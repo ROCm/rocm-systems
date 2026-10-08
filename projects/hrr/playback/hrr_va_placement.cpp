@@ -174,10 +174,51 @@ hipError_t hrr_record_free_event(hipStream_t stream, hipEvent_t* event) {
     return hipSuccess;
 }
 
-void hrr_flush_gpu_tlb() {
-    void* p = nullptr;
-    const hipError_t r = hipMalloc(&p, size_t(4) << 20);
-    if (r != hipSuccess || hipFree(p) != hipSuccess) (void)hipGetLastError();
+void hrr_flush_gpu_tlb(int device) {
+    static std::atomic<bool> warned_get{false}, warned_restore{false}, warned_flush{false};
+    bool failed = false;
+    int cur = -1;
+    if (hipGetDevice(&cur) != hipSuccess) {
+        cur = -1;
+        failed = true;
+        if (!warned_get.exchange(true))
+            fprintf(stderr,
+                    "[HRR] Placement: hipGetDevice failed before flushing the TLBs of device "
+                    "%d after an unmap, so the current device is flushed instead. Only the "
+                    "first failure is reported\n",
+                    device);
+    }
+    const bool switched = cur >= 0 && cur != device;
+    hipError_t r = switched ? hipSetDevice(device) : hipSuccess;
+    bool leaked = false;
+    if (r == hipSuccess) {
+        void* p = nullptr;
+        r = hipMalloc(&p, size_t(4) << 20);
+        if (r == hipSuccess) {
+            r = hipFree(p);
+            leaked = r != hipSuccess;
+        }
+        if (switched && hipSetDevice(cur) != hipSuccess) {
+            failed = true;
+            if (!warned_restore.exchange(true))
+                fprintf(stderr,
+                        "[HRR] Placement: device %d could not be made current again after "
+                        "flushing the TLBs of device %d; replay goes on with device %d "
+                        "current. Only the first failure is reported\n",
+                        cur, device, device);
+        }
+    }
+    if (r != hipSuccess) {
+        failed = true;
+        if (!warned_flush.exchange(true))
+            fprintf(stderr,
+                    "[HRR] Placement: flushing the TLBs of device %d after an unmap failed "
+                    "(%s)%s; memory mapped again at an unmapped address may be reached "
+                    "through the pages it replaced. Only the first failure is reported\n",
+                    device, hipGetErrorString(r),
+                    leaked ? ", and the 4 MiB buffer it allocated is leaked" : "");
+    }
+    if (failed) (void)hipGetLastError();
 }
 
 bool VaPlacement::hold(PlacementPlan plan) {
@@ -388,12 +429,41 @@ void VaPlacement::clear_error() {
 #endif
 }
 
-void VaPlacement::flush_tlb() {
+void VaPlacement::flush_tlbs(std::vector<int> devices) {
+    std::sort(devices.begin(), devices.end());
+    devices.erase(std::unique(devices.begin(), devices.end()), devices.end());
+    for (int d : devices) {
 #ifdef HRR_VA_PLACEMENT_TESTING
-    if (ops_.flush_tlb) ops_.flush_tlb();
+        if (ops_.flush_tlb) ops_.flush_tlb(d);
 #else
-    hrr_flush_gpu_tlb();
+        hrr_flush_gpu_tlb(d);
 #endif
+    }
+}
+
+// peers_ is set once, by reserve(), before the first map: no lock needed.
+void VaPlacement::add_mapping_devices(int device, std::vector<int>* out) const {
+    out->push_back(device);
+    if (device >= 0 && static_cast<size_t>(device) < peers_.size())
+        out->insert(out->end(), peers_[device].begin(), peers_[device].end());
+}
+
+void VaPlacement::flush_after_unmap(bool capturing) {
+    if (!active_) return;
+    if (capturing) {
+        flush_pending_ = true;
+        return;
+    }
+    flush_pending_ = false;
+    std::vector<int> all(device_count_);
+    for (int d = 0; d < device_count_; ++d) all[d] = d;
+    flush_tlbs(std::move(all));
+}
+
+bool VaPlacement::flush_pending() {
+    if (!flush_pending_.load() || !flush_pending_.exchange(false)) return false;
+    flush_after_unmap(false);
+    return true;
 }
 
 void VaPlacement::drop_event(hipEvent_t e) {
@@ -437,6 +507,9 @@ bool VaPlacement::any_unmapping() const {
 bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
                          void** live, bool capturing, const hipStream_t* stream) {
     if (!active_ || size == 0 || rec > UINT64_MAX - size) return false;
+    // A replayed hipMemUnmap made while a capture was open left its flush
+    // for now.
+    if (!capturing) flush_pending();
     const uint64_t pb = va_floor(rec, gran_);
     const uint64_t pe = va_ceil(rec + size, gran_);
     char buf[160];
@@ -628,18 +701,24 @@ size_t VaPlacement::drain_locked(std::unique_lock<std::mutex>& lk,
         it->second.unmapping = true;
         work.emplace_back(it->first, it->second);
     }
-    if (work.empty()) return 0;
+    if (work.empty() && !flush_pending_.load()) return 0;
     lk.unlock();
     std::vector<char> ok(work.size());
+    std::vector<int> devices;
     for (size_t i = 0; i < work.size(); ++i) {
         ok[i] = unmap_one(work[i].first, work[i].second);
         // The unmap waited for every stream, the freeing one included. A
         // failed one keeps its event for the next try.
-        if (ok[i]) drop_event(work[i].second.event);
+        if (ok[i]) {
+            drop_event(work[i].second.event);
+            add_mapping_devices(work[i].second.device, &devices);
+        }
     }
     // These ranges are mapped again later; hipMemUnmap may leave their old
-    // translations cached (hrr_flush_gpu_tlb).
-    if (std::find(ok.begin(), ok.end(), char(1)) != ok.end()) flush_tlb();
+    // translations cached, on every device that could reach them
+    // (hrr_flush_gpu_tlb). A flush left pending covers every device.
+    if (flush_pending_.exchange(false)) flush_after_unmap(false);
+    else if (!devices.empty()) flush_tlbs(std::move(devices));
     lk.lock();
     size_t n = 0;
     for (size_t i = 0; i < work.size(); ++i) {

@@ -1106,6 +1106,111 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_StreamOrder) {
 }
 
 // ===========================================================================
+// hipMemUnmap and hipMemMap inside a global-mode capture.
+// ===========================================================================
+// With placement on, replay flushes the TLBs after a replayed hipMemUnmap
+// (hrr_flush_gpu_tlb). The flush allocates and frees memory, which would
+// invalidate an open global-mode capture, so inside one it waits for the
+// capture to end. The program here maps new memory at the unmapped address
+// before the capture ends, and the graph writes there, so the flush has to
+// run when the capture ends, before the graph is launched.
+namespace {
+#define HRR_UNMAP_MARKER "HRR_PLACE_UNMAP"
+constexpr int kGraphFill = 0x40a00000;  // 5.0f
+}  // namespace
+
+TEST_CASE("Unit_HRR_VaPlacement_UnmapInCapture_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipFree(nullptr));
+  HRR_HIP_CHECK(hipSetDevice(0));
+
+  hipMemAllocationProp prop{};
+  prop.type          = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id   = 0;
+  size_t gran = 0;
+  HRR_HIP_CHECK(hipMemGetAllocationGranularity(&gran, &prop,
+                                               hipMemAllocationGranularityMinimum));
+  const size_t vsz = (kBytes + gran - 1) / gran * gran;
+  void* va = nullptr;
+  HRR_HIP_CHECK(hipMemAddressReserve(&va, vsz, 0, nullptr, 0));
+  hipMemGenericAllocationHandle_t h1{}, h2{};
+  HRR_HIP_CHECK(hipMemCreate(&h1, vsz, &prop, 0));
+  HRR_HIP_CHECK(hipMemCreate(&h2, vsz, &prop, 0));
+  hipMemAccessDesc desc{};
+  desc.location = prop.location;
+  desc.flags    = hipMemAccessFlagsProtReadWrite;
+  HRR_HIP_CHECK(hipMemMap(va, vsz, 0, h1, 0));
+  HRR_HIP_CHECK(hipMemSetAccess(va, vsz, &desc, 1));
+  int* p = static_cast<int*>(va);
+  hipLaunchKernelGGL(hrr_place_fill, dim3(kElems / 256), dim3(256), 0, nullptr, p, kOldFill,
+                     kElems);
+  HRR_HIP_CHECK(hipGetLastError());
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+
+  hipStream_t s = nullptr;
+  HRR_HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+  HRR_HIP_CHECK(hipStreamBeginCapture(s, hipStreamCaptureModeGlobal));
+  hipLaunchKernelGGL(hrr_place_fill, dim3(kElems / 256), dim3(256), 0, s, p, kGraphFill,
+                     kElems);
+  HRR_HIP_CHECK(hipGetLastError());
+  // Neither call checks for a capture, so both are legal inside one.
+  HRR_HIP_CHECK(hipMemUnmap(va, vsz));
+  HRR_HIP_CHECK(hipMemMap(va, vsz, 0, h2, 0));
+  hipGraph_t graph = nullptr;
+  HRR_HIP_CHECK(hipStreamEndCapture(s, &graph));
+  REQUIRE(graph != nullptr);
+  HRR_HIP_CHECK(hipMemSetAccess(va, vsz, &desc, 1));
+  hipGraphExec_t exec = nullptr;
+  HRR_HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HRR_HIP_CHECK(hipGraphLaunch(exec, s));
+  HRR_HIP_CHECK(hipStreamSynchronize(s));
+  std::vector<int> got(kElems);
+  HRR_HIP_CHECK(hipMemcpy(got.data(), p, kBytes, hipMemcpyDeviceToHost));
+  for (int i = 0; i < kElems; ++i) REQUIRE(got[i] == kGraphFill);
+
+  printf(HRR_UNMAP_MARKER " va=0x%llx\n", u64(va));
+  fflush(stdout);
+
+  HRR_HIP_CHECK(hipGraphExecDestroy(exec));
+  HRR_HIP_CHECK(hipGraphDestroy(graph));
+  HRR_HIP_CHECK(hipStreamDestroy(s));
+  HRR_HIP_CHECK(hipMemUnmap(va, vsz));
+  HRR_HIP_CHECK(hipMemRelease(h2));
+  HRR_HIP_CHECK(hipMemRelease(h1));
+  HRR_HIP_CHECK(hipMemAddressFree(va, vsz));
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapInCapture) {
+  hrr_place_require_vmm();
+  ScopedDir cap(fs::temp_directory_path() / "hrr_va_placement_unmap_capture.hrr");
+  std::string cout_;
+  { hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_VaPlacement_UnmapInCapture_Direct\"");
+    cout_ = proc.getOutput();
+    INFO("Capture exit: " << ret << "\n" << cout_);
+    REQUIRE(ret == 0); }
+  REQUIRE(cout_.find(HRR_UNMAP_MARKER) != std::string::npos);
+
+  // A flush run inside the capture invalidates it: hipStreamEndCapture then
+  // fails, which stops the replay, and no graph is launched.
+  auto [rc, out] = hrr_playback_merged(hrr_single_process_archive(cap.path), "--verbose");
+  INFO("Replay:\n" << out);
+  CHECK(rc == 0);
+  CHECK(out.find("hipErrorStreamCaptureInvalidated") == std::string::npos);
+  CHECK(out.find("Graphs launched : 1") != std::string::npos);
+  int pass = 0, fail = 0;
+  REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
+  CHECK(pass >= 1);
+  CHECK(fail == 0);
+  // The flush left pending by the hipMemUnmap runs where the capture ends, once.
+  CHECK(count_of(out, "[HRR] Placement: flushed the TLBs an unmap inside the capture left "
+                      "pending, at hipStreamEndCapture") == 1);
+  CHECK(out.find("after an unmap failed") == std::string::npos);
+}
+
+// ===========================================================================
 // Two GPUs: allocations on each, and device 0 reading device 1's memory.
 // ===========================================================================
 // Kernels run on device 0 only. Replay loads each code object for the device

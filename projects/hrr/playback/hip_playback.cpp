@@ -2514,6 +2514,18 @@ void hrr_placement_at_sync(PlaybackContext& ctx, const char* api) {
         fprintf(stderr, "[HRR] Placement: unmapped %zu deferred free(s) at %s\n", n, api);
 }
 
+// Call after a capture ends. A hipMemUnmap replayed while one was open left
+// its TLB flush pending, and a hipMemMap after it may have mapped the same
+// address again; the graph can be launched before anything else runs the
+// flush, so run it once the last capture is closed.
+static void hrr_capture_ended(PlaybackContext& ctx, const char* api) {
+    hrr::VaPlacement* pl = hrr_placing(ctx);
+    if (!pl || ctx.in_graph_capture.any() || !pl->flush_pending()) return;
+    if (ctx.verbose)
+        fprintf(stderr, "[HRR] Placement: flushed the TLBs an unmap inside the capture left "
+                        "pending, at %s\n", api);
+}
+
 // The recorded thread that made the call in `payload`.
 static uint64_t hrr_event_thread(const uint8_t* payload) {
     hrr_event_header h;
@@ -2552,6 +2564,7 @@ void hrr_track_capture(PlaybackContext& ctx, uint16_t event_type,
             const auto* a =
                 reinterpret_cast<const hrr_args_hipStreamEndCapture_spt*>(payload);
             (void)ctx.in_graph_capture.end(hrr_capture_key(a->stream, hrr_event_thread(payload)));
+            hrr_capture_ended(ctx, "hipStreamEndCapture_spt");
             break;
         }
         default:
@@ -3849,6 +3862,7 @@ hipError_t playback_hipStreamDestroy(PlaybackContext& ctx,
     // memset ends here. The frees deferred inside it are unmapped at the next
     // replayed device synchronization, like any other.
     (void)ctx.in_graph_capture.end(hrr_capture_key(a->stream, hrr_event_thread(pl)));
+    hrr_capture_ended(ctx, "hipStreamDestroy");
     return r;
 }
 
@@ -3912,6 +3926,7 @@ hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx,
         fprintf(stderr, "[HRR] hipStreamEndCapture: stream 0x%llx not found in map\n",
                 (unsigned long long)a->stream);
         ctx.in_graph_capture.end(hrr_capture_key(a->stream, hrr_event_thread(payload)));
+        hrr_capture_ended(ctx, "hipStreamEndCapture");
         return hipSuccess;  // non-fatal
     }
     hipGraph_t live_graph = nullptr;
@@ -3920,6 +3935,7 @@ hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx,
     // defer every later placed free, and make the allocations recorded over
     // them fall back, for the rest of the replay.
     ctx.in_graph_capture.end(hrr_capture_key(a->stream, hrr_event_thread(payload)));
+    hrr_capture_ended(ctx, "hipStreamEndCapture");
     if (r == hipSuccess && live_graph) {
         ctx.record_graph(a->pGraph, live_graph);
         if (ctx.verbose)
@@ -5142,6 +5158,10 @@ hipError_t playback_hipMemMap(PlaybackContext& ctx, const uint8_t* pl) {
     if (!live_va) return hipSuccess;  // VA not tracked, skip
     hipMemGenericAllocationHandle_t live_handle = ctx.translate_vmm_handle(a->handle);
     if (!live_handle) return hipSuccess;  // handle not tracked, skip
+    // A hipMemUnmap replayed while a capture was open left its flush for the
+    // next map; this one may be at the address it unmapped.
+    if (hrr::VaPlacement* placing = hrr_placing(ctx); placing && !ctx.in_graph_capture.any())
+        placing->flush_pending();
     hipError_t r = hipMemMap(live_va,
                              static_cast<size_t>(a->size),
                              static_cast<size_t>(a->offset),
@@ -5162,7 +5182,9 @@ hipError_t playback_hipMemUnmap(PlaybackContext& ctx, const uint8_t* pl) {
     hipError_t r = hipMemUnmap(live_va, static_cast<size_t>(a->size));
     // Placement maps the same addresses again, in this pass or the next;
     // hipMemUnmap may leave the old translation cached (hrr_flush_gpu_tlb).
-    if (r == hipSuccess && hrr_placing(ctx)) hrr::hrr_flush_gpu_tlb();
+    // The flush's hipMalloc would invalidate an open capture, so then it waits.
+    if (hrr::VaPlacement* placing = hrr_placing(ctx); r == hipSuccess && placing)
+        placing->flush_after_unmap(ctx.in_graph_capture.any());
     if (r == hipSuccess) {
         std::unique_lock lk(ctx.map_mutex);
         hrr::va_untrack_mapping(ctx.vmm_mappings, reinterpret_cast<uint64_t>(live_va),
@@ -5182,12 +5204,13 @@ void hrr_release_vmm_state(PlaybackContext& ctx) {
         reservations.swap(ctx.vmm_va_map);
         ++ctx.ranges_gen;
     }
+    hrr::VaPlacement* placing = hrr_placing(ctx);
     for (const auto& [va, size] : mappings)
         (void)hipMemUnmap(reinterpret_cast<void*>(va), size);
-    // The timed pass maps these addresses again (hrr_flush_gpu_tlb).
-    if (!mappings.empty()) hrr::hrr_flush_gpu_tlb();
+    // The timed pass maps these addresses again (hrr_flush_gpu_tlb). Before
+    // the reservations go, so the flush's own allocation cannot land there.
+    if (placing && !mappings.empty()) placing->flush_after_unmap(false);
     for (const auto& [rec, h] : handles) (void)hipMemRelease(h);
-    hrr::VaPlacement* placing = hrr_placing(ctx);
     std::vector<hrr::VaRange> rehold;
     for (const auto& [rec, va] : reservations) {
         if (hipMemAddressFree(va.live, va.size) != hipSuccess) continue;

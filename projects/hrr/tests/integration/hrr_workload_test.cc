@@ -22,6 +22,7 @@
  */
 
 #include "hrr_test_common.hh"
+#include "hrr_clock_hook.hh"
 #include <hip/hiprtc.h>
 #include <hip/hip_ext.h>  // hipExtModuleLaunchKernel
 
@@ -36,10 +37,26 @@
     INFO("hiprtcGetErrorString: " << hiprtcGetErrorString(_hrr_rtc));          \
     REQUIRE(_hrr_rtc == HIPRTC_SUCCESS);                                       \
   } while (0)
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
+
+#ifndef _WIN32
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <pthread.h>
+#include <signal.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
+#endif
 
 // ---------------------------------------------------------------------------
 // Workload parameters
@@ -3564,6 +3581,733 @@ TEST_CASE("Unit_HRR_ChevronLaunch_Direct", "[.][hrr][direct]") {
   HRR_HIP_CHECK(hipFree(d));
   HRR_HIP_CHECK(hipStreamDestroy(s));
 }
+
+#ifndef _WIN32
+// ---------------------------------------------------------------------------
+// Unit_HRR_CaptureCrashSmallStack_Direct
+//
+// Records a few events, then dies of SIGSEGV on a thread with a 64 KiB stack.
+// CLR's crash handler runs on the faulting thread's own stack, so the
+// emergency manifest has to be built off it: the 129 KiB buffer it needs
+// cannot fit there. The 1 MiB guard makes an overflow fault instead of landing
+// in whatever is mapped below the stack. Unit_HRR_CaptureCrashOnSmallStack
+// checks the manifest the crash leaves.
+// ---------------------------------------------------------------------------
+static void* hrr_raise_segv(void*) {
+  raise(SIGSEGV);
+  return nullptr;
+}
+
+TEST_CASE("Unit_HRR_CaptureCrashSmallStack_Direct", "[.][hrr-direct]") {
+  // The crash is the point; a core file is not.
+  struct rlimit no_core{0, 0};
+  (void)setrlimit(RLIMIT_CORE, &no_core);
+
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, SZ));
+  HRR_HIP_CHECK(hipMemset(d, 0, SZ));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+
+  pthread_attr_t attr;
+  REQUIRE(pthread_attr_init(&attr) == 0);
+  REQUIRE(pthread_attr_setstacksize(&attr, 64 * 1024) == 0);
+  REQUIRE(pthread_attr_setguardsize(&attr, 1024 * 1024) == 0);
+  pthread_t t;
+  REQUIRE(pthread_create(&t, &attr, hrr_raise_segv, nullptr) == 0);
+  pthread_join(t, nullptr);
+  FAIL("the process outlived its own SIGSEGV");
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_ForkWhileRecording_Direct
+//
+// Forks kHrrForkWhileRecordingForks times while a second thread records copies
+// of fresh data, so some forks land while that thread holds a writer lock. A
+// child reopens its archive under the writer mutexes on its first record; one
+// that inherited a mutex locked would block there forever. Every other child
+// records hipGetLastError(), which needs no device work, and exits; the rest
+// exit as soon as fork returns. The parent waits for each under a deadline, so
+// a hang fails the case rather than the job.
+//
+// The lock windows are narrow, so a regression is caught by chance, not on
+// every run. A clean run leaves an archive for each child that recorded and
+// none for the others, which Unit_HRR_ForkWhileRecording counts.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_ForkWhileRecording_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, SZ));
+
+  // Nothing below may REQUIRE before the join: unwinding past a joinable
+  // std::thread terminates the process.
+  std::atomic<bool> stop{false};
+  std::atomic<bool> recorder_ok{true};
+  std::thread recorder([&] {
+    std::vector<int> h(N);
+    for (int iter = 0; !stop.load(std::memory_order_relaxed); ++iter) {
+      // A fresh value every pass makes each H2D source a new blob.
+      h[0] = iter;
+      if (hipMemcpy(d, h.data(), SZ, hipMemcpyHostToDevice) != hipSuccess ||
+          hipMemcpy(h.data(), d, SZ, hipMemcpyDeviceToHost) != hipSuccess) {
+        recorder_ok = false;
+        return;
+      }
+    }
+  });
+
+  int forked = 0, hung = 0, failed = 0;
+  for (; forked < kHrrForkWhileRecordingForks; ++forked) {
+    pid_t pid = fork();
+    if (pid == 0) {
+      if (forked % 2 == 0) (void)hipGetLastError();
+      _exit(0);
+    }
+    if (pid < 0) break;
+
+    int status = 0;
+    pid_t got = 0;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while ((got = waitpid(pid, &status, WNOHANG)) == 0 &&
+           std::chrono::steady_clock::now() < deadline)
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    if (got == 0) {
+      // One hang is the failure. Waiting out every later child as well would
+      // run past the roundtrip case's own timeout.
+      kill(pid, SIGKILL);
+      waitpid(pid, &status, 0);
+      ++hung;
+      break;
+    } else if (got != pid || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+      ++failed;
+    }
+  }
+
+  stop = true;
+  recorder.join();
+  HRR_HIP_CHECK(hipFree(d));
+
+  INFO("forked " << forked << ", hung " << hung << ", failed " << failed);
+  REQUIRE(recorder_ok);
+  REQUIRE(hung == 0);
+  REQUIRE(forked == kHrrForkWhileRecordingForks);
+  REQUIRE(failed == 0);
+}
+
+// ---------------------------------------------------------------------------
+// fsync() for this test binary
+//
+// The capture writer calls fsync() at two points the cases below need to stop
+// a thread at: a checkpoint, under the events mutex, and the crash callback's
+// manifest write, while it owns the emergency manifest buffer. CLR resolves
+// fsync() through this executable before libc, to the one definition in
+// hrr_disk_space_test.cc, which runs this hook before anything else. A case
+// that sets g_hrr_fsync_hook can hold the calling thread there. With no hook
+// set this does nothing, and every other case in the binary runs as before.
+// ---------------------------------------------------------------------------
+static std::atomic<void (*)(int)> g_hrr_fsync_hook{nullptr};
+
+extern "C" void hrr_workload_fsync_hook(int fd) {
+  if (auto hook = g_hrr_fsync_hook.load(std::memory_order_acquire)) hook(fd);
+}
+
+// Async-signal-safe, for the hooks: one of them runs in a crash handler.
+static void hrr_sleep_1ms() {
+  struct timespec ts{0, 1000 * 1000};
+  nanosleep(&ts, nullptr);
+}
+
+// Waits up to `seconds` for a forked child, and kills and reaps one still
+// running then. Returns its wait status, or -1 if it hung or was lost.
+static int hrr_wait_child(pid_t pid, int seconds) {
+  int status = 0;
+  pid_t got = 0;
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
+  while ((got = waitpid(pid, &status, WNOHANG)) == 0 &&
+         std::chrono::steady_clock::now() < deadline)
+    hrr_sleep_1ms();
+  if (got == pid) return status;
+  if (got == 0) {
+    kill(pid, SIGKILL);
+    waitpid(pid, &status, 0);
+  }
+  return -1;
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_ForkWhileWriterHoldsLock_Direct
+//
+// Unit_HRR_ForkWhileRecording_Direct without the luck. A second thread records
+// hipGetLastError() in a loop, and the fork is made at the moment another
+// thread could take the events mutex if the writer's own prepare handler let
+// it go before fork(). The handler registered here, before hipSetDevice opens
+// the archive and registers the writer's, runs after the writer's: prepare
+// handlers run in reverse order of registration. It holds the recorder in its
+// next checkpoint fsync(), which the writer calls under the events mutex, and
+// gives up after two seconds. The writer keeps the mutex until fork() returns,
+// so the recorder never gets there and the child, which reopens its archive
+// under the mutex when it records, exits. A child forked with the mutex in the
+// recorder's hands would block on it for ever.
+// Unit_HRR_ForkWhileWriterHoldsLock checks the exit code and both archives.
+// ---------------------------------------------------------------------------
+namespace {
+thread_local bool t_fork_lock_recorder = false;
+std::atomic<int>  g_fork_lock_fsyncs{0};    // checkpoint fsyncs the recorder made
+std::atomic<bool> g_fork_lock_hold{false};  // hold the recorder in its next one
+std::atomic<bool> g_fork_lock_held{false};  // the recorder is held, mutex locked
+bool              g_fork_lock_held_at_fork = false;
+
+void fork_lock_fsync_hook(int) {
+  if (!t_fork_lock_recorder) return;
+  g_fork_lock_fsyncs.fetch_add(1);
+  if (!g_fork_lock_hold.load()) return;
+  g_fork_lock_held = true;
+  // Bounded, in case the parent handler never runs.
+  for (int ms = 0; ms < 10000 && g_fork_lock_hold.load(); ++ms) hrr_sleep_1ms();
+  g_fork_lock_held = false;
+}
+
+void fork_lock_prepare() {
+  g_fork_lock_hold = true;
+  for (int ms = 0; ms < 2000 && !g_fork_lock_held.load(); ++ms) hrr_sleep_1ms();
+  g_fork_lock_held_at_fork = g_fork_lock_held.load();
+}
+
+void fork_lock_parent() { g_fork_lock_hold = false; }
+
+void fork_lock_child() {
+  g_fork_lock_hold = false;
+  g_hrr_fsync_hook = nullptr;
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_ForkWhileWriterHoldsLock_Direct", "[.][hrr-direct]") {
+  // Before the first HIP call, which registers the writer's handlers.
+  REQUIRE(pthread_atfork(fork_lock_prepare, fork_lock_parent, fork_lock_child) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  g_hrr_fsync_hook = fork_lock_fsync_hook;
+
+  // Nothing below may REQUIRE before the join.
+  std::atomic<bool> stop{false};
+  std::thread recorder([&] {
+    t_fork_lock_recorder = true;
+    while (!stop.load(std::memory_order_relaxed)) (void)hipGetLastError();
+  });
+
+  // The recorder reaches a checkpoint every 4096 records. Seeing one proves
+  // fsync() is interposed, without which the case could not fail.
+  for (int ms = 0; ms < 10000 && g_fork_lock_fsyncs.load() == 0; ++ms) hrr_sleep_1ms();
+  const bool interposed = g_fork_lock_fsyncs.load() > 0;
+
+  int status = -1;
+  if (interposed) {
+    pid_t pid = fork();
+    if (pid == 0) {
+      (void)hipGetLastError();
+      _exit(0);
+    }
+    if (pid > 0) status = hrr_wait_child(pid, 10);
+  }
+
+  stop = true;
+  recorder.join();
+  g_hrr_fsync_hook = nullptr;
+
+  INFO("checkpoint fsyncs " << g_fork_lock_fsyncs.load() << ", child wait status "
+                            << status);
+  REQUIRE(interposed);
+  // Set if the recorder took the events mutex after the writer's prepare handler.
+  REQUIRE_FALSE(g_fork_lock_held_at_fork);
+  REQUIRE(status != -1);
+  REQUIRE(WIFEXITED(status));
+  REQUIRE(WEXITSTATUS(status) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_CaptureCrashDuringFork_Direct
+//
+// Forks while the crash callback writes the emergency manifest. The main thread
+// raises SIGSEGV, and the fsync hook holds CLR's crash callback in the fsync()
+// of its manifest.json, while the callback owns the emergency manifest buffer.
+// A second thread forks there. The child records a call, which opens its own
+// archive, and raises SIGABRT: CLR installs its handlers with SA_RESETHAND, so
+// SIGSEGV has none left by then. A child that inherited the buffer marked busy
+// by a thread it does not have would skip its own manifest. The parent's
+// callback is released once the child has gone, and the parent dies of its
+// SIGSEGV. Unit_HRR_CaptureCrashDuringFork checks both manifests.
+// ---------------------------------------------------------------------------
+namespace {
+std::atomic<bool> g_crash_fork_in_manifest{false};
+std::atomic<bool> g_crash_fork_release{false};
+
+// Whether fd is open on a manifest.json. Async-signal-safe.
+bool hrr_fd_is_manifest(int fd) {
+  char link[32] = "/proc/self/fd/";
+  size_t n = strlen(link);
+  char digits[12];
+  size_t k = 0;
+  do {
+    digits[k++] = static_cast<char>('0' + fd % 10);
+    fd /= 10;
+  } while (fd > 0);
+  while (k > 0) link[n++] = digits[--k];
+  link[n] = '\0';
+  char target[4096];
+  const ssize_t len = readlink(link, target, sizeof(target));
+  static constexpr char kSuffix[] = "/manifest.json";
+  constexpr ssize_t kSuffixLen = sizeof(kSuffix) - 1;
+  return len >= kSuffixLen && memcmp(target + len - kSuffixLen, kSuffix, kSuffixLen) == 0;
+}
+
+void crash_fork_fsync_hook(int fd) {
+  if (!hrr_fd_is_manifest(fd)) return;
+  g_crash_fork_in_manifest = true;
+  for (int ms = 0; ms < 60000 && !g_crash_fork_release.load(); ++ms) hrr_sleep_1ms();
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_CaptureCrashDuringFork_Direct", "[.][hrr-direct]") {
+  // The crashes are the point; core files are not.
+  struct rlimit no_core{0, 0};
+  (void)setrlimit(RLIMIT_CORE, &no_core);
+
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, SZ));
+  HRR_HIP_CHECK(hipMemset(d, 0, SZ));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+
+  g_hrr_fsync_hook = crash_fork_fsync_hook;
+  std::thread([] {
+    for (int ms = 0; ms < 30000 && !g_crash_fork_in_manifest.load(); ++ms) hrr_sleep_1ms();
+    if (g_crash_fork_in_manifest.load()) {
+      pid_t pid = fork();
+      if (pid == 0) {
+        g_hrr_fsync_hook = nullptr;
+        (void)hipGetLastError();
+        raise(SIGABRT);
+        _exit(1);
+      }
+      if (pid > 0) (void)hrr_wait_child(pid, 30);
+    }
+    g_crash_fork_release = true;
+  }).detach();
+
+  raise(SIGSEGV);
+  FAIL("the process outlived its own SIGSEGV");
+}
+
+// ---------------------------------------------------------------------------
+// A forked child that exits normally
+//
+// The capture writer finalizes a process's archive from an atexit handler,
+// hip_capture_shutdown(), which it registers on the first HIP call. A case
+// that registers hrr_after_capture_shutdown() before that call gets a handler
+// that runs right after it: atexit handlers run in reverse order of
+// registration. In a child that set g_hrr_after_capture_shutdown, the handler
+// calls it and ends the child with _exit(0). The child of a HIP process does
+// not run the fat-binary destructors and the runtime's teardown that would
+// follow. In the parent the handler does nothing.
+// ---------------------------------------------------------------------------
+static void (*g_hrr_after_capture_shutdown)() = nullptr;
+
+static void hrr_after_capture_shutdown() {
+  if (!g_hrr_after_capture_shutdown) return;
+  g_hrr_after_capture_shutdown();
+  _exit(0);
+}
+
+// ---------------------------------------------------------------------------
+// strlen() for this test binary, for the same reason as fsync() above: CLR
+// resolves it here first. The capture writer calls it with the API name once
+// note_unreplayable() holds its mutex. With no hook set it is a plain strlen.
+// ---------------------------------------------------------------------------
+static std::atomic<void (*)(const char*)> g_hrr_strlen_hook{nullptr};
+
+extern "C" size_t strlen(const char* s) noexcept {
+  if (auto hook = g_hrr_strlen_hook.load(std::memory_order_acquire)) hook(s);
+  // volatile, so the compiler cannot turn the loop back into a strlen() call.
+  const volatile char* p = s;
+  while (*p) ++p;
+  return static_cast<size_t>(p - static_cast<const volatile char*>(s));
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_ForkWhileNotingUnreplayable_Direct
+//
+// Forks while another thread is inside note_unreplayable(), under the mutex of
+// the archive's list of unreplayable APIs. The child records a call and exits
+// normally, and its capture shutdown writes its manifest, which lists those
+// APIs under that mutex. A child that inherited the mutex locked would block
+// there for ever.
+//
+// The recorder calls hipUserObjectCreate(), which the writer notes as
+// unreplayable. The strlen hook holds it at the API name, inside the mutex,
+// for two seconds at most, and the main thread forks while it is held. The
+// writer's prepare handler waits for the mutex, so fork() returns only after
+// the hold has run out; the case checks that too, which shows the hold was
+// inside the mutex. Unit_HRR_ForkWhileNotingUnreplayable checks both archives.
+// ---------------------------------------------------------------------------
+namespace {
+std::atomic<bool> g_unreplayable_hold{false};      // hold the next match
+std::atomic<bool> g_unreplayable_held{false};      // the recorder is held
+std::atomic<bool> g_unreplayable_release{false};   // let it go
+std::atomic<bool> g_unreplayable_ran_out{false};   // the hold ran out first
+
+void unreplayable_strlen_hook(const char* s) {
+  static constexpr char kApi[] = "hipUserObjectCreate";
+  const volatile char* p = s;
+  for (size_t i = 0; i < sizeof(kApi); ++i)
+    if (p[i] != kApi[i]) return;
+  if (!g_unreplayable_hold.exchange(false)) return;
+  g_unreplayable_held = true;
+  int ms = 0;
+  for (; ms < 2000 && !g_unreplayable_release.load(); ++ms) hrr_sleep_1ms();
+  g_unreplayable_ran_out = ms == 2000;
+}
+
+int  g_unreplayable_payload = 0;
+void unreplayable_destroy(void*) {}
+}  // namespace
+
+TEST_CASE("Unit_HRR_ForkWhileNotingUnreplayable_Direct", "[.][hrr-direct]") {
+  // Before the first HIP call, which registers the capture shutdown.
+  REQUIRE(std::atexit(hrr_after_capture_shutdown) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  g_hrr_strlen_hook = unreplayable_strlen_hook;
+  g_unreplayable_hold = true;
+
+  // Nothing below may REQUIRE before the join.
+  hipError_t created = hipErrorUnknown;
+  std::thread recorder([&] {
+    hipUserObject_t obj = nullptr;
+    created = hipUserObjectCreate(&obj, &g_unreplayable_payload, unreplayable_destroy, 1,
+                                  hipUserObjectNoDestructorSync);
+    if (created == hipSuccess) (void)hipUserObjectRelease(obj, 1);
+  });
+
+  for (int ms = 0; ms < 10000 && !g_unreplayable_held.load(); ++ms) hrr_sleep_1ms();
+  const bool held = g_unreplayable_held.load();
+
+  int status = -1;
+  if (held) {
+    pid_t pid = fork();
+    if (pid == 0) {
+      g_hrr_strlen_hook = nullptr;
+      g_hrr_after_capture_shutdown = [] {};
+      (void)hipGetLastError();  // opens the child's archive
+      exit(0);
+    }
+    g_unreplayable_release = true;
+    if (pid > 0) status = hrr_wait_child(pid, 10);
+  }
+
+  g_unreplayable_release = true;
+  recorder.join();
+  g_hrr_strlen_hook = nullptr;
+
+  INFO("hipUserObjectCreate " << created << ", child wait status " << status);
+  REQUIRE(created == hipSuccess);
+  REQUIRE(held);
+  REQUIRE(status != -1);
+  REQUIRE(WIFEXITED(status));
+  REQUIRE(WEXITSTATUS(status) == 0);
+  // Clear if fork() did not wait for the recorder to leave the mutex.
+  REQUIRE(g_unreplayable_ran_out.load());
+}
+
+// Records through the compiler dispatch table, which the capture shutdown
+// leaves in place.
+static void hrr_push_pop_launch_config() {
+  dim3 grid, block;
+  size_t shared = 0;
+  hipStream_t stream = nullptr;
+  (void)__hipPushCallConfiguration(dim3(1), dim3(1), 0, nullptr);
+  (void)__hipPopCallConfiguration(&grid, &block, &shared, &stream);
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_ForkedChildRecordsAfterShutdown_Direct
+//
+// A forked child opens its own archive on its first record, so one that has
+// not recorded when its capture shutdown runs has no archive to finalize. Its
+// fat-binary destructors run after that shutdown and still record, through
+// the compiler dispatch table that the shutdown leaves in place. A record
+// then must not open an archive that nothing will finalize. The child here
+// records nothing before it exits normally; after its capture shutdown it
+// pushes and pops a launch configuration, which goes through that same table.
+// Unit_HRR_ForkedChildRecordsAfterShutdown checks that only the parent has an
+// archive.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_ForkedChildRecordsAfterShutdown_Direct", "[.][hrr-direct]") {
+  // Before the first HIP call, which registers the capture shutdown.
+  REQUIRE(std::atexit(hrr_after_capture_shutdown) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  (void)hipGetLastError();
+
+  pid_t pid = fork();
+  if (pid == 0) {
+    g_hrr_after_capture_shutdown = hrr_push_pop_launch_config;
+    exit(0);
+  }
+  REQUIRE(pid > 0);
+  const int status = hrr_wait_child(pid, 30);
+  INFO("child wait status " << status);
+  REQUIRE(status != -1);
+  REQUIRE(WIFEXITED(status));
+  REQUIRE(WEXITSTATUS(status) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_ForkAfterCaptureShutdown_Direct
+//
+// A process that forks after its own capture shutdown has no archive open.
+// Its child must not open one on its first record either: nothing in the
+// child would finalize it. The parent forks after its shutdown, and the child
+// records through the compiler dispatch table before it exits. The parent
+// exits 3 if the child did not exit cleanly. Unit_HRR_ForkAfterCaptureShutdown
+// checks that only the parent has an archive.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_ForkAfterCaptureShutdown_Direct", "[.][hrr-direct]") {
+  // Before the first HIP call, which registers the capture shutdown.
+  REQUIRE(std::atexit(hrr_after_capture_shutdown) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  (void)hipGetLastError();
+
+  g_hrr_after_capture_shutdown = [] {
+    pid_t pid = fork();
+    if (pid == 0) {
+      hrr_push_pop_launch_config();
+      _exit(0);
+    }
+    const int status = pid > 0 ? hrr_wait_child(pid, 30) : -1;
+    if (status == -1 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) _exit(3);
+  };
+}
+
+// ---------------------------------------------------------------------------
+// mkdir() for this test binary, for the same reason as fsync() above: CLR
+// resolves it here first. The capture writer creates an archive's directories
+// with it while it opens the archive. With no hook set it is a plain mkdir.
+// ---------------------------------------------------------------------------
+static std::atomic<void (*)(const char*)> g_hrr_mkdir_hook{nullptr};
+
+extern "C" int mkdir(const char* path, mode_t mode) noexcept {
+  if (auto hook = g_hrr_mkdir_hook.load(std::memory_order_acquire)) hook(path);
+  return static_cast<int>(syscall(SYS_mkdirat, AT_FDCWD, path, mode));
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_ShutdownWhileChildOpensArchive_Direct
+//
+// A forked child opens its archive on its first record, on whichever thread
+// makes it, and its capture shutdown can run on another thread meanwhile. The
+// shutdown must wait for that open: a manifest or trailer written before it
+// finalizes an archive that is not there yet. Here a second thread of the
+// child makes the first record, and the mkdir hook holds it in the open, at
+// the archive's code_objects directory, for two seconds. The child's main
+// thread exits meanwhile, which runs the capture shutdown. The child exits 4
+// if the hold never came. Unit_HRR_ShutdownWhileChildOpensArchive checks that
+// both archives end in the clean-shutdown trailer.
+// ---------------------------------------------------------------------------
+namespace {
+std::atomic<bool> g_child_open_held{false};
+
+void child_open_mkdir_hook(const char* path) {
+  static constexpr char kSuffix[] = "/code_objects";
+  constexpr size_t kSuffixLen = sizeof(kSuffix) - 1;
+  const size_t len = strlen(path);
+  if (len < kSuffixLen || memcmp(path + len - kSuffixLen, kSuffix, kSuffixLen) != 0) return;
+  if (g_child_open_held.exchange(true)) return;
+  for (int ms = 0; ms < 2000; ++ms) hrr_sleep_1ms();
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_ShutdownWhileChildOpensArchive_Direct", "[.][hrr-direct]") {
+  // Before the first HIP call, which registers the capture shutdown.
+  REQUIRE(std::atexit(hrr_after_capture_shutdown) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  (void)hipGetLastError();
+
+  pid_t pid = fork();
+  if (pid == 0) {
+    g_hrr_after_capture_shutdown = [] {};
+    g_hrr_mkdir_hook = child_open_mkdir_hook;
+    std::thread([] { (void)hipGetLastError(); }).detach();
+    for (int ms = 0; ms < 10000 && !g_child_open_held.load(); ++ms) hrr_sleep_1ms();
+    if (!g_child_open_held.load()) _exit(4);
+    exit(0);
+  }
+  REQUIRE(pid > 0);
+  const int status = hrr_wait_child(pid, 30);
+  INFO("child wait status " << status);
+  REQUIRE(status != -1);
+  REQUIRE(WIFEXITED(status));
+  REQUIRE(WEXITSTATUS(status) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// rename() for this test binary, for the same reason as fsync() above: CLR
+// resolves it here first. The capture shutdown calls it to publish the root
+// manifest, after it has written the trailer and before it closes events.bin.
+// With no hook set it is a plain rename.
+// ---------------------------------------------------------------------------
+static std::atomic<void (*)(const char*)> g_hrr_rename_hook{nullptr};
+
+extern "C" int rename(const char* oldpath, const char* newpath) noexcept {
+  if (auto hook = g_hrr_rename_hook.load(std::memory_order_acquire)) hook(newpath);
+  return static_cast<int>(syscall(SYS_renameat2, AT_FDCWD, oldpath, AT_FDCWD, newpath, 0));
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_RecordAfterCaptureShutdown_Direct
+//
+// The capture shutdown writes the trailer and the manifests, then closes
+// events.bin. A thread already inside a recorded call can reach the buffer in
+// between, and must not land a record after the trailer. Here a second thread
+// is held inside hipGetLastError() until the shutdown reaches its first
+// manifest, and the shutdown is held there until that call returns. The
+// process exits 4 if the call never returned. Unit_HRR_RecordAfterCaptureShutdown
+// checks that events.bin still ends in the trailer.
+// ---------------------------------------------------------------------------
+namespace {
+std::atomic<bool> g_late_in_call{false};
+std::atomic<bool> g_shutdown_held{false};
+std::atomic<bool> g_late_recorded{false};
+
+// The late thread's first clock read inside hipGetLastError(), at the latest
+// the one that timestamps its record.
+void late_record_clock_hook() {
+  t_hrr_clock_hook = nullptr;
+  g_late_in_call = true;
+  for (int ms = 0; ms < 10000 && !g_shutdown_held.load(); ++ms) hrr_sleep_1ms();
+}
+
+void shutdown_rename_hook(const char* path) {
+  static constexpr char kSuffix[] = "/manifest.json";
+  constexpr size_t kSuffixLen = sizeof(kSuffix) - 1;
+  const size_t len = strlen(path);
+  if (len < kSuffixLen || memcmp(path + len - kSuffixLen, kSuffix, kSuffixLen) != 0) return;
+  if (g_shutdown_held.exchange(true)) return;
+  for (int ms = 0; ms < 10000 && !g_late_recorded.load(); ++ms) hrr_sleep_1ms();
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_RecordAfterCaptureShutdown_Direct", "[.][hrr-direct]") {
+  // Before the first HIP call, which registers the capture shutdown.
+  REQUIRE(std::atexit(hrr_after_capture_shutdown) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  (void)hipGetLastError();
+
+  g_hrr_after_capture_shutdown = [] {
+    g_hrr_rename_hook = nullptr;
+    if (!g_late_recorded.load()) _exit(4);
+  };
+  g_hrr_rename_hook = shutdown_rename_hook;
+  std::thread([] {
+    t_hrr_clock_hook = late_record_clock_hook;
+    (void)hipGetLastError();
+    g_late_recorded = true;
+  }).detach();
+  // The capture shutdown runs once this returns.
+  for (int ms = 0; ms < 10000 && !g_late_in_call.load(); ++ms) hrr_sleep_1ms();
+}
+
+// ---------------------------------------------------------------------------
+// pthread_mutex_lock() for this test binary, for the same reason as fsync()
+// above: CLR's std::mutex resolves it here first. The capture shutdown's
+// close() calls it first thing, for the lock flush() has just released. With no
+// hook set it is a plain pthread_mutex_lock.
+// ---------------------------------------------------------------------------
+static std::atomic<void (*)()> g_hrr_mutex_lock_hook{nullptr};
+
+extern "C" int pthread_mutex_lock(pthread_mutex_t* mutex) noexcept {
+  if (auto hook = g_hrr_mutex_lock_hook.load(std::memory_order_acquire)) hook();
+  using Fn = int (*)(pthread_mutex_t*);
+  static std::atomic<Fn> real{nullptr};
+  Fn fn = real.load(std::memory_order_relaxed);
+  if (fn == nullptr) {
+    fn = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "pthread_mutex_lock"));
+    real.store(fn, std::memory_order_relaxed);
+  }
+  return fn(mutex);
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_ForkBetweenCaptureFlushAndClose_Direct
+//
+// The capture shutdown finalizes the archive in flush(), and closes events.bin
+// in close() right after. A thread that forks in between must not leave the
+// child to open an archive on its first record: the shutdown that would
+// finalize it is running on the parent's exiting thread, and is no longer
+// pending in the child. Here the shutdown is held after flush(), at the first
+// lock close() takes, while a second thread forks. The child records through
+// the compiler dispatch table and exits. The parent exits 3 if the child did
+// not exit cleanly, and 4 if the hold never came or ran out before the fork
+// returned. Unit_HRR_ForkBetweenCaptureFlushAndClose checks that only the
+// parent has an archive.
+// ---------------------------------------------------------------------------
+namespace {
+std::atomic<bool> g_flush_done{false};
+std::atomic<bool> g_forked_after_flush{false};
+std::atomic<bool> g_close_hold_ran_out{false};
+std::atomic<int>  g_flush_fork_status{-1};
+thread_local bool t_hold_next_lock = false;
+
+// Holds the shutdown thread before it takes close()'s lock, until the fork.
+void hold_close_lock_hook() {
+  if (!t_hold_next_lock) return;
+  t_hold_next_lock = false;
+  g_hrr_mutex_lock_hook = nullptr;
+  g_flush_done = true;
+  int ms = 0;
+  for (; ms < 10000 && !g_forked_after_flush.load(); ++ms) hrr_sleep_1ms();
+  // fork() takes the lock close() is about to take, so a fork that returned
+  // while this waited ran before close().
+  g_close_hold_ran_out = ms == 10000;
+}
+
+// flush() publishes the root manifest last, after the trailer and the
+// process manifest. Nothing after it on this thread takes a mutex until
+// close() does.
+void root_manifest_rename_hook(const char* path) {
+  static constexpr char kSuffix[] = "/manifest.json";
+  constexpr size_t kSuffixLen = sizeof(kSuffix) - 1;
+  const size_t len = strlen(path);
+  if (len < kSuffixLen || memcmp(path + len - kSuffixLen, kSuffix, kSuffixLen) != 0) return;
+  const std::string dir = std::filesystem::path(path).parent_path().filename().string();
+  if (dir.rfind("pid-", 0) == 0) return;
+  g_hrr_rename_hook = nullptr;
+  t_hold_next_lock = true;
+  g_hrr_mutex_lock_hook = hold_close_lock_hook;
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_ForkBetweenCaptureFlushAndClose_Direct", "[.][hrr-direct]") {
+  // Before the first HIP call, which registers the capture shutdown.
+  REQUIRE(std::atexit(hrr_after_capture_shutdown) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  (void)hipGetLastError();
+
+  g_hrr_after_capture_shutdown = [] {
+    if (!g_flush_done.load() || g_close_hold_ran_out.load()) _exit(4);
+    const int status = g_flush_fork_status.load();
+    if (status == -1 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) _exit(3);
+  };
+  g_hrr_rename_hook = root_manifest_rename_hook;
+  std::thread([] {
+    for (int ms = 0; ms < 20000 && !g_flush_done.load(); ++ms) hrr_sleep_1ms();
+    if (!g_flush_done.load()) return;
+    pid_t pid = fork();
+    if (pid == 0) {
+      hrr_push_pop_launch_config();
+      _exit(0);
+    }
+    g_flush_fork_status = pid > 0 ? hrr_wait_child(pid, 30) : -1;
+    g_forked_after_flush = true;
+  }).detach();
+}
+#endif  // !_WIN32
 
 // ---------------------------------------------------------------------------
 // A copy the runtime rejects, its extent far larger than both buffers, made

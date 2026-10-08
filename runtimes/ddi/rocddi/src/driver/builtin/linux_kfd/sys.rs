@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! The audited Linux call boundary for KFD memory and queues.
@@ -83,6 +84,7 @@ pub(super) enum Call<'a> {
     IpcExportHandle(&'a mut uapi::IpcExportHandle),
     Svm(&'a mut uapi::SvmArgs, &'a mut [uapi::SvmAttribute]),
     Spm(&'a mut uapi::Spm),
+    Ais(&'a mut uapi::AisArgs),
     CreateEvent(&'a mut uapi::CreateEvent),
     DestroyEvent(&'a mut uapi::DestroyEvent),
     Wait(&'a mut uapi::WaitEvents, &'a mut uapi::EventData),
@@ -92,6 +94,7 @@ pub(super) enum Call<'a> {
     DestroyQueue(&'a mut uapi::DestroyQueue),
     UpdateQueue(&'a mut uapi::UpdateQueue),
     SetCuMask(&'a mut uapi::SetCuMask, &'a [u32]),
+    AllocQueueGws(&'a mut uapi::AllocQueueGws),
 }
 
 #[cfg(test)]
@@ -255,6 +258,7 @@ impl Kfd {
             Call::IpcExportHandle(args) => (uapi::IPC_EXPORT_HANDLE, ptr::from_mut(*args).cast()),
             Call::Svm(_, _) => return Err(invalid_data("SVM dispatch path was not selected")),
             Call::Spm(args) => (uapi::SPM, ptr::from_mut(*args).cast()),
+            Call::Ais(args) => (uapi::AIS, ptr::from_mut(*args).cast()),
             Call::CreateEvent(args) => (uapi::CREATE_EVENT, ptr::from_mut(*args).cast()),
             Call::DestroyEvent(args) => (uapi::DESTROY_EVENT, ptr::from_mut(*args).cast()),
             Call::SetScratchBackingVa(args) => {
@@ -268,6 +272,7 @@ impl Kfd {
                 args.mask = mask.as_ptr() as u64;
                 (uapi::SET_CU_MASK, ptr::from_mut(*args).cast())
             }
+            Call::AllocQueueGws(args) => (uapi::ALLOC_QUEUE_GWS, ptr::from_mut(*args).cast()),
             Call::Wait(args, event) => {
                 args.events = ptr::from_mut(*event) as u64;
                 (uapi::WAIT_EVENTS, ptr::from_mut(*args).cast())
@@ -510,6 +515,7 @@ impl Kfd {
             | uapi::NO_SUBSTITUTE
             | uapi::COHERENT
             | uapi::UNCACHED
+            | uapi::EXT_COHERENT
             | uapi::CONTIGUOUS;
         let kind = args.flags & (uapi::VRAM | uapi::GTT | uapi::USERPTR);
         if args.flags & !permitted != 0 || !matches!(kind, uapi::VRAM | uapi::GTT | uapi::USERPTR) {
@@ -726,6 +732,31 @@ impl Kfd {
         self.call(Call::Spm(args))
     }
 
+    /// A successful ioctl replaces the first 16 input bytes with its output.
+    /// An error leaves progress unknown because those bytes may still be input.
+    pub(super) fn ais(&self, input: uapi::AisInput) -> io::Result<uapi::AisOutput> {
+        if input.handle == 0
+            || input.size == 0
+            || input.size > crate::memory::interop::linux::AIS_MAX_TRANSFER_BYTES
+            || input.descriptor < 0
+            || input.file_offset < 0
+            || input
+                .file_offset
+                .checked_add(i64::try_from(input.size).map_err(invalid_data)?)
+                .is_none()
+            || !matches!(input.operation, uapi::AIS_READ | uapi::AIS_WRITE)
+        {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        }
+        let mut args = uapi::AisArgs::new(input);
+        self.call(Call::Ais(&mut args))?;
+        let output = args.completed_output();
+        if output.size_copied > input.size || output.status > 0 {
+            return Err(invalid_data("KFD returned invalid AIS progress or status"));
+        }
+        Ok(output)
+    }
+
     pub(super) fn create_queue(&self, args: &mut uapi::CreateQueue) -> io::Result<()> {
         self.call(Call::CreateQueue(args))
     }
@@ -735,6 +766,15 @@ impl Kfd {
             queue_id,
             pad: 0,
         }))
+    }
+
+    pub(super) fn alloc_queue_gws(&self, queue_id: u32) -> io::Result<()> {
+        let mut args = uapi::AllocQueueGws {
+            queue_id,
+            num_gws: 1,
+            ..uapi::AllocQueueGws::default()
+        };
+        self.call(Call::AllocQueueGws(&mut args))
     }
 
     pub(super) fn update_queue(&self, args: &mut uapi::UpdateQueue) -> io::Result<()> {
