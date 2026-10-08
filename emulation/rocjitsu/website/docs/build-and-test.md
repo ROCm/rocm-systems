@@ -70,6 +70,22 @@ If Chromium's system libraries are already installed, `npx playwright install ch
 installs just the browser without changing OS packages. Rerun browser installation
 after updating Playwright if its required browser version changes.
 
+## Test the benchmark publisher
+
+The publisher tests require Python 3.12, pytest, and pytest-xdist. They run
+separately from the npm commands and require no Node.js dependencies, GPU, ROCm
+installation, or corpus checkout. From `emulation/rocjitsu/website`, use a Python
+environment with the test dependencies installed:
+
+```bash
+python -m pip install pytest pytest-xdist
+python -m pytest -q tests/python -n "$(nproc)"
+```
+
+The website CI workflow runs these tests in a separate job. They cover conversion
+of raw benchmark results, provenance checks, immutable resources, failure and
+recovery, plugin comparisons, and the publisher CLI.
+
 ## Run locally
 
 ```bash

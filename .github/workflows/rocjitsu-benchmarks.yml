@@ -151,23 +151,15 @@ jobs:
           name: ${{ env.RESULTS_ARTIFACT }}
           path: incoming
 
-      - name: Checkout publisher corpus
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          repository: ROCm/rocjitsu-test-corpus
-          ref: ${{ env.CORPUS_SHA }}
-          path: rocjitsu-test-corpus
-          persist-credentials: false
-
       - name: Checkout repository for publication
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           path: publication
 
-      - name: Checkout dashboard validator
+      - name: Checkout dashboard publisher and validator
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
-          repository: ROCm/rocm-systems
+          ref: ${{ github.sha }}
           path: dashboard
           persist-credentials: false
           sparse-checkout: emulation/rocjitsu/website
@@ -215,23 +207,20 @@ jobs:
               exit "${REMOTE_STATUS}"
             fi
 
-            (
-              cd "${CORPUS_SOURCE_DIR}"
-              python -m benchmarks.dashboard_publish \
-                --raw-run "${GITHUB_WORKSPACE}/incoming/run.json" \
-                --data-dir "${GITHUB_WORKSPACE}/publication/rocjitsu-dashboard/data" \
-                --run-id "${RUN_ID}" \
-                --repository "https://github.com/${GITHUB_REPOSITORY}" \
-                --environment-id "rocjitsu-benchmark-u2404-4150afe4-rocm-10.1.0a20260812" \
-                --expected-sha "${GITHUB_SHA}" \
-                --expected-corpus-sha "${CORPUS_SHA}" \
-                --machine-id "${BENCHMARK_MACHINE}" \
-                --trigger "${TRIGGER}" \
-                --branch develop \
-                --commit-message "${COMMIT_MESSAGE}" \
-                --source-ref "${GITHUB_REF_NAME}" \
-                --is-beta
-            )
+            python "${GITHUB_WORKSPACE}/dashboard/emulation/rocjitsu/website/scripts/dashboard_publish.py" \
+              --raw-run "${GITHUB_WORKSPACE}/incoming/run.json" \
+              --data-dir "${GITHUB_WORKSPACE}/publication/rocjitsu-dashboard/data" \
+              --run-id "${RUN_ID}" \
+              --repository "https://github.com/${GITHUB_REPOSITORY}" \
+              --environment-id "rocjitsu-benchmark-u2404-4150afe4-rocm-10.1.0a20260812" \
+              --expected-sha "${GITHUB_SHA}" \
+              --expected-corpus-sha "${CORPUS_SHA}" \
+              --machine-id "${BENCHMARK_MACHINE}" \
+              --trigger "${TRIGGER}" \
+              --branch develop \
+              --commit-message "${COMMIT_MESSAGE}" \
+              --source-ref "${GITHUB_REF_NAME}" \
+              --is-beta
 
             node "${GITHUB_WORKSPACE}/dashboard/emulation/rocjitsu/website/scripts/validate-dashboard-data.mjs" \
               "${GITHUB_WORKSPACE}/publication/rocjitsu-dashboard/data"

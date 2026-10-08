@@ -21,6 +21,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  publisher:
+    name: Test dashboard publisher
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: emulation/rocjitsu/website
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install publisher test dependencies
+        run: python -m pip install pytest pytest-xdist
+
+      - name: Run publisher tests
+        run: python -m pytest -q tests/python -n "$(nproc)"
+
   verify:
     name: Verify website
     runs-on: ubuntu-latest
