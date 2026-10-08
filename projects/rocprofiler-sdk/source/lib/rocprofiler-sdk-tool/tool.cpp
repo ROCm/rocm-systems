@@ -910,8 +910,9 @@ runtime_initialization_callback(rocprofiler_callback_tracing_record_t record,
 {
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION) return;
     ROCP_CI_LOG_IF(WARNING, tool_metadata == nullptr)
-        << fmt::format("tool cannot record runtime initialization for {}",
-                       tool_metadata->get_operation_name(record.kind, record.operation));
+        << fmt::format("tool cannot record runtime initialization for kind={} operation={}",
+                       static_cast<uint32_t>(record.kind),
+                       static_cast<uint32_t>(record.operation));
     if(tool_metadata)
     {
         tool_metadata->add_runtime_initialization(
@@ -4362,6 +4363,29 @@ get_sigaction_function()
     return user_sigaction;
 }
 
+// Installs the tool's termination signal handlers on first use.
+void
+arm_signal_handlers()
+{
+    static std::once_flag _once;
+    std::call_once(_once, []() {
+        ROCP_INFO << "arming signal handlers";
+        initialize_signal_handler(get_sigaction_function());
+    });
+}
+
+// Arms the tool's signal handlers when a runtime registers its API table.
+void
+arm_signal_handlers_callback(rocprofiler_intercept_table_t /*table_id*/,
+                             uint64_t /*lib_version*/,
+                             uint64_t /*lib_instance*/,
+                             void** /*tables*/,
+                             uint64_t /*num_tables*/,
+                             void* /*user_data*/)
+{
+    arm_signal_handlers();
+}
+
 bool signal_handler_exit =
     rocprofiler::tool::get_env("ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT", false);
 
@@ -4868,6 +4892,10 @@ rocprofiler_configure(uint32_t                 version,
         rocprofiler_at_intercept_table_registration(api_timestamps_callback, libs, nullptr),
         "api registration");
 
+    ROCPROFILER_CALL(
+        rocprofiler_at_intercept_table_registration(arm_signal_handlers_callback, libs, nullptr),
+        "signal handler arming registration");
+
     ROCP_INFO << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
               << " (" << runtime_version << ")";
 
@@ -5037,8 +5065,6 @@ rocprofv3_main(int argc, char** argv, char** envp)
             });
         }
     }
-
-    initialize_signal_handler(get_sigaction_function());
 
     ROCP_INFO << "rocprofv3: main function wrapper will be invoked...";
 
