@@ -1505,7 +1505,9 @@ TEST_CASE("Unit_HRR_PinnedHost_CrossDeviceFree_Direct", "[.][hrr-direct]") {
 //   -  hipHostMalloc of kThreadFreeBytes, host filled pattern 1
 //   0  read      on the null stream, all of it
 //   -  a second thread frees the buffer once the launch is queued; the host
-//      waits for that thread, then checks the tail of the output
+//      waits for that thread, then checks the tail of the output. The free is
+//      the next event after the launch: an event of the launching thread in
+//      between would hold the free back on its own.
 // The buffer spans many snapshot chunks, so replay of launch 0 spends a while
 // loading blobs between checking that the buffer is live and queueing the
 // restore.
@@ -1525,12 +1527,17 @@ TEST_CASE("Unit_HRR_PinnedHost_ThreadFree_Direct", "[.][hrr-direct]") {
   fill(h, 1, kThreadFreeInts);
   HRR_HIP_CHECK(hipDeviceSynchronize());
 
-  // 0
-  hipLaunchKernelGGL(hrr_pinned_read, dim3((kThreadFreeInts + kThreads - 1) / kThreads),
-                     dim3(kThreads), 0, nullptr, h, out, kThreadFreeInts);
-  HRR_HIP_CHECK(hipGetLastError());
+  // 0. No HIP call on this thread until the free: the free must be the event
+  // right after the launch.
+  int n = kThreadFreeInts;
+  void* args[] = {&h, &out, &n};
+  const hipError_t launch_err =
+      hipLaunchKernel(reinterpret_cast<const void*>(hrr_pinned_read),
+                      dim3((kThreadFreeInts + kThreads - 1) / kThreads), dim3(kThreads), args,
+                      0, nullptr);
   hipError_t free_err = hipErrorUnknown;
   std::thread([&] { free_err = hipHostFree(h); }).join();
+  HRR_HIP_CHECK(launch_err);
   HRR_HIP_CHECK(free_err);
   // The last kPinnedInts ints, restored from the last records of the launch.
   const int tail = kThreadFreeInts - kPinnedInts;
@@ -2963,6 +2970,13 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_FreeOnOtherThread) {
   const auto kls = launches_of(arc);
   REQUIRE(kls.size() == 1);
   REQUIRE(kls[0]->snapshots.size() == kThreadFreeBytes / kChunk);
+  // The free, on the other thread, is the event right after the launch.
+  size_t launch_at = 0;
+  while (launch_at < arc.events.size() && !arc.events[launch_at].kernel_launch) ++launch_at;
+  REQUIRE(launch_at + 1 < arc.events.size());
+  const auto& next = arc.events[launch_at + 1];
+  CHECK(next.header().event_type == HRR_API_HIPHOSTFREE);
+  CHECK(next.header().thread_id != arc.events[launch_at].header().thread_id);
 
   auto [rc, out] = replay(archive, "--multi-thread");
   INFO("Replay exit: " << rc
