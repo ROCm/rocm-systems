@@ -643,14 +643,18 @@ int hrr_stream_device(hipStream_t stream);
 // around both. On failure nothing is left.
 hipError_t hrr_record_free_event(hipStream_t stream, hipEvent_t* event);
 
-// Flush this process's GPU TLBs, after a hipMemUnmap of a range that may be
-// mapped again. On gfx12 under Linux 7.0's in-box amdgpu, hipMemUnmap leaves
-// the old translation cached: memory mapped at the same address next is
-// reached through the pages it replaced, by the copy engines and by some
-// shader engines, until something flushes them. KFD flushes them whenever it
-// unmaps an ordinary allocation from the GPU, so allocate and free one larger
-// than ROCr's 2 MiB fragment blocks, whose free goes straight to KFD.
-void hrr_flush_gpu_tlb();
+// Flush `device`'s GPU TLBs, after a hipMemUnmap of a range that may be
+// mapped again; only that device's. On gfx12 under Linux 7.0's in-box amdgpu,
+// hipMemUnmap leaves the old translation cached: memory mapped at the same
+// address next is reached through the pages it replaced, by the copy engines
+// and by some shader engines, until something flushes them. KFD flushes them
+// whenever it unmaps an ordinary allocation from the GPU, so allocate and free
+// one larger than ROCr's 2 MiB fragment blocks, whose free goes straight to
+// KFD, with `device` current around both and the old one restored. The
+// hipFree waits for every stream on `device`. hipMalloc and hipFree
+// invalidate an open graph capture, so never call this while one is open. A
+// failure is reported once and its error cleared.
+void hrr_flush_gpu_tlb(int device);
 
 #ifdef HRR_VA_PLACEMENT_TESTING
 // Tests only: the HIP calls placement makes, replaced to run without a GPU.
@@ -667,7 +671,7 @@ struct VmmOps {
     hipError_t (*destroy_event)(hipEvent_t e)                 = hipEventDestroy;
     hipError_t (*address_free)(void* va, size_t size)         = hipMemAddressFree;
     int (*stream_device)(hipStream_t s)                       = hrr_stream_device;
-    void (*flush_tlb)()                                       = nullptr;
+    void (*flush_tlb)(int device)                             = nullptr;
 };
 // How many times read_proc_maps() has read /proc/self/maps.
 size_t proc_maps_reads_for_test();
@@ -749,6 +753,18 @@ class VaPlacement {
     // still hold memory. Returns how many were unmapped: when that is not 0,
     // the caller tries the allocation once more.
     size_t drain_for_retry(hipError_t r, bool capturing);
+    // Every drain that unmapped something flushes the TLBs of the devices
+    // those mappings were on and of the peers granted access to them
+    // (hrr_flush_gpu_tlb). This is the same for a hipMemUnmap made outside
+    // placement, a replayed one or the warm-up reset's, of a range that may be
+    // mapped again: flush every device now, which placement does not track
+    // for those. With `capturing` the flush would invalidate the capture, so
+    // it is left pending for the next drain, the next map_at with no capture
+    // open, or flush_pending().
+    void flush_after_unmap(bool capturing);
+    // Run a flush flush_after_unmap() left pending, if any. Call only when no
+    // capture is open.
+    void flush_pending();
 
     // hipMemAddressReserve: give back the placeholder over [base, base+size) so
     // the reserve at that hint can take it. False when placement does not hold
@@ -787,6 +803,9 @@ class VaPlacement {
     void set_vmm_ops_for_test(VmmOps ops) { ops_ = ops; }
     void adopt_reservation_for_test(uint64_t b, uint64_t e, int devices);
     void adopt_mapping_for_test(uint64_t rec, size_t size, int device = 0);
+    // Device d's mappings are also made accessible to peers[d], as reserve()
+    // decides with peer access on.
+    void set_peers_for_test(std::vector<std::vector<int>> peers) { peers_ = std::move(peers); }
     // Whether `live` is the base of a live placed mapping.
     bool is_mapped(void* live);
 #endif
@@ -795,7 +814,11 @@ class VaPlacement {
     hipError_t vmm_map(uint64_t pb, uint64_t pe, int device,
                        hipMemGenericAllocationHandle_t* h);
     void clear_error();
-    void flush_tlb();
+    // Flush the TLBs of each of `devices` once.
+    void flush_tlbs(std::vector<int> devices);
+    // The devices whose TLBs an unmap of a mapping on `device` leaves stale:
+    // it and its peers.
+    void add_mapping_devices(int device, std::vector<int>* out) const;
     bool unmap_one(uint64_t pb, const PlacedMapping& m);
     // Destroy the event a deferred free kept, if any.
     void drop_event(hipEvent_t e);
@@ -835,6 +858,7 @@ class VaPlacement {
     std::atomic<uint64_t> fallbacks_{0};
     std::atomic<uint64_t> lines_{0};
     std::atomic<uint64_t> deferred_total_{0};
+    std::atomic<bool> flush_pending_{false};  // every device, at the next chance
     uint64_t held_bytes_ = 0;
     size_t   lost_ranges_ = 0;
     size_t   reserve_lines_ = 0;

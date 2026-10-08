@@ -720,18 +720,29 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapRunsOutsideTheLock) {
 }
 
 namespace {
-int g_flushes = 0;
-void counted_flush() { ++g_flushes; }
+// Each flush: the device it flushed, and how many unmaps had run by then.
+std::vector<std::pair<int, int>> g_flushes;
+void counted_flush(int device) { g_flushes.emplace_back(device, g_unmaps.load()); }
+using Flushes = std::vector<std::pair<int, int>>;
+// The flushes since the last call, sorted by device.
+Flushes take_flushes() {
+  Flushes f;
+  f.swap(g_flushes);
+  std::sort(f.begin(), f.end());
+  return f;
+}
 hipError_t failed_unmap(void*, size_t) { return hipErrorInvalidValue; }
 }  // namespace
 
 HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapFlushesTlb) {
   // hipMemUnmap can leave the old translation in the GPU's TLBs (gfx12 under
   // Linux 7.0's in-box amdgpu), and placement maps the same address again.
-  // Every drain that unmapped something flushes them once; a drain whose
-  // unmaps all failed, or a mapping taken back, unmaps nothing and does not.
+  // Every drain that unmapped something flushes, after its unmaps, each
+  // device that could reach what it unmapped, once; a drain whose unmaps all
+  // failed, or a mapping taken back, unmaps nothing and does not. An unmap
+  // outside placement flushes every device, later if a capture is open.
   reset_events();
-  g_flushes = 0;
+  g_flushes.clear();
   hrr::VaPlacement pl;
   hrr::VmmOps ops = event_ops();
   ops.flush_tlb = counted_flush;
@@ -743,19 +754,19 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapFlushesTlb) {
     REQUIRE(pl.map_at(B, P, 0, "hipMalloc", &live));
     REQUIRE(pl.unmap(at(B)));
     REQUIRE(g_unmaps == 1);
-    REQUIRE(g_flushes == 1);
+    REQUIRE(take_flushes() == (Flushes{{0, 1}}));
     // Mapped again at the same address: no further flush.
     REQUIRE(pl.map_at(B, P, 0, "hipMalloc", &live));
-    REQUIRE(g_flushes == 1);
+    REQUIRE(g_flushes.empty());
   }
-  SECTION("a drain of several unmaps flushes once") {
+  SECTION("a drain of several unmaps flushes once, after all of them") {
     REQUIRE(pl.map_at(B, P, 0, "hipMalloc", &live));
     REQUIRE(pl.map_at(B + 2 * P, P, 0, "hipMalloc", &live));
     REQUIRE(pl.unmap(at(B), /*defer=*/true));
     REQUIRE(pl.unmap(at(B + 2 * P), /*defer=*/true));
-    REQUIRE(g_flushes == 0);
+    REQUIRE(g_flushes.empty());
     REQUIRE(pl.drain_deferred() == 2);
-    REQUIRE(g_flushes == 1);
+    REQUIRE(take_flushes() == (Flushes{{0, 2}}));
   }
   SECTION("a failed unmap does not flush") {
     REQUIRE(pl.map_at(B, P, 0, "hipMalloc", &live));
@@ -763,14 +774,67 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapFlushesTlb) {
     pl.set_vmm_ops_for_test(ops);
     REQUIRE(pl.unmap(at(B), /*defer=*/true));
     REQUIRE(pl.drain_deferred() == 0);
-    REQUIRE(g_flushes == 0);
+    REQUIRE(g_flushes.empty());
   }
   SECTION("a mapping taken back is not unmapped, so nothing is flushed") {
     REQUIRE(pl.map_at(B, 2 * P, 0, "hipMallocAsync", &live, false, &S1));
     REQUIRE(pl.unmap_async(at(B), S1, /*capturing=*/false));
     REQUIRE(pl.map_at(B, 2 * P, 0, "hipMallocAsync", &live, false, &S1));
     REQUIRE(g_unmaps == 0);
-    REQUIRE(g_flushes == 0);
+    REQUIRE(g_flushes.empty());
+  }
+  SECTION("on several devices, the mapping's device and its peers are flushed") {
+    // Three devices; device 0's mappings are also reachable from device 1.
+    hrr::VaPlacement multi;
+    multi.set_vmm_ops_for_test(ops);
+    multi.adopt_reservation_for_test(B, B + 16 * P, 3);
+    multi.set_peers_for_test({{1}, {}, {}});
+    REQUIRE(multi.map_at(B, P, 2, "hipMalloc", &live));
+    REQUIRE(multi.map_at(B + 2 * P, P, 0, "hipMalloc", &live));
+    REQUIRE(multi.unmap(at(B)));
+    REQUIRE(take_flushes() == (Flushes{{2, 1}}));
+    REQUIRE(multi.unmap(at(B + 2 * P)));
+    REQUIRE(take_flushes() == (Flushes{{0, 2}, {1, 2}}));
+    // One drain over both: each device once.
+    REQUIRE(multi.map_at(B, P, 2, "hipMalloc", &live));
+    REQUIRE(multi.map_at(B + 2 * P, P, 0, "hipMalloc", &live));
+    REQUIRE(multi.unmap(at(B), /*defer=*/true));
+    REQUIRE(multi.unmap(at(B + 2 * P), /*defer=*/true));
+    REQUIRE(multi.drain_deferred() == 2);
+    REQUIRE(take_flushes() == (Flushes{{0, 4}, {1, 4}, {2, 4}}));
+  }
+  SECTION("an unmap outside placement flushes every device, later while capturing") {
+    hrr::VaPlacement multi;
+    multi.set_vmm_ops_for_test(ops);
+    multi.adopt_reservation_for_test(B, B + 16 * P, 2);
+    multi.flush_after_unmap(/*capturing=*/false);
+    REQUIRE(take_flushes() == (Flushes{{0, 0}, {1, 0}}));
+    // The flush's hipMalloc would invalidate the capture: it waits for the
+    // first map with no capture open, and runs once.
+    multi.flush_after_unmap(/*capturing=*/true);
+    REQUIRE(g_flushes.empty());
+    REQUIRE(multi.map_at(B, P, 0, "hipMalloc", &live, /*capturing=*/true));
+    REQUIRE(g_flushes.empty());
+    REQUIRE(multi.map_at(B + 2 * P, P, 0, "hipMalloc", &live));
+    REQUIRE(take_flushes() == (Flushes{{0, 0}, {1, 0}}));
+    REQUIRE(multi.map_at(B + 4 * P, P, 0, "hipMalloc", &live));
+    REQUIRE(g_flushes.empty());
+    // Or for the next drain, which then flushes every device once, also
+    // when it has nothing to unmap.
+    multi.flush_after_unmap(/*capturing=*/true);
+    REQUIRE(multi.unmap(at(B), /*defer=*/true));
+    REQUIRE(multi.drain_deferred() == 1);
+    REQUIRE(take_flushes() == (Flushes{{0, 1}, {1, 1}}));
+    multi.flush_after_unmap(/*capturing=*/true);
+    REQUIRE(multi.drain_deferred() == 0);
+    REQUIRE(take_flushes() == (Flushes{{0, 1}, {1, 1}}));
+    // Or flush_pending(); nothing is left after it.
+    multi.flush_after_unmap(/*capturing=*/true);
+    multi.flush_pending();
+    REQUIRE(take_flushes() == (Flushes{{0, 1}, {1, 1}}));
+    multi.flush_pending();
+    REQUIRE(multi.drain_deferred() == 0);
+    REQUIRE(g_flushes.empty());
   }
 }
 

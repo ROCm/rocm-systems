@@ -5120,6 +5120,10 @@ hipError_t playback_hipMemMap(PlaybackContext& ctx, const uint8_t* pl) {
     if (!live_va) return hipSuccess;  // VA not tracked, skip
     hipMemGenericAllocationHandle_t live_handle = ctx.translate_vmm_handle(a->handle);
     if (!live_handle) return hipSuccess;  // handle not tracked, skip
+    // A hipMemUnmap replayed while a capture was open left its flush for the
+    // next map; this one may be at the address it unmapped.
+    if (hrr::VaPlacement* placing = hrr_placing(ctx); placing && !ctx.in_graph_capture.any())
+        placing->flush_pending();
     hipError_t r = hipMemMap(live_va,
                              static_cast<size_t>(a->size),
                              static_cast<size_t>(a->offset),
@@ -5140,7 +5144,9 @@ hipError_t playback_hipMemUnmap(PlaybackContext& ctx, const uint8_t* pl) {
     hipError_t r = hipMemUnmap(live_va, static_cast<size_t>(a->size));
     // Placement maps the same addresses again, in this pass or the next;
     // hipMemUnmap may leave the old translation cached (hrr_flush_gpu_tlb).
-    if (r == hipSuccess && hrr_placing(ctx)) hrr::hrr_flush_gpu_tlb();
+    // The flush's hipMalloc would invalidate an open capture, so then it waits.
+    if (hrr::VaPlacement* placing = hrr_placing(ctx); r == hipSuccess && placing)
+        placing->flush_after_unmap(ctx.in_graph_capture.any());
     if (r == hipSuccess) {
         std::unique_lock lk(ctx.map_mutex);
         hrr::va_untrack_mapping(ctx.vmm_mappings, reinterpret_cast<uint64_t>(live_va),
@@ -5160,12 +5166,13 @@ void hrr_release_vmm_state(PlaybackContext& ctx) {
         reservations.swap(ctx.vmm_va_map);
         ++ctx.ranges_gen;
     }
+    hrr::VaPlacement* placing = hrr_placing(ctx);
     for (const auto& [va, size] : mappings)
         (void)hipMemUnmap(reinterpret_cast<void*>(va), size);
-    // The timed pass maps these addresses again (hrr_flush_gpu_tlb).
-    if (!mappings.empty()) hrr::hrr_flush_gpu_tlb();
+    // The timed pass maps these addresses again (hrr_flush_gpu_tlb). Before
+    // the reservations go, so the flush's own allocation cannot land there.
+    if (placing && !mappings.empty()) placing->flush_after_unmap(false);
     for (const auto& [rec, h] : handles) (void)hipMemRelease(h);
-    hrr::VaPlacement* placing = hrr_placing(ctx);
     std::vector<hrr::VaRange> rehold;
     for (const auto& [rec, va] : reservations) {
         if (hipMemAddressFree(va.live, va.size) != hipSuccess) continue;
