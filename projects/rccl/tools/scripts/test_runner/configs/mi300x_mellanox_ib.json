@@ -4144,7 +4144,7 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall/recycle/splitShare)",
-          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong:GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv",
+          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong:GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv:GinMPIDeviceTests.Timeout_*",
           "timeout": 600
         },
         {
@@ -4205,6 +4205,11 @@
             "NCCL_IB_QPS_PER_CONNECTION": "4",
             "RCCL_IB_QPS_PER_P2P": "2"
           }
+        },
+        {
+          "name": "GIN_DeviceMPI_Timeouts",
+          "description": "Device-side timeouts over the IB proxy: flush, flushAsync + wait, waitSignal (indexed and VA), waitCounter and their C entry points",
+          "test_filter": "GinMPIDeviceTests.Timeout_*"
         }
       ]
     },

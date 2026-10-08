@@ -53,6 +53,8 @@ public:
   static __device__ inline size_t rma_inline_count{0};
   static __device__ inline size_t amo_count{0};
   static __device__ inline size_t quiet_count{0};
+  // Polls that try_quiet_single() reports busy before the queue drains.
+  static __device__ inline size_t try_quiet_busy{0};
 
 public:
   __host__ QueuePairMock()                                      = default;
@@ -88,6 +90,8 @@ public:
                                        PostOpt<Options...> = {});
 
   __device__ __forceinline__ void quiet_single();
+
+  __device__ __forceinline__ bool try_quiet_single();
 
 
   /**
@@ -283,6 +287,13 @@ __device__ __forceinline__ QueuePairMock::amo_ret_t<Fetch> QueuePairMock::post_w
 __device__ __forceinline__ void QueuePairMock::quiet_single() {
   // Release ensures that prior stores and RMW occur before the increment of quiet_count
   __scoped_atomic_fetch_add(&quiet_count, 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+}
+
+__device__ __forceinline__ bool QueuePairMock::try_quiet_single() {
+  quiet_single();
+  if (try_quiet_busy == 0) return true;
+  --try_quiet_busy;
+  return false;
 }
 
 }  // namespace rocshmem

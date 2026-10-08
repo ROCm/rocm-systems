@@ -92,6 +92,8 @@ public:
 
   __device__ __noinline__ void quiet_single();
 
+  __device__ __noinline__ bool try_quiet_single();
+
 private:
   /**
    * @brief Reserve space in the sq to post this many wqes.
@@ -407,6 +409,20 @@ __device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wq
 // precondition: called with all active lanes using different QPs
 __device__ inline __noinline__ void QueuePairIONIC::quiet_single() {
   quiet_internal_ccqe_single(sq.pos);
+}
+
+// precondition: called with all active lanes using different QPs
+__device__ inline __noinline__ bool QueuePairIONIC::try_quiet_single() {
+  volatile struct ionic_v1_cqe *cqe = &cq.buf[0];
+  uint32_t qtf_be = cqe->qid_type_flags;
+  uint32_t msn = endian::from_be(cqe->send.msg_msn);
+
+  if (!!(qtf_be & IONIC_V1_CQE_ERROR_BE)) {
+    /* No other way to signal an error, so just crash. */
+    abort();
+  }
+
+  return !((msn - sq.pos) & 0x800000);
 }
 
 __device__ __forceinline__ uint32_t QueuePairIONIC::reserve_sq(

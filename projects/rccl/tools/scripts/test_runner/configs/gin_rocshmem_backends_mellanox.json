@@ -198,7 +198,13 @@
         { "name": "BarrierFence_AllContextsGet", "description": "Get-fenced AllContexts barrier exercises FlushAsync/Wait (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_AllContextsGet_SingleNode" },
         { "name": "GetFlush_Visibility", "description": "gin.flush makes prior gets visible in the same kernel (8 B - 4 MiB)", "test_filter": "GinMPIDeviceTests.GetFlush_Visibility" },
         { "name": "GetFlushAsyncWait_Visibility", "description": "gin.flushAsync + gin.wait makes prior gets visible in the same kernel", "test_filter": "GinMPIDeviceTests.GetFlushAsyncWait_Visibility" },
-        { "name": "GetFlush_ConcurrentBlocks", "description": "8 CTAs get + flush concurrently on one GIN context", "test_filter": "GinMPIDeviceTests.GetFlush_ConcurrentBlocks" }
+        { "name": "GetFlush_ConcurrentBlocks", "description": "8 CTAs get + flush concurrently on one GIN context", "test_filter": "GinMPIDeviceTests.GetFlush_ConcurrentBlocks" },
+        { "name": "Timeout_WaitSignal",     "description": "waitSignal with a timeout: unmet times out, met succeeds, zero budget polls once", "test_filter": "GinMPIDeviceTests.Timeout_WaitSignal" },
+        { "name": "Timeout_WaitSignalVA",   "description": "VA waitSignal with a timeout. GDA and SDMA cannot send VA signals, so they run only the timeout cases", "test_filter": "GinMPIDeviceTests.Timeout_WaitSignalVA" },
+        { "name": "Timeout_WaitCounter",    "description": "waitCounter with a timeout: before any put, met, and more completions than issued", "test_filter": "GinMPIDeviceTests.Timeout_WaitCounter" },
+        { "name": "Timeout_Flush",          "description": "flush with a timeout: a 256 MiB put in flight times out on the owning thread, then drains and lands", "test_filter": "GinMPIDeviceTests.Timeout_Flush" },
+        { "name": "Timeout_FlushAsyncWait", "description": "flushAsync + wait with a timeout, every lane waiting on its own request to the same peer", "test_filter": "GinMPIDeviceTests.Timeout_FlushAsyncWait" },
+        { "name": "Timeout_CApi",           "description": "C entry points ncclGinWaitSignalTimeout[VA], ncclGinWaitCounterTimeout, ncclGinFlushTimeout and ncclGinWaitTimeout", "test_filter": "GinMPIDeviceTests.Timeout_CApi" }
       ]
     },
     "gin_devmpi_gda": {

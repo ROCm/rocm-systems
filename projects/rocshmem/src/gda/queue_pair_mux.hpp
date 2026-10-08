@@ -147,6 +147,8 @@ public:
 
   __device__ __forceinline__ void quiet_single();
 
+  __device__ __forceinline__ bool try_quiet_single();
+
 
   /**
    * @brief Resolve the local (origin) virtual address and LKey of a symmetric address.
@@ -355,6 +357,25 @@ __device__ __forceinline__ void QueuePairMux::quiet_single() {
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
     return qp.mlx5.quiet_single();
+#endif
+  default:
+    invalid_provider();
+  }
+}
+
+__device__ __forceinline__ bool QueuePairMux::try_quiet_single() {
+  switch (get_provider()) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    return qp.ionic.try_quiet_single();
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    return qp.bnxt.try_quiet_single();
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    return qp.mlx5.try_quiet_single();
 #endif
   default:
     invalid_provider();

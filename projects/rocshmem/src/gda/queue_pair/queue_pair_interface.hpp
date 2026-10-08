@@ -356,6 +356,21 @@ public:
       provider().quiet_single();
     }
   }
+
+  /**
+   * @brief Poll the completion queue once without blocking.
+   *
+   * @param[in] wf_info Wavefront information.
+   *
+   * @return True for every lane of the PE group once all posted WQEs have completed.
+   */
+  __device__ bool try_quiet(const ActiveWFInfo& wf_info) {
+    int drained = 1;
+    if (wf_info.is_pe_group_first) {
+      drained = provider().try_quiet_single();
+    }
+    return __shfl(drained, wf_info.pe_group_first_phys_lane_id) != 0;
+  }
 /**@}*/
 };
 

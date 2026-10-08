@@ -167,7 +167,9 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WGPutSignalTestType:
       case WGPutSignalNBITestType:
       case QpPutNbiTestType:
+      case QpPutNbiPollTestType:
       case SdmaPutNbiTestType:
+      case SdmaPutNbiPollTestType:
         max_msg_size = args.max_volume_size / args.num_wgs;
         break;
       case PingPongTestType:
@@ -1096,6 +1098,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "QP-Direct Put NBI";
       testers.push_back(new QpPutNbiTester(args));
       break;
+    case QpPutNbiPollTestType:
+      test_name = "QP-Direct Put NBI Poll";
+      testers.push_back(new QpPutNbiTester(args));
+      break;
 #endif
 #if defined(USE_SDMA)
     case SdmaPingPongTestType:
@@ -1105,6 +1111,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case SdmaPutNbiTestType:
       test_name = "SDMA-Direct Put NBI";
+      testers.push_back(new SdmaPutNbiTester(args));
+      break;
+    case SdmaPutNbiPollTestType:
+      test_name = "SDMA-Direct Put NBI Poll";
       testers.push_back(new SdmaPutNbiTester(args));
       break;
 #endif

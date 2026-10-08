@@ -102,6 +102,8 @@ public:
 
   __device__ __noinline__ void quiet_single();
 
+  __device__ __noinline__ bool try_quiet_single();
+
 private:
 #if GDA_MLX5_LOCK_USE_S_WAKEUP
   static __device__ __forceinline__ void amdgcn_s_wakeup() {
@@ -333,6 +335,34 @@ __device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_
 // precondition: called with all active lanes using different QPs
 __device__ inline __noinline__ void QueuePairMLX5::quiet_single() {
   poll_cq_until(sq.depth);
+}
+
+// precondition: called with all active lanes using different QPs
+__device__ inline __noinline__ bool QueuePairMLX5::try_quiet_single() {
+  uint16_t sq_depth = sq.depth;
+
+  uint64_t sq_post = __scoped_atomic_load_n(&sq.post, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE);
+  if (sq_post == 0) {
+    return true;
+  }
+
+  uint32_t wqecnt_sig_op_own = __scoped_atomic_load_n(reinterpret_cast<uint32_t*>(&cq.buf->wqe_counter),
+                                                      __ATOMIC_ACQUIRE, __MEMORY_SCOPE_SYSTEM);
+  uint8_t opcode = static_cast<uint8_t>(wqecnt_sig_op_own >> 28);
+  if (opcode == MLX5_CQE_INVALID) {
+    return false;
+  }
+
+  __be16 be_wqe_counter = static_cast<__be16>(wqecnt_sig_op_own);
+  uint16_t sq_head = endian::from_be(be_wqe_counter);
+
+  uint16_t posted          = static_cast<uint16_t>(sq_post);
+  uint16_t completed       = sq_head + 1;
+  uint16_t consumed_slots  = posted   - completed;
+  uint16_t available_slots = sq_depth - consumed_slots;
+
+  return available_slots >= sq_depth &&
+         __scoped_atomic_load_n(&sq.post, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE) == sq_post;
 }
 
 // precondition: called with all active lanes using different QPs

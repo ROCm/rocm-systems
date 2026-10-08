@@ -1243,8 +1243,10 @@ if(BUILD_TESTS)
       ${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda
     )
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE GDA_QUEUEPAIR_MOCK)
+    # Suite G is relocatable too. Without RDC, a -O0 build rejects the QueuePairMock scoped atomics (invalid addrspacecast).
     set_source_files_properties(
       ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilIpcDevice_test.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/device/GinRocshmemGdaTemplate_test.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilSdmaTemplate_test.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/device/sdma/anvil_stub_quiet_count.cpp
       PROPERTIES COMPILE_OPTIONS "-fgpu-rdc")
