@@ -5,8 +5,11 @@ from correctness qualification in [`validation/`](../validation/VALIDATION.md):
 a benchmark result cannot promote a validation cell, and validation status does
 not carry performance claims.
 
-The active performance targets are [gfx950](STATUS_GFX950.md) and
-[gfx1201](STATUS_GFX1201.md). Benchmark ledgers name concrete targets because
+The active performance targets are [gfx950](STATUS_GFX950.md),
+[gfx1100](STATUS_GFX1100.md), and [gfx1201](STATUS_GFX1201.md).
+The gfx1100 bringup starts with the shared Gluon probe; its remaining rows
+need independent native discovery and measurement. Benchmark ledgers name
+concrete targets because
 performance does not generalize across every product in an architecture family.
 The other `STATUS_*.md` files are placeholders, not required targets.
 The prepared MI350X campaign invocation and evidence layout are in

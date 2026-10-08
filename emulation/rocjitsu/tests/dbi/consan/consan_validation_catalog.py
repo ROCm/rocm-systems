@@ -39,6 +39,7 @@ PROCESS_OUTPUT_DRAIN_SECONDS = 2
 PROCESS_TERMINATION_GRACE_SECONDS = 5
 NATIVE_CDNA_TARGETS = frozenset(("gfx942", "gfx950"))
 ATOMIC_ORDER_ONLY_TARGETS = NATIVE_CDNA_TARGETS | {"gfx1100"}
+SINGLETON_BARRIER_TARGETS = NATIVE_CDNA_TARGETS | {"gfx1100"}
 SINGLE_REPETITION_TARGETS = frozenset(("gfx942", "gfx950", "gfx1250"))
 QWEN_OVERHEAD_REPETITIONS = {target: 1 for target in SINGLE_REPETITION_TARGETS}
 QWEN_BUILD_MANIFEST_SCHEMA_VERSION = 1
@@ -144,10 +145,10 @@ assert (
 
 def _fault_family_environment(target: str, family: str) -> dict[str, str]:
     environment = dict(FAULT_FAMILY_ENVIRONMENTS[family])
-    if target in NATIVE_CDNA_TARGETS and family == "barrier-drop":
-        # CDNA3/4 represent a full workgroup barrier with one s_barrier. Unlike
-        # RDNA4's signal/wait pair, it has no two-member logical sequence that
-        # must be selected and dropped atomically.
+    if target in SINGLETON_BARRIER_TARGETS and family == "barrier-drop":
+        # CDNA3/4 and RDNA3 represent a full workgroup barrier with one
+        # s_barrier. Unlike RDNA4's signal/wait pair, it has no two-member
+        # logical sequence that must be selected and dropped atomically.
         environment.pop("RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY")
     return environment
 
@@ -614,7 +615,7 @@ WORKLOADS = (
         overhead_processes=1,
         fault_families=("barrier-drop",),
         command_arguments=("--gtest_filter=RocblasGemmTest.Square_64x64",),
-        targets=("gfx950",),
+        targets=("gfx950", "gfx1100"),
         run_timeout_seconds=120,
     ),
     Workload(
@@ -740,7 +741,7 @@ WORKLOADS = (
         tracks_atomics=False,
         overhead_processes=1,
         fault_families=("barrier-drop",),
-        targets=("gfx950", "gfx1250", "gfx1201"),
+        targets=("gfx950", "gfx1100", "gfx1250", "gfx1201"),
         # This row proves the large object fits the ordinary bound even if the
         # harness-wide default is relaxed later.
         run_timeout_seconds=30,
@@ -775,7 +776,7 @@ WORKLOADS = (
         tracks_atomics=False,
         overhead_processes=1,
         fault_families=("barrier-drop",),
-        targets=("gfx950", "gfx1250"),
+        targets=("gfx950", "gfx1100", "gfx1250"),
     ),
     Workload(
         id="pytorch-scatter-reduce",
@@ -830,7 +831,7 @@ WORKLOADS = (
         tracks_atomics=False,
         overhead_processes=1,
         fault_families=("barrier-drop",),
-        targets=("gfx950", "gfx1250"),
+        targets=("gfx950", "gfx1100", "gfx1250"),
     ),
     Workload(
         id="pytorch-rdna4-compiled-softmax",
@@ -1664,6 +1665,14 @@ for target_id, overrides in NATIVE_GTEST_WORKLOAD_OVERRIDES.items():
 
 
 TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
+    "gfx1100": {
+        "rocblas-sgemm-square-64": {
+            "relative_path": (
+                "rocjitsu-test-corpus-build/kernels-gfx1100-rocblas/cases/"
+                "rocblas/rocblas_sgemm"
+            ),
+        },
+    },
     "gfx1201": {
         # The exact torch.mode workload completes on the physical RDNA4
         # target, but owner-local planning of its 50-MiB multi-kernel code

@@ -172,6 +172,31 @@ class ConSanBenchmarkTest(unittest.TestCase):
         self.assertEqual(len({workload.id for workload in cdna}), 13)
         self.assertEqual(cdna[:5], benchmark.WORKLOADS)
 
+    def test_gfx1100_admits_the_shared_probe_and_preserves_target(self) -> None:
+        args = benchmark._parse_args(
+            [
+                '--target',
+                'gfx1100',
+                '--output-dir',
+                '/tmp/rdna3-benchmark',
+                '--workload',
+                'gluon-shared-roundtrip',
+            ]
+        )
+        self.assertEqual(args.target, 'gfx1100')
+        self.assertEqual(benchmark._target_workloads(args.target), benchmark.WORKLOADS)
+        for mode in (None, *PROFILE_IDS):
+            with self.subTest(mode=mode):
+                environment = benchmark._clean_environment(
+                    args.target, Path('/rdna3-hook'), mode, True, Path('/names.txt')
+                )
+                self.assertEqual(environment['HIP_TARGET'], 'gfx1100')
+                if mode is not None:
+                    self.assertEqual(
+                        environment['RJ_CONSAN_KERNEL_ALLOWLIST_FILE'], '/names.txt'
+                    )
+                    self.assertEqual(environment['HSA_TOOLS_LIB'], '/rdna3-hook')
+
     def test_live_status_records_running_and_failure_without_removing_rows(
         self,
     ) -> None:

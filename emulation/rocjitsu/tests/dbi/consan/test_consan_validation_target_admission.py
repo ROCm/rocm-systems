@@ -11,6 +11,259 @@ import consan_validation_faults as validation_faults
 
 
 class ConSanValidationTargetAdmissionTest(unittest.TestCase):
+    def test_gfx1100_rocblas_fault_uses_the_native_singleton_publication(self) -> None:
+        catalog = Path(__file__).with_name('consan_validation_faults_gfx1100.json')
+        workload = validation._workload_for_target('gfx1100', 'rocblas-sgemm-square-64')
+        cases = {
+            'default': ('default', {'RJ_CONSAN_PRESET': 'default'}),
+            'high': ('default', {'RJ_CONSAN_PRESET': 'high'}),
+            'wg1-cell256': (
+                'default',
+                {
+                    'RJ_CONSAN_WORKGROUP_SAMPLE_STRIDE': '1',
+                    'RJ_CONSAN_CELL_SAMPLE_STRIDE': '256',
+                },
+            ),
+            'sc-sleep15': (
+                'supercollider',
+                {'RJ_CONSAN_SC_DELAY_MODE': 'sleep', 'RJ_CONSAN_SC_DELAY': '15'},
+            ),
+        }
+        for suffix, delay, reads_only in (
+            ('sc-sleep15-reads', '15', '1'),
+            ('sc-sleep127-all', '127', '0'),
+            ('sc-sleep127-reads', '127', '1'),
+        ):
+            cases[suffix] = (
+                'supercollider',
+                {
+                    'RJ_CONSAN_SC_DELAY_MODE': 'sleep',
+                    'RJ_CONSAN_SC_DELAY': delay,
+                    'RJ_CONSAN_SC_DELAY_READS_ONLY': reads_only,
+                },
+            )
+        for suffix, (profile, controls) in cases.items():
+            with self.subTest(suffix=suffix):
+                fault = validation_faults._load_fault(
+                    catalog, 'gfx1100', workload, f'drop-initial-publication-{suffix}'
+                )
+                environment = fault['environment']
+                self.assertEqual(environment['RJ_CONSAN_FAULT_DROP_BARRIER'], '1')
+                identity = environment['RJ_CONSAN_FAULT_SITE_IDENTITY']
+                self.assertIn('fnv1a64:3b148d41a0df9e19|', identity)
+                self.assertIn('|pc=0x00000000002002d8|mnemonic=s_barrier|', identity)
+                self.assertNotIn(
+                    'RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY', environment
+                )
+                policy, trials = validation_faults._fault_trials(fault, profile)
+                self.assertEqual(policy['detector'], 'statistical')
+                self.assertEqual(policy['minimum_detections'], 6)
+                self.assertEqual(trials, [controls] * 8)
+                self.assertEqual(
+                    fault['reach_witness']['kind'], 'reviewed-unconditional-final-isa'
+                )
+
+    def test_gfx1100_pytorch_faults_preserve_reviewed_sites_and_trials(self) -> None:
+        catalog = Path(__file__).with_name('consan_validation_faults_gfx1100.json')
+        cases = [
+            (
+                'pytorch-torch-mode',
+                'mode-initial-lds-publication-high',
+                'bb0ede9b5d4128a0',
+                '2e56c',
+                0,
+                'high',
+            ),
+            (
+                'pytorch-torch-sort',
+                'sort-first-lds-publication-high',
+                '2ab4471de865fd8f',
+                '29a9f4',
+                0,
+                'high',
+            ),
+            (
+                'pytorch-norm-softmax',
+                'softmax-lds-publication-high',
+                'dbee9568f8d7b8d5',
+                '1471bc',
+                2,
+                'high',
+            ),
+        ]
+        cases.extend(
+            (
+                'pytorch-norm-softmax',
+                f'norm-lds-publication-{preset}',
+                '2a88a7a8ddc0e00b',
+                '309ca0',
+                0,
+                preset,
+            )
+            for preset in ('high', 'higher', 'max')
+        )
+        for workload_id, fault_id, fingerprint, pc, occurrence, preset in cases:
+            with self.subTest(fault=fault_id):
+                workload = validation._workload_for_target('gfx1100', workload_id)
+                fault = validation_faults._load_fault(
+                    catalog, 'gfx1100', workload, fault_id
+                )
+                environment = fault['environment']
+                self.assertEqual(environment['RJ_CONSAN_FAULT_DROP_BARRIER'], '1')
+                identity = environment['RJ_CONSAN_FAULT_SITE_IDENTITY']
+                self.assertTrue(identity.startswith(f'fnv1a64:{fingerprint}|kernel='))
+                self.assertTrue(
+                    identity.endswith(
+                        f'|kind=barrier|pc=0x{int(pc, 16):016x}|mnemonic=s_barrier|'
+                        f'occurrence={occurrence}'
+                    )
+                )
+                if workload_id == 'pytorch-torch-mode':
+                    self.assertEqual(
+                        environment['RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY'],
+                        identity.replace('|kind=barrier|', '|event=barrier|')
+                        + '|sequence=singleton',
+                    )
+                    companion = identity.replace('0002e56c', '0002e578').replace(
+                        'occurrence=0', 'occurrence=1'
+                    )
+                    self.assertEqual(
+                        environment['RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY'],
+                        companion,
+                    )
+                    self.assertEqual(
+                        environment[
+                            'RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY'
+                        ],
+                        companion.replace('|kind=barrier|', '|event=barrier|')
+                        + '|sequence=singleton',
+                    )
+                else:
+                    self.assertEqual(
+                        set(environment),
+                        {
+                            'RJ_CONSAN_FAULT_DROP_BARRIER',
+                            'RJ_CONSAN_FAULT_SITE_IDENTITY',
+                        },
+                    )
+                # Reach is established by runtime diagnostics, not assumed for misses.
+                self.assertNotIn('reach_witness', fault)
+                self.assertEqual(set(fault['profiles']), {'default'})
+                policy, trials = validation_faults._fault_trials(fault, 'default')
+                self.assertEqual(policy['detector'], 'statistical')
+                self.assertEqual(policy['minimum_detections'], 6)
+                self.assertEqual(policy['oracle'], 'any')
+                self.assertEqual(trials, [{'RJ_CONSAN_PRESET': preset}] * 8)
+
+    def test_gfx1100_explain_includes_reviewed_external_fault_campaigns(self) -> None:
+        expected_counts = {
+            'rocblas-sgemm-square-64': 7,
+            'pytorch-torch-mode': 1,
+            'pytorch-torch-sort': 1,
+            'pytorch-norm-softmax': 4,
+        }
+        audit = validation._explain_contract(
+            Path('/workspace'),
+            'gfx1100',
+            tuple(expected_counts),
+            ('default', 'supercollider'),
+            Path(__file__).with_name('consan_validation_faults_gfx1100.json'),
+        )
+        for workload in audit['workloads']:
+            with self.subTest(workload=workload['id']):
+                self.assertEqual(workload['fault_spec_status'], 'reviewed-spec')
+                self.assertEqual(
+                    len(workload['faults']), expected_counts[workload['id']]
+                )
+                for fault in workload['faults']:
+                    profile = (
+                        'supercollider' if '-sc-sleep' in fault['id'] else 'default'
+                    )
+                    expectation = next(
+                        entry
+                        for entry in fault['profile_expectations']
+                        if entry['profile'] == profile
+                    )
+                    self.assertEqual(expectation['trial_count'], 8)
+                    self.assertEqual(expectation['minimum_detections'], 6)
+                    if fault['id'] == 'drop-initial-publication-wg1-cell256':
+                        for trial in expectation['trials']:
+                            settings = {
+                                entry['name']: entry
+                                for entry in trial['effective_settings']
+                            }
+                            for name, value in (
+                                ('RJ_CONSAN_WORKGROUP_SAMPLE_STRIDE', '1'),
+                                ('RJ_CONSAN_CELL_SAMPLE_STRIDE', '256'),
+                            ):
+                                self.assertEqual(settings[name]['value'], value)
+                                self.assertEqual(
+                                    settings[name]['category'], 'workload-tuning'
+                                )
+                                self.assertTrue(settings[name]['usability_exception'])
+
+    def test_gfx1100_admits_initial_torch_workloads(self) -> None:
+        workspace = Path('/workspace')
+        python = workspace / 'consan-pytorch-venv/bin/python'
+        for workload_id in (
+            'pytorch-torch-mode',
+            'pytorch-torch-sort',
+            'pytorch-norm-softmax',
+        ):
+            with self.subTest(workload=workload_id):
+                workload = validation._workload_for_target('gfx1100', workload_id)
+                self.assertEqual(workload.kind, 'pytorch')
+                with mock.patch.dict(
+                    'os.environ', {'CONSAN_VALIDATION_PYTORCH_PYTHON': str(python)}
+                ):
+                    command = validation._workload_command(
+                        workspace,
+                        'gfx1100',
+                        workload,
+                        'clean',
+                        workspace / 'result.json',
+                    )
+                self.assertEqual(command[0], str(python))
+                self.assertIn(workload_id.removeprefix("pytorch-"), command)
+                self.assertIn('--repetitions', command)
+                self.assertEqual(command[command.index('--repetitions') + 1], '1')
+
+    def test_rocblas_sgemm_uses_the_selected_native_target(self) -> None:
+        workspace = Path("/workspace")
+        workload_id = "rocblas-sgemm-square-64"
+        for target in ("gfx1100", "gfx950"):
+            with self.subTest(target=target):
+                workload = validation._workload_for_target(target, workload_id)
+                executable = workspace / (
+                    f"rocjitsu-test-corpus-build/kernels-{target}-rocblas/cases/"
+                    "rocblas/rocblas_sgemm"
+                )
+                manifest = {
+                    row["id"]: row for row in validation._manifest(target)["workloads"]
+                }
+                self.assertEqual(
+                    workspace / manifest[workload_id]["relative_path"], executable
+                )
+                self.assertEqual(
+                    validation._input_files(workspace, target, workload)["executable"],
+                    executable,
+                )
+                for phase in ("clean", "overhead", "fault"):
+                    with self.subTest(phase=phase):
+                        self.assertEqual(
+                            validation._workload_command(
+                                workspace,
+                                target,
+                                workload,
+                                phase,
+                                workspace / "result.json",
+                            ),
+                            [
+                                str(executable),
+                                "--gtest_filter=RocblasGemmTest.Square_64x64",
+                            ],
+                        )
+
     def test_gfx1100_admits_registered_native_gtests(self) -> None:
         expected = {
             "d128-block": (

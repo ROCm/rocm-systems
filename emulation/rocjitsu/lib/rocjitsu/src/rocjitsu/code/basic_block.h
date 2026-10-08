@@ -162,10 +162,13 @@ public:
 
   /// @brief Whether an inferred boundary terminates this block's fallthrough edge.
   ///
-  /// @details Clang may omit an architectural terminator after __builtin_unreachable(). Two
-  /// source conditions establish the boundary, and they are equivalent because neither leaves a
-  /// next instruction to reach: the following word is gfx1250 zero-filled text padding, or the
-  /// block ends at the end of `.text`. Relocation materializes either as an s_endpgm.
+  /// @details Clang may omit an architectural terminator after __builtin_unreachable(). The
+  /// existing RDNA4/CDNA5 compatibility policy infers a boundary when the next word is zero-filled
+  /// text padding or the block ends at the end of `.text`. Relocation materializes either as an
+  /// s_endpgm. This is a target-qualified inference, not a general proof from absent instructions.
+  /// RDNA3 recognizes zero-filled alignment but retains missing-fallthrough diagnostics instead
+  /// of inferring termination. RDNA3_5 is qualified for neither padding nor this inference;
+  /// both policies deliberately exclude it pending independent qualification.
   ///
   /// This cuts the FALLTHROUGH edge only. A conditional or indirect branch carrying this flag
   /// still has a live taken edge, so consumers must not read it as a whole-block program exit --
