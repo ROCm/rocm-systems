@@ -112,10 +112,16 @@ __CG_STATIC_QUALIFIER__ unsigned long long adjust_mask(unsigned long long base_m
 /**
  * @brief Drain the asynchronous global<->LDS copies issued by this wave.
  *
- * The copies behind `cooperative_groups::memcpy_async` complete out of band and are tracked by
- * ASYNCcnt, which is per-wave and is not drained by a barrier. Each wave therefore has to drain
- * its own counter, and it has to do so before the group barrier, so that the barrier is what
- * publishes the data to the rest of the group.
+ * gfx12.5 async global<->LDS copies retire through ASYNCcnt, which is per-wave and is not drained
+ * by a fence, s_waitcnt, or s_barrier. Each wave drains its own counter before the group barrier,
+ * so the barrier publishes the data to the rest of the group.
+ *
+ * gfx9 direct-to-LDS loads retire through vmcnt. The workgroup release fence inside __syncthreads()
+ * and barrier_arrive() already waits for vmcnt when such a load is in flight, and omits the wait
+ * when none is. An unconditional s_waitcnt here would drain vmcnt in every kernel that calls
+ * sync(), including ones that never issue memcpy_async, which measured 1.24x-1.36x slower than
+ * __syncthreads() on gfx950 for a kernel that keeps a global load in flight across a barrier.
+ * This function therefore waits only on the async counter.
  */
 __CG_STATIC_QUALIFIER__ void wait_async_copies() {
 #if __has_builtin(__builtin_amdgcn_s_wait_asynccnt)
@@ -215,6 +221,19 @@ __CG_STATIC_QUALIFIER__ unsigned int barrier_signal() {
 __CG_STATIC_QUALIFIER__ void barrier_wait(unsigned int s) { __ockl_grid_bar_wait(s); }
 }  // namespace grid
 
+// The LDS DMA path in memcpy_async is restricted to gfx9. gfx10 also exposes
+// __builtin_amdgcn_load_to_lds, but that path depends on the hardware adding lane_id * 4
+// to a wave uniform LDS base, and no gfx10 part was available to verify it against.
+// gfx10, gfx11 and gfx12 therefore use traditional_memcpy_bytes, which is correct on every
+// target. Turning gfx10 on later means widening this condition to __GFX10__ and running
+// Unit_device_memcpy_async_* on one. A target excluded here only loses the accelerated
+// path, it never becomes incorrect.
+#if defined(__GFX9__)
+#define __CG_LDS_DMA_TARGET 1
+#else
+#define __CG_LDS_DMA_TARGET 0
+#endif
+
 /**
  *  @brief Functionalities related to `workgroup` (thread_block in CUDA terminology)
  *  cooperative group type
@@ -249,6 +268,8 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
 __CG_STATIC_QUALIFIER__ bool is_valid() { return true; }
 
 __CG_STATIC_QUALIFIER__ void sync() {
+  // gfx9 LDS DMA needs nothing beyond __syncthreads(): its workgroup release fence already
+  // waits vmcnt when such a copy is in flight. gfx12.5 async copies need the counter drain.
   wait_async_copies();
   __syncthreads();
 }
@@ -259,6 +280,8 @@ __CG_STATIC_QUALIFIER__ dim3 block_dim() {
 }
 
 __CG_STATIC_QUALIFIER__ void barrier_arrive() {
+  // Signal only after this wave's copies have landed. Waiting later, in barrier_wait, is
+  // too late: the last wave's arrive can release everyone else.
   wait_async_copies();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
@@ -280,6 +303,8 @@ namespace tiled_group {
 
 // enforce ordering for memory instructions
 __CG_STATIC_QUALIFIER__ void sync() {
+  // Tile memcpy_async uses the gfx12.5 per-lane async copies. One wave, so the
+  // async counter has to be drained before the wavefront fence returns.
   wait_async_copies();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront");
@@ -324,10 +349,16 @@ __CG_STATIC_QUALIFIER__ void sync() {
   wait_async_copies();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
+  // is_invocable still names the builtin, so a compiler that does not have it
+  // (ROCm 7.0 and 7.1 clang) cannot parse the call. Those compilers fall back
+  // to s_barrier. memcpy_async includes this header, so it has to parse there.
+#if __has_builtin(__builtin_amdgcn_s_cluster_barrier)
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_cluster_barrier))
     // Generates a signal + wait combination for cluster barrier
     __builtin_amdgcn_s_cluster_barrier();
-  else if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier))
+  else
+#endif
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier))
     __builtin_amdgcn_s_barrier();  // fallback to s_barrier if device does not support clusters
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "cluster");
@@ -362,6 +393,9 @@ __CG_STATIC_QUALIFIER__ void barrier_wait() {
 }
 
 __CG_STATIC_QUALIFIER__ dim3 block_index() {
+#if __has_builtin(__builtin_amdgcn_cluster_workgroup_id_x) &&                                      \
+    __has_builtin(__builtin_amdgcn_cluster_workgroup_id_y) &&                                      \
+    __has_builtin(__builtin_amdgcn_cluster_workgroup_id_z)
   return dim3(__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_id_x)
                   ? __builtin_amdgcn_cluster_workgroup_id_x()
                   : 0,
@@ -371,9 +405,15 @@ __CG_STATIC_QUALIFIER__ dim3 block_index() {
               __builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_id_z)
                   ? __builtin_amdgcn_cluster_workgroup_id_z()
                   : 0);
+#else
+  return dim3(0, 0, 0);
+#endif
 }
 
 __CG_STATIC_QUALIFIER__ dim3 dim_blocks() {
+#if __has_builtin(__builtin_amdgcn_cluster_workgroup_max_id_x) &&                                  \
+    __has_builtin(__builtin_amdgcn_cluster_workgroup_max_id_y) &&                                  \
+    __has_builtin(__builtin_amdgcn_cluster_workgroup_max_id_z)
   return dim3((__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_max_id_x)
                    ? __builtin_amdgcn_cluster_workgroup_max_id_x()
                    : 0) +
@@ -386,6 +426,9 @@ __CG_STATIC_QUALIFIER__ dim3 dim_blocks() {
                    ? __builtin_amdgcn_cluster_workgroup_max_id_z()
                    : 0) +
                   1);
+#else
+  return dim3(1, 1, 1);
+#endif
 }
 
 __CG_STATIC_QUALIFIER__ unsigned int block_rank() {
@@ -401,10 +444,14 @@ __CG_STATIC_QUALIFIER__ dim3 thread_index() {
 }
 
 __CG_STATIC_QUALIFIER__ unsigned int num_blocks() {
+#if __has_builtin(__builtin_amdgcn_cluster_workgroup_max_flat_id)
   return (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_max_flat_id)
               ? __builtin_amdgcn_cluster_workgroup_max_flat_id()
               : 0) +
          1;
+#else
+  return 1;
+#endif
 }
 
 __CG_STATIC_QUALIFIER__ dim3 dim_threads() {
@@ -422,7 +469,7 @@ __CG_STATIC_QUALIFIER__ unsigned int num_threads() {
 
 __CG_STATIC_QUALIFIER__ unsigned int thread_rank() {
   return block_rank() * (blockDim.x * blockDim.y * blockDim.z) +
-      ((threadIdx.z * blockDim.y * blockDim.x) + (threadIdx.y * blockDim.x) + threadIdx.x);
+         ((threadIdx.z * blockDim.y * blockDim.x) + (threadIdx.y * blockDim.x) + threadIdx.x);
 }
 
 template <typename T> __CG_STATIC_QUALIFIER__ T* map_shared_rank(T* in, int rank) {
