@@ -291,9 +291,10 @@ public:
   }
 
   /// Translate a shared-aperture lane of a mixed FLAT request into the LDS
-  /// backing allocation. Execution and race intervals use the same address.
-  [[nodiscard]] uint64_t flat_shared_address_in_lds(uint32_t lane, uint32_t lds_base) const {
-    return per_lane_addr[lane] - flat_shared_aperture_base + lds_base;
+  /// backing allocation. Execution and observations use the same address.
+  [[nodiscard]] uint64_t flat_shared_address_in_lds(uint32_t lane,
+                                                    uint32_t lds_allocation_base) const {
+    return per_lane_addr[lane] - flat_shared_aperture_base + lds_allocation_base;
   }
 };
 

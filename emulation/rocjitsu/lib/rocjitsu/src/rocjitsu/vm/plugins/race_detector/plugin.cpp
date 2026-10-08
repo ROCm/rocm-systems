@@ -379,8 +379,8 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(ldsMask & (1ULL << lane)))
         continue;
-      laneAddrs[lane] = static_cast<uint32_t>(
-          mixedFlat ? d.flat_shared_address_in_lds(lane, wf.lds_base()) : d.per_lane_addr[lane]);
+      laneAddrs[lane] =
+          static_cast<uint32_t>(mixedFlat ? access.addresses[lane] : d.per_lane_addr[lane]);
       int addr = static_cast<int>(laneAddrs[lane]);
       if (d.is_load)
         detector->validateRead(addr, waveId, static_cast<int>(lane), perLaneBytes, memoryOrder);

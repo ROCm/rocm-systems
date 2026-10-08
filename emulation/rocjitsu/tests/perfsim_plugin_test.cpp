@@ -1289,6 +1289,9 @@ TEST_F(PerfsimPluginTest, SplitsMixedFlatResourcesInFirstRequestLaneOrder) {
   first_addresses[1] = 500;
   first_addresses[2] = 300;
   first_addresses[3] = 900;
+  auto first_effective_addresses = first_addresses;
+  first_effective_addresses[1] = 20;
+  first_effective_addresses[3] = 0x80000040;
   MemoryAccessObservation first;
   first.mnemonic = "flat_load_dword";
   first.pc = 0x2200;
@@ -1311,7 +1314,8 @@ TEST_F(PerfsimPluginTest, SplitsMixedFlatResourcesInFirstRequestLaneOrder) {
   first.flat_local_lane_mask = 0x2;
   first.flat_dds_lane_mask = 0x8;
   first.scratch_lane_mask = 0x4;
-  first.addresses = first_addresses;
+  first.addresses = first_effective_addresses;
+  first.pre_routing_addresses = first_addresses;
   plugin.onAmdgpuMemoryAccessRouted(first);
 
   SyntheticInstruction first_local("flat_load_dword", words, MEMORY_OP);
@@ -1320,9 +1324,11 @@ TEST_F(PerfsimPluginTest, SplitsMixedFlatResourcesInFirstRequestLaneOrder) {
   original_addresses[0] = 600;
   original_addresses[1] = 700;
   original_addresses[2] = 800;
+  auto effective_addresses = original_addresses;
+  effective_addresses[0] = 10;
   MemoryAccessObservation second = first;
   second.pc = 0x2204;
-  // Mixed requests keep original addresses even when their first lane is LDS.
+  // Both lane orderings expose effective addresses and preserve originals.
   second.route = MemoryRoute::GLOBAL;
   second.active_lane_mask = 0x7;
   second.architectural_exec_lane_mask = 0x7;
@@ -1331,7 +1337,8 @@ TEST_F(PerfsimPluginTest, SplitsMixedFlatResourcesInFirstRequestLaneOrder) {
   second.flat_local_lane_mask = 0x1;
   second.flat_dds_lane_mask = 0;
   second.scratch_lane_mask = 0x2;
-  second.addresses = original_addresses;
+  second.addresses = effective_addresses;
+  second.pre_routing_addresses = original_addresses;
   plugin.onAmdgpuMemoryAccessRouted(second);
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
