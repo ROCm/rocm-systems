@@ -7924,19 +7924,23 @@ class CodeGenerator:
         return '\n'.join(L)
 
     def _gen_smem_atomic(self, sem: InstructionSemantics) -> str:
+        num_dwords = sem.elem_size // 4
         L = [
-            '  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);',
+            f'  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, {num_dwords}u);',
             '  if (!data_register) return;',
             '  auto d = std::make_unique<amdgpu::ScalarMemState>();',
             '  d->dst_register = *data_register;',
-            '  d->num_dwords = 1;',
-            '  d->elem_size = 4;',
+            f'  d->num_dwords = {num_dwords};',
+            f'  d->elem_size = {sem.elem_size};',
             f'  d->atomic_op = amdgpu::AtomicOp::{sem.operation.upper()};',
             # Scalar atomic GLC selects return data, not cache policy.
             '  d->is_load = inst_.glc != 0;',
             '  d->mtype = amdgpu::Mtype::UC;',
-            '  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);',
         ]
+        L.extend(
+            f'  d->store_data[{i}] = amdgpu::read_scalar_register(wf, *data_register, {i});'
+            for i in range(num_dwords)
+        )
         self._append_wait_counter_type(L, sem)
         L.extend(
             [

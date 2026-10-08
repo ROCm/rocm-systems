@@ -387,6 +387,20 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   return MemoryAccessCompletion::Complete;
 }
 
+uint64_t apply_scalar_atomic(const ScalarMemState &d, uint64_t old) {
+  if (d.elem_size == sizeof(uint64_t)) {
+    const uint64_t source = d.store_data[0] | (uint64_t{d.store_data[1]} << 32);
+    return apply_int_atomic(d.atomic_op, old, source);
+  }
+  return apply_int_atomic(d.atomic_op, static_cast<uint32_t>(old), d.store_data[0]);
+}
+
+void set_scalar_atomic_response(ScalarMemState &d, uint64_t old) {
+  d.response_data[0] = static_cast<uint32_t>(old);
+  if (d.elem_size == sizeof(uint64_t))
+    d.response_data[1] = static_cast<uint32_t>(old >> 32);
+}
+
 VmAccessOutcome execute_translated_scalar_atomic_rmw(ScalarMemState &d) {
   assert(d.translated.access.has_value());
   if (!d.translated.atomic_loaded) {
@@ -398,15 +412,16 @@ VmAccessOutcome execute_translated_scalar_atomic_rmw(ScalarMemState &d) {
   }
 
   // Retain the load across unavailable CAS attempts, as for vector atomics.
+  const uint64_t width_mask = d.elem_size == sizeof(uint64_t) ? ~uint64_t{0} : 0xffffffffull;
   while (true) {
-    const uint32_t old = static_cast<uint32_t>(d.translated.atomic_loaded_value);
-    const uint32_t value = apply_int_atomic(d.atomic_op, old, d.store_data[0]);
+    const uint64_t old = d.translated.atomic_loaded_value & width_mask;
+    const uint64_t value = apply_scalar_atomic(d, old);
     const AtomicCompareExchangeResult exchanged =
         d.translated.access->compare_exchange(d.addr, d.elem_size, old, value);
     if (exchanged.outcome != VmAccessOutcome::Complete)
       return exchanged.outcome;
     if (exchanged.exchanged) {
-      d.response_data[0] = old;
+      set_scalar_atomic_response(d, old);
       d.translated.atomic_loaded = false;
       return VmAccessOutcome::Complete;
     }
@@ -419,13 +434,15 @@ VmAccessOutcome execute_translated_scalar_atomic_rmw(ScalarMemState &d) {
 VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<ScalarMemState>();
   const auto atomic_mutation = [&](std::span<std::byte> target) {
-    uint32_t old;
-    std::memcpy(&old, target.data(), sizeof(old));
-    const uint32_t value = apply_int_atomic(d.atomic_op, old, d.store_data[0]);
-    std::memcpy(target.data(), &value, sizeof(value));
-    d.response_data[0] = old;
+    uint64_t old = 0;
+    std::memcpy(&old, target.data(), d.elem_size);
+    const uint64_t value = apply_scalar_atomic(d, old);
+    std::memcpy(target.data(), &value, d.elem_size);
+    set_scalar_atomic_response(d, old);
   };
-  if (d.atomic_op != AtomicOp::NONE && (d.elem_size != 4 || d.num_dwords != 1))
+  if (d.atomic_op != AtomicOp::NONE &&
+      ((d.elem_size != sizeof(uint32_t) && d.elem_size != sizeof(uint64_t)) ||
+       d.num_dwords * sizeof(uint32_t) != d.elem_size))
     return VmAccessOutcome::Malformed;
   // Masked loads still write the zero response, without taking a VM snapshot or
   // touching backing memory, including byte and halfword requests.

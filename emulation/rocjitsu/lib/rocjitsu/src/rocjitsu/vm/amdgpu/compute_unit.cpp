@@ -1273,7 +1273,8 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
     access.mtype = state.mtype;
     access.wait_counter = state.wait_counter_type;
     access.element_size_bytes = state.elem_size;
-    access.elements_per_lane = state.num_dwords;
+    // An _X2 atomic is one 64-bit element held in two dwords.
+    access.elements_per_lane = state.atomic_op != AtomicOp::NONE ? 1 : state.num_dwords;
     // A scalar access is one address, so it is a one-lane wavefront as far as
     // the memory system is concerned. Saying so lets a consumer treat both
     // routes with the same per-lane arithmetic.
