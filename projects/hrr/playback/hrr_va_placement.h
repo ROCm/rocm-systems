@@ -592,8 +592,10 @@ void hold_free_pieces(uint64_t b, uint64_t e, const std::vector<VaRange>& occupi
                       std::vector<VaRange>* out);
 
 // A placed mapping: page range [key, end), the recorded allocation base, its
-// physical handle and the device it lives on. `unmapping` marks a freed one
-// whose hipMemUnmap is running outside the lock: it still occupies its range.
+// physical handle, the device it lives on and its size in bytes (`bytes`; when
+// taken back, the larger of the first allocation's and the new one's, as the
+// pool keeps a block's size). `unmapping` marks a freed one whose hipMemUnmap
+// is running outside the lock: it still occupies its range.
 // A mapping freed with hipFreeAsync remembers the live stream it was freed on
 // and that stream's device (`on_stream`, `stream`, `stream_device`: every
 // device's null stream has the same handle) and, when no capture was open, an
@@ -609,6 +611,7 @@ struct PlacedMapping {
     hipStream_t stream = nullptr;
     int stream_device  = -1;
     hipEvent_t  event  = nullptr;
+    uint64_t bytes     = 0;
 };
 using PlacedMap = std::map<uint64_t, PlacedMapping>;
 
@@ -640,6 +643,15 @@ int hrr_stream_device(hipStream_t stream);
 // around both. On failure nothing is left.
 hipError_t hrr_record_free_event(hipStream_t stream, hipEvent_t* event);
 
+// Flush this process's GPU TLBs, after a hipMemUnmap of a range that may be
+// mapped again. On gfx12 under Linux 7.0's in-box amdgpu, hipMemUnmap leaves
+// the old translation cached: memory mapped at the same address next is
+// reached through the pages it replaced, by the copy engines and by some
+// shader engines, until something flushes them. KFD flushes them whenever it
+// unmaps an ordinary allocation from the GPU, so allocate and free one larger
+// than ROCr's 2 MiB fragment blocks, whose free goes straight to KFD.
+void hrr_flush_gpu_tlb();
+
 #ifdef HRR_VA_PLACEMENT_TESTING
 // Tests only: the HIP calls placement makes, replaced to run without a GPU.
 struct VmmOps {
@@ -655,6 +667,7 @@ struct VmmOps {
     hipError_t (*destroy_event)(hipEvent_t e)                 = hipEventDestroy;
     hipError_t (*address_free)(void* va, size_t size)         = hipMemAddressFree;
     int (*stream_device)(hipStream_t s)                       = hrr_stream_device;
+    void (*flush_tlb)()                                       = nullptr;
 };
 // How many times read_proc_maps() has read /proc/self/maps.
 size_t proc_maps_reads_for_test();
@@ -688,14 +701,16 @@ class VaPlacement {
     // *live == rec. Returns false when the allocation has to fall back, after
     // reporting why; the caller then allocates the old way. `stream` is the
     // live stream a stream-ordered allocation is made on, and nullptr for
-    // hipMalloc, hipExtMallocWithFlags and region segments.
+    // hipMalloc, hipExtMallocWithFlags and region segments. With a stream, a
+    // negative `device` means the stream's own.
     //
     // A freed mapping still waiting for its unmap that starts at the same page
     // on the same device and ends where the allocation's pages do is taken
     // back as it is: no unmap, no new map. A stream-ordered allocation also
-    // takes back one up to 9/8 of its own pages, keeping the mapping's end, as
-    // the pool hands a block back for a request up to 12.5% smaller. The
-    // allocation is ordered after the free first:
+    // takes back one it fits in that is up to 9/8 of its own size in bytes,
+    // keeping the mapping's end, as the pool hands back a freed block up to
+    // 9/8 of the request in bytes (FindMemory). The allocation is ordered
+    // after the free first:
     //  - freed by hipFreeAsync on `stream` itself: nothing to wait for;
     //  - otherwise, with an event recorded after the free and no capture
     //    open: `stream` waits for that event, or the host does for an
@@ -780,6 +795,7 @@ class VaPlacement {
     hipError_t vmm_map(uint64_t pb, uint64_t pe, int device,
                        hipMemGenericAllocationHandle_t* h);
     void clear_error();
+    void flush_tlb();
     bool unmap_one(uint64_t pb, const PlacedMapping& m);
     // Destroy the event a deferred free kept, if any.
     void drop_event(hipEvent_t e);

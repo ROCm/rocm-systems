@@ -1243,7 +1243,8 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_MultiGpu) {
   REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
   CHECK(pass >= 4);
   CHECK(fail == 0);
-  // buf1, out0, buf0, async1, big1 and three cells.
+  // buf1, out0, buf0, async1, big1 and three cells; again too, when it takes
+  // big1's block back.
   int placed = 0, fell = -1;
   REQUIRE(hrr_place_counts(out, &placed, &fell));
   CHECK(placed >= 8);

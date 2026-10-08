@@ -2260,24 +2260,27 @@ static void hrr_zero_init_alloc(PlaybackContext& ctx, void* live, size_t sz) {
 
 // ---- Capture-address placement ---------------------------------------------
 
-// Map a recorded allocation at its recorded address on the current device.
-// False when placement is off or this allocation has to fall back, in which
-// case the caller allocates the way it always did. A placed allocation is
-// never padded: the recording had nothing after it but the next allocation,
-// and that one is placed too.
+// The placement when it is on, nullptr otherwise.
 static hrr::VaPlacement* hrr_placing(PlaybackContext& ctx) {
     hrr::VaPlacement* p = ctx.placement.get();
     return p && p->active() ? p : nullptr;
 }
 
-// `stream` is the live stream of a stream-ordered allocation, nullptr for the
-// others: taking back a mapping freed on another stream orders after its free.
+// Map a recorded allocation at its recorded address on `device`. A negative
+// `device` means the stream's own device with a stream, and the current
+// device only without one. `stream` is the live stream of a stream-ordered
+// allocation, nullptr for the others: taking back a mapping freed on another
+// stream orders after its free. False when placement is off or this
+// allocation has to fall back, in which case the caller allocates the way it
+// always did. A placed allocation is never padded: the recording had nothing
+// after it but the next allocation, and that one is placed too.
 static bool hrr_place_alloc(PlaybackContext& ctx, uint64_t rec, size_t size,
                             const char* api, void** live, int device = -1,
                             const hipStream_t* stream = nullptr) {
     hrr::VaPlacement* pl = hrr_placing(ctx);
     if (!pl) return false;
-    if (device < 0) (void)hipGetDevice(&device);
+    // With a stream, map_at resolves a negative device to the stream's own.
+    if (device < 0 && !stream) (void)hipGetDevice(&device);
     return pl->map_at(rec, size, device, api, live, ctx.in_graph_capture.any(), stream);
 }
 
@@ -2980,6 +2983,7 @@ static bool hrr_stream_capturing(hipStream_t stream) {
            st != hipStreamCaptureStatusNone;
 }
 
+// A negative `device` means the stream's own.
 static bool hrr_place_async_alloc(PlaybackContext& ctx, uint64_t rec, size_t size,
                                   const char* api, hipStream_t stream, bool capturing,
                                   int device, void** live) {
@@ -3022,7 +3026,7 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     hipError_t r = hipSuccess;
     const bool capturing = hrr_stream_capturing(stream);
     if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocAsync", stream, capturing,
-                              hrr::hrr_stream_device(stream), &live))
+                              /*device=*/-1, &live))
         pad_sz = orig_sz;
     else {
         r = hipMallocAsync(&live, pad_sz, stream);
@@ -3314,15 +3318,12 @@ hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
     // allocation recorded from the same first page on the same device, no
     // larger and close enough in size, takes the mapping back without
     // unmapping it, ordered after this free when it is on another stream
-    // (VaPlacement::map_at). One that only
-    // overlaps it unmaps it first, unless a capture is open, in which case
-    // that allocation falls back. A free captured into a graph runs when the
-    // graph is launched, on whatever stream that is, so it is deferred as a
-    // free on no stream.
+    // (VaPlacement::map_at). One that only overlaps it unmaps it first, unless
+    // a capture is open, in which case that allocation falls back. CLR accepts
+    // a captured hipFreeAsync only of a graph allocation, which is never placed,
+    // and the recorder writes a hipFreeAsync only when it succeeded.
     hrr::VaPlacement* placing = hrr_placing(ctx);
-    if (placing && (hrr_stream_capturing(stream)
-                        ? placing->unmap(live, /*defer=*/true)
-                        : placing->unmap_async(live, stream, ctx.in_graph_capture.any()))) {
+    if (placing && placing->unmap_async(live, stream, ctx.in_graph_capture.any())) {
         ctx.remove_alloc(a->dev_ptr);
         return hipSuccess;
     }
@@ -5159,6 +5160,9 @@ hipError_t playback_hipMemUnmap(PlaybackContext& ctx, const uint8_t* pl) {
     void* live_va = ctx.translate_vmm_va(a->ptr);
     if (!live_va) return hipSuccess;
     hipError_t r = hipMemUnmap(live_va, static_cast<size_t>(a->size));
+    // Placement maps the same addresses again, in this pass or the next;
+    // hipMemUnmap may leave the old translation cached (hrr_flush_gpu_tlb).
+    if (r == hipSuccess && hrr_placing(ctx)) hrr::hrr_flush_gpu_tlb();
     if (r == hipSuccess) {
         std::unique_lock lk(ctx.map_mutex);
         hrr::va_untrack_mapping(ctx.vmm_mappings, reinterpret_cast<uint64_t>(live_va),
@@ -5180,6 +5184,8 @@ void hrr_release_vmm_state(PlaybackContext& ctx) {
     }
     for (const auto& [va, size] : mappings)
         (void)hipMemUnmap(reinterpret_cast<void*>(va), size);
+    // The timed pass maps these addresses again (hrr_flush_gpu_tlb).
+    if (!mappings.empty()) hrr::hrr_flush_gpu_tlb();
     for (const auto& [rec, h] : handles) (void)hipMemRelease(h);
     hrr::VaPlacement* placing = hrr_placing(ctx);
     std::vector<hrr::VaRange> rehold;

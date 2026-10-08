@@ -1114,14 +1114,15 @@ An allocation over a deferred mapping is handled three ways:
 
 - From the same first page on the same device, and the same size in pages: the
   allocation takes the mapping back as it is. A stream-ordered allocation also
-  takes back a mapping up to 9/8 of its own pages, keeping the mapping's end, as
-  the pool hands a block back for a request up to 12.5% smaller and keeps the
-  whole block. `hipMalloc`, `hipExtMallocWithFlags` and a region segment do not
-  come from that pool, so they take back only the same size; keeping a larger
-  mapping would make a later allocation in its tail fall back. No unmap and no
-  new map. The recording's pool reused the block only once
-  its free was done, or with the new stream ordered after it, so replay orders
-  the allocation after the free:
+  takes back a mapping it fits in whose recorded size is up to 9/8 of its own in
+  bytes, keeping the mapping's end and the larger of the two sizes, as the pool
+  hands back a freed block up to 9/8 of the request in bytes and keeps the whole
+  block. `hipMalloc`,
+  `hipExtMallocWithFlags` and a region segment do not come from that pool, so
+  they take back only the same size; keeping a larger mapping would make a later
+  allocation in its tail fall back. No unmap and no new map. The recording's
+  pool reused the block only once its free was done, or with the new stream
+  ordered after it, so replay orders the allocation after the free:
   - a `hipMallocAsync` or `hipMallocFromPoolAsync` on the stream the
     `hipFreeAsync` was made on needs nothing more, while another stream
     captures too;
@@ -1131,9 +1132,7 @@ An allocation over a deferred mapping is handled three ways:
     segment) waits on the host (`hipEventSynchronize`) for that event.
 
   A free made while a capture was open has no event: recording one would add it
-  to the graph. Neither does a deferred `hipFree`. A `hipFreeAsync` on a
-  capturing stream counts as made on no stream: it runs when the graph is
-  launched, on whatever stream that is. Waiting for an event while a
+  to the graph. Neither does a deferred `hipFree`. Waiting for an event while a
   capture is open would sync inside it. In those cases the allocation is
   handled as any other overlap. The event is destroyed when the mapping is taken
   back, unmapped, or released at teardown or the warm-up reset. The event is
@@ -1176,9 +1175,10 @@ What deferral costs:
 
 - **Memory.** A deferred mapping keeps its physical memory until it drains. A
   trace that frees with `hipFreeAsync` and only ever synchronizes streams holds
-  every such allocation, except those reallocated from the same first page and
-  no larger, until the device runs out of memory, which then drains them, or
-  until teardown. The recording's pool reused that memory at once.
+  every such allocation, except those taken back (same first page and same
+  pages, or for a stream-ordered allocation a freed block up to 9/8 of the
+  request in bytes), until the device runs out of memory, which then drains
+  them, or until teardown. The recording's pool reused that memory at once.
 - **Events.** Each placed `hipFreeAsync` made with no capture open keeps one
   event until its mapping is taken back or unmapped. In a trace that only ever
   synchronizes streams they pile up with the mappings they belong to; the cost
@@ -1210,6 +1210,37 @@ only a later replayed event sets, that drain or wait never returns and the
 replay hangs. This is a known risk, not a solved one. It needs a non-matching
 overlap with a freed mapping, an exhausted device, or such a take-back, while
 such a kernel is running.
+
+**Remapping at the same address.** On gfx1201 hosts running Linux 7.0.0-34
+with its in-box amdgpu driver, `hipMemUnmap` leaves the old GPU address
+translation cached. VMM mappings take the `DRM_AMDGPU_GEM_VA` path, and that
+unmap does not flush the TLBs; `hipMalloc` memory goes through KFD, which does.
+Memory mapped next at the same address is then written by the copy engines, and
+read by some shader engines, through the physical pages it replaced, until
+something flushes them. A standalone program with no HRR in it (map, write,
+launch, unmap, map new memory at the same address, repeat) fails 26-94% of its
+iterations there. In replay it showed as the `--kernel-filter` reservation
+section of `Lifetimes`: in the timed pass, two of the four workgroups of one
+kernel read the old contents of a cell whose page the warm-up reset had
+unmapped and the timed pass mapped again. gfx1200 hosts on Linux 6.8 with a
+DKMS amdgpu, and gfx950, do not show it.
+
+This is a driver bug outside HRR, but placement maps the same addresses again by
+design, so replay works around it. With placement on, it flushes the TLBs after
+every drain that unmapped something, after the warm-up reset's unmaps, and after
+a replayed `hipMemUnmap` (`hrr_flush_gpu_tlb`). The flush allocates and frees 4
+MiB with `hipMalloc`: KFD flushes the TLBs whenever it unmaps an ordinary
+allocation from the GPU, and anything up to ROCr's 2 MiB fragment blocks would
+be carved from a block that stays mapped, so it would flush nothing. It runs on
+every platform, with no check for the affected driver, and costs about 1 ms per
+pass (0.7-1.5 ms on a 6-7 ms timed pass with about 20 unmaps). The flush reaches
+the replay thread's current device; an unmap made on another device of a
+multi-GPU host with the affected driver may stay unflushed. Once drivers with the
+fix are the minimum HRR supports, the workaround can be removed.
+`UnmapFlushesTlb` checks that a drain flushes once after unmapping and not when
+nothing was unmapped; the flush after the warm-up reset is what `Lifetimes`
+needs on the affected hosts, and no test fails without the flush after a
+replayed `hipMemUnmap`.
 
 **Several GPUs.** A placed allocation is backed on the device it was made on: the
 current device for `hipMalloc`, the stream's device for `hipMallocAsync`, and the
@@ -1275,8 +1306,8 @@ hipPointerGetAttributes <recorded> -> type=<t> device=<d> devicePointer=<live>`
 at each replayed `hipPointerGetAttributes`.
 
 **Not covered by tests.** These paths have no test, because the GPU cannot be
-made to reach them on purpose, no recording can reach them, or the CI runners
-have one GPU:
+made to reach them on purpose, no recording can reach them, the CI runners
+have one GPU, or the effect is not observed:
 
 - the out-of-memory retry at each call site (`hipMalloc`, `hipMallocManaged`,
   `hipExtMallocWithFlags`, `hipMallocAsync`, `hipMallocFromPoolAsync`, region
@@ -1286,19 +1317,26 @@ have one GPU:
 - the generated `hipMallocPitch`, `hipMemAllocPitch`, `hipMalloc3D`, array and
   mipmapped-array handlers, which do not retry at all;
 - the null-stream guard for `hipStreamBeginCaptureToGraph` in
-  `hrr_track_capture`, and the null-stream guard in `hrr_stream_capturing`: a
-  capture on the null stream fails and is never recorded;
+  `hrr_track_capture`: a capture on the null stream fails and is never recorded;
+- the null-stream guard in `hrr_stream_capturing`: reachable through
+  `hipMallocFromPoolAsync` on the null stream during another stream's global
+  capture; without it, the only effect would be a sticky error, which no test
+  reads;
+- the `hipGetLastError` in `hrr_stream_device` that clears the error a failed
+  `hipStreamGetDevice` leaves: the stand-ins never fail, and no test reads the
+  sticky error;
 - the per-thread keying as wired into the capture and `hipStreamDestroy`
   handlers: `PerThreadCapturesKeptApart` tests `hrr_capture_key` and the capture
   flag, and `Lifetimes` runs its per-thread capture on one thread, where it
   passes with or without the thread in the key;
-- a `hipFreeAsync` on a capturing stream, deferred as a free on no stream: CLR
-  accepts only a graph allocation there, which placed memory never is;
 - the host wait `wait_for_free` falls back to when `hipStreamWaitEvent` fails,
   and a free whose event could not be recorded (the unit tests use stand-ins
   that always succeed);
 - the device switches around `hipMemCreate` and the free event: only `MultiGpu`
-  covers them, and it skips on a runner with one GPU.
+  covers them, and it skips on a runner with one GPU;
+- a stream waiting for the free event of another device: only the stand-ins of
+  `NullStreamsOfTwoDevices` exercise it, since `MultiGpu`'s waiter is on the
+  event's own device.
 
 ### `hipMemcpyDeviceToDevice` — Not Captured
 
