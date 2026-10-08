@@ -1426,9 +1426,10 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // registered operands to DDA.
     //
     // GIN AllReduce is selected first in this function and requires symmetric
-    // windows. By default it only claims messages >= 256 MiB, so DDA must still be
-    // allowed for smaller symmetric AllReduces (otherwise they would hit the
-    // symmetric kernel instead of DDA). FORCE_ENABLE=1 keeps the original
+    // windows. By default gfx950 claims messages >= 256 MiB and gfx1250 with
+    // Anvil SDMA claims >= 64 MiB, so DDA must still be allowed for smaller
+    // symmetric AllReduces (otherwise they would hit the symmetric kernel
+    // instead of DDA). FORCE_ENABLE=1 keeps the original
     // !symEligible gate because GIN already returned above for those sizes.
     // symSuppressedByMin: DDA wins below symMinR2[AR]; do not block it with symkRequested.
     bool ddaSymEligible = symkRequested && !symSuppressedByMin;

@@ -916,11 +916,62 @@ if(ENABLE_ROCSHMEM_GIN)
 endif()
 
 # ===========================================================================
+# rocshmem QP device bitcode for GIN GDA puts (QueuePair::put_nbi, etc.).
+# Used by GIN symmetric kernels. The installed per-arch .bc files are
+# arch-optimized and cannot be used with -mlink-builtin-bitcode across archs,
+# so this is unoptimized IR + constmem stubs.
+# ===========================================================================
+set(GIN_ROCSHMEM_QP_BC_FLAG "")
+set(GIN_ROCSHMEM_QP_DEPS "")
+if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR AND DL_GPU_TARGETS)
+  list(GET DL_GPU_TARGETS 0 _bc_arch)
+  set(_qp_bc "${DEVICE_BUILD_DIR}/rocshmem_qp_device.bc")
+  find_program(_llvm_link llvm-link HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
+  find_program(_llvm_dis  llvm-dis  HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
+  find_program(_llvm_as   llvm-as   HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
+
+  set(_cm_src "${CMAKE_SOURCE_DIR}/src/gin/gin_rocshmem_constmem.hip")
+  set(_cm_bc  "${DEVICE_BUILD_DIR}/gin_rocshmem_constmem.bc")
+  set(_qp_raw "${DEVICE_BUILD_DIR}/rocshmem_qp_raw.bc")
+
+  add_custom_command(
+    OUTPUT ${_cm_bc}
+    COMMAND ${DL_CLANG}
+      -x hip --cuda-device-only --offload-arch=${_bc_arch}
+      -emit-llvm -Xclang -disable-llvm-passes
+      -std=c++17 -fPIC
+      -I${ROCSHMEM_SOURCE_DIR}/src
+      -I${ROCSHMEM_SOURCE_DIR}/include
+      -c -o ${_cm_bc} ${_cm_src}
+    DEPENDS ${_cm_src}
+    COMMENT "DL: compiling rocshmem constmem stubs to device bitcode"
+    VERBATIM)
+
+  add_custom_command(
+    OUTPUT ${_qp_bc}
+    COMMAND ${_llvm_link} ${_cm_bc} -o ${_qp_raw}
+    COMMAND ${_llvm_dis} -o ${_qp_raw}.ll ${_qp_raw}
+    COMMAND grep -v -E "@llvm[.]compiler[.]used|@__hip_cuid_"
+      ${_qp_raw}.ll > ${_qp_raw}.clean.ll
+    COMMAND ${_llvm_as} ${_qp_raw}.clean.ll -o ${_qp_bc}
+    DEPENDS ${_cm_bc}
+    COMMENT "DL: linking rocshmem QP device bitcode (with constmem, stripped)"
+    VERBATIM)
+  add_custom_target(dl_rocshmem_qp_bc DEPENDS ${_qp_bc})
+  if(TARGET rocshmem_static)
+    add_dependencies(dl_rocshmem_qp_bc rocshmem_static)
+  endif()
+  set(GIN_ROCSHMEM_QP_BC_FLAG -Xclang -mlink-builtin-bitcode -Xclang ${_qp_bc})
+  set(GIN_ROCSHMEM_QP_DEPS dl_rocshmem_qp_bc)
+endif()
+
+# ===========================================================================
 # gin_all_reduce_sdma.cu.cpp: GIN-SDMA allreduce kernel.
 #
 # The defines go here because this file is filtered out of the rccl target, so
 # per-source properties never apply. Leaving only SDMA on keeps ncclGinCallImpl
 # on its single backend branch. GDA must stay off, as this object gets no QP bitcode.
+# gfx1250 GinScatter and gfx950 two-shot both use Anvil SDMA gin.put().
 # ===========================================================================
 set(GIN_ALLREDUCE_SDMA_FAT_OBJ "")
 if(ENABLE_ROCSHMEM_GIN)
@@ -1300,65 +1351,9 @@ endforeach()
 # ===========================================================================
 set(SYM_FAT_OBJS "")
 if(GENERATE_SYM_KERNELS)
-  # When ENABLE_ROCSHMEM_GIN is set, GIN device templates reference rocshmem
-  # device symbols (QueuePair::put_nbi, atomic_add, etc.). The installed per-arch
-  # .bc files are arch-optimized (opt -mcpu=) and can't be used with
-  # -mlink-builtin-bitcode across archs. Instead, llvm-link the pre-opt
-  # individual source .bc files (arch-agnostic) into a minimal QP-only bitcode.
-  set(_sym_rocshmem_bc_flag "")
-  set(_sym_rocshmem_deps "")
-  if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR)
-    # Pick the first arch's pre-opt bitcode dir (all archs produce identical
-    # unoptimized IR since -Xclang -disable-llvm-passes is used).
-    list(GET DL_GPU_TARGETS 0 _bc_arch)
-    set(_bc_dir "${ROCSHMEM_SOURCE_DIR}/build/bitcode/${_bc_arch}")
-    set(_qp_bc "${DEVICE_BUILD_DIR}/rocshmem_qp_device.bc")
-    find_program(_llvm_link llvm-link HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
-    find_program(_llvm_dis  llvm-dis  HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
-    find_program(_llvm_as   llvm-as   HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
-
-    # Pipeline:
-    #  1. Compile gin_rocshmem_constmem.hip → device-only .bc (provides
-    #     rocshmem::constmem and rocshmem::logd_constants definitions that
-    #     queue_pair.bc references as external)
-    #  2. llvm-link QP .bc files + constmem .bc into one module
-    #  3. Strip @llvm.compiler.used and @__hip_cuid_ via text round-trip
-    #     (these AMDGCN addrspace(1) appending globals clash with the
-    #     host-side addrspace(0) equivalents in fat-object compilation)
-    set(_cm_src "${CMAKE_SOURCE_DIR}/src/gin/gin_rocshmem_constmem.hip")
-    set(_cm_bc  "${DEVICE_BUILD_DIR}/gin_rocshmem_constmem.bc")
-    set(_qp_raw "${DEVICE_BUILD_DIR}/rocshmem_qp_raw.bc")
-
-    add_custom_command(
-      OUTPUT ${_cm_bc}
-      COMMAND ${DL_CLANG}
-        -x hip --cuda-device-only --offload-arch=${_bc_arch}
-        -emit-llvm -Xclang -disable-llvm-passes
-        -std=c++17 -fPIC
-        -I${ROCSHMEM_SOURCE_DIR}/src
-        -I${ROCSHMEM_SOURCE_DIR}/include
-        -c -o ${_cm_bc} ${_cm_src}
-      DEPENDS ${_cm_src}
-      COMMENT "DL: compiling rocshmem constmem stubs to device bitcode"
-      VERBATIM)
-
-    add_custom_command(
-      OUTPUT ${_qp_bc}
-      COMMAND ${_llvm_link} ${_cm_bc} -o ${_qp_raw}
-      COMMAND ${_llvm_dis} -o ${_qp_raw}.ll ${_qp_raw}
-      COMMAND grep -v -E "@llvm[.]compiler[.]used|@__hip_cuid_"
-        ${_qp_raw}.ll > ${_qp_raw}.clean.ll
-      COMMAND ${_llvm_as} ${_qp_raw}.clean.ll -o ${_qp_bc}
-      DEPENDS ${_cm_bc}
-      COMMENT "DL: linking rocshmem QP device bitcode (with constmem, stripped)"
-      VERBATIM)
-    add_custom_target(dl_rocshmem_qp_bc DEPENDS ${_qp_bc})
-    if(TARGET rocshmem_static)
-      add_dependencies(dl_rocshmem_qp_bc rocshmem_static)
-    endif()
-    set(_sym_rocshmem_bc_flag -Xclang -mlink-builtin-bitcode -Xclang ${_qp_bc})
-    set(_sym_rocshmem_deps dl_rocshmem_qp_bc)
-  endif()
+  # GIN symmetric kernels reuse the QP bitcode generated above.
+  set(_sym_rocshmem_bc_flag "${GIN_ROCSHMEM_QP_BC_FLAG}")
+  set(_sym_rocshmem_deps "${GIN_ROCSHMEM_QP_DEPS}")
   file(GLOB _sym_srcs CONFIGURE_DEPENDS "${HIPIFY_DIR}/gensrc/symmetric/*.cpp")
   foreach(_sym_src IN LISTS _sym_srcs)
     get_filename_component(_sym_name "${_sym_src}" NAME_WE)
