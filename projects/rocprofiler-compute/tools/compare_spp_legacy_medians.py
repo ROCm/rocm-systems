@@ -7,11 +7,11 @@
 
 """Compare SPP vs legacy metric medians from 500-iter health workloads.
 
-Analyze ``--view table`` logs expose Avg/Min/Max, not Median. This tool:
+Analyze `--view table` logs expose Avg/Min/Max, not Median. This tool:
 
 1. Parses Avg/Min/Max (+ dispatch Count) from the analyze logs.
 2. When workload dirs are present, recomputes Median by evaluating
-   ``MEDIAN(<min-formula-inner>)`` via the same MetricEvaluator path
+   `MEDIAN(<min-formula-inner>)` via the same MetricEvaluator path
    analyze uses (so Median matches the per-dispatch quantity behind Min/Max).
 3. Emits CSV + markdown of |rel| > 100% on medians, with raw double-checks.
 
@@ -21,8 +21,6 @@ Usage:
     --tag 261001-gfx942-500med
 """
 
-from __future__ import annotations
-
 import argparse
 import csv
 import math
@@ -30,6 +28,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -52,10 +51,10 @@ COUNT_RE = re.compile(r"^\s*[│|]\s*0\s*[│|].*?[│|]\s*([0-9]+(?:\.[0-9]+)?)
 class MetricStats:
     metric_id: str
     name: str
-    avg: float | None
-    min_v: float | None
-    max_v: float | None
-    median: float | None
+    avg: Optional[float]
+    min_v: Optional[float]
+    max_v: Optional[float]
+    median: Optional[float]
     raw_avg: str
     raw_min: str
     raw_max: str
@@ -66,7 +65,7 @@ def strip_ansi(text: str) -> str:
     return ANSI.sub("", text)
 
 
-def to_float(value: str) -> float | None:
+def to_float(value: str) -> Optional[float]:
     cleaned = value.strip().replace(",", "")
     if not cleaned or cleaned.upper() in {"N/A", "NAN", "-", ""}:
         return None
@@ -76,21 +75,31 @@ def to_float(value: str) -> float | None:
         return None
 
 
-def relative_abs_delta(old: float, new: float) -> float | None:
+def relative_abs_delta(old: float, new: float) -> Optional[float]:
     if abs(old) < DELTA_NEAR_ZERO:
         return None
     return abs(new - old) / abs(old)
 
 
-def parse_log_stats(path: Path) -> tuple[dict[str, MetricStats], int | None]:
+def _cell_at(cols: List[str], header_idx: Optional[int]) -> Tuple[str, Optional[float]]:
+    if header_idx is None:
+        return "", None
+    data_idx = max(0, header_idx - 2)
+    if data_idx >= len(cols):
+        return "", None
+    raw = cols[data_idx]
+    return raw, to_float(raw)
+
+
+def parse_log_stats(path: Path) -> Tuple[Dict[str, MetricStats], Optional[int]]:
     """Parse Avg/Min/Max/Median rows and Top-Kernels Count from analyze log."""
-    text = strip_ansi(path.read_text(errors="replace"))
-    metrics: dict[str, MetricStats] = {}
-    avg_col: int | None = None
-    min_col: int | None = None
-    max_col: int | None = None
-    median_col: int | None = None
-    dispatch_count: int | None = None
+    text = strip_ansi(path.read_text(encoding="utf-8", errors="replace"))
+    metrics: Dict[str, MetricStats] = {}
+    avg_col: Optional[int] = None
+    min_col: Optional[int] = None
+    max_col: Optional[int] = None
+    median_col: Optional[int] = None
+    dispatch_count: Optional[int] = None
     in_top_kernels = False
 
     for line in text.splitlines():
@@ -132,19 +141,10 @@ def parse_log_stats(path: Path) -> tuple[dict[str, MetricStats], int | None]:
         name = match.group(2).strip()
         cols = [c.strip() for c in re.split(r"[│|]", match.group(3)) if c.strip()]
 
-        def _cell(header_idx: int | None) -> tuple[str, float | None]:
-            if header_idx is None:
-                return "", None
-            data_idx = max(0, header_idx - 2)
-            if data_idx >= len(cols):
-                return "", None
-            raw = cols[data_idx]
-            return raw, to_float(raw)
-
-        raw_avg, avg_v = _cell(avg_col)
-        raw_min, min_v = _cell(min_col)
-        raw_max, max_v = _cell(max_col)
-        raw_med, med_v = _cell(median_col)
+        raw_avg, avg_v = _cell_at(cols, avg_col)
+        raw_min, min_v = _cell_at(cols, min_col)
+        raw_max, max_v = _cell_at(cols, max_col)
+        raw_med, med_v = _cell_at(cols, median_col)
 
         # Skip rows that only matched a stale header with no usable value.
         if avg_v is None and med_v is None and min_v is None:
@@ -166,10 +166,10 @@ def parse_log_stats(path: Path) -> tuple[dict[str, MetricStats], int | None]:
     return metrics, dispatch_count
 
 
-def min_formula_to_median_expr(min_formula: str) -> str | None:
+def min_formula_to_median_expr(min_formula: str) -> Optional[str]:
     """Rewrite a Min YAML/expr formula into a Median expression.
 
-    Handles ``MIN(x)`` and ``c * MIN(x)`` / ``MIN(x) * c`` patterns that
+    Handles `MIN(x)` and `c * MIN(x)` / `MIN(x) * c` patterns that
     appear in analysis_configs.
     """
     s = min_formula.strip()
@@ -213,7 +213,9 @@ def min_formula_to_median_expr(min_formula: str) -> str | None:
     return None
 
 
-def find_workload_dir(artifacts: Path, tag: str, name: str, mode: str) -> Path | None:
+def find_workload_dir(
+    artifacts: Path, tag: str, name: str, mode: str
+) -> Optional[Path]:
     base = artifacts / "gfx942" / f"{name}_{tag}_{mode}"
     if not base.exists():
         return None
@@ -224,8 +226,8 @@ def find_workload_dir(artifacts: Path, tag: str, name: str, mode: str) -> Path |
 
 def compute_medians_for_workload(
     wl_dir: Path,
-    metric_keys: list[str],
-) -> dict[str, float | None]:
+    metric_keys: List[str],
+) -> Dict[str, Optional[float]]:
     """Recompute Median for metrics that have a Min formula, via analyze path."""
     del metric_keys  # compute all Min-backed rows; keys unused
     import pandas as pd
@@ -267,7 +269,7 @@ def compute_medians_for_workload(
             continue
         if "Median" in df.columns:
             continue
-        medians: list[str | None] = []
+        medians: List[Optional[str]] = []
         for _, row in df.iterrows():
             min_expr = row.get("Min")
             if not isinstance(min_expr, str) or not min_expr or min_expr == "None":
@@ -336,7 +338,7 @@ def compute_medians_for_workload(
         "Description",
         "Value",
     }
-    out: dict[str, float | None] = {}
+    out: Dict[str, Optional[float]] = {}
     for df_id, df in ac.dfs.items():
         if ac.dfs_type.get(df_id) != "metric_table":
             continue
@@ -365,7 +367,7 @@ def compute_medians_for_workload(
     return out
 
 
-def fallback_median_from_minmax(stats: MetricStats) -> float | None:
+def fallback_median_from_minmax(stats: MetricStats) -> Optional[float]:
     """When Min==Max, median equals that value; else leave unknown."""
     if stats.min_v is None or stats.max_v is None:
         return None
@@ -378,11 +380,11 @@ def classify_offender(
     spp: MetricStats,
     leg: MetricStats,
     rel: float,
-    n_spp: int | None,
-    n_leg: int | None,
+    n_spp: Optional[int],
+    n_leg: Optional[int],
 ) -> str:
     """Heuristic: spurious vs real for a |rel|>100% median delta."""
-    reasons: list[str] = []
+    reasons: List[str] = []
     if n_spp is not None and n_spp < 10:
         reasons.append(f"few_spp_samples({n_spp})")
     if n_leg is not None and n_leg < 10:
@@ -423,8 +425,8 @@ def classify_offender(
 
 def write_outputs(
     out_dir: Path,
-    rows: list[dict[str, object]],
-    summary_lines: list[str],
+    rows: List[Dict[str, object]],
+    summary_lines: List[str],
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / "median_deltas_gt100.csv"
@@ -447,13 +449,13 @@ def write_outputs(
         "n_spp",
         "verdict",
     ]
-    with csv_path.open("w", newline="") as fh:
+    with csv_path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=fields)
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
 
-    md_path.write_text("\n".join(summary_lines) + "\n")
+    md_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
     print(f"Wrote {csv_path}")
     print(f"Wrote {md_path}")
 
@@ -480,8 +482,8 @@ def main() -> int:
     logs = artifacts / "logs" / "gfx942"
 
     workloads = ["vcopy", "nbody", "mega_kernel"]
-    all_high: list[dict[str, object]] = []
-    summary: list[str] = [
+    all_high: List[Dict[str, object]] = []
+    summary: List[str] = [
         f"# SPP vs legacy median recheck ({tag})",
         "",
         "Iterations: 500 per workload. Compared **Median** of per-dispatch "
@@ -507,9 +509,21 @@ def main() -> int:
         spp_dir = find_workload_dir(artifacts, tag, wl, "spp")
         leg_dir = find_workload_dir(artifacts, tag, wl, "legacy")
         if spp_dir and (spp_dir / "pmc_dispatch_info.csv").exists():
-            n_spp = sum(1 for _ in (spp_dir / "pmc_dispatch_info.csv").open()) - 1
+            n_spp = (
+                sum(
+                    1
+                    for _ in (spp_dir / "pmc_dispatch_info.csv").open(encoding="utf-8")
+                )
+                - 1
+            )
         if leg_dir and (leg_dir / "pmc_dispatch_info.csv").exists():
-            n_leg = sum(1 for _ in (leg_dir / "pmc_dispatch_info.csv").open()) - 1
+            n_leg = (
+                sum(
+                    1
+                    for _ in (leg_dir / "pmc_dispatch_info.csv").open(encoding="utf-8")
+                )
+                - 1
+            )
 
         if not args.skip_reeval and spp_dir and leg_dir:
             # Only re-eval metrics still missing Median (Avg/Min/Max panels).
