@@ -222,24 +222,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `transport/p2p.cc` shareable-buffer entry points that `rccl-UnitTestsMicro`
   compiles for real. See `test_categories_micro_diagnostics.yaml`.
 
-- **`rccl-UnitTestsMicroDda`**: `src/algorithms/dda/` — currently
-  `fabric/fabric_mem_handler.cc` (via `FABRIC_MEM_HANDLER_CC_PATH`, suite
-  `FabricMemHandlerTest.*`) and `fabric/fabric_gpu_barrier.cu`'s host-side
-  `mallocAndInit` (via `FABRIC_GPU_BARRIER_CC_PATH`; hipify renames `.cu` to
-  `.cu.cpp`; suites `FabricGpuBarrierTest.*` and
-  `Geometry/FabricGpuBarrier{Invalid,Valid}GeometryTest.*`). A unit
-  `#include`d here is the definition the other DDA tests link against, so the
-  barrier exercises the real mem handler; `device/device_buffer.cc` is compiled
-  as a real oracle TU for the same reason. Tests here mirror the source tree:
-  `test/host/<path under src>/<file>-test.cc`, e.g.
-  `algorithms/dda/fabric/fabric-mem-handler-test.cc`; the files are listed by
-  path from `test/host/CMakeLists.txt`, with no nested CMake project. One binary
-  for all of DDA, since its units share the same seams (cuMem VMM, bootstrap
-  allgather). Their fixtures track device memory with `HipVmmLedger.h` (VMM
-  emulator plus reservation/handle/buffer bookkeeping, and a record of every
-  free or copy it refused), and pin `NCCL_CUMEM_SKIP_FREE` unset because
-  `alloc.h` memoises that skip once per process. See
-  `test_categories_micro_dda.yaml`.
+- **`rccl-UnitTestsMicroDda`**: `src/algorithms/dda/`. Tests mirror the source
+  tree under `test/host/algorithms/`. See `test_categories_micro_dda.yaml`.
 
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
@@ -358,7 +342,7 @@ symbol.
 
 | Production TU | Fakes file |
 |---|---|
-| `src/algorithms/dda/*.cc` (`rccl-UnitTestsMicroDda` compiles them for real instead) | `fakes/dda_fakes.cc` |
+| `src/algorithms/dda/*.cc` | `fakes/dda_fakes.cc` |
 | `src/bootstrap.cc` | `fakes/bootstrap_stubs.cc` |
 | `src/ce_coll.cc` | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
@@ -371,7 +355,6 @@ symbol.
 | `src/config/collconfig.cc` (targets that do not compile the real file) | `fakes/collconfig_fakes.cc` |
 | `src/enqueue/enqueue.cc`'s own symbols (targets that do not compile the real file) | `fakes/enqueue_fakes.cc` |
 | `src/init.cc` comm lifecycle + CTA/channel params | `fakes/comm_fakes.cc` |
-| `src/init.cc`'s `alloc.h` data symbols (`allocTracker`), for binaries that don't compile `init.cc` | `fakes/alloc_fakes.cc` |
 | `src/init_nvtx.cc` | `fakes/init_nvtx_fakes.cc` |
 | `src/mem_manager.cc` | `fakes/mem_manager_fakes.cc` |
 | `src/misc/amdsmi_wrap.cc` | `fakes/amdsmi_fakes.cc` |
@@ -415,7 +398,7 @@ and that default silently selects which production arm runs. Driving a seam mean
 marker. The marker travels with the declaration rather than a block comment so it cannot drift from
 what it describes. Call *counters* do not take the marker unless the counter itself is unread.
 
-Six things do NOT follow the TU-per-file rule, deliberately:
+Five things do NOT follow the TU-per-file rule, deliberately:
 
 - `fakes/collective_stubs.cc` is a fail-loud floor for the collective *launch*
   pipeline (`ncclLaunchKernel` and friends), which `enqueue.cc` itself defines.
@@ -441,11 +424,13 @@ Six things do NOT follow the TU-per-file rule, deliberately:
 - `rcclParamIntraGraphGen` stays in `fakes/init_fakes.cc` because its owner
   (`graph/rccl_graph_gen.cc:34`) has no fakes file at all. `rcclEffectiveP2pBatchEnable`
   did have one and moved to `fakes/enqueue_fakes.cc`.
-- `allocTracker`, which `src/init.cc` defines, has its own
-  `fakes/alloc_fakes.cc` rather than joining `fakes/comm_fakes.cc`, the other
-  `src/init.cc` fakes file: `comm_fakes.cc` pulls in `comm.h` and the
-  comm-lifecycle symbols, which a binary that only inlines the `alloc.h` cuMem
-  helpers would then have to satisfy.
+- `IsArchMatch` and the `allocTracker` data symbol stay in `p2p-test.cc`
+  itself rather than a fakes file, because neither has an owning production
+  TU to name a fakes file after: `IsArchMatch` is declared in the
+  header-only `archinfo.h`, and `allocTracker` is an `alloc.h` data symbol
+  that only `p2p.cc` references in this target. (The busId helpers alongside
+  them *do* have an owner — `src/misc/utils.cc` — so they live in
+  `fakes/utils_fakes.cc`, not here.)
 
 An aggregation header includes the per-TU headers a unit's tests use and
 declares the reset that chains their per-TU resets, and defines no seams itself.
@@ -601,18 +586,18 @@ When the link fails with `undefined symbol: foo`, find `foo` and
 triage it into the right bucket:
 
 - **It's a global variable (`extern int foo;`)** → add a definition
-  to its owning TU's fakes file (e.g. `allocTracker`, which `src/init.cc`
-  defines, comes from `fakes/alloc_fakes.cc`). If it has no owning TU
-  (e.g. a data symbol declared in a header-only file) and only one test
-  TU references it, define it in that test. Use a sensible default
-  (usually zero).
+  to its owning TU's fakes file. If it has no owning TU (e.g. a data
+  symbol declared in a header-only file) and only one test TU
+  references it, define it in that test (the fifth exception above —
+  e.g. the `allocTracker` array in `p2p-test.cc`). Use a sensible
+  default (usually zero).
 - **It's a plain function the module references but doesn't define**
   → add a definition returning a sensible default to its owning TU's
   fakes file (e.g. `busIdToInt64` / `getBusId` go in
   `fakes/utils_fakes.cc`, since `src/misc/utils.cc` owns them). Only
-  when the symbol has no owning TU does it belong in the test itself.
-  (`IsArchMatch` has an owner, `src/misc/archinfo.cc`, which the binaries
-  that need it compile for real.)
+  when the symbol has no owning TU does it belong in the test itself
+  (the fifth exception above — e.g. `IsArchMatch`, owned by the
+  header-only `archinfo.h`, in `p2p-test.cc`).
 - **It's a logging or env-param helper** → already covered by the
   no-op `ncclDebugLog` / `ncclLoadParam`. If a new logging primitive
   appears, follow the same pattern.
