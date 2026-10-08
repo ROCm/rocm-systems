@@ -2,21 +2,46 @@
 // SPDX-License-Identifier: MIT
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <cinttypes>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
+#include <string_view>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_container_id_parser.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_kfd.h"
+
+auto smi_amdgpu_parse_drm_memory(std::string_view line, std::string_view key, uint64_t* bytes)
+    -> bool {
+  if (line.substr(0, key.size()) != key) return false;
+  const std::string_view text = trim(line.substr(key.size()));
+  // The value ends at the first blank; the unit, if any, follows it.
+  const size_t value_end = std::min(text.size(), text.find_first_of(" \t"));
+  const auto value = parse_number_from_string<uint64_t>(text.substr(0, value_end));
+  if (!value) return false;
+  const std::string_view unit = trim(text.substr(value_end));
+  constexpr std::pair<std::string_view, uint64_t> kUnits[] = {
+      {"", 1}, {"KiB", uint64_t{1} << 10}, {"MiB", uint64_t{1} << 20}};
+  for (const auto& [name, scale] : kUnits) {
+    if (unit == name && *value <= std::numeric_limits<uint64_t>::max() / scale) {
+      *bytes = *value * scale;
+      return true;
+    }
+  }
+  return false;
+}
 
 extern "C" {
 
@@ -130,32 +155,43 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
 
   memset(&info, 0, sizeof(info));
   // Every fd that refers to a DRM client (dup, fork, fd passing) lists that
-  // client's usage, so count each drm-client-id once. Its sizes are in KiB.
-  constexpr uint64_t kKiB = 1024;
+  // client's usage, so count each drm-client-id once.
   std::unordered_set<uint64_t> clients;
   while ((dir = readdir(d)) != NULL) {
-    std::ifstream fdinfo(path + dir->d_name);
+    if (dir->d_name[0] == '.') continue;
+    // Opened through the directory already open, not by its path again, so a
+    // PID reused during the scan cannot switch these reads to another process.
+    const int fd = openat(dirfd(d), dir->d_name, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) continue;
+    FILE* fdinfo = fdopen(fd, "r");
+    if (fdinfo == nullptr) {
+      close(fd);
+      continue;
+    }
     char fd_bdf_str[13] = "";
     bool has_client = false;
     uint64_t client = 0, vram = 0, gtt = 0, cpu = 0, gfx = 0, enc = 0;
-    for (std::string line; getline(fdinfo, line);) {
-      const char* l = line.c_str();
+    char* l = nullptr;
+    size_t l_size = 0;
+    while (::getline(&l, &l_size, fdinfo) > 0) {
       if (sscanf(l, "drm-pdev: %12s", fd_bdf_str) == 1) continue;
       if (sscanf(l, "drm-client-id: %" SCNu64, &client) == 1) {
         has_client = true;
         continue;
       }
-      if (sscanf(l, "drm-memory-vram: %" SCNu64, &vram) == 1) continue;
-      if (sscanf(l, "drm-memory-gtt: %" SCNu64, &gtt) == 1) continue;
-      if (sscanf(l, "drm-memory-cpu: %" SCNu64, &cpu) == 1) continue;
+      if (smi_amdgpu_parse_drm_memory(l, "drm-memory-vram:", &vram)) continue;
+      if (smi_amdgpu_parse_drm_memory(l, "drm-memory-gtt:", &gtt)) continue;
+      if (smi_amdgpu_parse_drm_memory(l, "drm-memory-cpu:", &cpu)) continue;
       if (sscanf(l, "drm-engine-gfx: %" SCNu64, &gfx) == 1) continue;
       if (sscanf(l, "drm-engine-enc: %" SCNu64, &enc) == 1) continue;
     }
+    free(l);
+    fclose(fdinfo);
     if (strncmp(bdf_str, fd_bdf_str, sizeof(fd_bdf_str)) != 0) continue;
     if (has_client && !clients.insert(client).second) continue;
-    info.memory_usage.vram_mem += vram * kKiB;
-    info.memory_usage.gtt_mem += gtt * kKiB;
-    info.memory_usage.cpu_mem += cpu * kKiB;
+    info.memory_usage.vram_mem += vram;
+    info.memory_usage.gtt_mem += gtt;
+    info.memory_usage.cpu_mem += cpu;
     info.engine_usage.gfx += gfx;
     info.engine_usage.enc += enc;
   }
