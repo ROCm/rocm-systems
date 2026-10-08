@@ -3937,3 +3937,10 @@ class TestExecutor:
 
         if getattr(self.args, "db_push", False):
             emitter.push_postgres(timeout=getattr(self.args, "db_timeout", 10))
+
+        # Record the run directory so callers (e.g. --report) can locate it.
+        self._emit_run_dir = os.path.join(results_dir, run_id)
+
+    def get_emit_run_dir(self):
+        """Return the run directory written by emit_results(), or None if not yet emitted."""
+        return getattr(self, "_emit_run_dir", None)

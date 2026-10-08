@@ -201,6 +201,29 @@ Examples:
             default=10,
             help="PostgreSQL connect + statement timeout in seconds for --db-push (default: 10)."
         )
+        self.parser.add_argument(
+            '--report',
+            type=str,
+            default='',
+            metavar='OUTPUT.HTML',
+            help="Generate a self-contained HTML report at the given path after the run "
+                 "completes. Requires --emit-results (the report reads run.json + tests.jsonl "
+                 "from the emitted run directory). Combines with --report-mode and --report-bkc."
+        )
+        self.parser.add_argument(
+            '--report-mode',
+            type=str,
+            default='SPX',
+            choices=['SPX', 'DPX'],
+            help="Hardware mode for the HTML report: SPX (single package, 1 node) or "
+                 "DPX (dual package, 2+ nodes). Default: SPX."
+        )
+        self.parser.add_argument(
+            '--report-bkc',
+            type=str,
+            default='',
+            help="BKC/firmware version string to embed in the HTML report."
+        )
 
     def parse_arguments(self):
         """Parse command-line arguments"""
