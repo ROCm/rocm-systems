@@ -3295,6 +3295,43 @@ TEST(WrapMicrotest, DdaEnabled_UnsupportedArchReturnsFalse) {
   DeleteCommWithArch(comm);
 }
 
+TEST(WrapMicrotest, DdaEnabled_UnsetLaunchOrderDoesNotDisable) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nRanks = 8;
+  // Init leaves launchOrderImplicit at NCCL_CONFIG_UNDEF_INT unless the env or comm config sets it.
+  comm->config.launchOrderImplicit = NCCL_CONFIG_UNDEF_INT;
+  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx950AtRankFloorReturnsTrue) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nRanks = 8;
+  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx950BelowRankFloorReturnsFalse) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nRanks = 7;
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx1250HasNoRankFloor) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  comm->nRanks = 2;
+  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_ZeroThresholdReturnsFalseEvenForZeroBytes) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nRanks = 8;
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/0, /*threshold=*/0));
+  DeleteCommWithArch(comm);
+}
+
 // ===========================================================================
 // rcclSymkQuery -- rccl_wrap.cc:547-568 (static). Only the four early-return
 // guards, reachable through plain comm/arg setup: everything past
