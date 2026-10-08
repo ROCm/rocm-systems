@@ -160,7 +160,7 @@ Panel Config:
           unit: (Instructions + $normUnit)
         Read Instructions:
           avg: COLLECT_SUM(_collect.td_read_load, _collect.td_read_store_atomic_corr)
-          min: None
+          min: None  # MIN(a/d)+MIN(b/d) is not MIN((a+b)/d)
           max: None
           unit: (Instructions + $normUnit)
         Write Instructions:
