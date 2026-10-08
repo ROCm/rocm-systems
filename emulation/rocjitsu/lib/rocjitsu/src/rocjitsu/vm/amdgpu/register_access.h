@@ -23,6 +23,7 @@
 #ifndef ROCJITSU_VM_AMDGPU_REGISTER_ACCESS_H_
 #define ROCJITSU_VM_AMDGPU_REGISTER_ACCESS_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/block_memory.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -987,6 +988,16 @@ public:
   /// @param wordwise Preserve the backed prefix for emitters that validate each dword.
   [[nodiscard]] std::optional<RegisterRef> source_register(const Operand &op,
                                                            bool wordwise = false) const;
+
+  /// Resolve one block data word: unowned destinations are ignored, while
+  /// unowned sources use this wave's VGPR0, independently of the other words.
+  [[nodiscard]] std::optional<RegisterRef> block_data_register(const Operand &op, uint32_t word,
+                                                               bool write) const;
+
+  /// Physical source for a block-store word, including the architectural VGPR0 fallback.
+  [[nodiscard]] uint32_t block_store_source_vgpr(uint32_t physical_reg) const {
+    return owns_vgpr_range(physical_reg, 1) ? physical_reg : wavefront().vgpr_alloc().base;
+  }
 
   /// @brief Resolve consumed buffer descriptor words without reading their values.
   /// @details Vector descriptors require complete backing. Scalar loads validate

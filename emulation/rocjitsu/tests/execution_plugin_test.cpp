@@ -5534,7 +5534,12 @@ TEST_F(FormattedLoadRaceTest, RejectsWholeDestinationRangeWhenItExceedsTheWaveAl
   EXPECT_FALSE(probe(255, 0xf, false));
 }
 
-class BlockLoadRaceTest : public ::testing::TestWithParam<std::tuple<const char *, bool>> {
+struct BlockLoadCase {
+  const char *arch;
+  bool scratch;
+};
+
+class BlockLoadRaceTest : public ::testing::TestWithParam<BlockLoadCase> {
 protected:
   std::unique_ptr<PluginFixture> fixture;
   StringSink *sink = nullptr;
@@ -5543,7 +5548,8 @@ protected:
   std::unique_ptr<Decoder> decoder;
 
   void SetUp() override {
-    fixture = std::make_unique<PluginFixture>(1, std::get<0>(GetParam()), 32, 128);
+    fixture = std::make_unique<PluginFixture>(/*num_wf_slots=*/1, GetParam().arch,
+                                              /*wavefront_size=*/32, /*sgprs_per_wf=*/128);
     PluginSinkConfig sink_config;
     sink = &sink_config.emplace<StringSink>();
     fixture->plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -5565,17 +5571,19 @@ protected:
   }
 
   void issue(uint32_t mask, uint8_t destination = 32) {
-    const bool scratch = std::get<1>(GetParam());
+    const bool scratch = GetParam().scratch;
     std::array<uint32_t, 3> words;
     if (fixture->cu()->arch() == ROCJITSU_CODE_ARCH_CDNA5) {
       words =
           scratch
-              ? cdna5::build_vscratch(cdna5::kScratchLoadBlock, {.saddr = 124, .vdst = destination})
+              ? cdna5::build_vscratch(cdna5::kScratchLoadBlock,
+                                      {.saddr = 124, .vdst = destination, .sve = 1, .vaddr = 0})
               : cdna5::build_vglobal(cdna5::kGlobalLoadBlock, {.saddr = 124, .vdst = destination});
     } else {
       words =
           scratch
-              ? rdna4::build_vscratch(rdna4::kScratchLoadBlock, {.saddr = 124, .vdst = destination})
+              ? rdna4::build_vscratch(rdna4::kScratchLoadBlock,
+                                      {.saddr = 124, .vdst = destination, .sve = 1, .vaddr = 0})
               : rdna4::build_vglobal(rdna4::kGlobalLoadBlock, {.saddr = 124, .vdst = destination});
     }
     std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
@@ -5649,25 +5657,44 @@ TEST_P(BlockLoadRaceTest, IncomingLoadChecksOnlyEnabledWordsForWaw) {
   }
 }
 
-TEST_P(BlockLoadRaceTest, ValidatesFullSpanBeforeMaskingDestinations) {
-  for (uint32_t mask : {0u, 1u}) {
+TEST_P(BlockLoadRaceTest, ChecksOwnedWordsForWawInPartialDestinationSpan) {
+  for (uint32_t mask : {0u, 1u, 0x80000000u, 0xffffffffu}) {
     SCOPED_TRACE(mask);
     // v240 belongs to this wave, but the full v[240:271] destination does not.
-    // Even when the only enabled word is owned, reject before WAW checks.
+    // Block destinations are checked per DWORD, so enabled v240 still writes.
     wave->pc += 16;
     plugin_state->race_state->registerEvent(wave->pc, MemoryEventType::LDS_TO_VGPR, {240}, 1, 0xf,
                                             WaitCounterType::DSCNT, MemoryOrderClass::LDS);
     const size_t previous = sink->str().size();
     ASSERT_NO_FATAL_FAILURE(issue(mask, 240));
-    EXPECT_EQ(sink->str().find("RACE ", previous), std::string::npos);
-    EXPECT_EQ(plugin_state->race_state->getWaveMemoryEvents().size(), 1u);
+    EXPECT_EQ(sink->str().find("RACE ", previous) != std::string::npos, (mask & 1u) != 0);
     wait();
+    EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());
+  }
+}
+
+TEST_P(BlockLoadRaceTest, TracksOwnedWordsAndCounterInPartialDestinationSpan) {
+  for (uint32_t mask : {0u, 1u, 0x80000000u, 0x80008001u, 0xffffffffu}) {
+    for (uint32_t word : {0u, 1u, 15u}) {
+      for (bool write : {false, true}) {
+        SCOPED_TRACE(testing::Message()
+                     << "mask=" << mask << " word=" << word << " write=" << write);
+        ASSERT_NO_FATAL_FAILURE(issue(mask, 240));
+        ASSERT_EQ(plugin_state->race_state->getWaveMemoryEvents().size(), 1u);
+        EXPECT_FALSE(probe(240 + word, write, /*lanes=*/2));
+        EXPECT_EQ(probe(240 + word, write), (mask & (uint32_t{1} << word)) != 0);
+        wait();
+        EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());
+      }
+    }
   }
 }
 
 INSTANTIATE_TEST_SUITE_P(BlockLoads, BlockLoadRaceTest,
-                         ::testing::Combine(::testing::Values("cdna5", "rdna4"),
-                                            ::testing::Bool()));
+                         ::testing::Values(BlockLoadCase{"cdna5", false},
+                                           BlockLoadCase{"cdna5", true},
+                                           BlockLoadCase{"rdna4", false},
+                                           BlockLoadCase{"rdna4", true}));
 
 TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
   auto opposite_half_read_reports_race = [](std::string_view arch, uint32_t wavefront_size,

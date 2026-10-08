@@ -78,13 +78,14 @@ validated_load_destinations(const amdgpu::VectorMemState &state, const amdgpu::W
   std::vector<uint32_t> registers;
   registers.reserve(vgpr_count + ds2_vgpr_count);
   auto append_range = [&](uint32_t physical_base, uint32_t count) {
-    if (!registers_for.owns_vgpr_range(physical_base, count))
+    if (!state.is_block_transfer && !registers_for.owns_vgpr_range(physical_base, count))
       return false;
     const uint32_t logical_base = physical_base - wave.vgpr_alloc().base;
-    // Validate the full span before discarding preserved block words, matching
-    // completion and wait tracking. An empty result still represents a counter event.
+    // Blocks validate each enabled word independently; other loads retain their
+    // full-span contract. An empty result still represents a counter event.
     for (uint32_t i = 0; i < count; ++i)
-      if (state.block_dword_enabled(i))
+      if (state.block_dword_enabled(i) &&
+          (!state.is_block_transfer || registers_for.owns_vgpr_range(physical_base + i, 1)))
         registers.push_back(logical_base + i);
     return true;
   };
