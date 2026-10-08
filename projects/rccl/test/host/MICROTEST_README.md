@@ -246,10 +246,14 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `algorithms/dda/fabric/fabric-mem-handler-test.cc`; the files are listed by
   path from `test/host/CMakeLists.txt`, with no nested CMake project. One binary
   for all of DDA, since its units share the same seams (cuMem VMM, bootstrap
-  allgather). Their fixtures track device memory with `HipVmmLedger.h` (VMM
-  emulator plus reservation/handle/buffer bookkeeping, and a record of every
-  free, memset or non-host-bound copy it refused), and pin `NCCL_CUMEM_SKIP_FREE` unset because
-  `alloc.h` memoises that skip once per process. See
+  allgather). Their fixtures derive from `FabricLedgerTest` in
+  `algorithms/dda/fabric/FabricTestFixture.h`, which installs `HipVmmLedger.h`
+  (VMM emulator plus reservation/handle/buffer bookkeeping, and a record of
+  every free, memset or non-host-bound copy it refused), checks in `TearDown`
+  that nothing was leaked or refused, and unsets `NCCL_CUMEM_SKIP_FREE` and
+  latches `alloc.h`'s once-per-process skip-free decision with
+  `ASSERT_FALSE(rcclSkipCuMemFree())`. `fabric-init-test.cc` also tracks its
+  `ncclCalloc`'d host memory and bounds-checks its host-to-host copy. See
   `test_categories_micro_dda.yaml`.
 
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
@@ -426,7 +430,7 @@ and that default silently selects which production arm runs. Driving a seam mean
 marker. The marker travels with the declaration rather than a block comment so it cannot drift from
 what it describes. Call *counters* do not take the marker unless the counter itself is unread.
 
-Five things do NOT follow the TU-per-file rule, deliberately:
+Six things do NOT follow the TU-per-file rule, deliberately:
 
 - `fakes/collective_stubs.cc` is a fail-loud floor for the collective *launch*
   pipeline (`ncclLaunchKernel` and friends), which `enqueue.cc` itself defines.

@@ -24,11 +24,15 @@
 #include <vector>
 
 #include "ScopedHook.h"
-#include "algorithms/dda/fabric/FabricTestFixture.h"
+#include "fakes/bootstrap_stubs.h"
+#include "fakes/env_fakes.h"
+#include "fakes/hip_fakes.h"
+#include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
 #include "fakes/rccl_wrap_fakes.h"
 
 #include "algorithms/dda/fabric/FabricGpuBarrierState.h"
+#include "algorithms/dda/fabric/FabricTestFixture.h"
 #include "mem_manager.h"
 
 // Everything fabric_init.cu includes, first, so the free/ncclCalloc shims below
@@ -85,7 +89,7 @@ using dda_fabric_test::kBootstrap;
 using dda_fabric_test::kNRanks;
 using dda_fabric_test::kRank;
 
-// The local block cap. Above the AllGather term of ddaLLEpochCount (nRanks * 8 = 32),
+// The local block cap. Above the AllGather term of ddaLLEpochCount for kNRanks (4 * 8 = 32),
 // so the agreed block count is what sizes the epoch cells.
 constexpr int kCuCount = 40;
 constexpr int64_t kScratchBytes = 64 * 1024;
@@ -169,7 +173,7 @@ class DdaFabricCommTest : public FabricLedgerTest {
     if (HasFatalFailure()) return;
     SetMicroEnvAbsent("RCCL_DDA_FABRIC_MAXBLOCKS");
     g_initHostLive.clear();
-    // Host-bound copies are not the ledger's to check; the one init makes, into
+    // Host-to-host copies are not the ledger's to check; the one init makes, into
     // its ncclCalloc'd peer table, must land inside a block it allocated.
     auto ledgerCopy = g_hipMemcpy;
     g_hipMemcpy = [this, ledgerCopy](void* dst, const void* src, size_t n, hipMemcpyKind kind) {
@@ -443,7 +447,7 @@ TEST_F(DdaFabricCommInitTest, CommInit_AllSucceed_BarrierUsesCommGeometry) {
   EXPECT_EQ(barrier.peerFlags, state->resources->peerFlagsDev->get());
 }
 
-TEST_F(DdaFabricCommInitTest, CommInit_WithManager_TracksScratchAndPeerMappingsInIt) {
+TEST_F(DdaFabricCommInitTest, CommInit_WithManager_TracksScratchAndUntracksPeerMappingsInIt) {
   manager_ = std::make_unique<ncclMemManager>();  // value-initialised: nothing released
   ncclMemManager* const manager = manager_.get();
   comm_->memManager = manager;
@@ -531,7 +535,7 @@ TEST_F(DdaFabricCommInitTest, CommInit_RanksAtCap_SetsUpFabricPath) {
 
   EXPECT_NE(comm_->ddaFabricMemHandler, nullptr);
   // The one shape where the epoch cells' AllGather term (nRanks * 8) outgrows the block count.
-  const size_t epochLen = nccl_dda_detail::ddaLLEpochCount(dda::common::kDdaMaxNranks, kCuCount);
+  const size_t epochLen = static_cast<size_t>(dda::common::kDdaMaxNranks) * nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer;
   ASSERT_GT(epochLen, static_cast<size_t>(kCuCount));
   EXPECT_EQ(static_cast<size_t>(comm_->ddaLLEpochLen), epochLen);
 }

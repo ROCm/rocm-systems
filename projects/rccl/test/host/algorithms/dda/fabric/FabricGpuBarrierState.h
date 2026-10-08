@@ -10,7 +10,7 @@
 // and only read on the device. Mirror the layout to check what was handed over.
 // Tests give the three ints distinct values, so a reordered field fails rather
 // than passes. The size assert does not catch a field appended after nRanks_:
-// it lands in the tail padding before peerFlags_ and sizeof stays the same.
+// it lands in the interior padding before peerFlags_ and sizeof stays the same.
 
 #ifndef RCCL_TEST_HOST_ALGORITHMS_DDA_FABRIC_FABRICGPUBARRIERSTATE_H_
 #define RCCL_TEST_HOST_ALGORITHMS_DDA_FABRIC_FABRICGPUBARRIERSTATE_H_

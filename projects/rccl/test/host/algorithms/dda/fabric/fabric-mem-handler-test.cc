@@ -18,6 +18,11 @@
 #include <vector>
 
 #include "ScopedHook.h"
+#include "fakes/bootstrap_stubs.h"
+#include "fakes/env_fakes.h"
+#include "fakes/hip_fakes.h"
+#include "fakes/nccl_fakes.h"
+
 #include "algorithms/dda/fabric/FabricTestFixture.h"
 
 #include "alloc.h"
@@ -50,9 +55,9 @@ hipMemGenericAllocationHandle_t HandleForDesc(uint64_t desc) {
 class FabricMemHandlerTest : public FabricLedgerTest {
  protected:
   void SetUp() override {
+    savedHandleType_ = ncclCuMemHandleType;  // first: TearDown restores it even if SetUp bails
     FabricLedgerTest::SetUp();
     if (HasFatalFailure()) return;
-    savedHandleType_ = ncclCuMemHandleType;
 
     g_hipMemExportToShareableHandle = [](void* shareable, hipMemGenericAllocationHandle_t,
                                          hipMemAllocationHandleType, unsigned long long) {
@@ -133,7 +138,7 @@ class FabricMemHandlerTest : public FabricLedgerTest {
 // ---------------------------------------------------------------------------
 
 TEST_F(FabricMemHandlerTest, GetPeerDeviceMemPtr_BeforeExchange_ReturnsInvalidUsage) {
-  ncclFabricMemHandler* h = MakeRegisteredHandler();
+  const ncclFabricMemHandler* h = MakeRegisteredHandler();
   void* p = nullptr;
 
   // Even the self slot, which is already known, is gated on the exchange.
@@ -141,7 +146,7 @@ TEST_F(FabricMemHandlerTest, GetPeerDeviceMemPtr_BeforeExchange_ReturnsInvalidUs
 }
 
 TEST_F(FabricMemHandlerTest, GetPeerDeviceMemPtr_RankOutOfRange_ReturnsInvalidArgument) {
-  ncclFabricMemHandler* h = MakeExchangedHandler();
+  const ncclFabricMemHandler* h = MakeExchangedHandler();
   void* p = nullptr;
 
   EXPECT_EQ(h->getPeerDeviceMemPtr(-1, &p), ncclInvalidArgument);
@@ -157,7 +162,7 @@ TEST_F(FabricMemHandlerTest, GetPeerDeviceMemPtr_FirstAndLastRank_Succeed) {
 }
 
 TEST_F(FabricMemHandlerTest, GetPeerDeviceMemPtr_NullOutput_ReturnsInvalidArgument) {
-  ncclFabricMemHandler* h = MakeExchangedHandler();
+  const ncclFabricMemHandler* h = MakeExchangedHandler();
 
   EXPECT_EQ(h->getPeerDeviceMemPtr(0, nullptr), ncclInvalidArgument);
 }
@@ -365,7 +370,6 @@ TEST_F(FabricMemHandlerTest, Destructor_AfterExchange_FreesEveryPeerMappingButNo
 
   EXPECT_EQ(std::set<void*>(ledger_.addressFrees.begin(), ledger_.addressFrees.end()), peers);
   EXPECT_EQ(ledger_.addressFrees.size(), peers.size());
-  EXPECT_TRUE(ledger_.Clean());
 }
 
 TEST_F(FabricMemHandlerTest, Destructor_AfterImportFailsPartway_FreesOnlyTheMappedPeers) {
@@ -377,7 +381,6 @@ TEST_F(FabricMemHandlerTest, Destructor_AfterImportFailsPartway_FreesOnlyTheMapp
   handler_.reset();
 
   EXPECT_EQ(ledger_.addressFrees.size(), 2u);
-  EXPECT_TRUE(ledger_.Clean());
 }
 
 TEST_F(FabricMemHandlerTest, Destructor_AfterReleaseFails_StillFreesThatPeersMapping) {
@@ -390,7 +393,6 @@ TEST_F(FabricMemHandlerTest, Destructor_AfterReleaseFails_StillFreesThatPeersMap
   handler_.reset();
 
   EXPECT_EQ(ledger_.addressFrees, std::vector<void*>{peer0});
-  EXPECT_TRUE(ledger_.Clean());
 }
 
 TEST_F(FabricMemHandlerTest, Destructor_NeverExchanged_FreesNothing) {

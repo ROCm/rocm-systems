@@ -21,9 +21,13 @@
 #include <vector>
 
 #include "ScopedHook.h"
-#include "algorithms/dda/fabric/FabricTestFixture.h"
+#include "fakes/bootstrap_stubs.h"
+#include "fakes/env_fakes.h"
+#include "fakes/hip_fakes.h"
+#include "fakes/nccl_fakes.h"
 
 #include "algorithms/dda/fabric/FabricGpuBarrierState.h"
+#include "algorithms/dda/fabric/FabricTestFixture.h"
 #include "mem_manager.h"
 
 #include FABRIC_GPU_BARRIER_CC_PATH
@@ -311,14 +315,6 @@ TEST_F(FabricGpuBarrierTest, MallocAndInit_WithManager_TracksFlagBufferAndUntrac
   }
 }
 
-TEST_F(FabricGpuBarrierTest, MallocAndInit_ResourcesDestroyed_ReleasesEverythingItAllocated) {
-  ASSERT_NE(Init().first, nullptr);
-
-  result_.first.reset();
-
-  EXPECT_TRUE(ledger_.Clean());
-}
-
 // ---------------------------------------------------------------------------
 // Failure: each returns no resources and leaves nothing allocated
 // ---------------------------------------------------------------------------
@@ -338,7 +334,7 @@ TEST_F(FabricGpuBarrierTest, MallocAndInit_FlagBufferAllocationFails_ReturnsNull
 
   ExpectFailsWithoutLeaking();
 
-  // The null-buffer guard stops it, before the zeroing the VMM check would follow.
+  // The null-buffer guard returns before the zeroing, which comes ahead of the VMM check.
   EXPECT_TRUE(memsets_.empty()) << "zeroed a buffer that was never allocated";
 }
 
