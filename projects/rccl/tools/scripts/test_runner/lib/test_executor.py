@@ -1140,6 +1140,10 @@ class TestExecutor:
         )
         self.test_records = []       # rich per-test records for the emitter
         self._emit_log_counter = 0   # keeps captured-log filenames unique
+        # Incremental emission state: set by _open_incremental_writer() once
+        # setup_directories() has established workspace_dir and results_dir.
+        self._incremental_jsonl_path = None   # path to live tests.jsonl
+        self._incremental_run_json_path = None # path to live run.json
 
         # Rerun tracking
         self.failed_test_info = []  # Store info needed to rerun failed tests
@@ -1216,6 +1220,109 @@ class TestExecutor:
                 print(f"  (Custom path via {'--build-dir' if self.args.build_dir else 'RCCL_LIB_PATH/RCCL_BUILD_DIR'})")
             print(f"Log directory:    {self.log_dir}")
             print(f"Report directory: {self.report_dir}")
+
+        # Open the incremental writer early so that _record_result() can start
+        # appending to tests.jsonl and refreshing run.json from the very first
+        # test. This way a killed or hung run leaves a valid result directory for
+        # all completed tests without any post-hoc log scraping.
+        if self.emit_enabled:
+            self._prepare_incremental_emit()
+
+    def _prepare_incremental_emit(self):
+        """Build the run manifest and open the incremental writer.
+
+        Called once at the end of setup_directories() when emit is enabled.
+        Stores the partial manifest as self._manifest_snapshot so that
+        _record_result() can immediately start writing per-test lines to
+        tests.jsonl and refreshing run.json after every completed test.
+
+        The manifest built here is intentionally minimal (no host metadata,
+        no summary) because those are expensive/slow to collect and are not
+        needed for the incremental snapshot.  emit_results() enriches it later.
+        """
+        import socket
+        import uuid
+        from lib import results_emitter as re_mod
+
+        stamp = datetime.datetime.now(datetime.timezone.utc)
+        run_id = f"{stamp.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
+
+        sys_cfg = {}
+        try:
+            sys_cfg = self.config_processor.config.get("system_configurations", {}) or {}
+        except AttributeError:
+            pass
+
+        run_tags = list(getattr(self.args, "tag", []) or [])
+        for _t in (getattr(self.args, "tags", "") or "").split(","):
+            _t = _t.strip()
+            if _t and _t not in run_tags:
+                run_tags.append(_t)
+
+        self._manifest_snapshot = {
+            "run_id": run_id,
+            "created_at": stamp.isoformat(),
+            "started_at": stamp.isoformat(),
+            "host": socket.gethostname(),
+            "node_names": re_mod.node_names_from_mpi_hosts(self.mpi_hosts) or [socket.gethostname()],
+            "gpu_arch": re_mod.gpu_arch(),
+            "config_name": sys_cfg.get("name"),
+            "label": getattr(self.args, "run_label", "") or None,
+            "tags": run_tags or None,
+        }
+
+        results_dir = (getattr(self.args, "results_dir", "") or
+                       os.path.join(self.workspace_dir, "results"))
+        self._open_incremental_writer(results_dir, run_id)
+
+    def _open_incremental_writer(self, results_dir, run_id):
+        """Prepare the paths for incremental per-test-result emission.
+
+        Called once by emit_results() before the first test record is written.
+        After this call, every _record_result() invocation appends a line to
+        tests.jsonl and rewrites run.json with the latest partial summary so
+        that a killed or hung run leaves a valid, readable result directory.
+        """
+        run_dir = os.path.join(results_dir, run_id)
+        os.makedirs(run_dir, exist_ok=True)
+        self._incremental_jsonl_path = os.path.join(run_dir, "tests.jsonl")
+        self._incremental_run_json_path = os.path.join(run_dir, "run.json")
+
+    def _append_test_record(self, record, manifest):
+        """Append one test result to the live tests.jsonl and refresh run.json.
+
+        Intended to be called from _record_result() immediately after a test
+        completes.  Both files are written atomically (tmp + rename) so a
+        mid-write kill cannot leave a truncated or corrupt JSON file.
+        """
+        if not self._incremental_jsonl_path:
+            return
+        import json as _json
+        from lib import results_emitter as re_mod
+
+        # Append the slim record (no perf_rows) to tests.jsonl.
+        slim = {k: v for k, v in record.items() if k != "perf_rows"}
+        with open(self._incremental_jsonl_path, "a", encoding="utf-8") as f:
+            f.write(_json.dumps(slim, default=str) + "\n")
+
+        # Rewrite run.json with the current partial summary so consumers can
+        # read a meaningful snapshot even if the run is killed immediately after.
+        partial_summary = {
+            "total": len(self.test_results),
+            "passed": self.test_results.count(TestResult.RESULT_PASSED.value),
+            "failed": self.test_results.count(TestResult.RESULT_FAILED.value),
+            "timeout": self.test_results.count(TestResult.RESULT_TIMEOUT.value),
+            "skipped": self.test_results.count(TestResult.RESULT_SKIPPED.value),
+            "disabled": self.test_results.count(TestResult.RESULT_DISABLED.value),
+            "duration_s": sum(self.test_durations) if self.test_durations else 0,
+            "partial": True,   # cleared to False when emit_results() finalises
+        }
+        partial_manifest = dict(manifest)
+        partial_manifest["summary"] = partial_summary
+        tmp = self._incremental_run_json_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(partial_manifest, f, indent=2, default=str)
+        os.replace(tmp, self._incremental_run_json_path)
 
     def _coverage_profile_pattern(self):
         """Absolute per-host/process profile path for the current workspace."""
@@ -2924,6 +3031,11 @@ class TestExecutor:
             record["test_name"] = test_name
             record["duration"] = duration
             self.test_records.append(record)
+            # Write this result immediately so that a killed/hung run still
+            # leaves a valid tests.jsonl for all completed tests. _manifest_snapshot
+            # is set by emit_results() before the first test runs.
+            if hasattr(self, "_manifest_snapshot"):
+                self._append_test_record(record, self._manifest_snapshot)
 
     def record_disabled_suite(self, suite_config):
         """Record each config test as DISABLED without launching it.
@@ -3674,7 +3786,14 @@ class TestExecutor:
         print(f"{'='*80}")
 
         stamp = datetime.datetime.now(datetime.timezone.utc)
-        run_id = f"{stamp.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
+        # Reuse the run_id minted in _prepare_incremental_emit() so that the
+        # run directory created during the run (and already populated with an
+        # incremental tests.jsonl) matches the directory emit_results() writes
+        # the final run.json into.
+        if hasattr(self, "_manifest_snapshot") and self._manifest_snapshot.get("run_id"):
+            run_id = self._manifest_snapshot["run_id"]
+        else:
+            run_id = f"{stamp.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
 
         sha, branch = re_mod.git_info(os.path.dirname(os.path.abspath(__file__)))
 
