@@ -102,6 +102,10 @@ _COLLECT_RATIO_CALL_RE = re.compile(
 )
 
 
+def _parse_ref_parts(part: str) -> list[str]:
+    return [token.strip() for token in part.split("+") if token.strip()]
+
+
 def parse_collect_ratio_parts(formula: str) -> tuple[list[str], list[str]] | None:
     """Parse COLLECT_RATIO(n1 + n2, d1 + d2) into (numerator_refs, denominator_refs)."""
     if not formula or not isinstance(formula, str):
@@ -128,10 +132,7 @@ def parse_collect_ratio_parts(formula: str) -> tuple[list[str], list[str]] | Non
     if not num_part or not den_part:
         return None
 
-    def _refs(part: str) -> list[str]:
-        return [p.strip() for p in part.split("+") if p.strip()]
-
-    nums, dens = _refs(num_part), _refs(den_part)
+    nums, dens = _parse_ref_parts(num_part), _parse_ref_parts(den_part)
     if not nums or not dens:
         return None
     return nums, dens

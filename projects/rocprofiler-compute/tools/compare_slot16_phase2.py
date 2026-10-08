@@ -6,14 +6,13 @@
 Parses ``rocprof-compute analyze --view table`` logs and writes CSV + HTML.
 """
 
-from __future__ import annotations
-
 import argparse
 import html
 import re
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
-SLOT16: list[tuple[str, str]] = [
+SLOT16: List[Tuple[str, str]] = [
     ("2.1.0", "VALU FLOPs"),
     ("2.1.17", "vL1D Cache Hit Rate"),
     ("3.1.28", "VL1 Hit"),
@@ -37,9 +36,9 @@ ROW_RE = re.compile(
 )
 
 
-def parse_log(path: Path) -> dict[str, tuple[str, str]]:
+def parse_log(path: Path) -> Dict[str, Tuple[str, str]]:
     text = path.read_text(errors="replace")
-    found: dict[str, tuple[str, str]] = {}
+    found: Dict[str, Tuple[str, str]] = {}
     for match in ROW_RE.finditer(text):
         mid = match.group("id")
         if mid not in found:
@@ -47,7 +46,7 @@ def parse_log(path: Path) -> dict[str, tuple[str, str]]:
     return found
 
 
-def to_float(value: str) -> float | None:
+def to_float(value: str) -> Optional[float]:
     cleaned = value.strip().replace(",", "")
     if cleaned in {"", "N/A", "None", "-", "nan", "NaN", "?"}:
         return None
@@ -57,7 +56,7 @@ def to_float(value: str) -> float | None:
         return None
 
 
-def rel_pct(before: float | None, after: float | None) -> float | None:
+def rel_pct(before: Optional[float], after: Optional[float]) -> Optional[float]:
     if before is None or after is None:
         return None
     if before == 0.0 and after == 0.0:
@@ -83,7 +82,7 @@ def main() -> int:
     args = parser.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    rows: list[dict[str, object]] = []
+    rows: List[Dict[str, object]] = []
 
     for workload in args.workloads:
         before_path = args.before_dir / f"{workload}{args.before_suffix}"
