@@ -2256,6 +2256,24 @@ static bool hrr_place_alloc(PlaybackContext& ctx, uint64_t rec, size_t size,
     return pl->map_at(rec, size, device, api, live, ctx.in_graph_capture.any());
 }
 
+// An allocation that did not go through placement returned `r`: say whether
+// one more try is worth it, because it ran out of memory and unmapping the
+// deferred frees gave some back (VaPlacement::drain_for_retry). The failed
+// call left its error sticky; clear it, since the retry is what the
+// recording's call corresponds to.
+static bool hrr_drain_for_retry(PlaybackContext& ctx, hipError_t r) {
+    hrr::VaPlacement* pl = hrr_placing(ctx);
+    if (!pl) return false;
+    const size_t n = pl->drain_for_retry(r, ctx.in_graph_capture.any());
+    if (!n) return false;
+    (void)hipGetLastError();
+    if (ctx.verbose)
+        fprintf(stderr,
+                "[HRR] Placement: unmapped %zu deferred free(s) to retry an "
+                "allocation that ran out of memory\n", n);
+    return true;
+}
+
 // ---- External region materialisation ----------------------------------------
 
 // Make `device` current and return the ordinal to restore afterwards, or -1 if
@@ -2303,8 +2321,11 @@ hipError_t hrr_materialize_region(PlaybackContext& ctx, uint64_t rec_base,
 
     void* live = nullptr;
     hipError_t r = hipSuccess;
-    if (!hrr_place_alloc(ctx, rec_base, size, "region segment", &live))
-        r = HRR_HIP_CHECK(hipMalloc(&live, size));
+    if (!hrr_place_alloc(ctx, rec_base, size, "region segment", &live)) {
+        r = hipMalloc(&live, size);
+        if (hrr_drain_for_retry(ctx, r)) r = hipMalloc(&live, size);
+        r = hrr_hip_check(r, "hipMalloc(&live, size)", __FILE__, __LINE__);
+    }
     if (r != hipSuccess) {
         if (prev >= 0) (void)hipSetDevice(prev);
         fprintf(stderr,
@@ -2793,6 +2814,7 @@ static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
         r = hipMallocManaged(&live, pad_sz);
     } else {
         r = hipMalloc(&live, pad_sz);
+        if (hrr_drain_for_retry(ctx, r)) r = hipMalloc(&live, pad_sz);
     }
     if (r == hipSuccess) {
         // hipMalloc does NOT guarantee zeroed memory (only first-touch pages are
@@ -2835,8 +2857,11 @@ hipError_t playback_hipExtMallocWithFlags(PlaybackContext& ctx, const uint8_t* p
     if (a->flags == hipDeviceMallocDefault &&
         hrr_place_alloc(ctx, a->ptr, orig_sz, "hipExtMallocWithFlags", &live))
         pad_sz = orig_sz;
-    else
+    else {
         r = hipExtMallocWithFlags(&live, pad_sz, a->flags);
+        if (hrr_drain_for_retry(ctx, r))
+            r = hipExtMallocWithFlags(&live, pad_sz, a->flags);
+    }
     if (r == hipSuccess) {
         hrr_zero_init_alloc(ctx, live, pad_sz);
         ctx.record_alloc(a->ptr, live, pad_sz);
@@ -2925,8 +2950,10 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocAsync", stream,
                               hrr_stream_device(stream), &live))
         pad_sz = orig_sz;
-    else
+    else {
         r = hipMallocAsync(&live, pad_sz, stream);
+        if (hrr_drain_for_retry(ctx, r)) r = hipMallocAsync(&live, pad_sz, stream);
+    }
     if (r == hipSuccess) {
         if (hrr_replay_zero_init() && !capturing)
             (void)hipMemsetAsync(live, 0, pad_sz, stream);
@@ -2953,11 +2980,15 @@ hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
     if (why) {
         hrr_placing(ctx)->fell_back(a->dev_ptr, orig_sz, "hipMallocFromPoolAsync", why);
         r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
+        if (hrr_drain_for_retry(ctx, r))
+            r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
     } else if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocFromPoolAsync",
                                      stream, device, &live)) {
         pad_sz = orig_sz;
     } else {
         r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
+        if (hrr_drain_for_retry(ctx, r))
+            r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
     }
     if (r == hipSuccess) {
         if (hrr_replay_zero_init() && !capturing)
