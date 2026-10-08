@@ -253,8 +253,9 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         ' auto hi = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(b));'
         ' return lo | (hi << 16); }',
     ),
-    # --- f16 binary (low 16 bits f16, result zero-extended). Same f32
-    # intermediate as the scalar bodies (single final round) ⇒ bit-identical. ---
+    # --- f16 binary (low 16 bits f16, result zero-extended). These native-F32
+    # functors are emitted only behind the guest/host rounding-and-denormal gate;
+    # scalar lowering may evaluate through a wider intermediate. ---
     'v_add_f16_vop2': (
         'uint32_t',
         '[](auto a, auto b) {'
@@ -296,7 +297,7 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
 # types and may differ (e.g. int32->float32 for v_cvt_f32_i32). Eligible
 # kernels preserve the generated scalar result: elementwise bit operations,
 # exact casts, and floating-point helpers with matching guest policies.
-# LOG/EXP and RCP/RSQ use the shared hardware mappings. SIN/COS stay scalar.
+# LOG/EXP and RCP/RSQ/SQRT use the shared hardware mappings. SIN/COS stay scalar.
 # VOP3 F32 twins that require floating source and output modifiers.
 # MOV_B32/ACCVGPR_MOV_B32 use the generic raw-copy path: their scalar
 # bodies ignore floating modifiers.
@@ -657,11 +658,11 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         ' util::stdx::where(s - r >= util::native<float32_t>(0.5f), r) += 1.0f;'
         ' return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r); }',
     ),
-    # --- f16 (half) ops. Scalar bodies route through an f32 intermediate with a
-    # single final round, so the SIMD path (f16_to_f32_simd -> f32 op ->
-    # f32_to_f16_simd) is bit-identical. The conversions are bit-exact (see
-    # UtilSimd.F16ToF32/F32ToF16 guards). f16 result occupies the low 16 bits of
-    # the dst, high zeroed (Tout=uint32_t), matching write_lane zero-extension. ---
+    # --- f16 (half) ops. The SIMD functors widen exact half encodings, evaluate,
+    # then narrow to F16. Their wrappers own any required source flush, modifiers,
+    # and output policy so eligibility matches the generated scalar contract.
+    # The F16 result occupies the low 16 bits of the destination and is
+    # zero-extended to the uint32_t lane used by VOP1. ---
     'v_floor_f16_vop1': (
         'uint32_t',
         'uint32_t',

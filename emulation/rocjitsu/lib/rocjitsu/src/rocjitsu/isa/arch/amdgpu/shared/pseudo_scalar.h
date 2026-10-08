@@ -234,11 +234,12 @@ inline float apply_source_modifiers(float value, bool absolute, bool negate) {
 
 } // namespace detail
 
-/// @brief Scale/clamp a wide result, then round directly from F64 to F16.
-/// @details SDWA supplies a wide value; FMA modifier calls supply an already-rounded half.
-/// Migrated rounding stages disable modifiers here and modify the returned bits
-/// afterward. The caller owns MODE denormal controls; clamp_nan_to_zero selects
-/// CLAMP's NaN conversion separately.
+/// @brief Apply optional numeric modifiers to a host value, then narrow it to F16.
+/// @details This helper does not choose an instruction's output ordering. A caller
+/// may pass a wide arithmetic result to apply modifiers before narrowing, pass an
+/// already-rounded F16 value represented in F64, or disable modifiers and apply
+/// the shared raw-bit stage afterward. The caller owns MODE input/output-denormal
+/// policy; clamp_nan_to_zero selects CLAMP's NaN conversion separately.
 inline uint16_t round_f16_result(double value, uint32_t round_mode, uint32_t omod, bool clamp,
                                  bool fp16_ovfl, bool clamp_nan_to_zero) {
   const bool effective_clamp = clamp && (clamp_nan_to_zero || !std::isnan(value));
