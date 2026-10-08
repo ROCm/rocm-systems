@@ -46,6 +46,10 @@ cases:
   Unit_HRR_ApiMatrix_T5_Roundtrip: {}
   Unit_HRR_ApiMatrix_UC1Dense_Direct: {}
   Unit_HRR_BlankCaptureOutputCapturesNothing: {}
+  Unit_HRR_CaptureCrashDuringFork: {}
+  Unit_HRR_CaptureCrashDuringFork_Direct: {}
+  Unit_HRR_CaptureCrashOnSmallStack: {}
+  Unit_HRR_CaptureCrashSmallStack_Direct: {}
   Unit_HRR_CaptureExitSummary: {}
   Unit_HRR_CaptureReplayRoundtrip: {}
   Unit_HRR_CaptureStartNotice: {}
@@ -106,6 +110,18 @@ cases:
   Unit_HRR_FatBinHeader_Direct: {}
   Unit_HRR_FirstMallocRoundtrip: {}
   Unit_HRR_FirstMalloc_Direct: {}
+  Unit_HRR_ForkAfterCaptureShutdown: {}
+  Unit_HRR_ForkAfterCaptureShutdown_Direct: {}
+  Unit_HRR_ForkBetweenCaptureFlushAndClose: {}
+  Unit_HRR_ForkBetweenCaptureFlushAndClose_Direct: {}
+  Unit_HRR_ForkWhileNotingUnreplayable: {}
+  Unit_HRR_ForkWhileNotingUnreplayable_Direct: {}
+  Unit_HRR_ForkWhileRecording: {}
+  Unit_HRR_ForkWhileRecording_Direct: {}
+  Unit_HRR_ForkWhileWriterHoldsLock: {}
+  Unit_HRR_ForkWhileWriterHoldsLock_Direct: {}
+  Unit_HRR_ForkedChildRecordsAfterShutdown: {}
+  Unit_HRR_ForkedChildRecordsAfterShutdown_Direct: {}
   Unit_HRR_GpuWorkload_Direct: {}
   Unit_HRR_GraphExplicitRoundtrip: {}
   Unit_HRR_GraphExplicit_Direct: {}
@@ -177,6 +193,8 @@ cases:
   Unit_HRR_PitchedH2DRoundtrip: {}
   Unit_HRR_PitchedH2DShortBlob: {}
   Unit_HRR_PitchedH2D_Direct: {}
+  Unit_HRR_RecordAfterCaptureShutdown: {}
+  Unit_HRR_RecordAfterCaptureShutdown_Direct: {}
   Unit_HRR_Regions_Direct: {}
   Unit_HRR_Regions_EmbeddedPointerMaterialization: {}
   Unit_HRR_Regions_MemcpyDirect: {}
@@ -191,6 +209,8 @@ cases:
   Unit_HRR_ReplaceKernelRoundtrip: {}
   Unit_HRR_SecureExecIgnoresCaptureOutput: {}
   Unit_HRR_SecureExecProbe_Direct: {}
+  Unit_HRR_ShutdownWhileChildOpensArchive: {}
+  Unit_HRR_ShutdownWhileChildOpensArchive_Direct: {}
   Unit_HRR_SparsePitchRoundtrip: {}
   Unit_HRR_SparsePitch_Direct: {}
   Unit_HRR_StreamAdvanced2Roundtrip: {}

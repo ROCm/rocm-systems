@@ -1663,7 +1663,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureCrashOnSmallStack) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_crash_small_stack"};
 
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     int ret = proc.runWithTimeout("\"Unit_HRR_CaptureCrashSmallStack_Direct\"", 120);
@@ -1692,7 +1692,7 @@ HRR_TEST_CASE(Unit_HRR_ForkWhileRecording) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_fork_while_recording"};
 
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     int ret = proc.runWithTimeout("\"Unit_HRR_ForkWhileRecording_Direct\"", 600);
@@ -1718,7 +1718,7 @@ HRR_TEST_CASE(Unit_HRR_ForkWhileWriterHoldsLock) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_fork_writer_holds_lock"};
 
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     int ret = proc.runWithTimeout("\"Unit_HRR_ForkWhileWriterHoldsLock_Direct\"", 120);
@@ -1741,7 +1741,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureCrashDuringFork) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_crash_during_fork"};
 
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     int ret = proc.runWithTimeout("\"Unit_HRR_CaptureCrashDuringFork_Direct\"", 120);
@@ -1774,7 +1774,7 @@ HRR_TEST_CASE(Unit_HRR_ForkWhileNotingUnreplayable) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_fork_while_noting_unreplayable"};
 
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     int ret = proc.runWithTimeout("\"Unit_HRR_ForkWhileNotingUnreplayable_Direct\"", 120);
@@ -1804,7 +1804,7 @@ HRR_TEST_CASE(Unit_HRR_ForkedChildRecordsAfterShutdown) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_forked_child_records_after_shutdown"};
 
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     int ret = proc.runWithTimeout("\"Unit_HRR_ForkedChildRecordsAfterShutdown_Direct\"", 120);
@@ -1824,7 +1824,7 @@ HRR_TEST_CASE(Unit_HRR_ForkAfterCaptureShutdown) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_fork_after_capture_shutdown"};
 
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     int ret = proc.runWithTimeout("\"Unit_HRR_ForkAfterCaptureShutdown_Direct\"", 120);
@@ -1861,7 +1861,7 @@ HRR_TEST_CASE(Unit_HRR_ShutdownWhileChildOpensArchive) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_shutdown_while_child_opens_archive"};
 
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     int ret = proc.runWithTimeout("\"Unit_HRR_ShutdownWhileChildOpensArchive_Direct\"", 120);
@@ -1895,7 +1895,7 @@ HRR_TEST_CASE(Unit_HRR_RecordAfterCaptureShutdown) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_record_after_capture_shutdown"};
 
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     int ret = proc.runWithTimeout("\"Unit_HRR_RecordAfterCaptureShutdown_Direct\"", 120);
@@ -1924,7 +1924,7 @@ HRR_TEST_CASE(Unit_HRR_ForkBetweenCaptureFlushAndClose) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_fork_between_capture_flush_and_close"};
 
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     int ret = proc.runWithTimeout("\"Unit_HRR_ForkBetweenCaptureFlushAndClose_Direct\"", 120);
