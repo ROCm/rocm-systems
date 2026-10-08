@@ -17,6 +17,7 @@
 #include "hrr_test_common.hh"
 #include "hrr_va_placement.h"
 #include "hrr_event_order.h"
+#include "hip_playback.h"
 #include "hrr/hrr_api_args.h"
 
 #include <algorithm>
@@ -326,6 +327,27 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_CapturesOpenAndCloseInOrder) {
     INFO(hrr_api_names[api]);
     REQUIRE(hrr_needs_ordering(api));
   }
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_PerThreadCapturesKeptApart) {
+  // Code built for per-thread default streams captures with
+  // hipStreamBeginCapture_spt on stream 0, and each thread's stream 0 is its
+  // own. One thread ending its capture must not end another's: replay would
+  // then unmap, drain and sync while that capture is still open.
+  const uint64_t t1 = 11, t2 = 22;
+  StreamCaptureFlag f;
+  f.begin(hrr_capture_key(0, t1));
+  f.begin(hrr_capture_key(0, t2));
+  REQUIRE(f.end(hrr_capture_key(0, t1)));
+  REQUIRE(f.any());
+  // hipStreamPerThread names the same stream as 0 on that thread.
+  REQUIRE(f.end(hrr_capture_key(reinterpret_cast<uint64_t>(hipStreamPerThread), t2)));
+  REQUIRE_FALSE(f.any());
+  // A real stream is the same stream on every thread.
+  const uint64_t s = 0x7f0000001000ull;
+  REQUIRE(hrr_capture_key(s, t1) == s);
+  REQUIRE(hrr_capture_key(s, t2) == s);
+  REQUIRE(hrr_capture_key(0, t1) != s);
 }
 
 HRR_TEST_CASE(Unit_HRR_VaPlacement_PlanSegmentsMinusReservations) {

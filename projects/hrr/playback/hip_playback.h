@@ -51,14 +51,25 @@ inline bool hrr_zero_init_needs_drain(bool zero_init_enabled,
     return zero_init_enabled && !in_graph_capture;
 }
 
+// The key StreamCaptureFlag files a capture under. A recorded stream handle
+// names one stream wherever it is used, but 0 in an _spt call, and
+// hipStreamPerThread anywhere, name the calling thread's default stream: two
+// threads capturing their own per-thread streams are two captures. Those are
+// keyed by the recorded thread, above any address a stream handle can have.
+inline uint64_t hrr_capture_key(uint64_t stream, uint64_t thread_id) {
+    if (stream == 0 || stream == reinterpret_cast<uint64_t>(hipStreamPerThread))
+        return (1ull << 63) | thread_id;
+    return stream;
+}
+
 // ---------------------------------------------------------------------------
 // PlaybackContext — central replay state
 // ---------------------------------------------------------------------------
 
-// Which recorded streams are inside a stream capture. Keyed by the recorded
-// stream handle, so the hipStreamEndCapture replayed for a stream clears that
-// stream's capture and no other, whichever thread it runs on and however the
-// call ends. Converting to bool asks whether any capture is open: while one
+// Which recorded streams are inside a stream capture. Keyed by
+// hrr_capture_key, so the hipStreamEndCapture replayed for a stream clears
+// that stream's capture and no other, whichever thread it runs on and however
+// the call ends. Converting to bool asks whether any capture is open: while one
 // is, device synchronization and event timing fail (HIP 900/901), and
 // hipMemUnmap would sync inside the capture, because it waits for every
 // stream on the device.

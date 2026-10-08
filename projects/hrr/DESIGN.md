@@ -1154,7 +1154,10 @@ to retry for.
 A replayed `hipStreamEndCapture` closes its stream's capture even when replay's
 call fails, and so does `hipStreamEndCapture_spt`. `hipStreamBeginCaptureToGraph`
 and `hipStreamBeginCapture_spt` open one, when the stream is capturing after the
-call. The capture also closes at `hipStreamDestroy`. Failed calls are not
+call. A capture is filed under its recorded stream handle, except on a thread's
+default stream (stream 0 in an `_spt` call, or `hipStreamPerThread`), which is
+filed under the recorded thread, so two threads' per-thread captures do not end
+each other. The capture also closes at `hipStreamDestroy`. Failed calls are not
 recorded, so a capture the program's own `hipStreamEndCapture` failed to end
 leaves no end in the archive; destroying its stream is where it ends. A capture
 whose stream is never destroyed and never ends stays open for the rest of the

@@ -822,6 +822,18 @@ TEST_CASE("Unit_HRR_VaPlacement_Lifetimes_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipStreamDestroy(s2));
   HRR_HIP_CHECK(hipDeviceSynchronize());
 
+  // (g) A free inside a capture of this thread's default stream, opened and
+  // closed with the _spt calls code built for per-thread streams makes. It
+  // waits for the device sync after the capture ends.
+  void* z = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&z, kBytes));
+  HRR_HIP_CHECK(hipStreamBeginCapture_spt(nullptr, hipStreamCaptureModeRelaxed));
+  HRR_HIP_CHECK(hipFree(z));
+  hipGraph_t g3 = nullptr;
+  HRR_HIP_CHECK(hipStreamEndCapture_spt(nullptr, &g3));
+  if (g3) HRR_HIP_CHECK(hipGraphDestroy(g3));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+
   // (d) The same device address copied into 40 cells, one H2D copy each: 40
   // payloads for the scan to find it in once that allocation has moved.
   void* stored = nullptr;
@@ -943,12 +955,13 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_Lifetimes) {
                                (c.a1 == c.a2 ? "1" : "2") +
                                " deferred free(s) at hipDeviceSynchronize";
     CHECK(out.find(b_line) != std::string::npos);
-    // doomed, x, and a2 when it took a1's mapping back.
+    // doomed, x, z, and a2 when it took a1's mapping back.
     CHECK(count_of(out, "[HRR] Placement: unmapped 1 deferred free(s) at hipDeviceSynchronize") ==
-          (c.a1 == c.a2 ? 3 : 2));
+          (c.a1 == c.a2 ? 4 : 3));
     CHECK(out.find("is still mapped") == std::string::npos);
-    // doomed, a1, a2, and x, freed inside the capture hipStreamBeginCaptureToGraph opened.
-    CHECK(hrr_place_deferred(out) == 4);
+    // doomed, a1, a2, x, freed inside the capture hipStreamBeginCaptureToGraph
+    // opened, and z, freed inside the one hipStreamBeginCapture_spt opened.
+    CHECK(hrr_place_deferred(out) == 5);
     int placed = 0, fell = -1;
     REQUIRE(hrr_place_counts(out, &placed, &fell));
     CHECK(fell == 0);

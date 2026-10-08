@@ -2489,33 +2489,44 @@ void hrr_placement_at_sync(PlaybackContext& ctx, const char* api) {
         fprintf(stderr, "[HRR] Placement: unmapped %zu deferred free(s) at %s\n", n, api);
 }
 
+// The recorded thread that made the call in `payload`.
+static uint64_t hrr_event_thread(const uint8_t* payload) {
+    hrr_event_header h;
+    std::memcpy(&h, payload, sizeof(h));
+    return h.thread_id;
+}
+
 void hrr_track_capture(PlaybackContext& ctx, uint16_t event_type,
                        const uint8_t* payload) {
     switch (event_type) {
         case HRR_API_HIPSTREAMBEGINCAPTURETOGRAPH: {
-            // The handler may skip the call, so ask the stream.
+            // The handler may skip the call, so ask the stream. A null one
+            // cannot capture, and asking about it while another capture is
+            // open fails with an error that stays.
             const auto* a =
                 reinterpret_cast<const hrr_args_hipStreamBeginCaptureToGraph*>(payload);
+            hipStream_t stream = ctx.translate_stream(a->stream);
             hipStreamCaptureStatus st = hipStreamCaptureStatusNone;
-            if (hipStreamIsCapturing(ctx.translate_stream(a->stream), &st) == hipSuccess &&
+            if (stream && hipStreamIsCapturing(stream, &st) == hipSuccess &&
                 st == hipStreamCaptureStatusActive)
-                ctx.in_graph_capture.begin(a->stream);
+                ctx.in_graph_capture.begin(hrr_capture_key(a->stream, hrr_event_thread(payload)));
             break;
         }
         case HRR_API_HIPSTREAMBEGINCAPTURE_SPT: {
+            // A null stream here is this thread's default stream.
             const auto* a =
                 reinterpret_cast<const hrr_args_hipStreamBeginCapture_spt*>(payload);
             hipStreamCaptureStatus st = hipStreamCaptureStatusNone;
             if (hipStreamIsCapturing_spt(ctx.translate_stream(a->stream), &st) == hipSuccess &&
                 st == hipStreamCaptureStatusActive)
-                ctx.in_graph_capture.begin(a->stream);
+                ctx.in_graph_capture.begin(hrr_capture_key(a->stream, hrr_event_thread(payload)));
             break;
         }
         case HRR_API_HIPSTREAMENDCAPTURE_SPT: {
             // Ended whatever the call returned, as hipStreamEndCapture does.
             const auto* a =
                 reinterpret_cast<const hrr_args_hipStreamEndCapture_spt*>(payload);
-            (void)ctx.in_graph_capture.end(a->stream);
+            (void)ctx.in_graph_capture.end(hrr_capture_key(a->stream, hrr_event_thread(payload)));
             break;
         }
         default:
@@ -3834,7 +3845,7 @@ hipError_t playback_hipStreamDestroy(PlaybackContext& ctx,
     // calls are not recorded: a capture invalidated by a synchronous copy or
     // memset ends here. The frees deferred inside it are unmapped at the next
     // replayed device synchronization, like any other.
-    (void)ctx.in_graph_capture.end(a->stream);
+    (void)ctx.in_graph_capture.end(hrr_capture_key(a->stream, hrr_event_thread(pl)));
     return r;
 }
 
@@ -3884,7 +3895,7 @@ hipError_t playback_hipStreamBeginCapture(PlaybackContext& ctx,
                     r, hipGetErrorString(r));
     }
     if (r == hipSuccess)
-        ctx.in_graph_capture.begin(a->stream);
+        ctx.in_graph_capture.begin(hrr_capture_key(a->stream, hrr_event_thread(payload)));
     return r;
 }
 
@@ -3897,7 +3908,7 @@ hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx,
     if (!stream) {
         fprintf(stderr, "[HRR] hipStreamEndCapture: stream 0x%llx not found in map\n",
                 (unsigned long long)a->stream);
-        ctx.in_graph_capture.end(a->stream);
+        ctx.in_graph_capture.end(hrr_capture_key(a->stream, hrr_event_thread(payload)));
         return hipSuccess;  // non-fatal
     }
     hipGraph_t live_graph = nullptr;
@@ -3905,7 +3916,7 @@ hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx,
     // Cleared whatever the call returned: a capture left marked open would
     // defer every later placed free, and make the allocations recorded over
     // them fall back, for the rest of the replay.
-    ctx.in_graph_capture.end(a->stream);
+    ctx.in_graph_capture.end(hrr_capture_key(a->stream, hrr_event_thread(payload)));
     if (r == hipSuccess && live_graph) {
         ctx.record_graph(a->pGraph, live_graph);
         if (ctx.verbose)
