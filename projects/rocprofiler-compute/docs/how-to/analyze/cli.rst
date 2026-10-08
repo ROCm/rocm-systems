@@ -20,6 +20,8 @@ This section provides an overview of ROCm Compute Profiler's CLI analysis featur
 
 * :ref:`Roofline HTML generation <roofline-html-generation>`: Generate interactive HTML roofline charts from profiling data.
 
+* :ref:`Memory Chart HTML report <cli-memory-chart-html>`: View aggregate and per-kernel memory charts in a browser.
+
 Run ``rocprof-compute analyze -h`` for more details.
 
 .. _cli-walkthrough:
@@ -111,6 +113,21 @@ There are three high-level GPU analysis views:
                                                                                                         ╰────────────────────────────────────────────╯
 
    Legend: <---- Read  ----> Write  <---> Atomic  █ Util  █ Hit%
+
+.. _cli-memory-chart-html:
+
+Analyzing a Memory Chart writes an offline ``mem_chart.html`` to each workload
+directory. Open it in a browser to select a kernel or use **Show all** for the
+aggregate view.
+
+``-k`` sets the initial view when it selects exactly one kernel; all analyzed
+kernels remain available. GPU and dispatch filters restrict the data and add
+filename suffixes, such as ``mem_chart_gpu-0_d-3_4.html``. Repeated analysis
+overwrites the same file.
+
+Reports are generated for stdout and text output (``--output-format txt``),
+including ``--view table``. CSV or database output do
+not generate reports.
 
 .. _cli-memory-chart-viewing:
 

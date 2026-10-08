@@ -17,6 +17,7 @@ from memory_chart.loader import (
     LayoutError,
     Layouts,
     PanelConfigs,
+    has_layout,
     layout_files,
     load_layout,
 )
@@ -174,6 +175,18 @@ def test_runtime_arch_resolves_to_its_family_layout(gpu_arch, layout):
 @pytest.mark.parametrize("gpu_arch", ["gfx1030", None])
 def test_arch_without_layout_has_no_chart(gpu_arch):
     assert Layouts.for_arch(gpu_arch) is None
+
+
+@pytest.mark.parametrize("gpu_arch", MEMORY_CHART_ARCHS)
+def test_has_layout_for_supported_arch(gpu_arch):
+    """Confirm supported architectures have a memory chart layout."""
+    assert has_layout(gpu_arch) is True
+
+
+@pytest.mark.parametrize("gpu_arch", ["gfx1030", "unknown", None])
+def test_has_layout_is_false_without_a_layout(gpu_arch):
+    """Confirm unsupported, unknown, or missing architectures have no layout."""
+    assert has_layout(gpu_arch) is False
 
 
 def test_an_arch_in_two_layout_files_keeps_the_first(tmp_path, monkeypatch):
