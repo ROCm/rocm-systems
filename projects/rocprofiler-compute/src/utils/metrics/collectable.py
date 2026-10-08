@@ -46,6 +46,14 @@ class CompositeDef:
     kind: CompositeKind
     refs: List[str]
     weight_meta: Dict[str, Any] = field(default_factory=dict)
+    metric_name: str = ""
+
+
+def _ref_base_name(ref: str) -> str:
+    name = ref.strip()
+    if name.startswith("-"):
+        name = name[1:].strip()
+    return name
 
 
 @dataclass
@@ -57,8 +65,47 @@ class MetricEvalGraph:
     composites: List[CompositeDef] = field(default_factory=list)
 
     def composite_order(self) -> List[CompositeDef]:
-        """Topological order: collectables first, then composites (v1: flat deps)."""
-        return list(self.composites)
+        """Parents after the composite rows they reference.
+
+        Order is stable. A cycle is omitted so those parents stay unset.
+        """
+        by_name: Dict[str, CompositeDef] = {
+            composite.metric_name: composite
+            for composite in self.composites
+            if composite.metric_name
+        }
+        ordered: List[CompositeDef] = []
+        emitted: Set[str] = set()
+        pending = list(self.composites)
+        while pending:
+            ready: List[CompositeDef] = []
+            still: List[CompositeDef] = []
+            for composite in pending:
+                deps = [
+                    _ref_base_name(ref)
+                    for ref in composite.refs
+                    if _ref_base_name(ref) in by_name
+                    and _ref_base_name(ref) != composite.metric_name
+                ]
+                if all(dep in emitted for dep in deps):
+                    ready.append(composite)
+                else:
+                    still.append(composite)
+            if not ready:
+                names = ", ".join(
+                    composite.metric_name or composite.metric_id for composite in still
+                )
+                console_warning(
+                    "metrics",
+                    f"Composite cycle in {names}; leaving those metrics unset",
+                )
+                break
+            for composite in ready:
+                ordered.append(composite)
+                if composite.metric_name:
+                    emitted.add(composite.metric_name)
+            pending = still
+        return ordered
 
 
 def _metric_column_name(df: pd.DataFrame) -> Optional[str]:
@@ -75,6 +122,36 @@ def _avg_column_name(df: pd.DataFrame) -> Optional[str]:
     return None
 
 
+def _row_metric_name(df: pd.DataFrame, metric_id: object) -> str:
+    name_col = _metric_column_name(df)
+    if name_col is None or metric_id not in df.index:
+        return ""
+    row_name = df.at[metric_id, name_col]
+    if isinstance(row_name, str):
+        return row_name
+    return ""
+
+
+def _resolve_collectable_name(df: pd.DataFrame, ref_name: str) -> str:
+    """Resolve a ref to its display name.
+
+    ``_collectable_id`` wins inside this table when the ref matches an id.
+    Display keys still resolve for formulas that name the row.
+    """
+    signed = ref_name.startswith("-")
+    base = ref_name[1:].strip() if signed else ref_name
+    ids = df.attrs.get(COLLECTABLE_IDS_ATTR, {})
+    name_col = _metric_column_name(df)
+    if isinstance(ids, dict) and name_col is not None:
+        for metric_id, collect_id in ids.items():
+            if collect_id != base or metric_id not in df.index:
+                continue
+            row_name = df.at[metric_id, name_col]
+            if isinstance(row_name, str):
+                return f"-{row_name}" if signed else row_name
+    return ref_name
+
+
 def build_metric_eval_graph(df: pd.DataFrame) -> MetricEvalGraph:
     """Build collectable + composite graph from parser attrs on a metric_table df."""
     graph = MetricEvalGraph()
@@ -88,7 +165,8 @@ def build_metric_eval_graph(df: pd.DataFrame) -> MetricEvalGraph:
                     continue
                 row_name = df.at[metric_id, name_col]
                 if isinstance(row_name, str):
-                    graph.collectable_ids[row_name] = collect_id
+                    # Id is the lookup key within the table when it is present.
+                    graph.collectable_ids[collect_id] = row_name
                     graph.collectable_row_names.add(row_name)
 
     weighted_specs = df.attrs.get(WEIGHTED_AVG_ATTR)
@@ -105,6 +183,7 @@ def build_metric_eval_graph(df: pd.DataFrame) -> MetricEvalGraph:
                     kind=CompositeKind.WEIGHTED_AVG,
                     refs=refs,
                     weight_meta=weight_meta if isinstance(weight_meta, dict) else {},
+                    metric_name=_row_metric_name(df, metric_id),
                 )
             )
 
@@ -119,6 +198,7 @@ def build_metric_eval_graph(df: pd.DataFrame) -> MetricEvalGraph:
                     metric_id=metric_id,
                     kind=CompositeKind.COLLECT_SUM,
                     refs=refs,
+                    metric_name=_row_metric_name(df, metric_id),
                 )
             )
 
@@ -139,6 +219,7 @@ def build_metric_eval_graph(df: pd.DataFrame) -> MetricEvalGraph:
                     kind=CompositeKind.COLLECT_RATIO,
                     refs=list(nums) + list(dens),
                     weight_meta={"numerator": nums, "denominator": dens},
+                    metric_name=_row_metric_name(df, metric_id),
                 )
             )
 
@@ -245,6 +326,28 @@ def _lookup_collectable_built_avg(
     return built
 
 
+def _collectable_series(
+    df: pd.DataFrame,
+    ref_name: str,
+    avg_col: str,
+    raw_pmc_df: pd.DataFrame,
+    sys_vars: Dict[str, Any],
+    empirical_peaks: Dict[str, Any],
+    role: str,
+) -> Optional[pd.Series]:
+    """Per-dispatch values for one collectable ref, honoring a leading minus."""
+    negate = ref_name.startswith("-")
+    lookup_name = _resolve_collectable_name(df, _ref_base_name(ref_name))
+    built = _lookup_collectable_built_avg(df, lookup_name, avg_col)
+    if built is None:
+        console_warning(f"{role}: collectable '{ref_name}' not found in metric table.")
+        return None
+    series = per_dispatch_ratio_series(built, raw_pmc_df, sys_vars, empirical_peaks)
+    if negate:
+        return -series
+    return series
+
+
 def _evaluate_weighted_composite(
     composite: CompositeDef,
     df: pd.DataFrame,
@@ -282,12 +385,25 @@ def _evaluate_weighted_composite(
         bound_weight = resolve_weight_counter_column(
             weight_counter, ref_name, df, pass_layout
         )
+        if not bound_weight:
+            console_warning(
+                "metrics",
+                f"WEIGHTED_AVG: weight {weight_counter!r} for '{ref_name}' "
+                "is not on the sub-metric pass; leaving the composite unset",
+            )
+            return "N/A"
+        weight_series = _weight_counter_per_dispatch(bound_weight, raw_pmc_df)
+        if weight_series.empty:
+            console_warning(
+                "metrics",
+                f"WEIGHTED_AVG: weight column {bound_weight!r} for '{ref_name}' "
+                "is missing; leaving the composite unset",
+            )
+            return "N/A"
         ratio_series_list.append(
             per_dispatch_ratio_series(built_avg, raw_pmc_df, sys_vars, empirical_peaks)
         )
-        weight_series_list.append(
-            _weight_counter_per_dispatch(bound_weight, raw_pmc_df)
-        )
+        weight_series_list.append(weight_series)
 
     merged = merge_dispatch_weighted_avg(ratio_series_list, weight_series_list)
     if pd.isna(merged):
@@ -308,15 +424,12 @@ def _evaluate_collect_sum_composite(
 
     series_list: List[pd.Series] = []
     for ref_name in composite.refs:
-        built_avg = _lookup_collectable_built_avg(df, ref_name, avg_col)
-        if built_avg is None:
-            console_warning(
-                f"COLLECT_SUM: collectable '{ref_name}' not found in metric table."
-            )
-            return "N/A"
-        series_list.append(
-            per_dispatch_ratio_series(built_avg, raw_pmc_df, sys_vars, empirical_peaks)
+        series = _collectable_series(
+            df, ref_name, avg_col, raw_pmc_df, sys_vars, empirical_peaks, "COLLECT_SUM"
         )
+        if series is None:
+            return "N/A"
+        series_list.append(series)
 
     merged = merge_dispatch_collect_sum(series_list)
     if pd.isna(merged):
@@ -344,25 +457,31 @@ def _evaluate_collect_ratio_composite(
     num_series: List[pd.Series] = []
     den_series: List[pd.Series] = []
     for ref_name in nums:
-        built = _lookup_collectable_built_avg(df, ref_name, avg_col)
-        if built is None:
-            console_warning(
-                f"COLLECT_RATIO: numerator collectable '{ref_name}' not found."
-            )
-            return "N/A"
-        num_series.append(
-            per_dispatch_ratio_series(built, raw_pmc_df, sys_vars, empirical_peaks)
+        series = _collectable_series(
+            df,
+            ref_name,
+            avg_col,
+            raw_pmc_df,
+            sys_vars,
+            empirical_peaks,
+            "COLLECT_RATIO numerator",
         )
+        if series is None:
+            return "N/A"
+        num_series.append(series)
     for ref_name in dens:
-        built = _lookup_collectable_built_avg(df, ref_name, avg_col)
-        if built is None:
-            console_warning(
-                f"COLLECT_RATIO: denominator collectable '{ref_name}' not found."
-            )
-            return "N/A"
-        den_series.append(
-            per_dispatch_ratio_series(built, raw_pmc_df, sys_vars, empirical_peaks)
+        series = _collectable_series(
+            df,
+            ref_name,
+            avg_col,
+            raw_pmc_df,
+            sys_vars,
+            empirical_peaks,
+            "COLLECT_RATIO denominator",
         )
+        if series is None:
+            return "N/A"
+        den_series.append(series)
 
     merged = merge_dispatch_collect_ratio(num_series, den_series)
     if pd.isna(merged):
@@ -389,7 +508,16 @@ def apply_composite_metrics(
         if avg_col is None:
             continue
 
-        for composite in graph.composite_order():
+        ordered = graph.composite_order()
+        ordered_ids = {composite.metric_id for composite in ordered}
+        for composite in graph.composites:
+            in_order = composite.metric_id in ordered_ids
+            in_table = composite.metric_id in df.index
+            if in_order or not in_table:
+                continue
+            df.at[composite.metric_id, avg_col] = "N/A"
+
+        for composite in ordered:
             if composite.metric_id not in df.index:
                 continue
             if composite.kind is CompositeKind.WEIGHTED_AVG:

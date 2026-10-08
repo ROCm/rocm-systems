@@ -12,6 +12,7 @@ from utils.metrics.pass_provenance import (
     PassLayout,
     bind_expression,
     bind_expression_dataframe,
+    bind_metric_tables_to_passes,
     build_pass_layout,
     extract_row_refs,
     natural_pass_sort_key,
@@ -408,3 +409,49 @@ def test_weight_counter_keeps_bare_name_when_its_only_copy_is_that_pass() -> Non
         layout,
     )
     assert bound == "TCC_EA0_RDREQ_sum"
+
+
+def test_weight_only_in_another_pass_is_not_the_bare_column() -> None:
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TCC_EA0_RDREQ_sum"}),
+            "pmc_perf_1": frozenset({"SQ_A"}),
+        },
+        duplicated=frozenset(),
+    )
+    bound = resolve_weight_counter_column(
+        "TCC_EA0_RDREQ_sum",
+        "read_sub",
+        _sub_metric_frame("pmc_perf_1"),
+        layout,
+    )
+    assert bound == "TCC_EA0_RDREQ_sum@pass:pmc_perf_1"
+
+
+def test_bind_strips_timestamps_before_choosing_a_pass() -> None:
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TCP_TOTAL_CACHE_ACCESSES_sum"}),
+            "pmc_perf_1": frozenset({"TCP_TOTAL_CACHE_ACCESSES_sum", "SQ_WAVES"}),
+        },
+        duplicated=frozenset({"TCP_TOTAL_CACHE_ACCESSES_sum"}),
+    )
+    expr = (
+        "to_sum(raw_pmc_df['TCP_TOTAL_CACHE_ACCESSES_sum']) / "
+        "to_sum(raw_pmc_df['End_Timestamp'] - raw_pmc_df['Start_Timestamp'])"
+    )
+    df = pd.DataFrame({"Avg": [expr], "Metric": ["rate"]})
+    bind_metric_tables_to_passes(
+        {1: df},
+        {1: "metric_table"},
+        layout,
+        "MI300",
+        frozenset({"Avg"}),
+    )
+    bound = df.at[0, "Avg"]
+    assert "TCP_TOTAL_CACHE_ACCESSES_sum@pass:pmc_perf_0" in bound
+    assert "End_Timestamp@pass" not in bound
+    assert "raw_pmc_df['End_Timestamp']" in bound
+    assert "raw_pmc_df['Start_Timestamp']" in bound

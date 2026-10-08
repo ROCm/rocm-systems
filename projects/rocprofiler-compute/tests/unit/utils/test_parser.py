@@ -391,6 +391,58 @@ class TestBuildDfs:
         assert 301 in ac.dfs
         assert 3001 not in ac.dfs
 
+    def test_filter_keeps_collectables_a_parent_needs(self):
+        metrics = {
+            "AI HBM": {
+                "value": "COLLECT_RATIO(_collect.flops, _collect.bytes)",
+            },
+            "_collect.flops": {"value": "SUM(SQ_INSTS_VALU_ADD_F32)"},
+            "_collect.bytes": {"value": "SUM(TCC_EA0_RDREQ_sum)"},
+            "Other": {"value": "SUM(SQ_WAVES)"},
+        }
+        ac = _make_arch_config([
+            (400, _metric_panel(400, 402, metrics=metrics)),
+        ])
+        build_dfs(
+            ac, filter_metrics=["4.2.0"], sys_info=_sys_info(), profiling_config={}
+        )
+        names = list(ac.dfs[402]["Metric"])
+        assert "AI HBM" in names
+        assert "_collect.flops" in names
+        assert "_collect.bytes" in names
+        assert "Other" not in names
+
+    def test_composite_parent_min_with_counter_is_rejected(self):
+        metrics = {
+            "parent": {
+                "value": "COLLECT_SUM(_collect.a, _collect.b)",
+                "min": "SUM(SQ_WAVES)",
+            },
+            "_collect.a": {"value": "SUM(SQ_INSTS_VALU_ADD_F32)"},
+            "_collect.b": {"value": "SUM(SQ_WAVES)"},
+        }
+        ac = _make_arch_config([
+            (1700, _metric_panel(1700, 1701, metrics=metrics)),
+        ])
+        with pytest.raises(ValueError, match="SQ_WAVES"):
+            build_dfs(
+                ac, filter_metrics=None, sys_info=_sys_info(), profiling_config={}
+            )
+
+    def test_composite_parent_min_none_still_parses(self):
+        metrics = {
+            "parent": {
+                "value": "COLLECT_SUM(_collect.a)",
+                "min": None,
+            },
+            "_collect.a": {"value": "SUM(SQ_WAVES)"},
+        }
+        ac = _make_arch_config([
+            (1700, _metric_panel(1700, 1701, metrics=metrics)),
+        ])
+        build_dfs(ac, filter_metrics=None, sys_info=_sys_info(), profiling_config={})
+        assert list(ac.dfs[1701]["Metric"]) == ["parent", "_collect.a"]
+
 
 # =============================================================================
 # expand_placeholder_ranges
