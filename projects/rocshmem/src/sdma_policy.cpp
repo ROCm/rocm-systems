@@ -66,7 +66,8 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank) {
 
   // Create SDMA connections to all local PEs including self. A false return leaves a partially
   // wired mesh whose null handles would silently skip puts above the SDMA threshold, so tear
-  // everything down and fall back to IPC memcpy instead.
+  // everything down and fall back to IPC memcpy instead. The handle array below is still allocated
+  // (all null after disconnect) because USE_SDMA testers index it without checking sdmaEnabled.
   for (int i = 0; i < shm_size; i++) {
     if (i != deviceId) {
       sdma_anvil::EnablePeerAccess(deviceId, i);
@@ -76,7 +77,7 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank) {
                 deviceId, i, numChannels);
       sdma_anvil::anvil.disconnect();
       sdmaEnabled = false;
-      return;
+      break;
     }
   }
 

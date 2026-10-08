@@ -44,14 +44,19 @@
 
 namespace sdma_anvil {
 
+// A CPX/DPX partition owns host SDMA engines but no xGMI engines.
+inline bool isSdmaPartition(uint32_t numSdmaXgmiEngines, uint32_t numSdmaEnginesTotal) {
+  return numSdmaXgmiEngines == 0 && numSdmaEnginesTotal > 0;
+}
+
 // True when the doubled OAM-map id cannot be used as-is. A partition (no xGMI
 // engines) folds even when the doubled id is in range: same-device peers share
 // the map diagonal and would otherwise all land on engine 0. An id past the
 // engines this node reports folds too. numSdmaEnginesTotal == 0 never folds,
 // so the modulo below is not asked to divide by zero.
 inline bool oamMapEngineNeedsFold(uint32_t numSdmaXgmiEngines, uint32_t numSdmaEnginesTotal,
-                                 int doubledEngineId) {
-  const bool partition = numSdmaXgmiEngines == 0 && numSdmaEnginesTotal > 0;
+                                  int doubledEngineId) {
+  const bool partition = isSdmaPartition(numSdmaXgmiEngines, numSdmaEnginesTotal);
   const bool outOfRange =
       numSdmaEnginesTotal > 0 && static_cast<uint32_t>(doubledEngineId) >= numSdmaEnginesTotal;
   return partition || outOfRange;
