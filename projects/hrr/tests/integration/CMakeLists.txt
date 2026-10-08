@@ -49,6 +49,10 @@
 # fake a small file system under HIP_HRR_CAPTURE_OUTPUT when the test sets
 # HRR_TEST_FAKE_FS_TOTAL; every other call goes on to libc. Contains its own
 # hidden [.][hrr-direct] workloads. POSIX only.
+#
+# hrr_clock_hook.cc defines clock_gettime for the binary, so a workload can run
+# a hook on one thread's clock reads, as the capture writer timestamps a record.
+# POSIX only.
 
 # The workload translation units carry __global__ kernels, device built-ins
 # (blockIdx/blockDim/threadIdx), hipLaunchKernelGGL, and HIP_SYMBOL, so they must
@@ -82,6 +86,7 @@ add_executable(hrr-integration-tests
   hrr_api_matrix_test.cc
   hrr_fatbin_header_test.cc
   hrr_secure_exec_test.cc
+  hrr_clock_hook.cc
 )
 set_target_properties(hrr-integration-tests PROPERTIES
   CXX_STANDARD 17
