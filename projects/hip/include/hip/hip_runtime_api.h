@@ -187,6 +187,9 @@ typedef enum __HIP_NODISCARD hipError_t UINT32_BASE {
                                             ///< launched per grid for a kernel that was launched
                                             ///< via cooperative launch APIs exceeds the maximum
                                             ///< number of allowed blocks for the current device.
+  hipErrorNotPermitted = 800,  ///< The attempted operation is not permitted, typically because the
+                               ///< resource is owned by another object that is responsible for
+                               ///< releasing it.
   hipErrorNotSupported = 801,  ///< Produced when the hip API is not supported/implemented
   hipErrorStreamCaptureUnsupported = 900,  ///< The operation is not permitted when the stream
                                            ///< is capturing.
@@ -2997,35 +3000,6 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
  */
 
 hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev);
-
-/**
- * @brief Set a device-wide attribute for a kernel on a specific device.
- *
- * Sets @p attr for @p kernel on @p device without requiring @p device to be
- * current. Supported attributes are #hipFuncAttributeMaxDynamicSharedMemorySize,
- * #hipFuncAttributePreferredSharedMemoryCarveout,
- * #hipFuncAttributeRequiredClusterWidth,
- * #hipFuncAttributeRequiredClusterHeight,
- * #hipFuncAttributeRequiredClusterDepth,
- * #hipFuncAttributeNonPortableClusterSizeAllowed, and
- * #hipFuncAttributeClusterSchedulingPolicyPreference.
- *
- * Attributes set with #hipFuncSetAttribute override values set by this function
- * for the corresponding device, regardless of call order.
- *
- * @note On AMD devices, non-portable cluster size and cluster scheduling policy
- * are stored for readback but may not affect dispatch.
- *
- * @param [in] kernel Kernel to set the attribute for
- * @param [in] attr Attribute to set
- * @param [in] value Value to set
- * @param [in] device Device ordinal on which to set the attribute
- *
- * @returns #hipSuccess, #hipErrorInvalidResourceHandle, #hipErrorInvalidValue,
- * #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction
- */
-hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr, int value,
-                                          int device);
 
 /**
  * @brief Function will be extracted for specific kernel
@@ -7156,9 +7130,16 @@ hipError_t hipModuleLoad(hipModule_t* module, const char* fname);
  *
  * @param [in] module  Module to free
  *
- * @returns #hipSuccess, #hipErrorInvalidResourceHandle
+ * @returns #hipSuccess, #hipErrorInvalidResourceHandle, #hipErrorNotFound,
+ *          #hipErrorNotPermitted
  *
  * The module is freed, and the code objects associated with it are destroyed.
+ *
+ * @note Returns #hipErrorNotPermitted if @p module was obtained from
+ * hipLibraryGetModule(). Such a module is owned by its library and should be released with
+ * hipLibraryUnload() instead.
+ *
+ * @see hipLibraryGetModule, hipLibraryUnload
  */
 hipError_t hipModuleUnload(hipModule_t module);
 /**
@@ -7325,6 +7306,26 @@ hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library,
  */
 hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library,
                                 const char* name);
+
+/**
+ * @brief Get the module handle backing a library.
+ *
+ * Returns the #hipModule_t that @p library was loaded into, so a library can be
+ * consumed by the module-based APIs
+ *
+ * @param [out] pMod    Pointer to receive the module handle.
+ * @param [in]  library Input hip library handle to retrieve module from.
+ * @return #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle,
+ *         #hipErrorNotFound
+ *
+ * @note The returned module is owned by @p library and stays valid until
+ * hipLibraryUnload(). Do not release it with hipModuleUnload(), which returns
+ * #hipErrorNotPermitted for such a handle.
+ *
+ * @see hipLibraryLoadData, hipLibraryLoadFromFile, hipLibraryUnload,
+ * hipModuleGetFunction, hipModuleUnload
+ */
+hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library);
 
 /**
  * @brief Retrieve kernel handles within a library

@@ -2444,6 +2444,33 @@ TEST_F(SymMemoryObtainRollbackTest, RmaRegisterFails_ReturnsSpaceWithoutLinking)
   EXPECT_EQ(comm->devrState.memHead, nullptr);
 }
 
+// Label fail_mem: AICOMRCCL-2428. GIN succeeding then RMA failing is the only way to reach
+// free(mem->ginSegmentInfos) with a live array; the sibling cases never build one that survives.
+// ginDereg is the witness that symMemoryUnregister saw it, since mem is gone before Obtain returns.
+TEST_F(SymMemoryObtainRollbackTest, GinSucceedsThenRmaFails_UnregistersGinAndUnlinks) {
+  PushTeam();
+  comm->devrState.ginEnabled = true;
+  RmaProxyTerms(comm, true);
+  ScopedHook gather(g_devrBootstrapAllGather, agreeing);
+  ScopedHook alloc(g_devrSpaceAlloc, AllocAt(0));
+  ScopedHook spaceFree(g_devrSpaceFree, [](ncclSpace*, int64_t, int64_t) { return ncclSuccess; });
+  ScopedHook ginReg(g_devrGinRegister,
+                    [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) {
+                      return ncclSuccess;
+                    });
+  ScopedHook ginDereg(g_devrGinDeregister, [](ncclComm*, void*[]) { return ncclSuccess; });
+  ScopedHook rmaReg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSystemError; });
+  ScopedHook rmaDereg(g_devrRmaProxyDeregister, [](ncclComm*, void*[]) { return ncclSuccess; });
+
+  EXPECT_NE(Obtain(), ncclSuccess);
+  EXPECT_EQ(ginReg.calls, 1);
+  EXPECT_EQ(rmaReg.calls, 1);
+  EXPECT_EQ(ginDereg.calls, 1);   // symMemoryUnregister GIN arm
+  EXPECT_EQ(rmaDereg.calls, 0);  // rmaHostWins[0] witness never set
+  EXPECT_EQ(spaceFree.calls, 1);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
 // Label fail_mem: a failure before the reservation must not free space that was
 // never taken.
 TEST_F(SymMemoryObtainRollbackTest, EarlyFailure_DoesNotFreeUnreservedSpace) {
