@@ -124,7 +124,8 @@ protected:
             handle_ = dlopen(pluginPath_.c_str(), RTLD_NOW | RTLD_LOCAL);
             if(handle_ == nullptr)
             {
-                fail = std::string("cannot dlopen ") + pluginPath_ + ": " + dlerror();
+                const char* err = dlerror();
+                fail = "cannot dlopen " + pluginPath_ + ": " + (err ? err : "no loader error");
             }
             else
             {
@@ -254,6 +255,20 @@ protected:
         return recs;
     }
 
+    // The records from index `from` on, with parent indices rebased onto them, so
+    // a test can judge work done after a point while the communicator stays alive.
+    static std::vector<RcclKchRecord> recordsFrom(const std::vector<RcclKchRecord>& recs, size_t from)
+    {
+        std::vector<RcclKchRecord> tail;
+        for(size_t i = from; i < recs.size(); i++)
+        {
+            RcclKchRecord r = recs[i];
+            r.parentIndex = (r.parentIndex >= (int64_t)from) ? r.parentIndex - (int64_t)from : -1;
+            tail.push_back(r);
+        }
+        return tail;
+    }
+
     // Wait for the profiler thread to deliver every KernelCh the recorded tasks
     // advertise. The stream being synchronized only means the kernels finished;
     // the thread observes them asynchronously.
@@ -291,8 +306,10 @@ protected:
     // transport. Non-fatal so every rank reaches the closing barrier. Each
     // communicator has one profiler thread unless it shares its parent's, so the
     // expected thread count is the number of thread-owning communicators involved.
+    // slotReuse is for runs that drive the host past the per-channel slot ring:
+    // start and stop are then read from slots that may hold different ops.
     KernelChStats checkBalanced(const std::vector<RcclKchRecord>& recs, const char* what,
-                                size_t expectedThreads = 1)
+                                size_t expectedThreads = 1, bool slotReuse = false)
     {
         KernelChStats s;
         std::map<int64_t, std::vector<int>> childChannels;  // task index -> channel ids
@@ -322,8 +339,9 @@ protected:
             EXPECT_EQ(1, r.stopStates) << what << ": KernelCh on channel " << r.channelId
                                        << " got " << r.stopStates << " stop states";
             EXPECT_NE(0u, r.startTimer) << what << ": KernelCh start timer is zero";
-            EXPECT_GE(r.stopTimer, r.startTimer)
-                << what << ": KernelCh on channel " << r.channelId << " stops before it starts";
+            if(!slotReuse)
+                EXPECT_GE(r.stopTimer, r.startTimer)
+                    << what << ": KernelCh on channel " << r.channelId << " stops before it starts";
         }
 
         for(auto& [taskIdx, channels] : childChannels)
@@ -474,9 +492,10 @@ TEST_F(ProfilerKernelChMPITest, ProxyLessIntraNodeIsTimed)
     EXPECT_EQ(hipSuccess, hipStreamSynchronize(stream));
 
     auto recs = waitForDrain(kIters);
-    // The premise first: had this path used the proxy, the old design covered it too.
-    EXPECT_EQ(0u, proxyOps_()) << "intra-node AllReduce posted proxy ops, so this run does not "
-                                  "exercise a proxy-less plan";
+    // The premise first: had this path used the proxy, the old design covered it
+    // too. A host where neither P2P nor SHM is usable falls back to the network.
+    KCH_SKIP_IF_NEEDED(mpiCoordinatedSkipReason(proxyOps_() != 0, "intra-node AllReduce posted proxy ops, so "
+                                                                   "this host does not offer a proxy-less plan"));
     KernelChStats s = checkBalanced(recs, "intra-node AllReduce");
     EXPECT_EQ((size_t)kIters, s.tasks);
     freeBuffers();
@@ -688,9 +707,9 @@ TEST_F(ProfilerKernelChMPITest, MixedEagerAndGraphPostInDeviceOrder)
 
 // A burst of small collectives with no synchronization, well past the 64 slots
 // the device keeps per channel. The core accepts that a thread that falls that
-// far behind may time an op from a reused slot, so timeline order is not
-// guaranteed here; every op must still be delivered exactly once, with nothing
-// left pending or stopped twice.
+// far behind may time an op from a reused slot, so neither timeline order nor
+// stop-after-start is guaranteed here; every op must still be delivered exactly
+// once, with nothing left pending or stopped twice.
 TEST_F(ProfilerKernelChMPITest, BurstPastSlotRingIsBalanced)
 {
     KCH_REQUIRE_RECORDER();
@@ -705,7 +724,7 @@ TEST_F(ProfilerKernelChMPITest, BurstPastSlotRingIsBalanced)
     EXPECT_EQ(hipSuccess, hipStreamSynchronize(stream));
 
     auto recs = waitForDrain(kIters);
-    KernelChStats s = checkBalanced(recs, "burst");
+    KernelChStats s = checkBalanced(recs, "burst", 1, /*slotReuse=*/true);
     EXPECT_EQ((size_t)kIters, s.tasks);
     freeBuffers();
 }
@@ -767,14 +786,7 @@ TEST_P(ProfilerKernelChSplitMPITest, SplitThreadOwnership)
     const size_t before = snapshot().size();
     for(int i = 0; i < kIters; i++) EXPECT_EQ(ncclSuccess, allReduce(parent, stream));
     EXPECT_EQ(hipSuccess, hipStreamSynchronize(stream));
-    auto after = waitForDrain(2 * kIters + kIters);
-    std::vector<RcclKchRecord> tail;
-    for(size_t i = before; i < after.size(); i++)
-    {
-        RcclKchRecord r = after[i];
-        r.parentIndex = (r.parentIndex >= (int64_t)before) ? r.parentIndex - (int64_t)before : -1;
-        tail.push_back(r);
-    }
+    auto tail = recordsFrom(waitForDrain(2 * kIters + kIters), before);
     KernelChStats s = checkBalanced(tail, "parent after child destroyed");
     EXPECT_EQ((size_t)kIters, s.tasks);
     freeBuffers();
@@ -787,6 +799,9 @@ INSTANTIATE_TEST_SUITE_P(Share, ProfilerKernelChSplitMPITest, ::testing::Values(
 
 // Aborting with work in flight must let the thread drain and exit: abort joins
 // it, so a thread stuck waiting on counters that will never advance hangs abort.
+// The core drops ops whose kernels will never finish without stopping their
+// KernelCh, so after the abort a KernelCh may be left unstopped, but none may be
+// stopped twice.
 TEST_F(ProfilerKernelChMPITest, AbortWithWorkInFlightReturns)
 {
     KCH_REQUIRE_RECORDER();
@@ -795,6 +810,12 @@ TEST_F(ProfilerKernelChMPITest, AbortWithWorkInFlightReturns)
     ncclComm_t comm = getActiveCommunicator();
     hipStream_t stream = getActiveStream();
     ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 22));
+
+    // Shows the communicator is timed at all, which the abort itself cannot.
+    EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
+    EXPECT_EQ(hipSuccess, hipStreamSynchronize(stream));
+    KernelChStats warm = checkBalanced(waitForDrain(1), "before abort");
+    EXPECT_EQ(1u, warm.tasks);
 
     for(int i = 0; i < 64; i++) EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
     // Otherwise only an idle teardown is exercised.
@@ -805,6 +826,15 @@ TEST_F(ProfilerKernelChMPITest, AbortWithWorkInFlightReturns)
     test_comm_ = nullptr;  // aborted; cleanup must not destroy it again
     EXPECT_LT(secs, 60.0) << "ncclCommAbort took " << secs << " s with KernelCh work in flight";
     EXPECT_EQ(0u, anomalies_()) << "recorder saw unbalanced calls around abort";
+    size_t unstopped = 0;
+    for(const auto& r : snapshot())
+    {
+        if(r.type != ncclProfileKernelCh) continue;
+        EXPECT_LE(r.stopEvents, 1) << "KernelCh on channel " << r.channelId << " stopped " << r.stopEvents
+                                   << " times around abort";
+        if(r.stopEvents == 0) ++unstopped;
+    }
+    RecordProperty("UnstoppedKernelChAfterAbort", (int)unstopped);
     (void)hipStreamSynchronize(stream);
     freeBuffers();
 }
@@ -831,7 +861,11 @@ TEST_F(ProfilerKernelChMPITest, TimersAreWallClockTicks)
     hipEvent_t begin = nullptr, end = nullptr;
     ASSERT_EQ(hipSuccess, hipEventCreate(&begin));
     ASSERT_EQ(hipSuccess, hipEventCreate(&end));
+    // Connection setup on first use would otherwise sit inside the bracket with
+    // the device idle.
+    EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
     EXPECT_EQ(hipSuccess, hipStreamSynchronize(stream));
+    const size_t before = waitForDrain(1).size();
     constexpr int kIters = 8;
     EXPECT_EQ(hipSuccess, hipEventRecord(begin, stream));
     for(int i = 0; i < kIters; i++) EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
@@ -843,7 +877,7 @@ TEST_F(ProfilerKernelChMPITest, TimersAreWallClockTicks)
     (void)hipEventDestroy(begin);
     (void)hipEventDestroy(end);
 
-    auto recs = waitForDrain(kIters);
+    auto recs = recordsFrom(waitForDrain(1 + kIters), before);
     KernelChStats s = checkBalanced(recs, "timer units");
     EXPECT_EQ((size_t)kIters, s.tasks);
     uint64_t lo = UINT64_MAX, hi = 0;
