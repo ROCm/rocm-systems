@@ -94,7 +94,7 @@ public:
 
 private:
   void publish(int value) {
-    // In libstdc++ 13's int-sized futex path, notify_one checks the bucket's
+    // In libstdc++'s int-sized futex path, notify_one checks the bucket's
     // waiter count before deciding whether to wake. Order publication before
     // that check: on x86 a release store can remain buffered while the check
     // sees no waiter and a newly registered waiter still sees the old state.

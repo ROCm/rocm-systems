@@ -621,19 +621,20 @@ TEST(MatrixCoexecutionTest, SharedPoolClaimsAndReclaimsCapacityAcrossBitmapWords
 }
 
 TEST(MatrixCoexecutionTest, SharedPoolMakesProgressUnderConcurrentHandoffs) {
+  constexpr size_t kIssuerCount = 8;
   struct alignas(64) Progress {
     std::atomic<uint64_t> completed{0};
     uint64_t offloads = 0;
     bool matched = true;
   };
-  std::array<Progress, 8> progress;
+  std::array<Progress, kIssuerCount> progress;
   Instruction increment("increment",
                         [](Instruction &, void *opaque) { ++*static_cast<uint64_t *>(opaque); });
   mc::SharedPool pool(progress.size());
   ASSERT_TRUE(mc::helpers_enabled());
   std::atomic<bool> stop{false};
   std::barrier started(progress.size() + 1);
-  std::array<std::thread, 8> issuers;
+  std::array<std::thread, kIssuerCount> issuers;
   for (size_t i = 0; i != issuers.size(); ++i)
     issuers[i] = std::thread([&, i] {
       uint64_t value = 0;
@@ -641,7 +642,9 @@ TEST(MatrixCoexecutionTest, SharedPoolMakesProgressUnderConcurrentHandoffs) {
       started.arrive_and_wait();
       while (!stop.load(std::memory_order_relaxed)) {
         const auto before = value;
-        auto ticket = pool.submit(increment, &value);
+        // Do not add an atomic RMW or other synchronization between submit and
+        // finish: a locked instruction could mask the publication race.
+        const mc::SharedPool::Ticket ticket = pool.submit(increment, &value);
         if (ticket) {
           if (pool.finish(ticket))
             progress[i].matched = false;
@@ -653,8 +656,6 @@ TEST(MatrixCoexecutionTest, SharedPoolMakesProgressUnderConcurrentHandoffs) {
           progress[i].matched = false;
         if (!progress[i].matched)
           stop.store(true, std::memory_order_relaxed);
-        // Do not add an atomic RMW or other synchronization between submit and
-        // finish: a locked instruction could mask the publication race.
         progress[i].completed.store(++completed, std::memory_order_relaxed);
       }
     });
@@ -662,8 +663,8 @@ TEST(MatrixCoexecutionTest, SharedPoolMakesProgressUnderConcurrentHandoffs) {
   started.arrive_and_wait();
   using Clock = std::chrono::steady_clock;
   const auto begin = Clock::now();
-  std::array<uint64_t, 8> previous{};
-  std::array<Clock::time_point, 8> advanced;
+  std::array<uint64_t, kIssuerCount> previous{};
+  std::array<Clock::time_point, kIssuerCount> advanced;
   advanced.fill(begin);
   while (!stop.load(std::memory_order_relaxed) && Clock::now() - begin < std::chrono::seconds(20)) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));

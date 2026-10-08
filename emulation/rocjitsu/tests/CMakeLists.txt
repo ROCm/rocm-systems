@@ -873,14 +873,15 @@ endforeach()
 # CTest can bound a deadlocked child process, including helper destruction.
 rj_add_gtest_tests(rocjitsu_tests TEST_FILTER "${_rj_gtest_exclusions}")
 
-# Run in a fresh process so the fork guard cannot disable SharedPool helpers.
-# The test stresses handoffs for 20 seconds; the external timeout also bounds
-# a lost wake while joining issuers or destroying idle helpers.
+# Register separately to bound handoffs and shutdown with an external timeout.
+# The test stresses handoffs for 20 seconds; CTest also bounds a lost wake while
+# joining issuers or destroying idle helpers.
 rj_add_test(
     NAME "MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs"
     COMMAND
         $<TARGET_FILE:rocjitsu_tests>
         "--gtest_filter=MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs"
+    RUN_SERIAL
     TIMEOUT 40
     INSTALL_COMMAND
         "bin/rocjitsu_tests"
