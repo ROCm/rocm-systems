@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+import config
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 from utils.mem_chart_common import strip_ansi
 from utils.tty import (
@@ -21,6 +22,7 @@ from utils.tty import (
     format_table_output,
     has_time_data,
     print_operator_node,
+    resolve_hidden_columns,
     show_all,
     show_call_tree,
     show_operator_summary,
@@ -111,6 +113,39 @@ def sample_time_data() -> pd.DataFrame:
 def original_ns_values() -> dict[str, float]:
     """Original nanosecond values for the time row of sample_time_data."""
     return {"Avg": 3446.64, "Min": 1769.25, "Max": 12532.12}
+
+
+@pytest.mark.parametrize(
+    ("include_cols", "expected"),
+    [
+        pytest.param(None, ["Description", "Unit", "Count"], id="defaults"),
+        pytest.param(["Description"], ["Unit", "Count"], id="include-description"),
+        pytest.param(["Avg"], ["Description", "Unit", "Count"], id="include-avg"),
+    ],
+)
+def test_resolve_hidden_columns(
+    monkeypatch: pytest.MonkeyPatch,
+    include_cols: list[str] | None,
+    expected: list[str],
+) -> None:
+    """Explicitly included columns are removed from the hidden columns."""
+    hidden_columns = ["Description", "Unit", "Count"]
+    monkeypatch.setattr(config, "HIDDEN_COLUMNS_CLI", hidden_columns)
+
+    assert resolve_hidden_columns(make_args(include_cols=include_cols)) == expected
+
+
+def test_resolve_hidden_columns_does_not_modify_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mutating resolved columns does not change the configured hidden columns."""
+    hidden_columns = ["Description", "Unit", "Count"]
+    monkeypatch.setattr(config, "HIDDEN_COLUMNS_CLI", hidden_columns)
+
+    resolved = resolve_hidden_columns(make_args(include_cols=None))
+    resolved.append("Avg")
+
+    assert config.HIDDEN_COLUMNS_CLI == ["Description", "Unit", "Count"]
 
 
 def test_format_table_output_suppresses_empty_column() -> None:
