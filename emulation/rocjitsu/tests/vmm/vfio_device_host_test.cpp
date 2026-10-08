@@ -1252,7 +1252,6 @@ constexpr uint64_t kGapIova = 0x60000000;
 constexpr uint64_t kProtectionIova = 0x70000000;
 constexpr uint64_t kMultiSegmentIova = 0x80000000;
 constexpr uint64_t kReconnectIova = 0x90000000;
-constexpr std::size_t kBoundaryHalfBytes = 64;
 // The two successful split tests copy 64 bytes from the first registration
 // and 96 from the second, so a loop that reuses the first entry's length
 // cannot pass.
@@ -1298,12 +1297,12 @@ private:
 /// hold the same bytes and a cursor bug that reuses one page for every
 /// region fails the comparison, as does a transfer that lands at the wrong
 /// offset. The remaining bytes vary with seed and position.
-std::vector<std::byte> byte_pattern(std::size_t length, uint8_t seed, uint64_t base = 0) {
+std::vector<std::byte> byte_pattern(std::size_t length, uint8_t seed) {
   std::vector<std::byte> bytes(length);
   const uint64_t page_size = static_cast<uint64_t>(::sysconf(_SC_PAGESIZE));
   for (std::size_t i = 0; i < length; ++i) {
-    const uint64_t offset_in_page = (base + i) % page_size;
-    const uint64_t page = (base + i) / page_size;
+    const uint64_t offset_in_page = i % page_size;
+    const uint64_t page = i / page_size;
     if (offset_in_page < 2) {
       // The page index, little-endian, in the first two bytes of the page.
       bytes[i] = static_cast<std::byte>((page >> (offset_in_page * 8)) & 0xFF);
@@ -1390,6 +1389,9 @@ TEST(VfioDeviceHostDma, TransfersWithinOneRegisteredWindow) {
   const std::vector<std::byte> sentinel_after = byte_pattern(page_size - tail, 0x88);
 
   const std::vector<std::byte> source = byte_pattern(kLength, 0x31);
+  // The payload starts with 00 00. A zero-filled range would still match if
+  // the write left those two bytes untouched.
+  ASSERT_TRUE(write_all_at(backing.fd(), kStart, complemented(source)));
 
   EXPECT_TRUE(served.dma().write(kSingleWindowIova + kStart, source));
 
@@ -1492,18 +1494,19 @@ TEST(VfioDeviceHostDma, RejectsTransfersThroughAnUnmappedGap) {
   ASSERT_TRUE(write_all_at(backing.fd(), 0, first_sentinel));
   ASSERT_TRUE(write_all_at(backing.fd(), 2 * page_size, second_sentinel));
 
-  const std::vector<std::byte> write_source = byte_pattern(kBoundaryHalfBytes * 2, 0x33);
-  std::vector<std::byte> read_destination(kBoundaryHalfBytes * 2, std::byte{0xEE});
+  constexpr std::size_t kGapHalfBytes = 64;
+  const std::vector<std::byte> write_source = byte_pattern(kGapHalfBytes * 2, 0x33);
+  std::vector<std::byte> read_destination(kGapHalfBytes * 2, std::byte{0xEE});
 
-  std::vector<std::byte> buffer(kBoundaryHalfBytes, std::byte{0});
+  std::vector<std::byte> buffer(kGapHalfBytes, std::byte{0});
   EXPECT_FALSE(served.dma().read(kGapIova + page_size, buffer))
       << "a read wholly inside the gap must fail";
   EXPECT_FALSE(served.dma().write(kGapIova + page_size, buffer))
       << "a write wholly inside the gap must fail";
 
-  EXPECT_FALSE(served.dma().read(kGapIova + page_size - kBoundaryHalfBytes, read_destination))
+  EXPECT_FALSE(served.dma().read(kGapIova + page_size - kGapHalfBytes, read_destination))
       << "a read crossing into the gap must fail";
-  EXPECT_FALSE(served.dma().write(kGapIova + page_size - kBoundaryHalfBytes, write_source))
+  EXPECT_FALSE(served.dma().write(kGapIova + page_size - kGapHalfBytes, write_source))
       << "a write crossing into the gap must fail";
 
   // Nothing was copied on either rejection: the windows keep their sentinels
@@ -1513,7 +1516,7 @@ TEST(VfioDeviceHostDma, RejectsTransfersThroughAnUnmappedGap) {
   EXPECT_EQ(unchanged, first_sentinel) << "the rejected crossing write touched the first window";
   ASSERT_TRUE(read_all_at(backing.fd(), 2 * page_size, unchanged));
   EXPECT_EQ(unchanged, second_sentinel) << "the rejected crossing write touched the second window";
-  EXPECT_EQ(read_destination, std::vector<std::byte>(kBoundaryHalfBytes * 2, std::byte{0xEE}))
+  EXPECT_EQ(read_destination, std::vector<std::byte>(kGapHalfBytes * 2, std::byte{0xEE}))
       << "the rejected crossing read modified its destination";
 }
 
@@ -1549,6 +1552,19 @@ TEST(VfioDeviceHostDma, EnforcesWriteProtection) {
   std::vector<std::byte> unchanged(page_size);
   ASSERT_TRUE(read_all_at(read_only.fd(), 0, unchanged));
   EXPECT_EQ(unchanged, initial) << "the rejected write changed the backing file";
+
+  // These two choose their own protection flags, separately from a bulk write.
+  EXPECT_EQ(served.host().atomic_store(kProtectionIova, sizeof(uint32_t), 0x11223344),
+            simdojo::DmaAccessOutcome::Faulted);
+  ASSERT_TRUE(read_all_at(read_only.fd(), 0, unchanged));
+  EXPECT_EQ(unchanged, initial) << "the rejected atomic store changed the backing file";
+
+  const auto exchanged =
+      served.host().compare_exchange(kProtectionIova, sizeof(uint32_t), 0, 0x55667788);
+  EXPECT_EQ(exchanged.outcome, simdojo::DmaAccessOutcome::Faulted);
+  EXPECT_FALSE(exchanged.exchanged);
+  ASSERT_TRUE(read_all_at(read_only.fd(), 0, unchanged));
+  EXPECT_EQ(unchanged, initial) << "the rejected compare-exchange changed the backing file";
 
   const std::vector<std::byte> accepted = byte_pattern(page_size, 0x77);
   EXPECT_TRUE(served.dma().write(kProtectionIova + page_size, accepted));
