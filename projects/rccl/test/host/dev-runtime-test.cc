@@ -2250,9 +2250,9 @@ TEST_F(SymMemoryRegisterRmaTest, Succeeds_ConnectsThenRegisters) {
   EXPECT_EQ(registeredWins, mem.rmaHostWins);
 }
 
-// Branch: a multi-segment layout still brings the proxy up -- other windows on
-// this communicator need it -- but has nothing RMA can register.
-TEST_F(SymMemoryRegisterRmaTest, MultiSegment_ConnectsWithoutRegistering) {
+// Branch: with NCCL_MULTI_SEGMENT_REGISTER=0 (the host fake's default) a
+// multi-segment layout still brings the proxy up but registers nothing.
+TEST_F(SymMemoryRegisterRmaTest, MultiSegmentRegisterOff_ConnectsWithoutRegistering) {
   mem.maxGlobalNumSegments = 2;
   ScopedHook connect(g_devrRmaProxyConnectOnce, [](ncclComm*) { return ncclSuccess; });
   ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
@@ -2260,6 +2260,50 @@ TEST_F(SymMemoryRegisterRmaTest, MultiSegment_ConnectsWithoutRegistering) {
   EXPECT_EQ(symMemoryRegisterRma(comm, &mem), ncclSuccess);
   EXPECT_EQ(connect.calls, 1);
   EXPECT_EQ(reg.calls, 0);
+}
+
+// Branch: with the production default (=1) a multi-segment window registers its
+// whole range, so hierarchical CE puts have an RMA handle.
+TEST_F(SymMemoryRegisterRmaTest, MultiSegmentRegisterOn_RegistersWholeRange) {
+  mem.maxGlobalNumSegments = 2;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "MULTI_SEGMENT_REGISTER" ? 1 : deftVal;
+  });
+  void* registeredAddr = nullptr;
+  size_t registeredSize = 0;
+  ScopedHook reg(g_devrRmaProxyRegister, [&](ncclComm*, void* addr, size_t size, void*[]) {
+    registeredAddr = addr;
+    registeredSize = size;
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(symMemoryRegisterRma(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reg.calls, 1);
+  EXPECT_EQ(registeredAddr, mem.primaryAddr);
+  EXPECT_EQ(registeredSize, mem.size);
+}
+
+// Branch: teardown releases a multi-segment window's RMA MR; rmaHostWins[0] is
+// the witness that registration completed.
+TEST_F(SymMemoryRegisterRmaTest, Unregister_MultiSegmentRegistered_DeregistersMr) {
+  mem.maxGlobalNumSegments = 2;
+  mem.rmaHostWins[0] = reinterpret_cast<void*>(0x1);
+  comm->devrState.rmaProxyEnabled = true;
+  ScopedHook dereg(g_devrRmaProxyDeregister, [](ncclComm*, void*[]) { return ncclSuccess; });
+
+  symMemoryUnregister(comm, &mem);
+  EXPECT_EQ(dereg.calls, 1);
+}
+
+// Branch: nothing was registered (=0 skip or a failed register), so teardown
+// does not walk the proxy.
+TEST_F(SymMemoryRegisterRmaTest, Unregister_NotRegistered_SkipsMrDeregister) {
+  mem.maxGlobalNumSegments = 2;
+  comm->devrState.rmaProxyEnabled = true;
+  ScopedHook dereg(g_devrRmaProxyDeregister, [](ncclComm*, void*[]) { return ncclSuccess; });
+
+  symMemoryUnregister(comm, &mem);
+  EXPECT_EQ(dereg.calls, 0);
 }
 
 // Branch: the proxy is unreachable, so nothing is registered against it.

@@ -873,7 +873,8 @@ fail:
 static ncclResult_t symMemoryRegisterRma(struct ncclComm* comm, struct ncclDevrMemory* mem) {
   if (!ncclDevrWinRegEnabled(mem->winFlags, ncclDevrRegisterRma)) return ncclSuccess;
   NCCLCHECK(ncclRmaProxyConnectOnce(comm));
-  if (mem->maxGlobalNumSegments == 1) {
+  // RCCL registers one MR per segment unless NCCL_MULTI_SEGMENT_REGISTER=0.
+  if (mem->maxGlobalNumSegments == 1 || ncclParamMultiSegmentRegister()) {
     NCCLCHECK(ncclRmaProxyRegister(comm, mem->primaryAddr, mem->size, mem->rmaHostWins));
   }
   return ncclSuccess;
@@ -890,7 +891,7 @@ static void symMemoryUnregister(struct ncclComm* comm, struct ncclDevrMemory* me
   // as windowRegisterNonSym / ncclCommWindowDeregister). Skip if connect/register
   // failed partway so deregister does not walk an unbound rmaCommCount.
   if (devr->rmaProxyEnabled && ncclDevrWinRegEnabled(mem->winFlags, ncclDevrRegisterRma) &&
-      mem->maxGlobalNumSegments == 1 && mem->rmaHostWins[0] != nullptr) {
+      mem->rmaHostWins[0] != nullptr) {
     (void)ncclRmaProxyDeregister(comm, mem->rmaHostWins);
   }
 }

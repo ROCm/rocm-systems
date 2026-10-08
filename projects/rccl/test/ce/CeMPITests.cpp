@@ -29,6 +29,9 @@
 #include <vector>
 
 #ifdef MPI_TESTS_ENABLED
+#ifdef RCCL_HAS_RMA_IB_PROXY
+#include "../transport/RmaMPI/RmaMultiSegmentHelpers.hpp"
+#endif
 
 using namespace MPITestConstants;
 using namespace RCCLTestHelpers;
@@ -37,6 +40,9 @@ namespace CeMPITestConstants
 {
 constexpr size_t kSmallCount      = 4096;   // elements per rank for fast tests
 constexpr size_t kMediumCount     = 65536;  // elements per rank for larger tests
+// 4 MiB per rank so every window's payload crosses its segment boundary.
+constexpr size_t kMultiSegmentElems = 1u << 20;
+constexpr int    kMultiSegmentCount = 2;
 // Total AllReduce message size that forces the CE multi-chunk pipeline. A shard
 // spills past one staging slot once the message exceeds NCCL_CE_AR_MAX_MSG_BYTES
 // (256 MiB); 512 MiB yields >= 4 chunks per shard at every rank count, plus a
@@ -104,6 +110,15 @@ protected:
 
     void TearDown() override
     {
+#ifdef RCCL_HAS_RMA_IB_PROXY
+        for(auto& w : msWins_)
+        {
+            if(w.win) ncclCommWindowDeregister(getActiveCommunicator(), w.win);
+            RCCLRmaTests::ReleaseMappedVmm(w.buf.base, w.buf.totalSize, w.buf.handles, w.buf.segSizes,
+                                           w.buf.segSize);
+        }
+        msWins_.clear();
+#endif
         // Destroy communicator before logCtx_ so its log lines flush to the debug file first.
         MPITestBase::TearDown();
 
@@ -378,6 +393,43 @@ protected:
     {
         return RCCLTestHelpers::ncclSymBufAlloc(getActiveCommunicator(), bytes, sb);
     }
+
+    // Window of at least `bytes`; numSegments_ > 1 maps it over that many physical VMM segments.
+    void allocWindow(size_t bytes, SymBuf& sb, void** ptr)
+    {
+        if(numSegments_ <= 1)
+        {
+            ASSERT_EQ(ncclSuccess, allocSymBuf(bytes, sb));
+            *ptr = sb.ptr;
+            return;
+        }
+#ifdef RCCL_HAS_RMA_IB_PROXY
+        int dev = 0;
+        ASSERT_EQ(hipSuccess, hipGetDevice(&dev));
+        MsWin w;
+        int ok = RCCLRmaTests::AllocMultiSegmentVmm(dev, numSegments_, (bytes + numSegments_ - 1) / numSegments_,
+                                                    &w.buf) ? 1 : 0;
+        int allOk = 0;
+        MPI_Allreduce(&ok, &allOk, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+        if(ok) msWins_.push_back(w);
+        ASSERT_EQ(1, allOk) << "multi-segment VMM allocation failed on some rank";
+        ASSERT_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), w.buf.ptr, w.buf.totalSize,
+                                                      &msWins_.back().win, NCCL_WIN_COLL_SYMMETRIC));
+        *ptr = w.buf.ptr;
+#else
+        GTEST_FAIL() << "multi-segment windows need RCCL_HAS_RMA_IB_PROXY";
+#endif
+    }
+
+    int numSegments_ = 1;
+#ifdef RCCL_HAS_RMA_IB_PROXY
+    struct MsWin
+    {
+        RCCLRmaTests::MultiSegmentVmmBuffer buf;
+        ncclWindow_t                        win = nullptr;
+    };
+    std::vector<MsWin> msWins_;
+#endif
 };
 
 // ===========================================================================
@@ -410,9 +462,11 @@ protected:
         ncclCommCount(getActiveCommunicator(), &nRanks);
 
         SymBuf sendSym, recvSym;
-        ASSERT_EQ(ncclSuccess, allocSymBuf(count * sizeof(float), sendSym));
-        ASSERT_EQ(ncclSuccess,
-                  allocSymBuf(count * static_cast<size_t>(nRanks) * sizeof(float), recvSym));
+        void*  sendPtr = nullptr;
+        void*  recvPtr = nullptr;
+        ASSERT_NO_FATAL_FAILURE(allocWindow(count * sizeof(float), sendSym, &sendPtr));
+        ASSERT_NO_FATAL_FAILURE(
+            allocWindow(count * static_cast<size_t>(nRanks) * sizeof(float), recvSym, &recvPtr));
 
         const int iterations = requireScaleOut ? scaleOutIters : 1;
         for(int iter = 0; iter < iterations; ++iter)
@@ -426,19 +480,19 @@ protected:
             ASSERT_EQ(
                 hipSuccess,
                 initializeBufferWithPattern<float>(
-                    sendSym.ptr, count,
+                    sendPtr, count,
                     [rank, epoch, halfCount](size_t i) {
                         return static_cast<float>(epoch + rank + 1) +
                                (i >= halfCount ? kUpperHalfBias : 0.0f);
                     }));
 
             ASSERT_EQ(ncclSuccess,
-                      ncclAllGather(sendSym.ptr, recvSym.ptr, count, ncclFloat32,
+                      ncclAllGather(sendPtr, recvPtr, count, ncclFloat32,
                                     getActiveCommunicator(), getActiveStream()));
             ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
             ASSERT_TRUE(verifyBufferData<float>(
-                recvSym.ptr, count * static_cast<size_t>(nRanks),
+                recvPtr, count * static_cast<size_t>(nRanks),
                 [count, epoch, halfCount](size_t i) {
                     return static_cast<float>(epoch + i / count + 1) +
                            (i % count >= halfCount ? kUpperHalfBias : 0.0f);
@@ -455,7 +509,7 @@ protected:
             int algo = 0, proto = 0, nChannels = 0;
             ASSERT_EQ(ncclSuccess,
                       rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllGather, count, ncclFloat32,
-                                          ncclSum, sendSym.ptr, recvSym.ptr, /*graphCapturing=*/0, &algo,
+                                          ncclSum, sendPtr, recvPtr, /*graphCapturing=*/0, &algo,
                                           &proto, &nChannels))
                 << testId << ": rcclGetCollImplInfo failed";
             EXPECT_EQ(algo, static_cast<int>(RCCL_CE_REGISTERED))
@@ -492,6 +546,12 @@ TEST_F(CeMPI_AllGather, MultiNodeHierarchicalChunkBoundary)
     runAllGather(kMinRanks4, kChunkBoundaryCount,
                  "CeMPI_AllGather/MultiNodeHierarchicalChunkBoundary", true, 1,
                  kChunkBoundaryMaxRanks);
+}
+// CE-MPI-AG-07: two-segment windows; the RMA proxy must register them or the puts are rejected.
+TEST_F(CeMPI_AllGather, MultiNodeHierarchicalMultiSegment)
+{
+    numSegments_ = kMultiSegmentCount;
+    runAllGather(kMinRanks4, kMultiSegmentElems, "CeMPI_AllGather/MultiNodeHierarchicalMultiSegment", true);
 }
 
 // ===========================================================================
@@ -532,8 +592,10 @@ protected:
         const size_t totalElem = count * static_cast<size_t>(nRanks);
 
         SymBuf sendSym, recvSym;
-        ASSERT_EQ(ncclSuccess, allocSymBuf(totalElem * sizeof(float), sendSym));
-        ASSERT_EQ(ncclSuccess, allocSymBuf(totalElem * sizeof(float), recvSym));
+        void*  sendPtr = nullptr;
+        void*  recvPtr = nullptr;
+        ASSERT_NO_FATAL_FAILURE(allocWindow(totalElem * sizeof(float), sendSym, &sendPtr));
+        ASSERT_NO_FATAL_FAILURE(allocWindow(totalElem * sizeof(float), recvSym, &recvPtr));
 
         const int iterations = requireScaleOut ? scaleOutIters : 1;
         for(int iter = 0; iter < iterations; ++iter)
@@ -548,20 +610,20 @@ protected:
             ASSERT_EQ(
                 hipSuccess,
                 initializeBufferWithPattern<float>(
-                    sendSym.ptr, totalElem,
+                    sendPtr, totalElem,
                     [rank, nRanks, count, epoch, halfCount](size_t i) {
                         return static_cast<float>(epoch + rank * nRanks + i / count + 1) +
                                (i % count >= halfCount ? kUpperHalfBias : 0.0f);
                     }));
 
             ASSERT_EQ(ncclSuccess,
-                      ncclAlltoAll(sendSym.ptr, recvSym.ptr, count, ncclFloat32,
+                      ncclAlltoAll(sendPtr, recvPtr, count, ncclFloat32,
                                    getActiveCommunicator(), getActiveStream()));
             ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
             // Slice s of the result is what rank s sent to us, i.e. epoch + s*nRanks + rank + 1.
             ASSERT_TRUE(verifyBufferData<float>(
-                recvSym.ptr, totalElem,
+                recvPtr, totalElem,
                 [count, nRanks, rank, epoch, halfCount](size_t i) {
                     return static_cast<float>(epoch + (i / count) * nRanks + rank + 1) +
                            (i % count >= halfCount ? kUpperHalfBias : 0.0f);
@@ -603,6 +665,12 @@ TEST_F(CeMPI_AlltoAll, MultiNodeHierarchicalChunkBoundary)
     runAlltoAll(kMinRanks4, kChunkBoundaryCount,
                 "CeMPI_AlltoAll/MultiNodeHierarchicalChunkBoundary", true, 1,
                 kChunkBoundaryMaxRanks);
+}
+// CE-MPI-A2A-07: two-segment windows; the RMA proxy must register them or the puts are rejected.
+TEST_F(CeMPI_AlltoAll, MultiNodeHierarchicalMultiSegment)
+{
+    numSegments_ = kMultiSegmentCount;
+    runAlltoAll(kMinRanks4, kMultiSegmentElems, "CeMPI_AlltoAll/MultiNodeHierarchicalMultiSegment", true);
 }
 
 // ===========================================================================
