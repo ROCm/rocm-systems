@@ -246,3 +246,93 @@ def test_uninitialized_tensor_item_still_raises(monkeypatch):
         wrapped.item()
     with pytest.raises(ValueError, match="uninitialized"):
         wrapped.contiguous()
+
+
+def test_lazy_batch_norm_to_cuda_keeps_uninitialized_buffer(monkeypatch):
+    from tests.integration.common import require_torch
+    from utils.inject_roctx._backends import torch as torch_backend
+
+    require_torch(gpu=True)
+    import torch
+    from torch.nn.parameter import UninitializedBuffer, UninitializedParameter
+
+    if not torch_backend._resolve_torch():
+        pytest.skip("torch could not be resolved for inject_roctx backend")
+
+    monkeypatch.setattr(torch_backend, "_push_scope", lambda *args, **kwargs: None)
+    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
+    install_tensor_method_wrappers_for_test(monkeypatch, torch_backend, torch)
+
+    model = torch.nn.LazyBatchNorm1d().to("cuda")
+    assert isinstance(model.running_mean, UninitializedBuffer)
+    assert isinstance(model.running_var, UninitializedBuffer)
+    assert isinstance(model.weight, UninitializedParameter)
+    assert model.running_mean.device.type == "cuda"
+    output = model(torch.randn(2, 4, device="cuda"))
+    assert tuple(output.shape) == (2, 4)
+    assert tuple(model.running_mean.shape) == (4,)
+
+
+def test_lazy_batch_norm_to_dtype_keeps_uninitialized_buffer(monkeypatch):
+    from tests.integration.common import require_torch
+    from utils.inject_roctx._backends import torch as torch_backend
+
+    require_torch()
+    import torch
+    from torch.nn.parameter import UninitializedBuffer
+
+    if not torch_backend._resolve_torch():
+        pytest.skip("torch could not be resolved for inject_roctx backend")
+
+    monkeypatch.setattr(torch_backend, "_push_scope", lambda *args, **kwargs: None)
+    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
+    install_tensor_method_wrappers_for_test(monkeypatch, torch_backend, torch)
+
+    model = torch.nn.LazyBatchNorm1d().to(dtype=torch.float64)
+    assert isinstance(model.running_mean, UninitializedBuffer)
+    assert isinstance(model.running_var, UninitializedBuffer)
+    assert model.running_mean.dtype == torch.float64
+    output = model(torch.randn(2, 4, dtype=torch.float64))
+    assert tuple(output.shape) == (2, 4)
+    assert model.running_mean.dtype == torch.float64
+
+
+def test_uninitialized_buffer_keeps_persistent_on_to(monkeypatch):
+    from tests.integration.common import require_torch
+    from utils.inject_roctx._backends import torch as torch_backend
+
+    require_torch()
+    import torch
+    from torch.nn.parameter import UninitializedBuffer
+
+    if not torch_backend._resolve_torch():
+        pytest.skip("torch could not be resolved for inject_roctx backend")
+
+    monkeypatch.setattr(torch_backend, "_push_scope", lambda *args, **kwargs: None)
+    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
+    install_tensor_method_wrappers_for_test(monkeypatch, torch_backend, torch)
+
+    buffer = UninitializedBuffer(persistent=False)
+    moved = buffer.to(dtype=torch.float64)
+    assert isinstance(moved, UninitializedBuffer)
+    assert moved.persistent is False
+    assert moved.dtype == torch.float64
+
+
+def test_tensor_to_wrap_keeps_original_method_name(monkeypatch):
+    from tests.integration.common import require_torch
+    from utils.inject_roctx._backends import torch as torch_backend
+
+    require_torch()
+    import torch
+
+    if not torch_backend._resolve_torch():
+        pytest.skip("torch could not be resolved for inject_roctx backend")
+
+    monkeypatch.setattr(torch_backend, "_push_scope", lambda *args, **kwargs: None)
+    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
+    install_tensor_method_wrappers_for_test(monkeypatch, torch_backend, torch)
+
+    assert torch.Tensor.to.__name__ == "to"
+    assert torch.Tensor.cpu.__name__ == "cpu"
+    assert torch.Tensor.cuda.__name__ == "cuda"
