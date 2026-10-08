@@ -71,6 +71,7 @@ class FabricGpuBarrierTest : public ::testing::Test {
   void SetUp() override {
     SetMicroEnvAbsent("NCCL_CUMEM_SKIP_FREE");  // see HipVmmLedger.h
     ledger_.Install();
+    ASSERT_FALSE(rcclSkipCuMemFree());  // latch the once-per-process decision under this env
     g_cuMemEnable = [] { return 1; };
     auto ledgerMemset = g_hipMemset;
     g_hipMemset = [this, ledgerMemset](void* dst, int value, size_t bytes) {
@@ -92,6 +93,9 @@ class FabricGpuBarrierTest : public ::testing::Test {
 
   void TearDown() override {
     result_.first.reset();  // first: the resources free through the ledger hooks
+    EXPECT_TRUE(ledger_.Clean()) << ledger_.reserved.size() << " reservations, " << ledger_.liveHandles.size()
+                                 << " handles, " << ledger_.liveBuffers.size() << " buffers live; "
+                                 << ledger_.rejected.size() << " calls refused";
     ResetBootstrapStubs();
     ResetHipFakes();
     ResetNcclFakes();
@@ -303,7 +307,7 @@ TEST_F(FabricGpuBarrierTest, MallocAndInit_AllSucceed_BarrierCarriesGeometryAndD
   EXPECT_EQ(state.peerFlags, r.first->peerFlagsDev->get());
 }
 
-TEST_F(FabricGpuBarrierTest, MallocAndInit_WithManager_TracksFlagBufferAndPeerMappingsInIt) {
+TEST_F(FabricGpuBarrierTest, MallocAndInit_WithManager_TracksFlagBufferAndUntracksPeerMappingsInIt) {
   auto manager = std::make_unique<ncclMemManager>();  // value-initialised: nothing released
   std::vector<std::pair<ncclMemManager*, void*>> tracked;
   std::vector<std::pair<ncclMemManager*, void*>> untracked;
@@ -363,6 +367,9 @@ TEST_F(FabricGpuBarrierTest, MallocAndInit_FlagBufferAllocationFails_ReturnsNull
   });
 
   ExpectFailsWithoutLeaking();
+
+  // The null-buffer guard stops it, before the zeroing the VMM check would follow.
+  EXPECT_TRUE(memsets_.empty()) << "zeroed a buffer that was never allocated";
 }
 
 TEST_F(FabricGpuBarrierTest, MallocAndInit_FlagBufferZeroingFails_ReturnsNullWithoutLeaking) {
