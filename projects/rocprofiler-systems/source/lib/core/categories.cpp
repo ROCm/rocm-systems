@@ -12,9 +12,7 @@
 #include <set>
 #include <string>
 
-namespace rocprofsys
-{
-namespace categories
+namespace rocprofsys::categories
 {
 namespace
 {
@@ -77,5 +75,4 @@ shutdown()
 {
     disable_categories(config::get_enabled_categories());
 }
-}  // namespace categories
-}  // namespace rocprofsys
+}  // namespace rocprofsys::categories

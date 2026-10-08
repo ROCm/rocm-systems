@@ -8,7 +8,15 @@ import pytest
 
 from amdisa.codegen import CodeGenerator
 from amdisa.gpuisa import Instruction
-from amdisa.isa_profile import Cdna4Profile, CdnaProfile, Rdna4Profile
+from amdisa.isa_profile import (
+    Cdna4Profile,
+    CdnaProfile,
+    Rdna1Profile,
+    Rdna2Profile,
+    Rdna3Profile,
+    Rdna3_5Profile,
+    Rdna4Profile,
+)
 from amdisa.parser import Parser
 
 
@@ -117,3 +125,26 @@ def test_modifier_availability_requires_explicit_encoding_provenance():
     with pytest.raises(ValueError, match='V_SYNTHETIC.*encoding provenance'):
         generator._instruction_supports_dpp(unknown, 'ENC_VOP1')
     assert not generator._instruction_supports_dpp(known_absent, 'ENC_VOP1')
+
+
+@pytest.mark.parametrize(
+    'arch,profile,encoding,name',
+    [
+        ('rdna1', Rdna1Profile(), 'ENC_VOP3', 'V_LSHLREV_B64'),
+        ('rdna2', Rdna2Profile(), 'ENC_VOP3', 'V_LSHLREV_B64'),
+        ('rdna3', Rdna3Profile(), 'ENC_MIMG', 'IMAGE_GATHER4H'),
+        ('rdna3_5', Rdna3_5Profile(), 'ENC_MIMG', 'IMAGE_GATHER4H'),
+    ],
+)
+def test_subdecoder_keeps_opcodes_across_primary_prefixes(
+    arch, profile, encoding, name
+):
+    spec = Parser(str(_mrisa_dir() / f'amdgpu_isa_{arch}.xml'), profile).parse()
+    inst = _find_instruction(spec, encoding, name)
+    enc = spec.encoding_map[encoding]
+    # The generator emits one named table for every primary prefix of an encoding.
+    # Every such table must route the documented instruction, including opcodes
+    # whose prefix was first encountered without another instruction beside it.
+    for index in set(enc.primary_dt_ptrs) - {-1}:
+        entry = spec.primary_decode_table[index]
+        assert entry.sub_decode_funcs[inst.opcode] == f'decode{inst.fmt_name}'

@@ -2879,6 +2879,54 @@ TEST(CodeObjectPatcher, AppliesArchSpecificWgpModeBit) {
   EXPECT_EQ(AMDHSA_BITS_GET(*gfx1250_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
 }
 
+TEST(CodeObjectPatcher, WavefrontSizeBitIsReservedUnlessTargetSupportsBothSizes) {
+  using namespace rocr::llvm::amdhsa;
+
+  struct Target {
+    rj_code_arch_t arch;
+    uint8_t wave_size;
+    uint32_t expected_bit;
+  };
+  const Target targets[] = {
+      {ROCJITSU_CODE_ARCH_CDNA4, 64, 0},   {ROCJITSU_CODE_ARCH_CDNA5, 32, 0},
+      {ROCJITSU_CODE_ARCH_RDNA1, 32, 1},   {ROCJITSU_CODE_ARCH_RDNA1, 64, 0},
+      {ROCJITSU_CODE_ARCH_RDNA2, 32, 1},   {ROCJITSU_CODE_ARCH_RDNA2, 64, 0},
+      {ROCJITSU_CODE_ARCH_RDNA3, 32, 1},   {ROCJITSU_CODE_ARCH_RDNA3, 64, 0},
+      {ROCJITSU_CODE_ARCH_RDNA3_5, 32, 1}, {ROCJITSU_CODE_ARCH_RDNA3_5, 64, 0},
+      {ROCJITSU_CODE_ARCH_RDNA4, 32, 1},   {ROCJITSU_CODE_ARCH_RDNA4, 64, 0},
+  };
+  for (const auto &target : targets) {
+    for (const uint32_t source_bit : {0u, 1u}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "arch=" << target.arch << " wave_size=" << unsigned(target.wave_size)
+                   << " source_bit=" << source_bit);
+      auto image = make_minimal_amdgpu_elf_with_descriptor_after_text();
+      AmdGpuCodeObject probe(image.data(), image.size());
+      ASSERT_TRUE(probe.is_valid());
+      const Section *rodata = find_section(probe, ".rodata");
+      ASSERT_NE(rodata, nullptr);
+      const uint64_t descriptor_offset = rodata->sectionOffset();
+      auto descriptor = read_kernel_descriptor_for_test(rodata->data());
+      AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                      KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, source_bit);
+      write_kernel_descriptor_for_test(image.data() + descriptor_offset, descriptor);
+
+      AmdGpuCodeObject source(image.data(), image.size());
+      KdTranslation translation{};
+      translation.descriptor_file_offset = descriptor_offset;
+      translation.target_wave_size = target.wave_size;
+      CodeObjectPatcher patcher(source);
+      ASSERT_TRUE(patcher.apply_kernel_descriptor_translation(translation, target.arch));
+      const auto patched_image = patcher.emit();
+      const auto patched =
+          read_kernel_descriptor_for_test(patched_image.data() + descriptor_offset);
+      EXPECT_EQ(AMDHSA_BITS_GET(patched.kernel_code_properties,
+                                KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32),
+                target.expected_bit);
+    }
+  }
+}
+
 TEST(CodeObjectPatcher, PreservesPrivateEnableForZeroFixedDynamicStack) {
   using namespace rocr::llvm::amdhsa;
 
@@ -2964,9 +3012,8 @@ TEST(CodeObjectPatcher, ReplaceTextPreservesLoadSegmentAlignment) {
   EXPECT_LE(phdrs[0].p_vaddr + phdrs[0].p_memsz, phdrs[1].p_vaddr)
       << "expanded RX LOAD must not overlap the following LOAD in virtual memory";
 
-  const auto symtab = std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &shdr) {
-    return shdr.sh_type == SHT_SYMTAB;
-  });
+  const auto symtab = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &shdr) { return shdr.sh_type == SHT_SYMTAB; });
   ASSERT_NE(symtab, shdrs.end());
   ASSERT_EQ(symtab->sh_entsize, sizeof(Elf64_Sym));
   ASSERT_GE(symtab->sh_size / symtab->sh_entsize, 3u);
@@ -2997,9 +3044,8 @@ TEST(CodeObjectPatcher, ReplaceTextRelocatesTextSymbolsWithExactOffsetMap) {
   const auto patched_bytes = patcher.emit();
   const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(patched_bytes, 0);
   const auto shdrs = read_elf_array_for_test<Elf64_Shdr>(patched_bytes, ehdr.e_shoff, ehdr.e_shnum);
-  const auto symtab = std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &shdr) {
-    return shdr.sh_type == SHT_SYMTAB;
-  });
+  const auto symtab = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &shdr) { return shdr.sh_type == SHT_SYMTAB; });
   ASSERT_NE(symtab, shdrs.end());
   const auto symbols = read_elf_array_for_test<Elf64_Sym>(patched_bytes, symtab->sh_offset,
                                                           symtab->sh_size / symtab->sh_entsize);
@@ -3704,7 +3750,7 @@ TEST(BinaryTranslator, InlineExpansionAvoidsCaveBranchOverflow) {
 
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
                                                           : result.diagnostics.front().message);
-  const bool diagnosed = std::any_of(
+  const bool diagnosed = std::ranges::any_of(
       result.diagnostics.begin(), result.diagnostics.end(),
       [](const TranslationDiagnostic &diagnostic) {
         return diagnostic.severity == DiagnosticSeverity::Error &&
@@ -4075,7 +4121,7 @@ TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerTranslatesWhenScopeHasNoStal
   // stale value the fail-closed path exists to prevent.
   expect_builder_targets_endpgm(kBypassSreg);
 
-  EXPECT_NE(std::find(target_words, target_words + word_count, pack_sop1(0x1d, 0, kPcSreg)),
+  EXPECT_NE(std::ranges::find(target_words, target_words + word_count, pack_sop1(0x1d, 0, kPcSreg)),
             target_words + word_count)
       << "an incomplete consumer must keep its dynamic transfer, not become a direct window";
 }

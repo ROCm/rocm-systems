@@ -30,9 +30,14 @@ def test_gfx12_flat_vaddr_width_follows_saddr_mode():
             'vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst))'
         )
 
-    assert CodeGenerator._vflat_vaddr_operand_size_expr('ENC_VSCRATCH', 'vaddr') is None
+    assert CodeGenerator._vflat_vaddr_operand_size_expr('ENC_VSCRATCH', 'vaddr') == (
+        '(reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0)'
+    )
     assert CodeGenerator._vflat_vaddr_operand_size_expr('ENC_VFLAT', 'vdst') is None
-    assert 'inst->saddr == OPR_SREG_NULL' in CodeGenerator._emit_vflat_helpers()
+    for arch in ('rdna4', 'cdna5'):
+        helper = CodeGenerator._emit_vflat_helpers(arch)
+        assert 'inst->saddr == OPR_SREG_NULL' in helper
+        assert ('inst->saddr == 127' in helper) == (arch == 'rdna4')
 
 
 def test_buffer_vaddr_helper_maps_address_modes_to_zero_one_or_two_vgprs():

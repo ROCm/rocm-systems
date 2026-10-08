@@ -26,7 +26,10 @@ namespace amdgpu {
 // (SGPR/VCC/EXEC/M0 reads plus inline constants). `m0_ev` is the M0 encoding
 // value for this arch (124 on most arches; 125 on RDNA 3 / RDNA 3.5 / RDNA4
 // / GFX1250, where 124 is the NULL slot).
-inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
+// Compile-time readers preserve the three-argument execution ABI. Passing
+// capturing callbacks at runtime would spill wave references on every broadcast.
+template <auto ReadSgpr, auto ReadTtmp>
+inline uint32_t resolve_src_scalar_value(const Wavefront &wf, int ev, int m0_ev) {
   if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) &&
       ev == static_cast<int>(kFlatScratchSelectorFirst))
     return static_cast<uint32_t>(wf.scratch_base());
@@ -34,7 +37,7 @@ inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
       ev == static_cast<int>(kFlatScratchSelectorLast))
     return static_cast<uint32_t>(wf.scratch_base() >> 32);
   if (ev <= static_cast<int>(kScalarSgprSelectorLast))
-    return RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+    return ReadSgpr(wf, static_cast<uint32_t>(ev));
   if (ev == static_cast<int>(kVccSelectorFirst))
     return static_cast<uint32_t>(wf.vcc());
   if (ev == static_cast<int>(kVccSelectorLast))
@@ -45,13 +48,13 @@ inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
   // of the CWSR area, and a shader that never enters a trap must not be able to
   // clobber them through an SGPR write.
   if (ev >= static_cast<int>(kTtmpSelectorFirst) && ev <= static_cast<int>(kTtmpSelectorLast))
-    return RegisterAccess(wf).read_ttmp(static_cast<uint32_t>(ev) - kTtmpSelectorFirst);
+    return ReadTtmp(wf, static_cast<uint32_t>(ev) - kTtmpSelectorFirst);
   if (m0_ev == static_cast<int>(kModernM0Selector) && ev == static_cast<int>(kModernNullSelector))
     return 0u; // NULL
   if (ev == m0_ev)
     return wf.m0();
   if (ev == static_cast<int>(kExecSelectorFirst))
-    return static_cast<uint32_t>(wf.exec());
+    return static_cast<uint32_t>(wf.exec_raw());
   if (ev == static_cast<int>(kExecSelectorLast))
     return static_cast<uint32_t>(wf.exec_raw() >> 32);
   if (ev >= 128 && ev <= 192)
@@ -99,6 +102,15 @@ inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
   if (ev == 253)
     return wf.read_scc() ? 1u : 0u; // SCC
   throw std::logic_error("Unsupported encoding value for scalar read: " + std::to_string(ev));
+}
+
+inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
+  return resolve_src_scalar_value<[](const Wavefront &wave, uint32_t reg) {
+    return RegisterAccess(wave).read_sgpr(wave.sgpr_alloc().base + reg);
+  },
+                                  [](const Wavefront &wave, uint32_t reg) {
+                                    return RegisterAccess(wave).read_ttmp(reg);
+                                  }>(wf, ev, m0_ev);
 }
 
 // 16-bit reads of the inline float constants use the half-precision bit
@@ -244,7 +256,7 @@ inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
     return;
   }
   if (ev == static_cast<int>(kExecSelectorFirst)) {
-    wf.set_exec((wf.exec() & 0xFFFFFFFF00000000ULL) | val);
+    wf.set_exec_raw((wf.exec_raw() & 0xFFFFFFFF00000000ULL) | val);
     return;
   }
   if (ev == static_cast<int>(kExecSelectorLast)) {

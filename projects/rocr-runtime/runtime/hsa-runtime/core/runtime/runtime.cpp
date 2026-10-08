@@ -2716,7 +2716,7 @@ Runtime::AsyncEventsControl::AsyncEventsControl(AsyncEventsInfo* asyncInfo)
     : exit(false), info_(asyncInfo) {
   auto err = HSA::hsa_signal_create(0, 0, NULL, &wake);
   if (err != HSA_STATUS_SUCCESS)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to allocate async handler signal");
+    throw AMD::hsa_exception(err, "Failed to allocate async handler signal");
 }
 
 void Runtime::AsyncEventsControl::Start() {
@@ -3241,11 +3241,11 @@ void Runtime::LoadTools() {
   }
 }
 
-// Load the rocjitsu hotswap hook through the existing HSA tool lifecycle.
+// When enabled, load the rocjitsu hotswap hook through the existing HSA tool lifecycle.
 // Keeping its handle in tool_libs_ gives it the normal reverse-order OnUnload
 // and CloseTools handling without dedicated runtime state.
 hsa_status_t Runtime::LoadHotswapTool() {
-  if (flag().hotswap_disable()) return HSA_STATUS_SUCCESS;
+  if (!flag().hotswap_enable()) return HSA_STATUS_SUCCESS;
 
   bool has_gfx1250_a0_agent = false;
   for (const Agent* agent : gpu_agents_) {
@@ -4582,7 +4582,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(MappedHandle* _mappe
 
 Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-    if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) assert(!"Unimplemented");
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) assert(!"Unimplemented");
 
     /* Remap the CPU mapping back to anonymous, freeing the DRM FD while retaining VA reservation */
     bool result = rocr::os::UncommitMemory(va, size);
@@ -4599,7 +4599,7 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-    if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return HSA_STATUS_ERROR;
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return HSA_STATUS_ERROR;
 
     MemoryHandle* memHandle = mappedHandle->mem_handle;
 
@@ -4643,7 +4643,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (permissions != HSA_ACCESS_PERMISSION_NONE) {
-      if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return HSA_STATUS_ERROR;
+      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return HSA_STATUS_ERROR;
 
       hsa_access_permission_t perms = HSA_ACCESS_PERMISSION_NONE;
       if (!rocr::os::ProtectMemory(va, size, PermissionsToMemProt(perms))) {
@@ -4663,7 +4663,7 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle* mem_handle, AddressHandle* add
                                     hsa_access_permission_t perm)
     : mem_handle(mem_handle), address_handle(address_handle), offset(offset), size(size) {
   /* Create a CPU mapping with PROT_NONE */
-  if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return;
+  if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return;
 
   if (!mem_handle->imported) {
     /*

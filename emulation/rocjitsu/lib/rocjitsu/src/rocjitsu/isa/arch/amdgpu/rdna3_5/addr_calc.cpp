@@ -5,6 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -41,7 +42,8 @@ std::optional<uint32_t> read_smem_offset(uint32_t soffset, amdgpu::Wavefront &wf
 
 } // namespace
 
-std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf) {
+std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
+                                               amdgpu::ScalarMemState *state) {
   const uint32_t sbase_sel = inst.sbase * 2;
   auto base = amdgpu::try_read_scalar_selector64(wf, sbase_sel);
   if (!base)
@@ -51,6 +53,8 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
   if (!soffset)
     return std::nullopt;
   off += *soffset;
+  if (amdgpu::addr_calc::smem_is_buffer_load_op(inst.op))
+    return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base, off, state);
   return (*base + off) & ~0x3ULL;
 }
 
@@ -106,9 +110,6 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
     }
     saddr_val = *saddr;
   }
-  uint32_t priv_hi = static_cast<uint32_t>(wf.private_aperture_base() >> 32);
-  uint64_t scratch_base = wf.scratch_base();
-  uint32_t lane_stride = wf.scratch_lane_size();
   uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
   auto vaddr_region = regs.read_vgpr_region(vbase, has_saddr(inst.saddr) ? 1 : 2, exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -121,8 +122,9 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
       vaddr = vaddr_region.lane64(0, lane);
     }
     uint64_t addr = saddr_val + vaddr + offset;
-    if (inst.seg == 0 && priv_hi != 0 && static_cast<uint32_t>(addr >> 32) == priv_hi)
-      addr = scratch_base + static_cast<uint64_t>(lane) * lane_stride + (addr & 0xFFFFFFFFULL);
+    if (inst.seg == 0)
+      addr =
+          amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::Linear).value;
     d.per_lane_addr[lane] = addr;
   }
 }
