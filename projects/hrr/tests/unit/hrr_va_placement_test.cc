@@ -314,6 +314,20 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_AllocsRunInCaptureOrder) {
   REQUIRE_FALSE(hrr_needs_ordering(HRR_API_HIPLAUNCHKERNEL));
 }
 
+HRR_TEST_CASE(Unit_HRR_VaPlacement_CapturesOpenAndCloseInOrder) {
+  // Whether a capture is open decides whether a placed free unmaps now or
+  // waits. A free on one thread has to see the capture another thread opened
+  // or closed before it, whichever API did that.
+  for (uint16_t api : {HRR_API_HIPSTREAMBEGINCAPTURE, HRR_API_HIPSTREAMENDCAPTURE,
+                       HRR_API_HIPSTREAMBEGINCAPTURETOGRAPH,
+                       HRR_API_HIPSTREAMBEGINCAPTURE_SPT,
+                       HRR_API_HIPSTREAMENDCAPTURE_SPT,
+                       HRR_API_HIPSTREAMDESTROY}) {
+    INFO(hrr_api_names[api]);
+    REQUIRE(hrr_needs_ordering(api));
+  }
+}
+
 HRR_TEST_CASE(Unit_HRR_VaPlacement_PlanSegmentsMinusReservations) {
   // The region sidecar declares a segment for every allocation it saw, so a
   // hipMemAddressReserve range comes back as a segment too. It belongs to the

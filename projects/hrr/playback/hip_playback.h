@@ -856,21 +856,27 @@ void hrr_release_vmm_state(PlaybackContext& ctx);
 // HIP_HRR_REPLAY_ALLOC_PAD_FACTOR as replay applies it: 1 when unset or invalid.
 size_t hrr_replay_alloc_pad_factor();
 
+// Called by dispatch_event after every handler, whatever it returned. Keeps
+// ctx.in_graph_capture right for the capture APIs whose handlers are
+// generated: hipStreamBeginCaptureToGraph and the _spt Begin/EndCapture.
+void hrr_track_capture(PlaybackContext& ctx, uint16_t event_type,
+                       const uint8_t* payload);
+
 // Called by dispatch_event after every event a handler replayed successfully.
 // Placement's bookkeeping that is not any one handler's business: reports a
 // fallback for each allocation API placement does not place, remembers which
 // device each memory pool allocates on, unmaps deferred frees at
-// hipCtxSynchronize and at the end of the last open capture, and under
-// --verbose prints what hipPointerGetAttributes says about the replayed
-// pointer.
+// hipCtxSynchronize, and under --verbose prints what hipPointerGetAttributes
+// says about the replayed pointer.
 void hrr_placement_after_event(PlaybackContext& ctx, uint16_t event_type,
                                const uint8_t* payload, size_t size);
 
-// A replayed synchronization point (`api` names it): unmap the placed
-// allocations whose free was deferred, and retry earlier unmaps that failed,
-// unless a capture is still open. hipDeviceSynchronize and
-// hipStreamSynchronize are special events that never reach
-// hrr_placement_after_event, so their handlers call this directly.
+// A replayed device or context synchronization (`api` names it): unmap the
+// placed allocations whose free was deferred, and retry earlier unmaps that
+// failed, unless a capture is still open. hipDeviceSynchronize is a special
+// event that never reaches hrr_placement_after_event, so its handler calls
+// this directly. A stream synchronization does not drain: hipMemUnmap waits
+// for every stream on the device, which the recording did not.
 void hrr_placement_at_sync(PlaybackContext& ctx, const char* api);
 
 // ---------------------------------------------------------------------------

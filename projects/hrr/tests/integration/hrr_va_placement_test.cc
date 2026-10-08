@@ -767,8 +767,9 @@ TEST_CASE("Unit_HRR_VaPlacement_Lifetimes_Direct", "[.][hrr-direct]") {
 
   // (a) A free inside a capture that a synchronous hipMemset then
   // invalidates, so hipStreamEndCapture fails. Failed calls are not recorded,
-  // so the archive has neither; the capture ends at hipStreamDestroy. The
-  // next allocation at the freed address must be placed.
+  // so the archive has neither; the capture ends at hipStreamDestroy, and the
+  // free is unmapped at the hipDeviceSynchronize after it. The next
+  // allocation at the freed address must be placed.
   void* doomed = nullptr;
   HRR_HIP_CHECK(hipMalloc(&doomed, kBytes));
   hipStream_t cs = nullptr;
@@ -785,7 +786,9 @@ TEST_CASE("Unit_HRR_VaPlacement_Lifetimes_Direct", "[.][hrr-direct]") {
   int* cell_again = nullptr;
   int* again = hrr_place_round(out, 90, &cell_again);
 
-  // (b) Stream-ordered frees, each followed by a different kind of sync.
+  // (b) Stream-ordered frees. A stream sync does not unmap a1; the pool
+  // usually hands its address straight back to a2, which then takes the
+  // mapping back. The device sync unmaps what is left.
   hipStream_t s = nullptr;
   HRR_HIP_CHECK(hipStreamCreate(&s));
   void* a1 = nullptr;
@@ -797,6 +800,24 @@ TEST_CASE("Unit_HRR_VaPlacement_Lifetimes_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMallocAsync(&a2, kBytes, s));
   HRR_HIP_CHECK(hipMemsetAsync(a2, 2, kBytes, s));
   HRR_HIP_CHECK(hipFreeAsync(a2, s));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+
+  // (f) A free inside a capture opened by hipStreamBeginCaptureToGraph. It
+  // waits for the device sync after the capture ends.
+  void* x = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&x, kBytes));
+  hipStream_t s2 = nullptr;
+  HRR_HIP_CHECK(hipStreamCreate(&s2));
+  hipGraph_t g = nullptr;
+  HRR_HIP_CHECK(hipGraphCreate(&g, 0));
+  HRR_HIP_CHECK(hipStreamBeginCaptureToGraph(s2, g, nullptr, nullptr, 0,
+                                             hipStreamCaptureModeRelaxed));
+  HRR_HIP_CHECK(hipMemsetAsync(out, 0, kBytes, s2));
+  HRR_HIP_CHECK(hipFree(x));
+  hipGraph_t g2 = nullptr;
+  HRR_HIP_CHECK(hipStreamEndCapture(s2, &g2));
+  HRR_HIP_CHECK(hipGraphDestroy(g));
+  HRR_HIP_CHECK(hipStreamDestroy(s2));
   HRR_HIP_CHECK(hipDeviceSynchronize());
 
   // (d) The same device address copied into 40 cells, one H2D copy each: 40
@@ -831,8 +852,9 @@ TEST_CASE("Unit_HRR_VaPlacement_Lifetimes_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMemSetAccess(va, vsz, &desc, 1));
   int** cell_va = hrr_place_check(out, static_cast<int*>(va), 100, nullptr);
 
-  printf(HRR_LIFE_MARKER " doomed=0x%llx again=0x%llx va=0x%llx vsz=%zu stored=0x%llx\n",
-         u64(doomed), u64(again), u64(va), vsz, u64(stored));
+  printf(HRR_LIFE_MARKER " doomed=0x%llx again=0x%llx va=0x%llx vsz=%zu stored=0x%llx"
+         " a1=0x%llx a2=0x%llx\n",
+         u64(doomed), u64(again), u64(va), vsz, u64(stored), u64(a1), u64(a2));
   fflush(stdout);
 
   HRR_HIP_CHECK(hipFree(cell_va));
@@ -844,7 +866,7 @@ TEST_CASE("Unit_HRR_VaPlacement_Lifetimes_Direct", "[.][hrr-direct]") {
 
 namespace {
 struct LifeCapture {
-  uint64_t doomed = 0, again = 0, va = 0, stored = 0;
+  uint64_t doomed = 0, again = 0, va = 0, stored = 0, a1 = 0, a2 = 0;
   size_t vsz = 0;
   fs::path archive;
 };
@@ -865,12 +887,13 @@ const LifeCapture& hrr_life_capture() {
 
   const size_t at = out.find(HRR_LIFE_MARKER);
   REQUIRE(at != std::string::npos);
-  unsigned long long d = 0, a = 0, v = 0, st = 0;
+  unsigned long long d = 0, a = 0, v = 0, st = 0, x1 = 0, x2 = 0;
   size_t vsz = 0;
   REQUIRE(sscanf(out.c_str() + at,
-                 HRR_LIFE_MARKER " doomed=0x%llx again=0x%llx va=0x%llx vsz=%zu stored=0x%llx",
-                 &d, &a, &v, &vsz, &st) == 5);
-  c.doomed = d; c.again = a; c.va = v; c.vsz = vsz; c.stored = st;
+                 HRR_LIFE_MARKER " doomed=0x%llx again=0x%llx va=0x%llx vsz=%zu stored=0x%llx"
+                 " a1=0x%llx a2=0x%llx",
+                 &d, &a, &v, &vsz, &st, &x1, &x2) == 7);
+  c.doomed = d; c.again = a; c.va = v; c.vsz = vsz; c.stored = st; c.a1 = x1; c.a2 = x2;
   c.archive = hrr_single_process_archive(cap.path);
   return c;
 }
@@ -888,30 +911,48 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_Lifetimes) {
     int pass = 0, fail = 0;
     REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
     CHECK(fail == 0);
-    // The capture ends where its stream is destroyed, and the free made
-    // inside it is unmapped there.
-    CHECK(out.find("[HRR] Placement: unmapped 1 deferred free(s) at hipStreamDestroy") !=
-          std::string::npos);
+    // The capture ends where its stream is destroyed, so the free made
+    // inside it is unmapped at the next device sync, the first in the replay.
+    const std::string want = "[HRR] Placement: unmapped 1 deferred free(s) at hipDeviceSynchronize";
+    const size_t first = out.find("[HRR] Placement: unmapped ");
+    REQUIRE(first != std::string::npos);
+    CHECK(out.compare(first, want.size(), want) == 0);
+    CHECK(out.find("deferred free(s) at hipStreamDestroy") == std::string::npos);
     // Nothing is still mapped where `again` goes, so it lands there.
     CHECK(out.find("is still mapped") == std::string::npos);
     int placed = 0, fell = -1;
     REQUIRE(hrr_place_counts(out, &placed, &fell));
     CHECK(fell == 0);
     if (c.doomed != c.again)
-      SKIP("the capture's allocator did not reuse the freed address ("
-           << hex(c.doomed) << " then " << hex(c.again) << ")");
+      WARN("the capture's allocator did not reuse the freed address ("
+           << hex(c.doomed) << " then " << hex(c.again) << "), so nothing was placed over it");
   }
 
-  SECTION("a stream-ordered free is unmapped at the next sync, not at the free") {
+  SECTION("a deferred free is unmapped at the next device sync, not at a stream sync") {
     auto [rc, out] = hrr_playback_merged(c.archive, "--verbose");
     INFO("Replay:\n" << out);
     CHECK(rc == 0);
-    CHECK(out.find("[HRR] Placement: unmapped 1 deferred free(s) at hipStreamSynchronize") !=
-          std::string::npos);
-    CHECK(out.find("[HRR] Placement: unmapped 1 deferred free(s) at hipDeviceSynchronize") !=
-          std::string::npos);
-    // doomed, a1 and a2.
-    CHECK(hrr_place_deferred(out) == 3);
+    // hipMemUnmap waits for every stream on the device: a stream sync waited
+    // for one, so it unmaps nothing.
+    CHECK(out.find("deferred free(s) at hipStreamSynchronize") == std::string::npos);
+    // a2 took a1's mapping back when the pool reused its address, so the
+    // device sync after them unmaps one; otherwise both.
+    const std::string b_line = std::string("[HRR] Placement: unmapped ") +
+                               (c.a1 == c.a2 ? "1" : "2") +
+                               " deferred free(s) at hipDeviceSynchronize";
+    CHECK(out.find(b_line) != std::string::npos);
+    // doomed, x, and a2 when it took a1's mapping back.
+    CHECK(count_of(out, "[HRR] Placement: unmapped 1 deferred free(s) at hipDeviceSynchronize") ==
+          (c.a1 == c.a2 ? 3 : 2));
+    CHECK(out.find("is still mapped") == std::string::npos);
+    // doomed, a1, a2, and x, freed inside the capture hipStreamBeginCaptureToGraph opened.
+    CHECK(hrr_place_deferred(out) == 4);
+    int placed = 0, fell = -1;
+    REQUIRE(hrr_place_counts(out, &placed, &fell));
+    CHECK(fell == 0);
+    if (c.a1 != c.a2)
+      WARN("the pool did not hand a1's address to a2 (" << hex(c.a1) << " then " << hex(c.a2)
+           << "), so no mapping was taken back");
   }
 
   SECTION("the H2D scan names the first 16 payloads, says why it runs, and counts the rest") {

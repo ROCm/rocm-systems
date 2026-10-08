@@ -2486,6 +2486,40 @@ void hrr_placement_at_sync(PlaybackContext& ctx, const char* api) {
         fprintf(stderr, "[HRR] Placement: unmapped %zu deferred free(s) at %s\n", n, api);
 }
 
+void hrr_track_capture(PlaybackContext& ctx, uint16_t event_type,
+                       const uint8_t* payload) {
+    switch (event_type) {
+        case HRR_API_HIPSTREAMBEGINCAPTURETOGRAPH: {
+            // The handler may skip the call, so ask the stream.
+            const auto* a =
+                reinterpret_cast<const hrr_args_hipStreamBeginCaptureToGraph*>(payload);
+            hipStreamCaptureStatus st = hipStreamCaptureStatusNone;
+            if (hipStreamIsCapturing(ctx.translate_stream(a->stream), &st) == hipSuccess &&
+                st == hipStreamCaptureStatusActive)
+                ctx.in_graph_capture.begin(a->stream);
+            break;
+        }
+        case HRR_API_HIPSTREAMBEGINCAPTURE_SPT: {
+            const auto* a =
+                reinterpret_cast<const hrr_args_hipStreamBeginCapture_spt*>(payload);
+            hipStreamCaptureStatus st = hipStreamCaptureStatusNone;
+            if (hipStreamIsCapturing_spt(ctx.translate_stream(a->stream), &st) == hipSuccess &&
+                st == hipStreamCaptureStatusActive)
+                ctx.in_graph_capture.begin(a->stream);
+            break;
+        }
+        case HRR_API_HIPSTREAMENDCAPTURE_SPT: {
+            // Ended whatever the call returned, as hipStreamEndCapture does.
+            const auto* a =
+                reinterpret_cast<const hrr_args_hipStreamEndCapture_spt*>(payload);
+            (void)ctx.in_graph_capture.end(a->stream);
+            break;
+        }
+        default:
+            break;
+    }
+}
+
 void hrr_placement_after_event(PlaybackContext& ctx, uint16_t event_type,
                                const uint8_t* payload, size_t size) {
     // Pools are remembered whether or not placement is on: a pool created
@@ -2525,11 +2559,6 @@ void hrr_placement_after_event(PlaybackContext& ctx, uint16_t event_type,
     switch (event_type) {
         case HRR_API_HIPCTXSYNCHRONIZE:
             hrr_placement_at_sync(ctx, "hipCtxSynchronize");
-            break;
-        case HRR_API_HIPSTREAMENDCAPTURE:
-            // Frees deferred because a capture was open are unmapped once the
-            // last capture ends.
-            hrr_placement_at_sync(ctx, "hipStreamEndCapture");
             break;
         case HRR_API_HIPPOINTERGETATTRIBUTES: {
             if (!ctx.verbose) break;
@@ -3236,9 +3265,11 @@ hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
     // A placed allocation is a VMM mapping that the stream may still be using.
     // hipMemUnmap waits for every stream on the device, which would turn each
     // stream-ordered free into a device-wide sync the recording never had. So
-    // the unmap is deferred to the next replayed synchronization point, or to
-    // the next allocation placed over it, and nothing else is placed over the
-    // mapping until then.
+    // the unmap is deferred to the next replayed device or context
+    // synchronization. An allocation recorded at exactly the same range on
+    // the same device takes the mapping back without unmapping it. One that
+    // only overlaps it unmaps it first, unless a capture is open, in which
+    // case that allocation falls back.
     hrr::VaPlacement* placing = hrr_placing(ctx);
     if (placing && placing->unmap(live, /*defer=*/true)) {
         ctx.remove_alloc(a->dev_ptr);
@@ -3759,8 +3790,9 @@ hipError_t playback_hipStreamDestroy(PlaybackContext& ctx,
     // Destroying a capturing stream ends its capture. The recording shows no
     // hipStreamEndCapture when the program's own call failed, because failed
     // calls are not recorded: a capture invalidated by a synchronous copy or
-    // memset ends here. The frees made inside it can be unmapped now.
-    if (ctx.in_graph_capture.end(a->stream)) hrr_placement_at_sync(ctx, "hipStreamDestroy");
+    // memset ends here. The frees deferred inside it are unmapped at the next
+    // replayed device or context synchronization, like any other.
+    (void)ctx.in_graph_capture.end(a->stream);
     return r;
 }
 
@@ -3829,8 +3861,8 @@ hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx,
     hipGraph_t live_graph = nullptr;
     hipError_t r = hipStreamEndCapture(stream, &live_graph);
     // Cleared whatever the call returned: a capture left marked open would
-    // defer every later placed free, and block the allocations recorded over
-    // them, for the rest of the replay.
+    // defer every later placed free, and make the allocations recorded over
+    // them fall back, for the rest of the replay.
     ctx.in_graph_capture.end(a->stream);
     if (r == hipSuccess && live_graph) {
         ctx.record_graph(a->pGraph, live_graph);
