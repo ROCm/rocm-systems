@@ -1993,13 +1993,16 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
   // Don't report cached memory in runtime as allocated, since allocedMem tracked at PAL calls
   Pal::gpusize local = allocedMem[Pal::GpuHeapLocal] - resourceCache().persistentCacheSize();
   Pal::gpusize invisible = allocedMem[Pal::GpuHeapInvisible] - resourceCache().lclCacheSize();
-  Pal::gpusize total_alloced = local + invisible;
   size_t cache_group_local = resourceCache().persistentCacheSize() + resourceCache().lclCacheSize();
   // Allocated system memory without cached allocations. Cache size contains all allocations, so
   // don't count persistent and local
   Pal::gpusize system_memory = allocedMem[Pal::GpuHeapGartCacheable] +
                                allocedMem[Pal::GpuHeapGartUswc] + cache_group_local -
                                resourceCache().cacheSize();
+
+  // globalMemSize_ credits the GART aperture only on an APU, so charge the aperture there
+  const bool apu_system = settings().apuSystem_;
+  Pal::gpusize total_alloced = local + invisible + (apu_system ? system_memory : 0);
 
 #if IS_WINDOWS
   // Second, query OS for overall memory usage on the system
@@ -2009,25 +2012,21 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
     // Query OS how much memory is available
     iDev()->QueryGpuMemoryBudgetInfo(&mem_budget_info);
 
-    Pal::gpusize system_total_alloced = mem_budget_info.usage[Pal::GpuHeapGroupLocal];
+    // The segment groups partition memory, and on an APU the KMD reports aperture
+    // allocations in the local group, so only their sum maps onto the heaps charged above
+    Pal::gpusize os_alloced = mem_budget_info.usage[Pal::GpuHeapGroupLocal];
+    Pal::gpusize os_cached = cache_group_local;
+    if (apu_system) {
+      os_alloced += mem_budget_info.usage[Pal::GpuHeapGroupNonLocal];
+      os_cached = resourceCache().cacheSize();
+    }
     // Avoid possible negative values in case of alignments
-    if (mem_budget_info.usage[Pal::GpuHeapGroupLocal] > cache_group_local) {
-      system_total_alloced = mem_budget_info.usage[Pal::GpuHeapGroupLocal] - cache_group_local;
+    if (os_alloced > os_cached) {
+      os_alloced -= os_cached;
     }
-    // System usage exceeds per process usage for device memory
-    if (system_total_alloced > total_alloced) {
-      total_alloced = system_total_alloced;
-    }
-    system_total_alloced = mem_budget_info.usage[Pal::GpuHeapGroupNonLocal];
-    // Avoid possible negative values in case of extra alignments
-    if (mem_budget_info.usage[Pal::GpuHeapGroupNonLocal] >
-        (resourceCache().cacheSize() - cache_group_local)) {
-      system_total_alloced = mem_budget_info.usage[Pal::GpuHeapGroupNonLocal] + cache_group_local -
-                             resourceCache().cacheSize();
-    }
-    // System usage exceeds per process usage for system memory
-    if (system_total_alloced > system_memory) {
-      system_memory = system_total_alloced;
+    // System usage exceeds per process usage
+    if (os_alloced > total_alloced) {
+      total_alloced = os_alloced;
     }
   }
 #endif
@@ -2043,23 +2042,15 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
       (freeMemory[TotalFreeMemory] > HIP_HIDDEN_FREE_MEM * Ki) ? HIP_HIDDEN_FREE_MEM * Ki : 0;
 
   Pal::gpusize largest_block = 0;
-  if (settings().apuSystem_) {
-    system_memory /= Ki;
-    if (system_memory >= freeMemory[TotalFreeMemory]) {
-      freeMemory[TotalFreeMemory] = 0;
-    } else {
-      freeMemory[TotalFreeMemory] -= system_memory;
-    }
-    if (system_memory < heaps_[Pal::GpuHeapGartUswc].logicalSize) {
-      largest_block = heaps_[Pal::GpuHeapGartUswc].logicalSize - system_memory;
-    }
+  if (apu_system && system_memory < heaps_[Pal::GpuHeapGartUswc].logicalSize) {
+    largest_block = heaps_[Pal::GpuHeapGartUswc].logicalSize - system_memory;
   }
 
   if (invisible < heaps_[Pal::GpuHeapInvisible].logicalSize) {
     largest_block = std::max(largest_block, heaps_[Pal::GpuHeapInvisible].logicalSize - invisible);
   }
   if (local < heaps_[Pal::GpuHeapLocal].logicalSize) {
-    largest_block = std::max(largest_block, heaps_[Pal::GpuHeapLocal].logicalSize - invisible);
+    largest_block = std::max(largest_block, heaps_[Pal::GpuHeapLocal].logicalSize - local);
   }
 
   largest_block /= Ki;
