@@ -586,63 +586,6 @@ hipError_t counted_unmap(void*, size_t) {
 void* at(uint64_t va) { return reinterpret_cast<void*>(va); }
 }  // namespace
 
-HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapHoldsTheLock) {
-  // While one thread unmaps a placed allocation, the pages are still mapped.
-  // Another thread asking about them waits until the unmap is over, rather
-  // than hearing they are gone and placing over them.
-  reset_slow_unmap();
-  hrr::VaPlacement pl;
-  pl.set_vmm_ops_for_test({ok_map, slow_unmap, no_release});
-  pl.adopt_mapping_for_test(B, P);
-  REQUIRE(pl.is_mapped(at(B)));
-
-  SECTION("a free") {
-    bool unmapped = false;  // Catch2 assertions are for the main thread only
-    std::thread a([&] { unmapped = pl.unmap(at(B)); });
-    if (!wait_for(g_unmap_entered)) {
-      g_unmap_go = true;
-      a.join();
-      FAIL("unmap never reached hipMemUnmap");
-    }
-    bool done_when_answered = false;
-    bool mapped = true;
-    std::thread b([&] {
-      mapped = pl.is_mapped(at(B));
-      done_when_answered = g_unmap_done;
-    });
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    g_unmap_go = true;
-    a.join();
-    b.join();
-    REQUIRE(unmapped);
-    REQUIRE(done_when_answered);
-    REQUIRE_FALSE(mapped);
-  }
-  SECTION("a drain of deferred frees") {
-    REQUIRE(pl.unmap(at(B), /*defer=*/true));
-    size_t drained = 0;
-    std::thread a([&] { drained = pl.drain_deferred(); });
-    if (!wait_for(g_unmap_entered)) {
-      g_unmap_go = true;
-      a.join();
-      FAIL("drain_deferred never reached hipMemUnmap");
-    }
-    bool done_when_answered = false;
-    bool mapped = true;
-    std::thread b([&] {
-      mapped = pl.is_mapped(at(B));
-      done_when_answered = g_unmap_done;
-    });
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    g_unmap_go = true;
-    a.join();
-    b.join();
-    REQUIRE(drained == 1);
-    REQUIRE(done_when_answered);
-    REQUIRE_FALSE(mapped);
-  }
-}
-
 HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapRunsOutsideTheLock) {
   // hipMemUnmap waits for every stream on the device. Another thread's
   // allocation or free elsewhere must not wait for that too: a kernel still

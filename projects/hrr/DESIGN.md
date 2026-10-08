@@ -1145,9 +1145,8 @@ What deferral costs:
 
 `hipMemUnmap` never runs under placement's lock. A drain marks the mappings it
 unmaps, releases the lock, unmaps them, and takes the lock again to drop them.
-Until then they still occupy their pages: an allocation over them waits, and
-`is_mapped` gives the answer the unmap ends with. An allocation or free elsewhere
-does not wait.
+Until then they still occupy their pages: an allocation over them waits. An
+allocation or free elsewhere does not wait.
 
 Allocations and frees are ordered events, which hold the replay's event sequence
 until they return. An unmap inside one therefore stops every other replay thread

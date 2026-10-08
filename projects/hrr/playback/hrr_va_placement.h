@@ -685,8 +685,7 @@ class VaPlacement {
     // hipMemUnmap would wait for the capturing stream, and for every
     // hipFreeAsync, since hipMemUnmap waits for every stream.
     bool unmap(void* live, bool defer = false);
-    // Whether `live` is the base of a live placed mapping. Waits while an
-    // unmap of `live` is still running.
+    // Whether `live` is the base of a live placed mapping.
     bool is_mapped(void* live);
     // Unmap everything unmap() deferred, and retry unmaps that failed. Call
     // only when no capture is open. Returns how many were unmapped.

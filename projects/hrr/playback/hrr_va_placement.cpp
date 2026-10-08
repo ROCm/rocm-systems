@@ -488,8 +488,7 @@ bool VaPlacement::unmap_one(uint64_t pb, const PlacedMapping& m) {
 // thread's unrelated alloc or free would wait for it too, and a kernel that
 // needs a later replayed event to finish would never be reached. The mapping
 // stays in deferred_, marked, while the unmap runs. Until hipMemUnmap returns
-// the pages are still mapped: map_at does not place over them, and is_mapped
-// does not yet say they are gone.
+// the pages are still mapped, and map_at does not place over them.
 size_t VaPlacement::drain_locked(std::unique_lock<std::mutex>& lk,
                                  const std::vector<uint64_t>& keys) {
     std::vector<std::pair<uint64_t, PlacedMapping>> work;
@@ -568,13 +567,7 @@ void VaPlacement::adopt_mapping_for_test(uint64_t rec, size_t size, int device) 
 bool VaPlacement::is_mapped(void* live) {
     if (!active_ || !live) return false;
     const uint64_t v = reinterpret_cast<uint64_t>(live);
-    std::unique_lock<std::mutex> lk(mu_);
-    // An unmap of `live` still running: its pages are still mapped, and the
-    // answer is the one it ends with.
-    cv_.wait(lk, [&] {
-        const auto* d = va_mapping_overlapping(deferred_, v, v + 1);
-        return !(d && d->unmapping && d->rec == v);
-    });
+    std::lock_guard<std::mutex> lk(mu_);
     auto it = mapped_.upper_bound(v);
     if (it == mapped_.begin()) return false;
     --it;
