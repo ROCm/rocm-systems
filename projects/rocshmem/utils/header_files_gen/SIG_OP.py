@@ -89,12 +89,6 @@ def generate_signal_api():
 
     return "".join([signaling_api_dec(suffix) for suffix in suffixes])
 
-def fetch_api_dec(suffix):
-    return f"__device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch{suffix}(const uint64_t *sig_addr);\n"
-
-def generate_fetch_api():
-    suffixes = ["", "_wg", "_wave"]
-    return "".join([fetch_api_dec(suffix) for suffix in suffixes])
 
 def add_misc_apis():
     return """/**
@@ -144,7 +138,7 @@ def signal_fetch_dec():
     ]
     for suffix, scope in [("_wg", "work-group"), ("_wave", "wave")]:
         declarations.append(
-            "/**\n"
+            "\n/**\n"
             f" * @brief Atomically fetch a signal value collectively at {scope} scope.\n"
             " *\n"
             " * @deprecated Use rocshmem_signal_fetch() instead.\n"
@@ -159,7 +153,7 @@ def signal_fetch_dec():
 def signal_wait_dec():
     return (
         "__device__ ATTR_NO_INLINE uint64_t rocshmem_signal_wait_until(\n"
-        "    uint64_t *sig_addr, int cmp, uint64_t cmp_value);"
+        "    uint64_t *sig_addr, int cmp, uint64_t cmp_value);\n"
     )
 
 
@@ -190,7 +184,6 @@ namespace rocshmem {
 
     expanded_code += generate_signal_api()
     expanded_code += standalone_signal_dec()
-    expanded_code += f"\n{generate_fetch_api()}\n"
     expanded_code += add_misc_apis()
     expanded_code += """
 }  // namespace rocshmem
