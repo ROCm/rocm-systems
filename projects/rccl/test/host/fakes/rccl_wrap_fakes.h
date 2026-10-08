@@ -102,6 +102,17 @@ extern bool g_validHsaScratch;
 extern const char* g_lastHsaScratchEnv;
 extern int g_firmwareVersion;
 
+// -------------------------------------------------------------------------
+// DDA params and thresholds. Defaults match rccl_wrap.cc with no arch table.
+// -------------------------------------------------------------------------
+extern int64_t g_rcclParamDdaEnable;  // 1
+extern int64_t g_rcclParamDdaLL;      // 1
+extern int64_t g_rcclParamDdaLL128;   // kDdaThresholdUnset
+extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLLThreshold;  // kDdaLLBaseDefault, UNDRIVEN
+extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold;  // kDdaLL128BaseDefault
+extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaVmmThreshold;  // kDdaVmmBaseDefault, UNDRIVEN
+extern std::function<size_t(const struct ncclComm*)> g_rcclDdaScratchPayloadCap;
+
 void ResetRcclWrapFakes();
 
 #endif  // RCCL_TEST_HOST_RCCL_WRAP_FAKES_H_
