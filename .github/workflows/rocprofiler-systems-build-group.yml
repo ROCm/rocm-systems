@@ -83,7 +83,7 @@ jobs:
       # Step anchors: steps shared identically with the system-deps job are
       # anchored here (_step-*) and aliased below to avoid duplication.
       - &_step-checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/
@@ -245,7 +245,7 @@ jobs:
       - &_step-upload-junit-results
         name: Upload JUnit test results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: junit-build-${{ inputs.group_key }}-${{ github.job }}-${{ strategy.job-index }}
           path: projects/rocprofiler-systems/build/test-results.xml
@@ -348,7 +348,7 @@ jobs:
         name: CTest artifacts
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: ctest-${{ inputs.group_key }}-${{ github.job }}-${{ strategy.job-index }}-log
           path: |
@@ -358,7 +358,7 @@ jobs:
         name: Data artifacts
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: data-${{ inputs.group_key }}-${{ github.job }}-${{ strategy.job-index }}-files
           path: |

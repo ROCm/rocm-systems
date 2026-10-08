@@ -113,7 +113,7 @@ jobs:
       windows_amdgpu_families: ${{ steps.build_stages.outputs.windows_amdgpu_families }}
     steps:
       - name: Checkout repository config
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             .github/repos-config.json
@@ -121,7 +121,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Checkout TheRock for configure script
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ROCm/TheRock
           ref: 05add1921fd03b0649f054ec2a7c54d162c0cd99 # 2026-10-08
@@ -174,7 +174,7 @@ jobs:
 
   setup:
     needs: configure
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@05add1921fd03b0649f054ec2a7c54d162c0cd99 # 2026-10-08
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@1b43c9ced522b8569dc78e523dd55cb6cc4e1e1d # 2026-10-08
     with:
       build_variant: "release"
       # Limit GPU families for rocm-systems CI
@@ -228,7 +228,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@05add1921fd03b0649f054ec2a7c54d162c0cd99 # 2026-10-08
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@1b43c9ced522b8569dc78e523dd55cb6cc4e1e1d # 2026-10-08
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -254,7 +254,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@05add1921fd03b0649f054ec2a7c54d162c0cd99 # 2026-10-08
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@1b43c9ced522b8569dc78e523dd55cb6cc4e1e1d # 2026-10-08
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
@@ -280,7 +280,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: "ROCm/TheRock"
           ref: 05add1921fd03b0649f054ec2a7c54d162c0cd99 # 2026-10-08
