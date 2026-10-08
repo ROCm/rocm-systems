@@ -467,20 +467,21 @@ bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
             auto it = deferred_.find(freed[0]);
             const PlacedMapping& d = it->second;
             // Freed from the same first page on this device, and the same
-            // size. A stream-ordered pool also hands a block back for a
-            // request up to 12.5% smaller (FindMemory), so a stream-ordered
-            // allocation takes back a mapping up to 9/8 of its own pages too.
-            // An allocation with no stream does not come from that pool, and
-            // keeping a larger mapping would only make a later allocation in
-            // its tail fall back. Take the mapping back as it is, keeping its
-            // end, as the pool kept the whole block. That needs no unmap, so
+            // pages. A stream-ordered pool also hands a block back for a
+            // request up to 12.5% smaller in bytes (FindMemory), so a
+            // stream-ordered allocation takes back a mapping it fits in whose
+            // recorded size is up to 9/8 of its own. An allocation with no
+            // stream does not come from that pool, and keeping a larger
+            // mapping would only make a later allocation in its tail fall
+            // back. Take the mapping back as it is, keeping its end and size,
+            // as the pool kept the whole block. That needs no unmap, so
             // no device-wide wait. The recording's pool reused the block only
             // once the free was done, or ordered after it, so replay orders
             // the allocation after the free too: nothing to do on the stream
             // that freed it; on another, or for an allocation with no stream,
             // wait for the event the free left, unless a capture is open,
             // where that wait would sync inside it.
-            const bool fits = stream ? pe <= d.end && (d.end - pb) * 8 <= (pe - pb) * 9
+            const bool fits = stream ? pe <= d.end && d.bytes * 8 <= uint64_t(size) * 9
                                      : pe == d.end;
             const bool same_stream =
                 stream && d.on_stream && d.stream == *stream && d.stream_device == sdev;
@@ -535,6 +536,7 @@ bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
             continue;
         }
         PlacedMapping m{pe, rec, {}, device, false};
+        m.bytes = size;
         const hipError_t r = vmm_map(pb, pe, device, &m.handle);
         if (r == hipSuccess) {
             mapped_[pb] = m;
@@ -719,7 +721,9 @@ void VaPlacement::adopt_reservation_for_test(uint64_t b, uint64_t e, int devices
 void VaPlacement::adopt_mapping_for_test(uint64_t rec, size_t size, int device) {
     std::lock_guard<std::mutex> lk(mu_);
     active_ = true;
-    mapped_[va_floor(rec, gran_)] = {va_ceil(rec + size, gran_), rec, {}, device, false};
+    PlacedMapping m{va_ceil(rec + size, gran_), rec, {}, device, false};
+    m.bytes = size;
+    mapped_[va_floor(rec, gran_)] = m;
 }
 
 bool VaPlacement::is_mapped(void* live) {

@@ -1114,9 +1114,9 @@ An allocation over a deferred mapping is handled three ways:
 
 - From the same first page on the same device, and the same size in pages: the
   allocation takes the mapping back as it is. A stream-ordered allocation also
-  takes back a mapping up to 9/8 of its own pages, keeping the mapping's end, as
-  the pool hands a block back for a request up to 12.5% smaller and keeps the
-  whole block. `hipMalloc`, `hipExtMallocWithFlags` and a region segment do not
+  takes back a mapping it fits in whose recorded size is up to 9/8 of its own in
+  bytes, keeping the mapping's end and size, as the pool hands a block back for a
+  request up to 12.5% smaller and keeps the whole block. `hipMalloc`, `hipExtMallocWithFlags` and a region segment do not
   come from that pool, so they take back only the same size; keeping a larger
   mapping would make a later allocation in its tail fall back. No unmap and no
   new map. The recording's pool reused the block only once
@@ -1176,8 +1176,8 @@ What deferral costs:
 
 - **Memory.** A deferred mapping keeps its physical memory until it drains. A
   trace that frees with `hipFreeAsync` and only ever synchronizes streams holds
-  every such allocation, except those reallocated from the same first page and
-  no larger, until the device runs out of memory, which then drains them, or
+  every such allocation, except those taken back (same first page and same
+  pages, or for a stream-ordered allocation up to 1/8 smaller in bytes), until the device runs out of memory, which then drains them, or
   until teardown. The recording's pool reused that memory at once.
 - **Events.** Each placed `hipFreeAsync` made with no capture open keeps one
   event until its mapping is taken back or unmapped. In a trace that only ever
