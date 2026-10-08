@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "decode_test_util.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
@@ -401,6 +402,31 @@ TEST_P(ScalarAtomicTest, FailedCompareExchangeDoesNotWriteBackOrLeakCounter) {
     EXPECT_EQ(backing->mutations, 0u);
     EXPECT_EQ(read_sgpr(4), 9u);
     EXPECT_EQ(memory.read32(kAddress), 4u);
+  }
+}
+
+TEST_P(ScalarAtomicTest, DecodedDependenciesFollowReturnBit) {
+  for (uint8_t glc : {0, 1}) {
+    SCOPED_TRACE(glc);
+    const auto words =
+        cdna3::build_smem(cdna3::kSAtomicDecSmem, {.sdata = 4, .glc = glc, .imm = 1});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    const InstDefUse def_use(*inst);
+    EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 4, 1}));
+    EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 0, 2}));
+    EXPECT_EQ(def_use.defs.contains({RegClass::SGPR, 4, 1}), glc != 0);
+    EXPECT_EQ(inst->num_dst_operands(), glc ? 1 : 0);
+
+    EXPECT_TRUE(inst->is_memory_wait_producer());
+    const auto *issue = inst->amdgpu_memory_issue_info();
+    ASSERT_NE(issue, nullptr);
+    EXPECT_FALSE(issue->exec_masked);
+    const auto obligations = issue->counter_obligations();
+    ASSERT_EQ(obligations.size(), 1u);
+    EXPECT_EQ(obligations[0].wait_counter_type(), WaitCounterType::LGKMCNT);
+    EXPECT_EQ(obligations[0].completion_class(), MemoryCompletionClass::UNORDERED);
+    EXPECT_EQ(obligations[0].counter_increment(), 1u);
   }
 }
 

@@ -10461,6 +10461,10 @@ class CodeGenerator:
                                     inst_sem.semantic_class == 'buffer_atomic'
                                     and opnd.name == 'vdata'
                                 )
+                                or (
+                                    inst_sem.semantic_class == 'smem_atomic'
+                                    and opnd.name == 'sdata'
+                                )
                             )
                         )
                         # Compare-swap consumes two elements through vdata but
@@ -10486,9 +10490,15 @@ class CodeGenerator:
                             else opnd.name
                         )
                         if _is_optional_atomic_return:
-                            sc0, _, _ = self._coherency_exprs()
+                            if inst_sem.semantic_class == 'smem_atomic':
+                                # SMEM retains GLC on CDNA3/4, whose vector
+                                # atomics use SC0 to select the return value.
+                                returns_data = 'inst_.glc != 0'
+                            else:
+                                sc0, _, _ = self._coherency_exprs()
+                                returns_data = self._atomic_return_expr(sc0)
                             conditional_dst_body.append(
-                                f'if ({self._atomic_return_expr(sc0)}) '
+                                f'if ({returns_data}) '
                                 f'dst_operands_[num_dst_++] = &{atomic_return_operand};'
                             )
                         elif (
