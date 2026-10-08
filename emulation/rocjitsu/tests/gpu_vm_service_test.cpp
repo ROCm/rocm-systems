@@ -231,7 +231,7 @@ TEST(GpuVmService, UnroutedIdentityBindingCoexistsWithRoutedVmidZero) {
   EXPECT_TRUE(gpu_vm.snapshot(gart));
   EXPECT_FALSE(gpu_vm.snapshot(gart)->info().ready);
   readback.fill(std::byte{0});
-  EXPECT_EQ(internal_access->read(0x4000, readback), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(internal_access->read(0x4000, readback), VmAccessOutcome::Revoked);
   EXPECT_EQ(readback, (std::array<std::byte, 4>{}));
 
   EXPECT_TRUE(gpu_vm.reset());
@@ -966,7 +966,7 @@ TEST(GpuVmService, AccessSnapshotIsRevokedAndNamespacesItsTranslationEpoch) {
   EXPECT_EQ(new_access->cache_namespace().address_space, address_space);
 
   std::array<std::byte, 1> value{std::byte{0x5a}};
-  EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Revoked);
   EXPECT_EQ(value[0], std::byte{0x5a});
   EXPECT_EQ(new_access->read(0, value), VmAccessOutcome::Complete);
   EXPECT_EQ(std::to_integer<uint8_t>(value[0]), 0x22);
@@ -975,9 +975,9 @@ TEST(GpuVmService, AccessSnapshotIsRevokedAndNamespacesItsTranslationEpoch) {
   EXPECT_FALSE(gpu_vm.snapshot(address_space));
   EXPECT_FALSE(new_access->is_current());
   value[0] = std::byte{0x5a};
-  EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Revoked);
   EXPECT_EQ(value[0], std::byte{0x5a});
-  EXPECT_EQ(new_access->read(0, value), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(new_access->read(0, value), VmAccessOutcome::Revoked);
 }
 
 TEST(GpuVmService, ExplicitInvalidationRevokesTheAccessSnapshot) {
@@ -995,7 +995,7 @@ TEST(GpuVmService, ExplicitInvalidationRevokesTheAccessSnapshot) {
   EXPECT_TRUE(refreshed->is_current());
   EXPECT_NE(old_access->cache_namespace(), refreshed->cache_namespace());
   std::array<std::byte, 1> value{std::byte{0x5a}};
-  EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Revoked);
   EXPECT_EQ(value[0], std::byte{0x5a});
   EXPECT_EQ(refreshed->read(0, value), VmAccessOutcome::Complete);
   EXPECT_EQ(value[0], std::byte{0x11});
@@ -1018,6 +1018,57 @@ TEST(GpuVmService, PolicyCacheDoesNotRetainSnapshotBacking) {
   EXPECT_FALSE(weak_backing.expired());
   snapshot.reset();
   EXPECT_TRUE(weak_backing.expired());
+}
+
+TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
+  class PagePolicy final : public AddressSpaceTranslator {
+  public:
+    VmTranslationResult translate(uint64_t, std::size_t, VmAccessKind) const override { return {}; }
+
+    VmMtypeSnapshot snapshot_mtype(uint64_t address) const override {
+      ++queries;
+      return {.mtype = mtype,
+              .begin = address & ~uint64_t{4095},
+              .size = 4096,
+              .mutation_epoch = epoch,
+              .captured_epoch = epoch->load()};
+    }
+
+    std::shared_ptr<std::atomic<uint64_t>> epoch = std::make_shared<std::atomic<uint64_t>>(0);
+    Mtype mtype = Mtype::RW;
+    mutable uint32_t queries = 0;
+  };
+
+  GpuVm vm;
+  auto policy = std::make_shared<PagePolicy>();
+  auto backing = std::make_shared<ByteAddressSpace>(0);
+  const auto handle = vm.register_translated(77, policy, backing);
+  auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  VmMtypeCache cache;
+  for (uint32_t repeat = 0; repeat < 3; ++repeat)
+    for (uint64_t page = 0; page < 8; ++page)
+      EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::RW);
+  EXPECT_EQ(policy->queries, 8u);
+
+  policy->epoch->fetch_add(1);
+  policy->mtype = Mtype::UC;
+  for (uint64_t page = 0; page < 8; ++page)
+    EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::UC);
+  EXPECT_EQ(policy->queries, 16u);
+
+  // A different VM generation may reuse the same epoch token. Entries from
+  // every page must be invalidated even when the token itself is unchanged.
+  auto replacement = std::make_shared<PagePolicy>();
+  replacement->epoch = policy->epoch;
+  ASSERT_TRUE(vm.replace_translated(handle, replacement, backing));
+  auto new_access = vm.snapshot(handle);
+  ASSERT_TRUE(new_access);
+  for (uint64_t page = 0; page < 8; ++page) {
+    EXPECT_FALSE(access->query_mtype(page * 4096, cache));
+    EXPECT_EQ(new_access->query_mtype(page * 4096, cache), Mtype::RW);
+  }
+  EXPECT_EQ(replacement->queries, 8u);
 }
 
 TEST(GpuVmService, GenerationsShareFaultReporterWithoutCopyingItsTarget) {
@@ -1175,7 +1226,7 @@ TEST(GpuVmService, ConcurrentSnapshotsPreserveRootEpochAndRetirement) {
           if (outcome == VmAccessOutcome::Complete)
             EXPECT_EQ(value[0], std::byte(access->info().translation_epoch & 255));
           else
-            EXPECT_EQ(outcome, VmAccessOutcome::Unavailable);
+            EXPECT_EQ(outcome, VmAccessOutcome::Revoked);
         }
         EXPECT_EQ(gpu_vm.find_vmid(7), handle);
         EXPECT_TRUE(gpu_vm.lookup(handle)->ready);
@@ -1204,7 +1255,7 @@ TEST(GpuVmService, ConcurrentSnapshotsPreserveRootEpochAndRetirement) {
   for (const auto &access : pinned) {
     ASSERT_TRUE(access);
     std::array<std::byte, 1> value{std::byte{0xff}};
-    EXPECT_EQ(access->read(0, value), VmAccessOutcome::Unavailable);
+    EXPECT_EQ(access->read(0, value), VmAccessOutcome::Revoked);
     EXPECT_EQ(value[0], std::byte{0xff});
   }
 }

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Borrowed host pages registered through DRM in a secondary KFD context.
 //!
 //! A KFD USERPTR allocation is unavailable in that context, but its acquired
@@ -41,7 +44,11 @@ impl VmMapping {
         }
     }
 
-    fn map(
+    /// # Safety
+    /// `host_base..host_base + size` must remain mapped until this native
+    /// registration is fully released or its render file closes.
+    #[allow(unsafe_code)]
+    unsafe fn map(
         &mut self,
         host_base: u64,
         address: u64,
@@ -50,7 +57,8 @@ impl VmMapping {
         uncached: bool,
     ) -> Result<(), Error> {
         let render = self.vm.render()?;
-        let result = drm::register_userptr(render, host_base, size, &mut self.handle);
+        // SAFETY: The caller retains the complete host page cover.
+        let result = unsafe { drm::register_userptr(render, host_base, size, &mut self.handle) };
         if let Err(source) = result {
             if self.handle != 0
                 || source.raw_os_error() == Some(14)
@@ -112,8 +120,12 @@ impl VmMapping {
             self.phase = MappingPhase::Unmapped;
         }
         if self.timeline != 0 {
-            drm::destroy_syncobj(render, self.timeline)
-                .map_err(|source| native_error("DRM host registration timeline close", source))?;
+            if let Err(source) = drm::destroy_syncobj(render, self.timeline) {
+                // EFAULT can follow successful handle removal at copyout.
+                // Quarantine the mapping rather than retrying a recycled ID.
+                self.uncertain = source.raw_os_error() == Some(14);
+                return Err(native_error("DRM host registration timeline close", source));
+            }
             self.timeline = 0;
         }
         if self.handle != 0 {
@@ -137,7 +149,11 @@ pub(crate) struct DrmRegisteredHost {
 }
 
 impl DrmRegisteredHost {
-    pub(super) fn create(
+    /// # Safety
+    /// The caller keeps the complete host page cover mapped and synchronizes
+    /// access through successful cleanup or process teardown.
+    #[allow(unsafe_code)]
+    pub(super) unsafe fn create(
         owner: Shared<DeviceVm>,
         peers: impl ExactSizeIterator<Item = Shared<DeviceVm>>,
         desc: AllocationDesc,
@@ -235,7 +251,8 @@ impl DrmRegisteredHost {
         });
         let address = allocation.address()?;
         for mapping in &mut allocation.mappings {
-            mapping.map(host_base as u64, address, desc.size, permissions, uncached)?;
+            // SAFETY: This constructor retains the caller-owned page cover.
+            unsafe { mapping.map(host_base as u64, address, desc.size, permissions, uncached)? };
         }
         allocation.owner.check()?;
         Ok(allocation)

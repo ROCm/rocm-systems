@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Linux KFD and DRM identities associated with a discovered endpoint.
 
 use crate::topology::Endpoint;
@@ -27,11 +30,14 @@ impl Endpoint {
     /// frontends that must translate rocddi objects to an established KFD or
     /// DRM contract.
     #[must_use]
-    pub fn linux_kfd_drm_info(&self) -> KfdDrmEndpointInfo {
-        KfdDrmEndpointInfo {
-            node_id: self.native.node,
-            gpu_id: self.native.gpu_id,
-            render_minor: self.native.render_minor,
+    pub fn linux_kfd_drm_info(&self) -> Option<KfdDrmEndpointInfo> {
+        match &self.native {
+            crate::driver::EndpointSelector::LinuxKfd(native) => Some(KfdDrmEndpointInfo {
+                node_id: native.node,
+                gpu_id: native.gpu_id,
+                render_minor: native.render_minor,
+            }),
+            crate::driver::EndpointSelector::Opaque(_) => None,
         }
     }
 }

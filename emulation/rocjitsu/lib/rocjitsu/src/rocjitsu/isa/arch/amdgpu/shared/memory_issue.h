@@ -74,8 +74,9 @@ private:
 /// FLAT and pre-GFX12 stores can contribute to multiple simultaneous domains.
 /// Each obligation carries its own completion-order class because operations
 /// sharing one counter need not form one FIFO, and one instruction's different
-/// counter domains can have different ordering guarantees. The memory route
-/// does not change these obligations. exec_masked distinguishes ordinary
+/// counter domains can have different ordering guarantees. Decoded FLAT metadata
+/// lists possible domains; address routing selects the domains actually used.
+/// exec_masked distinguishes ordinary
 /// vector memory operations from scalar memory and the few vector operations
 /// that execute independently of EXEC.
 ///
@@ -91,6 +92,33 @@ struct MemoryIssueInfo {
     return {counter_obligations_.data(), num_counter_obligations_};
   }
   [[nodiscard]] bool empty() const { return num_counter_obligations_ == 0; }
+
+  /// Select FLAT's actual memory domains without changing completion ordering
+  /// or independent obligations such as source-register export completion.
+  [[nodiscard]] MemoryIssueInfo for_flat_memory_domains(bool vmem, bool lds) const {
+    MemoryIssueInfo result;
+    result.exec_masked = exec_masked;
+    for (const auto obligation : counter_obligations()) {
+      switch (obligation.wait_counter_type()) {
+      case WaitCounterType::VMCNT:
+      case WaitCounterType::VSCNT:
+      case WaitCounterType::LOADCNT:
+      case WaitCounterType::STORECNT:
+        if (!vmem)
+          continue;
+        break;
+      case WaitCounterType::LGKMCNT:
+      case WaitCounterType::DSCNT:
+        if (!lds)
+          continue;
+        break;
+      default:
+        break;
+      }
+      result.counter_obligations_[result.num_counter_obligations_++] = obligation;
+    }
+    return result;
+  }
 
   std::array<MemoryCounterObligation, MAX_COUNTER_OBLIGATIONS> counter_obligations_{};
   uint8_t num_counter_obligations_ = 0;
