@@ -5,11 +5,16 @@
 
 from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
+from utils.metrics.expression import (
+    is_composite_avg_formula,
+    reject_counter_bearing_composite_extents,
+)
 from utils.utils_common import (
     METRIC_ID_RE,
     convert_metric_id_to_panel_info,
 )
 from utils.utils_counter_defs import extract_counters_and_variables
+from vendored import yaml
 
 from .counter_file import CounterFile, flat_counters_in_perfmon_file
 
@@ -50,11 +55,59 @@ def rebuild_counter_file(
     return counter_file
 
 
+def _metric_body(metric_yaml: str) -> Optional[Dict[str, Any]]:
+    try:
+        body = yaml.safe_load(metric_yaml)
+    except yaml.YAMLError:
+        return None
+    if isinstance(body, dict):
+        return body
+    return None
+
+
+def _composite_formula(body: Dict[str, Any]) -> Optional[str]:
+    formula = body.get("avg")
+    if not isinstance(formula, str):
+        formula = body.get("value")
+    if isinstance(formula, str) and is_composite_avg_formula(formula):
+        return formula
+    return None
+
+
+def _weight_counters_by_submetric(
+    raw_metrics: List[Tuple[Any, ...]],
+) -> Dict[Tuple[str, str, str], Set[str]]:
+    """Map (stem, panel, sub-metric name) to WEIGHTED_AVG weight counters."""
+    extras: Dict[Tuple[str, str, str], Set[str]] = {}
+    for stem_id, panel_id, _metric_idx, _metric_name, metric_yaml in raw_metrics:
+        body = _metric_body(metric_yaml)
+        if body is None:
+            continue
+        meta = body.get("_weighted_avg")
+        if not isinstance(meta, dict):
+            continue
+        panel_key = str(panel_id) if panel_id is not None else ""
+        for sub_name, sub_meta in meta.items():
+            if not isinstance(sub_meta, dict):
+                continue
+            counter = sub_meta.get("weight_counter")
+            if not isinstance(counter, str) or not counter:
+                continue
+            key = (str(stem_id), panel_key, str(sub_name))
+            extras.setdefault(key, set()).add(counter)
+    return extras
+
+
 def iter_metric_groups(
     soc: "OmniSoC_Base",
     profile_counters: Set[str],
 ) -> List[_MetricGroup]:
-    """Metric PMC groups in priority-tier order for the profiled counters."""
+    """Metric PMC groups in priority-tier order for the profiled counters.
+
+    A WEIGHTED_AVG weight counter is added to the sub-ratio collectable so
+    Phase 1 can place it in that collectable's bucket. Composite parents are
+    not a second PMC pack.
+    """
     priority_keys: Set[Tuple[str, Any, int]] = set()
     for token in soc._same_bucket_priority_metric_ids():
         tid = token.strip()
@@ -65,6 +118,9 @@ def iter_metric_groups(
             continue
         priority_keys.add((file_id, panel_id, metric_idx))
 
+    raw_metrics = list(soc._iter_arch_analysis_yaml_metrics())
+    weight_extras = _weight_counters_by_submetric(raw_metrics)
+
     rows: List[_MetricGroup] = []
     for (
         stem_id,
@@ -72,20 +128,26 @@ def iter_metric_groups(
         metric_idx,
         metric_name,
         metric_yaml,
-    ) in soc._iter_arch_analysis_yaml_metrics():
+    ) in raw_metrics:
+        body = _metric_body(metric_yaml)
+        if body is not None:
+            reject_counter_bearing_composite_extents(metric_name, body)
+            if _composite_formula(body) is not None:
+                continue
         formula_hw, _ = extract_counters_and_variables(
             metric_yaml,
             soc._mspec.gpu_series,
             include_supported_denom=False,
         )
-        hw = soc._expand_tcc_template_counters(formula_hw)
+        panel_key = str(panel_id) if panel_id is not None else ""
+        extra = weight_extras.get((str(stem_id), panel_key, str(metric_name)), set())
+        hw = soc._expand_tcc_template_counters(set(formula_hw) | set(extra))
         counters = frozenset(hw & profile_counters)
         if not counters:
             continue
         tier = 0 if (stem_id, panel_id, metric_idx) in priority_keys else 1
-        panel_s = str(panel_id) if panel_id is not None else ""
-        sort_key = (tier, -len(counters), stem_id, panel_s, metric_idx)
-        label = f"{stem_id}.{panel_s}.{metric_idx} ({metric_name})"
+        sort_key = (tier, -len(counters), stem_id, panel_key, metric_idx)
+        label = f"{stem_id}.{panel_key}.{metric_idx} ({metric_name})"
         rows.append((sort_key, counters, label))
     rows.sort(key=lambda row: row[0])
     return rows
