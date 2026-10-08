@@ -865,6 +865,37 @@ TEST_CASE("Unit_HRR_PinnedHost_HostUnregistered_Direct", "[.][hrr-direct]") {
   std::free(r);
 }
 
+// ===========================================================================
+// A hipHostRegister range unregistered after hipDeviceReset.
+//
+//   -  register range R
+//   -  hipDeviceReset, which keeps R registered with more than one GPU
+//   -  hipHostUnregister(R), which succeeds, so capture records it
+// With one GPU the reset unregisters R, and the workload skips.
+// ===========================================================================
+TEST_CASE("Unit_HRR_PinnedHost_UnregisterAfterReset_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* r = static_cast<int*>(std::aligned_alloc(4096, kPinnedBytes));
+  REQUIRE(r != nullptr);
+  fill(r, 34);
+  HRR_HIP_CHECK(hipHostRegister(r, kPinnedBytes, hipHostRegisterDefault));
+
+  HRR_HIP_CHECK(hipDeviceReset());
+  HRR_HIP_CHECK(hipSetDevice(0));
+  hipPointerAttribute_t attr{};
+  const hipError_t ar = hipPointerGetAttributes(&attr, r);
+  (void)hipGetLastError();
+  if (ar != hipSuccess || attr.type == hipMemoryTypeUnregistered) {
+    skip_direct("hipDeviceReset unregistered the registered range; it keeps it "
+                "only with more than one GPU visible");
+    std::free(r);
+    return;
+  }
+
+  HRR_HIP_CHECK(hipHostUnregister(r));
+  std::free(r);
+}
+
 namespace {
 // The device pointer makes the argument value_kind 3; the pinned one is at
 // byte offset 8.
@@ -3012,6 +3043,40 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_HostUnregistered) {
                 static_cast<unsigned long long>(r));
   CHECK(line.find(home) != std::string::npos);
   CHECK(line.find(", +" + std::to_string(kUnregOffset) + ")") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// A replayed hipHostUnregister of a range a replayed hipDeviceReset already
+// unregistered succeeds. Capture sees every GPU this test sees, so its reset
+// keeps the range registered and its unregister succeeds and is recorded.
+// Replay sees only the first, so its reset unregisters replay's range and
+// its own unregister fails. The application's call succeeded, so replay's
+// must too: replay that returned the error counted a failed event. Skips
+// with one GPU, where capture's reset unregisters the range as well.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_UnregisterAfterReset) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_unregister_after_reset.hrr");
+  const std::string skipped =
+      capture_case("Unit_HRR_PinnedHost_UnregisterAfterReset_Direct", cap.path);
+  if (!skipped.empty()) SKIP(skipped);
+  const fs::path archive = hrr_single_process_archive(cap.path);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  size_t resets = 0, unregisters = 0;
+  for (const auto& ev : arc.events) {
+    const uint16_t t = ev.header().event_type;
+    if (t == static_cast<uint16_t>(HRR_API_HIPDEVICERESET)) ++resets;
+    if (t == static_cast<uint16_t>(HRR_API_HIPHOSTUNREGISTER) && resets > 0) ++unregisters;
+  }
+  REQUIRE(resets == 1);
+  REQUIRE(unregisters == 1);
+
+  auto [rc, out] = replay(archive, "--continue-on-error", first_gpu_only());
+  INFO("Replay exit: " << rc << "\nReplay:\n" << out);
+  CHECK(rc == 0);
+  CHECK(count_of(out, "Events failed") == 0);
+  CHECK(count_of(out, "(hipHostUnregister) returned") == 0);
 }
 
 // ---------------------------------------------------------------------------
