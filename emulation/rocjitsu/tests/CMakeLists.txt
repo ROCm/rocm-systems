@@ -2142,11 +2142,14 @@ rj_add_interposer_test_suite(
     DeviceInfoReportsActiveCuCount
     DmabufExportKeepsADriverCpuMapping
     DmabufExportKeepsAReservedCpuMapping
+    DmabufExportKeepsStoresMadeDuringTheExport
+    DmabufExportLeavesPagesPastAPartialMapping
     GemMetadataRoundTripsOnABuffer
     GemOpReportsTheCreateSize
     GemOpSetPlacementChangesTheReportedDomain
     OpensWithinCurrentDescriptorLimit
     PrimeHandleToFdReturnsTheBuffer
+    PrimeImportKeepsTheBoStateAfterTheHandleCloses
     PrimeImportSharesTheBufferAndItsMetadata
     PrimaryNodePathHasCharacterDeviceMetadata
     RenderNodePathMetadataMatchesDescriptor
