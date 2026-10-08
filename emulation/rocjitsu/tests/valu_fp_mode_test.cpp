@@ -2811,10 +2811,12 @@ INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuRoundedResultModifierTest,
 
 class ValuLegacyRoundedResultModifierTest : public testing::TestWithParam<ArithmeticCase> {};
 
-TEST_P(ValuLegacyRoundedResultModifierTest, MatchesCapturesOnScalarAndSimdPaths) {
+// Both passes use scalar fallback. This F16 ADD/MUL SIMD path rejects OMOD=3
+// and requires preserving input/output denormals; these cases flush outputs.
+TEST_P(ValuLegacyRoundedResultModifierTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   ForceScalarGuard guard;
   for (const bool scalar : {true, false}) {
-    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    SCOPED_TRACE(scalar ? "forced scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
     expect_arithmetic_case(GetParam());
   }
