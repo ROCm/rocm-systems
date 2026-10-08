@@ -1,11 +1,7 @@
 /*************************************************************************
  * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
- * Host-only microtests for src/algorithms/dda/fabric/fabric_gpu_barrier.cu,
- * #include-d via FABRIC_GPU_BARRIER_CC_PATH. Only the host-side
- * FabricGpuBarrier::mallocAndInit is under test; its flag buffer is a real
- * DeviceBuffer and its exchange a real ncclFabricMemHandler, both driven at the
- * HIP VMM seams through HipVmmLedger.
+ * Host-only tests for FabricGpuBarrier::mallocAndInit in src/algorithms/dda/fabric/fabric_gpu_barrier.cu.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -46,9 +42,7 @@ void* const kBootstrap = reinterpret_cast<void*>(0xB007);
 
 size_t FlagBytes(int nRanks, int nBlocks) { return static_cast<size_t>(nRanks) * nBlocks * sizeof(FlagType); }
 
-// FabricGpuBarrier's state is private and only read on the device. Mirror its
-// layout to check what mallocAndInit hands the kernels; the test that reads it
-// gives the three ints distinct values, so a reordered field fails, not passes.
+// Mirrors FabricGpuBarrier's private layout.
 struct BarrierState {
   int nBlocks;
   int selfRank;
@@ -69,9 +63,9 @@ using InitResult = std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricG
 class FabricGpuBarrierTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    SetMicroEnvAbsent("NCCL_CUMEM_SKIP_FREE");  // see HipVmmLedger.h
+    SetMicroEnvAbsent("NCCL_CUMEM_SKIP_FREE");
     ledger_.Install();
-    ASSERT_FALSE(rcclSkipCuMemFree());  // latch the once-per-process decision under this env
+    ASSERT_FALSE(rcclSkipCuMemFree());  // alloc.h caches this once per process
     g_cuMemEnable = [] { return 1; };
     auto ledgerMemset = g_hipMemset;
     g_hipMemset = [this, ledgerMemset](void* dst, int value, size_t bytes) {
@@ -79,7 +73,7 @@ class FabricGpuBarrierTest : public ::testing::Test {
       memsets_.push_back({dst, value, bytes});
       return ledgerMemset(dst, value, bytes);
     };
-    // A homogeneous clique: every peer publishes what this rank published.
+    // Every peer publishes what this rank published.
     g_bootstrapAllGather = [this](void* state, void* allData, int size) {
       events_.push_back("allgather");
       gatherStates_.push_back(state);
@@ -92,7 +86,7 @@ class FabricGpuBarrierTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    result_.first.reset();  // first: the resources free through the ledger hooks
+    result_.first.reset();
     EXPECT_TRUE(ledger_.Clean()) << ledger_.reserved.size() << " reservations, " << ledger_.liveHandles.size()
                                  << " handles, " << ledger_.liveBuffers.size() << " buffers live; "
                                  << ledger_.rejected.size() << " calls refused";
@@ -110,7 +104,6 @@ class FabricGpuBarrierTest : public ::testing::Test {
     return result_;
   }
 
-  // Runs mallocAndInit expecting failure, then checks it left nothing allocated.
   void ExpectFailsWithoutLeaking(int nRanks = kNRanks, int selfRank = kRank) {
     Init(nRanks, selfRank);
     EXPECT_EQ(result_.first, nullptr);
@@ -119,7 +112,6 @@ class FabricGpuBarrierTest : public ::testing::Test {
                                  << ledger_.rejected.size() << " calls refused";
   }
 
-  // Where each sync memset and allgather fell, in order.
   size_t EventIndex(const std::string& event, size_t nth = 0) const {
     for (size_t i = 0; i < events_.size(); ++i) {
       if (events_[i] == event && nth-- == 0) return i;
@@ -159,7 +151,6 @@ class FabricGpuBarrierInvalidGeometryTest : public FabricGpuBarrierTest,
 
 TEST_P(FabricGpuBarrierInvalidGeometryTest, MallocAndInit_InvalidGeometry_ReturnsNullWithoutAllocating) {
   const Geometry g = GetParam();
-  // Pass-through hooks: count calls, keep the ledger's behaviour.
   ScopedHook create(g_hipMemCreate, g_hipMemCreate);
   ScopedHook extMalloc(g_hipExtMallocWithFlags, g_hipExtMallocWithFlags);
 
@@ -211,7 +202,6 @@ TEST_F(FabricGpuBarrierTest, MallocAndInit_AllSucceed_ReturnsVmmFlagBufferAndHan
   EXPECT_NE(r.first->peerFlagsDev->get(), nullptr);
 }
 
-// Peers may signal into the buffer as soon as they hold its mapping.
 TEST_F(FabricGpuBarrierTest, MallocAndInit_AllSucceed_ZeroesFlagBufferBeforePublishingIt) {
   InitResult& r = Init();
   ASSERT_NE(r.first, nullptr);
@@ -247,10 +237,9 @@ TEST_F(FabricGpuBarrierTest, MallocAndInit_AllSucceed_ExchangesOverTheGivenBoots
   for (void* state : gatherStates_) EXPECT_EQ(state, kBootstrap);
 }
 
-// A flag buffer bigger than one page and not a page multiple, so a peer mapping
-// sized from anything but the whole buffer rounds to a different size.
+// Not a page multiple, so a wrongly sized peer mapping rounds differently.
 TEST_F(FabricGpuBarrierTest, MallocAndInit_AllSucceed_PeersMapTheWholeFlagBuffer) {
-  constexpr int kManyBlocks = 300;  // 4 ranks * 300 blocks * 4 B = 4800 B
+  constexpr int kManyBlocks = 300;  // 4800 B of flags
   InitResult& r = Init(kNRanks, kRank, kManyBlocks);
   ASSERT_NE(r.first, nullptr);
   auto* const* table = static_cast<FlagType* const*>(r.first->peerFlagsDev->get());
@@ -277,7 +266,6 @@ TEST_F(FabricGpuBarrierTest, MallocAndInit_AllSucceed_PeerTableHoldsOwnFlagBuffe
   void* const flags = r.first->selfFlagBuf->get();
 
   EXPECT_EQ(table[kRank], flags);
-  // Every other reservation is a peer mapping; the peer slots are exactly those.
   std::set<void*> peerMappings;
   for (const auto& entry : ledger_.reserved) {
     if (entry.first != flags) peerMappings.insert(entry.first);
@@ -292,7 +280,6 @@ TEST_F(FabricGpuBarrierTest, MallocAndInit_AllSucceed_PeerTableHoldsOwnFlagBuffe
   }
   EXPECT_EQ(peerSlots, peerMappings);
   EXPECT_EQ(peerSlots.size(), static_cast<size_t>(kNRanks - 1));
-  // The table is staged from host memory.
   for (hipMemcpyKind kind : kinds) EXPECT_TRUE(kind == hipMemcpyHostToDevice || kind == hipMemcpyDefault) << kind;
 }
 
@@ -308,7 +295,7 @@ TEST_F(FabricGpuBarrierTest, MallocAndInit_AllSucceed_BarrierCarriesGeometryAndD
 }
 
 TEST_F(FabricGpuBarrierTest, MallocAndInit_WithManager_TracksFlagBufferAndUntracksPeerMappingsInIt) {
-  auto manager = std::make_unique<ncclMemManager>();  // value-initialised: nothing released
+  auto manager = std::make_unique<ncclMemManager>();
   std::vector<std::pair<ncclMemManager*, void*>> tracked;
   std::vector<std::pair<ncclMemManager*, void*>> untracked;
   ScopedHook track(g_memTrack, [&tracked](ncclMemManager* m, void* ptr, size_t, hipMemGenericAllocationHandle_t,
@@ -360,7 +347,6 @@ TEST_F(FabricGpuBarrierTest, MallocAndInit_FlagBufferAllocationFails_ReturnsNull
 
   ExpectFailsWithoutLeaking();
 
-  // The null-buffer guard returns before the zeroing, which comes ahead of the VMM check.
   EXPECT_TRUE(memsets_.empty()) << "zeroed a buffer that was never allocated";
 }
 
@@ -376,7 +362,6 @@ TEST_F(FabricGpuBarrierTest, MallocAndInit_ExchangeFails_ReturnsNullWithoutLeaki
   ExpectFailsWithoutLeaking();
 }
 
-// With no peers to look up afterwards, only the exchange's own result can stop it.
 TEST_F(FabricGpuBarrierTest, MallocAndInit_SingleRankExchangeFails_ReturnsNullWithoutLeaking) {
   ScopedHook gather(g_bootstrapAllGather, [](void*, void*, int) { return ncclRemoteError; });
 
@@ -387,7 +372,7 @@ TEST_F(FabricGpuBarrierTest, MallocAndInit_ExchangeFailsAfterMappingPeers_Return
   int imports = 0;
   ScopedHook import(g_hipMemImportFromShareableHandle,
                     [&imports](hipMemGenericAllocationHandle_t* handle, void*, hipMemAllocationHandleType) {
-                      if (++imports == kNRanks - 1) return hipErrorInvalidValue;  // the last peer
+                      if (++imports == kNRanks - 1) return hipErrorInvalidValue;
                       *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
                       return hipSuccess;
                     });

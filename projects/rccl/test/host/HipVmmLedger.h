@@ -4,33 +4,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Device-memory bookkeeping for a fixture whose unit allocates through the HIP
-// VMM / malloc seams and must give everything back.
-//
-// Install() puts InstallHipVmmEmulator() in place and wraps it to track:
-//   - VA reservations, with their sizes. The emulator's address-range query
-//     reports size 0, which makes alloc.h's free paths fail; the ledger
-//     reports the reserved size instead.
-//   - mappings (map/unmap) and the physical handles hipMemCreate made, counted
-//     through retain/release. Imported handles are recorded on release only:
-//     their lifetime belongs to the exporting peer.
-//   - plain device buffers from hipMalloc / hipExtMallocWithFlags.
-// hipMemcpy and hipMemset act on the host-memory stand-ins.
-//
-// Production code usually discards free results ((void), CUDACHECKIGNORE), so
-// a bad free would pass silently. The ledger records every call it refuses in
-// `rejected` instead: a free of an unknown, already-freed or still-mapped
-// range, a release of a handle no longer live, a copy or memset outside any
-// live allocation. Clean() checks both that and that nothing is left live.
-//
-// Hooks capture `this`; destroy the unit under test before the fixture's
-// ResetHipFakes(), which restores every hook installed here.
-//
-// alloc.h memoises once per process whether ncclCuMemFreeAddr skips peer
-// unmaps (NCCL_CUMEM_SKIP_FREE, else the device arch). Fixtures using the
-// ledger unset that variable and then latch the decision with
-// ASSERT_FALSE(rcclSkipCuMemFree()): with the emulator's gfx900 every free stays
-// real, and a test that finds it already latched the other way fails loudly.
+// Tracks device memory a unit allocates through the HIP VMM / malloc seams,
+// on top of InstallHipVmmEmulator(). Clean() is true when everything was freed
+// and no call was refused (bad free, over-release, out-of-range copy/memset).
 
 #ifndef RCCL_TEST_HOST_HIPVMMLEDGER_H_
 #define RCCL_TEST_HOST_HIPVMMLEDGER_H_
@@ -132,9 +108,7 @@ class HipVmmLedger {
     };
   }
 
-  // Nothing the ledger created is still live (imported handles aside).
   bool Empty() const { return reserved.empty() && mappedHandle.empty() && liveHandles.empty() && liveBuffers.empty(); }
-  // Empty, and no call was refused along the way.
   bool Clean() const { return Empty() && rejected.empty(); }
 
   std::map<void*, size_t> reserved;  // live VA reservations -> size
@@ -158,7 +132,6 @@ class HipVmmLedger {
     return hipSuccess;
   }
 
-  // [dst, dst + n) lies inside one live buffer or reservation.
   bool Covers(const void* dst, size_t n) const {
     auto inside = [dst, n](const std::map<void*, size_t>& allocs) {
       auto it = allocs.upper_bound(const_cast<void*>(dst));
