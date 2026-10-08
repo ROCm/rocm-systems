@@ -1120,15 +1120,6 @@ inline native<float> round_to_nearest_even_simd(native<float> value) {
 /// with ties to even. Clamp inputs to [minimum, 1] and convert NaNs to zero.
 /// An FP32 product can round onto an integer midpoint. The FMA residual
 /// distinguishes these false ties so the conversion rounds only once.
-/// @details ISA discrepancy: the ISA applies MODE.FP_ROUND to every
-/// floating-point operation unless the instruction says otherwise, and the
-/// NORM conversions say nothing. gfx1201 and gfx1100 nevertheless round to
-/// nearest even under every FP_ROUND setting, so callers do not pass MODE.
-/// Other targets reuse this rounding and are not verified on hardware.
-///
-/// MODE.FP_DENORM does apply: gfx1201 flushes a subnormal F16 source before
-/// it is widened when MODE disables F16 input denormals. Callers do not flush
-/// yet; a later PR adds that flush on a common input-denormal primitive.
 inline native<float> round_normalized_simd(native<float> f, float scale, float minimum) {
   using F = native<float>;
   stdx::where(f < F(minimum), f) = F(minimum);

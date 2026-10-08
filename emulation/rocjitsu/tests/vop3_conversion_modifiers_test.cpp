@@ -387,8 +387,8 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedRoundsOnceAndSaturatesSymmetr
   // Physical RDNA3/4 witnesses: false FP32 midpoint ties, signed saturation,
   // exact midpoints, infinities and NaN. Rounding ignores MODE.FP_ROUND. Both
   // MODE values here flush F16 input denormals, and the only subnormal source
-  // (0x33800000 as F16 0x0001) gives 0 with or without that flush, which is
-  // not modeled yet. GFX9 and RDNA1-2 F16 results reuse these RDNA3/4
+  // (0x33800000 as F16 0x0001) gives 0 with or without that flush, which the
+  // emulator does not model. GFX9 and RDNA1-2 F16 results reuse these RDNA3/4
   // witnesses and are not verified on hardware.
   constexpr Case second_source{0x3f000000, 0x8000, 0x4000};
   constexpr Case f32_only_cases[] = {
@@ -560,8 +560,8 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedHalfScalesSubnormalSourcesWhe
   // these gfx1201-derived results and are not verified on hardware.
   //
   // gfx1201 flushes these sources to 0 when MODE disables F16 input denormals.
-  // The emulator does not flush them yet; a later PR adds that flush and its
-  // cases here.
+  // The emulator does not apply that flush, so this test covers only MODE
+  // values that allow F16 input denormals.
   constexpr Case cases[] = {{true, 0, 0x3c00, 0x83ff, 0xc0, 0xfffe7fff},
                             {true, 2, 0x0000, 0x83ff, 0xf0, 0x00020000},
                             {false, 0, 0x3c00, 0x03ff, 0xc0, 0x0004ffff},
