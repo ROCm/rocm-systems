@@ -23,8 +23,9 @@ namespace
 {
 constexpr int k_exec_failure_status = 127;
 
-[[noreturn]] void
-print_version(std::string_view program)
+// enable_version exits on success. The exit below runs only if that action did not.
+[[noreturn]] int
+exit_with_version(std::string_view program)
 {
     auto name   = std::string{ program };
     auto parser = tim::argparse::argument_parser{ name };
@@ -51,14 +52,11 @@ c_argv(std::vector<std::string>& args)
 }
 
 [[nodiscard]] std::string
-executable_directory(const char* invoked)
+executable_directory()
 {
-    const auto exe_dir = std::filesystem::path{ invoked }.parent_path();
-    if(!exe_dir.empty())
-    {
-        return exe_dir.string();
-    }
-    // Same Linux /proc/self/exe assumption as get_rocprofsys_root().
+    // Resolve symlinks. A /usr/bin/rocsys link must find siblings next to the
+    // real binary, not next to the link. Same /proc/self/exe assumption as
+    // get_rocprofsys_root().
     std::error_code error;
     const auto      canon = std::filesystem::canonical("/proc/self/exe", error);
     if(error)
@@ -92,7 +90,7 @@ dispatch_exec(int argc, char** argv, const rocprofsys::cli::dispatch_result& par
         return k_exec_failure_status;
     }
     const auto& spec      = *parsed.spec;
-    const auto  directory = executable_directory(argv[0]);
+    const auto  directory = executable_directory();
     const auto  path = (std::filesystem::path{ directory } / spec.binary_name).string();
     auto        forwarded = rocprofsys::cli::make_forwarded_argv(
         argc, argv,
@@ -110,20 +108,21 @@ dispatch_exec(int argc, char** argv, const rocprofsys::cli::dispatch_result& par
 int
 main(int argc, char** argv)
 {
-    const auto  parsed  = rocprofsys::cli::parse_dispatch(argc, argv);
     const char* invoked = "rocsys";
     if(argc > 0)
     {
         invoked = argv[0];
     }
     const auto program = std::filesystem::path{ invoked }.filename().string();
+    const auto parsed  = rocprofsys::cli::parse_dispatch(argc, argv, program);
 
     switch(parsed.kind)
     {
         case rocprofsys::cli::dispatch_kind::show_help:
             rocprofsys::cli::print_help(std::cout, program);
             return EXIT_SUCCESS;
-        case rocprofsys::cli::dispatch_kind::show_version: print_version(program);
+        case rocprofsys::cli::dispatch_kind::show_version:
+            return exit_with_version(program);
         case rocprofsys::cli::dispatch_kind::error:
             std::cerr << parsed.error_message << '\n';
             return EXIT_FAILURE;

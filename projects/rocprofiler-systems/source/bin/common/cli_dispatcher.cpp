@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <filesystem>
 #include <iterator>
 #include <ostream>
 #include <string>
@@ -30,9 +29,16 @@ constexpr std::string_view k_docs_url =
 constexpr int k_index_after_verb = 2;
 
 [[nodiscard]] std::string
+make_usage(std::string_view program)
+{
+    return fmt::format("{} [subcommand] [options] -- <app> [app-args]", program);
+}
+
+[[nodiscard]] std::string
 help_hint(std::string_view program)
 {
-    return fmt::format("hint: run '{} --help' for available subcommands.", program);
+    return fmt::format("Usage: {}\nhint: run '{} --help' for available subcommands.",
+                       make_usage(program), program);
 }
 
 [[nodiscard]] std::string_view
@@ -68,14 +74,40 @@ unknown_subcommand_error(std::string_view program, std::string_view token)
         fmt::format("error: unknown subcommand '{}'\n{}", token, help_hint(program)));
 }
 
+// True when the payload already contains @p flag, or an -o / --output alias
+// when @p flag is "-o". Stops at "--" or an empty argument.
+[[nodiscard]] bool
+payload_contains_flag(int argc, char** argv, int start, std::string_view flag)
+{
+    if(flag.empty() || argv == nullptr)
+    {
+        return false;
+    }
+    for(int idx = start; idx < argc; ++idx)
+    {
+        const auto arg = arg_at(argc, argv, idx);
+        if(arg.empty() || arg == "--")
+        {
+            return false;
+        }
+        const auto same_flag = arg == flag;
+        const auto output_alias =
+            flag == k_output_short &&
+            (arg == k_output_long || arg.starts_with(k_output_long_eq) ||
+             arg.starts_with(k_output_short_eq));
+        if(same_flag || output_alias)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 dispatch_result
-parse_dispatch(int argc, char** argv)
+parse_dispatch(int argc, char** argv, std::string_view program)
 {
-    const auto program =
-        std::filesystem::path{ arg_at(argc, argv, 0) }.filename().string();
-
     if(argc <= 1)
     {
         dispatch_result result;
@@ -109,11 +141,8 @@ parse_dispatch(int argc, char** argv)
         constexpr bool k_strip_verb = true;
         if(spec->requires_app && argc <= payload_index(k_strip_verb))
         {
-            return make_error(
-                fmt::format("error: missing application argument\n"
-                            "Usage: {} [subcommand] [options] -- <app> [app-args]\n"
-                            "{}",
-                            program, help_hint(program)));
+            return make_error(fmt::format("error: missing application argument\n{}",
+                                          help_hint(program)));
         }
         dispatch_result result;
         result.spec = spec;
@@ -123,7 +152,7 @@ parse_dispatch(int argc, char** argv)
         return result;
     }
 
-    if(first.empty() || first.front() != '-')
+    if(first.front() != '-')
     {
         return unknown_subcommand_error(program, first);
     }
@@ -157,29 +186,8 @@ make_forwarded_argv(int argc, char** argv, forward_options options)
     {
         args.emplace_back(k_program_fallback);
     }
-    auto already_present = false;
-    if(!options.extra_flag.empty() && argv != nullptr)
-    {
-        for(int idx = start; idx < argc; ++idx)
-        {
-            const auto arg = arg_at(argc, argv, idx);
-            if(arg.empty() || arg == "--")
-            {
-                break;
-            }
-            const auto same_flag = arg == options.extra_flag;
-            const auto output_alias =
-                options.extra_flag == k_output_short &&
-                (arg == k_output_long || arg.starts_with(k_output_long_eq) ||
-                 arg.starts_with(k_output_short_eq));
-            if(same_flag || output_alias)
-            {
-                already_present = true;
-                break;
-            }
-        }
-    }
-    if(!options.extra_flag.empty() && !already_present)
+    if(!options.extra_flag.empty() &&
+       !payload_contains_flag(argc, argv, start, options.extra_flag))
     {
         args.emplace_back(options.extra_flag);
     }
@@ -196,7 +204,7 @@ void
 print_help(std::ostream& out, std::string_view program)
 {
     out << "Usage:\n"
-        << "  " << program << " [subcommand] [options] -- <app> [app-args]\n"
+        << "  " << make_usage(program) << '\n'
         << "\n"
         << "ROCm Systems Profiler.\n"
         << "Experimental: This is a preview of the rocsys command-line tool.\n"
