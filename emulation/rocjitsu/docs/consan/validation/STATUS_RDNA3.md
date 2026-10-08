@@ -8,11 +8,12 @@ Each outcome used eight trials;
 the table records the selected profile controls, detection counts, and
 lower-preset misses needed to interpret each grade.
 
-## P0 qualification and sensitivity
+## External-workload qualification and sensitivity
 
-Default and SuperCollider are detector profiles, not workload priorities. The
-evaluated external P0 rows are one rocBLAS SGEMM workload and three PyTorch
-workloads: mode, sort, and norm/softmax. Both profiles have clean controls for
+Default and SuperCollider are detector profiles. The evaluated external
+workloads are one rocBLAS SGEMM workload and three PyTorch workloads: mode,
+sort, and norm/softmax. Catalog priorities are P0 for mode, P1 for sort, and
+P2 for rocBLAS SGEMM and norm/softmax. Both profiles have clean controls for
 all four rows. The seven rocBLAS fault matrices and the PyTorch operation-level
 campaigns below are separate evidence sets. The P0 fixture and Qwen prefill
 rows in the status table are separate workloads.
@@ -107,7 +108,7 @@ provide a measured Default workaround. A policy guaranteeing observation of
 small grids, with reproducible selection independent of reader allocation, is
 worth designing and benchmarking; automatically changing the standard preset
 would affect overhead and needs separate evidence. Default sampling is the
-current P0 investigation; SuperCollider sensitivity work is deferred. RDNA3
+current investigation; SuperCollider sensitivity work is deferred. RDNA3
 currently lacks
 `sleep_wave` support in both the runner and
 [replay delay emitter](../../../lib/rocjitsu/src/rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops.cpp).
@@ -284,10 +285,10 @@ for this execution target; simulator prerequisites alone do not qualify hardware
 | Physical compact gate | P0 | native two-wave LDS fixture (`ConSanGfx1100Physical.*`) | 🟨 exact clean output, visible records, zero diagnostics; reviewed conflict and broad campaign missing | 🟨 exact clean/all-sites rows and mutation containment; broad E2E fault campaign missing |
 | Simulator prerequisite | P0 | native two-wave LDS fixture (`ConSanGfx1100Sim.*`) | 🩶 prerequisite passes | 🩶 prerequisite passes |
 | Broad E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🩶 unassessed | 🩶 unassessed |
-| Broad E2E | P0 | rocBLAS SGEMM 64³ (`rocblas-sgemm-square-64`) | 🟩 high (lowest passing): clean pass; access 232/232, barrier 5/5; initial-publication fault 8/8; `default` 2/8, six empty-report misses; explicit workgroup/cell strides 1/256 also 8/8 | 🟨 clean pass; access 232/232; sleep=15 and sleep=127, each with all-access or reads-only delay: four separate 0/8 batches (bar 6/8) |
+| Broad E2E | P2 | rocBLAS SGEMM 64³ (`rocblas-sgemm-square-64`) | 🟩 high (lowest passing): clean pass; access 232/232, barrier 5/5; initial-publication fault 8/8; `default` 2/8, six empty-report misses; explicit workgroup/cell strides 1/256 also 8/8 | 🟨 clean pass; access 232/232; sleep=15 and sleep=127, each with all-access or reads-only delay: four separate 0/8 batches (bar 6/8) |
 | Broad E2E | P0 | PyTorch mode (`pytorch-torch-mode`) | 🟩 high: clean pass; access 244/244, barrier 51/51; selected publication fault detected and reached 8/8; standard preset unassessed | 🟨 clean pass; access 244/244; fault sensitivity unassessed |
-| Broad E2E | P0 | PyTorch sort (`pytorch-torch-sort`) | 🟩 high: clean pass; access 234/234, barrier 40/40; selected publication fault detected and reached 8/8; standard preset unassessed | 🟨 clean pass; access 234/234; fault sensitivity unassessed |
-| Broad E2E | P0 | PyTorch norm/softmax (`pytorch-norm-softmax`) | 🟨 combined clean pass; access 22/22, barrier 15/15. Component fault trials: softmax high 8/8 detected/reached; norm high 2/8, higher 5/8, max 5/8 diagnostics with miss reach unproved; combined row below bar | 🟨 combined clean pass; access 22/22; fault sensitivity unassessed |
+| Broad E2E | P1 | PyTorch sort (`pytorch-torch-sort`) | 🟩 high: clean pass; access 234/234, barrier 40/40; selected publication fault detected and reached 8/8; standard preset unassessed | 🟨 clean pass; access 234/234; fault sensitivity unassessed |
+| Broad E2E | P2 | PyTorch norm/softmax (`pytorch-norm-softmax`) | 🟨 combined clean pass; access 22/22, barrier 15/15. Component fault trials: softmax high 8/8 detected/reached; norm high 2/8, higher 5/8, max 5/8 diagnostics with miss reach unproved; combined row below bar | 🟨 combined clean pass; access 22/22; fault sensitivity unassessed |
 | Broad E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🩶 unassessed | 🩶 unassessed |
 | Broad E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🩶 unassessed | 🩶 unassessed |
 | Broad E2E | P2 | Sharktank TP2 family (`tp2-family`) | 🩶 unassessed | 🩶 unassessed |

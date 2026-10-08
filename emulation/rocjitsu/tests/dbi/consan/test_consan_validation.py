@@ -671,10 +671,17 @@ class ConSanValidationTest(unittest.TestCase):
 
                 for workload in validation._manifest(target)["workloads"]:
                     marker = f"`{workload['id']}`"
+                    workload_rows = [row for row in rows if marker in row]
                     self.assertEqual(
-                        sum(marker in row for row in rows),
+                        len(workload_rows),
                         1,
                         f"{filename} must contain {marker} exactly once",
+                    )
+                    priority = workload_rows[0].strip("|").split("|")[1].strip()
+                    self.assertEqual(
+                        priority,
+                        workload["priority"],
+                        f"{filename} priority for {marker} must match the manifest",
                     )
 
     def test_pytorch_manifest_workloads_have_client_runners(self) -> None:

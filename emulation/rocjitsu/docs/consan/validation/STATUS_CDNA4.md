@@ -42,7 +42,7 @@ established, but fault qualification is below bar or outside detector scope;
 | Test corpus | P1 | HIP Stream-K simple (`hip-streamk-simple-m256-n256-k256`) | 🟩 higher (lowest passing): clean pass; fault 8/8 | 🟨 sleep=15: clean pass; fault 0/8; below bar |
 | Test corpus | P1 | HIP Stream-K two-tile (`hip-streamk-two-tile-m256-n256-k256`) | 🟩 high (lowest passing): clean pass; fault 8/8 | 🟨 sleep=15: clean pass; fault 0/8; below bar |
 | Test corpus | P2 | rocBLAS SGEMM square-64 (`rocblas-sgemm-square-64`) | 🟩 higher (lowest passing): clean pass; fault 8/8 | 🟨 sleep=15: clean pass; fault 0/8; below bar |
-| Tensile | P0 | gfx950 LDS-positive BF16 GEMM (`tensile-gfx950-lds-positive`) | 🟩 max + 64 banks: repaired lane retention; clean pass; fault 8/8 (bar 6/8) | 🟩 delay-zero: clean pass; fault 8/8 (bar 6/8) |
+| Tensile | P2 | gfx950 LDS-positive BF16 GEMM (`tensile-gfx950-lds-positive`) | 🟩 max + 64 banks: repaired lane retention; clean pass; fault 8/8 (bar 6/8) | 🟩 delay-zero: clean pass; fault 8/8 (bar 6/8) |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 higher (lowest passing): clean pass; fault 8/8 | 🟨 sleep=15: clean pass; fault 2/8; below bar |
 | PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟩 higher (lowest passing): clean pass; fault 8/8 | 🟨 sleep=15: clean pass; fault 0/8; below bar |
 | PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) | 🟩 higher (lowest passing): clean pass; fault 7/8 | 🟨 sleep=15: clean pass; fault 0/8; below bar |

@@ -155,7 +155,7 @@ class ConSanValidationTargetAdmissionTest(unittest.TestCase):
                 self.assertEqual(policy['oracle'], 'any')
                 self.assertEqual(trials, [{'RJ_CONSAN_PRESET': preset}] * 8)
 
-    def test_gfx1100_explain_includes_all_p0_fault_campaigns(self) -> None:
+    def test_gfx1100_explain_includes_reviewed_external_fault_campaigns(self) -> None:
         expected_counts = {
             'rocblas-sgemm-square-64': 7,
             'pytorch-torch-mode': 1,
