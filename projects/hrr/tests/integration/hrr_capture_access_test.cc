@@ -253,10 +253,10 @@ TEST_CASE("Unit_HRR_CaptureAbort_Direct", "[.][hrr-direct]") {
 
 // ---------------------------------------------------------------------------
 // Hidden ([.]) workload for Unit_HRR_CaptureDisabledInForkedChild: records a
-// few events, then forks with RLIMIT_NOFILE at 3. The capture writer's atfork
-// handler opens the child's archive before fork() returns in the child, so that
-// open cannot get a descriptor and fails. The child restores the limit, then
-// calls through both dispatch tables. A capture shim left in either would read
+// few events, then forks with RLIMIT_NOFILE at 3. The capture writer opens a
+// forked child's archive on the child's first record, which the child makes
+// before it restores the limit, so that open cannot get a descriptor and fails.
+// The child then calls through both dispatch tables. A capture shim left in either would read
 // the clock to timestamp its record, so the child counts its clock reads. It
 // exits 1 if a runtime call read it, 2 if a compiler call did, 3 for both.
 // ---------------------------------------------------------------------------
@@ -281,6 +281,7 @@ TEST_CASE("Unit_HRR_CaptureForkWithoutFds_Direct", "[.][hrr-direct]") {
   REQUIRE(::setrlimit(RLIMIT_NOFILE, &tight) == 0);
   const pid_t child = ::fork();
   if (child == 0) {
+    (void)hipGetLastError();  // opens the child's archive
     (void)::setrlimit(RLIMIT_NOFILE, &saved);
     t_hrr_clock_hook = [] { ++g_child_clock_reads; };
     (void)hipGetLastError();
@@ -723,8 +724,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureSurvivesUnusableOutputPath) {
 /**
  * Test Description
  * ----------------
- *   - Runs Unit_HRR_CaptureForkWithoutFds_Direct, whose child is forked with
- *     no descriptor to spare, so its own archive cannot be opened.
+ *   - Runs Unit_HRR_CaptureForkWithoutFds_Direct, whose child makes its first
+ *     record with no descriptor to spare, so its own archive cannot be opened.
  *   - The child says capture is disabled, and the pid-<pid> it created for
  *     itself is removed again, so a refused capture leaves nothing behind.
  *     The parent's archive is the only one left.

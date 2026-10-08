@@ -22,7 +22,8 @@
  * file system holding it falls below a reserve; see "Disk space" below.
  *
  * Thread-safety: write_event_raw() and write_blob() acquire the file mutex.
- * open()/close()/flush() are called from a single thread (init/shutdown).
+ * open() publishes a new archive under it. A forked child's first record opens
+ * its archive under g_reopen_mu, which flush() and close() also take.
  *
  * Access: on POSIX the archive holds the process's host buffers, kernel
  * arguments and code objects, so every archive directory this writer creates is
@@ -50,6 +51,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <algorithm>
 #include <vector>
@@ -168,6 +170,8 @@ static constexpr size_t   kPathMax          = 4096;
 static constexpr size_t   kMetadataJsonMax  = 128u * 1024u;
 static constexpr size_t   kEmergencyManifestMax = kMetadataJsonMax + 1024u;
 
+// Lock order: g_reopen_mu, then g_blob_mu, then g_file_mu, then
+// g_unreplayable_mu. atfork_prepare is the only path that holds them all.
 static std::mutex   g_file_mu;
 static int          g_events_fd = -1;
 // g_base_dir is the archive path requested via HIP_HRR_CAPTURE_OUTPUT.
@@ -185,7 +189,10 @@ static size_t       g_metadata_json_len = 0;
 static uint8_t  g_buf[kBufCap];
 static size_t   g_buf_len            = 0;
 static uint64_t g_events_since_ckpt  = 0;
-static bool     g_trailer_written    = false;
+// Set once events.bin is finalized, with or without the trailer. No record is
+// appended after it: the trailer must stay the last record, and the manifest
+// already holds the event count.
+static bool     g_events_finalized   = false;
 
 // Set when an event could not be serialized losslessly and had to be dropped
 // (e.g. an oversized kernel launch). A capture with this flag set is finalized
@@ -200,21 +207,40 @@ static std::atomic<bool> g_capture_incomplete{false};
 // crash-callback <-> writer coordination point.
 static std::atomic_flag g_buf_busy = ATOMIC_FLAG_INIT;
 
+// Raise g_buf_busy for a thread that already holds g_file_mu. Writers are
+// serialized by the mutex, so the flag can only be up already because the crash
+// callback is flushing g_buf; wait for it rather than mutating under it. The
+// callback holds the flag only for that flush and never takes g_file_mu, which
+// is what bounds this wait.
+static void claim_buf_locked() {
+  while (g_buf_busy.test_and_set(std::memory_order_acquire)) std::this_thread::yield();
+}
+
 // RAII for writer threads: take the thread<->thread mutex AND raise g_buf_busy so
 // the crash callback can tell a g_buf mutation is in flight. Member order
 // matters: the mutex locks first and unlocks last, with the busy window nested
 // strictly inside it.
 struct BufWriteGuard {
   std::lock_guard<std::mutex> lk_;
-  BufWriteGuard() : lk_(g_file_mu) {
-    g_buf_busy.test_and_set(std::memory_order_acquire);
-  }
+  BufWriteGuard() : lk_(g_file_mu) { claim_buf_locked(); }
   ~BufWriteGuard() { g_buf_busy.clear(std::memory_order_release); }
 };
+
+// emergency_finalize builds the crash manifest here rather than on the stack:
+// the crash handler can run on a thread with little stack left.
+static std::atomic_flag g_emergency_manifest_busy = ATOMIC_FLAG_INIT;
+static char g_emergency_manifest_buf[kEmergencyManifestMax];
 
 static std::atomic<uint64_t> g_seq_id{0};
 static std::atomic<uint64_t> g_event_count{0};
 static std::atomic<uint64_t> g_blob_count{0};
+
+// Set in a forked child. POSIX allows the child of a multithreaded process only
+// async-signal-safe calls until it execs, and open() is far from that, so the
+// child's archive is opened by its first record, blob or code object rather
+// than in atfork_child. A child that only execs or exits opens none.
+static std::atomic<bool> g_reopen_after_fork{false};
+static std::mutex        g_reopen_mu;
 
 // In-memory set of blob hex keys already written to disk.
 // Eliminates the fs::exists() stat syscall on repeated blobs (common for weight tensors).
@@ -630,7 +656,7 @@ static bool resumed_file_is_ours(const fs::path& p) {
 #endif
 }
 
-static void index_existing_blobs_locked() {
+static void index_existing_blobs_locked(const std::string& output_dir) {
   std::lock_guard<std::mutex> lk(g_blob_mu);
   g_written_blobs.clear();
 
@@ -640,7 +666,7 @@ static void index_existing_blobs_locked() {
   // A blobs/<xx> prefix is claimed before its files are trusted: one that fails
   // claim_private_dir contributes nothing, and write_blob refuses it later.
   std::error_code ec;
-  const fs::path blobs_root = g_output_dir + "/blobs";
+  const fs::path blobs_root = output_dir + "/blobs";
   for (fs::directory_iterator dit(blobs_root, ec), dend; !ec && dit != dend; dit.increment(ec)) {
     std::error_code entry_ec;
     if (dit->symlink_status(entry_ec).type() != fs::file_type::directory) continue;
@@ -662,48 +688,87 @@ static void index_existing_blobs_locked() {
   }
 
   ec.clear();
-  const fs::path co_root = g_output_dir + "/code_objects";
+  const fs::path co_root = output_dir + "/code_objects";
   for (fs::directory_iterator it(co_root, ec), end; !ec && it != end; it.increment(ec)) {
     if (it->path().extension() == ".hsaco" && resumed_file_is_ours(it->path()))
       g_written_blobs.insert(std::string("co:") + it->path().stem().string());
   }
 }
 
+static void reopen_after_fork() {
+  if (!g_reopen_after_fork.load(std::memory_order_acquire)) return;
+  std::lock_guard<std::mutex> lk(g_reopen_mu);
+  if (!g_reopen_after_fork.load(std::memory_order_relaxed)) return;
+  // From the *base* dir, so the child selects its own pid-<pid> sub-archive.
+  // open() assigns g_base_dir, so pass it a copy.
+  const std::string base = g_base_dir;
+  // A child whose archive is refused runs on uncaptured, without the shims.
+  if (!open(base.c_str())) hip_capture_uninstall();
+  g_reopen_after_fork.store(false, std::memory_order_release);
+}
+
 #ifndef _WIN32
+// The writer mutexes are held across fork(): a child must not inherit one that
+// a thread which does not exist in the child had locked, because the child
+// reopens its archive under them.
 static void atfork_prepare() {
-  BufWriteGuard lk;
+  g_reopen_mu.lock();
+  g_blob_mu.lock();
+  g_file_mu.lock();
+  claim_buf_locked();
   if (g_events_fd >= 0)
     flush_buffer_locked();
+  g_buf_busy.clear(std::memory_order_release);
+  // The child's shutdown writes its manifest under this one.
+  g_unreplayable_mu.lock();
+}
+
+static void atfork_parent() {
+  g_unreplayable_mu.unlock();
+  g_file_mu.unlock();
+  g_blob_mu.unlock();
+  g_reopen_mu.unlock();
 }
 
 static void atfork_child() {
-  std::string dir;
-  {
-    std::lock_guard<std::mutex> lk(g_file_mu);
-    if (g_events_fd >= 0) {
-      HRR_CLOSE(g_events_fd);
-      g_events_fd = -1;
-    }
-    g_buf_len = 0;
-    g_events_since_ckpt = 0;
-    g_trailer_written = false;
-    // Re-open from the *base* dir so the forked child selects its own
-    // pid-<pid> sub-archive.
-    dir = g_base_dir;
+  g_unreplayable_mu.unlock();
+  g_file_mu.unlock();
+  g_blob_mu.unlock();
+  g_reopen_mu.unlock();
+  // A crash callback on another thread can raise g_buf_busy after
+  // atfork_prepare clears it, or hold g_emergency_manifest_busy, which
+  // atfork_prepare does not take. That thread does not exist in the child.
+  g_buf_busy.clear(std::memory_order_release);
+  g_emergency_manifest_busy.clear(std::memory_order_release);
+  // Only async-signal-safe work from here: drop the parent's events fd and
+  // forget its paths, so neither shutdown nor the crash path writes into the
+  // parent's archive. reopen_after_fork() opens the child's.
+  const bool parent_open = g_events_fd >= 0;
+  const bool parent_finalized = g_events_finalized;
+  if (parent_open) {
+    HRR_CLOSE(g_events_fd);
+    g_events_fd = -1;
   }
-  // NOTE: this is hrr_cap::writer::open(const char*), the writer's archive-open
-  // routine, NOT POSIX ::open(). It creates directories and opens files,
-  // which are not async-signal-safe in general, but pthread_atfork's child
-  // handler runs in the (single-threaded) child immediately after fork() with no
-  // mutex held, so these calls are safe here. We deliberately do NOT call this
-  // from any async-signal context.
-  if (!dir.empty() && !writer::open(dir.c_str())) hip_capture_uninstall();
+  g_buf_len = 0;
+  g_events_since_ckpt = 0;
+  g_events_finalized = false;
+  g_output_dir.clear();
+  g_manifest_path[0] = '\0';
+  // The child's archive is a new one: an event the parent dropped is not
+  // missing from it.
+  g_capture_incomplete.store(false, std::memory_order_relaxed);
+  // After flush() nothing would finalize a child's archive. The fd stays open
+  // until close(), but the shutdown that runs both is on the parent's exiting
+  // thread and no longer pending in the child. A parent that is itself a child
+  // yet to open its archive passes its flag on unchanged.
+  if (parent_open && !parent_finalized)
+    g_reopen_after_fork.store(true, std::memory_order_relaxed);
 }
 
 static void install_atfork_handlers_once() {
   static std::once_flag once;
   std::call_once(once, [] {
-    pthread_atfork(atfork_prepare, nullptr, atfork_child);
+    pthread_atfork(atfork_prepare, atfork_parent, atfork_child);
   });
 }
 #endif
@@ -954,14 +1019,14 @@ static void stop_for_space(uint64_t keep_free) {
           static_cast<unsigned long long>(keep_free >> 20), g_output_dir.c_str());
 }
 
-// Size the reserve for the archive's file system. False when less than the
-// reserve is free to begin with.
-static bool init_space_reserve() {
+// Size the reserve for the file system holding `dir`, the archive open() is
+// about to publish. False when less than the reserve is free to begin with.
+static bool init_space_reserve(const std::string& dir) {
   g_keep_free = 0;
   g_bytes_since_space_check = 0;
   g_bytes_reserved.store(0, std::memory_order_relaxed);
   uint64_t avail = 0, total = 0, block = kFileBlockDefault;
-  if (!fs_space(g_output_dir, &avail, &total, &block)) return true;
+  if (!fs_space(dir, &avail, &total, &block)) return true;
   g_file_block_bytes.store(block, std::memory_order_relaxed);
   g_keep_free = std::min<uint64_t>(total / 100 * 15, kKeepFreeMax);
   g_space_check_bytes = std::max<uint64_t>(std::min<uint64_t>(kSpaceCheckMax, g_keep_free / 4), 1);
@@ -1031,8 +1096,8 @@ struct SpaceReservation {
 
 // For open() refusing an archive. A forked child inherits these paths and
 // atexit(hip_capture_shutdown), so without this its flush() would finalize the
-// parent's archive, or one the child never opened. An empty g_base_dir also stops
-// atfork_child() trying again in later forks.
+// parent's archive, or one the child never opened. An empty g_base_dir also keeps
+// reopen_after_fork() from trying again.
 static void clear_archive_paths() {
   g_base_dir.clear();
   g_output_dir.clear();
@@ -1043,14 +1108,14 @@ static void clear_archive_paths() {
 // open / close / flush / checkpoint
 // ---------------------------------------------------------------------------
 
-// A failed open() keeps no archive path, so atfork_child does not reopen one in
-// a forked child. When this attempt created pid-<pid>, its empty directories go
+// A failed open() keeps no archive path, so reopen_after_fork() does not open one
+// in a forked child. When this attempt created pid-<pid>, its empty directories go
 // too, so a refused capture leaves nothing behind. Only empty directories are
 // removed, and a link in their place is not followed.
-static bool open_failed(bool created_pid_dir) {
+static bool open_failed(const std::string& out_dir, bool created_pid_dir) {
   if (created_pid_dir) {
     for (const char* sub : {"/blobs", "/code_objects", ""}) {
-      const std::string dir = g_output_dir + sub;
+      const std::string dir = out_dir + sub;
 #ifdef _WIN32
       std::error_code ec;
       if (fs::is_directory(fs::symlink_status(dir, ec)) && fs::is_empty(dir, ec))
@@ -1105,8 +1170,8 @@ static std::string process_instance() {
 #endif
 }
 
-static bool publish_active_marker() {
-  const std::string marker = g_output_dir + kActiveMarker;
+static bool publish_active_marker(const std::string& out_dir) {
+  const std::string marker = out_dir + kActiveMarker;
   const std::string instance = process_instance();
   if (instance.empty())
     LogPrintfWarning("[HRR capture] Cannot name this process in %s, so producers will not "
@@ -1124,7 +1189,7 @@ static bool publish_active_marker() {
 }
 
 bool open(const char* output_dir) {
-  if (g_events_fd >= 0) return true;  // already open — guard against double-invocation
+  if (is_open()) return true;  // already open — guard against double-invocation
   if (g_out_of_space.load(std::memory_order_relaxed)) {  // e.g. a child after fork
     clear_archive_paths();
     return false;
@@ -1132,91 +1197,74 @@ bool open(const char* output_dir) {
 #ifndef _WIN32
   install_atfork_handlers_once();
 #endif
+  // The archive is prepared in locals and published below under the writer
+  // mutex and g_buf_busy. A forked child opens its archive while other threads
+  // may checkpoint, crash or finalize, and none of them may see the events fd
+  // before the buffer holds the file header. g_base_dir is set first because
+  // ensure_dir() reads it; open() runs at init or under g_reopen_mu, as flush()
+  // does.
   g_base_dir = output_dir;
-  g_pid = current_process_id();
-  g_parent_pid = current_parent_process_id();
+  const uint64_t pid = current_process_id();
+  const uint64_t parent_pid = current_parent_process_id();
   char sub[64];
-  snprintf(sub, sizeof(sub), "/pid-%llu",
-           static_cast<unsigned long long>(g_pid));
-  g_output_dir = g_base_dir + sub;
-
-  // Buffer/checkpoint state is reset here so it is consistent for this
-  // process's pid-<pid> sub-archive.
-  g_buf_len           = 0;
-  g_events_since_ckpt = 0;
-  g_trailer_written   = false;
-  // A forked child inherits the parent's flag, which is about the parent's
-  // archive.
-  g_capture_incomplete.store(false, std::memory_order_relaxed);
+  snprintf(sub, sizeof(sub), "/pid-%llu", static_cast<unsigned long long>(pid));
+  const std::string out_dir = g_base_dir + sub;
 
   std::error_code exists_ec;
   const bool created_pid_dir =
-      !fs::exists(fs::symlink_status(g_output_dir, exists_ec));
-  bool dirs_ok = ensure_dir(g_output_dir) && claim_private_dir(g_output_dir);
+      !fs::exists(fs::symlink_status(out_dir, exists_ec));
+  bool dirs_ok = ensure_dir(out_dir) && claim_private_dir(out_dir);
   // A marker left by an earlier process with this pid goes first, once the
   // directory it sits in is known to be ours.
-  if (dirs_ok) (void)remove((g_output_dir + kActiveMarker).c_str());
-  dirs_ok = dirs_ok && ensure_dir(g_output_dir + "/blobs") &&
-            claim_private_dir(g_output_dir + "/blobs") &&
-            ensure_dir(g_output_dir + "/code_objects") &&
-            claim_private_dir(g_output_dir + "/code_objects");
+  if (dirs_ok) (void)remove((out_dir + kActiveMarker).c_str());
+  dirs_ok = dirs_ok && ensure_dir(out_dir + "/blobs") &&
+            claim_private_dir(out_dir + "/blobs") &&
+            ensure_dir(out_dir + "/code_objects") &&
+            claim_private_dir(out_dir + "/code_objects");
   if (!dirs_ok) {
     const int err = errno;
     LogPrintfError("[HRR capture] Cannot use %s as a private archive directory: %s",
-                   g_output_dir.c_str(), strerror(err));
+                   out_dir.c_str(), strerror(err));
     fprintf(stderr, "[HRR capture] Capture disabled: cannot use %s as a private archive "
-            "directory (%s).\n", g_output_dir.c_str(), strerror(err));
-    return open_failed(created_pid_dir);
+            "directory (%s).\n", out_dir.c_str(), strerror(err));
+    return open_failed(out_dir, created_pid_dir);
   }
 #ifndef _WIN32
   for (auto& claimed : g_blob_prefix_claimed) claimed.store(false, std::memory_order_relaxed);
 #endif
 
-  if (!init_space_reserve()) {
+  if (!init_space_reserve(out_dir)) {
     LogPrintfError("[HRR capture] Less than %llu MiB free on the file system holding %s",
-                   static_cast<unsigned long long>(g_keep_free >> 20), g_output_dir.c_str());
+                   static_cast<unsigned long long>(g_keep_free >> 20), out_dir.c_str());
     fprintf(stderr, "[HRR capture] Capture disabled: less than %llu MiB free on the file "
             "system holding %s.\n", static_cast<unsigned long long>(g_keep_free >> 20),
-            g_output_dir.c_str());
-    return open_failed(created_pid_dir);
+            out_dir.c_str());
+    return open_failed(out_dir, created_pid_dir);
   }
 
-  std::string events_path = g_output_dir + "/events.bin";
-  std::string manifest_path = g_output_dir + "/manifest.json";
-  snprintf(g_manifest_path, sizeof(g_manifest_path), "%s", manifest_path.c_str());
-
-  // The last step of a successful open, on resume and on a fresh archive.
-  auto publish_or_fail = [&]() {
-    if (publish_active_marker()) return true;
-    const int err = errno;
-    LogPrintfError("[HRR capture] Cannot create %s%s: %s", g_output_dir.c_str(), kActiveMarker,
-                   strerror(err));
-    fprintf(stderr, "[HRR capture] Capture disabled: cannot create %s%s (%s).\n",
-            g_output_dir.c_str(), kActiveMarker, strerror(err));
-    HRR_CLOSE(g_events_fd);
-    g_events_fd = -1;
-    return open_failed(created_pid_dir);
-  };
+  std::string events_path = out_dir + "/events.bin";
+  std::string manifest_path = out_dir + "/manifest.json";
 
   std::int64_t existing_size = 0;
-  g_events_fd = open_events_file(events_path, &existing_size);
-  if (g_events_fd < 0) {
+  const int fd = open_events_file(events_path, &existing_size);
+  if (fd < 0) {
     const int err = errno;
     LogPrintfError("[HRR capture] Failed to open %s: %s", events_path.c_str(), strerror(err));
     fprintf(stderr, "[HRR capture] Capture disabled: cannot open %s (%s).\n",
             events_path.c_str(), strerror(err));
-    return open_failed(created_pid_dir);
+    return open_failed(out_dir, created_pid_dir);
   }
 
-  if (existing_size > 0) {
-    uint64_t next_seq = 0, ev_count = 0, bl_count = 0;
-    const std::string state_path = g_output_dir + "/writer_state.json";
-    const bool fast = try_load_writer_state(state_path, existing_size,
-                                            &next_seq, &ev_count, &bl_count);
+  const bool exists = existing_size > 0;
+  uint64_t next_seq = 0, ev_count = 0, bl_count = 0;
+  bool fast = false;
+  ScanResult scan{};
+  if (exists) {
+    const std::string state_path = out_dir + "/writer_state.json";
+    fast = try_load_writer_state(state_path, existing_size, &next_seq, &ev_count, &bl_count);
 
     // Without the scan a trailer is not stripped and the counters can restart,
     // so an archive that cannot be scanned is not resumed.
-    ScanResult scan{};
     bool scanned = false;
     int scan_err = 0;
 #ifdef _WIN32
@@ -1230,7 +1278,7 @@ bool open(const char* output_dir) {
 #else
     // Reuse the already-validated events descriptor so a pathname swap cannot
     // make the scan follow a different file than open_events_file accepted.
-    const int scan_fd = ::fcntl(g_events_fd, F_DUPFD_CLOEXEC, 0);
+    const int scan_fd = ::fcntl(fd, F_DUPFD_CLOEXEC, 0);
     if (scan_fd < 0) {
       scan_err = errno;
     } else if (FILE* rf = ::fdopen(scan_fd, "rb")) {
@@ -1247,9 +1295,8 @@ bool open(const char* output_dir) {
                      strerror(scan_err));
       fprintf(stderr, "[HRR capture] Capture disabled: cannot read %s to resume it (%s).\n",
               events_path.c_str(), strerror(scan_err));
-      HRR_CLOSE(g_events_fd);
-      g_events_fd = -1;
-      return open_failed(created_pid_dir);
+      HRR_CLOSE(fd);
+      return open_failed(out_dir, created_pid_dir);
     }
     if (!fast) {
       next_seq = (scan.count > 0) ? (scan.max_seq + 1) : 0;
@@ -1259,56 +1306,76 @@ bool open(const char* output_dir) {
     // The reader stops at a trailer or a torn tail, so records appended after
     // one that cannot be cut off would be lost: such an archive is not resumed.
     if (scan.append_at > 0 && (scan.had_trailer || scan.torn_tail) &&
-        hrr_ftruncate_fd(g_events_fd, scan.append_at) != 0) {
+        hrr_ftruncate_fd(fd, scan.append_at) != 0) {
       const int err = errno;
       LogPrintfError("[HRR capture] ftruncate resume of %s at %lld failed: %s", events_path.c_str(),
                      (long long)scan.append_at, strerror(err));
       fprintf(stderr, "[HRR capture] Capture disabled: cannot trim %s to resume it (%s).\n",
               events_path.c_str(), strerror(err));
-      HRR_CLOSE(g_events_fd);
-      g_events_fd = -1;
-      return open_failed(created_pid_dir);
+      HRR_CLOSE(fd);
+      return open_failed(out_dir, created_pid_dir);
     }
-    if (hrr_seek_end(g_events_fd) < 0) {
+    if (hrr_seek_end(fd) < 0) {
       const int err = errno;
       LogPrintfError("[HRR capture] seek end of %s failed", events_path.c_str());
       fprintf(stderr, "[HRR capture] Capture disabled: cannot seek to the end of %s (%s).\n",
               events_path.c_str(), strerror(err));
-      HRR_CLOSE(g_events_fd);
-      g_events_fd = -1;
-      return open_failed(created_pid_dir);
+      HRR_CLOSE(fd);
+      return open_failed(out_dir, created_pid_dir);
     }
 
+    index_existing_blobs_locked(out_dir);
+  } else {
+    // Fresh per-process archive.
+    std::lock_guard<std::mutex> lk(g_blob_mu);
+    g_written_blobs.clear();
+  }
+
+  // The last step before the archive is published, on resume and on a fresh one.
+  if (!publish_active_marker(out_dir)) {
+    const int err = errno;
+    LogPrintfError("[HRR capture] Cannot create %s%s: %s", out_dir.c_str(), kActiveMarker,
+                   strerror(err));
+    fprintf(stderr, "[HRR capture] Capture disabled: cannot create %s%s (%s).\n",
+            out_dir.c_str(), kActiveMarker, strerror(err));
+    HRR_CLOSE(fd);
+    return open_failed(out_dir, created_pid_dir);
+  }
+
+  {
+    BufWriteGuard lk;
+    g_output_dir = out_dir;
+    g_pid        = pid;
+    g_parent_pid = parent_pid;
+    snprintf(g_manifest_path, sizeof(g_manifest_path), "%s", manifest_path.c_str());
+    // Buffer/checkpoint state is reset here so it is consistent for this
+    // process's pid-<pid> sub-archive.
+    g_buf_len           = 0;
+    g_events_since_ckpt = 0;
+    g_events_finalized  = false;
     g_seq_id.store(next_seq, std::memory_order_relaxed);
     g_event_count.store(ev_count, std::memory_order_relaxed);
-    if (fast)
+    if (!exists)
+      g_blob_count.store(0, std::memory_order_relaxed);
+    else if (fast)
       g_blob_count.store(bl_count, std::memory_order_relaxed);
-    index_existing_blobs_locked();
-    if (!publish_or_fail()) return false;
+    g_events_fd = fd;
+    if (!exists) {
+      // Pitched host copies record only their copied rows (hip_capture.cpp,
+      // write_host_rect_blob), which replay reads back by this flag.
+      hrr_file_header fh{HRR_MAGIC, HRR_VERSION, HRR_FILE_FLAG_PACKED_HOST_RECTS};
+      buffer_append_locked(&fh, sizeof(fh));
+    }
+  }
 
+  if (exists) {
     LogPrintfInfo("[HRR capture] Resumed archive at %s (events=%llu next_seq=%llu%s%s)",
                   events_path.c_str(),
                   static_cast<unsigned long long>(ev_count),
                   static_cast<unsigned long long>(next_seq),
                   scan.had_trailer ? ", stripped trailer" : "",
                   scan.torn_tail ? ", trimmed torn tail" : "");
-    return true;
   }
-
-  // Fresh per-process archive.
-  g_seq_id.store(0, std::memory_order_relaxed);
-  g_event_count.store(0, std::memory_order_relaxed);
-  g_blob_count.store(0, std::memory_order_relaxed);
-  {
-    std::lock_guard<std::mutex> lk(g_blob_mu);
-    g_written_blobs.clear();
-  }
-
-  if (!publish_or_fail()) return false;
-  // Pitched host copies record only their copied rows (hip_capture.cpp,
-  // write_host_rect_blob), which replay reads back by this flag.
-  hrr_file_header fh{HRR_MAGIC, HRR_VERSION, HRR_FILE_FLAG_PACKED_HOST_RECTS};
-  buffer_append_locked(&fh, sizeof(fh));
   return true;
 }
 
@@ -1361,6 +1428,12 @@ void flush(const char* /*output_dir*/) {
   // Always finalize the *effective* directory this process actually wrote to
   // (g_output_dir), which is always a pid-<pid> sub-archive. The caller passes
   // the base HIP_HRR_CAPTURE_OUTPUT path.
+  //
+  // A forked child opens its archive on its first record, under g_reopen_mu.
+  // Holding it here keeps the trailer and the manifest from landing before
+  // that open has finished, and no archive opens once this one is finalized.
+  std::lock_guard<std::mutex> reopen_lk(g_reopen_mu);
+  g_reopen_after_fork.store(false, std::memory_order_release);
   bool incomplete;
   std::string out_dir;
   {
@@ -1370,7 +1443,7 @@ void flush(const char* /*output_dir*/) {
     out_dir = g_output_dir;
     // Skip the clean-shutdown trailer when the capture is known incomplete: its
     // absence is exactly how the reader detects a non-faithful archive.
-    if (g_events_fd >= 0 && !g_trailer_written && !incomplete) {
+    if (g_events_fd >= 0 && !g_events_finalized && !incomplete) {
       hrr_eof_record rec = hrr_make_eof_record(
           g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
       rec.hdr.timestamp_ns = amd::Os::timeNanos();
@@ -1378,12 +1451,15 @@ void flush(const char* /*output_dir*/) {
       buffer_append_locked(&rec, sizeof(rec));
       flush_buffer_locked();
       HRR_FSYNC(g_events_fd);
-      g_trailer_written = true;
     } else if (g_events_fd >= 0 && incomplete) {
       // Still flush buffered events so nothing is lost, just no trailer.
       flush_buffer_locked();
       HRR_FSYNC(g_events_fd);
     }
+    // close() runs later and the fd stays open until then. A thread can still
+    // record in between: a forked child's first record finishes opening the
+    // archive just before this, and takes the lock after it.
+    g_events_finalized = true;
   }
 
   if (out_dir.empty()) return;
@@ -1394,6 +1470,10 @@ void flush(const char* /*output_dir*/) {
 }
 
 void close() {
+  // A forked child that has not recorded yet must not open its archive after
+  // this: nothing would finalize it. Fat-binary destructors still record then.
+  std::lock_guard<std::mutex> reopen_lk(g_reopen_mu);
+  g_reopen_after_fork.store(false, std::memory_order_release);
   BufWriteGuard lk;
   if (g_events_fd >= 0) {
     flush_buffer_locked();
@@ -1442,11 +1522,11 @@ void emergency_finalize(bool clean_shutdown) {
     // Clean shutdowns append the fixed-size trailer so the reader does not treat
     // the archive as crash-truncated. The CLR crash callback passes
     // clean_shutdown=false; normal shutdown uses flush().
-    if (clean_shutdown && !g_trailer_written) {
+    if (clean_shutdown && !g_events_finalized) {
       hrr_eof_record rec = hrr_make_eof_record(
           g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
       write_all_fd(g_events_fd, &rec, sizeof(rec));
-      g_trailer_written = true;
+      g_events_finalized = true;
     }
     g_buf_busy.clear(std::memory_order_release);
   }
@@ -1458,10 +1538,16 @@ void emergency_finalize(bool clean_shutdown) {
   // complete:true (the trailer is present); a crash writes complete:false — its
   // absence-of-trailer is how the reader detects truncation.
   if (g_manifest_path[0] == '\0') return;
+  // Concurrent crash callbacks must not share the emergency buffer. A second
+  // entrant skips the manifest.
+  if (g_emergency_manifest_busy.test_and_set(std::memory_order_acquire)) return;
   bool complete = clean_shutdown && locked;
   int mfd = HRR_OPEN(g_manifest_path);
-  if (mfd < 0) return;
-  char buf[kEmergencyManifestMax];
+  if (mfd < 0) {
+    g_emergency_manifest_busy.clear(std::memory_order_release);
+    return;
+  }
+  auto& buf = g_emergency_manifest_buf;
   size_t p = 0;
   p = append_lit(buf, p,
                  "{\n"
@@ -1488,6 +1574,7 @@ void emergency_finalize(bool clean_shutdown) {
   write_all_fd(mfd, buf, p);
   HRR_FSYNC(mfd);
   HRR_CLOSE(mfd);
+  g_emergency_manifest_busy.clear(std::memory_order_release);
 }
 
 // ---------------------------------------------------------------------------
@@ -1502,7 +1589,8 @@ void emergency_finalize(bool clean_shutdown) {
 // events that are actually written. A full record is always appended under the
 // lock, so the buffer never holds a torn record — which is what makes the
 // crash-callback flush in emergency_finalize() safe. Caller holds BufWriteGuard and
-// has seen g_events_fd open.
+// has seen g_events_fd open. A record that comes after flush() is dropped, as
+// one after close() is.
 //
 // The checkpoint flush+fsync happens inside the same lock scope. An earlier
 // version released the lock and re-acquired it for the fsync, which let two
@@ -1511,6 +1599,7 @@ void emergency_finalize(bool clean_shutdown) {
 // fsync under the lock blocks other writers for the duration of the syscall,
 // but guarantees exactly one fsync per checkpoint and removes the race.
 static void append_event_locked(hrr_event_header* hdr, uint32_t payload_len) {
+  if (g_events_finalized) return;
   hdr->sequence_id = g_seq_id.fetch_add(1, std::memory_order_relaxed);
   buffer_append_locked(hdr, payload_len);
   g_event_count.fetch_add(1, std::memory_order_relaxed);
@@ -1522,6 +1611,7 @@ static void append_event_locked(hrr_event_header* hdr, uint32_t payload_len) {
 }
 
 void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_len) {
+  reopen_after_fork();
   // Fill fields that don't require the lock (timestamp and thread_id are
   // cheap and per-thread; getting them outside the lock keeps contention low).
   hdr->event_type     = api_id;
@@ -1598,6 +1688,7 @@ static bool atomic_write_file(const std::string& path,
 // ---------------------------------------------------------------------------
 
 Hash128 write_blob(const void* data, size_t len) {
+  reopen_after_fork();
   {
     std::lock_guard<std::mutex> lk(g_file_mu);
     if (g_events_fd < 0) return {};  // writer not open — drop silently
@@ -1666,6 +1757,7 @@ Hash128 write_blob(const void* data, size_t len) {
 // ---------------------------------------------------------------------------
 
 Hash128 write_code_object(const void* image, size_t image_size) {
+  reopen_after_fork();
   {
     std::lock_guard<std::mutex> lk(g_file_mu);
     if (g_events_fd < 0) return {};  // writer not open — drop silently
