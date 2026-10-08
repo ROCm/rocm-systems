@@ -10,8 +10,13 @@ synchronously, so they run without GPU hardware or the compiled ``amdsmi``
 package and without real OS threads. They lock in the behaviors introduced by
 the WSL event-thread-hang fix:
 
-* ``_read_stdin`` never blocks in ``input()`` while ``stop`` is already set, and
-  polls stdin with ``select`` rather than blocking immediately.
+* ``_read_stdin`` never blocks while ``stop`` is already set, and reads stdin
+  non-blockingly (``os.set_blocking`` + ``readline()``) instead of gating a
+  blocking ``input()`` behind ``select()`` -- which could strand an
+  already-buffered line (multiple lines delivered in one pipe write) behind a
+  ``select()`` call that only sees the OS-level fd, not the decoder's internal
+  buffer, and which raised an uncaught ``TypeError`` when stdin was closed
+  (``sys.stdin is None``).
 * ``EventListenerThread`` reports a worker exception via the result queue
   instead of raising it out of ``join()``.
 * ``event()`` re-raises an ``AmdSmiLibraryException`` from a worker, lets any
@@ -28,6 +33,7 @@ import queue
 import signal
 import sys
 import threading
+import time
 import types
 import unittest
 from contextlib import redirect_stdout
@@ -86,6 +92,29 @@ class _FakeLogger:
 class _FakeHelpers:
     def check_required_groups(self):
         pass
+
+
+class _FakeNonBlockingStdin:
+    """Stands in for ``sys.stdin`` under ``os.set_blocking(fd, False)``.
+
+    ``readline()`` returns queued lines immediately (as a real non-blocking fd
+    would once data is buffered) and raises ``BlockingIOError`` once the queue
+    is empty, instead of blocking. Thread-safe so it can back a real reader
+    thread in the concurrency tests.
+    """
+
+    def __init__(self, lines=()):
+        self._lines = list(lines)
+        self._lock = threading.Lock()
+
+    def fileno(self):
+        return 0
+
+    def readline(self):
+        with self._lock:
+            if self._lines:
+                return self._lines.pop(0)
+        raise BlockingIOError()
 
 
 def _build_event_args(gpu):
@@ -241,43 +270,64 @@ class TestReadStdin(unittest.TestCase):
         commands.stop = stop
         return commands
 
+    def _patch_set_blocking(self):
+        # The real os.set_blocking(0, False) would flip the test runner's own
+        # stdin to non-blocking; stub it out everywhere except the dedicated
+        # os.set_blocking-failure test below.
+        return mock.patch.object(self.event_module.os, "set_blocking")
+
     def test_returns_immediately_when_stop_already_set(self):
-        # Regression guard: the WSL hang was _read_stdin blocking in input()
-        # forever, never observing that stop had already flipped True.
+        # Regression guard: the WSL hang was _read_stdin blocking forever on
+        # input(), never observing that stop had already flipped True.
         commands = self._make_commands(stop=True)
         result_queue = queue.Queue()
+        fake_stdin = _FakeNonBlockingStdin()
 
-        with mock.patch.object(self.event_module.select, "select") as mock_select, mock.patch(
-            "builtins.input"
-        ) as mock_input:
+        with self._patch_set_blocking(), mock.patch.object(sys, "stdin", fake_stdin):
             commands._read_stdin(result_queue)
 
-        mock_select.assert_not_called()
-        mock_input.assert_not_called()
+        self.assertEqual(fake_stdin._lines, [])
         self.assertTrue(result_queue.empty())
 
-    def test_polls_without_blocking_then_reads_quit(self):
+    def test_reads_quit_without_blocking(self):
         commands = self._make_commands()
         result_queue = queue.Queue()
-        select_results = [([], [], []), ([sys.stdin], [], [])]
+        fake_stdin = _FakeNonBlockingStdin(["q\n"])
 
-        with mock.patch.object(
-            self.event_module.select, "select", side_effect=select_results
-        ) as mock_select, mock.patch("builtins.input", return_value="q") as mock_input:
+        with self._patch_set_blocking(), mock.patch.object(sys, "stdin", fake_stdin):
             commands._read_stdin(result_queue)
 
-        self.assertEqual(mock_select.call_count, 2)
-        mock_input.assert_called_once()
         kind, _payload = result_queue.get_nowait()
         self.assertEqual(kind, "quit")
 
-    def test_eof_error_is_queued(self):
+    def test_blocking_io_error_retries_until_data_ready(self):
         commands = self._make_commands()
         result_queue = queue.Queue()
+        calls = {"n": 0}
 
-        with mock.patch.object(
-            self.event_module.select, "select", return_value=([sys.stdin], [], [])
-        ), mock.patch("builtins.input", side_effect=EOFError):
+        def _readline_then_blocking():
+            # First poll finds nothing buffered yet; the retry sleep must not
+            # be a real 0.1s wait in a test (sleep is mocked below).
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise BlockingIOError()
+            return "q\n"
+
+        with self._patch_set_blocking(), mock.patch.object(
+            sys, "stdin", mock.Mock(fileno=lambda: 0, readline=_readline_then_blocking)
+        ), mock.patch.object(self.event_module.time, "sleep") as mock_sleep:
+            commands._read_stdin(result_queue)
+
+        mock_sleep.assert_called_once()
+        kind, _payload = result_queue.get_nowait()
+        self.assertEqual(kind, "quit")
+
+    def test_eof_when_readline_returns_empty_string(self):
+        commands = self._make_commands()
+        result_queue = queue.Queue()
+        fake_stdin = _FakeNonBlockingStdin([""])
+
+        with self._patch_set_blocking(), mock.patch.object(sys, "stdin", fake_stdin):
             commands._read_stdin(result_queue)
 
         kind, _payload = result_queue.get_nowait()
@@ -286,14 +336,74 @@ class TestReadStdin(unittest.TestCase):
     def test_keyboard_interrupt_is_queued(self):
         commands = self._make_commands()
         result_queue = queue.Queue()
+        fake_stdin = mock.Mock(fileno=lambda: 0, readline=mock.Mock(side_effect=KeyboardInterrupt))
 
-        with mock.patch.object(
-            self.event_module.select, "select", return_value=([sys.stdin], [], [])
-        ), mock.patch("builtins.input", side_effect=KeyboardInterrupt):
+        with self._patch_set_blocking(), mock.patch.object(sys, "stdin", fake_stdin):
             commands._read_stdin(result_queue)
 
         kind, _payload = result_queue.get_nowait()
         self.assertEqual(kind, "interrupt")
+
+    def test_closed_stdin_is_queued_as_eof(self):
+        # Regression guard: sys.stdin is None when fd 0 is closed outright
+        # (e.g. `0<&-`); the old select()-based version raised an uncaught
+        # TypeError here and the reader thread died silently.
+        commands = self._make_commands()
+        result_queue = queue.Queue()
+
+        with mock.patch.object(sys, "stdin", None):
+            commands._read_stdin(result_queue)
+
+        kind, _payload = result_queue.get_nowait()
+        self.assertEqual(kind, "eof")
+
+    def test_invalid_fd_from_set_blocking_is_queued_as_eof(self):
+        commands = self._make_commands()
+        result_queue = queue.Queue()
+        fake_stdin = mock.Mock(fileno=lambda: 0)
+
+        with mock.patch.object(
+            self.event_module.os, "set_blocking", side_effect=OSError("bad fd")
+        ), mock.patch.object(sys, "stdin", fake_stdin):
+            commands._read_stdin(result_queue)
+
+        kind, _payload = result_queue.get_nowait()
+        self.assertEqual(kind, "eof")
+        fake_stdin.readline.assert_not_called()
+
+    def test_multiple_buffered_lines_are_each_processed_without_stranding(self):
+        # Regression guard: select() only confirms the OS-level fd is
+        # readable, not that a full line is buffered. Piping "x\nq\n" in one
+        # write let input() consume "x" while "q" sat stranded behind a
+        # select() that (correctly) saw nothing left at the OS level. Plain
+        # readline() calls, with no select() in between, can't strand a line
+        # that's already sitting in the decoder's own buffer.
+        commands = self._make_commands()
+        result_queue = queue.Queue()
+        fake_stdin = _FakeNonBlockingStdin(["x\n", "q\n"])
+
+        with self._patch_set_blocking(), mock.patch.object(sys, "stdin", fake_stdin):
+            commands._read_stdin(result_queue)
+
+        kind, _payload = result_queue.get_nowait()
+        self.assertEqual(kind, "quit")
+        self.assertEqual(fake_stdin._lines, [])
+
+    def test_unexpected_exception_is_queued_not_raised(self):
+        # Safety net: any exception type we didn't anticipate still unblocks
+        # event()'s result_queue.get() instead of killing the thread silently.
+        commands = self._make_commands()
+        result_queue = queue.Queue()
+        fake_stdin = mock.Mock(
+            fileno=lambda: 0, readline=mock.Mock(side_effect=RuntimeError("boom"))
+        )
+
+        with self._patch_set_blocking(), mock.patch.object(sys, "stdin", fake_stdin):
+            commands._read_stdin(result_queue)
+
+        kind, payload = result_queue.get_nowait()
+        self.assertEqual(kind, "exception")
+        self.assertIsInstance(payload, RuntimeError)
 
 
 class TestEventOrchestration(unittest.TestCase):
@@ -355,3 +465,98 @@ class TestEventOrchestration(unittest.TestCase):
 
         self.assertTrue(commands.stop)
         self.assertEqual(signal.getsignal(signal.SIGTERM), previous_handler)
+
+
+class _EventTimeoutError(Exception):
+    """Raised by the SIGALRM handler when event() outlives the test's timeout."""
+
+
+def _raise_event_timeout(signum, frame):
+    raise _EventTimeoutError("event() did not return before the timeout; threads are hung")
+
+
+class TestEventRealThreads(unittest.TestCase):
+    """Runs event() with real, unpatched Thread.start/join.
+
+    The tests above patch Thread.start/join to run inline, which proves the
+    message-passing logic but can't catch an actual hang: a worker or
+    stdin-reader thread that never observes ``stop`` would just make those
+    tests block forever too. These run real OS threads and bound the wait with
+    a SIGALRM (event() itself must stay on the main thread -- it calls
+    signal.signal(SIGTERM, ...), which only works there), so a reintroduced
+    hang fails the assertion instead of hanging the suite.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if not EVENT_PATH or not os.path.isfile(EVENT_PATH):
+            raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
+        modules = _build_fake_amdsmi()
+        stub_modules(cls, modules)
+        cls.exception_module = modules["amdsmi.amdsmi_exception"]
+        cls.event_module = _load_event_module()
+
+    def _make_commands(self):
+        commands = object.__new__(self.event_module.EventCommands)
+        commands.device_handles = []
+        return commands
+
+    def _run_with_timeout(self, commands, args, timeout_seconds=5):
+        """Run commands.event(args) on the main thread, bounded by an alarm."""
+        previous_handler = signal.signal(signal.SIGALRM, _raise_event_timeout)
+        signal.alarm(timeout_seconds)
+        try:
+            commands.event(args)
+        except _EventTimeoutError:
+            self.fail("event() did not return within the timeout; threads are hung")
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, previous_handler)
+
+    def test_real_threads_quit_without_hanging(self):
+        commands = self._make_commands()
+
+        # Mirrors _event_thread's "while not self.stop" shape on a real thread,
+        # without touching AmdSmiEventReader.
+        def _worker(cmds, _i):
+            while not cmds.stop:
+                time.sleep(0.01)
+
+        commands._event_thread = _worker
+
+        # A couple of BlockingIOError polls before "q" lands, same as a real
+        # non-blocking fd with no data ready yet.
+        fake_stdin = _FakeNonBlockingStdin([None, None, "q\n"])
+
+        def _readline():
+            line = fake_stdin._lines.pop(0)
+            if line is None:
+                raise BlockingIOError()
+            return line
+
+        with mock.patch.object(self.event_module.os, "set_blocking"), mock.patch.object(
+            sys, "stdin", mock.Mock(fileno=lambda: 0, readline=_readline)
+        ):
+            self._run_with_timeout(commands, _build_event_args([0]))
+
+        self.assertTrue(commands.stop)
+
+    def test_real_threads_worker_exception_unblocks_without_waiting_on_stdin(self):
+        commands = self._make_commands()
+
+        def _worker(cmds, _i):
+            time.sleep(0.02)
+            raise RuntimeError("worker boom")
+
+        commands._event_thread = _worker
+
+        # The reader thread keeps polling and never sees "q"; only the worker's
+        # exception should unblock event(), so it must not wait on stdin.
+        fake_readline = mock.Mock(side_effect=BlockingIOError)
+        with mock.patch.object(self.event_module.os, "set_blocking"), mock.patch.object(
+            sys, "stdin", mock.Mock(fileno=lambda: 0, readline=fake_readline)
+        ):
+            with self.assertRaises(RuntimeError):
+                self._run_with_timeout(commands, _build_event_args([0]))
+
+        self.assertTrue(commands.stop)

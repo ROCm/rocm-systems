@@ -2,11 +2,12 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+import os
 import queue
-import select
 import signal
 import sys
 import threading
+import time
 
 from amdsmi import amdsmi_exception, amdsmi_interface
 
@@ -52,9 +53,13 @@ class EventCommands:
         try:
             kind, payload = result_queue.get()
             if kind == "exception":
+                if isinstance(payload, amdsmi_exception.AmdSmiLibraryException):
+                    raise payload
                 raise payload
             if kind == "quit":
                 print("Escape Sequence Detected; Exiting")
+            if kind == "eof" or kind == "interrupt":
+                print("Input stream closed or interrupted; Exiting")
         except SystemExit as exc:
             system_exit_exc = exc
         except amdsmi_exception.AmdSmiLibraryException as e:
@@ -73,24 +78,35 @@ class EventCommands:
         raise SystemExit(128 + signum)
 
     def _read_stdin(self, result_queue):
-        while not self.stop:
-            # check stdin for user input so we don't block in input()
-            ready, _, _ = select.select([sys.stdin], [], [], 0.5)
-            if not ready:
-                continue
+        try:
+            os.set_blocking(sys.stdin.fileno(), False)
+        except (AttributeError, OSError, ValueError):
+            # stdin is closed or invalid (e.g. 0<&-); nothing to read.
+            result_queue.put(("eof", None))
+            return
 
-            try:
-                user_input = input()
-            except EOFError:
-                result_queue.put(("eof", None))
-                return
-            except KeyboardInterrupt:
-                result_queue.put(("interrupt", None))
-                return
+        try:
+            while not self.stop:
+                try:
+                    line = sys.stdin.readline()
+                except BlockingIOError:
+                    time.sleep(0.1)
+                    continue
+                except (OSError, ValueError):
+                    result_queue.put(("eof", None))
+                    return
+                except KeyboardInterrupt:
+                    result_queue.put(("interrupt", None))
+                    return
 
-            if user_input == "q":
-                result_queue.put(("quit", None))
-                return
+                if line == "":
+                    result_queue.put(("eof", None))
+                    return
+                if line.strip() == "q":
+                    result_queue.put(("quit", None))
+                    return
+        except Exception as e:  # safety net: always unblock the main thread's get()
+            result_queue.put(("exception", e))
 
     def _event_thread(self, commands, i):
         devices = commands.device_handles
