@@ -27,7 +27,8 @@ from amdisa.codegen.execute.vector_special import (
     gen_vector_movrel,
     gen_vector_cvt_pk,
 )
-from amdisa.codegen.execute.vector_alu import gen_legacy_vector_unary
+from amdisa.codegen.execute.sema_lower import LoweringContext, lower_sema_block
+from amdisa.sema_derive import derive_sema_block
 from amdisa.codegen.execute.matrix import gen_mfma as emit_mfma
 from amdisa.codegen.execute.vector_cmp import (
     gen_vector_add_co,
@@ -68,6 +69,14 @@ def _repo_root() -> Path:
 def _mrisa_dir() -> Path:
     default = _repo_root() / 'shared' / 'machine-readable-isa' / 'isa'
     return Path(os.environ.get('MRISA_PATH', default))
+
+
+def _lower_unary(name: str, arch_name: str = '') -> str:
+    sem = derive_semantics(name, 'ENC_VOP1')
+    block = derive_sema_block(sem)
+    return lower_sema_block(
+        block, LoweringContext(exec_model=block.pragma, arch_name=arch_name)
+    )
 
 
 def _gen_mfma(
@@ -2876,13 +2885,7 @@ def test_cdna3_fp8_cvt_uses_fnuz_helper_variant():
     assert 'util::bf8_e5m2_fnuz_to_f32' in packed
     assert 'util::bf8_e5m2_to_f32' not in packed
 
-    unary = gen_legacy_vector_unary(
-        ['vdst'],
-        ['src0'],
-        'cvt_f32_fp8',
-        None,
-        arch_name='cdna3',
-    )
+    unary = _lower_unary('V_CVT_F32_FP8', 'cdna3')
     assert 'util::fp8_e4m3_fnuz_to_f32' in unary
     assert 'util::fp8_e4m3_to_f32' not in unary
 
@@ -2907,21 +2910,16 @@ def test_cdna4_fp8_cvt_keeps_ocp_helper_variant():
     assert 'util::f32_to_fp8_e4m3_fnuz_rne_mode' not in narrow
     assert 'wf.fp16_ovfl()' in narrow
 
-    unary = gen_legacy_vector_unary(
-        ['vdst'],
-        ['src0'],
-        'cvt_f32_fp8',
-        None,
-        arch_name='cdna4',
-    )
+    unary = _lower_unary('V_CVT_F32_FP8', 'cdna4')
     assert 'util::fp8_e4m3_to_f32' in unary
     assert 'util::fp8_e4m3_fnuz_to_f32' not in unary
 
 
 def test_f32_to_f16_vector_conversion_threads_fp16_ovfl():
-    unary = gen_legacy_vector_unary(['vdst'], ['src0'], 'cvt', 'f16_f32')
+    unary = _lower_unary('V_CVT_F16_F32')
 
-    assert 'util::f32_to_f16_mode(s, wf.fp16_ovfl())' in unary
+    assert 'util::f32_to_f16_mode(' in unary
+    assert ', wf.fp16_ovfl())' in unary
 
 
 def test_fp16_ovfl_sensitive_f16_simd_probes_stay_vectorized():

@@ -59,14 +59,6 @@ def _fp8_rne_encode_call(cvt_fn: str, value_expr: str, use_fp16_ovfl: bool) -> s
     return f'{cvt_fn}({value_expr})'
 
 
-def _fp8_sr_encode_call(
-    cvt_fn: str, value_expr: str, seed_expr: str, use_fp16_ovfl: bool
-) -> str:
-    if use_fp16_ovfl:
-        return f'{cvt_fn}({value_expr}, {seed_expr}, wf.fp16_ovfl())'
-    return f'{cvt_fn}({value_expr}, {seed_expr})'
-
-
 def _shared_inst_operand(opnd: str) -> bool:
     return opnd.startswith('inst.')
 
@@ -2317,17 +2309,6 @@ def _parse_scalef32_op(op: str):
         raise ValueError(f'cannot determine direction for {op}: {dst_fmt} vs {src_fmt}')
 
     return stochastic, mode, dst_fmt, src_fmt, direction
-
-
-def _read_as_f32(src_name: str, src_fmt: str) -> str:
-    """Return C++ expression to read a source value as float."""
-    if src_fmt == 'f32':
-        return f'std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({src_name}, lane)))'
-    elif src_fmt == 'f16':
-        return f'util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_name}, lane) & 0xFFFF))'
-    elif src_fmt == 'bf16':
-        return f'util::bf16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_name}, lane) & 0xFFFF))'
-    raise ValueError(f'unsupported source format: {src_fmt}')
 
 
 def _write_as_fmt(dst_name: str, dst_fmt: str, val_expr: str) -> str:

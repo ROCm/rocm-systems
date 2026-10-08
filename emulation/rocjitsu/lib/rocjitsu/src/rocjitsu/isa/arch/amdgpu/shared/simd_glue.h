@@ -3082,80 +3082,6 @@ template <typename Inst, typename FmaOp>
   return false;
 }
 
-/// @brief Legacy VOP3 F16 accumulator SIMD with promoted F32 output modifiers.
-/// @details No generated caller; production FMAC uses the MODE-aware FMA path.
-/// Widen src0/src1/vdst; apply ABS/NEG only to src0/src1, evaluate,
-/// then apply F32 OMOD/CLAMP before narrowing to F16.
-/// Storage: generic uses low halves and zero-extends vdst; true16 selects
-/// source and accumulator/destination halves with OP_SEL.
-template <bool True16, typename Inst, typename FmaOp>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_fmac_vop3_fp16_simd(Inst &inst, Wavefront &wf,
-                                                          FmaOp tern_op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
-    return false;
-  using T = uint32_t;
-  const uint32_t opsel = vop3_opsel(inst.inst_);
-  const uint32_t abs = inst.inst_.abs;
-  const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = effective_vop3_omod_f16(wf, inst.inst_.omod);
-  const uint32_t clamp = inst.inst_.clamp;
-  constexpr std::size_t W = util::native_width_v<T>;
-  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  RegisterAccess regs(wf);
-  auto src0 = regs.read_operand(inst.src0, exec);
-  auto src1 = regs.read_operand(inst.src1, exec);
-  auto acc = regs.readwrite_operand(inst.vdst, exec);
-  if constexpr (True16)
-    if (!acc.has_storage())
-      return false;
-  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-    const uint64_t chunk = (exec >> base) & chunk_full;
-    if (chunk == 0)
-      continue;
-    auto a_raw = src0.template load_native<T>(base);
-    auto b_raw = src1.template load_native<T>(base);
-    auto c_raw = acc.template load_native<T>(base);
-    auto prev = c_raw;
-    if constexpr (True16) {
-      a_raw = select_vop3_true16_src(a_raw, opsel, 0);
-      b_raw = select_vop3_true16_src(b_raw, opsel, 1);
-      c_raw = (opsel & 0x8u) ? (c_raw >> 16) : c_raw;
-      c_raw = c_raw & util::broadcast<T>(0xffffu);
-    } else {
-      a_raw = a_raw & util::broadcast<T>(0xffffu);
-      b_raw = b_raw & util::broadcast<T>(0xffffu);
-      c_raw = c_raw & util::broadcast<T>(0xffffu);
-    }
-    const auto a = apply_vop3_src_mod_f32<0>(util::f16_to_f32_simd(a_raw), abs, neg);
-    const auto b = apply_vop3_src_mod_f32<1>(util::f16_to_f32_simd(b_raw), abs, neg);
-    const auto c = util::f16_to_f32_simd(c_raw); // accumulator, no modifier
-    const auto r =
-        apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp, floating_clamp_nan_to_zero(wf));
-    const auto out_half =
-        finalize_omod_f16_bits_simd(util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()), omod) &
-        util::broadcast<T>(0xffffu);
-    auto out = out_half;
-    if constexpr (True16) {
-      if (opsel & 0x8u)
-        out = (prev & util::broadcast<T>(0x0000ffffu)) | (out_half << 16);
-      else if (cdna_vop3_low_dst_zeroes_high(wf))
-        out = out_half;
-      else
-        out = (prev & util::broadcast<T>(0xffff0000u)) | out_half;
-    }
-    acc.template store_native<T>(base, out, chunk);
-  }
-  return true;
-}
-
-template <bool True16, typename Inst, typename FmaOp>
-[[nodiscard]] bool try_execute_fmac_vop3_fp16_simd(Inst &, Wavefront &, FmaOp) {
-  return false;
-}
-
 /// @brief MODE-aware VOP3 F16 destination-accumulate FMA SIMD fast path.
 template <bool True16, typename Inst>
   requires(util::has_stdx_simd)
@@ -3209,45 +3135,6 @@ template <bool True16, typename Inst>
 
 template <bool True16, typename Inst>
 [[nodiscard]] bool try_execute_fmac_vop3_fp16_mode_simd(Inst &, Wavefront &) {
-  return false;
-}
-
-/// VOP3 dst-accumulate FMA fast path (f64).
-template <typename Inst, typename FmaOp>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_fmac_vop3_fp64_simd(Inst &inst, Wavefront &wf,
-                                                          FmaOp tern_op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
-    return false;
-  using T = double;
-  const uint32_t abs = inst.inst_.abs;
-  const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = effective_vop3_omod_f64(wf, inst.inst_.omod);
-  const uint32_t clamp = inst.inst_.clamp;
-  constexpr std::size_t W = util::native_width64;
-  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  RegisterAccess regs(wf);
-  auto src0 = regs.read_operand64(inst.src0, exec);
-  auto src1 = regs.read_operand64(inst.src1, exec);
-  auto acc = regs.readwrite_operand64(inst.vdst, exec);
-  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-    const uint64_t chunk = (exec >> base) & chunk_full;
-    if (chunk == 0)
-      continue;
-    const auto a = apply_vop3_src_mod_f64<0>(src0.template load_native<T>(base), abs, neg);
-    const auto b = apply_vop3_src_mod_f64<1>(src1.template load_native<T>(base), abs, neg);
-    const auto c = acc.template load_native<T>(base); // accumulator, no mod
-    const auto r =
-        apply_vop3_dst_mod_f64(tern_op(a, b, c), omod, clamp, floating_clamp_nan_to_zero(wf));
-    acc.template store_native<T>(base, r, chunk);
-  }
-  return true;
-}
-
-template <typename Inst, typename FmaOp>
-[[nodiscard]] bool try_execute_fmac_vop3_fp64_simd(Inst &, Wavefront &, FmaOp) {
   return false;
 }
 
@@ -5092,10 +4979,6 @@ template <bool Vop3, typename Inst>
   if (::rocjitsu::amdgpu::try_execute_binary_vop3_simd<uint32_t>(                                  \
           inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
   return
-#define ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP16(Fmt, ...)                                           \
-  if (::rocjitsu::amdgpu::try_execute_binary_vop3_f16_simd<false, uint32_t>(                       \
-          inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
-  return
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_RAW_FP16(Fmt, ...)                                    \
   if (::rocjitsu::amdgpu::try_execute_binary_vop3_f16_simd<true, uint32_t>(                        \
           inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
@@ -5261,17 +5144,6 @@ template <bool Vop3, typename Inst>
   if (::rocjitsu::amdgpu::try_execute_fmac_vop3_fp_simd(inst, wf, __VA_ARGS__))                    \
   return
 
-/// VOP3 dst-accumulate FMA counterpart (f16). Widen chain, vdst is the
-/// (widened) accumulator.
-#define ROCJITSU_TRY_SIMD_FMAC_VOP3_FP16(...)                                                      \
-  if (::rocjitsu::amdgpu::try_execute_fmac_vop3_fp16_simd<false>(inst, wf, __VA_ARGS__))           \
-  return
-
-/// VOP3 dst-accumulate f16 counterpart for true16 source/accumulator/dst halves.
-#define ROCJITSU_TRY_SIMD_FMAC_VOP3_TRUE16_FP16(...)                                               \
-  if (::rocjitsu::amdgpu::try_execute_fmac_vop3_fp16_simd<true>(inst, wf, __VA_ARGS__))            \
-  return
-
 #define ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_FP16()                                                    \
   if (::rocjitsu::amdgpu::try_execute_fmac_vop3_fp16_mode_simd<false>(inst, wf))                   \
   return
@@ -5285,15 +5157,6 @@ template <bool Vop3, typename Inst>
 #else
 #define ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_FP64()                                                    \
   if (::rocjitsu::amdgpu::try_execute_fmac_vop3_fp64_mode_simd(inst, wf))                          \
-  return
-#endif
-
-/// VOP3 dst-accumulate FMA counterpart (f64).
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-#define ROCJITSU_TRY_SIMD_FMAC_VOP3_FP64(...) static_cast<void>(inst)
-#else
-#define ROCJITSU_TRY_SIMD_FMAC_VOP3_FP64(...)                                                      \
-  if (::rocjitsu::amdgpu::try_execute_fmac_vop3_fp64_simd(inst, wf, __VA_ARGS__))                  \
   return
 #endif
 

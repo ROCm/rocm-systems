@@ -2384,25 +2384,16 @@ def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
 
 
 def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
-    """Lower apply_omod CALL to inline VOP3 OMOD code.
-
-    Operates in float domain: bit_cast input to float/double, apply omod,
-    returns float/double.
-
-    Direct F16 wrapper lowering is legacy. Production F16 destination writes
-    use _destination_result and the shared output stage.
-    Remaining formats use this live expression-level path; see output_modifier.h.
-
-    CALL children: [ID('apply_omod'), rhs_expr]
-    """
+    """Lower expression-level OMOD for results not handled at the destination."""
+    if node.ty == SemaType.F16:
+        raise ValueError('F16 output modifiers require destination lowering')
     if len(node.children) < 2:
         return '0'
     if any(_contains_call(node.children[1], op) for op in CUBE_OPERATIONS):
         return cube_omod(_lower_expr(node.children[1], ctx))
     is_f64 = node.ty and node.ty.size == 64
     mode_arithmetic = ctx.mode_arithmetic and _contains_mode_arithmetic(node)
-    wide_result = is_f64 or (node.ty == SemaType.F16 and mode_arithmetic)
-    fp_type = 'double' if wide_result else 'float'
+    fp_type = 'double' if is_f64 else 'float'
     mode = 'f32' if node.ty == SemaType.F32 else 'f16_f64'
     environment = (
         f'amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_{mode}()); '
@@ -2414,11 +2405,6 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
         omod_expr = (
             'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
             'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod)'
-        )
-    elif node.ty == SemaType.F16:
-        omod_expr = (
-            'amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), '
-            'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false, inst_.omod)'
         )
     elif node.ty == SemaType.BF16:
         omod_expr = (
@@ -2469,41 +2455,27 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
             f'[&]() {{ {environment}float v = {rhs};'
             f' return amdgpu::fp_mode::apply_omod_f32(v, {omod_expr}); }}()'
         )
-    if node.ty == SemaType.F16 and any(
-        _contains_call(node.children[1], op) for op in sorted(F16_TRANSCENDENTAL_CALLS)
-    ):
-        return f'amdgpu::fp_mode::apply_omod_f16({rhs}, {omod_expr}, wf.fp16_ovfl())'
     return (
         f'[&]() {{ {environment}{fp_type} v = {rhs};'
         f' const uint32_t effective_omod = {omod_expr};'
         f' if (effective_omod == 1) v *= 2.0{suffix};'
         f' else if (effective_omod == 2) v *= 4.0{suffix};'
         f' else if (effective_omod == 3) v *= 0.5{suffix};'
-        f' v = amdgpu::fp_mode::finalize_omod_{"f64" if wide_result else "f32"}(v, effective_omod);'
+        f' v = amdgpu::fp_mode::finalize_omod_{"f64" if is_f64 else "f32"}(v, effective_omod);'
         f' return v; }}()'
     )
 
 
 def _lower_apply_clamp(node: SemaNode, ctx: LoweringContext) -> str:
-    """Lower apply_clamp CALL to inline VOP3 CLAMP code.
-
-    Operates in float domain: bit_cast input to float/double, apply clamp,
-    returns float/double. The final bit_cast back to uint32_t/uint64_t
-    happens at the destination write site.
-
-    Direct F16 wrapper lowering is legacy. Production F16 destination writes
-    use _destination_result and the shared output stage.
-    Remaining formats use this live expression-level path; see output_modifier.h.
-
-    CALL children: [ID('apply_clamp'), rhs_expr]
-    """
+    """Lower expression-level CLAMP for results not handled at the destination."""
+    if node.ty == SemaType.F16:
+        raise ValueError('F16 output modifiers require destination lowering')
     if len(node.children) < 2:
         return '0'
     rhs = _lower_expr(node.children[1], ctx)
     is_f64 = node.ty and node.ty.size == 64
     mode_arithmetic = ctx.mode_arithmetic and _contains_mode_arithmetic(node)
-    wide_result = is_f64 or (node.ty == SemaType.F16 and mode_arithmetic)
-    fp_type = 'double' if wide_result else 'float'
+    fp_type = 'double' if is_f64 else 'float'
     mode = 'f32' if node.ty == SemaType.F32 else 'f16_f64'
     environment = (
         f'amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_{mode}()); '

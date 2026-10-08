@@ -12,7 +12,7 @@
 /// - Shared scalar/SIMD stage for migrated VOP3 results on every target.
 /// - Older targets enable OMOD only with IEEE=0 and output denormals flushed.
 ///
-/// Live production paths outside this stage include:
+/// Other emitted paths:
 /// - Host-result scalar lowering and SIMD destination helpers: separate
 ///   OMOD/CLAMP implementations for remaining F32/F64 operations.
 /// - Specialized generators using vop3_dst_mod: F32 intermediate modifiers,
@@ -25,8 +25,6 @@
 ///
 /// Migration must preserve operation-specific rounding and flushing. In F32
 /// arithmetic, effective OMOD also selects output flushing before scaling.
-/// Test-only vector emitters use legacy names; they do not add a production path.
-/// The promoted-F32 F16 accumulator helper is unused; FMAC uses the MODE-aware path.
 ///
 /// Hardware evidence:
 /// - gfx1201 (RDNA4): every F16/F32/F64 min/max matches under all probed MODEs.

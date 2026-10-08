@@ -1,16 +1,9 @@
 # Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Side-by-side validation: SemaAST lowering vs old generators.
+"""Check operand access, execution loops and side effects in semantic lowering.
 
-Validates that the SemaAST pipeline (derive → enrich → lower) produces
-C++ that has the same structural properties as the old string-tag
-generators. Does NOT require byte-identical output — instead checks
-that both outputs:
-  - Use the same operand names (ssrc0, vdst, etc.)
-  - Use the same read/write methods (read_scalar, write_lane, etc.)
-  - Write the same side-effect registers (SCC, VCC, EXEC)
-  - Have the same execution model (EXEC loop vs no loop)
+Scalar cases also compare the corresponding scalar emitters.
 """
 
 import re
@@ -30,11 +23,6 @@ from amdisa.codegen.execute.scalar import (
     gen_scalar_cmp,
     gen_scalar_saveexec,
     gen_scalar_unary,
-)
-from amdisa.codegen.execute.vector_alu import (
-    gen_legacy_vector_binop,
-    gen_legacy_vector_ternary,
-    gen_legacy_vector_unary,
 )
 
 
@@ -145,33 +133,25 @@ class TestVectorBinopValidation:
     )
     def test_vector_binop_has_exec_loop(self, op, dtype):
         sem = _FakeSem(f'V_{op.upper()}_{dtype.upper()}', 'vector_binop', op, dtype)
-        old = gen_legacy_vector_binop(['vdst'], ['src0', 'vsrc1'], op, dtype)
         new = _new_output(sem, ['src0', 'vsrc1'], ['vdst'], dtype)
-        old_props = _extract_properties(old)
         new_props = _extract_properties(new)
-        assert old_props['has_exec_loop']
         assert new_props['has_exec_loop']
         assert 'vdst' in new_props['operand_names']
         assert new_props['reads_lane']
         assert new_props['writes_lane']
 
-    def test_legacy_i24_mul_uses_unsigned_helper(self):
-        old = gen_legacy_vector_binop(['vdst'], ['src0', 'vsrc1'], 'mul', 'i24')
+    def test_i24_mul_uses_unsigned_helper(self):
+        sem = _FakeSem('V_MUL_I32_I24', 'vector_binop', 'mul', 'i24')
+        new = _new_output(sem, ['src0', 'vsrc1'], ['vdst'], 'i24')
 
-        assert '::rocjitsu::amdgpu::mul_i24_u32' in old
-        assert 'sv0 * sv1' not in old
+        assert '::rocjitsu::amdgpu::mul_i24_u32' in new
 
 
 class TestVectorTernaryValidation:
     def test_fma_f32(self):
         sem = _FakeSem('V_FMA_F32', 'vector_ternary', 'fma', 'f32')
-        old = gen_legacy_vector_ternary(
-            ['vdst'], ['src0', 'src1', 'src2'], 'fma', 'f32'
-        )
         new = _new_output(sem, ['src0', 'src1', 'src2'], ['vdst'], 'f32')
-        old_props = _extract_properties(old)
         new_props = _extract_properties(new)
-        assert old_props['uses_fma']
         assert new_props['uses_fma']
         assert new_props['has_exec_loop']
 
@@ -180,9 +160,7 @@ class TestVectorUnaryValidation:
     @pytest.mark.parametrize('op', ['floor', 'trunc', 'sqrt'])
     def test_vector_unary_exec_loop(self, op):
         sem = _FakeSem(f'V_{op.upper()}_F32', 'vector_unary', op, 'f32')
-        old = gen_legacy_vector_unary(['vdst'], ['src0'], op, 'f32')
         new = _new_output(sem, ['src0'], ['vdst'], 'f32')
-        assert 'for (uint32_t lane' in old
         assert 'for (uint32_t lane' in new
 
 
