@@ -16,21 +16,192 @@
 #include "gin_scratch__types.h"
 #endif
 
-template <bool EnableProfiler>
-__device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct ncclSymkDevWorkArgs const* args) {
+// Replay a register block of packs into every LSA peer's output slot. `getDst` is
+// a hoisted pointer getter, so a peer costs address arithmetic rather than a
+// reload of the window metadata. Peers are visited starting from `rank` so the
+// node's GPUs don't all target the same peer at once.
+template <int UnrollPacks, int UnrollPeers, typename Pack, typename GetDst>
+static __device__ __forceinline__ void bcastPacksToLsa(GetDst const& getDst, intptr_t cursor, int packStride,
+                                                       Pack const (&tmp)[UnrollPacks], int nRanks, int rank,
+                                                       int selfSkip) {
+  int dr = selfSkip;
+  int r = rank + dr;
+  if (nRanks <= r) r -= nRanks;
+  NVCC_PRAGMA_UNROLL_DISABLED
+  for (; dr + UnrollPeers <= nRanks; dr += UnrollPeers) {
+    NVCC_PRAGMA_UNROLL(UnrollPeers)
+    for (int up = 0; up < UnrollPeers; up++) {
+      Pack* dst = getDst(r) + cursor;
+      NVCC_PRAGMA_UNROLL(UnrollPacks)
+      for (int u = 0; u < UnrollPacks; u++) dst[u * packStride] = tmp[u];
+      if (++r == nRanks) r = 0;
+    }
+  }
+  NVCC_PRAGMA_UNROLL(UnrollPeers)
+  for (int up = 0; up < UnrollPeers; up++) {
+    if (dr + up == nRanks) break;
+    Pack* dst = getDst(r) + cursor;
+    NVCC_PRAGMA_UNROLL(UnrollPacks)
+    for (int u = 0; u < UnrollPacks; u++) dst[u * packStride] = tmp[u];
+    if (++r == nRanks) r = 0;
+  }
+}
+
+// Resolve the source of a broadcast. `srcSlot` is the LSA slot to read from, or
+// -1 for the local buffer, which is also the only form that works when the input
+// window is unregistered.
+static __device__ __forceinline__ char const* bcastLsaSrc(ncclSymPtr<char> input, int srcSlot) {
+  return srcSlot < 0 ? input.localPtr() : input.lsaPtr(srcSlot);
+}
+
+// Warp-blocked broadcast over whole tiles of UnrollPacks*WARP_SIZE packs. The
+// source reads are batched into registers so they overlap, then replayed to all
+// peers; the next tile's loads are issued before the back edge.
+template <int BytePerPack, int UnrollPacks, int UnrollPeers>
+static __device__ void bcastLsaDeep(int tn, int t, ncclSymPtr<char> input, ncclSymPtr<char> output, ncclTeam team,
+                                    int srcSlot, int slot0, int selfSkip, int nIters) {
+  using Pack = BytePack<BytePerPack>;
+  int wn = tn / WARP_SIZE;
+  int w = t / WARP_SIZE;
+  int lane = t % WARP_SIZE;
+
+  Pack const* inpPacks = (Pack const*)bcastLsaSrc(input, srcSlot) + intptr_t(w) * UnrollPacks * WARP_SIZE + lane;
+  ncclSymPtr<Pack> outPacks = (ncclSymPtr<Pack>)output + intptr_t(w) * UnrollPacks * WARP_SIZE + lane;
+  ncclLsaPointerGetter<Pack> getDst{outPacks, slot0};
+  intptr_t cursor = 0;
+  Pack tmp[UnrollPacks];
+
+  nIters -= w;
+  if (0 < nIters) {
+    NVCC_PRAGMA_UNROLL_AUTO
+    for (int u = 0; u < UnrollPacks; u++) tmp[u] = inpPacks[u * WARP_SIZE];
+
+    while (true) {
+      bcastPacksToLsa<UnrollPacks, UnrollPeers>(getDst, cursor, WARP_SIZE, tmp, team.nRanks, team.rank, selfSkip);
+      inpPacks += intptr_t(wn) * UnrollPacks * WARP_SIZE;
+      cursor += intptr_t(wn) * UnrollPacks * WARP_SIZE;
+      nIters -= wn;
+      if (nIters <= 0) break;
+      NVCC_PRAGMA_UNROLL_AUTO
+      for (int u = 0; u < UnrollPacks; u++) tmp[u] = inpPacks[u * WARP_SIZE];
+    }
+  }
+}
+
+// Whole packs left over once the tiled loop can no longer fill a warp tile.
+template <int BytePerPack, int UnrollPeers>
+static __device__ void bcastLsaPacks(int tn, int t, ncclSymPtr<char> input, ncclSymPtr<char> output, ncclTeam team,
+                                     int srcSlot, int slot0, int selfSkip, size_t nPacks) {
+  using Pack = BytePack<BytePerPack>;
+  Pack const* inpPacks = (Pack const*)bcastLsaSrc(input, srcSlot);
+  ncclLsaPointerGetter<Pack> getDst{(ncclSymPtr<Pack>)output, slot0};
+  NVCC_PRAGMA_UNROLL_DISABLED
+  for (size_t i = t; i < nPacks; i += tn) {
+    Pack tmp[1];
+    tmp[0] = inpPacks[i];
+    bcastPacksToLsa<1, UnrollPeers>(getDst, (intptr_t)i, 1, tmp, team.nRanks, team.rank, selfSkip);
+  }
+}
+
+// Unaligned head and ragged tail, one byte at a time.
+template <int UnrollPeers>
+static __device__ void bcastLsaEnds(int tn, int t, ncclSymPtr<char> input, ncclSymPtr<char> output, ncclTeam team,
+                                    int srcSlot, int slot0, int selfSkip, size_t nBytes, uint32_t nPreBytes,
+                                    size_t nSufBytes) {
+  using Pack = BytePack<1>;
+  Pack const* inpPacks = (Pack const*)bcastLsaSrc(input, srcSlot);
+  ncclLsaPointerGetter<Pack> getDst{(ncclSymPtr<Pack>)output, slot0};
+  NVCC_PRAGMA_UNROLL_DISABLED
+  for (size_t i = t; i < nPreBytes + nSufBytes; i += tn) {
+    size_t elt = i < nPreBytes ? i : nBytes - nPreBytes - nSufBytes + i;
+    Pack tmp[1];
+    tmp[0] = inpPacks[elt];
+    bcastPacksToLsa<1, UnrollPeers>(getDst, (intptr_t)elt, 1, tmp, team.nRanks, team.rank, selfSkip);
+  }
+}
+
+template <typename T>
+static __device__ void bcastLsa(ncclSymkArgsHandler& handler, int tn, int t, ncclSymPtr<T> input,
+                                ncclSymPtr<T> output, size_t nElts, BoolTag</*multimem=*/true>, ncclTeam, int, int) {
+  bcastMultimem(handler, tn, t, input, output, nElts);
+}
+
+// Replay `input` into `output` on every rank of `team`, which must be a unit-stride
+// sub-team of the LSA team based at LSA slot `slot0`. `srcSlot` selects the LSA slot
+// the source is read from, or -1 for the local buffer.
+template <typename T>
+static __device__ void bcastLsa(ncclSymkArgsHandler& handler, int tn, int t, ncclSymPtr<T> input,
+                                ncclSymPtr<T> output, size_t nElts, BoolTag</*multimem=*/false>, ncclTeam team,
+                                int srcSlot, int slot0) {
+    // When the chunk already landed locally the self store is redundant, and it
+    // races with the ring warp relaying that same chunk over GIN. Pulling from a
+    // peer slot is never redundant, even though source and destination name the
+    // same offset, because the source is another rank's copy of it.
+  int selfSkip = (srcSlot < 0 && input == output) ? 1 : 0;
+  size_t nBytes = nElts;
+
+    // Both sides advance together, so one alignment value governs the pack width
+    // usable for the whole chunk. The relayed path has input == output, hence 0.
+  uint32_t alignment = uint32_t(input.offset - output.offset);
+  uint32_t nPreBytes = (16 - input.offset) % 16;
+  nPreBytes = min((size_t)nPreBytes, nBytes);
+  uintptr_t cursor = nPreBytes;
+
+  if (alignment % 16 == 0) {
+    constexpr int BytePerPack = 16, UnrollPacks = 4, UnrollPeers = 2;
+    constexpr int BytePerTile = UnrollPacks * WARP_SIZE * BytePerPack;
+      // A zero-warp span would never retire a tile, so leave the bytes to the
+      // pack loop below.
+    size_t tiles = (tn < WARP_SIZE) ? 0 : (nBytes - cursor) / BytePerTile;
+    if (tiles != 0) {
+      bcastLsaDeep<BytePerPack, UnrollPacks, UnrollPeers>(tn, t, (ncclSymPtr<char>)input + cursor,
+                                                          (ncclSymPtr<char>)output + cursor, team, srcSlot, slot0,
+                                                          selfSkip, (int)tiles);
+      cursor += tiles * BytePerTile;
+    }
+    size_t packs = (nBytes - cursor) / BytePerPack;
+    if (packs != 0) {
+      bcastLsaPacks<BytePerPack, /*UnrollPeers=*/4>(tn, t, (ncclSymPtr<char>)input + cursor,
+                                                    (ncclSymPtr<char>)output + cursor, team, srcSlot, slot0, selfSkip,
+                                                    packs);
+      cursor += packs * BytePerPack;
+    }
+  }
+
+  if (alignment % 4 == 0) {
+    constexpr int BytePerPack = 4;
+    size_t packs = (nBytes - cursor) / BytePerPack;
+    if (packs != 0) {
+      bcastLsaPacks<BytePerPack, /*UnrollPeers=*/4>(tn, t, (ncclSymPtr<char>)input + cursor,
+                                                    (ncclSymPtr<char>)output + cursor, team, srcSlot, slot0, selfSkip,
+                                                    packs);
+      cursor += packs * BytePerPack;
+    }
+  }
+
+  bcastLsaEnds</*UnrollPeers=*/8>(tn, t, (ncclSymPtr<char>)input, (ncclSymPtr<char>)output, team, srcSlot, slot0,
+                                  selfSkip, nBytes, nPreBytes, nBytes - cursor);
+}
+
+template <bool EnableProfiler, bool multimem>
+static __device__ void agAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multimem> multimemTag) {
   ncclCoopCta cta;
   ncclSymkArgsHandler handler(args);
   ncclTeam rail = ncclTeamRail(handler.comm);
+  ncclTeam lsa = ncclTeamLsa(handler.comm);
   ncclGin gin(handler.comm, (int)(blockIdx.x % handler.comm.ginContextCount));
   constexpr int chunkSize = ncclSymkAllGather_RailRing_ChunkSize;
   uint32_t lsaRank = ncclTeamLsa(handler.comm).rank;
   ncclGinSignal_t railSignals = handler.ginSyncHandle.railSignals + blockIdx.x * rail.nRanks;
-  ncclBarrierSession<ncclCoopCta> bar(cta, ncclTeamTagWorld(), gin, blockIdx.x, /*multimem=*/true);
+  ncclBarrierSession<ncclCoopCta> bar(cta, ncclTeamTagWorld(), gin, blockIdx.x, multimem);
   int nextPeer = (rail.rank + 1) % rail.nRanks;
   int prevPeer = (rail.rank + rail.nRanks - 1) % rail.nRanks;
   uint64_t* localSignalPtr = gin.getSignalShadowPtr(railSignals + prevPeer);
   uint64_t localSignalValue = *localSignalPtr;
   const int ringThreads = WARP_SIZE;
+
+    // Zero the AMD software warp-span barrier slots before any coop sync (no-op on NVIDIA).
+  ncclCoopNamedBarrierInit();
 
   bar.sync(cta, cuda::memory_order_acquire, ncclGinFenceLevel::None);
   if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
@@ -88,8 +259,8 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
           while (remainingElts) {
             size_t chunkElts = min(min(remainingElts, size_t(chunkSize)), nElts - offset);
               // Put self rank's data
-            bcastMultimem(handler, warps.num_threads(), warps.thread_rank(), input + offset,
-                          output + dgrank * nAllElts + offset, chunkElts);
+            bcastLsa(handler, warps.num_threads(), warps.thread_rank(), input + offset,
+                     output + dgrank * nAllElts + offset, chunkElts, multimemTag, lsa, /*srcSlot=*/-1, /*slot0=*/0);
             advanceOffset(chunkElts, offset, remainingElts);
           }
         } else {
@@ -97,8 +268,8 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
             size_t chunkElts = min(min(remainingElts, size_t(chunkSize)), nElts - offset);
               // Wait for signal from other peers before putting their data
             gin.waitSignal(warps, railSignals + prevPeer, localSignalValue + 1, 32);
-            bcastMultimem(handler, warps.num_threads(), warps.thread_rank(), output + dgrank * nAllElts + offset,
-                          output + dgrank * nAllElts + offset, chunkElts);
+            bcastLsa(handler, warps.num_threads(), warps.thread_rank(), output + dgrank * nAllElts + offset,
+                     output + dgrank * nAllElts + offset, chunkElts, multimemTag, lsa, /*srcSlot=*/-1, /*slot0=*/0);
             advanceOffset(chunkElts, offset, remainingElts);
             localSignalValue++;
           }
@@ -113,4 +284,74 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
   }
   if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_BEFORE_CLOSE);
   bar.sync(cta, cuda::memory_order_release, ncclGinFenceLevel::None);
+}
+
+template <bool EnableProfiler>
+__device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaST(struct ncclSymkDevWorkArgs const* args) {
+  agAlgoHier<EnableProfiler>(args, /*multimem=*/BoolTag<false>{});
+}
+
+template <bool EnableProfiler>
+__device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct ncclSymkDevWorkArgs const* args) {
+  agAlgoHier<EnableProfiler>(args, /*multimem=*/BoolTag<true>{});
+}
+
+// Two-level load/store AllGather for an LSA team spanning several packages joined by
+// narrow links, e.g. MI300X in CPX mode where each run of S slots is the XCDs of one
+// card. The team factors into a scale-in team (peers on the same package) and a
+// scale-up team (the rank at the same lane on every package, this one included).
+//
+// Each rank pulls the contribution of every scale-up member and writes it into that
+// member's output slot on itself and its scale-in peers. Lanes cover disjoint slots,
+// so a package collects every remote slot exactly once and the narrow links carry one
+// slot per rank instead of one per cross-package pair.
+//
+// A member's contribution is its own output slot when in-place, which sits at the
+// same offset on every rank, and its input otherwise, which is only reachable when
+// the input window is registered. Nothing read is written during the kernel, so the
+// entry and exit barriers are the only ordering needed.
+template <bool EnableProfiler>
+__device__ __forceinline__ void ncclSymkRun_AllGather_HierLsa(ncclSymkDevWorkArgs const* args) {
+  ncclSymkArgsHandler handler{args};
+  ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), handler.comm, ncclTeamTagLsa(), blockIdx.x};
+
+  ncclTeam lsa = ncclTeamLsa(handler.comm);
+  ncclTeam scaleIn = ncclTeamInnerFactor(lsa, handler.hierScaleInSize);
+  ncclTeam scaleUp = ncclTeamOuterFactor(lsa, handler.hierScaleInSize);
+  int slot0 = ncclTeamRankToLsa(handler.comm, scaleIn, 0);
+  int const& rank = handler.comm.rank;
+
+  bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
+
+  handler.forEachWork<char>([&] __device__(int block, int nBlocks, size_t nElts, size_t nAllElts,
+                                           ncclSymPtr<char> input, ncclSymPtr<char> output) {
+    // One group of warps per scale-up member so every package is pulled from at
+    // once. On a mesh each package pair has its own link, and visiting one package
+    // at a time would leave all but one of them idle. Grouping warps rather than
+    // blocks keeps the groups even when the block count is not a multiple of the
+    // package count, such as one block per CU or fewer blocks than packages.
+    int nWarps = nBlocks * (blockDim.x / WARP_SIZE);
+    int w = flattenIx(block, nBlocks, threadIdx.x / WARP_SIZE, blockDim.x / WARP_SIZE);
+    int nGroups = min(nWarps, scaleUp.nRanks);
+    int group = w % nGroups;
+    int nGroupWarps = nWarps / nGroups + (group < nWarps % nGroups ? 1 : 0);
+    // Threads numbered over the group.
+    int t = (w / nGroups) * WARP_SIZE + threadIdx.x % WARP_SIZE;
+    int tn = nGroupWarps * WARP_SIZE;
+    bool inPlace = input == output + rank * nAllElts;
+    // Packages are visited starting from our own so they don't all pull from the
+    // same one at once.
+    for (int k = group; k < scaleUp.nRanks; k += nGroups) {
+      int su = scaleUp.rank + k;
+      if (su >= scaleUp.nRanks) su -= scaleUp.nRanks;
+      ncclSymPtr<char> slot = output + ncclTeamRankToWorld(handler.comm, scaleUp, su) * nAllElts;
+      int srcSlot = k == 0 ? -1 : ncclTeamRankToLsa(handler.comm, scaleUp, su);
+      bcastLsa(handler, tn, t, inPlace ? slot : input, slot, nElts, /*multimem=*/BoolTag<false>{}, scaleIn, srcSlot,
+               slot0);
+    }
+  });
+
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_BEFORE_CLOSE);
+  bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }

@@ -35,7 +35,9 @@ constexpr uint32_t kernelMask_LL = 1 << ncclSymkKernelId_AllReduce_AGxLL_R | 1 <
 constexpr uint32_t kernelMask_AG = 1 << ncclSymkKernelId_AllGather_LL | 1 << ncclSymkKernelId_AllGather_LLMC |
                                    1 << ncclSymkKernelId_AllGather_ST | 1 << ncclSymkKernelId_AllGather_STMC |
                                    1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
-                                   1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC;
+                                   1 << ncclSymkKernelId_AllGather_RailRing_LsaST |
+                                   1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC |
+                                   1 << ncclSymkKernelId_AllGather_HierLsa;
 
 constexpr uint32_t kernelMask_AR = 1 << ncclSymkKernelId_AllReduce_AGxLLMC_R | 1 << ncclSymkKernelId_AllReduce_AGxLL_R |
                                    1 << ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC |
@@ -56,8 +58,12 @@ constexpr uint32_t kernelMask_LSA =
   1 << ncclSymkKernelId_ReduceScatter_LL | 1 << ncclSymkKernelId_ReduceScatter_LD |
   1 << ncclSymkKernelId_ReduceScatter_LDMC | 1 << ncclSymkKernelId_ReduceScatter_TmaLD;
 
+// Needs the LSA team to factor into equal-size packages; see computeHierScaleInSize().
+constexpr uint32_t kernelMask_HierLsa = 1 << ncclSymkKernelId_AllGather_HierLsa;
+
 constexpr uint32_t kernelMask_Gin = 1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD |
                                     1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC |
+                                    1 << ncclSymkKernelId_AllGather_RailRing_LsaST |
                                     1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC;
 
 constexpr uint32_t kernelMask_Tma = 1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
@@ -143,6 +149,8 @@ NCCL_PARAM(SymRsGinChunkSize, "SYM_RS_GIN_CHUNK_SIZE", -1)
 // 0 off, 1 offer to the tuner, 2 force (skips the cost model and the deep-loop size bar; for A/B
 // measurement). NCCL_SYM_KERNEL forces one named kernel, 2 forces whichever the collective has.
 NCCL_PARAM(SymTmaEnable, "SYM_TMA_ENABLE", 0)
+// Ranks per physical device for hierarchical LSA kernels; 0 derives it from the topology.
+RCCL_PARAM(SymHierScaleIn, "SYM_HIER_SCALE_IN", 0)
 
 bool ncclSymkTmaAvailable(struct ncclComm* comm) {
   if (!ncclParamSymTmaEnable()) return false;
@@ -213,6 +221,28 @@ bool ncclSymkIsGfx950(struct ncclComm* comm) {
 }
 #endif
 
+// How many consecutive ranks share a physical device. A partitioned AMD GPU exposes
+// its partitions as PCI functions .0-.7 of one device (see the MLOPart handling in
+// ncclCommInitRankFunc), so masking the function nibble off busId names the card.
+// Yields 0 unless every card holds the same number of ranks and each card's ranks are
+// consecutive, since only then does ncclTeamInnerFactor() describe the hardware.
+static int computeHierScaleInSize(struct ncclComm* comm) {
+  int64_t param = rcclParamSymHierScaleIn();
+  if (param > 0) return (int)param;
+  if (comm->peerInfo == nullptr || comm->nRanks < 2) return 0;
+
+  int size = 1;
+  while (size < comm->nRanks && (comm->peerInfo[size].busId & ~0xfLL) == (comm->peerInfo[0].busId & ~0xfLL)) size++;
+  if (size == comm->nRanks || comm->nRanks % size != 0) return 0;
+
+  int card = 0;
+  for (int r = 1; r < comm->nRanks; r++) {
+    if ((comm->peerInfo[r].busId & ~0xfLL) != (comm->peerInfo[r - 1].busId & ~0xfLL)) card++;
+    if (card != r / size) return 0;
+  }
+  return size;
+}
+
 ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
   // ncclTeamLsa() below calls this internally but drops the error code so we do it here.
   NCCLCHECK(ncclDevrInitOnce(comm));
@@ -220,6 +250,9 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
   struct ncclSymkState* symk = &comm->symkState;
   if (!symk->initialized) {
     symk->initialized = true;
+    symk->kcomm.hierScaleInSize = computeHierScaleInSize(comm);
+    INFO(NCCL_INIT, "Symmetric hierarchical scale-in size = %d (nRanks %d)", symk->kcomm.hierScaleInSize,
+         comm->nRanks);
     struct ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
     // Disable LSA multicast for cross-clique since NVLS isn't available across cliques
     symk->hasLsaMultimem =
@@ -395,6 +428,10 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
   if (!hasGin) kmask &= ~kernelMask_Gin;
   bool needGin = ncclTeamLsa(comm).nRanks < comm->nRanks;
   kmask &= needGin ? kernelMask_Gin : ~kernelMask_Gin;
+
+  // Needs at least two packages of equal size to have a cross-package hop worth saving.
+  int scaleIn = comm->symkState.kcomm.hierScaleInSize;
+  if (scaleIn <= 0 || comm->nRanks % scaleIn != 0 || comm->nRanks / scaleIn < 2) kmask &= ~kernelMask_HierLsa;
   return kmask;
 }
 

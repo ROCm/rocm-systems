@@ -56,7 +56,9 @@ enum ncclSymkKernelId {
   ncclSymkKernelId_AllGather_ST,
   ncclSymkKernelId_AllGather_TmaSTMC,
   ncclSymkKernelId_AllGather_STMC,
+  ncclSymkKernelId_AllGather_RailRing_LsaST,
   ncclSymkKernelId_AllGather_RailRing_LsaSTMC,
+  ncclSymkKernelId_AllGather_HierLsa,
 
   ncclSymkKernelId_ReduceScatter_LL,
   ncclSymkKernelId_ReduceScatter_TmaLD,
@@ -81,7 +83,9 @@ constexpr char const* ncclSymKernelStr[] = {
   "AllGather_ST",
   "AllGather_TmaSTMC",
   "AllGather_STMC",
+  "AllGather_RailRing_LsaST",
   "AllGather_RailRing_LsaSTMC",
+  "AllGather_HierLsa",
   "ReduceScatter_LL",
   "ReduceScatter_TmaLD",
   "ReduceScatter_LD",
@@ -103,6 +107,10 @@ struct ncclSymkDevComm {
   struct ncclDevProfiler* workStarted;
   struct ncclDevProfiler* workCompleted;
   struct ncclDevProfilerPhases* workPhases;
+  // Ranks sharing one physical device, so a hierarchical kernel can tell the
+  // on-package half of the LSA team from the cross-package half. 0 when the comm
+  // does not decompose that way.
+  int hierScaleInSize;
 };
 
 struct ncclSymkState {

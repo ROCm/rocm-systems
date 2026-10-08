@@ -121,6 +121,10 @@ const std::vector<ExpectedKernelCase>& ValidCases() {
        (void*)ncclSymkDevKernel_AllGather_LL_profile},
       {"AllGather_ST", ncclSymkKernelId_AllGather_ST, ncclDevSum, ncclFloat32, (void*)ncclSymkDevKernel_AllGather_ST,
        (void*)ncclSymkDevKernel_AllGather_ST_profile},
+      {"AllGather_RailRing_LsaST", ncclSymkKernelId_AllGather_RailRing_LsaST, ncclDevSum, ncclFloat32,
+       (void*)ncclSymkDevKernel_AllGather_RailRing_LsaST, (void*)ncclSymkDevKernel_AllGather_RailRing_LsaST_profile},
+      {"AllGather_HierLsa", ncclSymkKernelId_AllGather_HierLsa, ncclDevSum, ncclFloat32,
+       (void*)ncclSymkDevKernel_AllGather_HierLsa, (void*)ncclSymkDevKernel_AllGather_HierLsa_profile},
 
       {"AllReduce_AGxLL_R_sum_f32", ncclSymkKernelId_AllReduce_AGxLL_R, ncclDevSum, ncclFloat32,
        (void*)ncclSymkDevKernel_AllReduce_AGxLL_R_sum_f32, (void*)ncclSymkDevKernel_AllReduce_AGxLL_R_sum_f32_profile},
@@ -244,7 +248,7 @@ const std::vector<ExpectedKernelCase>& ValidCases() {
 INSTANTIATE_TEST_SUITE_P(SymAllEmittedCombinations, SymKernelIndexValidTest, ::testing::ValuesIn(ValidCases()),
                          [](const ::testing::TestParamInfo<ExpectedKernelCase>& info) { return info.param.name; });
 
-// A 43rd generated kernel would otherwise fail elsewhere (link error or the Python EXPECTED_TOTAL) unnoticed here.
+// A 45th generated kernel would otherwise fail elsewhere (link error or the Python EXPECTED_TOTAL) unnoticed here.
 TEST(SymKernelIndexValidCasesTest, CoversEveryGeneratedKernel) {
   EXPECT_EQ(static_cast<int>(ValidCases().size()), ncclSymkKernelCount);
 }

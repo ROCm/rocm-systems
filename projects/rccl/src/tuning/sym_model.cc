@@ -103,7 +103,9 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
       (inputs->func == ncclFuncReduceScatter && inputs->winRegType != ncclSymSendRegRecvReg &&
        inputs->winRegType != ncclSymSendRegRecvNonreg && (tuning_kmask & ncclSymkLLKernelMask()) == 0) ||
       (inputs->func == ncclFuncAllGather && inputs->winRegType != ncclSymSendRegRecvReg && inputs->comm->nNodes > 1 &&
-       (tuning_kmask & ncclSymkGinKernelMask()) != 0)) {
+       (tuning_kmask & ncclSymkGinKernelMask()) != 0) ||
+      (inputs->func == ncclFuncAllGather && inputs->winRegType != ncclSymSendRegRecvReg &&
+       tuning->symKernelId == ncclSymkKernelId_AllGather_HierLsa)) {
     tuning->valid = 0;
     tuning->timeUs = -1.0;
     return ncclSuccess;

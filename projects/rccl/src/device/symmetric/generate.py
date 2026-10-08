@@ -57,7 +57,9 @@ class Rec(object):
 reductions = ["AllReduce","ReduceScatter"]
 all_reds = ["sum", "avg"]
 all_tys = ["f32","f16","bf16","f8e4m3","f8e5m2"]
-gin_algos = ["RailA2A_LsaLD", "RailA2A_LsaLDMC", "RailRing_LsaSTMC"]
+gin_algos = ["RailA2A_LsaLD", "RailA2A_LsaLDMC", "RailRing_LsaST", "RailRing_LsaSTMC"]
+# Algos implemented in the *_gin.cuh translation unit, whether or not they use GIN.
+gin_file_algos = gin_algos + ["HierLsa"]
 
 nvls_algos_by_coll = {
   "AllReduce": ["AGxLLMC_R","RSxLDMC_AGxSTMC"],
@@ -103,7 +105,7 @@ ty_to_cxxtype = {
 have_tdm = "gfx1250" in gpu_targets
 
 def enumerate_kernels():
-  ag_algos = ["LL","ST"] + (["TmaST"] if have_tdm else [])
+  ag_algos = ["LL","ST"] + (["TmaST"] if have_tdm else []) + ["RailRing_LsaST","HierLsa"]
   # AllGather_TmaSTMC and the other *MC algos need multimem, which ROCm has no
   # equivalent for, so they stay out regardless of the target.
   ar_algos = ["AGxLL_R","RSxLD_AGxST"] + (["RSxTmaLD_AGxTmaST"] if have_tdm else [])
@@ -144,20 +146,18 @@ def required_cuda(k):
 
 ################################################################################
 
-def kernel_fdep(k):
-  return coll_to_lower[k.coll] + '.cpp'
+def kernel_fbase(k):
+  return coll_to_lower[k.coll] + ("_gin" if k.algo in gin_file_algos else "")
 
 def kernel_fname(k):
+  parts = [coll_to_lower[k.coll]]
+  if k.algo in gin_file_algos: parts += ['gin']
   if k.coll in reductions:
-    # GIN algos compile a heavier device path; keep them in a separate TU.
-    if k.algo in gin_algos:
-      return paste('_', coll_to_lower[k.coll], 'gin', k.red, k.ty) + '.cpp'
     if k.algo in ldmc_algos and k.ty.startswith('f8'):
-      return paste('_', coll_to_lower[k.coll], k.red, k.ty, k.algo) + '.cpp'
+      parts += [k.red, k.ty, k.algo]
     else:
-      return paste('_', coll_to_lower[k.coll], k.red, k.ty) + '.cpp'
-  else:
-    return coll_to_lower[k.coll] + '.cpp'
+      parts += [k.red, k.ty]
+  return paste('_', *parts) + '.cpp'
 
 # Sibling .cpp holding the instrumented (_profile) instantiations, kept separate so
 # the build compiles the default and profile variants concurrently. RCCL emits
@@ -165,12 +165,6 @@ def kernel_fname(k):
 def profile_fname(fname):
   assert fname.endswith('.cpp')
   return fname[:-len('.cpp')] + '_profile.cpp'
-
-def kernel_gencode(k):
-  if k.coll in reductions and k.algo in ldmc_algos and k.ty.startswith('f8'):
-    return "$(NVCC_GENCODE_LDMC_FP8)"
-  else:
-    return "$(NVCC_GENCODE)"
 
 def kernel_cname(k):
   if k.coll in reductions:
@@ -238,23 +232,22 @@ def partition(vals, keyfn):
     ans[k].append(x)
   return ans
 
-
-kernels_by_file = partition(enumerate_kernels(), lambda k: (kernel_fname(k), k.coll))
+kernels_to_build = list(enumerate_kernels())
+kernels_by_file = partition(kernels_to_build, lambda k: (kernel_fname(k), kernel_fbase(k)))
 
 # Add dependency only files (e.g. allreduce.cpp)
-for coll in set(k.coll for k in enumerate_kernels()):
-  fname = coll_to_lower[coll]+'.cpp'
-  if (fname, coll) not in kernels_by_file:
-    kernels_by_file[fname, coll] = []
+for coll in set(k.coll for k in kernels_to_build):
+  fbase = coll_to_lower[coll]
+  fname = fbase +'.cpp'
+  if (fname, fbase) not in kernels_by_file:
+    kernels_by_file[fname, fbase] = []
 
 files_to_print = ""
 # Generate each kernel instantiation file, plus a sibling _profile.cpp with the
 # instrumented variants so both compile concurrently.
-for (fname, coll), ks in kernels_by_file.items():
+for (fname, fbase), ks in kernels_by_file.items():
   files_to_print += fname + ";"
-  # GIN instantiation TUs need the *_gin.h header for the RailA2A/RailRing defs.
-  coll_include = '#include "symmetric/{coll}{gin}.h"'.format(
-    coll=coll_to_lower[coll], gin='_gin' if (ks and all(k.algo in gin_algos for k in ks)) else '')
+  coll_include = '#include "symmetric/{fbase}.h"'.format(fbase=fbase)
   with open(os.path.join(gensrc, fname), "w") as f:
     print("-- Generating %s" % os.path.join(gensrc, fname))
     emitln(f, '#include "sym_kernels.h"')
@@ -280,7 +273,7 @@ with open(os.path.join(gensrc, "sym_kernels_host.cc"), "w") as f:
   emitln(f, '#include "device.h"')
   emitln(f, '')
 
-  kernel_list = list(enumerate_kernels())
+  kernel_list = kernels_to_build
   for k in kernel_list:
     emitln(f, prototype(k))
   emitln(f, '')

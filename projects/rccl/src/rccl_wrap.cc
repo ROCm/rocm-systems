@@ -1635,11 +1635,11 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     // (rcclSelectAllGatherAlgo); the reporting query always runs outside a group, so
     // the same gate reproduces rcclGetAlgoInfo's group-agnostic reporting. Only live
     // dispatch builds sub-communicators that RCCL_HIERARCHICAL_LAZY_INIT deferred.
-    if (!query && ncclGroupDepth == 0 && comm->hierarchicalEligible && !comm->hierarchicalCommsInitialized &&
-        rcclHierarchicalAllGatherEligible(comm, msgSize)) {
+    if (!query && !symEligible && ncclGroupDepth == 0 && comm->hierarchicalEligible &&
+        !comm->hierarchicalCommsInitialized && rcclHierarchicalAllGatherEligible(comm, msgSize)) {
       NCCLCHECK(rcclLazyInitHierarchicalComms(comm, ceCapturing));
     }
-    if (ncclGroupDepth == 0 && rcclUseHierarchicalAllGather(comm, msgSize)) {
+    if (!symEligible && ncclGroupDepth == 0 && rcclUseHierarchicalAllGather(comm, msgSize)) {
       decision->algo = RCCL_HIERARCHICAL_ALLGATHER;
       if (query) {
         // -A reports the inter-comm proto/channels; intra values are logged only.

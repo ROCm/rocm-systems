@@ -35,8 +35,20 @@ double ncclTuningGetGinLat(struct ncclComm* comm) {
          comm->tuningContext.tuningConstants.hwLatencies[NCCL_HW_NET][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE];
 }
 
+// GB/s substituted for the rail link when the topology reports no net bandwidth; see ncclTuningGetGinBw().
+RCCL_PARAM(SymGinFallbackBw, "SYM_GIN_FALLBACK_BW", 12)
+
 double ncclTuningGetGinBw(struct ncclComm* comm) {
-  return (/*byte/sec*/ 1.e9) * comm->minNetBw;
+  // [RCCL] ncclTopoGetMinNetBw() yields 0 when a rank reaches no NET node, which is
+  // every single-node comm: rail traffic there runs over GIN/RMA nodes and no NET
+  // node is built. A 0 makes the models below divide by zero, so every GIN kernel
+  // scores as infinitely slow and the cost model silently drops back to the
+  // legacy path. Substitute a constant rather than a topology bandwidth: this feeds
+  // kernel selection, so it must be identical on every rank or ranks could choose
+  // different kernels and hang.
+  float bw = comm->minNetBw;
+  if (bw <= 0.0f) bw = (float)std::max<int64_t>(1, rcclParamSymGinFallbackBw());
+  return (/*byte/sec*/ 1.e9) * bw;
 }
 
 // Bus multipliers count number of times data is sent through that widget.
@@ -115,6 +127,7 @@ ncclResult_t ncclSymkGinModel(struct ncclTuningInput_t* input, enum ncclSymkKern
   *timeUs = FLT_MAX;
   *nBlocks = 0;
   switch (kernelId) {
+  case ncclSymkKernelId_AllGather_RailRing_LsaST:
   case ncclSymkKernelId_AllGather_RailRing_LsaSTMC:
     {
       constexpr int railChunkSize = ncclSymkAllGather_RailRing_ChunkSize;
@@ -124,7 +137,7 @@ ncclResult_t ncclSymkGinModel(struct ncclTuningInput_t* input, enum ncclSymkKern
       float intraTime = (float)(nBytes * comm->nRanks) / intraBw;
       float interTime = (float)(nBytes * (rail.nRanks - 1)) / interBw;
       uint32_t steps = DIVUP(nBytes, railChunkSize) * (rail.nRanks - 1);
-      *timeUs = steps * ginLat + std::max(intraTime, interTime);
+      *timeUs = (/*usec/sec=*/1.e6) * (steps * ginLat + std::max(intraTime, interTime));
       *nBlocks = std::max(nMinBlocks, std::min(nMaxBlocks, requiredBlocks));
     }
     break;
