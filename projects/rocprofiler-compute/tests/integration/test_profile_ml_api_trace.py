@@ -123,11 +123,11 @@ def test_list_triton_only_confines_tree_and_kernels(
     out = captured.out + captured.err
     assert "Triton Operator Call Tree:" in out
     assert "PyTorch Operator Call Tree" not in out
-    relu_idx = out.find("aten::relu")
+    # relu is a torch sibling of the Triton launch, not an ancestor, so
+    # backend confinement drops it. Kernel ids belong on the Triton node.
+    assert "aten::relu" not in out
     triton_idx = out.find("triton.JITFunction")
-    assert relu_idx >= 0
-    assert triton_idx > relu_idx
-    assert "(id " not in out[relu_idx:triton_idx]
+    assert triton_idx >= 0
     assert "(id " in out[triton_idx:]
 
 
