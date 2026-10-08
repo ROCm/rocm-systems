@@ -18,6 +18,9 @@
  * memory pointers via HIP/CUDA IPC, using the NCCL bootstrap allgather for
  * handle distribution (host memory only, like the original implementation).
  *
+ * exchangeMemPtrs() is collective: every rank must call it, even one whose own pointer is unset. An export failure on
+ * any rank fails the call on every rank; an import (open) failure is rank-local, so callers must agree on the outcome.
+ *
  * This class is not thread-safe; only one thread per process should use it.
  *
  * Example (each rank):

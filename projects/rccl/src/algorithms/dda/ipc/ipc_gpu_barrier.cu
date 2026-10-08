@@ -27,7 +27,7 @@ __host__ DeviceMailbox::DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf)
   int nRanks, int nBlocks) {
   assert(nRanks == NRANKS);
   auto flagBuf = std::make_unique<DeviceBuffer>(nRanks * nBlocks * sizeof(FlagType));
-  if (flagBuf == nullptr) {
+  if (flagBuf == nullptr || flagBuf->get() == nullptr) {
     ERROR("DeviceMailbox::mallocAndInit: allocation failed");
     return {nullptr, DeviceMailbox{}};
   }
@@ -52,13 +52,11 @@ __host__ IpcGpuBarrier::IpcGpuBarrier(int nRanks, int nBlocks, int selfRank,
   auto selfAlloc = DeviceMailbox::mallocAndInit(nRanks, nBlocks);
   auto& selfMboxBuf = selfAlloc.first;
   auto& selfMbox = selfAlloc.second;
-  if (!selfMboxBuf) {
-    return {nullptr, IpcGpuBarrier{}};
-  }
 
+  // A rank whose mailbox allocation failed still joins the exchange, which then fails on every rank instead of hanging.
   auto memHandler = std::make_unique<ncclIpcMemHandler>(bootstrap, selfRank, nRanks);
 
-  ncclResult_t result = memHandler->addSelfDeviceMemPtr(selfMboxBuf->get());
+  ncclResult_t result = memHandler->addSelfDeviceMemPtr(selfMboxBuf ? selfMboxBuf->get() : nullptr);
   if (result != ncclSuccess && result != ncclInProgress) {
     if (ncclDebugNoWarn == 0) {
       INFO(NCCL_ALL, "%s:%d -> %d", __FILE__, __LINE__, result);

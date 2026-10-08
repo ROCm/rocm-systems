@@ -334,6 +334,10 @@ static hipError_t DefaultHipMemcpyAsync(void*, const void*, size_t, hipMemcpyKin
 {
     return g_hipAsyncOpsResult;
 }
+static hipError_t DefaultHipMemset(void*, int, size_t)
+{
+    return hipErrorInvalidValue;
+}
 static hipError_t DefaultHipMemsetAsync(void*, int, size_t, hipStream_t)
 {
     return g_hipAsyncOpsResult;
@@ -377,6 +381,7 @@ std::function<hipError_t(void*)> g_hipIpcCloseMemHandle = DefaultHipIpcCloseMemH
 std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind)> g_hipMemcpy = DefaultHipMemcpy;
 std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)>
     g_hipMemcpyAsync = DefaultHipMemcpyAsync;
+std::function<hipError_t(void*, int, size_t)> g_hipMemset = DefaultHipMemset;
 std::function<hipError_t(void*, int, size_t, hipStream_t)> g_hipMemsetAsync = DefaultHipMemsetAsync;
 std::function<hipError_t(hipStream_t*, unsigned)> g_hipStreamCreateWithFlags = DefaultHipStreamCreateWithFlags;
 std::function<hipError_t(hipStream_t)> g_hipStreamSynchronize = DefaultHipStreamSynchronize;
@@ -616,6 +621,7 @@ void ResetHipFakes()
     g_hipIpcCloseMemHandle          = DefaultHipIpcCloseMemHandle;
     g_hipMemcpy                     = DefaultHipMemcpy;
     g_hipMemcpyAsync                = DefaultHipMemcpyAsync;
+    g_hipMemset                     = DefaultHipMemset;
     g_hipMemsetAsync                = DefaultHipMemsetAsync;
     g_hipStreamCreateWithFlags      = DefaultHipStreamCreateWithFlags;
     g_hipStreamSynchronize          = DefaultHipStreamSynchronize;
@@ -946,7 +952,7 @@ hipError_t hipMallocManaged(void** p, size_t size, unsigned int flags)
     return g_hipMallocManaged(p, size, flags);
 }
 hipError_t hipMemcpy(void* d, const void* s, size_t n, hipMemcpyKind k) { return g_hipMemcpy(d, s, n, k); }
-hipError_t hipMemset(void*, int, size_t) { return hipErrorInvalidValue; }
+hipError_t hipMemset(void* dst, int value, size_t bytes) { return g_hipMemset(dst, value, bytes); }
 hipError_t hipDeviceSynchronize(void) { return hipErrorInvalidValue; }
 // We define hipGetDevicePropertiesR0600, the versioned public HIP ABI symbol,
 // rather than the unversioned hipGetDeviceProperties. Callers write
