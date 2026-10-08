@@ -195,6 +195,13 @@ faults inside the lookup, confirm the prerequisites above
 that the buffer was registered with ``NCCL_WIN_COLL_SYMMETRIC``, and that the
 pointer passed to ``ncclFindWindow`` lies within that registration.
 
+``ncclDevCommCreate`` copies the ``ncclDevCommRequirements_t`` you pass,
+including its resource and team lists, so you can free or reuse that structure
+as soon as the call returns. A rejected call, for example ``ncclInvalidArgument``
+for ``cftCaps`` that the communicator does not support, releases its copy
+before returning. You can therefore change the requirements and call it again
+without leaking memory.
+
 Ignoring CPU affinity with multi-node
 =====================================
 
