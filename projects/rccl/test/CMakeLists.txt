@@ -384,6 +384,7 @@ if(BUILD_TESTS)
       device/GinDeviceTests.cpp
       device/GinAnvilIpcDevice_test.cpp
       device/HierarchicalShuffleTests.cpp
+      device/ChannelMaskMapTests.cpp
       DeviceApiTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp

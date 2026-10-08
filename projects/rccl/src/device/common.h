@@ -531,10 +531,9 @@ template <int SpecializedFnId, typename SpecializedRunWorkBatch, int COLL_UNROLL
 __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* args) {
   const int tid = threadIdx.x;
   int tn = blockDim.x;
-  int x = tid;
+#ifdef ENABLE_WARP_SPEED
   int total = 0, y;
   int num = MAXCHANNELS / CHANNELS_PER_MASK_WORD > 0 ? MAXCHANNELS / CHANNELS_PER_MASK_WORD : 1;
-#ifdef ENABLE_WARP_SPEED
   int warpCount = tn / WARP_SIZE;
   int localWarpId = tid / WARP_SIZE;
   int globalWarpId = (warpCount * blockIdx.x) + localWarpId;
@@ -558,37 +557,12 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   // do better when we know all threads are querying the same bitmask.
   switch (tid / WARP_SIZE) {
   case 0:
-  // ncclShmem.channelId = blockIdx.x;
-    for (int i = 0; i < num; i++) {
-      // WARP_SIZE<64 path leaves `x` set to (WARP_SIZE+tid) from the
-      // previous iteration, so the first check of masks[i] for i>=1 was reading
-      // the upper 32 bits twice and never the lower 32 bits. Reset to tid here.
-      x = tid;
-      if (args->channelMask.masks[i] & (1ull << x)) {
-        y = __popcll(args->channelMask.masks[i] & ((1ull << x) - 1));
-        y = total + y;
-        if (channelNth == y) {
-          // channelId is the absolute bit position in the global mask:
-          // i*CHANNELS_PER_MASK_WORD + x. Using `x + total` was only correct
-          // when prior mask words were densely packed (which broke for sparse
-          // channel sets, e.g. SATURATE_P2P_NCHANNELS with small messages or
-          // non-pow2 tilings, causing the wrong channel to be loaded -> IMA).
-          ncclShmem.channelId = x + i * CHANNELS_PER_MASK_WORD;
-          break;
-        }
+    {
+      // ncclChannelMaskNthChannelId (device.h) owns the wave32 and sparse-mask rules; exactly one lane matches.
+      int channelId = ncclChannelMaskNthChannelId(args->channelMask, channelNth, tid);
+      if (channelId >= 0) {
+        ncclShmem.channelId = channelId;
       }
-      if (WARP_SIZE < 64) {
-        x = WARP_SIZE + tid;
-        if (args->channelMask.masks[i] & (1ull << x)) {
-          y = __popcll(args->channelMask.masks[i] & ((1ull << x) - 1));
-          y = y + total;
-          if (channelNth == y) {
-            ncclShmem.channelId = x + i * CHANNELS_PER_MASK_WORD;
-            break;
-          }
-        }
-      }
-      total = total + __popcll(args->channelMask.masks[i]);
     }
     break;
   case 1:
