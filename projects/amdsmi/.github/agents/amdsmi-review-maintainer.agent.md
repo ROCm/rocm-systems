@@ -43,9 +43,14 @@ changed function and test, listing only what applies:
 - callee statuses left unchecked
 - casts or copies between types, and whether a `static_assert` guards them
 - what each parse step reads (`sscanf`, `stoi`, `from_chars`; empty lines)
-- unnamed literals, and one-line `if`/loop bodies
+- unnamed literals, one-line `if`/loop bodies, and declarations that spell out
+  a type `auto` could take (CX1)
+- for a cache or lock: what a cache hit still calls, and each callee run while
+  the lock is held
 - for tests: state changed (device settings, gtest flags, env vars, files),
   and whether it is restored
+- for tests: each equality whose two sides can both be 0 or empty, and each
+  loop bounded by time rather than by work done
 
 Every note that breaks a rule becomes a finding. Merge findings that share
 a root cause, listing every location. Group 💡 idioms into one finding per
@@ -81,6 +86,7 @@ Scan the diff for these signals first; each one makes its items mandatory.
 | New or changed status return path | ST1, ST2, TS1 |
 | New or changed public entry point (`amdsmi_*`, `rsmi_*`) | AP3, DC2, TS3 (negative oracle) |
 | Globals, static objects, caches, mutexes or threads in or near the change | CL1–CL5 |
+| Test loop bounded by a deadline or time budget; a test skip or failure decided by an errno | TS4, TS5 |
 | Changes who owns or frees objects held in a global or static container | CL5, CL1, CL3 |
 | `amdsmi.h`, public enums or structs | AP1, AP2, AP5, AP6, DC2, ST5 |
 | `CHANGELOG.md`, comments or docs | DC1, DC3, DC4 |
@@ -158,7 +164,9 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
   families, SMU/gpu_metrics revisions and platforms (bare metal, host, guest,
   APU, partitioned, container) run it, and whether their output changes.
   Detect: the conditionals the diff adds or edits on ASIC, firmware or metrics
-  version, and the callers of each changed function.
+  version, the callers of each changed function, and every other reader of the
+  file, directory or value the fix hardens (fix them through one shared helper,
+  or say why each is exempt).
 - **BR2 Stay on the bug's path** — Fix the stated bug minimally; edits to paths
   it never reaches (e.g. the other parser layout) change behavior on devices
   nobody tested, so revert them or split them out. Report the release-build
@@ -180,14 +188,20 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
   an INVALID/sentinel value that merges distinct cases: format not recognized;
   recognized but nothing found; found but not modeled. An ignored callee status,
   or an aggregate (sum over blocks, list over devices) that silently drops a
-  failed member, is the same bug. If telling the cases apart needs a new status
-  or field (ABI), raise it as policy (PR3).
+  failed member, is the same bug; so is one member's read error discarding the
+  others: fail on enumeration errors, list an unreadable member with N/A values.
+  If telling the cases apart needs a new status or field (ABI), raise it as
+  policy (PR3).
 - **ST2 Trace the mapping** — Follow cause → errno → rsmi status → amdsmi status
   → CLI text and exit code, and write the chain into the finding.
   `ErrnoToRsmiStatus` maps `EPERM`, `ENOENT` and `ENOTSUP` to `NOT_SUPPORTED`
   (`EACCES` to `PERMISSION`), so a truncated or failed read can surface as "not
   supported". Each errno maps to the status that means it, no log line blames
   the wrong cause, and CLI exit codes stay within 0–255 without collisions.
+  When a change starts returning errors that callers used to get as an empty
+  `SUCCESS`, list each errno that can now surface: an absent subsystem (no
+  `/sys/class/kfd/kfd/proc`: KFD not loaded) stays an empty `SUCCESS`; name the
+  CLI commands that will now raise.
 - **ST3 Keep diagnostics readable** — Don't gate an introspection call (header,
   version or capability read) on the support check callers use it to diagnose.
 - **ST4 Log every skip** — Skip-and-continue (one bad device in discovery, one
@@ -209,7 +223,9 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
   zero/non-zero; a check that only prints cannot fail.
 - **TS2 Distinct data** — A uniform fill byte cannot catch swapped or misplaced
   fields. Fill by offset, assert offset-derived values, and keep the fill clear
-  of `0x00`/`0xFF` so a populated field never looks like N/A.
+  of `0x00`/`0xFF` so a populated field never looks like N/A. An equality
+  between values that can both be 0 proves nothing: assert the expected side is
+  non-zero first.
 - **TS3 Edges and negatives** — For a text parser, cover each line type the
   producer emits (header, levels, the sleep `S:` line, the current marker):
   absent, alone, empty or whitespace-only, malformed, past the type's range
@@ -221,7 +237,11 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
   absent or unreadable sysfs file. Name each uncovered case in the finding.
 - **TS4 Falsifiable relaxations** — Accept lists name specific statuses, never a
   catch-all. If a per-item `NOT_SUPPORTED` is now accepted, assert that at least
-  one item still works wherever the group claims support.
+  one item still works wherever the group claims support. A loop bounded by a
+  deadline or time budget asserts a named minimum of completed work per phase
+  (totals; a per-thread minimum flakes on an unfair lock), or a slow or stuck
+  library passes having done nothing. A relative check such as
+  `EXPECT_GT(done, failed)` passes at 1 vs 0: add a floor.
 - **TS5 Skips last** — A skipped test is unknown behavior; a PR whose purpose is
   to add skips is challenged on that purpose first. Prefer accepting the
   documented status for unsupported hardware: new or changed Python tests use
@@ -231,8 +251,15 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
   Never skip silently (`continue`, early `return`): use `GTEST_SKIP()` or
   `skipTest()` with the reason, gated on a capability (APU:
   `asic_info.flags & AMDGPU_IDS_FLAGS_FUSION`), never on a status any ASIC can
-  return. Destructive tests (driver reload, reset) are opt-in via an
-  environment variable; document what the runner needs.
+  return. An errno skip names the step that failed: setup helpers report
+  `{step, errno}`, and only environment steps skip (opening a device file:
+  `EACCES`, `EPERM`, `ENOENT`, `ENODEV`, `ENXIO`; or `ENOMEM`), so an `ioctl`
+  failing with `ENODEV` still fails. Sibling tests share one helper contract
+  and one environment-failure rule (one test header, not copies). A skip that fires on every CI run means the
+  test never runs: grep the CI log for `SKIPPED` (the GPU CI container has its
+  own PID namespace, where KFD lists host PIDs). Destructive tests (driver
+  reload, reset) are opt-in via an environment variable; document what the
+  runner needs.
 - **TS6 Ask the tool, restore the state** — Derive expectations from what
   amd-smi reports for that GPU (`amd-smi static --profile`, `amd-smi metric
   --fan`), not from enum lists; skip set/reset where it reports N/A. Restore
@@ -291,7 +318,12 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
 - **CL3 Cache paths populate** — For each early `return` inside a cache or
   lock block, check that the caller's output is filled on that path; a
   double-checked cache that returns `SUCCESS` early hands back an empty or
-  stale result.
+  stale result. A hit returns the finished result (copied under the lock) and
+  skips the expensive work; caching intermediate pieces repeats per-item work
+  under the lock on every hit. Stamp the cache when the result is stored, so
+  callers queued behind a refresh reuse it instead of refreshing again. Count
+  the work a refresh does under a per-device lock (retries times scans): every
+  caller of that device waits behind all of it.
 - **CL4 Bounded waits** — Every retry loop or wait has a timeout or retry cap.
 - **CL5 Exit-time lifetime** — Static destruction can free state another thread
   still uses inside an API call; prefer never-destroyed owners. A change that
@@ -303,10 +335,11 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
 - **CX1 Shape and clarity** — Several related parameters → a struct initialized
   at declaration. References over pointers; no `T*&` cursor parameters;
   `std::optional<T>` instead of `bool` plus an out-parameter. `const` on new
-  methods and locals; `const auto x = static_cast<T>(...)`; braces on every
-  `if`/`else`/loop/`case` body; parenthesized compound conditions;
-  `if (auto it = m.find(k); it != m.end())`. Delete guards that cannot change
-  the result (`x != M ? x : M`).
+  methods and locals; `const auto x = static_cast<T>(...)` and
+  `constexpr auto kName = std::uint16_t(3)` (the type stated once, in the
+  initializer); braces on every `if`/`else`/loop/`case` body; parenthesized
+  compound conditions; `if (auto it = m.find(k); it != m.end())`. Delete guards
+  that cannot change the result (`x != M ? x : M`).
 - **CX2 Named limits** — No magic numbers (named `constexpr`);
   `std::numeric_limits<T>::max()` rather than `SIZE_MAX`-style macros in new
   code.
@@ -328,7 +361,11 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
   `std::vector` only after sizing it, and only for trivially copyable `T`.
   Structs mirrored across layers (`reinterpret_cast` or `memcpy` between
   `amdsmi_*` and `rsmi_*` types) carry `static_assert`s on `sizeof` and
-  `alignof`.
+  `alignof`. Check the unit suffix the producer prints (fdinfo: none = bytes,
+  `KiB`, `MiB`) instead of assuming one, and read the files under one
+  `/proc/<pid>/` through its directory fd (`openat`), so a reused PID cannot
+  switch processes mid-scan. A dedupe keyed on a field the producer may omit
+  says what happens to records without it.
 - **CX6 RAII and ownership** — `std::unique_ptr`, `std::string`,
   `std::filesystem` and scoped handles instead of raw `new`, C strings,
   `opendir` and manual `close`; `[[nodiscard]]` on status-returning helpers;
