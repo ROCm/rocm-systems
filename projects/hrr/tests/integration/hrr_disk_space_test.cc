@@ -194,7 +194,11 @@ extern "C" int hrr_disk_space_statvfs64(const char* path, struct statvfs* buf) {
   return fake_statvfs("statvfs64", path, buf);
 }
 
+// Defined in hrr_workload_test.cc: the fork cases there hold a thread in fsync.
+extern "C" void hrr_workload_fsync_hook(int fd);
+
 extern "C" int hrr_disk_space_fsync(int fd) {
+  hrr_workload_fsync_hook(fd);
   using Fn = int (*)(int);
   static Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "fsync"));
   if (g_fsync_hold.exchange(false)) {
@@ -263,6 +267,17 @@ std::vector<unsigned char> pattern(size_t len, uint32_t seed) {
 void copy_to_device(void* dev, uint32_t seed, size_t len) {
   const std::vector<unsigned char> host = pattern(len, seed);
   HRR_HIP_CHECK(hipMemcpy(dev, host.data(), len, hipMemcpyHostToDevice));
+}
+
+// A forked child opens its archive on its first record, not at fork. This
+// records one without touching the device, which a forked child must not use:
+// a launch configuration pushed and popped through the compiler dispatch table.
+void record_in_child() {
+  dim3 grid, block;
+  size_t shared = 0;
+  hipStream_t stream = nullptr;
+  (void)__hipPushCallConfiguration(dim3(1), dim3(1), 0, nullptr);
+  (void)__hipPopCallConfiguration(&grid, &block, &shared, &stream);
 }
 
 // Wait for a forked child for at most 60 s; -1 when it had to be killed.
@@ -389,6 +404,7 @@ TEST_CASE("Unit_HRR_DiskSpace_ForkAfterStop_Direct", "[.][hrr-direct]") {
   const pid_t child = fork();
   if (child == 0) {
     g_quick_exit_pid.store(getpid());
+    record_in_child();
     std::exit(0);
   }
   REQUIRE(child > 0);
@@ -417,6 +433,8 @@ TEST_CASE("Unit_HRR_DiskSpace_RefusedForkChild_Direct", "[.][hrr-direct]") {
   const pid_t child = fork();
   if (child == 0) {
     g_quick_exit_pid.store(getpid());
+    // Its open, and so the refusal, comes with its first record.
+    record_in_child();
     std::exit(0);
   }
   REQUIRE(child > 0);
