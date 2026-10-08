@@ -1061,6 +1061,47 @@ TEST_F(TopoTest, RingSearch_TwoRailNode_StaysOnTheLocalNicPathType) {
       {{"NCCL_CROSS_NIC", "2"}});
 }
 
+TEST_F(TopoTest, CheckP2p_DisableOverridesIntelCpuDefault) {
+  // NCCL_P2P_DISABLE is cached process-wide. Isolate the test so it is the
+  // first P2P policy lookup and cannot affect other topology tests.
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "CheckP2p_DisableOverridesIntelCpuDefault",
+      [this]() {
+        const uint64_t host = 0xe5;
+        struct ncclXmlNode* cpu = addSystemCpu(host);
+        struct ncclXmlNode* pciSwitch =
+            addPciBridge(cpu, "0000:0b:00.0");
+        addGpuPci(pciSwitch, "0000:0c:00.0", "gfx942",
+                  /*rank=*/0, /*dev=*/0);
+        addGpuPci(pciSwitch, "0000:0d:00.0", "gfx942",
+                  /*rank=*/1, /*dev=*/1);
+
+        struct ncclTopoSystem* built = buildSystemWithPaths(host);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2);
+        ASSERT_EQ(built->nodes[CPU].count, 1);
+
+        // Reproduce the host policy that used to widen PATH_LOC (the value
+        // produced by NCCL_P2P_DISABLE=1) back to PATH_PXB.
+        built->nodes[CPU].nodes[0].cpu.arch = NCCL_TOPO_CPU_ARCH_X86;
+        built->nodes[CPU].nodes[0].cpu.vendor = NCCL_TOPO_CPU_VENDOR_INTEL;
+        // Pin the pair at the Intel default threshold. The old ordering
+        // accepted this path after overwriting the user's PATH_LOC.
+        built->nodes[GPU].nodes[0].paths[GPU][1].type = PATH_PXB;
+
+        int p2p = -1;
+        int read = -1;
+        int intermediateRank = -1;
+        ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 1, &p2p, &read,
+                                   &intermediateRank, nullptr, nullptr),
+                  ncclSuccess);
+        EXPECT_EQ(p2p, 0);
+
+        ncclTopoFree(built);
+      },
+      {{"NCCL_P2P_DISABLE", "1"}});
+}
+
 #else // !(__HIP_PLATFORM_AMD__ || __HIPCC__)
 
 // ncclTopoAddXGMI() is not built on non-HIP platforms, so register one skipped
