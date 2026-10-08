@@ -1780,8 +1780,8 @@ CUDA graph capture.
 .. warning::
 
    ``NCCL_GRAPH_STREAM_ORDERING=0`` together with **graph mixing** (communicator
-   ``graphUsageMode=2``; see :ref:`ncclconfig`) is **not supported**. NCCL emits
-   a warning, forces ``graphStreamOrdering`` to ``1``, and continues communicator
+   ``graphUsageMode=2``; see :ref:`ncclconfig`) is **not supported**. NCCL logs
+   an INFO message, forces ``graphStreamOrdering`` to ``1``, and continues communicator
    creation successfully. If stream ordering is disabled for a communicator,
    **graph mixing must be off**—use ``graphUsageMode`` ``0`` or ``1`` (and note
    that :ref:`NCCL_GRAPH_MIXING_SUPPORT` ``1`` forces ``graphUsageMode=2`` at init,
