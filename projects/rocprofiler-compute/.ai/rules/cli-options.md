@@ -32,10 +32,8 @@ be used on their own, such as `--roofline-device` and `--roofline-sort`.
 Frequently used options get a short alias: a single lowercase letter with a
 single dash, such as `-v`.
 
-User-facing options are named for what they enable, not what they disable: use
-`--roofline`, not `--no-roofline`. Debug and developer options may use disabling
-names since customers rarely touch them. `--no-native-tool` is such an exception;
-mark these as "(advanced)" in their help.
+Options are named for what they enable, not what they disable: use
+`--roofline`, not `--no-roofline`.
 
 ## Renaming and Deprecation
 
@@ -87,7 +85,7 @@ it at the end of the description as `(Default: value)`.
 
 ```text
 --roofline-data-types <types>...   Selects data <type>s to present in roofline (Default: FP32).
-                                    Values: FP4, FP6, FP8, MXFP8, FP16, BF16, FP32, FP64, I8, I32, I64.
+                                    Values: <value1>, <value2>, ..., <valueN>.
 --list-blocks [arch]               List all available blocks for analysis on specified GPU <arch> (Default: current GPU arch).
-                                    Values: gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950, gfx1151
+                                    Values: <value1>, <value2>, ..., <valueN>
 ```
