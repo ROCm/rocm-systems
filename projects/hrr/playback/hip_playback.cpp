@@ -1149,7 +1149,7 @@ void hrr_forget_released_host_allocs(PlaybackContext& ctx) {
         auto it = ctx.alloc_map.find(rec);
         if (it == ctx.alloc_map.end() || it->second.live_ptr != live) continue;
         if (it->second.kind == AllocKind::HostRegister)
-            it->second.kind = AllocKind::HostUnregistered;
+            ctx.mark_host_unregistered(rec);
         else
             ctx.alloc_map.erase(it);
     }

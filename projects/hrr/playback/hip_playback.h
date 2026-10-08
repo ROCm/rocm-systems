@@ -107,6 +107,9 @@ struct PlaybackContext {
 
     // Device allocations: recorded base address -> {live ptr, size}
     std::unordered_map<uint64_t, AllocEntry>     alloc_map;
+    // Recorded bases mark_host_unregistered marked. An entry may have left
+    // alloc_map or changed kind since; record_alloc checks, and drops it here.
+    std::vector<uint64_t> host_unregistered_bases;
 
     // __device__ globals, keyed by the recorded host shadow address the
     // capturing process passed to hipGetSymbolAddress and the hipMemcpy*Symbol
@@ -695,10 +698,41 @@ struct PlaybackContext {
     }
 
     // ---- Allocation registration (exclusive lock) ----
+    // A new allocation over a HostUnregistered range means the application
+    // freed that range, so the range is dropped: otherwise translate_ptr,
+    // which picks the tightest enclosing entry, would send the part of the new
+    // allocation above the range's base to the range's stale buffer. The
+    // buffer stays in host_reg_bufs, and teardown frees it. An alias names
+    // memory already tracked, so it drops nothing.
     void record_alloc(uint64_t rec, void* live, size_t sz,
                       AllocKind kind = AllocKind::Device) {
         std::unique_lock lk(map_mutex);
+        if (kind != AllocKind::DevicePtrAlias && sz != 0) {
+            auto& bases = host_unregistered_bases;
+            for (size_t i = 0; i < bases.size();) {
+                auto it = alloc_map.find(bases[i]);
+                const bool live_entry =
+                    it != alloc_map.end() && it->second.kind == AllocKind::HostUnregistered;
+                const bool overlaps = live_entry && it->first < rec + sz &&
+                                      rec < it->first + it->second.size;
+                if (overlaps) alloc_map.erase(it);
+                if (!live_entry || overlaps) {
+                    bases[i] = bases.back();
+                    bases.pop_back();
+                } else {
+                    ++i;
+                }
+            }
+        }
         alloc_map[rec] = {rec, live, sz, kind};
+    }
+    // Marks the HostRegister entry at rec HostUnregistered. Caller holds
+    // map_mutex exclusively.
+    void mark_host_unregistered(uint64_t rec) {
+        auto it = alloc_map.find(rec);
+        if (it == alloc_map.end() || it->second.kind != AllocKind::HostRegister) return;
+        it->second.kind = AllocKind::HostUnregistered;
+        host_unregistered_bases.push_back(rec);
     }
     void remove_alloc(uint64_t rec) {
         std::unique_lock lk(map_mutex);
