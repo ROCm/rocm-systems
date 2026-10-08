@@ -1209,6 +1209,17 @@ replay hangs. This is a known risk, not a solved one. It needs a non-matching
 overlap with a freed mapping, an exhausted device, or such a take-back, while
 such a kernel is running.
 
+**Remapping at the same address.** Once, on a gfx1201 CI runner, the
+`--kernel-filter` reservation section of `Lifetimes` read a wrong value in the
+timed pass: two of the four workgroups of one kernel saw the wrong contents of
+an 8-byte cell whose page the warm-up reset had unmapped and the timed pass
+mapped again with new memory. Replay's host ordering there is complete: a
+synchronous copy, then a device sync, with no deferred free pending. The
+suspected cause, not proven, is a stale GPU address translation after an unmap
+and a remap at the same address: VMM mappings take the `DRM_AMDGPU_GEM_VA` path,
+while `hipMalloc` memory goes through KFD, which flushes the TLBs itself. It did
+not reproduce in 100 runs on gfx950.
+
 **Several GPUs.** A placed allocation is backed on the device it was made on: the
 current device for `hipMalloc`, the stream's device for `hipMallocAsync`, and the
 pool's location for `hipMallocFromPoolAsync`. `hipMemCreate` takes its memory
@@ -1284,8 +1295,10 @@ have one GPU:
 - the generated `hipMallocPitch`, `hipMemAllocPitch`, `hipMalloc3D`, array and
   mipmapped-array handlers, which do not retry at all;
 - the null-stream guard for `hipStreamBeginCaptureToGraph` in
-  `hrr_track_capture`, and the null-stream guard in `hrr_stream_capturing`: a
-  capture on the null stream fails and is never recorded;
+  `hrr_track_capture`: a capture on the null stream fails and is never recorded;
+- the null-stream guard in `hrr_stream_capturing`: reachable through
+  `hipMallocFromPoolAsync` on the null stream during another stream's global
+  capture; its only effect is a sticky error, which no test reads;
 - the per-thread keying as wired into the capture and `hipStreamDestroy`
   handlers: `PerThreadCapturesKeptApart` tests `hrr_capture_key` and the capture
   flag, and `Lifetimes` runs its per-thread capture on one thread, where it
@@ -1294,7 +1307,10 @@ have one GPU:
   and a free whose event could not be recorded (the unit tests use stand-ins
   that always succeed);
 - the device switches around `hipMemCreate` and the free event: only `MultiGpu`
-  covers them, and it skips on a runner with one GPU.
+  covers them, and it skips on a runner with one GPU;
+- a stream waiting for the free event of another device: only the stand-ins of
+  `NullStreamsOfTwoDevices` exercise it, since `MultiGpu`'s waiter is on the
+  event's own device.
 
 ### `hipMemcpyDeviceToDevice` — Not Captured
 
