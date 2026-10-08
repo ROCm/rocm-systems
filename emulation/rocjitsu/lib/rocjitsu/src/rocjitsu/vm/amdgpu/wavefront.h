@@ -45,7 +45,7 @@ enum class WfState : uint8_t {
   WAITCNT,  ///< Stalled at a waitcnt.
   VM_RETRY, ///< A prepared memory operation is waiting for backing availability.
   BARRIER,  ///< Stalled at a barrier.
-  GWS_WAIT, ///< Parked at a Global Wave Sync rendezvous (co-resident scope).
+  GWS_WAIT, ///< Parked at a Global Wave Sync rendezvous (dispatch-global).
   ENDING,   ///< s_endpgm executed but outstanding memory ops are draining.
 };
 
@@ -319,7 +319,8 @@ public:
   /// @brief Seed a Global Wave Sync resource (init count / credits).
   void gws_init(uint32_t rid, uint32_t count);
 
-  /// @brief Arrive at a GWS barrier; may park this wave in the co-resident scope.
+  /// @brief Arrive at a GWS barrier; may park this wave until the dispatch's
+  /// participants arrive.
   void gws_barrier_arrive(uint32_t rid, uint32_t count);
 
   /// @brief Signal (V) a GWS semaphore, releasing one waiter if present.

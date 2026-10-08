@@ -707,10 +707,11 @@ uint32_t ComputeUnitCore::dispatch_resident_waves(uint32_t dispatch_id) const {
 // no producer-identity guess is needed (a V really reaches a cross-workgroup P).
 //
 //  * Barrier: hardware/LLVM program the resource with (participants - 1); the
-//    MI200 pseudocode queues an arrival while the counter is positive and, on
-//    the arrival that observes zero, releases every queued arrival and reloads
-//    the counter from that arrival's own value (so consecutive phases may differ
-//    in size). We follow that convention exactly (see gws_barrier_arrive). A
+//    CDNA/RDNA barrier pseudocode queues an arrival while the counter is
+//    positive and, on the arrival that observes zero, releases every queued
+//    arrival and reloads the counter from that arrival's own value (so
+//    consecutive phases may differ in size). We follow that convention exactly
+//    (see gws_barrier_arrive). A
 //    blocking arrival is gated on the outstanding counter: the still-required
 //    participant set is (counter + 1), and we only park when that whole set is
 //    provably resident in the dispatch; larger sets fall back to a non-blocking
