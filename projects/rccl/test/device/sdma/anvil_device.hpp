@@ -86,4 +86,16 @@ __device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) {
   atomicAdd(&g_sdmaStubQuietCount, 1ULL);
 }
 
+__device__ __forceinline__ uint64_t quietTarget(SdmaQueueDeviceHandle& handle) {
+  (void)handle;
+  return 0;
+}
+
+__device__ __forceinline__ bool isFlushed(SdmaQueueDeviceHandle& handle, uint64_t upToIndex) {
+  (void)handle;
+  (void)upToIndex;
+  atomicAdd(&g_sdmaStubQuietCount, 1ULL);
+  return true;
+}
+
 }  // namespace sdma_anvil

@@ -11,6 +11,40 @@
 #include "gin_rocshmem_device_host_common_gda.h"
 #include "gda/queue_pair_provider.hpp"
 
+namespace nccl {
+namespace gin {
+namespace rocshmem_gda {
+
+struct ncclGinRocshmemGdaRequest {
+  int peer;
+};
+static_assert(sizeof(ncclGinRocshmemGdaRequest) <= sizeof(ncclGinRequest_t),
+              "ncclGinRocshmemGdaRequest must fit in ncclGinRequest_t");
+
+template <bool HasTimeout>
+NCCL_DEVICE_INLINE ncclResult_t quietPeer(ncclGinCtx ctx, int peer, uint32_t* abortFlag, uint64_t startCycle,
+                                          uint64_t timeoutCycles) {
+  using nccl::utility::loadConst;
+  using nccl::utility::testAbort;
+  ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
+  rocshmem::QueuePair* qp = loadConst(loadConst(&rsCtx->qps) + peer);
+  rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
+  if NCCL_IF_CONSTEXPR (HasTimeout) {
+    uint32_t steps = 0;
+    while (!qp->try_quiet(wf_info)) {
+      if (clock64() - startCycle >= timeoutCycles) return ncclTimeout;
+      if (testAbort(abortFlag, steps)) return ncclSuccess;
+    }
+  } else {
+    qp->quiet(wf_info);
+  }
+  return ncclSuccess;
+}
+
+}  // namespace rocshmem_gda
+}  // namespace gin
+}  // namespace nccl
+
 template <>
 struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   template <typename Coop>
@@ -165,23 +199,25 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
     (void)hasDescriptor;
     (void)descriptor;
     (void)ord;
-    (void)abortFlag;
-    using nccl::utility::loadConst;
-    ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
-    rocshmem::QueuePair** qps = loadConst(&rsCtx->qps);
 #pragma unroll 1
     for (int peer = coop.thread_rank(); peer < ctx.nRanks; peer += coop.size()) {
-      rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
-      loadConst(qps + peer)->quiet(wf_info);
+      (void)nccl::gin::rocshmem_gda::quietPeer</*HasTimeout=*/false>(ctx, peer, abortFlag, 0, 0);
     }
   }
-  // quiet() blocks until drained; nothing to time out.
   template <typename Coop>
   NCCL_DEVICE_INLINE static ncclResult_t call(ncclGinCtx ctx, Coop coop, bool hasDescriptor,
                                               ncclGinDescriptorSmem* descriptor, cuda::memory_order ord,
                                               uint32_t* abortFlag, uint64_t timeoutCycles) {
-    (void)timeoutCycles;
-    call(ctx, coop, hasDescriptor, descriptor, ord, abortFlag);
+    (void)hasDescriptor;
+    (void)descriptor;
+    (void)ord;
+    uint64_t startCycle = clock64();
+#pragma unroll 1
+    for (int peer = coop.thread_rank(); peer < ctx.nRanks; peer += coop.size()) {
+      ncclResult_t ret =
+        nccl::gin::rocshmem_gda::quietPeer</*HasTimeout=*/true>(ctx, peer, abortFlag, startCycle, timeoutCycles);
+      if (ret != ncclSuccess) return ret;
+    }
     return ncclSuccess;
   }
 };
@@ -197,21 +233,23 @@ struct ncclGinApi_Get<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 
 template <>
 struct ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx, int, ncclGinRequest_t*, bool, ncclGinDescriptorSmem*, uint32_t) {
-    __builtin_trap();
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, int peer, ncclGinRequest_t* outRequest, bool, ncclGinDescriptorSmem*,
+                                      uint32_t) {
+    reinterpret_cast<nccl::gin::rocshmem_gda::ncclGinRocshmemGdaRequest*>(outRequest)->peer = peer;
   }
 };
 
 template <>
 struct ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx, ncclGinRequest_t&, bool, ncclGinDescriptorSmem*, cuda::memory_order,
-                                      uint32_t*) {
-    __builtin_trap();
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, ncclGinRequest_t& request, bool, ncclGinDescriptorSmem*,
+                                      cuda::memory_order, uint32_t* abortFlag) {
+    int peer = reinterpret_cast<nccl::gin::rocshmem_gda::ncclGinRocshmemGdaRequest&>(request).peer;
+    (void)nccl::gin::rocshmem_gda::quietPeer</*HasTimeout=*/false>(ctx, peer, abortFlag, 0, 0);
   }
-  NCCL_DEVICE_INLINE static ncclResult_t call(ncclGinCtx, ncclGinRequest_t&, bool, ncclGinDescriptorSmem*,
-                                              cuda::memory_order, uint32_t*, uint64_t) {
-    __builtin_trap();
-    return ncclInternalError;
+  NCCL_DEVICE_INLINE static ncclResult_t call(ncclGinCtx ctx, ncclGinRequest_t& request, bool, ncclGinDescriptorSmem*,
+                                              cuda::memory_order, uint32_t* abortFlag, uint64_t timeoutCycles) {
+    int peer = reinterpret_cast<nccl::gin::rocshmem_gda::ncclGinRocshmemGdaRequest&>(request).peer;
+    return nccl::gin::rocshmem_gda::quietPeer</*HasTimeout=*/true>(ctx, peer, abortFlag, clock64(), timeoutCycles);
   }
 };
 

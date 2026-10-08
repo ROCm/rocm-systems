@@ -644,17 +644,29 @@ TEST_F(GinAnvilSdmaTemplateTest, Get_MissingHandleFallsBackToIpc) {
   EXPECT_EQ(d_dirty.download(), 0ULL);
 }
 
-// H17: FlushAsync quiets dirty channels for the requested peer and marks complete.
-// Dirty bits are left set; only Flush (the synchronous API) clears them.
-__global__ void kernelFlushAsync(TemplateHarness* h, ncclGinRequest_t* req, int peer, uint32_t* completeOut) {
+// H17: FlushAsync records the dirty channels of the requested peer without quieting or clearing them.
+__global__ void kernelFlushAsync(TemplateHarness* h, ncclGinRequest_t* req, int peer) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
   ginCtx.nRanks = 2;
   ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, peer, req, false, nullptr, 0);
-  completeOut[0] = reinterpret_cast<ncclGinAnvilSdmaRequest*>(req)->complete;
 }
 
-TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_CompletesWithoutClearingDirty) {
+static ncclGinAnvilSdmaRequest readRequest(DeviceBuffer<ncclGinRequest_t>& d_req) {
+  ncclGinRequest_t raw = d_req.download();
+  ncclGinAnvilSdmaRequest req;
+  std::memcpy(&req, &raw, sizeof(req));
+  return req;
+}
+
+static ncclGinRequest_t makeRequest(int peer, uint32_t channelMask) {
+  ncclGinAnvilSdmaRequest req{peer, channelMask};
+  ncclGinRequest_t raw{};
+  std::memcpy(&raw, &req, sizeof(req));
+  return raw;
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_RecordsDirtyChannelsWithoutQuiet) {
   DeviceBuffer<uint8_t> d_src(1);
   DeviceBuffer<uint8_t> d_dst(1);
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
@@ -663,24 +675,24 @@ TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_CompletesWithoutClearingDirty) {
   DeviceBuffer<TemplateHarness> d_h(1);
   DeviceBuffer<uint64_t> d_dirty(1);
   DeviceBuffer<ncclGinRequest_t> d_req(1);
-  DeviceBuffer<uint32_t> d_complete(1);
   uint64_t peer1Bit = 1ULL << 1;  // peer 1, channel 0, numChannels=1
   d_dirty.copyFrom(&peer1Bit, 1);
   d_req.zero();
-  d_complete.zero();
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
   host.ctx.sdmaDirty = d_dirty.ptr;
   d_h.upload(host);
   resetQuietCount();
-  kernelFlushAsync<<<1, 1>>>(d_h.ptr, d_req.ptr, /*peer=*/1, d_complete.ptr);
+  kernelFlushAsync<<<1, 1>>>(d_h.ptr, d_req.ptr, /*peer=*/1);
   syncAndCheck();
-  EXPECT_EQ(d_complete.download(), 1u);
+  ncclGinAnvilSdmaRequest req = readRequest(d_req);
+  EXPECT_EQ(req.peer, 1);
+  EXPECT_EQ(req.channelMask, 1u);
   EXPECT_EQ(d_dirty.download(), peer1Bit);
-  EXPECT_EQ(readQuietCount(), 1ULL);
+  EXPECT_EQ(readQuietCount(), 0ULL);
 }
 
-TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_CleanPeerDoesNotQuiet) {
+TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_CleanPeerRecordsNoChannels) {
   DeviceBuffer<uint8_t> d_src(1);
   DeviceBuffer<uint8_t> d_dst(1);
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
@@ -689,25 +701,23 @@ TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_CleanPeerDoesNotQuiet) {
   DeviceBuffer<TemplateHarness> d_h(1);
   DeviceBuffer<uint64_t> d_dirty(1);
   DeviceBuffer<ncclGinRequest_t> d_req(1);
-  DeviceBuffer<uint32_t> d_complete(1);
-  uint64_t peer0Bit = 1ULL << 0;  // peer 0 dirty; flush peer 1 so a bitIdx that drops peer still quiets
+  uint64_t peer0Bit = 1ULL << 0;  // peer 0 dirty, request peer 1. A bitIdx that ignored peer would record ch 0
   d_dirty.copyFrom(&peer0Bit, 1);
   d_req.zero();
-  d_complete.zero();
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
   host.ctx.sdmaDirty = d_dirty.ptr;
   d_h.upload(host);
   resetQuietCount();
-  kernelFlushAsync<<<1, 1>>>(d_h.ptr, d_req.ptr, /*peer=*/1, d_complete.ptr);
+  kernelFlushAsync<<<1, 1>>>(d_h.ptr, d_req.ptr, /*peer=*/1);
   syncAndCheck();
-  EXPECT_EQ(d_complete.download(), 1u);
+  EXPECT_EQ(readRequest(d_req).channelMask, 0u);
   EXPECT_EQ(d_dirty.download(), peer0Bit);
   EXPECT_EQ(readQuietCount(), 0ULL);
 }
 
-// H18: invalid ctx still completes the request so Wait will not hang.
-TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_InvalidCtxCompletes) {
+// H18: invalid ctx records no channels, so Wait only fences.
+TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_InvalidCtxRecordsNoChannels) {
   DeviceBuffer<uint8_t> d_src(1);
   DeviceBuffer<uint8_t> d_dst(1);
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
@@ -716,50 +726,66 @@ TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_InvalidCtxCompletes) {
   DeviceBuffer<TemplateHarness> d_h(1);
   DeviceBuffer<uint64_t> d_dirty(1);
   DeviceBuffer<ncclGinRequest_t> d_req(1);
-  DeviceBuffer<uint32_t> d_complete(1);
   uint64_t peer1Bit = 1ULL << 1;
   d_dirty.copyFrom(&peer1Bit, 1);
   d_req.zero();
-  d_complete.zero();
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
   host.ctx.sdmaDirty = d_dirty.ptr;
   host.ctx.layoutMagic = 0;
   d_h.upload(host);
   resetQuietCount();
-  kernelFlushAsync<<<1, 1>>>(d_h.ptr, d_req.ptr, /*peer=*/1, d_complete.ptr);
+  kernelFlushAsync<<<1, 1>>>(d_h.ptr, d_req.ptr, /*peer=*/1);
   syncAndCheck();
-  EXPECT_EQ(d_complete.download(), 1u);
+  EXPECT_EQ(readRequest(d_req).channelMask, 0u);
   EXPECT_EQ(readQuietCount(), 0ULL);
 }
 
-// H19/H20: Wait fences only after FlushAsync has marked the request complete.
-__global__ void kernelWait(ncclGinRequest_t* req) {
+// H19/H20: Wait quiets the channels recorded by FlushAsync, then fences.
+__global__ void kernelWait(TemplateHarness* h, ncclGinRequest_t* req) {
   ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
   ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
       ginCtx, *req, false, nullptr, cuda::memory_order_acq_rel, nullptr);
 }
 
-TEST_F(GinAnvilSdmaTemplateTest, Wait_FencesWhenComplete) {
+TEST_F(GinAnvilSdmaTemplateTest, Wait_QuietsRecordedChannels) {
+  DeviceBuffer<uint8_t> d_src(1);
+  DeviceBuffer<uint8_t> d_dst(1);
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<TemplateHarness> d_h(1);
   DeviceBuffer<ncclGinRequest_t> d_req(1);
-  ncclGinRequest_t hostReq{};
-  reinterpret_cast<ncclGinAnvilSdmaRequest&>(hostReq).complete = 1;
-  d_req.upload(hostReq);
+  TemplateHarness host{};
+  uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
+  d_req.upload(makeRequest(/*peer=*/1, /*channelMask=*/1u));
+  resetQuietCount();
   resetThreadfenceCount();
-  kernelWait<<<1, 1>>>(d_req.ptr);
+  kernelWait<<<1, 1>>>(d_h.ptr, d_req.ptr);
   syncAndCheck();
+  EXPECT_EQ(readQuietCount(), 1ULL);
   EXPECT_EQ(readThreadfenceCount(), 1ULL);
 }
 
-TEST_F(GinAnvilSdmaTemplateTest, Wait_NoFenceWhenIncomplete) {
+TEST_F(GinAnvilSdmaTemplateTest, Wait_EmptyRequestOnlyFences) {
+  DeviceBuffer<uint8_t> d_src(1);
+  DeviceBuffer<uint8_t> d_dst(1);
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<TemplateHarness> d_h(1);
   DeviceBuffer<ncclGinRequest_t> d_req(1);
-  ncclGinRequest_t hostReq{};
-  reinterpret_cast<ncclGinAnvilSdmaRequest&>(hostReq).complete = 0;
-  d_req.upload(hostReq);
+  TemplateHarness host{};
+  uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
+  d_req.upload(makeRequest(/*peer=*/1, /*channelMask=*/0u));
+  resetQuietCount();
   resetThreadfenceCount();
-  kernelWait<<<1, 1>>>(d_req.ptr);
+  kernelWait<<<1, 1>>>(d_h.ptr, d_req.ptr);
   syncAndCheck();
-  EXPECT_EQ(readThreadfenceCount(), 0ULL);
+  EXPECT_EQ(readQuietCount(), 0ULL);
+  EXPECT_EQ(readThreadfenceCount(), 1ULL);
 }
 
 // H21/H22: a strong signal still resolves the peer queue so fenceBeforeSignal
