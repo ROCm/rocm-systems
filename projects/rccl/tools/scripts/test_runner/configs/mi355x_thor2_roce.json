@@ -3277,6 +3277,16 @@
           "env_variables": {
             "NCCL_GRAPH_STREAM_ORDERING": "0"
           }
+        },
+        {
+          "name": "DDA_IpcFlatIndexDependent_8Ranks",
+          "description": "DDA IPC one-shot flat AllReduce with rank- and index-dependent fp32/bf16 data, out-of-place and in-place, checked bitwise on every rank",
+          "test_filter": "DdaMPI_AllReduceIpc.FlatIndexDependentValues"
+        },
+        {
+          "name": "DDA_IpcTreeIndexDependent_8Ranks",
+          "description": "DDA IPC two-shot tree AllReduce with rank- and index-dependent fp32/bf16 data, out-of-place and in-place, checked bitwise on every rank",
+          "test_filter": "DdaMPI_AllReduceIpc.TreeIndexDependentValues"
         }
       ]
     },
