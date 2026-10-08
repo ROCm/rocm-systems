@@ -10,6 +10,7 @@ on:
       - '!**/*.rtf'
       - '!**/*.rst'
       - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/skills/**'
       - '!projects/rocprofiler-systems/source/docs/**'
 
 permissions:
