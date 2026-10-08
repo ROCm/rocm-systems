@@ -87,6 +87,9 @@ on:
       RCCL_COCO_DB_URL:
         description: 'coco database URL for result ingest. Omit to run without publishing.'
         required: false
+      HF_TOKEN:
+        description: 'Hugging Face token. Exported to the build and test jobs as MAD_SECRETS_HFTOKEN. Omit to run without it.'
+        required: false
 
 permissions:
   contents: read
@@ -198,6 +201,9 @@ jobs:
           SOFTWARE: ${{ inputs.software }}
           COCO_DATABASE_URL: ${{ secrets.RCCL_COCO_DB_URL }}
           COCO_VENV: ${{ env.COCO_DIR }}/venv
+          # sbatch --export=ALL carries the launcher environment to the compute
+          # jobs, so both the build-only pass and the test pass see this.
+          MAD_SECRETS_HFTOKEN: ${{ secrets.HF_TOKEN || '' }}
         run: |
           set -euo pipefail
           # setup-python's interpreter is not runnable on the compute node, and
