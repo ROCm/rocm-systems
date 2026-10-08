@@ -17,8 +17,8 @@ A volume is reported as hipFile-capable when it mirrors the fast-path
 eligibility the hipFile library enforces for a regular file:
 
   * filesystem is xfs, or ext4 mounted with data=ordered (the ext4 default),
-  * the backing device is a local NVMe, or an LVM logical volume whose physical
-    volumes are all local NVMe, and
+  * the backing device is a local NVMe, or an LVM logical volume or MD RAID
+    array whose member devices are all local NVMe, and
   * direct I/O (O_DIRECT) opens succeed on the filesystem.
 
 See src/amd_detail/mountinfo.cpp (fstype/journaling classification) and
@@ -26,11 +26,12 @@ src/amd_detail/backend/fastpath.cpp (the accept rule) for the authoritative
 logic the volume scan reproduces.
 
 The BACKING column (nvme, lvm, md, ...) names the block layer under the
-filesystem. Raw local NVMe and LVM stacked directly on local NVMe qualify,
-including RAID logical volumes: LVM builds those out of sub-LVs that are
-themselves LVM targets, so every layer down to the physical volumes is still
-LVM. Any other interposing layer (multipath, dm-crypt, MD RAID, loopback)
-breaks the direct P2P-DMA path and forces the compatibility fallback.
+filesystem. Raw local NVMe qualifies, as do LVM and MD RAID stacked over local
+NVMe, in any combination and to any depth: both pass the I/O through to their
+members without interposing a buffer, so the direct P2P-DMA path survives. This
+covers LVM RAID logical volumes too, since LVM builds those out of sub-LVs that
+are themselves LVM targets. Any other interposing layer (multipath, dm-crypt,
+loopback) breaks the direct path and forces the compatibility fallback.
 """
 
 # pylint: enable=invalid-name
@@ -629,23 +630,25 @@ def block_slaves(sysfs_dir):
     return [os.path.realpath(os.path.join(slaves_dir, n)) for n in names]
 
 
-def lvm_over_nvme(devno):
+def stack_over_nvme(devno):
     """
-    Whether an LVM (device-mapper) mount is stacked directly on local NVMe.
+    Whether a stacked (LVM or MD RAID) mount bottoms out on local NVMe.
 
-    Walks the dm slave tree from the mount's block device. Returns True only
-    when every device-mapper layer in the stack is an LVM target and every
-    underlying physical block device is NVMe. Returns False when a non-LVM dm
-    layer (multipath, dm-crypt, ...) or a non-NVMe leaf (scsi, MD RAID, ...) is
-    found, and None when the topology can't be resolved from sysfs.
+    Walks the slave tree from the mount's block device. LVM device-mapper
+    targets and MD RAID arrays are pass-through layers: they hand the I/O to
+    their member devices without interposing a buffer, so the direct P2P-DMA
+    path survives them at any depth and in any combination (LVM over MD, MD
+    over LVM, either nested in itself). Returns True only when every layer in
+    the stack is one of those two and every device underneath them is NVMe.
+    Returns False when a layer that does break the direct path (multipath,
+    dm-crypt, ...) or a non-NVMe leaf (scsi, loopback, ...) is found, and None
+    when the topology can't be resolved from sysfs.
 
-    RAID logical volumes are accepted by that same walk rather than by a case
-    of their own: LVM implements a dm-raid LV as a tree of rimage/rmeta
+    LVM RAID logical volumes are accepted by that same walk rather than by a
+    case of their own: LVM implements a dm-raid LV as a tree of rimage/rmeta
     sub-LVs, and every one of them carries an "LVM-" dm uuid, so the recursion
     classifies each member as an LVM layer and keeps descending until it
-    reaches the physical volumes. A top-level MD RAID is not device-mapper, so
-    backing_storage labels it "md" and backing_supported rejects it outright;
-    if MD is nested beneath LVM, this walk rejects it as a non-NVMe leaf.
+    reaches the physical volumes.
     """
     try:
         start = os.path.realpath(os.path.join("/sys/dev/block", devno))
@@ -661,22 +664,35 @@ def lvm_over_nvme(devno):
             continue
         seen.add(node)
 
+        name = os.path.basename(node)
         prefix = dm_uuid_prefix(node)
-        if prefix is None:
+        if prefix is not None:
+            # A device-mapper layer. Only LVM targets keep the direct path;
+            # multipath, dm-crypt and friends do not.
+            if prefix != "lvm":
+                return False
+        elif os.path.isdir(os.path.join(node, "dm")):
             # A device-mapper node always carries a dm/ directory in sysfs. If
             # one is present but its uuid couldn't be read (permissions or a
             # transient error), the layer's target type is unknown and the
             # topology is unresolvable rather than a leaf.
-            if os.path.isdir(os.path.join(node, "dm")):
-                return None
-            # Otherwise it's a physical leaf, which must be NVMe.
-            if not os.path.basename(node).startswith("nvme"):
-                return False
+            return None
+        elif name.startswith("md"):
+            # MD software RAID. Not device-mapper, so it has no dm/uuid, but it
+            # is a pass-through layer all the same: descend into its members. A
+            # partition of an MD array (md0p1) carries no slaves of its own, so
+            # step up to the array it was carved out of.
+            if os.path.exists(os.path.join(node, "partition")):
+                stack.append(os.path.dirname(node))
+                continue
+        elif name.startswith("nvme"):
+            # A physical leaf of the right kind; nothing below it to check.
             saw_leaf = True
             continue
-        # Only LVM targets are allowed anywhere in the stack.
-        if prefix != "lvm":
+        else:
+            # Any other leaf (scsi, virtio, loopback, ...) is not P2P-capable.
             return False
+
         slaves = block_slaves(node)
         if not slaves:
             return None
@@ -726,11 +742,11 @@ def backing_supported(backing, devno):
     """
     Whether the backing storage allows hipFile's direct P2P-DMA path.
 
-    Raw local NVMe qualifies, as does an LVM logical volume whose underlying
-    physical volumes are all local NVMe -- linear, striped and RAID alike (see
-    lvm_over_nvme). Any other interposing layer (multipath, dm-crypt, MD RAID,
-    loopback) breaks the direct path to the device, so the kernel rejects the
-    IO at runtime.
+    Raw local NVMe qualifies, as do LVM logical volumes -- linear, striped and
+    RAID alike -- and MD RAID arrays, whenever every device underneath them is
+    local NVMe (see stack_over_nvme). Any other interposing layer (multipath,
+    dm-crypt, loopback) breaks the direct path to the device, so the kernel
+    rejects the IO at runtime.
 
     Returns None when the backing could not be determined.
     """
@@ -738,8 +754,8 @@ def backing_supported(backing, devno):
         return None
     if backing == "nvme":
         return True
-    if backing == "lvm":
-        return lvm_over_nvme(devno)
+    if backing in ("lvm", "md"):
+        return stack_over_nvme(devno)
     return False
 
 
@@ -772,8 +788,8 @@ def collect(mounts):
         odirect = probe_odirect(m.mountpoint) if supported_fs else None
 
         # A volume is capable only when the filesystem qualifies, the backing is
-        # a direct local NVMe (or LVM stacked on local NVMe), and O_DIRECT works.
-        # Unknown backing leaves the verdict unverified.
+        # a direct local NVMe (or LVM/MD RAID stacked on local NVMe), and
+        # O_DIRECT works. Unknown backing leaves the verdict unverified.
         if not supported_fs or backing_ok is False:
             capable = False
         elif backing_ok is None:

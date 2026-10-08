@@ -8,14 +8,13 @@ Limitations
 
 hipFile requires a direct path from the GPU to the storage device. The
 filesystem must be backed by a local NVMe device that either resides on the
-device's partition or is stacked on it through LVM.
+device's partition or is stacked on it through LVM or MD software RAID.
 Any other interposing block layer between the filesystem and the device breaks
 the direct path and forces a fallback to compatibility mode. This
 includes, but is not limited to:
 
 - multipath
 - dm-crypt (encrypted volumes)
-- MD software RAID (``mdadm``, ``/dev/md*``)
 - loopback devices
 
 LVM logical volumes
@@ -32,9 +31,29 @@ local NVMe physical volume keeps the direct path and qualifies for the
 fastpath. If any member resides on a non-NVMe physical volume, the volume falls
 back to compatibility mode.
 
-This applies to LVM's own RAID implementation only. MD software RAID
-is a separate block layer and is not supported, even when every member device
-is a local NVMe.
+MD software RAID
+================
+
+MD software RAID arrays (``mdadm``, ``/dev/md*``) are supported for the
+fastpath when every member device of the array is a local NVMe device. MD
+passes the I/O through to its members without interposing a buffer, so the
+direct path survives. An array with any non-NVMe or multipath member falls back
+to compatibility mode.
+
+Because reads can be served from any member of a mirrored or striped array, a
+single unsupported member disqualifies the whole array.
+
+Stacking LVM and MD RAID
+========================
+
+LVM and MD RAID can be combined in either order, to any depth, as long as every
+device at the bottom of the stack is a local NVMe. An LVM volume group built on
+MD arrays, or an MD array assembled from logical volumes, both keep the direct
+path. Inserting any other layer anywhere in the stack, such as multipath or
+dm-crypt, forces the fallback to compatibility mode.
+
+Run ``ais-check`` to see how a given mount is classified. For more information,
+see :doc:`/how-to/checking-system-compatibility`.
 
 File descriptor limits
 ======================
