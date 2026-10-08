@@ -1,11 +1,12 @@
+<!-- Copyright (c) 2026 Advanced Micro Devices, Inc. -->
 <!-- SPDX-License-Identifier: MIT -->
 
 # libamdf
 
 libamdf implements the AMDF native C ABI in Rust. Its sole public contract is
-the seven headers under `api-headers/include/amdf/`, synchronized from
-`hrx-system/libamdf` at `4aa34130de44c45d68a48575cebfd0ff0610c461` with only
-the approved AMD copyright and MIT license preamble substitution.
+the eight headers under `api-headers/include/amdf/`, synchronized from
+`hrx-system/libamdf` at `bd24215e6a5d1e12570c892356fd5b343ac38a6d` with an
+AMD copyright and MIT SPDX preamble.
 The crate builds `libamdf.a`; the workspace-root shared package supplies the
 `libamdf.so` alias and the `libamdf.so.0` compatibility name. `amdf_query_api`
 is the AMDF C entry point. The shared image also exports HSA entry points, but
@@ -104,12 +105,13 @@ There is no global allocator selector. PROCESS sessions in one combined shared
 image reuse a system-allocated native KFD connection and exact DRM VM binding;
 the instance's callback allocator is not retained by that process owner.
 
-Destruction accepts a live handle by value. Success consumes it; the caller
-must discard its aliases. No caller pointer slot is cleared. Native teardown
-failure preserves cleanup ownership and progress for retry, without promising
-continued access to transport after partial cleanup. Destruction does not
-implicitly wait for completion. Callers serialize destruction against other
-uses according to the imported headers.
+Destruction accepts a live handle by value and never clears the caller's
+pointer slot. An API-domain BUSY preflight leaves the affected queue or parent
+live. Memory and queue destruction consume their handles after preflight, even
+when native cleanup fails; unreleased native dependencies remain as leaks.
+Instance and device cleanup retains ownership for retry where their contracts
+specify it. Destruction does not implicitly wait for completion. Callers
+serialize destruction against other uses according to the imported headers.
 
 If ambiguous native cleanup still retains callback-backed metadata, instance
 destruction fails and preserves the remaining native owners. The caller keeps
@@ -120,7 +122,8 @@ PROCESS native lifetime permits kernel-owned process state to survive instance
 destruction. INSTANCE requires library-owned native state to be released with
 the instance. On KFD UAPI 1.19 or newer, this provider selects an
 instance-owned secondary KFD context and supports GPU activation under both
-lifetimes. Secondary contexts do not support USERPTR registration.
+lifetimes. Secondary KFD contexts do not use KFD USERPTR registration;
+INSTANCE GPU registration maps DRM GEM USERPTR in the acquired render VM.
 
 On the KFD provider, first-device activation acquires and publishes the retained
 VM owner, then enables the KFD runtime before publishing the public device.
@@ -135,7 +138,6 @@ for later activation in that process. The backend rejects inherited native
 work before touching its own callbacks, files, or locks. Native `EBUSY` or
 `EEXIST` activation leaves a foreign runtime unowned and is never followed by
 disable; an ambiguous activation outcome blocks replay and requires cleanup.
-The current one-GPU test host cannot execution-qualify the second-device path.
 
 ## Memory and queues
 
@@ -224,9 +226,14 @@ atomic submission slot. The caller supplies a single immutable command range
 with execute access in the queue device's current address domain. The provider
 does not inspect or translate its bytes. The caller keeps the command and its
 indirect dependencies live until the accepted submission retires. Cached
-status is syscall-free; an explicit wait proves retirement before storage
-reuse. An uncertain native submission becomes a failed accepted submission so
-its storage cannot be reused prematurely.
+status is syscall-free; explicit refresh polls checked progress without
+waiting, and an explicit wait can prove retirement before storage reuse. The
+requested pending count, or the default 4096, is reported as an admission
+bound, while the current native context admits one unretired command and checks
+progress once before rejecting an occupied slot. Native
+event notification is unavailable and reported as a zero type mask. An
+uncertain native submission becomes a failed accepted submission so its
+storage cannot be reused prematurely.
 
 Family and creation information specify format, producer mode, priority,
 ring bounds, and achieved capabilities. There is no native C batch-creation
@@ -251,11 +258,12 @@ prove completion of every memory access initiated by its commands.
 The caller retains application resources through their actual device-use
 lifetime, independently of queue mapping lifetime.
 
-Destruction returns BUSY before mutation while mappings remain or the
-producer and consumer frontiers differ. Once native teardown begins, failure preserves cleanup
-ownership but blocks further transport use. Retry does not replay released
-native IDs; ambiguous outcomes retain their dependencies until process
-teardown. There is no hidden completion wait.
+User-queue destruction returns BUSY before mutation while mappings remain or
+the producer and consumer frontiers differ. Kernel-queue destruction returns
+BUSY while an accepted submission remains unretired. Every other result
+consumes the public queue handle. Failed native cleanup retains unreleased
+backing and dependencies without a second release attempt. There is no hidden
+completion wait.
 
 ## Build and validation
 

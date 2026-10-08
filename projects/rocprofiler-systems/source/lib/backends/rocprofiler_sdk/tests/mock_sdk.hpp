@@ -216,6 +216,10 @@ struct stream_id
 {
     std::uint64_t handle{};
 };
+struct code_object_load_data
+{};
+struct kernel_symbol_data
+{};
 // Real SDK defines rocprofiler_hip_stream_operation_t as an enum; a plain int
 // satisfies every comparison/assignment backend<mock_sdk> performs on it.
 using hip_stream_operation_t = int;
@@ -471,6 +475,8 @@ struct mock_sdk
     using hip_stream_data                      = testing::hip_stream_data;
     using hip_stream_operation_t               = testing::hip_stream_operation_t;
     using stream_id                            = testing::stream_id;
+    using code_object_load_data                = testing::code_object_load_data;
+    using code_object_kernel_symbol_register_data = testing::kernel_symbol_data;
 
     // compile_time_version >= 10000 selects the v1 branch in query_counter_details.
     static constexpr std::uint32_t compile_time_version = 10100u;
@@ -545,6 +551,42 @@ struct mock_sdk
     static constexpr rccl_api_id_t RCCL_API_ID_ncclBroadcast     = 6;
     static constexpr rccl_api_id_t RCCL_API_ID_ncclReduceScatter = 7;
     static constexpr rccl_api_id_t RCCL_API_ID_ncclSend          = 8;
+
+    // ── OMPT types and constants ──────────────────────────────────────────────
+    // Minimal stand-ins so backend<Sdk>'s unconditional OMPT forwarding aliases
+    // type-check; no test in this TU exercises OMPT behavior.
+    struct ompt_data_t
+    {};
+    using ompt_operation_t = int;
+    using ompt_thread_t    = int;
+
+    static constexpr ompt_thread_t    OMPT_THREAD_INITIAL        = 1;
+    static constexpr ompt_operation_t OMPT_ID_thread_begin       = 0;
+    static constexpr ompt_operation_t OMPT_ID_thread_end         = 1;
+    static constexpr ompt_operation_t OMPT_ID_parallel_begin     = 2;
+    static constexpr ompt_operation_t OMPT_ID_parallel_end       = 3;
+    static constexpr ompt_operation_t OMPT_ID_task_create        = 4;
+    static constexpr ompt_operation_t OMPT_ID_task_schedule      = 5;
+    static constexpr ompt_operation_t OMPT_ID_implicit_task      = 6;
+    static constexpr ompt_operation_t OMPT_ID_device_initialize  = 7;
+    static constexpr ompt_operation_t OMPT_ID_device_finalize    = 8;
+    static constexpr ompt_operation_t OMPT_ID_device_load        = 9;
+    static constexpr ompt_operation_t OMPT_ID_mutex_released     = 10;
+    static constexpr ompt_operation_t OMPT_ID_dependences        = 11;
+    static constexpr ompt_operation_t OMPT_ID_task_dependence    = 12;
+    static constexpr ompt_operation_t OMPT_ID_lock_init          = 13;
+    static constexpr ompt_operation_t OMPT_ID_lock_destroy       = 14;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquire      = 15;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquired     = 16;
+    static constexpr ompt_operation_t OMPT_ID_nest_lock          = 17;
+    static constexpr ompt_operation_t OMPT_ID_flush              = 18;
+    static constexpr ompt_operation_t OMPT_ID_cancel             = 19;
+    static constexpr ompt_operation_t OMPT_ID_dispatch           = 20;
+    static constexpr ompt_operation_t OMPT_ID_error              = 21;
+    static constexpr ompt_operation_t OMPT_ID_callback_functions = 22;
+
+    static constexpr tracing_operation CODE_OBJECT_LOAD                          = 1;
+    static constexpr tracing_operation CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER = 2;
 
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_CORE_API         = 1;
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_AMD_EXT_API      = 2;

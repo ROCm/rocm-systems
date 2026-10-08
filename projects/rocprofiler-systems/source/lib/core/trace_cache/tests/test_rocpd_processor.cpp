@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/agent.hpp"
+#include "core/agent_info.hpp"
 #include "core/agent_manager.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
@@ -20,9 +21,11 @@
 #include "library/pmc/collectors/nic/types.hpp"
 #include "library/thread_info.hpp"
 
+#include <nlohmann/json_fwd.hpp>
 #include <profiler-hub/reader.hpp>
 #include <profiler-hub/reader_types.hpp>
 #include <profiler-hub/storage.hpp>
+#include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/version.h>
@@ -341,6 +344,14 @@ struct agent_pmc_spec
     const char* target_arch;
     const char* description = nullptr;
 };
+
+constexpr std::size_t k_max_json_length = 128;
+void
+expect_stored_json_matches(const std::string& stored, const std::string& expected)
+{
+    ASSERT_TRUE(nlohmann::json::accept(stored)) << stored.substr(0, k_max_json_length);
+    EXPECT_EQ(nlohmann::json::parse(stored), nlohmann::json::parse(expected));
+}
 }  // namespace
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1426,21 +1437,18 @@ TEST_F(rocpd_write_read_test_interface, memory_copy_values_persisted)
             metadata->add_stream(k_stream_id);
         },
         [](rocpd_processor_t& processor) {
-            const memory_copy_sample mcs{
-                k_start_ts,
-                k_end_ts,
-                k_thread_id,
-                k_managed_gpu_handle,
-                k_managed_cpu_handle,
-                static_cast<std::int32_t>(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY),
-                static_cast<std::int32_t>(ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE),
-                k_copy_size,
-                1,
-                0,
-                k_dst_address,
-                k_src_address,
-                k_stream_id
-            };
+            const memory_copy_sample mcs{ k_start_ts,
+                                          k_end_ts,
+                                          k_thread_id,
+                                          k_managed_gpu_handle,
+                                          k_managed_cpu_handle,
+                                          "MEMORY_COPY_HOST_TO_DEVICE",
+                                          k_copy_size,
+                                          1,
+                                          0,
+                                          k_dst_address,
+                                          k_src_address,
+                                          k_stream_id };
             processor.handle(mcs);
         });
 
@@ -1545,6 +1553,52 @@ TEST_F(rocpd_write_read_test_interface, metadata_round_trip)
 }
 
 // ---------------------------------------------------------------------------
+// Info extdata: JSON produced by rocprofiler-systems must be stored verbatim
+// and remain valid JSON after a write/read round trip
+// ---------------------------------------------------------------------------
+
+TEST_F(rocpd_write_read_test_interface, info_extdata_is_valid_json)
+{
+    // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
+    const auto process_extdata = nlohmann::json{
+        { "ROCPROFSYS_TRACE", "true" },
+        { "ROCPROFSYS_OUTPUT_PREFIX", "run \"a\"" },
+        { "nested", { { "k", "v" }, { "values", { 1, 2, 3 } } } }
+    }.dump();
+    const auto process_environment =
+        nlohmann::json{ { "MPI_COMM_WORLD_SIZE", 2 } }.dump();
+
+    rocprofiler_agent_v0_t agent_data{};
+    agent_data.type         = ROCPROFILER_AGENT_TYPE_GPU;
+    agent_data.name         = "gfx90a";
+    agent_data.vendor_name  = "AMD";
+    agent_data.product_name = "Instinct MI210";
+    agent_data.model_name   = "MI210";
+
+    auto gpu       = managed_gpu_agent();
+    gpu.agent_info = rocprofsys::agent_info::to_json_string(agent_data);
+
+    run_processor_and_open_reader(
+        { gpu }, [&](const std::shared_ptr<metadata_registry>& metadata) {
+            auto proc        = metadata->get_process_info();
+            proc.extdata     = process_extdata;
+            proc.environment = process_environment;
+            metadata->set_process(proc);
+        });
+
+    // Validate: profiler_hub::reader_t read-back matches inserted values.
+    const auto processes = m_reader->get_all_processes();
+    ASSERT_EQ(processes.size(), 1U);
+    expect_stored_json_matches(processes[0]->extdata, process_extdata);
+    expect_stored_json_matches(processes[0]->environment, process_environment);
+
+    const auto agents = m_reader->get_all_agents();
+    ASSERT_EQ(agents.size(), 1U);
+    expect_stored_json_matches(agents[0]->extdata, gpu.agent_info);
+    expect_gpu_agent_mi210();
+}
+
+// ---------------------------------------------------------------------------
 // Output file existence and non-empty after flush
 // ---------------------------------------------------------------------------
 
@@ -1618,20 +1672,19 @@ TEST_F(rocpd_write_read_test_interface, handle_scratch_memory_pathway)
             seed_gpu_queue_stream(metadata);
         },
         [](rocpd_processor_t& processor) {
-            const scratch_memory_sample sms{
-                k_start_ts,
-                k_end_ts,
-                k_thread_id,
-                k_managed_gpu_handle,
-                k_queue_id,
-                static_cast<std::int32_t>(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY),
-                static_cast<std::int32_t>(ROCPROFILER_SCRATCH_MEMORY_ALLOC),
-                0,
-                k_alloc_size,
-                k_flags,
-                k_queue_handle,
-                k_stream_id
-            };
+            const scratch_memory_sample sms{ k_start_ts,
+                                             k_end_ts,
+                                             k_thread_id,
+                                             k_managed_gpu_handle,
+                                             k_queue_id,
+                                             "SCRATCH_MEMORY_ALLOC",
+                                             static_cast<std::int32_t>(
+                                                 ROCPROFILER_SCRATCH_MEMORY_ALLOC),
+                                             0,
+                                             k_alloc_size,
+                                             k_flags,
+                                             k_queue_handle,
+                                             k_stream_id };
             processor.handle(sms);
         });
 
@@ -1666,19 +1719,18 @@ TEST_F(rocpd_write_read_test_interface, handle_memory_allocate_pathway)
             metadata->add_stream(k_stream_id);
         },
         [](rocpd_processor_t& processor) {
-            const memory_allocate_sample mas{
-                k_start_ts,
-                k_end_ts,
-                k_thread_id,
-                k_managed_gpu_handle,
-                static_cast<std::int32_t>(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION),
-                static_cast<std::int32_t>(ROCPROFILER_MEMORY_ALLOCATION_ALLOCATE),
-                k_alloc_size,
-                k_corr_id,
-                k_ancestor,
-                k_address,
-                k_stream_id
-            };
+            const memory_allocate_sample mas{ k_start_ts,
+                                              k_end_ts,
+                                              k_thread_id,
+                                              k_managed_gpu_handle,
+                                              "MEMORY_ALLOCATION_ALLOCATE",
+                                              static_cast<std::int32_t>(
+                                                  ROCPROFILER_MEMORY_ALLOCATION_ALLOCATE),
+                                              k_alloc_size,
+                                              k_corr_id,
+                                              k_ancestor,
+                                              k_address,
+                                              k_stream_id };
             processor.handle(mas);
         });
 
@@ -2132,37 +2184,33 @@ insert_multiple_event_type_samples(rocpd_processor_t&            processor,
                                       timestamps.stream_id };
     processor.handle(kds);
 
-    const memory_copy_sample mcs{
-        timestamps.mc_start_ts,
-        timestamps.mc_end_ts,
-        timestamps.thread_id,
-        timestamps.managed_gpu_handle,
-        timestamps.managed_cpu_handle,
-        static_cast<std::int32_t>(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY),
-        static_cast<std::int32_t>(ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE),
-        timestamps.mc_size,
-        3,
-        0,
-        0,
-        0,
-        timestamps.stream_id
-    };
+    const memory_copy_sample mcs{ timestamps.mc_start_ts,
+                                  timestamps.mc_end_ts,
+                                  timestamps.thread_id,
+                                  timestamps.managed_gpu_handle,
+                                  timestamps.managed_cpu_handle,
+                                  "MEMORY_COPY_HOST_TO_DEVICE",
+                                  timestamps.mc_size,
+                                  3,
+                                  0,
+                                  0,
+                                  0,
+                                  timestamps.stream_id };
     processor.handle(mcs);
 
-    const scratch_memory_sample sms{
-        timestamps.sms_start_ts,
-        timestamps.sms_end_ts,
-        timestamps.thread_id,
-        timestamps.managed_gpu_handle,
-        timestamps.queue_id,
-        static_cast<std::int32_t>(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY),
-        static_cast<std::int32_t>(ROCPROFILER_SCRATCH_MEMORY_ALLOC),
-        0,
-        timestamps.sms_size,
-        4,
-        0,
-        timestamps.stream_id
-    };
+    const scratch_memory_sample sms{ timestamps.sms_start_ts,
+                                     timestamps.sms_end_ts,
+                                     timestamps.thread_id,
+                                     timestamps.managed_gpu_handle,
+                                     timestamps.queue_id,
+                                     "SCRATCH_MEMORY_ALLOC",
+                                     static_cast<std::int32_t>(
+                                         ROCPROFILER_SCRATCH_MEMORY_ALLOC),
+                                     0,
+                                     timestamps.sms_size,
+                                     4,
+                                     0,
+                                     timestamps.stream_id };
     processor.handle(sms);
 
     const backtrace_region_sample bts{ 0,
@@ -2489,21 +2537,18 @@ TEST_F(rocpd_write_read_test_interface, handle_memory_copy_addresses_persisted)
             metadata->add_stream(k_stream_id);
         },
         [](rocpd_processor_t& processor) {
-            const memory_copy_sample mcs{
-                k_start_ts,
-                k_end_ts,
-                k_thread_id,
-                k_managed_gpu_handle,
-                k_managed_cpu_handle,
-                static_cast<std::int32_t>(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY),
-                static_cast<std::int32_t>(ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST),
-                k_copy_size,
-                1,
-                0,
-                k_dst_address,
-                k_src_address,
-                k_stream_id
-            };
+            const memory_copy_sample mcs{ k_start_ts,
+                                          k_end_ts,
+                                          k_thread_id,
+                                          k_managed_gpu_handle,
+                                          k_managed_cpu_handle,
+                                          "MEMORY_COPY_DEVICE_TO_HOST",
+                                          k_copy_size,
+                                          1,
+                                          0,
+                                          k_dst_address,
+                                          k_src_address,
+                                          k_stream_id };
             processor.handle(mcs);
         });
 
