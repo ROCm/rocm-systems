@@ -89,8 +89,8 @@ The example above is intentionally minimal.
 |---|---|---|
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
 | `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned). Omit for the default. |
-| `cpu_dispatch_threads` | int | Inclusive functional dispatch width per SoC. Omitted/0 selects a preferred allocation; 1 forces serial dispatch. Clamped to per-CP CU capacity. |
-| `cpu_thread_budget` | int | Automatic selection ceiling. Omitted/0 uses CPU affinity, with engine/dispatch cost capped at 32 and additive preset helpers up to 48 total; a positive value overrides the budget. |
+| `cpu_dispatch_threads` | int | Inclusive functional dispatch width per SoC. Omitted/0 selects a preferred allocation; 1 forces serial dispatch. Clamped to the shared SoC pool capacity. |
+| `cpu_thread_budget` | int | Automatic selection ceiling. Omitted/0 uses CPU affinity and the target allocation table; a positive value overrides the budget. |
 | `async_helper_threads` | int | Shared MMA helpers per VM. Omitted/-1 selects the table; 0 disables; explicit values are 0–128. |
 | `thread_allocations` | array | Preferred `num_threads` / `cpu_dispatch_threads` / `async_helper_threads` triples, selected by total execution-thread cost. |
 | `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
@@ -123,14 +123,17 @@ selects the largest effective allocation fitting the budget, after applying
 explicit knob overrides and topology limits. A budget between table entries
 uses the lower entry; it does not create workers merely to exhaust the budget.
 Later entries break ties. The automatic total budget is CPU affinity, with a
-minimum of one. Engine/dispatch cost stays capped at 32; helper entries may
-use additional affinity. Shipped presets stop at 48 total. A positive
-`cpu_thread_budget` overrides the budget, including the engine/dispatch cap. A config without a table uses serial defaults for unspecified
-knobs. Clocked mode uses only engines, capped by affinity/budget and XCD count.
+minimum of one; the target table sets the preferred allocation ceiling. A
+positive `cpu_thread_budget` overrides the budget. A config without a table
+uses serial defaults for unspecified knobs. Clocked mode uses only engines,
+capped automatically at 32, by affinity/budget and by XCD count.
 
-Explicit engine, dispatch and helper values take precedence and may exceed the automatic
-ceiling. Engines are clamped to aggregate XCD count, and dispatch width to each
-SoC's largest per-CP CU count. No workload inspection is involved.
+Explicit engine, dispatch and helper values take precedence and may exceed the
+automatic ceiling. Engines are clamped to aggregate XCD count. Each SoC's pool
+width is bounded by one plus the sum of CUs-1 across nonempty XCDs; individual
+submissions use at most their active CU count. This is the maximum concurrent
+capacity; fewer engine partitions may leave workers idle. No workload inspection
+is involved.
 
 Two separate contracts constrain consumers, and only the first is about the
 config file.
@@ -195,13 +198,15 @@ The single-GPU tables retain these synchronous engine/dispatch pairs (H=0):
 | 4 | 2/3 | 1/4 | 1/4 |
 | 8 | 2/7 | 2/7 | 1/8 |
 | 16 | 8/9 | 8/9 | 1/16 |
-| 24 | 8/17 | 8/17 | 1/16 |
-| 32 | 8/25 | 8/25 | 1/32 |
+| 24 | 8/17 | 8/17 | 1/24 |
+| 32 | 8/17 | 8/25 | 1/24 |
+| 40 and above | 8/17 | 8/33 | 1/24 |
 
 The gfx950/gfx1250 tables also contain the [async MMA triples](async-instructions.md#thread-policy).
-Both keep 8/25/0 at 32 threads. Affinity above 32 selects additive helper rows
-at totals 34, 36, 40 and 48 (2, 4, 8 and 16 helpers). Larger hosts still select
-48. `async_helper_threads: 0` retains the synchronous choices above.
+gfx950 adds eight helpers at budget 32, selecting 8/17/8; gfx1250 adds eight
+at budget 48, selecting 8/33/8. Larger hosts retain those allocations.
+`async_helper_threads: 0` retains the synchronous choices above. Desktop and MI210 tables stop at 1/24/0;
+CDNA3 stops at 8/17/0.
 A budget of 12 selects the eight-thread row.
 
 Print allocations for any target without constructing a simulated GPU:
@@ -253,7 +258,9 @@ selects them by the agent's GPU target and GPU count. The hardware agent format 
 host scheduling policy. Unknown targets use the serial fallback. For multiple
 GPUs, it uses the matching native preset when available. Other GPU counts
 convert each single-GPU granule's budget B to E=1, D=1+floor((B-1)/GPUs) and H=0,
-then leave selection to rocjitsu.
+then leave selection to rocjitsu. B includes helper slots, which become dispatch
+workers in this opt-in path: derived gfx950 tables use a budget of 32 and
+gfx1250 uses 48, while desktop and CDNA3 tables use 24.
 Its multi-GPU configurations default to E=1/D=1/H=0 for the same reasons. A positive
 engine override can change that pin;
 `num_threads: 0` retains it. Profile options may override `cpu_thread_budget`,
@@ -283,6 +290,28 @@ Components are defined hierarchically under `topology.root`. Range
 expansion (`xcd[0:8]`) creates multiple instances. Links connect
 component ports using pattern expressions with loop variables.
 
+gfx1250 `WAVE_HW_ID1.WGP_ID` reads require a shader-array width
+(`vm.gpu.device.num_cu_per_sh`) of 1–16. Every shader engine, including groups
+with direct CU children, must have `num_shader_arrays_per_engine * num_cu_per_sh`
+compute units. If this geometry disagrees with the component hierarchy, the
+loader warns once per GPU and leaves the shader-array width unknown. Reads
+with unknown or unrepresentable geometry issue an `s_getreg_b32` warning and
+write zero.
+
+Omitted geometry fields inherit defaults selected by `gfx_target_version`.
+For a smaller topology, set both `num_cu_per_sh` and
+`num_shader_arrays_per_engine` to match its CU groups; for example, two arrays
+of two CUs match a four-CU group. The topology need not grow to the generation's
+default size to support WGP-ID reads.
+
+The topology has no shader-array level. Within each shader engine, the first
+`num_cu_per_sh` CU children form array 0, the next form array 1, and so on.
+The WGP ID is the CU's shader-engine-local index modulo `num_cu_per_sh`.
+For gfx1250 shader engines, KFD CU-mask bit order varies XCD fastest, followed
+by shader engine, array, and WGP. Within an engine, array `a` and WGP `w` select
+CU child `a * num_cu_per_sh + w`, which reports `WGP_ID = w`. The KFD mask loop
+does not select direct-CU groups; their WGP IDs still follow CU child order.
+
 ### Memory wait diagnostics
 
 With memory wait diagnostics enabled, compute units warn when an instruction reads
@@ -290,8 +319,9 @@ or overwrites a pending memory result without a sufficient wait. Results still
 execute eagerly. See
 [memory wait diagnostics](memory-wait-diagnostics.md) for coverage and the
 `memory_wait_diagnostics` setting (`off`, the default, or `warn`).
-On gfx1250, this setting also controls XCNT replay-source warnings. Both checks
-are disabled by default and enabled together with `memory_wait_diagnostics=warn`.
+On gfx1250, XCNT replay-source warnings are independently opt-in through
+`xcnt_diagnostics=warn` (default: `off`). Both settings belong in each
+`compute_unit` node's `config` array.
 
 ### KFD device sections
 
@@ -310,6 +340,12 @@ The JSON config is validated against FlatBuffers schemas in `schemas/`:
 
 - `simulation_config.fbs` — topology and simulation parameters
 - `checkpoint.fbs` — simulation state checkpointing
+
+Checkpoints preserve the shader-array width used by gfx1250 `WAVE_HW_ID1.WGP_ID`
+reads. Older checkpoints lack this geometry, so WGP-ID reads after restoring
+them issue an `s_getreg_b32` warning and write zero; the simulator cannot infer a
+shader-array-local ID from the shader-engine CU count alone. Saving such a restored
+checkpoint again preserves that unknown geometry.
 
 ## Multi-GPU
 

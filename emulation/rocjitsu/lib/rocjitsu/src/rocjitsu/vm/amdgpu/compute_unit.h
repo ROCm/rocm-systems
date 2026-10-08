@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
+#include "rocjitsu/vm/amdgpu/decoded_instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
@@ -140,8 +141,19 @@ public:
     uint32_t functional_quantum = kFunctionalQuantum;
     /// Shared VM resources; null preserves direct-construction environment controls.
     std::shared_ptr<matrix_coexecution::ExecutionResources> async_resources = nullptr;
-    /// Report premature memory-result accesses and conflicting replay-source overwrites.
+    /// Opt in to premature memory-result access diagnostics.
     MemoryWaitDiagnostics memory_wait_diagnostics = MemoryWaitDiagnostics::Off;
+    /// Opt in to gfx1250 replay-source overwrite diagnostics independently.
+    MemoryWaitDiagnostics xcnt_diagnostics = MemoryWaitDiagnostics::Off;
+
+    /// @brief Whether gfx1250 replay-source diagnostics are enabled.
+    bool xcnt_checks_enabled() const {
+      return arch == ROCJITSU_CODE_ARCH_CDNA5 && xcnt_diagnostics != MemoryWaitDiagnostics::Off;
+    }
+    /// @brief Whether either core memory-result or replay-source checking is enabled.
+    bool memory_wait_checks_enabled() const {
+      return memory_wait_diagnostics != MemoryWaitDiagnostics::Off || xcnt_checks_enabled();
+    }
   };
 
   ~ComputeUnitCore() override = default;
@@ -149,8 +161,8 @@ public:
   uint64_t memory_wait_diagnostic_count() const { return memory_wait_diagnostic_count_; }
   /// @brief Number of replay-source hazards, including suppressed reports.
   uint64_t xcnt_diagnostic_count() const { return xcnt_diagnostic_count_; }
-  /// @brief Account for an executed producer using resolved shared FLAT lanes.
-  void track_memory_wait(Instruction &inst, Wavefront &wf, uint64_t flat_shared_lanes = 0);
+  /// @brief Register a producer using planned FLAT lanes before execution.
+  void track_memory_wait(Instruction &inst, Wavefront &wf);
   /// @brief Format a scoreboard hazard using its owning wavefront context.
   static void report_memory_wait(void *context, const MemoryWaitScoreboard::Hazard &hazard);
 
@@ -248,6 +260,7 @@ public:
   /// @brief Execute up to one functional quantum of step() iterations on this CU.
   /// @returns Whether wavefronts ran and whether one requested an event-loop yield.
   FunctionalQuantumResult run_quantum() {
+    const GpuVmAccessBatchGuard vm_access_batch;
     // Reuse instruction-fetch snapshots only within this execution quantum.
     // Restore the outer scope on exceptions and nested quantum execution too.
     InstructionVmSnapshot snapshot;
@@ -445,8 +458,25 @@ public:
   void abort_dispatch(uint32_t dispatch_id);
 
   /// @brief Set the execution plugin group (shared ownership).
+  /// @details Replacement refreshes resident waves' hot-hook subscriptions but
+  /// does not replay dispatch callbacks or migrate or clear wave-local plugin
+  /// state. Stateful plugins must tolerate missing initialization and state
+  /// left in a reused slot when attached to an already-resident wave.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
-    plugin_group_ = pg ? std::move(pg) : ExecutionPluginGroup::empty_group();
+    std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
+    auto replacement = pg ? std::move(pg) : ExecutionPluginGroup::empty_group();
+    if (plugin_group_.get() != replacement.get()) {
+      // A resident wave's cached decisions belong to the group that observed
+      // its dispatch. A replacement group may have the same plugin count but
+      // different per-wave subscriptions, so force it onto the live-query path.
+      for (const auto &wf : wfs_) {
+        if (!wf)
+          continue;
+        wf->hot_hook_subscriptions_valid_ = false;
+        wf->hot_hook_observer_count_ = 0;
+      }
+    }
+    plugin_group_ = std::move(replacement);
     observes_before_execute_instruction_ = plugin_group_->observes_before_execute_instruction();
     observes_after_execute_instruction_ = plugin_group_->observes_after_execute_instruction();
     observes_async_instruction_issued_ = plugin_group_->observes_async_instruction_issued();
@@ -456,8 +486,7 @@ public:
     observes_sgpr_reads_ = plugin_group_->observes_sgpr_reads();
     observes_scalar_register_writes_ = plugin_group_->observes_scalar_register_writes();
     observes_memory_routing_ = plugin_group_->observes_memory_routing();
-    observes_register_access_ = config_.memory_wait_diagnostics != MemoryWaitDiagnostics::Off ||
-                                observes_vgpr_reads_ || observes_vgpr_writes_ ||
+    observes_register_access_ = observes_vgpr_reads_ || observes_vgpr_writes_ ||
                                 observes_sgpr_reads_ || observes_scalar_register_writes_;
   }
 
@@ -492,14 +521,24 @@ public:
   /// @brief Record this CU's physical location within its XCC.
   /// @param shader_engine_id Zero-based shader-engine index within the XCC.
   /// @param cu_index Zero-based CU index within the shader engine.
-  void set_shader_engine_location(uint32_t shader_engine_id, uint32_t cu_index) {
+  /// @param cus_per_shader_array Width of each shader array in CU order; zero means unknown.
+  void set_shader_engine_location(uint32_t shader_engine_id, uint32_t cu_index,
+                                  uint32_t cus_per_shader_array = 0) {
     shader_engine_id_ = shader_engine_id;
     shader_engine_cu_index_ = cu_index;
     scratch_scoreboard_base_ = shader_engine_cu_index_ * scratch_slots_per_cu_;
+    cus_per_shader_array_ = cus_per_shader_array;
+    shader_array_cu_id_ = cus_per_shader_array ? cu_index % cus_per_shader_array : 0;
   }
 
   /// @brief Return this CU's physical shader-engine index.
   uint32_t shader_engine_id() const { return shader_engine_id_; }
+
+  /// @brief Return the shader-array width, or zero when the geometry is unknown.
+  uint32_t cus_per_shader_array() const { return cus_per_shader_array_; }
+
+  /// @brief Return this CU's index within its shader array when the width is known.
+  uint32_t shader_array_cu_id() const { return shader_array_cu_id_; }
 
   /// @brief Return the first scratch scoreboard slot owned by this CU.
   uint32_t scratch_scoreboard_base() const { return scratch_scoreboard_base_; }
@@ -790,8 +829,6 @@ private:
   void notify_scalar_register_read(const Wavefront &wf, RegisterRef reg) const {
     if (!observes_register_access_)
       return;
-    if (wf.memory_wait_checks_enabled() && wf.memory_wait_shadow().pending(reg))
-      check_active_memory_wait(reg, ~uint64_t{0}, 0xf, false);
     if (observes_sgpr_reads_)
       observe_scalar_register_read(wf, reg);
   }
@@ -799,8 +836,6 @@ private:
   void notify_scalar_register_write(const Wavefront &wf, RegisterRef reg) const {
     if (!observes_register_access_)
       return;
-    if (wf.memory_wait_checks_enabled() && wf.memory_wait_shadow().pending(reg, true))
-      check_active_memory_wait(reg, ~uint64_t{0}, 0xf, true);
     if (observes_scalar_register_writes_)
       observe_scalar_register_write(wf, reg);
   }
@@ -859,11 +894,6 @@ public:
     if (!observes_register_access_)
       return;
     if (wf && lane_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1)) {
-      if (wf->memory_wait_checks_enabled() &&
-          wf->memory_wait_shadow().test(reg_idx - wf->vgpr_alloc().base))
-        check_active_memory_wait(
-            {RegClass::VGPR, static_cast<uint16_t>(reg_idx - wf->vgpr_alloc().base), 1}, lane_mask,
-            byte_mask, false);
       if (observes_vgpr_reads_)
         observe_vgpr_read(wf, reg_idx, lane_mask, byte_mask);
     }
@@ -879,11 +909,6 @@ public:
     if (wf)
       lane_mask &= wf->vgpr_write_mask();
     if (wf && lane_mask != 0 && byte_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1)) {
-      if (wf->memory_wait_checks_enabled() &&
-          wf->memory_wait_shadow().test(reg_idx - wf->vgpr_alloc().base, true))
-        check_active_memory_wait(
-            {RegClass::VGPR, static_cast<uint16_t>(reg_idx - wf->vgpr_alloc().base), 1}, lane_mask,
-            byte_mask, true);
       if (observes_vgpr_writes_)
         observe_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
     }
@@ -898,11 +923,6 @@ public:
     if (!observes_register_access_)
       return;
     if (wf && lane_mask != 0 && byte_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1)) {
-      if (wf->memory_wait_checks_enabled() &&
-          wf->memory_wait_shadow().test(reg_idx - wf->vgpr_alloc().base, true))
-        check_active_memory_wait(
-            {RegClass::VGPR, static_cast<uint16_t>(reg_idx - wf->vgpr_alloc().base), 1}, lane_mask,
-            byte_mask, true);
       if (observes_vgpr_writes_)
         observe_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
     }
@@ -1056,7 +1076,7 @@ public:
   void replace_decoder_for_test(std::unique_ptr<Decoder> decoder) {
     assert(decoder != nullptr);
     assert(!has_active_wfs());
-    decoder->enable_pool();
+    decoded_inst_cache_.clear();
     decoder_ = std::move(decoder);
   }
 
@@ -1204,6 +1224,8 @@ protected:
   uint32_t shader_engine_id_ = 0;
   uint32_t shader_engine_cu_index_ = 0;
   uint32_t scratch_slots_per_cu_ = 1;
+  uint32_t cus_per_shader_array_ = 0;
+  uint32_t shader_array_cu_id_ = 0;
   uint32_t scratch_scoreboard_base_ = 0;
   bool sram_ecc_ = false;
   const bool setreg_vgpr_msb_fixup_ = false;
@@ -1291,6 +1313,7 @@ protected:
   L1ScalarCache l1_scalar_;
   L1VectorCache l1_vector_;
   InstructionCache inst_cache_;
+  DecodedInstructionCache decoded_inst_cache_;
   /// @brief Debug attach/detach transitions seen by set_debug_active().
   std::atomic<uint64_t> inst_cache_debug_epoch_{0};
   /// @brief The epoch this CU's thread has already invalidated the I$ for.
@@ -1382,8 +1405,9 @@ protected:
   bool observes_scalar_register_writes_ = false;
   bool pool_driven_ = false;
   bool observes_memory_routing_ = false;
-  bool observes_register_access_ = config_.memory_wait_diagnostics != MemoryWaitDiagnostics::Off;
+  bool observes_register_access_ = false;
   uint64_t memory_wait_diagnostic_count_ = 0;
+  std::vector<waitcheck_detail::ClassifiedEvent> memory_wait_classification_;
   uint64_t xcnt_diagnostic_count_ = 0;
 
   /// @brief Resolve the owner of a physical SGPR from its allocation block.
@@ -1437,6 +1461,12 @@ inline bool InstructionComputeUnitView::observes_register_access() const {
   return raw_cu().observes_register_access();
 }
 inline bool InstructionComputeUnitView::debug_active() const { return raw_cu().debug_active(); }
+inline uint32_t InstructionComputeUnitView::cus_per_shader_array() const {
+  return raw_cu().cus_per_shader_array();
+}
+inline uint32_t InstructionComputeUnitView::shader_array_cu_id() const {
+  return raw_cu().shader_array_cu_id();
+}
 inline uint32_t InstructionComputeUnitView::wf_size() const { return raw_cu().wf_size(); }
 inline uint32_t InstructionComputeUnitView::sgprs_per_wf() const {
   return raw_cu().config().sgprs_per_wf;
@@ -1476,7 +1506,6 @@ inline bool InstructionComputeUnitView::observes_tensor_dma_memory_access() cons
 }
 inline void InstructionComputeUnitView::report_tensor_dma_memory_access(
     const TensorDmaMemoryAccessObservation &access) {
-  SuspendedMemoryWaitCheck observer_scope;
   raw_cu().plugin_group().onAmdgpuTensorDmaMemoryAccess(access, raw_wavefront());
 }
 

@@ -1,28 +1,23 @@
+<!-- Copyright (c) 2026 Advanced Micro Devices, Inc. -->
+<!-- SPDX-License-Identifier: MIT -->
+
 # libamdf
 
-> [!CAUTION]
-> This frontend is part of the early-access rocddi runtime infrastructure.
-> Expect implementation, packaging, deployment, and platform-qualification
-> details to move while rocddi is integrated into ROCm Systems.
-
 libamdf implements the AMDF native C ABI in Rust. Its sole public contract is
-the seven headers under `api-headers/include/amdf/`, synchronized from
-`hrx-system/libamdf` at `4aa34130de44c45d68a48575cebfd0ff0610c461` with only
-the approved AMD copyright and MIT license preamble substitution.
-The build produces `libamdf.so` and `libamdf.a`; `amdf_query_api` is the sole
-exported C entry point. `libamdf.so` is an independent preloadable API frontend
-and does not require an HSA frontend to be installed or loaded.
-
-On Linux, the shared library has SONAME `libamdf.so.0`. CMake stages it as
-`libamdf.so.0.1`, with the symlink chain `libamdf.so` → `libamdf.so.0` →
-`libamdf.so.0.1`. Cargo's internal artifact remains named `libamdf.so`.
-The static library remains `libamdf.a`.
+the eight headers under `api-headers/include/amdf/`, synchronized from
+`hrx-system/libamdf` at `bd24215e6a5d1e12570c892356fd5b343ac38a6d` with an
+AMD copyright and MIT SPDX preamble.
+The crate builds `libamdf.a`; the workspace-root shared package supplies the
+`libamdf.so` alias and the `libamdf.so.0` compatibility name. `amdf_query_api`
+is the AMDF C entry point. The shared image also exports HSA entry points, but
+loading AMDF does not initialize HSA.
 
 AMDF separates passive endpoint discovery from explicit device activation.
-An instance owns its native connections and callback allocator. Upper runtimes
+An instance owns its callback allocator and native session; PROCESS sessions
+share the library image's primary KFD connection. Upper runtimes
 own device selection, suballocation, queue pooling, packet construction,
 graphs, synchronization policy, and recovery. Native GPU mechanisms are
-provided by the [rocddi](../rocddi/README.md) layer; this frontend owns the AMDF
+provided by the owning [rocddi](../rocddi/README.md) layer; this frontend owns the AMDF
 ABI and translates it to the implementation-neutral core interface.
 
 ## Implemented services
@@ -79,7 +74,7 @@ AMDF declarations or public lifetime rules.
 
 | Object | Ownership and lifetime |
 |---|---|
-| Instance | Owns the copied host allocator and native connections; construction performs no discovery or device activation. |
+| Instance | Owns the copied host allocator and native session; construction performs no discovery or device activation. |
 | Endpoint | Query-only object borrowing its instance; caches immutable endpoint and family facts. |
 | Device | Explicitly activated execution/address domain borrowing its endpoint. |
 | Memory scope | Borrowed storage metadata embedded in its instance or endpoint. |
@@ -106,14 +101,17 @@ obligation. Enumeration's documented BUFFER_TOO_SMALL count/prefix protocol
 is the exception. Metadata uses the instance's copied allocator callbacks;
 backing uses operating-system or driver allocation mechanisms. The callbacks
 and their user data remain valid through successful instance destruction.
-There is no global allocator selector or native attachment cache.
+There is no global allocator selector. PROCESS sessions in one combined shared
+image reuse a system-allocated native KFD connection and exact DRM VM binding;
+the instance's callback allocator is not retained by that process owner.
 
-Destruction accepts a live handle by value. Success consumes it; the caller
-must discard its aliases. No caller pointer slot is cleared. Native teardown
-failure preserves cleanup ownership and progress for retry, without promising
-continued access to transport after partial cleanup. Destruction does not
-implicitly wait for completion. Callers serialize destruction against other
-uses according to the imported headers.
+Destruction accepts a live handle by value and never clears the caller's
+pointer slot. An API-domain BUSY preflight leaves the affected queue or parent
+live. Memory and queue destruction consume their handles after preflight, even
+when native cleanup fails; unreleased native dependencies remain as leaks.
+Instance and device cleanup retains ownership for retry where their contracts
+specify it. Destruction does not implicitly wait for completion. Callers
+serialize destruction against other uses according to the imported headers.
 
 If ambiguous native cleanup still retains callback-backed metadata, instance
 destruction fails and preserves the remaining native owners. The caller keeps
@@ -124,20 +122,22 @@ PROCESS native lifetime permits kernel-owned process state to survive instance
 destruction. INSTANCE requires library-owned native state to be released with
 the instance. On KFD UAPI 1.19 or newer, this provider selects an
 instance-owned secondary KFD context and supports GPU activation under both
-lifetimes. Secondary contexts do not support USERPTR registration.
+lifetimes. Secondary KFD contexts do not use KFD USERPTR registration;
+INSTANCE GPU registration maps DRM GEM USERPTR in the acquired render VM.
 
 On the KFD provider, first-device activation acquires and publishes the retained
 VM owner, then enables the KFD runtime before publishing the public device.
 Runtime activation is serialized across concurrent callers. Recreating that
 same device or activating another device acquires or reuses its distinct VM
 binding under the same serialization. Queue creation rechecks runtime admission
-before acquiring queue backing. Shutdown closes every retained VM binding,
-disables the runtime, and then closes KFD; a failed step retains the remaining
-state for retry. The backend rejects inherited native work before touching its
-own callbacks, files, or locks. Native `EBUSY` or `EEXIST` activation leaves a
-foreign runtime unowned and is never followed by disable; an ambiguous
-activation outcome blocks replay and requires cleanup. The current one-GPU
-test host cannot execution-qualify the second-device path.
+before acquiring queue backing. INSTANCE shutdown closes every retained VM
+binding, disables the runtime, and then closes KFD; a failed step retains the
+remaining state for retry. PROCESS shutdown disables runtime enablement after
+the last active frontend session, while retaining the KFD and exact DRM file
+for later activation in that process. The backend rejects inherited native
+work before touching its own callbacks, files, or locks. Native `EBUSY` or
+`EEXIST` activation leaves a foreign runtime unowned and is never followed by
+disable; an ambiguous activation outcome blocks replay and requires cleanup.
 
 ## Memory and queues
 
@@ -226,9 +226,14 @@ atomic submission slot. The caller supplies a single immutable command range
 with execute access in the queue device's current address domain. The provider
 does not inspect or translate its bytes. The caller keeps the command and its
 indirect dependencies live until the accepted submission retires. Cached
-status is syscall-free; an explicit wait proves retirement before storage
-reuse. An uncertain native submission becomes a failed accepted submission so
-its storage cannot be reused prematurely.
+status is syscall-free; explicit refresh polls checked progress without
+waiting, and an explicit wait can prove retirement before storage reuse. The
+requested pending count, or the default 4096, is reported as an admission
+bound, while the current native context admits one unretired command and checks
+progress once before rejecting an occupied slot. Native
+event notification is unavailable and reported as a zero type mask. An
+uncertain native submission becomes a failed accepted submission so its
+storage cannot be reused prematurely.
 
 Family and creation information specify format, producer mode, priority,
 ring bounds, and achieved capabilities. There is no native C batch-creation
@@ -253,11 +258,12 @@ prove completion of every memory access initiated by its commands.
 The caller retains application resources through their actual device-use
 lifetime, independently of queue mapping lifetime.
 
-Destruction returns BUSY before mutation while mappings remain or the
-producer and consumer frontiers differ. Once native teardown begins, failure preserves cleanup
-ownership but blocks further transport use. Retry does not replay released
-native IDs; ambiguous outcomes retain their dependencies until process
-teardown. There is no hidden completion wait.
+User-queue destruction returns BUSY before mutation while mappings remain or
+the producer and consumer frontiers differ. Kernel-queue destruction returns
+BUSY while an accepted submission remains unretired. Every other result
+consumes the public queue handle. Failed native cleanup retains unreleased
+backing and dependencies without a second release attempt. There is no hidden
+completion wait.
 
 ## Build and validation
 
@@ -280,11 +286,11 @@ The header pin and licensing are recorded in the
 [API header provenance](../../api-headers/README.md). The checked-in Rust
 bindings and C layout probe are snapshots of those headers. Header changes
 require regenerating and comparing both ABI declarations and layout values.
-The runtime workspace contains a private core and two peer API frontends:
+The rocddi layer contains a private core and two peer API frontends:
 
-- `ddi/libamdf` builds `libamdf.so` and `libamdf.a`. It owns C ABI
+- `ddi/libamdf` builds `libamdf.a`. It owns C ABI
   validation, the negotiated tables, and public handle lifetimes.
-- `hsa/libhsa` builds `libhsa_runtime64.so`. It owns the HSA symbol
+- `hsa/libhsa` owns the HSA symbol
   ABI, process runtime, public handles, queues, signals, loading, and tooling
   semantics.
 - `ddi/rocddi` supplies implementation-neutral native mechanisms through
@@ -293,71 +299,25 @@ The runtime workspace contains a private core and two peer API frontends:
   and Linux KFD implementation, while `host_storage.rs` implements fallible
   callback-backed ownership.
 
+The CMake build stages both frontends in one shared image. Its AMDF and
+HSA aliases share the core's process context.
+
 Rust types are internal implementation details. Consumers use the AMDF C API.
 The HSA peer consumes the core directly and does not depend on libamdf.
+AMDF's Linux descriptor and memory imports enter through its `platform/`
+adapter. Only a Linux adapter is implemented.
 
 Validation results and their limits are recorded in [tests/README.md](tests/README.md).
 
-## Next work
+## Qualification
 
-The upstream CTS now qualifies a direct-PM4 SYSTEM-memory copy and concurrent
-device recreation in every PROCESS linkage mode. The
-[GFX1201 examples](examples/README.md) qualify a SYSTEM-memory SDMA copy, a
-private and host-visible LOCAL SDMA round trips, a registered-host SDMA copy,
-a qualified DMA-BUF subrange import/re-export SDMA copy, a scratch-backed
-AQL copy-add dispatch from SYSTEM and LOCAL memory, and GPU-produced AQL
-and SDMA queue packets through the imported tables. The LOCAL workload checks placement, exact device access,
-private-map rejection, public WC mapping, prospective and concrete directional
-cache pairs, CPU and SDMA access to public VRAM, 64 round trips, ring reuse,
-completion, results, queue status, and ordered cleanup under both lifetimes.
+The [validation record](tests/README.md) identifies the tested GFX1201
+hardware and driver, the binary used for each recorded result, and the
+remaining hardware limits. The [examples](examples/README.md) provide
+reproducible GPU workloads. The [support map](docs/api-support.md) distinguishes
+implemented requests from capabilities that remain unadvertised.
 
-The registered-host workload pins subpage-offset caller buffers with exact GPU
-permissions, preserves their host addresses, obtains independent GPU addresses,
-checks page-cover and alignment metadata, and exercises directional cache pairs.
-It completes 64 checked copies and eight ring wraps before destroying the AMDF
-objects and proving that the caller still owns usable pages.
-
-The current DMA-BUF workload exports a page-aligned subrange of shareable
-SYSTEM memory, imports it with exact READ access through an independent
-descriptor, and verifies backing identity and metadata. A child process
-attaches the same backing through a fresh instance. The parent destroys the
-source allocation, copies from the live import through SDMA, re-exports it,
-and releases every descriptor. PROCESS and INSTANCE passed this workload on
-the qualified GFX1201 host. Import remains unadvertised when the required DRM
-ioctls or backing facts are unavailable.
-
-The AQL path covers single- and multiple-producer queues, exact atomic
-reservations, a deliberately unpublished hole, independent later publication,
-MMIO doorbell ordering, an AQL barrier-AND packet ordered between dispatches,
-scratch geometry, firmware control fields, memory borrowing, and private-segment
-execution. A concurrent unbarriered control distinguishes barrier ordering from
-mere serial scheduling. Each host producer waits for its own kernel completion
-before reserving again, bounding this fixed-scratch workload to four concurrent
-dispatches. Fresh single-producer queues also execute at low, normal, and high
-priority. The recorded SDMA latency samples are observational; they establish no
-latency or jitter guarantee, and the priority checks establish no relative
-scheduling rate or fairness.
-
-Isolated read-only SDMA faults passed under both lifetimes: each reached
-sticky device loss and a fresh healthy workload completed afterward. Future
-fault runs remain deliberately disruptive and should be isolated.
-Dependency-bearing AQL barriers and barrier-OR need independent
-qualification; dynamic scratch growth is beyond the fixed-backing GPU v1
-contract. Multi-device activation and coherent SYSTEM-memory
-access are implemented and unit tested, including common-VA selection, ordered
-access records, distinct KFD device lists, repeated-consumer VM reuse,
-partial retry progress,
-device-to-device cache pairs, and dependency retention after ambiguous native
-results. The current one-GPU host cannot qualify those paths in hardware. The
-source implementation also admits LOCAL/VRAM peers only through cached direct
-XGMI or kernel-validated PCIe routes, selects the physical owner independently
-of caller order, and maps the backing through each distinct VM. Real multi-GPU
-execution remains the topology gate, followed by broader cache-pair recipes,
-kernel queues on other GPU targets, peer-device queue production,
-live reset/unplug and cross-runtime stress, AArch64 GPU/cache execution, and
-additional GPU targets. Cached loss publication, inherited-process rejection,
-runtime non-interference, ambiguous cleanup, and the AArch64 source build are
-covered without claiming those hardware gates.
-
-The [alignment audit](docs/alignment-audit.md) records contract checks, planning
-disposition, and verification performed after adopting AMDF.
+The workspace-root shared package supports primary GPU activation through both public ABIs
+in one process. The separately linked AMDF static archive has its own rocddi
+process state. Only the Linux KFD/DRM backend is implemented; GPU execution
+has been qualified on one x86-64 GFX1201 host.

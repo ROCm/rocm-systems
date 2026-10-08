@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Regression coverage for host transition recipes, independent of GPU access.
 #![allow(clippy::unwrap_used, clippy::cast_possible_truncation)]
 use super::*;
@@ -968,7 +971,7 @@ fn single_owner_wc_local_sdma_and_aql_pairs_are_qualified() {
     let family = amdf_queue_family_info_t {
         command_type: AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA,
         format_version: AMDF_GPU_SDMA_QUEUE_FORMAT_VERSION_1,
-        format_features: AMDF_GPU_SDMA_FORMAT_FEATURE_GCR
+        format_features: AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR
             | AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM,
         cache_operations: AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM
             | AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM,
