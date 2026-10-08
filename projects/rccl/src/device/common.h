@@ -532,8 +532,6 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   const int tid = threadIdx.x;
   int tn = blockDim.x;
 #ifdef ENABLE_WARP_SPEED
-  int total = 0, y;
-  int num = MAXCHANNELS / CHANNELS_PER_MASK_WORD > 0 ? MAXCHANNELS / CHANNELS_PER_MASK_WORD : 1;
   int warpCount = tn / WARP_SIZE;
   int localWarpId = tid / WARP_SIZE;
   int globalWarpId = (warpCount * blockIdx.x) + localWarpId;
@@ -641,24 +639,16 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
 
 #ifdef ENABLE_WARP_SPEED
   // Determine per-warp channel assignment for WarpSpeed enablement
-  total = 0;
   if (ncclShmem.warpComm ==
       1) {  // If warpComm is enabled, assign warps to channels that have the corresponding channel mask enabled
     ncclShmem.warpChannelId[localWarpId] = -1;
     __syncthreads();
-    for (int i = 0; i < num; i++) {
-      if (args->channelMask.masks[i] & (1ull << laneId)) {
-        y = __popcll(args->channelMask.masks[i] & ((1ull << laneId) - 1));
-        y = total + y;
-        if (globalWarpId == y) {
-          // Same fix as the non-WS path: channelId is the absolute bit
-          // position (i*CHANNELS_PER_MASK_WORD + laneId), not total bits
-          // seen so far.
-          ncclShmem.warpChannelId[localWarpId] = laneId + i * CHANNELS_PER_MASK_WORD;
-          break;
-        }
+    {
+      // Same lookup as the blockIdx path, so wave32 also checks bit WARP_SIZE + laneId (channels 32-63 of each word).
+      int warpChannelId = ncclChannelMaskNthChannelId(args->channelMask, globalWarpId, laneId);
+      if (warpChannelId >= 0) {
+        ncclShmem.warpChannelId[localWarpId] = warpChannelId;
       }
-      total = total + __popcll(args->channelMask.masks[i]);
     }
     __syncthreads();
     if (ncclShmem.warpChannelId[localWarpId] >= 0) {

@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Block n must get the n-th set bit of the mask. Wave32 runs the WARP_SIZE + lane path; wave64 is a control.
+// Block or warp n must get the n-th set bit of the mask. Wave32 runs the WARP_SIZE + lane path; wave64 is a control.
 
 #include "DeviceTestBase.hpp"
 
@@ -47,9 +47,37 @@ __global__ void kernelBlockToChannel(channelMasks mask, int* channelIds, int* ow
   }
 }
 
+// Mirrors the ENABLE_WARP_SPEED per-warp lookup in ncclKernelMain.
+__global__ void kernelWarpToChannel(channelMasks mask, int* channelIds, int* owners, int* deviceWarpSize) {
+  __shared__ int warpChannelId[kThreadsPerBlock / 32];
+  __shared__ int warpOwners[kThreadsPerBlock / 32];
+  const int warpCount = blockDim.x / WARP_SIZE;
+  const int localWarpId = threadIdx.x / WARP_SIZE;
+  const int globalWarpId = warpCount * blockIdx.x + localWarpId;
+  const int laneId = threadIdx.x % WARP_SIZE;
+  if (laneId == 0) {
+    warpChannelId[localWarpId] = -1;
+    warpOwners[localWarpId] = 0;
+  }
+  __syncthreads();
+  int id = ncclChannelMaskNthChannelId(mask, globalWarpId, laneId);
+  if (id >= 0) {
+    warpChannelId[localWarpId] = id;
+    atomicAdd(&warpOwners[localWarpId], 1);
+  }
+  __syncthreads();
+  if (laneId == 0) {
+    channelIds[globalWarpId] = warpChannelId[localWarpId];
+    owners[globalWarpId] = warpOwners[localWarpId];
+    if (globalWarpId == 0) {
+      *deviceWarpSize = WARP_SIZE;
+    }
+  }
+}
+
 struct MaskCase {
   std::string name;
-  std::vector<int> channels;  // Ascending; block n must map to channels[n].
+  std::vector<int> channels;  // Ascending; block or warp n must map to channels[n].
 };
 
 // Names the failing case instead of dumping its raw bytes.
@@ -89,7 +117,7 @@ std::vector<MaskCase> MaskCases() {
 std::string Mismatches(const std::vector<int>& want, const std::vector<int>& got, const std::vector<int>& owners) {
   std::ostringstream report;
   int bad = 0;
-  for (size_t s = 0; s <= want.size(); s++) {
+  for (size_t s = 0; s < got.size(); s++) {
     const int wantId = s < want.size() ? want[s] : -1;
     const int wantOwners = s < want.size() ? 1 : 0;
     if (got[s] != wantId || owners[s] != wantOwners) {
@@ -102,7 +130,7 @@ std::string Mismatches(const std::vector<int>& want, const std::vector<int>& got
   if (bad == 0) {
     return "";
   }
-  return std::to_string(bad) + " of " + std::to_string(want.size() + 1) + " slots wrong:" + report.str();
+  return std::to_string(bad) + " of " + std::to_string(got.size()) + " slots wrong:" + report.str();
 }
 
 }  // namespace
@@ -116,6 +144,14 @@ protected:
     EXPECT_EQ(hipDeviceGetAttribute(&warpSize, hipDeviceAttributeWarpSize, device), hipSuccess);
     return warpSize;
   }
+
+  // A wave32 GPU must run the wave32 code object, else the WARP_SIZE + lane path is not what was tested.
+  void ExpectCompiledWarpSize(const DeviceBuffer<int>& deviceWarpSize) {
+    const int compiledWarpSize = deviceWarpSize.download();
+    RecordProperty("compiledWarpSize", compiledWarpSize);
+    std::cout << "[ INFO     ] device code WARP_SIZE " << compiledWarpSize << std::endl;
+    ASSERT_EQ(compiledWarpSize, HostWarpSize());
+  }
 };
 
 TEST_P(ChannelMaskMapTest, BlockMapsToNthSetBit) {
@@ -126,11 +162,21 @@ TEST_P(ChannelMaskMapTest, BlockMapsToNthSetBit) {
   kernelBlockToChannel<<<slots, kThreadsPerBlock>>>(MaskOf(want), channelIds.ptr, owners.ptr, deviceWarpSize.ptr);
   syncAndCheck();
 
-  // A wave32 GPU must run the wave32 code object, else the WARP_SIZE + lane path is not what was tested.
-  const int compiledWarpSize = deviceWarpSize.download();
-  RecordProperty("compiledWarpSize", compiledWarpSize);
-  std::cout << "[ INFO     ] device code WARP_SIZE " << compiledWarpSize << std::endl;
-  ASSERT_EQ(compiledWarpSize, HostWarpSize());
+  ASSERT_NO_FATAL_FAILURE(ExpectCompiledWarpSize(deviceWarpSize));
+  EXPECT_EQ(Mismatches(want, channelIds.copyTo(), owners.copyTo()), "") << "warpSize " << HostWarpSize();
+}
+
+TEST_P(ChannelMaskMapTest, WarpMapsToNthSetBit) {
+  const std::vector<int>& want = GetParam().channels;
+  const int warpsPerBlock = kThreadsPerBlock / HostWarpSize();
+  const int blocks = static_cast<int>(want.size()) / warpsPerBlock + 1;  // At least one spare warp at the end.
+  const int slots = blocks * warpsPerBlock;
+  DeviceBuffer<int> channelIds(slots), owners(slots), deviceWarpSize(1);
+
+  kernelWarpToChannel<<<blocks, kThreadsPerBlock>>>(MaskOf(want), channelIds.ptr, owners.ptr, deviceWarpSize.ptr);
+  syncAndCheck();
+
+  ASSERT_NO_FATAL_FAILURE(ExpectCompiledWarpSize(deviceWarpSize));
   EXPECT_EQ(Mismatches(want, channelIds.copyTo(), owners.copyTo()), "") << "warpSize " << HostWarpSize();
 }
 
