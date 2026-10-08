@@ -62,7 +62,9 @@ def tarball_urls(channel: str) -> tuple[str, str]:
         base = TARBALL_CHANNELS[channel]
     except KeyError:
         known = ", ".join(sorted(TARBALL_CHANNELS))
-        raise ValueError(f"unknown tarball channel {channel!r}; expected {known}") from None
+        raise ValueError(
+            f"unknown tarball channel {channel!r}; expected {known}"
+        ) from None
     return base + "/", base
 
 

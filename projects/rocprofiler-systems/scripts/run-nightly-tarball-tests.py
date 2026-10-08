@@ -24,7 +24,6 @@ if str(_SCRIPTS) not in sys.path:
 from rocprof_sys_nightly.cli import main  # noqa: E402
 from rocprof_sys_nightly.command import die, emit  # noqa: E402
 
-
 if __name__ == "__main__":
     try:
         raise SystemExit(main())

@@ -203,7 +203,7 @@ def make_rocm_env(base_env: dict, rocm_dir: Path) -> dict:
     # Make git abort quickly instead of hanging forever when a compute node has no
     # egress (the common cluster case). Abort if <1 KB/s for 30s.
     env.setdefault("GIT_HTTP_LOW_SPEED_LIMIT", "1000")
-    env.setdefault("GIT_HTTP_LOW_SPEED_TIME", "30")
+    env.setdefault("GIT_HTTP_LOW_SPEED_TIME", "300")
 
     env["PATH"] = os.pathsep.join(bins + path).rstrip(os.pathsep)
     env["LD_LIBRARY_PATH"] = os.pathsep.join(libs + ld_library_path).rstrip(os.pathsep)

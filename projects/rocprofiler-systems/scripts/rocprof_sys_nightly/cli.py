@@ -502,7 +502,9 @@ def prepare_rocm(ctx: RunContext) -> None:
             facts["tests_tarball"] = tests_name
             facts["tests_tarball_url"] = tests_url
             if dist_current and current_tests_tarball(workdir) == tests_name:
-                log(f"Tests tarball already current ({tests_name}); reusing extracted files.")
+                log(
+                    f"Tests tarball already current ({tests_name}); reusing extracted files."
+                )
             else:
                 log(f"Selected tests tarball: {tests_name}")
                 log(f"URL: {tests_url}")

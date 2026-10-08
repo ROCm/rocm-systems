@@ -22,7 +22,10 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 from rocprof_sys_nightly.cli import main  # noqa: E402
-from rocprof_sys_nightly.constants import MULTIARCH_VARIANT, tarball_selection  # noqa: E402
+from rocprof_sys_nightly.constants import (
+    MULTIARCH_VARIANT,
+    tarball_selection,
+)  # noqa: E402
 from rocprof_sys_nightly.environment import make_rocm_env  # noqa: E402
 from rocprof_sys_nightly.gpu import (  # noqa: E402
     _gfx_from_kfd_version,

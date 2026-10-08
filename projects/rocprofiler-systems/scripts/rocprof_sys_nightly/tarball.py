@@ -339,12 +339,7 @@ def _rocm_version_matches(
     if requested == full_version:
         return True
     nightly = re.fullmatch(r"\d+\.\d+\.\d+a(\d{8})", full_version)
-    if (
-        date_int is None
-        and nightly
-        and requested.isdigit()
-        and len(requested) == 8
-    ):
+    if date_int is None and nightly and requested.isdigit() and len(requested) == 8:
         date_int = int(nightly.group(1))
     if (
         requested.isdigit()
