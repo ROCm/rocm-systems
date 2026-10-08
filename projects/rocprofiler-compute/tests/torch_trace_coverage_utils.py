@@ -1475,15 +1475,17 @@ def _register_bulk_unary_float_builders() -> None:
         "reciprocal", "rsqrt", "sqrt", "square",
         # rounding / sign / fractional
         "ceil", "floor", "trunc", "round", "neg", "frac", "sgn", "sign",
-        "positive",
+        "signbit", "positive",
         # gamma / Bessel-ish
         "digamma", "erf", "erfc", "erfinv", "i0", "lgamma",
         # complex / angle helpers
         "angle", "conj_physical",
+        # predicates (BoolTensor)
+        "isfinite", "isinf", "isnan", "isneginf", "isposinf", "isreal",
         # angle conversion
         "deg2rad", "rad2deg",
         # activations
-        "elu", "gelu", "hardshrink", "hardsigmoid", "hardswish",
+        "elu", "gelu", "glu", "hardshrink", "hardsigmoid", "hardswish",
         "hardtanh", "leaky_relu", "mish", "relu", "sigmoid", "silu",
         "softplus", "softshrink",
     )
@@ -3828,7 +3830,6 @@ _KNOWN_UNARY_FLOAT_ELEMENTWISE: frozenset = frozenset({
     "round",
     "sgn",
     "sign",
-    "signbit",
     "trunc",
     "positive",
     # gamma / bessel-ish
@@ -3838,17 +3839,17 @@ _KNOWN_UNARY_FLOAT_ELEMENTWISE: frozenset = frozenset({
     "erfinv",
     "i0",
     "lgamma",
-    "polygamma",
     # complex / angle
     "angle",
     "conj_physical",
-    # predicates → BoolTensor
+    # predicates -> BoolTensor
     "isfinite",
     "isinf",
     "isnan",
     "isneginf",
     "isposinf",
     "isreal",
+    "signbit",
     # angle conversion
     "deg2rad",
     "rad2deg",
@@ -3867,9 +3868,6 @@ _KNOWN_UNARY_FLOAT_ELEMENTWISE: frozenset = frozenset({
     "silu",
     "softplus",
     "softshrink",
-    "threshold",
-    # other
-    "nonzero",
 })
 
 _KNOWN_WHOLE_TENSOR_REDUCTIONS: frozenset = frozenset({
