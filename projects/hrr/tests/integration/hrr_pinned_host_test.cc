@@ -1685,6 +1685,24 @@ std::pair<int, std::string> replay(
   return {ret, proc.getOutput()};
 }
 
+// A wave held on a stream wait that the host or a later call releases can be
+// preempted only with compute wave save/restore. With amdgpu.cwsr_enable=0 a
+// queue remap during the wait times out after queue_preemption_timeout_ms and
+// KFD reports "GPU Hang"; the plain HIP workloads hang there without HRR.
+bool cwsr_disabled() {
+#ifdef __linux__
+  std::ifstream f("/sys/module/amdgpu/parameters/cwsr_enable");
+  int v = 1;
+  return (f >> v) && v == 0;
+#else
+  return false;
+#endif
+}
+
+constexpr const char* kNoCwsr =
+    "amdgpu.cwsr_enable=0: a wave held on a stream wait cannot be preempted, so the "
+    "workload hangs the GPU with or without HRR";
+
 void capture_pinned(const fs::path& cap,
                     const std::vector<std::pair<std::string, std::string>>& env = {}) {
   capture_case(kDirect, cap, env);
@@ -2394,6 +2412,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_NullStreamDrainedFirst) {
 // for restore, and the read must see them.
 // ---------------------------------------------------------------------------
 HRR_TEST_CASE(Unit_HRR_PinnedHost_RestoreWaitsOnStream) {
+  if (cwsr_disabled()) SKIP(kNoCwsr);
   ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_batch_wait.hrr");
   capture_case("Unit_HRR_PinnedHost_BatchWait_Direct", cap.path);
   const fs::path archive = hrr_single_process_archive(cap.path);
@@ -2436,6 +2455,7 @@ namespace {
 // stream, so capture must find the launch ordered: reading the legacy stream
 // instead sees blocking stream A still waiting.
 void no_null_barrier(const char* variant) {
+  if (cwsr_disabled()) SKIP(kNoCwsr);
   INFO("HRR_PINNED_VARIANT=" << variant);
   ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_no_null_barrier.hrr");
   capture_case("Unit_HRR_PinnedHost_NoNullBarrier_Direct", cap.path,
@@ -3223,6 +3243,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceReset) {
 // releases the stream comes after the free.
 // ---------------------------------------------------------------------------
 HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceFreeHeld) {
+  if (cwsr_disabled()) SKIP(kNoCwsr);
   cross_device_free("4",
                     "is not freed: a snapshot restore queued for it has not run after "
                     "1000 ms",

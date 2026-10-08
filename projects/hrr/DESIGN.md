@@ -769,7 +769,11 @@ the old buffer that the runtime does not know. The six cross-device cases need
 two devices and skip with fewer, which is every runner that pins one GPU: a
 free, an unregister, a `hipFree`, a `hipDeviceReset` of the allocating device,
 no free at all (the summary and the `--kernel-filter` warm-up wait), and a free
-whose restore waits for a later event (the bounded wait and the leak). With two
+whose restore waits for a later event (the bounded wait and the leak). The
+cases that hold a stream on a wait the host or a later call releases (the
+restore on a held stream, the three null-barrier cases and the held free) skip
+when `amdgpu.cwsr_enable=0`: such a wave cannot be preempted there, and the
+plain workload hangs the GPU without HRR. With two
 devices the reset frees no pinned host memory, so the reset case shows only that
 replay waits before it. Another case captures and replays with only the first
 visible GPU, points a record after a reset at the `hipHostMalloc` buffer the
