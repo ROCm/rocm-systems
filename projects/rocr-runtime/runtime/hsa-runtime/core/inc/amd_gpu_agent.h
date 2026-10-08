@@ -659,6 +659,30 @@ class GpuAgent : public GpuAgentInt {
   // conversions establish the offset too.
   int64_t ClockEpochOffsetLocked(uint64_t raw_tick);
 
+  // @brief Packet-clock epoch offset to subtract from @p tick before
+  // interpolation, resolving it from the platform's detection path.  Assumes
+  // ::t1_lock_ is held.
+  int64_t EpochOffsetForTickLocked(uint64_t tick);
+
+  // @brief Re-synchronize the correlated clock pair if ::tick lies beyond the
+  // bound within which extrapolation from that pair stays accurate.  At most
+  // one re-synchronization is performed: if the tick is still out of bounds
+  // afterwards the GPU tick itself disagrees with the CPU clock, and further
+  // syncing cannot bring it into range.  Assumes ::t1_lock_ is held.
+  void SyncClocksForTick(uint64_t tick);
+
+  // @brief Translate a GPU tick to a system tick using the current correlated
+  // clock pair, without re-synchronizing it.  Assumes ::t1_lock_ is held and
+  // that any packet-clock epoch offset has already been removed from @p tick.
+  // Keeping the pair fixed is what lets two ticks translated back to back share
+  // one calibration, so an interval measured across them cannot invert.
+  uint64_t TranslateTimeLocked(uint64_t tick);
+
+  // @brief Translate a start/end GPU tick pair against a single correlated
+  // clock pair, under one hold of ::t1_lock_.
+  void TranslateTimePair(uint64_t start_tick, uint64_t end_tick, uint64_t& start_out,
+                         uint64_t& end_out);
+
   // @brief Binds the second-level trap handler to this node.
   void BindTrapHandler();
 
