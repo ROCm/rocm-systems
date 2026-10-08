@@ -721,11 +721,12 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapRunsOutsideTheLock) {
 
 HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedRangeTakenBack) {
   // hipFreeAsync defers the unmap, and a stream-ordered pool hands the block
-  // straight back, for a request up to 12.5% smaller in bytes too; hipMalloc
-  // only for the same pages. The allocation recorded there takes the mapping back as it is: no device-wide wait for
-  // an unmap the recording never had. The pool reused the block only once
-  // the free was done, or ordered after it, so on another stream the
-  // allocation is ordered after the free's event first.
+  // straight back, also when it is up to 9/8 of the request in bytes;
+  // hipMalloc only for the same pages. The allocation recorded there takes
+  // the mapping back as it is: no device-wide wait for an unmap the recording
+  // never had. The pool reused the block only once the free was done, or
+  // ordered after it, so on another stream the allocation is ordered after
+  // the free's event first.
   reset_events();
   hrr::VaPlacement pl;
   pl.set_vmm_ops_for_test(event_ops());
@@ -782,7 +783,7 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedRangeTakenBack) {
     REQUIRE(pl.fallbacks() == 0);
     REQUIRE(g_destroyed == 1);
   }
-  SECTION("up to 12.5% smaller from the same page keeps the whole mapping") {
+  SECTION("a block up to 9/8 of the request from the same page keeps the whole mapping") {
     const uint64_t C = B + 4 * P;
     REQUIRE(pl.map_at(C, 9 * P, 0, "hipMallocAsync", &live, false, &S1));
     REQUIRE(pl.unmap_async(at(C), S1, /*capturing=*/false));
@@ -794,6 +795,21 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedRangeTakenBack) {
     REQUIRE(g_unmaps == 1);
     REQUIRE(g_unmap_bytes == 9 * P);
   }
+  SECTION("taken back, it keeps the first allocation's size") {
+    // 9 pages, then 8 taken back, freed again: 7.5 pages is within 9/8 of
+    // the 8 pages but not of the 9 the pool's block still has.
+    const uint64_t C = B + 4 * P;
+    REQUIRE(pl.map_at(C, 9 * P, 0, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(pl.unmap_async(at(C), S1, /*capturing=*/false));
+    REQUIRE(pl.map_at(C, 8 * P, 0, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(pl.unmap_async(at(C), S1, /*capturing=*/false));
+    REQUIRE(pl.map_at(C, 7 * P + P / 2, 0, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(live == at(C));
+    REQUIRE(g_unmaps == 1);
+    REQUIRE(g_unmap_bytes == 9 * P);
+    REQUIRE(g_maps == 3);
+  }
   SECTION("1/8 larger in bytes, a page more: taken back") {
     // 4.5 KiB freed, 4 KiB asked for: the pool reuses the block, although
     // it spans two pages and the request one.
@@ -801,8 +817,11 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedRangeTakenBack) {
     REQUIRE(pl.map_at(C, P + P / 8, 0, "hipMallocAsync", &live, false, &S1));
     REQUIRE(pl.unmap_async(at(C), S1, /*capturing=*/false));
     REQUIRE(pl.map_at(C, P, 0, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(live == at(C));
     REQUIRE(g_maps == 2);
     REQUIRE(g_unmaps == 0);
+    REQUIRE(g_waits.empty());
+    REQUIRE(g_destroyed == 1);
   }
   SECTION("10 pages freed, 8 asked for: unmapped, then mapped") {
     const uint64_t C = B + 4 * P;
@@ -821,7 +840,7 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedRangeTakenBack) {
     REQUIRE(g_maps == 2);
   }
   SECTION("hipMalloc smaller: not taken back") {
-    // hipMalloc does not come from the pool, so only the same size is
+    // hipMalloc does not come from the pool, so only the same pages are
     // taken back.
     const uint64_t C = B + 4 * P;
     REQUIRE(pl.map_at(C, 9 * P, 0, "hipMallocAsync", &live, false, &S1));

@@ -1115,13 +1115,13 @@ An allocation over a deferred mapping is handled three ways:
 - From the same first page on the same device, and the same size in pages: the
   allocation takes the mapping back as it is. A stream-ordered allocation also
   takes back a mapping it fits in whose recorded size is up to 9/8 of its own in
-  bytes, keeping the mapping's end and size, as the pool hands a block back for a
-  request up to 12.5% smaller and keeps the whole block. `hipMalloc`, `hipExtMallocWithFlags` and a region segment do not
-  come from that pool, so they take back only the same size; keeping a larger
-  mapping would make a later allocation in its tail fall back. No unmap and no
-  new map. The recording's pool reused the block only once
-  its free was done, or with the new stream ordered after it, so replay orders
-  the allocation after the free:
+  bytes, keeping the mapping's end and size, as the pool hands back a freed block
+  up to 9/8 of the request in bytes and keeps the whole block. `hipMalloc`,
+  `hipExtMallocWithFlags` and a region segment do not come from that pool, so
+  they take back only the same size; keeping a larger mapping would make a later
+  allocation in its tail fall back. No unmap and no new map. The recording's
+  pool reused the block only once its free was done, or with the new stream
+  ordered after it, so replay orders the allocation after the free:
   - a `hipMallocAsync` or `hipMallocFromPoolAsync` on the stream the
     `hipFreeAsync` was made on needs nothing more, while another stream
     captures too;
@@ -1175,8 +1175,9 @@ What deferral costs:
 - **Memory.** A deferred mapping keeps its physical memory until it drains. A
   trace that frees with `hipFreeAsync` and only ever synchronizes streams holds
   every such allocation, except those taken back (same first page and same
-  pages, or for a stream-ordered allocation up to 1/8 smaller in bytes), until the device runs out of memory, which then drains them, or
-  until teardown. The recording's pool reused that memory at once.
+  pages, or for a stream-ordered allocation a freed block up to 9/8 of the
+  request in bytes), until the device runs out of memory, which then drains
+  them, or until teardown. The recording's pool reused that memory at once.
 - **Events.** Each placed `hipFreeAsync` made with no capture open keeps one
   event until its mapping is taken back or unmapped. In a trace that only ever
   synchronizes streams they pile up with the mappings they belong to; the cost
@@ -1284,8 +1285,8 @@ hipPointerGetAttributes <recorded> -> type=<t> device=<d> devicePointer=<live>`
 at each replayed `hipPointerGetAttributes`.
 
 **Not covered by tests.** These paths have no test, because the GPU cannot be
-made to reach them on purpose, no recording can reach them, or the CI runners
-have one GPU:
+made to reach them on purpose, no recording can reach them, the CI runners
+have one GPU, or the effect is not observed:
 
 - the out-of-memory retry at each call site (`hipMalloc`, `hipMallocManaged`,
   `hipExtMallocWithFlags`, `hipMallocAsync`, `hipMallocFromPoolAsync`, region
@@ -1298,7 +1299,11 @@ have one GPU:
   `hrr_track_capture`: a capture on the null stream fails and is never recorded;
 - the null-stream guard in `hrr_stream_capturing`: reachable through
   `hipMallocFromPoolAsync` on the null stream during another stream's global
-  capture; its only effect is a sticky error, which no test reads;
+  capture; without it, the only effect would be a sticky error, which no test
+  reads;
+- the `hipGetLastError` in `hrr_stream_device` that clears the error a failed
+  `hipStreamGetDevice` leaves: the stand-ins never fail, and no test reads the
+  sticky error;
 - the per-thread keying as wired into the capture and `hipStreamDestroy`
   handlers: `PerThreadCapturesKeptApart` tests `hrr_capture_key` and the capture
   flag, and `Lifetimes` runs its per-thread capture on one thread, where it

@@ -592,10 +592,10 @@ void hold_free_pieces(uint64_t b, uint64_t e, const std::vector<VaRange>& occupi
                       std::vector<VaRange>* out);
 
 // A placed mapping: page range [key, end), the recorded allocation base, its
-// physical handle, the device it lives on and its size in bytes (`bytes`, the
-// first allocation's when taken back, as the pool keeps a block's size).
-// `unmapping` marks a freed one
-// whose hipMemUnmap is running outside the lock: it still occupies its range.
+// physical handle, the device it lives on and its size in bytes (`bytes`; when
+// taken back, the larger of the first allocation's and the new one's, as the
+// pool keeps a block's size). `unmapping` marks a freed one whose hipMemUnmap
+// is running outside the lock: it still occupies its range.
 // A mapping freed with hipFreeAsync remembers the live stream it was freed on
 // and that stream's device (`on_stream`, `stream`, `stream_device`: every
 // device's null stream has the same handle) and, when no capture was open, an
@@ -697,9 +697,9 @@ class VaPlacement {
     // on the same device and ends where the allocation's pages do is taken
     // back as it is: no unmap, no new map. A stream-ordered allocation also
     // takes back one it fits in that is up to 9/8 of its own size in bytes,
-    // keeping the mapping's end, as the pool hands a block back for a request
-    // up to 12.5% smaller (FindMemory). The
-    // allocation is ordered after the free first:
+    // keeping the mapping's end, as the pool hands back a freed block up to
+    // 9/8 of the request in bytes (FindMemory). The allocation is ordered
+    // after the free first:
     //  - freed by hipFreeAsync on `stream` itself: nothing to wait for;
     //  - otherwise, with an event recorded after the free and no capture
     //    open: `stream` waits for that event, or the host does for an

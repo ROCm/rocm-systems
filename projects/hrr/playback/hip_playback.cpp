@@ -3296,7 +3296,8 @@ hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
     // unmapping it, ordered after this free when it is on another stream
     // (VaPlacement::map_at). One that only overlaps it unmaps it first, unless
     // a capture is open, in which case that allocation falls back. CLR accepts
-    // a captured hipFreeAsync only of a graph allocation, which is never placed.
+    // a captured hipFreeAsync only of a graph allocation, which is never placed,
+    // and the recorder writes a hipFreeAsync only when it succeeded.
     hrr::VaPlacement* placing = hrr_placing(ctx);
     if (placing && placing->unmap_async(live, stream, ctx.in_graph_capture.any())) {
         ctx.remove_alloc(a->dev_ptr);

@@ -470,15 +470,15 @@ bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
             auto it = deferred_.find(freed[0]);
             const PlacedMapping& d = it->second;
             // Freed from the same first page on this device, and the same
-            // pages. A stream-ordered pool also hands a block back for a
-            // request up to 12.5% smaller in bytes (FindMemory), so a
+            // pages. A stream-ordered pool also hands back a freed block up
+            // to 9/8 of the request in bytes (FindMemory), so a
             // stream-ordered allocation takes back a mapping it fits in whose
             // recorded size is up to 9/8 of its own. An allocation with no
             // stream does not come from that pool, and keeping a larger
             // mapping would only make a later allocation in its tail fall
-            // back. Take the mapping back as it is, keeping its end and size,
-            // as the pool kept the whole block. That needs no unmap, so
-            // no device-wide wait. The recording's pool reused the block only
+            // back. Take the mapping back as it is, keeping its end and the
+            // larger of the two sizes, as the pool kept the whole block. That
+            // needs no unmap, so no device-wide wait. The recording's pool reused the block only
             // once the free was done, or ordered after it, so replay orders
             // the allocation after the free too: nothing to do on the stream
             // that freed it; on another, or for an allocation with no stream,
@@ -493,6 +493,7 @@ bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
                 PlacedMapping m = d;
                 const hipEvent_t ev = d.event;
                 m.rec = rec;
+                m.bytes = std::max(d.bytes, uint64_t(size));
                 m.on_stream = false;
                 m.stream = nullptr;
                 m.stream_device = -1;
