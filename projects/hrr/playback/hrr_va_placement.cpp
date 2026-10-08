@@ -109,8 +109,16 @@ hipError_t hrr_vmm_map_into(void* va, size_t len, int device,
     prop.location.type = hipMemLocationTypeDevice;
     prop.location.id   = device;
 
+    // hipMemCreate takes its memory from the current device and only records
+    // location.id as the owner, so make `device` current around it.
+    int cur = -1;
+    if (hipGetDevice(&cur) != hipSuccess) cur = -1;
+    if (cur >= 0 && cur != device) {
+        if (const hipError_t sr = hipSetDevice(device); sr != hipSuccess) return sr;
+    }
     hipMemGenericAllocationHandle_t handle{};
     hipError_t r = hipMemCreate(&handle, len, &prop, 0);
+    if (cur >= 0 && cur != device) (void)hipSetDevice(cur);
     if (r != hipSuccess) return r;
 
     r = hipMemMap(va, len, 0, handle, 0);

@@ -1180,7 +1180,9 @@ running.
 
 **Several GPUs.** A placed allocation is backed on the device it was made on: the
 current device for `hipMalloc`, the stream's device for `hipMallocAsync`, and the
-pool's location for `hipMallocFromPoolAsync`. A pool on the host or on a device
+pool's location for `hipMallocFromPoolAsync`. `hipMemCreate` takes its memory
+from the current device and only records the location it is given as the owner,
+so replay makes that device current around the call and restores the old one. A pool on the host or on a device
 replay cannot see falls back, with the reason named. When the archive uses more
 than one device, or enables peer access, every mapping is also made accessible from
 each device that `hipDeviceCanAccessPeer` says can reach it.

@@ -1097,6 +1097,10 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_StreamOrder) {
 // ===========================================================================
 // Kernels run on device 0 only. Replay loads each code object for the device
 // current at load time, so a launch on device 1 is a separate limitation.
+namespace {
+constexpr size_t kMultiGpuBig = 256ull << 20;
+}  // namespace
+
 TEST_CASE("Unit_HRR_VaPlacement_MultiGpu_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(nullptr));
   int n = 0;
@@ -1134,6 +1138,22 @@ TEST_CASE("Unit_HRR_VaPlacement_MultiGpu_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipPointerGetAttributes(&attr, async1));
   REQUIRE(attr.device == 1);
 
+  // A large one on device 1's stream, still with device 0 current, between
+  // hipMemGetInfo calls on both devices. Replay under --verbose prints what
+  // each call says there, which shows which device's memory it took.
+  size_t free_b = 0, total_b = 0;
+  HRR_HIP_CHECK(hipSetDevice(1));
+  HRR_HIP_CHECK(hipMemGetInfo(&free_b, &total_b));
+  HRR_HIP_CHECK(hipSetDevice(0));
+  HRR_HIP_CHECK(hipMemGetInfo(&free_b, &total_b));
+  void* big1 = nullptr;
+  HRR_HIP_CHECK(hipMallocAsync(&big1, kMultiGpuBig, s1));
+  HRR_HIP_CHECK(hipStreamSynchronize(s1));
+  HRR_HIP_CHECK(hipSetDevice(1));
+  HRR_HIP_CHECK(hipMemGetInfo(&free_b, &total_b));
+  HRR_HIP_CHECK(hipSetDevice(0));
+  HRR_HIP_CHECK(hipMemGetInfo(&free_b, &total_b));
+
   // Device 0 reads its own buffer and both of device 1's through stored
   // pointers. Without peer access in replay, the last two fault.
   int** cell0 = hrr_place_check(out0, buf0, 60, nullptr);
@@ -1152,6 +1172,7 @@ TEST_CASE("Unit_HRR_VaPlacement_MultiGpu_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(cella));
   HRR_HIP_CHECK(hipFree(cell1));
   HRR_HIP_CHECK(hipFree(cell0));
+  HRR_HIP_CHECK(hipFreeAsync(big1, s1));
   HRR_HIP_CHECK(hipFreeAsync(async1, s1));
   HRR_HIP_CHECK(hipStreamSynchronize(s1));
   HRR_HIP_CHECK(hipFree(buf0));
@@ -1193,13 +1214,33 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_MultiGpu) {
   REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
   CHECK(pass >= 4);
   CHECK(fail == 0);
-  // buf1, out0, buf0, async1 and three cells.
+  // buf1, out0, buf0, async1, big1 and three cells.
   int placed = 0, fell = -1;
   REQUIRE(hrr_place_counts(out, &placed, &fell));
-  CHECK(placed >= 7);
+  CHECK(placed >= 8);
   CHECK(fell == 0);
   // The async allocation was mapped on its stream's device, not the current one.
   CHECK(out.find(hrr_place_attr_line(async1, type, 1, async1)) != std::string::npos);
+  // And its memory came from that device: hipMemCreate takes it from the
+  // current one, whatever the allocation's location says. The four
+  // hipMemGetInfo lines are device 1, device 0, before big1, then after it.
+  std::vector<std::pair<int, unsigned long long>> info;
+  const std::string tag = "[HRR] hipMemGetInfo device=";
+  for (size_t p = out.find(tag); p != std::string::npos; p = out.find(tag, p + 1)) {
+    int d = -1;
+    unsigned long long f = 0;
+    if (sscanf(out.c_str() + p + tag.size(), "%d free=%llu", &d, &f) == 2) info.push_back({d, f});
+  }
+  REQUIRE(info.size() == 4);
+  REQUIRE(info[0].first == 1);
+  REQUIRE(info[1].first == 0);
+  REQUIRE(info[2].first == 1);
+  REQUIRE(info[3].first == 0);
+  const long long took1 = static_cast<long long>(info[0].second - info[2].second);
+  const long long took0 = static_cast<long long>(info[1].second - info[3].second);
+  INFO("device 1 gave " << took1 << " bytes, device 0 " << took0);
+  CHECK(took1 >= static_cast<long long>(kMultiGpuBig));
+  CHECK(took0 < static_cast<long long>(kMultiGpuBig / 2));
 }
 
 #endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE

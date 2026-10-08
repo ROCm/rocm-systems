@@ -867,7 +867,8 @@ void hrr_track_capture(PlaybackContext& ctx, uint16_t event_type,
 // Placement's bookkeeping that is not any one handler's business: reports a
 // fallback for each allocation API placement does not place, remembers which
 // device each memory pool allocates on, and under --verbose prints what
-// hipPointerGetAttributes says about the replayed pointer.
+// hipPointerGetAttributes says about the replayed pointer and what
+// hipMemGetInfo says about the current device.
 void hrr_placement_after_event(PlaybackContext& ctx, uint16_t event_type,
                                const uint8_t* payload, size_t size);
 

@@ -2560,6 +2560,21 @@ void hrr_placement_after_event(PlaybackContext& ctx, uint16_t event_type,
         return;
     }
     switch (event_type) {
+        case HRR_API_HIPMEMGETINFO: {
+            // Which device placed memory is backed on shows only in how much
+            // each device has left.
+            if (!ctx.verbose) break;
+            int dev = -1;
+            size_t free_b = 0, total_b = 0;
+            if (hipGetDevice(&dev) != hipSuccess ||
+                hipMemGetInfo(&free_b, &total_b) != hipSuccess) {
+                (void)hipGetLastError();
+                break;
+            }
+            fprintf(stderr, "[HRR] hipMemGetInfo device=%d free=%zu total=%zu\n", dev, free_b,
+                    total_b);
+            break;
+        }
         case HRR_API_HIPPOINTERGETATTRIBUTES: {
             if (!ctx.verbose) break;
             const auto* a =
