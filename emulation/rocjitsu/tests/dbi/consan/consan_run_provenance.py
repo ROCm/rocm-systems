@@ -18,7 +18,6 @@ from consan_validation_support import (
     sha256_bytes,
 )
 
-
 CONTRACT_NAME = "run-contract.json"
 
 
@@ -40,7 +39,9 @@ def _file_record(label: str, path: Path, *, canonical_json: bool = False) -> dic
 def _source_record(root: Path) -> dict:
     resolved = root.resolve()
     head = git_output(resolved, "rev-parse", "HEAD").decode().strip()
-    status = git_output(resolved, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    status = git_output(
+        resolved, "status", "--porcelain=v1", "-z", "--untracked-files=all"
+    )
     diff = git_output(resolved, "diff", "--binary", "HEAD", "--")
     untracked_payload = bytearray()
     for entry in status.split(b"\0"):
@@ -57,7 +58,9 @@ def _source_record(root: Path) -> dict:
         "root": str(resolved),
         "head": head,
         "dirty": bool(status),
-        "worktree_sha256": sha256_bytes(status + b"\0" + diff + b"\0" + untracked_payload),
+        "worktree_sha256": sha256_bytes(
+            status + b"\0" + diff + b"\0" + untracked_payload
+        ),
     }
 
 
@@ -66,7 +69,9 @@ def _contract_payload(contract: dict) -> dict:
 
 
 def _contract_sha(contract: dict) -> str:
-    data = json.dumps(_contract_payload(contract), sort_keys=True, separators=(",", ":")).encode()
+    data = json.dumps(
+        _contract_payload(contract), sort_keys=True, separators=(",", ":")
+    ).encode()
     return sha256_bytes(data)
 
 
@@ -116,7 +121,9 @@ def initialize_contract(
     source_roots: list[Path],
 ) -> dict:
     if artifact_root.exists() and any(artifact_root.iterdir()):
-        raise ValueError("artifact root is nonempty; refusing foreign or reused evidence")
+        raise ValueError(
+            "artifact root is nonempty; refusing foreign or reused evidence"
+        )
     labels = [label for label, _ in inputs]
     if "hook" not in labels or "binary" not in labels:
         raise ValueError("run inputs must include hook and binary labels")
@@ -164,7 +171,12 @@ def summarize_contract(artifact_root: Path) -> dict:
     try:
         contract = load_contract(contract_path)
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
-        return {"schema_version": 1, "status": "rejected", "errors": [str(error)], "rows": []}
+        return {
+            "schema_version": 1,
+            "status": "rejected",
+            "errors": [str(error)],
+            "rows": [],
+        }
     errors = validate_current_contract(contract)
     declared = set(contract["declared_rows"])
     result_paths = sorted(artifact_root.glob("*/result.json"))
@@ -199,9 +211,15 @@ def summarize_contract(artifact_root: Path) -> dict:
             errors.append(f"row {name}: run_id mismatch")
         if provenance.get("contract_sha256") != contract["contract_sha256"]:
             errors.append(f"row {name}: contract hash mismatch")
-        if provenance.get("plan_canonical_sha256") != contract["files"][0]["canonical_sha256"]:
+        if (
+            provenance.get("plan_canonical_sha256")
+            != contract["files"][0]["canonical_sha256"]
+        ):
             errors.append(f"row {name}: plan hash mismatch")
-        if provenance.get("manifest_canonical_sha256") != contract["files"][1]["canonical_sha256"]:
+        if (
+            provenance.get("manifest_canonical_sha256")
+            != contract["files"][1]["canonical_sha256"]
+        ):
             errors.append(f"row {name}: manifest hash mismatch")
         if provenance.get("files") != contract["files"]:
             errors.append(f"row {name}: input file provenance mismatch")
@@ -243,15 +261,23 @@ def main() -> int:
     try:
         if args.action == "init":
             result = initialize_contract(
-                args.artifact_root.resolve(), args.plan.resolve(), args.manifest.resolve(),
-                args.input, args.source_root,
+                args.artifact_root.resolve(),
+                args.plan.resolve(),
+                args.manifest.resolve(),
+                args.input,
+                args.source_root,
             )
         else:
             result = summarize_contract(args.artifact_root.resolve())
             if args.json_out:
                 args.json_out.parent.mkdir(parents=True, exist_ok=True)
                 atomic_write_json(args.json_out, result)
-    except (OSError, subprocess.CalledProcessError, ValueError, json.JSONDecodeError) as error:
+    except (
+        OSError,
+        subprocess.CalledProcessError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as error:
         print(str(error), file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))

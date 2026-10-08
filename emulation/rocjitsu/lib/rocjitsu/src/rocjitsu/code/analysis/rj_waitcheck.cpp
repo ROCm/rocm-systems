@@ -3,8 +3,8 @@
 
 #include "rocjitsu/analysis/rj_waitcheck.h"
 
-#include "rocjitsu/code/analysis/waitcheck.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/analysis/waitcheck.h"
 
 #include <algorithm>
 #include <cstring>

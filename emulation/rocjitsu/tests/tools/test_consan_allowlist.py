@@ -8,7 +8,6 @@ import sys
 import tempfile
 import unittest
 
-
 SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 import rocjitsu_consan_allowlist as allowlist  # noqa: E402
@@ -67,9 +66,7 @@ class ConSanAllowlistTest(unittest.TestCase):
             trace = root / "run_kernel_trace.csv"
             output = root / "kernels.txt"
             _write_trace(trace, [("KERNEL_DISPATCH", "kernel_with,comma")])
-            self.assertEqual(
-                allowlist.main(["--output", str(output), str(trace)]), 0
-            )
+            self.assertEqual(allowlist.main(["--output", str(output), str(trace)]), 0)
             self.assertEqual(output.read_text(encoding="utf-8"), "kernel_with,comma\n")
 
 

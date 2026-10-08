@@ -9,19 +9,22 @@ import subprocess
 import sys
 import unittest
 
-
 DBI_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(DBI_DIR))
 from consan_run_provenance import initialize_contract, summarize_contract  # noqa: E402
-from consan_validation_support import RESULT_SCHEMA_VERSION, read_row_result  # noqa: E402
+from consan_validation_support import (
+    RESULT_SCHEMA_VERSION,
+    read_row_result,
+)  # noqa: E402
 from consan_validation_test_support import temporary_root  # noqa: E402
-
 
 RUNNER = DBI_DIR / "consan_fault_runner.py"
 
 
 class ConSanRunProvenanceTest(unittest.TestCase):
-    def fixture(self, root: Path, rows: tuple[str, ...] = ("row-a", "row-b")) -> tuple[dict, dict]:
+    def fixture(
+        self, root: Path, rows: tuple[str, ...] = ("row-a", "row-b")
+    ) -> tuple[dict, dict]:
         source = root / "source"
         source.mkdir()
         subprocess.run(["git", "init", "-q", str(source)], check=True)
@@ -29,15 +32,21 @@ class ConSanRunProvenanceTest(unittest.TestCase):
             ["git", "-C", str(source), "config", "user.email", "test@example.com"],
             check=True,
         )
-        subprocess.run(["git", "-C", str(source), "config", "user.name", "Test"], check=True)
+        subprocess.run(
+            ["git", "-C", str(source), "config", "user.name", "Test"], check=True
+        )
         (source / "tracked.txt").write_text("initial\n")
         subprocess.run(["git", "-C", str(source), "add", "tracked.txt"], check=True)
-        subprocess.run(["git", "-C", str(source), "commit", "-qm", "initial"], check=True)
+        subprocess.run(
+            ["git", "-C", str(source), "commit", "-qm", "initial"], check=True
+        )
         plan = root / "plan.json"
         manifest = root / "manifest.json"
         hook = root / "hook.so"
         binary = root / "binary"
-        plan.write_text(json.dumps({"schema_version": 1, "rows": [{"name": row} for row in rows]}))
+        plan.write_text(
+            json.dumps({"schema_version": 1, "rows": [{"name": row} for row in rows]})
+        )
         manifest.write_text(json.dumps({"schema_version": 1, "cases": []}))
         hook.write_bytes(b"hook")
         binary.write_bytes(b"binary")
@@ -108,8 +117,12 @@ class ConSanRunProvenanceTest(unittest.TestCase):
         mutations = {
             "schema": lambda result: result.update(schema_version=2),
             "run_id": lambda result: result["run_provenance"].update(run_id="foreign"),
-            "contract": lambda result: result["run_provenance"].update(contract_sha256="bad"),
-            "plan": lambda result: result["run_provenance"].update(plan_canonical_sha256="bad"),
+            "contract": lambda result: result["run_provenance"].update(
+                contract_sha256="bad"
+            ),
+            "plan": lambda result: result["run_provenance"].update(
+                plan_canonical_sha256="bad"
+            ),
             "manifest": lambda result: result["run_provenance"].update(
                 manifest_canonical_sha256="bad"
             ),
@@ -220,7 +233,9 @@ class ConSanRunProvenanceTest(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             result = read_row_result(context["artifact"], "row-a")
             self.assertEqual(result["run_provenance"]["run_id"], contract["run_id"])
-            self.assertEqual(summarize_contract(context["artifact"])["status"], "accepted")
+            self.assertEqual(
+                summarize_contract(context["artifact"])["status"], "accepted"
+            )
 
 
 if __name__ == "__main__":

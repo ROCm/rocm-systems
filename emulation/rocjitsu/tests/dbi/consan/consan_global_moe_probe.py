@@ -52,7 +52,9 @@ def main() -> None:
             )
 
     x, w1, w2, ids, weights = [a.cuda() for a in (x, w1, w2, ids, weights)]
-    inter = torch.empty(tokens * topk, intermediate, device="cuda", dtype=torch.bfloat16)
+    inter = torch.empty(
+        tokens * topk, intermediate, device="cuda", dtype=torch.bfloat16
+    )
     out = torch.empty(tokens, hidden, device="cuda", dtype=torch.bfloat16)
     invoke_stage1_warp_decode_gluon(x, w1, ids, inter, topk)
     invoke_stage2_warp_decode_gluon(inter, w2, ids, weights, out, topk)
@@ -61,15 +63,20 @@ def main() -> None:
     actual = out.cpu().float()
     atol = 0.02 * float(reference.abs().max()) + 0.01
     torch.testing.assert_close(actual, reference, atol=atol, rtol=0.0)
-    print(json.dumps({
-        "target": target,
-        "shape": [tokens, experts, hidden, intermediate, topk],
-        "oracle": "cpu-fp32-swiglu-weighted-expert-sum",
-        "atol": atol,
-        "max_abs_error": float((actual - reference).abs().max()),
-        "passed": True,
-        "scope": "production two-stage kernels, reduced shape; not E2E qualification",
-    }, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "target": target,
+                "shape": [tokens, experts, hidden, intermediate, topk],
+                "oracle": "cpu-fp32-swiglu-weighted-expert-sum",
+                "atol": atol,
+                "max_abs_error": float((actual - reference).abs().max()),
+                "passed": True,
+                "scope": "production two-stage kernels, reduced shape; not E2E qualification",
+            },
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":

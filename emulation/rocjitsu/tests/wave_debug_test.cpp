@@ -69,7 +69,7 @@ TEST(WaveDebugTest, ArchitecturesWithoutAccumulatorsDoNotAllocateAnAccumulatorBa
     WaveDebugFixture fx(arch);
     // Reject an explicitly requested accumulator bank before allocating a slot.
     EXPECT_EQ(fx.cu->dispatch_wf(0, kKernelAddr, SGPRS_PER_WF,
-                                amdgpu::WaveVgprAllocation{VGPRS_PER_WF, VGPRS_PER_WF, 1}),
+                                 amdgpu::WaveVgprAllocation{VGPRS_PER_WF, VGPRS_PER_WF, 1}),
               nullptr);
     auto *wave = fx.dispatch(kKernelAddr);
     ASSERT_NE(wave, nullptr);

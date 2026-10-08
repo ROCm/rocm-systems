@@ -49,15 +49,23 @@ def freeze(work_dir: Path, wrapper: Path, contract: dict) -> dict:
                     keys.append(key)
             if 'library-file' not in keys or 'code-object' not in keys:
                 raise ValueError(f'missing client library or code object: {ini}')
-            if sum(s.startswith('results-file=') for s in ini.read_text().splitlines()) != 1:
+            if (
+                sum(s.startswith('results-file=') for s in ini.read_text().splitlines())
+                != 1
+            ):
                 raise ValueError(f'expected one client results file: {ini}')
             for path in inputs:
                 files[str(path)] = digest(path)
             clients.append(str(ini))
     if not clients or len(set(clients)) != len(clients):
         raise ValueError('expected nonempty, distinct retained client invocations')
-    return {'schema_version': 1, 'contract': contract, 'work_dir': str(work_dir.resolve()),
-            'clients': clients, 'files': files}
+    return {
+        'schema_version': 1,
+        'contract': contract,
+        'work_dir': str(work_dir.resolve()),
+        'clients': clients,
+        'files': files,
+    }
 
 
 def verify(manifest: dict, contract: dict) -> None:
@@ -70,8 +78,14 @@ def verify(manifest: dict, contract: dict) -> None:
         raise ValueError('retained Tensile client inputs changed since review')
 
 
-def run(manifest: dict, contract: dict, output_dir: Path, environment: dict,
-        timeout_seconds: int, run_command) -> tuple[int, str, bool]:
+def run(
+    manifest: dict,
+    contract: dict,
+    output_dir: Path,
+    environment: dict,
+    timeout_seconds: int,
+    run_command,
+) -> tuple[int, str, bool]:
     verify(manifest, contract)
     deadline = time.monotonic() + timeout_seconds
     output = []
@@ -80,12 +94,20 @@ def run(manifest: dict, contract: dict, output_dir: Path, environment: dict,
         if remaining <= 0:
             return 1, ''.join(output), True
         ini = output_dir / f'client-{index}.ini'
-        ini.write_text('\n'.join(
-            f'results-file={output_dir / f"client-{index}.csv"}'
-            if line.startswith('results-file=') else line
-            for line in Path(client).read_text().splitlines()) + '\n')
+        ini.write_text(
+            '\n'.join(
+                (
+                    f'results-file={output_dir / f"client-{index}.csv"}'
+                    if line.startswith('results-file=')
+                    else line
+                )
+                for line in Path(client).read_text().splitlines()
+            )
+            + '\n'
+        )
         code, text, timed_out = run_command(
-            [contract['wrapper'], '--config-file', str(ini)], environment, remaining)
+            [contract['wrapper'], '--config-file', str(ini)], environment, remaining
+        )
         output.append(text + '\n')
         if timed_out or code != 0:
             return code, ''.join(output), timed_out

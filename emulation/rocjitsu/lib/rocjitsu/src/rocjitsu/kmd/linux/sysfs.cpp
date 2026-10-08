@@ -467,8 +467,8 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
     uint32_t dev = (gpu.location_id >> 3) & 0x1F;
     uint32_t func = gpu.location_id & 0x7;
     std::ostringstream domain_bus, bus_id;
-    domain_bus << std::hex << std::setw(4) << std::setfill('0') << gpu.domain << ":"
-               << std::setw(2) << std::setfill('0') << bus;
+    domain_bus << std::hex << std::setw(4) << std::setfill('0') << gpu.domain << ":" << std::setw(2)
+               << std::setfill('0') << bus;
     bus_id << domain_bus.str() << ":" << std::setw(2) << std::setfill('0') << dev << "." << func;
     std::ostringstream uevent;
     uevent << "DRIVER=amdgpu\n"

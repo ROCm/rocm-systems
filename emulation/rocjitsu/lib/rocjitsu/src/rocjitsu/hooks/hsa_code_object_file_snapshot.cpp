@@ -15,7 +15,7 @@ namespace rocjitsu {
 
 CodeObjectFileSnapshot snapshot_code_object_file_range(int file, size_t offset,
                                                        size_t size) noexcept {
-  struct stat status{};
+  struct stat status {};
   if (fstat(file, &status) != 0 || !S_ISREG(status.st_mode) || status.st_size <= 0 || size == 0 ||
       static_cast<uintmax_t>(status.st_size) > std::numeric_limits<size_t>::max())
     return {};
@@ -53,7 +53,7 @@ CodeObjectFileSnapshot snapshot_code_object_file_range(int file, size_t offset,
 }
 
 CodeObjectFileSnapshot snapshot_code_object_file(int file) noexcept {
-  struct stat status{};
+  struct stat status {};
   if (fstat(file, &status) != 0 || !S_ISREG(status.st_mode) || status.st_size <= 0 ||
       static_cast<uintmax_t>(status.st_size) > std::numeric_limits<size_t>::max())
     return {};

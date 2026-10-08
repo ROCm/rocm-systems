@@ -30,8 +30,8 @@ __attribute__((constructor)) static void early_mmap_constructor() {
   const int fd = open("/dev/null", O_RDONLY);
   if (fd < 0)
     fail("early preload: open failed\n");
-  struct stat st{};
-  struct stat64 st64{};
+  struct stat st {};
+  struct stat64 st64 {};
   auto check = [](int rc, mode_t mode) {
     if (rc != 0 || !S_ISCHR(mode))
       fail("early preload: stat alias failed before interposer initialization\n");

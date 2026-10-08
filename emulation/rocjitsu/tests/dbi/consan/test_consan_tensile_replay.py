@@ -5,19 +5,26 @@ from pathlib import Path
 from unittest import mock
 import consan_tensile_replay as replay
 
+
 class ReplayTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.wrapper = self.root / 'wrapper'
-        self.contract = {'wrapper': str(self.wrapper), 'target': 'gfx1250', 'shape': [127]}
+        self.contract = {
+            'wrapper': str(self.wrapper),
+            'target': 'gfx1250',
+            'shape': [127],
+        }
         self.ini = self.root / 'ClientParameters.ini'
         self.co = self.root / 'kernel.co'
         self.co.write_bytes(b'original exact ELF')
         self.library = self.root / 'library.yaml'
         self.library.write_text('original library')
-        self.ini.write_text(f'library-file={self.library}\ncode-object={self.co}\nproblem-size=127,127,1,127\nresults-file=old.csv\n')
+        self.ini.write_text(
+            f'library-file={self.library}\ncode-object={self.co}\nproblem-size=127,127,1,127\nresults-file=old.csv\n'
+        )
         self.script = self.root / '1_BenchmarkProblems/a/build/run.sh'
         self.script.parent.mkdir(parents=True)
         self.script.write_text(f'{self.wrapper} --config-file {self.ini}\n')
@@ -39,7 +46,9 @@ class ReplayTest(unittest.TestCase):
     def test_preserves_inputs_and_redirects_results(self):
         before = self.ini.read_text()
         command = mock.Mock(return_value=(0, 'numeric output', False))
-        code, output, timed = replay.run(self.manifest, self.contract, self.output, {}, 10, command)
+        code, output, timed = replay.run(
+            self.manifest, self.contract, self.output, {}, 10, command
+        )
         self.assertEqual((code, timed), (0, False))
         self.assertIn('clientExit=0 (PASS)', output)
         args = command.call_args.args
@@ -57,14 +66,19 @@ class ReplayTest(unittest.TestCase):
                 path.write_bytes(before + b'changed')
                 command = mock.Mock()
                 with self.assertRaises(ValueError):
-                    replay.run(self.manifest, self.contract, self.output, {}, 10, command)
+                    replay.run(
+                        self.manifest, self.contract, self.output, {}, 10, command
+                    )
                 command.assert_not_called()
                 path.write_bytes(before)
 
     def test_reject_changed_target_or_shape(self):
-        for changed in [{'target': 'gfx950'}, {'shape': [128]},
-                        {'benchmark_sleep_percent_override': 0},
-                        {'skip_timing_dispatches': True}]:
+        for changed in [
+            {'target': 'gfx950'},
+            {'shape': [128]},
+            {'benchmark_sleep_percent_override': 0},
+            {'skip_timing_dispatches': True},
+        ]:
             with self.assertRaises(ValueError):
                 replay.verify(self.manifest, {**self.contract, **changed})
 
@@ -72,12 +86,20 @@ class ReplayTest(unittest.TestCase):
         def mutate(*args):
             self.co.write_bytes(b'changed during execution')
             return 0, 'output', False
+
         with self.assertRaises(ValueError):
             replay.run(self.manifest, self.contract, self.output, {}, 10, mutate)
 
     def test_failure_or_timeout_never_gets_pass_marker(self):
         for result in [(1, 'numeric failure', False), (-15, 'partial', True)]:
-            actual = replay.run(self.manifest, self.contract, self.output, {}, 10, mock.Mock(return_value=result))
+            actual = replay.run(
+                self.manifest,
+                self.contract,
+                self.output,
+                {},
+                10,
+                mock.Mock(return_value=result),
+            )
             self.assertEqual((actual[0], actual[2]), (result[0], result[2]))
             self.assertNotIn('clientExit=0 (PASS)', actual[1])
 
@@ -93,6 +115,7 @@ class ReplayTest(unittest.TestCase):
             result = replay.run(manifest, self.contract, self.output, {}, 10, command)
         self.assertTrue(result[2])
         self.assertEqual(command.call_count, 1)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -84,7 +84,9 @@ def _main(argv: list[str]) -> int:
         values = shared.load(layout)
         gl.store(destination + offsets, values * 1.25 + 0.5)
 
-    instrumentation_nanoseconds, begin_analysis, end_analysis = _instrumentation_control()
+    instrumentation_nanoseconds, begin_analysis, end_analysis = (
+        _instrumentation_control()
+    )
     instrumentation_begin = instrumentation_nanoseconds()
     setup_start = time.perf_counter()
     if not torch.cuda.is_available():

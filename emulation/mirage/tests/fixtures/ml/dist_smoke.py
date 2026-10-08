@@ -63,11 +63,15 @@ def main() -> int:
     log(f"current device = {torch.cuda.current_device()} ({device})")
 
     log("init_process_group(backend='nccl', init_method='env://') ...")
-    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size, device_id=device_index)
+    dist.init_process_group(
+        backend="nccl", rank=rank, world_size=world_size, device_id=device_index
+    )
     log("init_process_group returned")
 
-    log(f"is_initialized={dist.is_initialized()} "
-        f"get_rank={dist.get_rank()} get_world_size={dist.get_world_size()}")
+    log(
+        f"is_initialized={dist.is_initialized()} "
+        f"get_rank={dist.get_rank()} get_world_size={dist.get_world_size()}"
+    )
 
     try:
         # Build a tensor whose value depends on rank, all_reduce(SUM), and

@@ -18,7 +18,6 @@ import triton.language as tl
 from triton.experimental import gluon
 import triton.experimental.gluon.language as ttgl
 
-
 # Widths below 4096 select a register-only gfx950 softmax implementation and
 # therefore cannot exercise ConSan's LDS engines dynamically. Keep this shared
 # exact-oracle row on the smallest width that qualifies both CDNA4 and CDNA5.

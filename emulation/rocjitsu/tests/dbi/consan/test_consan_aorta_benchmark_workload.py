@@ -14,7 +14,12 @@ class AortaOracleTest(unittest.TestCase):
             reference.weight.copy_(torch.eye(2))
         inputs = torch.tensor([[1.0, 2.0]])
         expected = reference(inputs).detach()
-        self.assertEqual(_check_cpu_reference(reference, [(inputs, expected)])["cpu_oracle_max_abs_error"], 0)
+        self.assertEqual(
+            _check_cpu_reference(reference, [(inputs, expected)])[
+                "cpu_oracle_max_abs_error"
+            ],
+            0,
+        )
         corrupted = expected + 1.0
         # This output is finite and perfectly repeatable. The independent CPU
         # reference must still reject it, on either operation in the cell.

@@ -35,7 +35,9 @@ class ConSanFaultRunnerTest(unittest.TestCase):
         # Every child in this suite is fake, including destructive rows and
         # quarantine-clear probes. Keep them off the physical campaign lock.
         resources.enter_context(
-            mock.patch.dict(os.environ, {runner.GLOBAL_DESTRUCTIVE_LOCK_ENV: self.gpu_lock})
+            mock.patch.dict(
+                os.environ, {runner.GLOBAL_DESTRUCTIVE_LOCK_ENV: self.gpu_lock}
+            )
         )
 
     def run_runner(
@@ -1742,9 +1744,7 @@ class ConSanFaultRunnerTest(unittest.TestCase):
                 result["coverage"]["overflow_counts"],
                 {"windows": 0},
             )
-            self.assertEqual(
-                result["coverage"]["snapshot_counts"]["incomplete"], 1
-            )
+            self.assertEqual(result["coverage"]["snapshot_counts"]["incomplete"], 1)
 
     def test_workload_mismatch_and_nonzero_exit_are_not_sanitizer_detection(
         self,

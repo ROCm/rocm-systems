@@ -111,9 +111,9 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
       }
       try {
         util::StringDiagnostic decode_error;
-        DecodeResult decoded = decoder->decode_window(
-            std::span<const uint32_t>(words + pc, word_count - pc), pc * sizeof(uint32_t),
-            decode_error.emitter());
+        DecodeResult decoded =
+            decoder->decode_window(std::span<const uint32_t>(words + pc, word_count - pc),
+                                   pc * sizeof(uint32_t), decode_error.emitter());
         if (decoded.failed()) {
           record_decode_failure(section_report, pc * sizeof(uint32_t), decode_error.message());
           if (include_disassembly) {
@@ -367,8 +367,8 @@ collect_executable_sections(const AmdGpuCodeObject &object) {
   while (pc < words.size()) {
     try {
       util::StringDiagnostic decode_error;
-      DecodeResult decoded = decoder->decode_window(words.subspan(pc), pc * sizeof(uint32_t),
-                                                    decode_error.emitter());
+      DecodeResult decoded =
+          decoder->decode_window(words.subspan(pc), pc * sizeof(uint32_t), decode_error.emitter());
       if (decoded.failed()) {
         lines.push_back(std::string("<decode error: ") + decode_error.message() + ">");
         ++pc;

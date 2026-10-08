@@ -55,8 +55,15 @@ if(_expected_result STREQUAL "gpu-trap")
     if(NOT "${_result}" MATCHES "^(0|134|Subprocess aborted)$")
         message(FATAL_ERROR "unexpected device-trap test exit: ${_result}")
     endif()
-    if(_combined_output MATCHES "ERROR: (AddressSanitizer|LeakSanitizer)|UndefinedBehaviorSanitizer|runtime error:")
-        message(FATAL_ERROR "host sanitizer failure is not an expected device trap")
+    if(
+        _combined_output
+            MATCHES
+            "ERROR: (AddressSanitizer|LeakSanitizer)|UndefinedBehaviorSanitizer|runtime error:"
+    )
+        message(
+            FATAL_ERROR
+            "host sanitizer failure is not an expected device trap"
+        )
     endif()
 elseif(NOT "${_result}" STREQUAL "${_expected_result}")
     message(

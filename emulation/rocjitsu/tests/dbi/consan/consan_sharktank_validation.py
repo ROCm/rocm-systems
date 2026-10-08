@@ -16,7 +16,6 @@ import pathlib
 import statistics
 import time
 
-
 TOKEN_IDS = [
     0,
     208,
@@ -178,7 +177,10 @@ def run_clip(args):
     def oracle(result):
         cosine = module.cosine_similarity(result, expected, dim=-1)
         error = float(np.max(np.abs(cosine - np.ones_like(cosine))))
-        return math.isfinite(error) and error <= module.absolute_tolerance["bf16"], error
+        return (
+            math.isfinite(error) and error <= module.absolute_tolerance["bf16"],
+            error,
+        )
 
     warmup_ok, warmup_error = oracle(invoke())
     if not warmup_ok and not args.allow_oracle_failure:
@@ -224,7 +226,9 @@ def parse_args():
         required=True,
         help="iree-test-suites source checkout",
     )
-    parser.add_argument("--workload", choices=("tp1", "tp2", "clip-bf16"), required=True)
+    parser.add_argument(
+        "--workload", choices=("tp1", "tp2", "clip-bf16"), required=True
+    )
     parser.add_argument(
         "--mode",
         choices=("prefill", "decode", "combined", "decode-combined", "all"),
