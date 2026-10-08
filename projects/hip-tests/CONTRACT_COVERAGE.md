@@ -13,10 +13,10 @@ contract tier intentionally pins only small, portable semantic guarantees.
 ## Snapshot
 
 <!-- contract-coverage-snapshot
-contract_tests: 616
+contract_tests: 617
 contract_domains: 118
-declared_apis: 501
-covered_apis: 488
+declared_apis: 502
+covered_apis: 489
 uncovered_allowlisted: 13
 coverage_pct: 97.4
 -->

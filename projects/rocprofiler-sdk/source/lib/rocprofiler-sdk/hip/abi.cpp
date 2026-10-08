@@ -709,7 +709,6 @@ ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipDeviceFlushGPUDirectRDMAWrites_fn, 5
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipKernelSetAttributeForDevice_fn, 546);
 #endif
 
-
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 37
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLibraryGetModule_fn, 547);
 #endif
