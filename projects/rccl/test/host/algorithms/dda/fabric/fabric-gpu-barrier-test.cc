@@ -20,12 +20,8 @@
 #include <string>
 #include <vector>
 
-#include "HipVmmLedger.h"
 #include "ScopedHook.h"
-#include "fakes/bootstrap_stubs.h"
-#include "fakes/env_fakes.h"
-#include "fakes/hip_fakes.h"
-#include "fakes/nccl_fakes.h"
+#include "algorithms/dda/fabric/FabricTestFixture.h"
 
 #include "algorithms/dda/fabric/FabricGpuBarrierState.h"
 #include "mem_manager.h"
@@ -39,21 +35,22 @@ using dda::common::FabricGpuBarrierResources;
 using dda::common::kDdaMaxNranks;
 using FlagType = FabricGpuBarrier::FlagType;
 
-constexpr int kNRanks = 4;
-constexpr int kRank = 1;
+using dda_fabric_test::FabricLedgerTest;
+using dda_fabric_test::kBootstrap;
+using dda_fabric_test::kNRanks;
+using dda_fabric_test::kRank;
+
 constexpr int kNBlocks = 3;
-void* const kBootstrap = reinterpret_cast<void*>(0xB007);
 
 size_t FlagBytes(int nRanks, int nBlocks) { return static_cast<size_t>(nRanks) * nBlocks * sizeof(FlagType); }
 
 using InitResult = std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier>;
 
-class FabricGpuBarrierTest : public ::testing::Test {
+class FabricGpuBarrierTest : public FabricLedgerTest {
  protected:
   void SetUp() override {
-    SetMicroEnvAbsent("NCCL_CUMEM_SKIP_FREE");  // see HipVmmLedger.h
-    ledger_.Install();
-    ASSERT_FALSE(rcclSkipCuMemFree());  // latch the once-per-process decision under this env
+    FabricLedgerTest::SetUp();
+    if (HasFatalFailure()) return;
     g_cuMemEnable = [] { return 1; };
     auto ledgerMemset = g_hipMemset;
     g_hipMemset = [this, ledgerMemset](void* dst, int value, size_t bytes) {
@@ -75,13 +72,7 @@ class FabricGpuBarrierTest : public ::testing::Test {
 
   void TearDown() override {
     result_.first.reset();  // first: the resources free through the ledger hooks
-    EXPECT_TRUE(ledger_.Clean()) << ledger_.reserved.size() << " reservations, " << ledger_.liveHandles.size()
-                                 << " handles, " << ledger_.liveBuffers.size() << " buffers live; "
-                                 << ledger_.rejected.size() << " calls refused";
-    ResetBootstrapStubs();
-    ResetHipFakes();
-    ResetNcclFakes();
-    ResetEnvFakes();
+    FabricLedgerTest::TearDown();
   }
 
   InitResult& Init(int nRanks = kNRanks, int selfRank = kRank, int nBlocks = kNBlocks,
@@ -96,9 +87,7 @@ class FabricGpuBarrierTest : public ::testing::Test {
   void ExpectFailsWithoutLeaking(int nRanks = kNRanks, int selfRank = kRank) {
     Init(nRanks, selfRank);
     EXPECT_EQ(result_.first, nullptr);
-    EXPECT_TRUE(ledger_.Clean()) << ledger_.reserved.size() << " reservations, " << ledger_.liveHandles.size()
-                                 << " handles, " << ledger_.liveBuffers.size() << " buffers live; "
-                                 << ledger_.rejected.size() << " calls refused";
+    EXPECT_TRUE(LedgerClean());
   }
 
   // Where each sync memset and allgather fell, in order.
@@ -117,7 +106,6 @@ class FabricGpuBarrierTest : public ::testing::Test {
 
   int nRanks_ = kNRanks;
   int selfRank_ = kRank;
-  HipVmmLedger ledger_;
   std::vector<std::string> events_;
   std::vector<Memset> memsets_;
   std::vector<void*> gatherStates_;

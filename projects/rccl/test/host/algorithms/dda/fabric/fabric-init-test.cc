@@ -16,18 +16,15 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
 #include <vector>
 
-#include "HipVmmLedger.h"
 #include "ScopedHook.h"
-#include "fakes/bootstrap_stubs.h"
-#include "fakes/env_fakes.h"
-#include "fakes/hip_fakes.h"
-#include "fakes/nccl_fakes.h"
+#include "algorithms/dda/fabric/FabricTestFixture.h"
 #include "fakes/param_redirect.h"
 #include "fakes/rccl_wrap_fakes.h"
 
@@ -49,14 +46,23 @@
 #include "param.h"
 #include "rccl_common.h"
 
-// Host memory fabric_init.cu allocates with ncclCalloc and releases with free;
-// the ledger only sees device memory.
-static std::set<void*> g_initHostLive;
+// Host memory fabric_init.cu allocates with ncclCalloc and releases with free,
+// with its size; the ledger only sees device memory.
+static std::map<void*, size_t> g_initHostLive;
 template <typename T>
 static ncclResult_t InitCalloc(T** ptr, size_t nelem, const char* file, int line, const char* fn) {
   ncclResult_t ret = ncclCallocDebug(ptr, nelem, file, line, fn, true);
-  if (ret == ncclSuccess && *ptr != nullptr) g_initHostLive.insert(*ptr);
+  if (ret == ncclSuccess && *ptr != nullptr) g_initHostLive[*ptr] = nelem * sizeof(T);
   return ret;
+}
+// [dst, dst + n) lies inside one live ncclCalloc block.
+static bool InitHostCovers(const void* dst, size_t n) {
+  auto it = g_initHostLive.upper_bound(const_cast<void*>(dst));
+  if (it == g_initHostLive.begin()) return false;
+  --it;
+  const auto* base = static_cast<const char*>(it->first);
+  const auto* p = static_cast<const char*>(dst);
+  return p >= base && p + n <= base + it->second;
 }
 static void InitFree(void* ptr) {
   g_initHostLive.erase(ptr);
@@ -74,13 +80,15 @@ static void InitFree(void* ptr) {
 
 namespace {
 
-constexpr int kNRanks = 4;
-constexpr int kRank = 1;
+using dda_fabric_test::FabricLedgerTest;
+using dda_fabric_test::kBootstrap;
+using dda_fabric_test::kNRanks;
+using dda_fabric_test::kRank;
+
 // The local block cap. Above the AllGather term of ddaLLEpochCount (nRanks * 8 = 32),
 // so the agreed block count is what sizes the epoch cells.
 constexpr int kCuCount = 40;
 constexpr int64_t kScratchBytes = 64 * 1024;
-void* const kBootstrap = reinterpret_cast<void*>(0xB007);
 char kGfx1250[] = "gfx1250";
 
 // Installs `fail` in front of `slot`'s current behaviour for the calls `when` picks.
@@ -148,7 +156,7 @@ INSTANTIATE_TEST_SUITE_P(Arch, DdaUseFabricPathTest,
 // Fixture for Init / Fini
 // ---------------------------------------------------------------------------
 
-class DdaFabricCommTest : public ::testing::Test {
+class DdaFabricCommTest : public FabricLedgerTest {
  protected:
   struct Memset {
     void* dst;
@@ -157,9 +165,20 @@ class DdaFabricCommTest : public ::testing::Test {
   };
 
   void SetUp() override {
-    SetMicroEnvAbsent("NCCL_CUMEM_SKIP_FREE");  // see HipVmmLedger.h
+    FabricLedgerTest::SetUp();
+    if (HasFatalFailure()) return;
     SetMicroEnvAbsent("RCCL_DDA_FABRIC_MAXBLOCKS");
-    ledger_.Install();
+    g_initHostLive.clear();
+    // Host-bound copies are not the ledger's to check; the one init makes, into
+    // its ncclCalloc'd peer table, must land inside a block it allocated.
+    auto ledgerCopy = g_hipMemcpy;
+    g_hipMemcpy = [this, ledgerCopy](void* dst, const void* src, size_t n, hipMemcpyKind kind) {
+      if (kind == hipMemcpyHostToHost && !InitHostCovers(dst, n)) {
+        hostCopiesRefused_++;
+        return hipErrorInvalidValue;
+      }
+      return ledgerCopy(dst, src, n, kind);
+    };
     auto ledgerMemset = g_hipMemset;
     g_hipMemset = [this, ledgerMemset](void* dst, int value, size_t bytes) {
       memsets_.push_back({dst, value, bytes});
@@ -170,7 +189,6 @@ class DdaFabricCommTest : public ::testing::Test {
       const bool unset = !bufferSize_.has_value() || std::string(name) != "RCCL_DDA_FABRIC_BUFFER_SIZE";
       return unset ? deftVal : *bufferSize_;
     };
-    g_initHostLive.clear();
     // A homogeneous clique: every peer publishes what this rank published.
     g_bootstrapAllGather = [this](void* state, void* allData, int size) {
       gatherStates_.push_back(state);
@@ -194,20 +212,23 @@ class DdaFabricCommTest : public ::testing::Test {
   void TearDown() override {
     // first: Fini frees through the ledger hooks
     if (comm_) ncclDdaFabricCommFini(comm_.get());
-    ResetBootstrapStubs();
-    ResetHipFakes();
-    ResetNcclFakes();
+    EXPECT_TRUE(HostClean());
     ResetRcclWrapFakes();
-    ResetEnvFakes();
+    FabricLedgerTest::TearDown();
   }
 
-  // Nothing device- or host-side left allocated, and nothing the ledger refused.
+  // Nothing host-side left allocated, and no host copy refused.
+  ::testing::AssertionResult HostClean() const {
+    if (g_initHostLive.empty() && hostCopiesRefused_ == 0) return ::testing::AssertionSuccess();
+    return ::testing::AssertionFailure() << g_initHostLive.size() << " host allocations live; " << hostCopiesRefused_
+                                         << " host copies refused";
+  }
+
+  // Nothing device- or host-side left allocated, and nothing refused.
   ::testing::AssertionResult AllReleased() const {
-    if (ledger_.Clean() && g_initHostLive.empty()) return ::testing::AssertionSuccess();
-    return ::testing::AssertionFailure() << ledger_.reserved.size() << " reservations, " << ledger_.liveHandles.size()
-                                         << " handles, " << ledger_.liveBuffers.size() << " buffers, "
-                                         << g_initHostLive.size() << " host allocations live; "
-                                         << ledger_.rejected.size() << " calls refused";
+    ::testing::AssertionResult device = LedgerClean();
+    if (!device) return device;
+    return HostClean();
   }
 
   // Peers report these block caps instead of this rank's (indexed by rank; the
@@ -232,7 +253,7 @@ class DdaFabricCommTest : public ::testing::Test {
   }
 
   std::optional<int64_t> bufferSize_ = kScratchBytes;  // RCCL_DDA_FABRIC_BUFFER_SIZE; nullopt = unset
-  HipVmmLedger ledger_;
+  int hostCopiesRefused_ = 0;
   std::unique_ptr<ncclMemManager> manager_;  // outlives TearDown's Fini
   std::unique_ptr<ncclComm> comm_;
   std::vector<Memset> memsets_;
@@ -457,6 +478,7 @@ TEST_F(DdaFabricCommInitTest, CommInit_WithManager_TracksScratchAndPeerMappingsI
   for (void* peer : peers) {
     EXPECT_TRUE(has(untracked, manager, peer)) << "peer mapping " << peer << " not untracked";
   }
+  EXPECT_TRUE(AllReleased());
 }
 
 TEST_F(DdaFabricCommInitTest, CommInit_PeerCapsLower_UsesSmallestCapAcrossRanks) {
@@ -508,6 +530,10 @@ TEST_F(DdaFabricCommInitTest, CommInit_RanksAtCap_SetsUpFabricPath) {
   ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
 
   EXPECT_NE(comm_->ddaFabricMemHandler, nullptr);
+  // The one shape where the epoch cells' AllGather term (nRanks * 8) outgrows the block count.
+  const size_t epochLen = nccl_dda_detail::ddaLLEpochCount(dda::common::kDdaMaxNranks, kCuCount);
+  ASSERT_GT(epochLen, static_cast<size_t>(kCuCount));
+  EXPECT_EQ(static_cast<size_t>(comm_->ddaLLEpochLen), epochLen);
 }
 
 // ---------------------------------------------------------------------------

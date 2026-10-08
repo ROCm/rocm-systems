@@ -17,12 +17,8 @@
 #include <set>
 #include <vector>
 
-#include "HipVmmLedger.h"
 #include "ScopedHook.h"
-#include "fakes/bootstrap_stubs.h"
-#include "fakes/env_fakes.h"
-#include "fakes/hip_fakes.h"
-#include "fakes/nccl_fakes.h"
+#include "algorithms/dda/fabric/FabricTestFixture.h"
 
 #include "alloc.h"
 #include "bootstrap.h"
@@ -32,11 +28,12 @@
 
 namespace {
 
-constexpr int kNRanks = 4;
-constexpr int kRank = 1;
-constexpr size_t kPage = 4096;  // InstallHipVmmEmulator()'s allocation granularity
+using dda_fabric_test::FabricLedgerTest;
+using dda_fabric_test::kBootstrap;
+using dda_fabric_test::kNRanks;
+using dda_fabric_test::kRank;
 
-void* const kBootstrap = reinterpret_cast<void*>(0xB007);
+constexpr size_t kPage = 4096;  // InstallHipVmmEmulator()'s allocation granularity
 void* const kSelfPtr = reinterpret_cast<void*>(0x5E1F000);
 const hipMemGenericAllocationHandle_t kSelfHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x5E1F);
 constexpr size_t kSelfSize = 2 * kPage;
@@ -50,14 +47,11 @@ hipMemGenericAllocationHandle_t HandleForDesc(uint64_t desc) {
   return reinterpret_cast<hipMemGenericAllocationHandle_t>(0x10000 + desc);
 }
 
-class FabricMemHandlerTest : public ::testing::Test {
+class FabricMemHandlerTest : public FabricLedgerTest {
  protected:
   void SetUp() override {
-    SetMicroEnvAbsent("NCCL_CUMEM_SKIP_FREE");  // see HipVmmLedger.h
-    ledger_.Install();
-    // Latch alloc.h's once-per-process skip-free decision now, under this
-    // fixture's env and arch, so no later test can find it latched the other way.
-    ASSERT_FALSE(rcclSkipCuMemFree());
+    FabricLedgerTest::SetUp();
+    if (HasFatalFailure()) return;
     savedHandleType_ = ncclCuMemHandleType;
 
     g_hipMemExportToShareableHandle = [](void* shareable, hipMemGenericAllocationHandle_t,
@@ -86,13 +80,8 @@ class FabricMemHandlerTest : public ::testing::Test {
 
   void TearDown() override {
     handler_.reset();  // first: the destructor frees through the ledger hooks
-    EXPECT_TRUE(ledger_.Clean()) << ledger_.reserved.size() << " reservations live; " << ledger_.rejected.size()
-                                 << " calls refused";
     ncclCuMemHandleType = savedHandleType_;
-    ResetBootstrapStubs();
-    ResetHipFakes();
-    ResetNcclFakes();
-    ResetEnvFakes();
+    FabricLedgerTest::TearDown();
   }
 
   ncclFabricMemHandler* MakeHandler(int nRanks = kNRanks, int rank = kRank) {
@@ -135,7 +124,6 @@ class FabricMemHandlerTest : public ::testing::Test {
   int nRanks_ = kNRanks;
   int rank_ = kRank;
   hipMemAllocationHandleType savedHandleType_ = hipMemHandleTypeNone;
-  HipVmmLedger ledger_;
   std::unique_ptr<ncclFabricMemHandler> handler_;
   std::vector<uint64_t> importedDescs_;
 };
