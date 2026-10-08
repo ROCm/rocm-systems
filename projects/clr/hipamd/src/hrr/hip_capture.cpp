@@ -196,11 +196,11 @@ static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_s
 // stream's, the null stream's for a blocking stream, and every blocking
 // stream's for the null stream. That work may wait on a flag the host sets
 // only after this launch returns (hipStreamWaitValue32 on host memory), and
-// waiting would hang the application. Checking it queues nothing either. When
-// that work is still running, the bytes are read anyway: a piece that changed
-// is recorded for replay to restore, and a piece that did not is recorded as
-// unchanged and left alone. The manifest counts such launches as
-// host_snapshots_unordered.
+// waiting would hang the application. Checking it queues no wait on another
+// stream either. When that work is still running, the bytes are read anyway:
+// a piece that changed is recorded for replay to restore, and a piece that did
+// not is recorded as unchanged and left alone. The manifest counts such
+// launches as host_snapshots_unordered.
 //
 // The snapshot runs before the launch, so it updates the shadow before it
 // knows whether the launch will be recorded. When the launch fails, the chunks
@@ -476,7 +476,7 @@ enum class LaunchStream { Idle, Busy, Capturing, Skip };
 
 // Whether a stream's last queued command is still pending, read the way
 // Device::WaitActiveStreams reads it before a launch waits on that stream. It
-// takes no asynchronous error and queues nothing.
+// takes no asynchronous error and queues no wait on another stream.
 static bool last_command_pending(hip::Stream* s) {
   amd::Command* cmd = s->getLastQueuedCommand(true);
   if (cmd == nullptr) return false;
@@ -524,7 +524,7 @@ static bool blocking_streams_busy() {
 }
 
 // Whether the work the launch will wait for has finished, found without
-// waiting for it and without queueing anything. That is the launch stream's
+// waiting for it and without queueing a wait on another stream. That is the launch stream's
 // earlier work and, for a blocking stream, the null stream's; a launch into
 // hipStreamLegacy or the null stream also waits for every blocking stream of
 // the device. A caller passes the stream the launch really uses: the
@@ -553,7 +553,7 @@ static LaunchStream launch_stream_state(hipStream_t stream) {
       st = LaunchStream::Capturing;
     } else if (cr == hipSuccess && status == hipStreamCaptureStatusNone) {
       // hipStreamQuery(hipStreamLegacy) looks at the null stream alone and
-      // queues nothing; the blocking streams are read below.
+      // queues no wait on another stream; the blocking streams are read below.
       const bool legacy = s == nullptr || s == hipStreamLegacy;
       const hipError_t qr = g_real_table.hipStreamQuery_fn(legacy ? hipStreamLegacy : s);
       switch (qr) {
@@ -2587,10 +2587,12 @@ hipError_t capture_hipMemcpy3DAsync_spt(const struct hipMemcpy3DParms* p, hipStr
   hrr_args_hipMemcpy3DAsync_spt a{};
   a.ret    = static_cast<int32_t>(r);
   a.stream = reinterpret_cast<uint64_t>(stream);
-  // The null stream of an _spt call is this thread's default stream, and that
-  // is the one the D2H blob has to wait for.
+  // The null stream and hipStreamLegacy of an _spt call are this thread's
+  // default stream, and that is the one the D2H blob has to wait for.
   capture_memcpy3d_impl(a, HRR_API_HIPMEMCPY3DASYNC_SPT, p,
-                        stream ? stream : hipStreamPerThread, true);
+                        (stream == nullptr || stream == hipStreamLegacy) ? hipStreamPerThread
+                                                                         : stream,
+                        true);
   return r;
 }
 

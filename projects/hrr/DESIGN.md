@@ -593,7 +593,9 @@ alone, then reads the last command of each blocking stream. It does not ask the
 null-stream query, which also covers them: that query queues a marker on the
 null stream that waits for every blocking stream. A launch that then fails its
 own checks leaves the marker behind, and every later launch into a blocking
-stream waits for it. The per-thread entry points (`hipLaunchKernel_spt` and
+stream waits for it. None of the checks capture makes queues a wait on another
+stream. `hipStreamQuery` can still queue a marker with no dependencies on the
+stream it asks about. The per-thread entry points (`hipLaunchKernel_spt` and
 `hipLaunchCooperativeKernel_spt`) launch into the per-thread stream when given
 the null stream or `hipStreamLegacy`, so capture asks about the per-thread
 stream. The answer is one of two:
