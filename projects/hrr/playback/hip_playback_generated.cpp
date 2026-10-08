@@ -946,6 +946,7 @@ static hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* payl
   const auto* a = reinterpret_cast<const hrr_args_hipFreeHost*>(payload);
   uint64_t _rec_ptr = a->ptr;
   void*    _live_ptr = ctx.translate_ptr(_rec_ptr);
+  if (_live_ptr) hrr_wait_host_restores(ctx, _live_ptr);
   hipError_t _r = (hipError_t)hipFreeHost(_live_ptr);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipFreeHost", a->ret);
@@ -2418,6 +2419,7 @@ static hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* payl
   const auto* a = reinterpret_cast<const hrr_args_hipHostFree*>(payload);
   uint64_t _rec_ptr = a->ptr;
   void*    _live_ptr = ctx.translate_ptr(_rec_ptr);
+  if (_live_ptr) hrr_wait_host_restores(ctx, _live_ptr);
   hipError_t _r = (hipError_t)hipHostFree(_live_ptr);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipHostFree", a->ret);

@@ -1553,6 +1553,12 @@ int main(int argc, char** argv) {
     ctx.region_oob_ptrs.store(0, std::memory_order_relaxed);
     ctx.guard_blocks_relocated.store(0, std::memory_order_relaxed);
     ctx.guard_blind_max.store(0, std::memory_order_relaxed);
+    // The warm-up's closing sync covers one device; a restore queued on
+    // another may still be pending, and would count in the timed pass.
+    hrr_wait_host_restores(ctx, nullptr);
+    ctx.host_restores->applied.store(0, std::memory_order_relaxed);
+    ctx.host_snapshots_rejected.store(0, std::memory_order_relaxed);
+    ctx.host_snapshots_in_graph.store(0, std::memory_order_relaxed);
     printf("[HRR] Warm-up done. Running filtered pass...\n");
   }
 
@@ -1582,7 +1588,10 @@ int main(int argc, char** argv) {
     for (auto& [rec, entry] : ctx.alloc_map) {
       switch (entry.kind) {
         case AllocKind::Device:        hrr_free_device_alloc(ctx, entry.live_ptr); break;
-        case AllocKind::HostMalloc:    (void)hipHostFree(entry.live_ptr); break;
+        case AllocKind::HostMalloc:
+          hrr_wait_host_restores(ctx, entry.live_ptr);
+          (void)hipHostFree(entry.live_ptr);
+          break;
         case AllocKind::HostRegister:                                     break;
         case AllocKind::DevicePtrAlias:                                   break;
       }
@@ -1593,6 +1602,7 @@ int main(int argc, char** argv) {
     // and the malloc'd buffer every run.
     for (auto& [rec, buf] : ctx.host_reg_bufs) {
       if (!buf) continue;
+      hrr_wait_host_restores(ctx, buf);
       (void)hipHostUnregister(buf);
 #ifdef _WIN32
       _aligned_free(buf);
@@ -1714,7 +1724,7 @@ int main(int argc, char** argv) {
   }
 
   {
-    const uint64_t applied  = ctx.host_snapshots_applied.load();
+    const uint64_t applied  = ctx.host_restores->applied.load();
     const uint64_t rejected = ctx.host_snapshots_rejected.load();
     const uint64_t in_graph = ctx.host_snapshots_in_graph.load();
     if (applied || rejected)

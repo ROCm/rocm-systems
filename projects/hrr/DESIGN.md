@@ -593,7 +593,9 @@ alone, then reads the last command of each blocking stream. It does not ask the
 null-stream query, which also covers them: that query queues a marker on the
 null stream that waits for every blocking stream. A launch that then fails its
 own checks leaves the marker behind, and every later launch into a blocking
-stream waits for it. The per-thread entry points (`hipLaunchKernel_spt` and
+stream waits for it. None of the checks capture makes queues a wait on another
+stream. `hipStreamQuery` can still queue a marker with no dependencies on the
+stream it asks about. The per-thread entry points (`hipLaunchKernel_spt` and
 `hipLaunchCooperativeKernel_spt`) launch into the per-thread stream when given
 the null stream or `hipStreamLegacy`, so capture asks about the per-thread
 stream. The answer is one of two:
@@ -673,9 +675,12 @@ the live allocation it lands in. It uses the record only when all of these hold:
 A record that fails a check is named on stderr with its reason and counted as
 rejected; nothing is written for it. When the count runs past the end of the
 event or the tail is malformed, every record the launch claims is counted. A
-valid direction 0 record of a launch replayed into a graph capture is not
-applied either, but it is not rejected: it is counted apart and printed on its
-own summary line.
+valid direction 0 record of a launch into a capturing stream is not applied
+either, but it is not rejected: it is counted apart and printed on its own
+summary line. Replay asks `hipStreamIsCapturing` about the launch's own stream,
+so a capture open on another stream does not stop the restore. A launch into
+the null stream or `hipStreamLegacy` while a blocking stream captures is a
+capture error, and its restore is skipped the same way.
 
 The restore is ordered on the launch stream. Replay queues one host function
 per launch with `hipLaunchHostFunc`, just before the kernel. The host function
@@ -687,7 +692,21 @@ different bytes, and calls no HIP API. The kernel waits for it. Replay never
 blocks on the host for the restore, so a launch stream held back by a wait that
 later replayed work releases does not hang the replay. When the host function
 cannot be queued, replay warns once and restores at once, without waiting. The
-summary prints the chunks restored and the records rejected. Snapshot blobs are
+host functions run on the HSA async handler thread, which every host callback
+and completion handler of the process shares. A launch with many chunks copies
+them all there, up to `HIP_HRR_HOST_SNAPSHOT_MAX_MB` per allocation, and
+delays the other handlers while it does.
+
+A host function that has not run yet still writes its allocation later.
+`hipHostFree` and `hipHostUnregister` sync the streams of the allocating device
+only, and a restore can be queued on another device's stream. So replay counts
+the restores queued for each allocation, and waits for that count to reach zero
+before it frees or unregisters the allocation, including at teardown. The first
+such wait is printed. The count and the restored total live in state each host
+function holds a reference to, so one that runs after replay has exited does
+not touch a destroyed context. `--kernel-filter` resets the counters after its
+warm-up pass. The summary prints the chunks restored and the records rejected.
+Snapshot blobs are
 held in a cache of at most 256 MiB, oldest out first, rather than the unbounded
 blob cache.
 
@@ -702,9 +721,13 @@ leaves alone are not reported.
 **Tests.** `hrr_pinned_host_test.cc` covers the behaviour above, including a
 failed launch, every launch entry point, a free that fails and `hipDeviceReset`.
 Most cases capture a workload and replay it; the ones that check only what
-capture records or trusts do not replay. Two paths are untested by design: the
-fork handlers and a blob or event that cannot be written. Each needs a fault
-injected into the process under capture, which no test hook provides.
+capture records or trusts do not replay. Two cases can skip. The
+`hipDeviceReset` case skips its last check when the reset leaves no address in
+the old buffer that the runtime does not know. The cross-device free needs two
+devices. Three paths are untested by design: the fork handlers, a blob or event
+that cannot be written, and a restore `hipLaunchHostFunc` refuses. Each needs a
+fault injected into the capture or replay process, which no test hook
+provides.
 
 ### Threat Model: Pinned Host Snapshots
 
@@ -765,6 +788,22 @@ exists to put chosen bytes in front of those kernels.
   there too. Replay of `hipStreamBatchMemOp` waits for real, so a launch stream
   can stay blocked until later replayed work releases it; the restore waits
   with the kernel rather than hanging the replay.
+- Restores of one allocation queued by launches on streams that do not wait
+  for each other run when each stream reaches them, not in the order of the
+  launches. An earlier launch on a busy stream can write its bytes after a
+  later launch on an idle stream wrote its own. The later kernel can then read
+  the earlier bytes, and the host is left holding them. The earlier launch was
+  recorded unordered, so the application raced there too.
+- A free or unregister waits for the restores queued for its allocation. When
+  such a restore's stream is held by work that only later replayed events
+  release, replay waits for it. It prints a line after 10 s. CLR's own
+  `hipHostFree` waits the same way for the streams of the allocating device.
+- A replayed `hipDeviceReset` releases the device's pinned allocations without
+  waiting for restores queued for them on another device's stream.
+- Replay exits after a fatal HIP error without syncing the device or draining
+  queued restores. A host function that still runs keeps its own state alive,
+  but the pinned memory it writes is torn down as the process exits, so it can
+  fault during exit.
 - A by-value scalar whose value happens to fall inside a pinned allocation the
   launch recorded, at an aligned word, is rewritten on replay as if it were a
   pointer. So is one inside a pinned allocation the launch did not record,

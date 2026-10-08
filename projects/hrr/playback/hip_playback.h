@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <atomic>
 #include <mutex>
+#include <condition_variable>
 #include <shared_mutex>
 #include <chrono>
 #include <unordered_set>
@@ -316,14 +317,29 @@ struct PlaybackContext {
     bool warn_untranslated_args = false;
     std::atomic<uint64_t> untranslated_ptr_args{0};
 
-    // Pinned host snapshot chunks written back before a launch, and records
-    // refused because they did not fit a live host allocation or their blob,
-    // or could not be read from the event at all. Valid restore records of a
-    // launch replayed into a graph capture are not applied, and are counted
-    // apart: they are not malformed.
-    std::atomic<uint64_t> host_snapshots_applied{0};
+    // Records refused because they did not fit a live host allocation or
+    // their blob, or could not be read from the event at all. Valid restore
+    // records of a launch into a capturing stream are not applied, and are
+    // counted apart: they are not malformed.
     std::atomic<uint64_t> host_snapshots_rejected{0};
     std::atomic<uint64_t> host_snapshots_in_graph{0};
+
+    // What replay shares with the host functions that restore pinned host
+    // snapshots. It is held by a shared_ptr, not by the context, because a
+    // restore can still be queued when replay exits after a fatal error
+    // without syncing the device: the host function must not point into a
+    // context that is gone. applied counts the chunks written back. pending
+    // counts the restores queued but not yet run, per live host allocation
+    // base, so that a free of the allocation can wait for them:
+    // hipHostFree and hipHostUnregister sync only the allocating device.
+    struct HostRestoreState {
+        std::atomic<uint64_t> applied{0};
+        std::mutex mu;
+        std::condition_variable cv;
+        std::unordered_map<const void*, size_t> pending;
+    };
+    std::shared_ptr<HostRestoreState> host_restores =
+        std::make_shared<HostRestoreState>();
 
     // ---- Guard pages ----
     // Both off by default: they trade the exact memory layout the replay
@@ -792,6 +808,13 @@ void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live);
 // Under --guard-segments an allocation is a VMM mapping rather than a hipMalloc
 // and hipFree cannot release it, so every teardown path has to go through here.
 void hrr_free_device_alloc(PlaybackContext& ctx, void* live);
+
+// Wait until no queued pinned host snapshot restore still has to write into
+// the host allocation whose live base is `base`. Called before replay frees or
+// unregisters it: hipHostFree and hipHostUnregister sync only the device that
+// allocated it, and a restore may be queued on another device's stream. A null
+// base waits for every queued restore.
+void hrr_wait_host_restores(PlaybackContext& ctx, const void* base);
 
 // ---------------------------------------------------------------------------
 // hrr_note_unreplayable — this API cannot be reproduced, and here is why.

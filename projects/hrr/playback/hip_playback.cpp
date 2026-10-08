@@ -1063,14 +1063,17 @@ static void decode_kernel_args(
 static constexpr size_t kHostSnapRecordSize = 8 * 5 + 1;
 
 // The chunks one launch restores, owned by the host function that applies
-// them. The blobs stay alive until it runs. It calls no HIP API.
+// them. The blobs and the shared state stay alive until it runs, even if
+// replay has exited by then. bases names each host allocation it writes once,
+// for the pending count. It calls no HIP API.
 struct HostSnapshotRestore {
     struct Chunk {
         uint8_t* dst;
         std::shared_ptr<const std::vector<uint8_t>> blob;
     };
     std::vector<Chunk> chunks;
-    std::atomic<uint64_t>* applied;
+    std::vector<const void*> bases;
+    std::shared_ptr<PlaybackContext::HostRestoreState> state;
 };
 
 static void apply_host_snapshots(void* user) {
@@ -1078,9 +1081,38 @@ static void apply_host_snapshots(void* user) {
     for (const auto& c : job->chunks) {
         if (memcmp(c.dst, c.blob->data(), c.blob->size()) != 0) {
             memcpy(c.dst, c.blob->data(), c.blob->size());
-            job->applied->fetch_add(1, std::memory_order_relaxed);
+            job->state->applied.fetch_add(1, std::memory_order_relaxed);
         }
     }
+    auto& st = *job->state;
+    {
+        std::lock_guard<std::mutex> lk(st.mu);
+        for (const void* b : job->bases) {
+            auto it = st.pending.find(b);
+            if (it != st.pending.end() && --it->second == 0) st.pending.erase(it);
+        }
+    }
+    st.cv.notify_all();
+}
+
+void hrr_wait_host_restores(PlaybackContext& ctx, const void* base) {
+    auto& st = *ctx.host_restores;
+    std::unique_lock<std::mutex> lk(st.mu);
+    auto done = [&] {
+        return base ? st.pending.find(base) == st.pending.end() : st.pending.empty();
+    };
+    if (done()) return;
+    static std::atomic<bool> noted{false};
+    if (!noted.exchange(true))
+        fprintf(stderr,
+                "[HRR] %s waits for a pinned host snapshot restore still "
+                "queued on a stream\n",
+                base ? "freeing a pinned host allocation" : "the warm-up pass");
+    if (st.cv.wait_for(lk, std::chrono::seconds(10), done)) return;
+    fprintf(stderr,
+            "[HRR] a pinned host snapshot restore has been queued for 10 s; "
+            "replay keeps waiting for it\n");
+    st.cv.wait(lk, done);
 }
 
 static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
@@ -1096,7 +1128,18 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
                 "of the event — none applied\n", kname.c_str(), n);
         return;
     }
-    const bool apply = !ctx.in_graph_capture;
+    // A host function sent into a capturing stream would become a graph node,
+    // so the restore is applied only when the launch's own stream is not
+    // capturing. A null or legacy stream reports hipErrorStreamCaptureImplicit
+    // while a blocking stream captures; the launch is then itself a capture
+    // error, and the restore is skipped like a captured one. Any other error
+    // is left to hipLaunchHostFunc below.
+    hipStreamCaptureStatus cap = hipStreamCaptureStatusNone;
+    const hipError_t cr = hipStreamIsCapturing(stream, &cap);
+    if (cr != hipSuccess) (void)hipGetLastError();
+    const bool apply = cr == hipErrorStreamCaptureImplicit ? false
+                     : cr != hipSuccess                    ? true
+                                                           : cap == hipStreamCaptureStatusNone;
     if (!apply) {
         static std::atomic<bool> warned{false};
         if (!warned.exchange(true))
@@ -1113,7 +1156,7 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
                 (unsigned long long)off, (unsigned long long)len, why);
     };
     auto job = std::make_unique<HostSnapshotRestore>();
-    job->applied = &ctx.host_snapshots_applied;
+    job->state = ctx.host_restores;
     for (uint16_t i = 0; i < n; i++, p += kHostSnapRecordSize) {
         uint64_t ptr, off, len, hlo, hhi;
         memcpy(&ptr, p,      8);
@@ -1160,9 +1203,16 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
             continue;
         }
         job->chunks.push_back({static_cast<uint8_t*>(live) + off, std::move(blob)});
+        if (std::find(job->bases.begin(), job->bases.end(), abase) == job->bases.end())
+            job->bases.push_back(abase);
         if (rec_bases_out) rec_bases_out->insert(arec);
     }
     if (job->chunks.empty()) return;
+    {
+        auto& st = *ctx.host_restores;
+        std::lock_guard<std::mutex> lk(st.mu);
+        for (const void* b : job->bases) ++st.pending[b];
+    }
     // Earlier work the launch waits for may still be reading or writing the
     // buffer, so the bytes go in from the launch stream, not from here.
     HostSnapshotRestore* raw = job.get();
@@ -3145,10 +3195,10 @@ hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
 }
 
 // ---------------------------------------------------------------------------
-// Manual playback: hipHostMalloc / hipMallocHost
+// Manual playback: hipHostMalloc. hipMallocHost, hipHostFree and hipFreeHost
+// are generated; the two frees wait for pending pinned host restores.
 // ---------------------------------------------------------------------------
 // hipHostMalloc:  ret(4) ptr(8) size(8) flags(4)
-// hipMallocHost:  ret(4) ptr(8) size(8)
 
 hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipHostMalloc*>(pl);
@@ -3156,33 +3206,6 @@ hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl) {
     hipError_t r = hipHostMalloc(&live, static_cast<size_t>(a->size), a->flags);
     if (r == hipSuccess)
         ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
-    return r;
-}
-
-hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl) {
-    const auto* a = reinterpret_cast<const hrr_args_hipMallocHost*>(pl);
-    void* live = nullptr;
-    hipError_t r = hipMallocHost(&live, static_cast<size_t>(a->size));
-    if (r == hipSuccess)
-        ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
-    return r;
-}
-
-hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl) {
-    const auto* a = reinterpret_cast<const hrr_args_hipFreeHost*>(pl);
-    void* live = ctx.translate_ptr(a->ptr);
-    if (!live) return hipSuccess;
-    hipError_t r = hipFreeHost(live);
-    if (r == hipSuccess) ctx.remove_alloc(a->ptr);
-    return r;
-}
-
-hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* pl) {
-    const auto* a = reinterpret_cast<const hrr_args_hipHostFree*>(pl);
-    void* live = ctx.translate_ptr(a->ptr);
-    if (!live) return hipSuccess;
-    hipError_t r = hipHostFree(live);
-    if (r == hipSuccess) ctx.remove_alloc(a->ptr);
     return r;
 }
 
@@ -3254,6 +3277,7 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
     void* live = buf ? buf : ctx.translate_ptr(a->hostPtr);
     if (!live) return hipSuccess;
 
+    hrr_wait_host_restores(ctx, live);
     hipError_t r = hipHostUnregister(live);
     if (r == hipSuccess) ctx.remove_alloc(a->hostPtr);
 
@@ -3325,6 +3349,7 @@ hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
         ctx.remove_alloc(a->ptr);
         return hipSuccess;
     }
+    hrr_wait_host_restores(ctx, live);  // hipFree also frees pinned host memory
     hipError_t r = hipFree(live);
     if (r == hipSuccess) ctx.remove_alloc(a->ptr);
     return r;
