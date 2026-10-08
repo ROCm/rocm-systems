@@ -625,9 +625,17 @@ hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute a
 hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t device)
 {
   HIP_INIT_API(hipKernelSetCacheConfig, kernel, config, device);
+  hipError_t status = hipSuccess;
 
   if (kernel == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+
+  auto* currentDevice = hip::getCurrentDevice();
+  const auto& devices = currentDevice->devices();
+
+  if (device < 0 || static_cast<size_t>(device) >= devices.size()) {
+    HIP_RETURN(hipErrorInvalidDevice);
   }
 
   // Load code object for the target device if not already loaded
@@ -674,10 +682,10 @@ hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hi
     wrkGrpInfo->coarseMemCarveout_ = static_cast<uint32_t>(config);
     break;
   default:
-    HIP_RETURN(hipErrorInvalidValue);
+    status = hipErrorInvalidValue;
   }
 
-  HIP_RETURN(hipSuccess);
+  HIP_RETURN(status);
 }
 
 hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
