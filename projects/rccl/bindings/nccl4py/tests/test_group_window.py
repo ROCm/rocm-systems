@@ -29,8 +29,8 @@ from cuda.core import Device, system  # noqa: E402
 
 _NRANKS = 2
 _NBYTES = 1 << 21
-# One budget for both tests: the nccl4py build-smoke harness runs this whole module under a 300 s timeout.
-_DEADLINE = time.monotonic() + 240
+# Per call, so both tests together stay inside the 300 s the nccl4py build-smoke harness gives this module.
+_TIMEOUT_S = 120
 # The unique id goes through the environment: a child's argv is world-readable in /proc, its environment is not.
 _UID_ENV = "NCCL4PY_TEST_GROUP_WINDOW_UID"
 
@@ -62,11 +62,12 @@ def _register_windows(grouped: bool) -> list[int | None]:
         outs = [os.path.join(tmp, f"rank{r}.json") for r in range(_NRANKS)]
         procs = [subprocess.Popen([sys.executable, __file__, str(r), str(int(grouped)), outs[r]], env=env)
                  for r in range(_NRANKS)]
+        deadline = time.monotonic() + _TIMEOUT_S
         try:
             for p in procs:
-                p.wait(timeout=max(1.0, _DEADLINE - time.monotonic()))
+                p.wait(timeout=max(0.0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
-            pytest.fail(f"ranks still running at the deadline; exit codes so far: {[p.poll() for p in procs]}")
+            pytest.fail(f"ranks still running after {_TIMEOUT_S} s; exit codes so far: {[p.poll() for p in procs]}")
         finally:
             for p in procs:
                 if p.poll() is None:
