@@ -63,6 +63,61 @@ are self-contained: they describe behavior that `--help` does not state and poin
 go stale when options are added. The install script leaves `evals/` out of the copy
 it makes for the agent.
 
+## Tests
+
+There is no CI for skills. `run_evals.py` is the gate, and it is meant to be run by
+hand before a release:
+
+```bash
+./skills/run_evals.py --list                                # validate the datasets
+./skills/run_evals.py                                       # does the right skill load?
+./skills/run_evals.py --mode behavioral                     # also grade the agent
+./skills/run_evals.py --skill instrumenting-binaries        # one skill
+./skills/run_evals.py --model <model>                       # pick the model under test
+./skills/run_evals.py --save-transcripts /tmp/transcripts   # keep transcripts to debug
+```
+
+It needs Python 3.9 or newer and the `claude` CLI, and it also runs from the installed
+`skills/` folder because the datasets are installed with the skills. It exits 0 when
+every case passes, 1 on a failure, and 77 when `claude` is not installed, so a caller
+can treat that as skipped rather than failed. `--list` needs no CLI.
+
+Routing mode denies the agent its tools and only checks which skill it chose, so it is
+quick (about a minute for all cases). Behavioral mode lets the agent work and grades
+`logs_contain`, `files_exist`, and the plain-language `expected_behavior` and
+`unexpected_behavior` claims with a second agent, so it takes longer and uses more
+quota; the agent may run the profiler tools if they are on `PATH`.
+
+How a case is graded:
+
+- A skill counts as loaded only when the agent calls the `Skill` tool. Reading a
+  `SKILL.md` does not count: on a vague prompt the agent explores the workspace, finds
+  the installed skills and reads them, which would fail a case that should not route.
+- Every case gets its own scratch workspace with the skills installed by
+  `install-skills.sh`, and runs with `--setting-sources project` so the agent does not
+  also see your personal skills, which can answer a prompt instead of the skill under
+  test. `--keep-user-settings` turns that off, and the report then warns about any
+  personal skill that was visible.
+- The agent is a language model, so a result can differ between runs. Re-run a failing
+  case before changing a skill or its dataset, and use `--save-transcripts` to see what
+  the agent actually did.
+
+Each dataset needs at least three cases that should trigger the skill, two that should
+not, and one triggering case with judged behavior. Negative cases carry only an id, a
+prompt, and an optional note. The runner also rejects a case id that two skills share;
+uniqueness across the whole repository is still a manual check:
+
+```bash
+grep -rhoE --include=evals.json '"id": *"[^"]+"' ../.. | sed -E 's/"id": *//' | sort | uniq -d   # must print nothing
+```
+
+The install script has no automated test of its own; `run_evals.py` exercises it for
+every case, and you can also try it by hand with a throwaway `HOME`:
+
+```bash
+HOME=$(mktemp -d) ./install-skills.sh --agent claude
+```
+
 ## Keeping skills correct
 
 Nothing catches drift automatically, so it falls to each change. A PR that alters
