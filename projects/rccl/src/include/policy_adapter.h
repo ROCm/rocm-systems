@@ -15,6 +15,9 @@ struct ncclTaskP2p;
 
 // Input boundary: normalize mutable RCCL state into policy-specific values.
 enum rcclExecutionTransportIntent rcclPolicyTransportIntent(bool p2pDisabled);
+// NCCL_P2P_DISABLE presence and RCCL_RUNTIME_TRANSPORT_TOGGLE are read once per
+// process; this forgets them so the next query rereads the environment.
+void rcclPolicyResetEnvCache();
 uint32_t rcclPolicyAvailableTransportMask(
   const struct ncclComm* comm, bool p2pDisabled);
 // Canonical transport mode (RCCL_RUNTIME_TRANSPORT_TOGGLE=1 on an eligible

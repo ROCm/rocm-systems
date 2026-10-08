@@ -516,6 +516,69 @@ bool rcclEvaluateCollectiveExecutionRules(
   return resolution.status == RCCL_EXECUTION_POLICY_SELECTED;
 }
 
+namespace {
+
+// Every P2P task of one collective resolves the same input, so a small
+// per-thread memo of the last resolutions skips the rule scan. Resolution is a
+// pure function of the input, the validation snapshot and the built-in table;
+// validation is compared bytewise, so differing padding can only cause a miss.
+struct rcclPolicyResolutionMemoEntry {
+  bool valid;
+  rcclCollectivePolicyInput input;
+  char gfxArch[32];
+  bool hasValidation;
+  rcclExecutionPolicyValidationContext validation;
+  rcclExecutionPolicyResolution resolution;
+};
+constexpr int kPolicyResolutionMemoEntries = 4;
+thread_local rcclPolicyResolutionMemoEntry
+  rcclPolicyResolutionMemo[kPolicyResolutionMemoEntries];
+thread_local int rcclPolicyResolutionMemoNext;
+
+bool rcclPolicyMemoInputMatches(
+  const rcclPolicyResolutionMemoEntry& entry,
+  const rcclCollectivePolicyInput* input,
+  const rcclExecutionPolicyValidationContext* validation) {
+  const rcclCollectivePolicyInput& key = entry.input;
+  if (!entry.valid || key.scope != input->scope ||
+      key.collType != input->collType || key.dataSize != input->dataSize ||
+      key.nNodes != input->nNodes || key.nRanks != input->nRanks ||
+      key.nChannels != input->nChannels ||
+      key.availableTransportMask != input->availableTransportMask ||
+      key.inPlace != input->inPlace ||
+      key.transportIntent != input->transportIntent ||
+      (input->gfxArch == nullptr) != (key.gfxArch == nullptr) ||
+      (input->gfxArch != nullptr && strcmp(entry.gfxArch, input->gfxArch) != 0) ||
+      entry.hasValidation != (validation != nullptr))
+    return false;
+  return validation == nullptr ||
+         memcmp(&entry.validation, validation, sizeof(*validation)) == 0;
+}
+
+void rcclPolicyMemoStore(
+  const rcclCollectivePolicyInput* input,
+  const rcclExecutionPolicyValidationContext* validation,
+  const rcclExecutionPolicyResolution& resolution) {
+  if (input->gfxArch != nullptr &&
+      strlen(input->gfxArch) >= sizeof(rcclPolicyResolutionMemo[0].gfxArch))
+    return;
+  rcclPolicyResolutionMemoEntry& entry =
+    rcclPolicyResolutionMemo[rcclPolicyResolutionMemoNext];
+  rcclPolicyResolutionMemoNext =
+    (rcclPolicyResolutionMemoNext + 1) % kPolicyResolutionMemoEntries;
+  entry.input = *input;
+  // Non-null marks a present arch; the memo compares its own copy.
+  entry.input.gfxArch = input->gfxArch != nullptr ? entry.gfxArch : nullptr;
+  if (input->gfxArch != nullptr) strcpy(entry.gfxArch, input->gfxArch);
+  entry.hasValidation = validation != nullptr;
+  if (validation != nullptr)
+    memcpy(&entry.validation, validation, sizeof(*validation));
+  entry.resolution = resolution;
+  entry.valid = true;
+}
+
+} // namespace
+
 // Normalizes a policy input and resolves the built-in architecture rules with
 // an optional immutable validation snapshot.
 struct rcclExecutionPolicyResolution rcclResolveCollectiveExecutionPolicyWithValidation(
@@ -538,6 +601,10 @@ struct rcclExecutionPolicyResolution rcclResolveCollectiveExecutionPolicyWithVal
     resolution.status = RCCL_EXECUTION_POLICY_INVALID_INPUT;
     return resolution;
   }
+  for (const rcclPolicyResolutionMemoEntry& entry : rcclPolicyResolutionMemo) {
+    if (rcclPolicyMemoInputMatches(entry, input, validation))
+      return entry.resolution;
+  }
 
   const rcclExecutionPolicyFact inputFacts[] = {
     {RCCL_EXECUTION_INPUT_SCOPE, rcclExecutionPolicyValue::Signed(input->scope)},
@@ -559,6 +626,7 @@ struct rcclExecutionPolicyResolution rcclResolveCollectiveExecutionPolicyWithVal
     inputFacts, sizeof(inputFacts) / sizeof(inputFacts[0]),
     rcclExecutionPolicyRules::kCollectiveExecutionRuleTable.count, rcclBuiltInExecutionPolicyRuleAt, nullptr,
     validation, &resolution);
+  rcclPolicyMemoStore(input, validation, resolution);
   return resolution;
 }
 

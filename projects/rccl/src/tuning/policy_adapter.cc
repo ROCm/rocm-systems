@@ -15,6 +15,7 @@
 #include "transport.h"
 
 #include <algorithm>
+#include <atomic>
 #include <stdint.h>
 #include <string.h>
 
@@ -32,9 +33,29 @@ rcclExecutionTransport rcclConfiguredPolicyTransport(bool p2pDisabled) {
   return RCCL_EXECUTION_TRANSPORT_UNKNOWN;
 }
 
+// Read once per process, like NCCL_PARAM: the enqueue path queries these for
+// every task and channel. -1 means not yet read.
+std::atomic<int> rcclPolicyToggleRequestedCache{-1};
+std::atomic<int> rcclPolicyP2pDisableSetCache{-1};
+
 bool rcclPolicyRuntimeToggleRequested() {
-  const char* toggle = ncclGetEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE");
-  return toggle != nullptr && strcmp(toggle, "1") == 0;
+  int cached = rcclPolicyToggleRequestedCache.load(std::memory_order_relaxed);
+  if (cached < 0) {
+    const char* toggle = ncclGetEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE");
+    cached = toggle != nullptr && strcmp(toggle, "1") == 0;
+    rcclPolicyToggleRequestedCache.store(cached, std::memory_order_relaxed);
+  }
+  return cached != 0;
+}
+
+bool rcclPolicyP2pDisableSet() {
+  int cached = rcclPolicyP2pDisableSetCache.load(std::memory_order_relaxed);
+  if (cached < 0) {
+    const char* p2pDisable = ncclGetEnv("NCCL_P2P_DISABLE");
+    cached = p2pDisable != nullptr && p2pDisable[0] != '\0';
+    rcclPolicyP2pDisableSetCache.store(cached, std::memory_order_relaxed);
+  }
+  return cached != 0;
 }
 
 rcclExecutionPolicyResolution rcclInvalidPolicyResolution() {
@@ -168,9 +189,13 @@ void rcclBuildCollectiveExecutionPolicyValidationContext(
 
 } // namespace
 
+void rcclPolicyResetEnvCache() {
+  rcclPolicyToggleRequestedCache.store(-1, std::memory_order_relaxed);
+  rcclPolicyP2pDisableSetCache.store(-1, std::memory_order_relaxed);
+}
+
 rcclExecutionTransportIntent rcclPolicyTransportIntent(bool p2pDisabled) {
-  const char* p2pDisable = ncclGetEnv("NCCL_P2P_DISABLE");
-  if (p2pDisable == nullptr || p2pDisable[0] == '\0')
+  if (!rcclPolicyP2pDisableSet())
     return RCCL_EXECUTION_TRANSPORT_INTENT_AUTO;
   return p2pDisabled ? RCCL_EXECUTION_TRANSPORT_INTENT_SHM
                      : RCCL_EXECUTION_TRANSPORT_INTENT_IPC;

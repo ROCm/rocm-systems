@@ -26,6 +26,9 @@
 
 #include "signature-drift.h"
 
+// src/tuning/policy_adapter.cc; absent from binaries that do not link it.
+void rcclPolicyResetEnvCache() __attribute__((weak));
+
 namespace {
 struct MicroEnvironState {
   bool active = false;
@@ -51,6 +54,10 @@ void PublishMicroEnviron() {
 std::unordered_map<std::string, std::optional<std::string>>& microEnvMap() {
   static std::unordered_map<std::string, std::optional<std::string>> m;
   return m;
+}
+// Binaries that link the policy adapter must reread the variables it caches after a fixture changes them.
+void ResetPolicyEnvCache() {
+  if (rcclPolicyResetEnvCache) rcclPolicyResetEnvCache();
 }
 // Resolved past our interposing definition below so the map-miss fallback doesn't recurse into ourselves.
 char* real_getenv(const char* name) {
@@ -100,6 +107,7 @@ void SetMicroEnv(const char* name, const char* value) {
     state.entries = std::move(entries);
     PublishMicroEnviron();
   }
+  ResetPolicyEnvCache();
 }
 
 void SetMicroEnvAbsent(const char* name) { SetMicroEnv(name, nullptr); }
@@ -117,6 +125,7 @@ void SetMicroEnviron(const std::vector<std::string>& entries) {
       values.emplace(entry.substr(0, separator), entry.substr(separator + 1));
   }
   PublishMicroEnviron();
+  ResetPolicyEnvCache();
 }
 
 void ClearMicroEnv() {
@@ -129,6 +138,7 @@ void ClearMicroEnv() {
     state.pointers.clear();
   }
   microEnvMap().clear();
+  ResetPolicyEnvCache();
 }
 
 void ResetEnvFakes() {
