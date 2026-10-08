@@ -837,7 +837,7 @@ void hrr_free_device_alloc(PlaybackContext& ctx, void* live);
 // device's stream. The wait is bounded by --sync-watchdog-ms when that is set and
 // by 10 s otherwise, because the stream may be held by work that only a later
 // replayed event releases. Returns false when restores are still queued after
-// that; for a null base it then says that replay goes on. `why` names the
+// that; for a null base it then says that `why` stops waiting. `why` names the
 // waiter in the one-time notice.
 bool hrr_wait_host_restores(PlaybackContext& ctx, const void* base, const char* why);
 
@@ -908,9 +908,8 @@ bool hrr_replayed_recorded_error(PlaybackContext& ctx, const char* api,
 // that capture shows failing that way fails the same way here.
 hipCtx_t hrr_live_ctx(uint64_t recorded);
 
-// Thread-local sequence ID — set by dispatch_event before calling any handler.
-// Kernel-launch handlers read this to wait for their submission turn at the
-// exact point of the HIP call, allowing preparation work to run in parallel.
+// Thread-local sequence ID — set by dispatch_event before calling any handler,
+// which reads it to name the event in diagnostics.
 extern thread_local uint64_t hrr_dispatch_seq;
 
 // The sequence id the current event hands on to the next one, when it is a

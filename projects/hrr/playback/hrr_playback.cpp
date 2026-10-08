@@ -622,8 +622,8 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
                                  size_t idx, bool log) {
   uint16_t etype = ev.header().event_type;
 
-  // Give kernel-launch handlers the sequence ID so they can wait and advance
-  // next_seq at the exact point of the HIP call.
+  // The sequence ID, for handlers that name the event in diagnostics. An
+  // ordered launch passes the turn on through hrr_dispatch_release_seq.
   hrr_dispatch_seq = ev.header().sequence_id;
   // A launch that restores pinned host memory is ordered too, so that the
   // next event, a free of that memory or a capture begun on the launch

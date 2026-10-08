@@ -1103,8 +1103,8 @@ bool hrr_wait_host_restores(PlaybackContext& ctx, const void* base, const char* 
     if (st.cv.wait_for(lk, std::chrono::milliseconds(ms), done)) return true;
     if (!base)
         fprintf(stderr,
-                "[HRR] %s: a pinned host snapshot restore is still queued after "
-                "%u ms; replay goes on without it\n", why, ms);
+                "[HRR] %s stops waiting: a pinned host snapshot restore is "
+                "still queued after %u ms\n", why, ms);
     return false;
 }
 
