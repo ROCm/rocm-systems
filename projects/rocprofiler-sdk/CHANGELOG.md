@@ -10,6 +10,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+  - Fixed `rocprofv3 --replay-mode kernel` exiting with "cannot be combined with PC sampling" whenever `ROCPROFILER_PC_SAMPLING_BETA_ENABLED` was set or `--pc-sampling-beta-enabled` was given, although no PC sampling was requested. Only a configured PC sampling method (`--pc-sampling-unit`, `--pc-sampling-method`, `--pc-sampling-interval`, or `ROCPROF_PC_SAMPLING_METHOD`) now conflicts with kernel replay.
+
 ### Known issues
 
 ### Removed
