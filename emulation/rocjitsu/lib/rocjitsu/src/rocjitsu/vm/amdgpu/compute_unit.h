@@ -442,15 +442,17 @@ public:
   void gws_init(Wavefront &wf, uint32_t rid, uint32_t count);
 
   /// @brief Arrive at a GWS barrier. Parks the wave when the participant set is
-  /// provably co-resident and more arrivals are pending; the final arrival
-  /// releases the parked peers. Non-resident/degenerate counts fall back to a
-  /// non-blocking structural no-op.
+  /// provably resident in the dispatch and more arrivals are pending; the final
+  /// arrival releases the parked peers (from any workgroup). Non-resident/
+  /// degenerate counts fall back to a non-blocking structural no-op.
   void gws_barrier_arrive(Wavefront &wf, uint32_t rid, uint32_t count);
 
-  /// @brief Signal (V) a GWS semaphore: add one credit, release one waiter.
+  /// @brief Signal (V) a GWS semaphore: add one credit, release one waiter
+  /// (parked by any workgroup of the dispatch).
   void gws_sema_v(Wavefront &wf, uint32_t rid);
 
-  /// @brief Wait (P) on a GWS semaphore: consume a credit, else park the wave.
+  /// @brief Wait (P) on a GWS semaphore: consume a credit, else park until any
+  /// workgroup of the dispatch signals the shared resource.
   void gws_sema_p(Wavefront &wf, uint32_t rid);
 
   /// @brief Bulk-signal (BR) a GWS semaphore: add @p count credits and release
@@ -1412,11 +1414,12 @@ protected:
   std::unordered_map<uint64_t, WorkgroupBarriers> barrier_wgs_;
 
   /// @brief Per-resource state for a Global Wave Sync (GWS) barrier/semaphore.
-  /// @details One array of kGwsResourcesPerWg entries is kept per co-resident
-  /// workgroup (keyed by wg_key), indexed by the 6-bit resource id. GWS state
-  /// lives CU-local and workgroup-private so a rendezvous can only ever involve
-  /// waves that are provably co-resident -- the same deadlock-free scope as an
-  /// ordinary s_barrier.
+  /// @details One array of kGwsResourcesPerWg entries is kept per dispatch
+  /// (keyed by gws_key(dispatch_id)), indexed by the 6-bit resource id. GWS
+  /// state is dispatch-global, matching hardware: every workgroup of a dispatch
+  /// shares one resource, so a signal/arrival from any workgroup rendezvouses
+  /// with a waiter parked by another. The dispatch-wide quiescence scan in
+  /// update_wf_states() is the genuine-deadlock backstop.
   static constexpr uint32_t kGwsResourcesPerWg = 64;
   struct GwsResource {
     uint32_t counter = 0; ///< Live barrier counter: decremented per arrival, reloaded from the
@@ -1425,14 +1428,13 @@ protected:
     bool armed = false;   ///< Whether the barrier counter has been seeded (init or first arrival).
   };
   std::unordered_map<uint64_t, std::array<GwsResource, kGwsResourcesPerWg>> gws_resources_;
-  /// @brief Wake up to @p max_wake waves parked on one GWS resource.
+  /// @brief Wake up to @p max_wake waves parked on one GWS resource, across every
+  /// workgroup of the dispatch (GWS state is dispatch-global).
   /// @returns Number of waves released.
-  uint32_t release_gws_waiters(uint32_t dispatch_id, uint32_t wg_id, uint32_t rid,
-                               uint32_t max_wake);
-  /// @brief Whether a co-resident peer of @p self (same wg, not halted, not
-  /// already parked on GWS) could still issue a GWS signal/arrival. Used to keep
-  /// waits whose participants cannot be established in this model non-blocking.
-  bool gws_has_active_peer(uint32_t dispatch_id, uint32_t wg_id, const Wavefront &self) const;
+  uint32_t release_gws_waiters(uint32_t dispatch_id, uint32_t rid, uint32_t max_wake);
+  /// @brief Total resident (not-yet-retired) waves across all workgroups of a
+  /// dispatch. Used as the GWS barrier's provable-participant bound.
+  uint32_t dispatch_resident_waves(uint32_t dispatch_id) const;
 
   uint64_t shared_aperture_base_ = 0;
   uint64_t shared_aperture_limit_ = 0;
