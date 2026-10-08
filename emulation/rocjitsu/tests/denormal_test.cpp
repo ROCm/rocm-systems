@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "util/simd.h"
 
 #include <gtest/gtest.h>

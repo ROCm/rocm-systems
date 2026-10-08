@@ -14,6 +14,7 @@ from amdisa.codegen.execute.floating_policy import (
     F16_TRANS_OPERATIONS,
     F16_TRANSCENDENTAL_CALLS,
     FLUSH_NEAREST_F32_OPS,
+    INPUT_FLUSHED_ROUNDING,
 )
 from amdisa.codegen.execute.simd_codegen import SIMD_VOP3_UNARY_FP16, simd_probe_line
 from amdisa.codegen.execute.sema_lower import lower_sema_block
@@ -143,18 +144,17 @@ def test_scalar_trans_call_uses_trans_output(callee: str):
     assert _PLAIN_OUTPUT not in result
 
 
-@pytest.mark.parametrize('operation', ['ceil', 'floor'])
+@pytest.mark.parametrize('operation', sorted(INPUT_FLUSHED_ROUNDING))
 def test_scalar_input_flushed_rounding_has_plain_output(operation: str):
-    value = (
-        _f16_call(operation)
-        if operation == 'ceil'
-        else SemaNode(
+    values = {
+        'ceil': _f16_call('ceil'),
+        'floor': SemaNode(
             SemaNodeKind.FLOOR,
             ty=SemaType.F16,
             children=(_f16(_operand('S', 0)),),
-        )
-    )
-    result = _lower_f16_unary(value)
+        ),
+    }
+    result = _lower_f16_unary(values[operation])
 
     assert result.count(_F16_FLUSH) == 1
     assert _PLAIN_OUTPUT in result
@@ -182,10 +182,10 @@ def test_simd_trans_functor_gets_flushed_source(template: str):
 def test_simd_trans_functor_uses_trans_output(template: str):
     line = simd_probe_line(template)
 
-    assert ', true,' in line
+    assert line.endswith(f', true, {_F16_POLICY});')
 
 
-@pytest.mark.parametrize('operation', ['ceil', 'floor'])
+@pytest.mark.parametrize('operation', sorted(INPUT_FLUSHED_ROUNDING))
 def test_simd_input_flushed_rounding_has_plain_output(operation: str):
     line = simd_probe_line(f'v_{operation}_f16_vop3')
 

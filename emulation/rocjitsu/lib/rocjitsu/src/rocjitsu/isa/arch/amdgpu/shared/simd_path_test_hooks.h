@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_SIMD_PATH_TEST_HOOKS_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_SIMD_PATH_TEST_HOOKS_H_
+#pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 
@@ -10,30 +9,37 @@
 
 namespace rocjitsu::amdgpu {
 
-/// Test-only tracker for successful SIMD fast-path execution on this thread.
-///
-/// Like util::set_force_scalar_for_testing, this observes only execution linked
-/// into the caller's module. Nested observers restore the previous destination.
+/// @brief Observe successful execution of the SimdFastPath families on this thread.
+/// @details Uninstrumented SIMD routes (including F32/F64 helpers) are invisible:
+/// an empty observation does not prove scalar execution, and a single recorded
+/// family does not rule out untracked routes. Like util::set_force_scalar_for_testing,
+/// this observes only execution linked into the caller's module. Nested observers
+/// restore the previous destination; events belong only to the innermost observer.
 class ScopedSimdFastPathTracker {
 public:
   ScopedSimdFastPathTracker() : previous_sink_(detail::active_simd_fast_path_bits) {
     detail::active_simd_fast_path_bits = &executed_paths_;
+    // The counter gates TLS access, not publication: the sink is thread-local.
+    detail::simd_fast_path_observer_count.fetch_add(1, std::memory_order_relaxed);
   }
 
-  ~ScopedSimdFastPathTracker() { detail::active_simd_fast_path_bits = previous_sink_; }
+  ~ScopedSimdFastPathTracker() {
+    detail::active_simd_fast_path_bits = previous_sink_;
+    detail::simd_fast_path_observer_count.fetch_sub(1, std::memory_order_relaxed);
+  }
 
   ScopedSimdFastPathTracker(const ScopedSimdFastPathTracker &) = delete;
   ScopedSimdFastPathTracker &operator=(const ScopedSimdFastPathTracker &) = delete;
 
-  [[nodiscard]] bool was_executed(SimdFastPath path) const {
+  [[nodiscard]] bool tracked_path_executed(SimdFastPath path) const {
     return (executed_paths_ & path_bit(path)) != 0;
   }
 
-  [[nodiscard]] bool only_was_executed(SimdFastPath path) const {
+  [[nodiscard]] bool only_tracked_path_executed(SimdFastPath path) const {
     return executed_paths_ == path_bit(path);
   }
 
-  [[nodiscard]] bool none_was_executed() const { return executed_paths_ == 0; }
+  [[nodiscard]] bool no_tracked_path_executed() const { return executed_paths_ == 0; }
 
 private:
   static constexpr uint64_t path_bit(SimdFastPath path) {
@@ -45,5 +51,3 @@ private:
 };
 
 } // namespace rocjitsu::amdgpu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_SHARED_SIMD_PATH_TEST_HOOKS_H_

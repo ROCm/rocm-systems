@@ -255,9 +255,10 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
     auto out = fx.run(inst, c.kind, rot, exec);
     if (c.expected_simd_path.has_value()) {
       if (force_scalar)
-        EXPECT_TRUE(tracker.none_was_executed()) << c.name << ": forced-scalar execution used SIMD";
+        EXPECT_TRUE(tracker.no_tracked_path_executed())
+            << c.name << ": forced-scalar execution used SIMD";
       else
-        EXPECT_TRUE(tracker.only_was_executed(*c.expected_simd_path))
+        EXPECT_TRUE(tracker.only_tracked_path_executed(*c.expected_simd_path))
             << c.name << ": eligible execution did not use its expected SIMD path";
     }
     delete inst;
@@ -527,10 +528,10 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
         amdgpu::ScopedSimdFastPathTracker tracker;
         ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
         if (force_scalar)
-          EXPECT_TRUE(tracker.none_was_executed())
+          EXPECT_TRUE(tracker.no_tracked_path_executed())
               << test.name << ": forced-scalar execution used SIMD";
         else
-          EXPECT_TRUE(tracker.only_was_executed(amdgpu::SimdFastPath::VOP3_TERNARY_FP16))
+          EXPECT_TRUE(tracker.only_tracked_path_executed(amdgpu::SimdFastPath::VOP3_TERNARY_FP16))
               << test.name << ": eligible execution did not use the ternary F16 SIMD path";
         for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
           const uint32_t actual = fx.cu->read_vgpr(vb + kDstVgpr32, lane);
