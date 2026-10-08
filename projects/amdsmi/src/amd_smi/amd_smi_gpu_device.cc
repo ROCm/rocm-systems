@@ -159,15 +159,14 @@ amdsmi_status_t AMDSmiGPUDevice::amdgpu_query_cpu_affinity(std::string& cpu_affi
 }
 
 namespace {
-// cache the compute process list for the device
+// This GPU's finished process list, reused for kComputeProcessCacheDuration.
 struct ComputeProcessCache {
-  std::unique_ptr<rsmi_process_info_t[]> list_all_processes_ptr = nullptr;
-  std::atomic<std::chrono::steady_clock::time_point> last_compute_process_list_update_time{
-      std::chrono::steady_clock::time_point{}};
   std::mutex mtx;
-  uint32_t num_running_processes = 0;
-  // Per GPU, keyed by pid: the cached memory and engine usage differ per GPU.
-  std::unordered_map<uint32_t, amdsmi_proc_info_t> process_info;
+  // All guarded by mtx.
+  bool valid = false;
+  std::chrono::steady_clock::time_point updated;
+  uint32_t num_kfd_processes = 0;  // Sizes the next listing of KFD processes.
+  GPUComputeProcessList_t list;
 };
 
 // Never destroyed: a thread can still be inside get_compute_process_list_impl()
@@ -178,10 +177,20 @@ std::mutex compute_process_list_mutex;
 static const std::chrono::milliseconds kComputeProcessCacheDuration =
     std::chrono::milliseconds(read_env_ms("AMDSMI_PROCESS_INFO_CACHE_MS", 1));
 
+// Room for processes that start while the KFD processes are listed.
+constexpr auto kProcessListHeadroom = uint32_t(64);
+// Listings tried before processes that keep starting make the read fail.
+constexpr auto kListAttempts = std::uint16_t(3);
+
 }  // namespace
 
 int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     GPUComputeProcessList_t& compute_process_list, ComputeProcessListType_t list_type) {
+  compute_process_list.clear();
+  if (list_type != ComputeProcessListType_t::kAllProcesses &&
+      list_type != ComputeProcessListType_t::kAllProcessesOnDevice) {
+    return rsmi_status_t::RSMI_STATUS_SUCCESS;
+  }
   ComputeProcessCache* cache_ptr = nullptr;
   {
     std::lock_guard<std::mutex> lock(compute_process_list_mutex);
@@ -190,59 +199,42 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     }
     cache_ptr = compute_process_cache_map[gpu_id_].get();
   }
-  // Held from the expiry check through the read-out, so no call reads this GPU's
-  // cache while another call refreshes it.
+  // Held through the refresh, so a call that waits here while another call
+  // refreshes this GPU's list gets that list instead of reading it again.
   std::lock_guard<std::mutex> lock(cache_ptr->mtx);
-
-  /**
-   *  The first call to rsmi_compute_process_info_get() to find the number of
-   *  rsmi_process_info_t currently running on the system.
-   */
-  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
-  auto now = std::chrono::steady_clock::now();
-  auto last_read_delta = std::chrono::duration_cast<std::chrono::milliseconds>(
-      now - cache_ptr->last_compute_process_list_update_time.load());
-  // only get new data if cache duration has expired
-  if (last_read_delta > kComputeProcessCacheDuration) {
-    // Clear the process info cache when refreshing
-    cache_ptr->process_info.clear();
-
-    // A GPU process that starts or exits between the count and the read fails the
-    // read, so a busy system needs another try before that becomes an error.
-    constexpr int kReadAttempts = 3;
-    for (int attempt = 1;; ++attempt) {
-      status_code = rsmi_compute_process_info_get(nullptr, &cache_ptr->num_running_processes);
-      if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS &&
-          cache_ptr->num_running_processes <= 0) {
-        compute_process_list.clear();
-        cache_ptr->last_compute_process_list_update_time = std::chrono::steady_clock::now();
-        return static_cast<int32_t>(status_code);
-      }
-
-      /**
-       *  Make a type safe pointer, then
-       *
-       * second call to rsmi_compute_process_info_get() to get the actual data into
-       *  the allocated rsmi_process_info_t array.
-       */
-      if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) {
-        cache_ptr->list_all_processes_ptr =
-            std::make_unique<rsmi_process_info_t[]>(cache_ptr->num_running_processes);
-        status_code = rsmi_compute_process_info_get(cache_ptr->list_all_processes_ptr.get(),
-                                                    &cache_ptr->num_running_processes);
-      }
-      if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) break;
-      if (attempt == kReadAttempts) return static_cast<int32_t>(status_code);
-    }
-
-    if (cache_ptr->num_running_processes <= 0) {
-      compute_process_list.clear();
-      cache_ptr->last_compute_process_list_update_time = std::chrono::steady_clock::now();
-      return rsmi_status_t::RSMI_STATUS_SUCCESS;  // No processes running
-    }
-
-    cache_ptr->last_compute_process_list_update_time = std::chrono::steady_clock::now();
+  if (cache_ptr->valid &&
+      std::chrono::steady_clock::now() - cache_ptr->updated <= kComputeProcessCacheDuration) {
+    compute_process_list = cache_ptr->list;
+    return rsmi_status_t::RSMI_STATUS_SUCCESS;
   }
+
+  // List the KFD processes by PID only; each one's stats are read below, for
+  // this GPU. Processes that start during a listing can make it longer than
+  // the buffer, so list again with room for them.
+  std::vector<rsmi_process_info_t> procs(cache_ptr->num_kfd_processes + kProcessListHeadroom);
+  auto num_kfd_processes = uint32_t(0);
+  for (auto attempt = std::uint16_t(1);; ++attempt) {
+    const int err =
+        GetProcessInfo(procs.data(), static_cast<uint32_t>(procs.size()), &num_kfd_processes);
+    if (err == ENOENT) {
+      // No KFD process directory: KFD is not loaded, so no process uses a GPU through it.
+      num_kfd_processes = 0;
+      break;
+    }
+    if (err != 0) {
+      return static_cast<int32_t>(ErrnoToRsmiStatus(err));
+    }
+    if (num_kfd_processes <= procs.size()) {
+      break;
+    }
+    if (attempt == kListAttempts) {
+      return rsmi_status_t::RSMI_STATUS_INSUFFICIENT_SIZE;
+    }
+    procs.resize(num_kfd_processes + kProcessListHeadroom);
+  }
+  procs.resize(num_kfd_processes);
+  cache_ptr->num_kfd_processes = num_kfd_processes;
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
 
   /**
    *  Check that you have devices that are able to be monitored, ie excluding CPUs
@@ -285,7 +277,10 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     // If we cannot get the info from sysfs, save the minimum info
     if (status_code != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) {
       amdsmi_proc_info.pid = rsmi_proc_info.process_id;
-      amdsmi_proc_info.memory_usage.vram_mem = rsmi_proc_info.vram_usage;
+      // The memory sizes have no "not available" value: an unknown VRAM stays 0.
+      if (rsmi_proc_info.vram_usage != UINT64_MAX) {
+        amdsmi_proc_info.memory_usage.vram_mem = rsmi_proc_info.vram_usage;
+      }
     }
 
     // Copy the kfd stats from rsmi_process_info_t to amdsmi_proc_info_t
@@ -320,28 +315,25 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     for (auto device_idx = uint32_t(0); device_idx < list_device_allocation_size; ++device_idx) {
       // Is this device running this process?
       if (list_device_ptr[device_idx] == get_gpu_id()) {
-        amdsmi_proc_info_t tmp_amdsmi_proc_info{};
-
-        auto cached_amdsmi_proc = cache_ptr->process_info.find(rsmi_proc_info.process_id);
-        if (cached_amdsmi_proc != cache_ptr->process_info.end()) {
-          // Use cached info
-          tmp_amdsmi_proc_info = cached_amdsmi_proc->second;
-        } else {
-          // Need to get new info from system
-          std::unordered_set<uint64_t> gpu_set;
-          gpu_set.insert(get_kfd_gpu_id());
-          // A failed refresh leaves the list's totals over all GPUs in place. Drop them:
-          // mem keeps this GPU's fdinfo total and the other KFD stats read as unknown.
-          if (GetProcessInfoForPID(rsmi_proc_info.process_id, &rsmi_proc_info, &gpu_set) != 0) {
-            rsmi_proc_info.vram_usage = 0;
-            rsmi_proc_info.sdma_usage = std::numeric_limits<uint64_t>::max();
-            rsmi_proc_info.cu_occupancy = std::numeric_limits<uint32_t>::max();
-            rsmi_proc_info.evicted_time = std::numeric_limits<uint32_t>::max();
+        // Read the process's KFD stats for this GPU only.
+        std::unordered_set<uint64_t> gpu_set{kfd_gpu_id};
+        if (GetProcessInfoForPID(rsmi_proc_info.process_id, &rsmi_proc_info, &gpu_set) != 0) {
+          // Its KFD entry is gone: the process exited after the listing.
+          const std::string kfd_proc_path =
+              "/sys/class/kfd/kfd/proc/" + std::to_string(rsmi_proc_info.process_id);
+          if (!FileExists(kfd_proc_path.c_str())) {
+            break;
           }
-          get_process_info(rsmi_proc_info, tmp_amdsmi_proc_info);
-          cache_ptr->process_info[rsmi_proc_info.process_id] = tmp_amdsmi_proc_info;
+          // Still running but unreadable: list it with each KFD stat unknown.
+          // KFD_STATS_INVALID is 32 bits wide; the 64-bit stats use all-ones.
+          rsmi_proc_info.vram_usage = std::numeric_limits<uint64_t>::max();
+          rsmi_proc_info.sdma_usage = std::numeric_limits<uint64_t>::max();
+          rsmi_proc_info.cu_occupancy = KFD_STATS_INVALID;
+          rsmi_proc_info.evicted_time = KFD_STATS_INVALID;
         }
-        compute_process_list.emplace(rsmi_proc_info.process_id, tmp_amdsmi_proc_info);
+        amdsmi_proc_info_t amdsmi_proc_info{};
+        get_process_info(rsmi_proc_info, amdsmi_proc_info);
+        compute_process_list.emplace(rsmi_proc_info.process_id, amdsmi_proc_info);
       }
     }
 
@@ -351,14 +343,12 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
   /**
    *  Transfer/Save the ones linked to this device.
    */
-  compute_process_list.clear();
-  for (auto process_idx = uint32_t(0); process_idx < cache_ptr->num_running_processes;
-       ++process_idx) {
-    if (list_type == ComputeProcessListType_t::kAllProcesses ||
-        list_type == ComputeProcessListType_t::kAllProcessesOnDevice) {
-      update_list_by_running_device(cache_ptr->list_all_processes_ptr[process_idx]);
-    }
+  for (const auto& rsmi_proc_info : procs) {
+    update_list_by_running_device(rsmi_proc_info);
   }
+  cache_ptr->list = compute_process_list;
+  cache_ptr->updated = std::chrono::steady_clock::now();
+  cache_ptr->valid = true;
 
   return static_cast<int32_t>(status_code);
 }
