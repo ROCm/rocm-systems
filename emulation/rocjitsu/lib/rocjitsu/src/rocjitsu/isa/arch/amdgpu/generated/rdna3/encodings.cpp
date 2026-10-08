@@ -390,6 +390,9 @@ Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
+  if (has_encoded_dpp())
+    dpp_modifiers_ = amdgpu::dpp::SourceModifiers::decode(
+        *reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst));
 }
 
 void Vop1::implicit_uses(RegisterSet &uses) const {
@@ -650,6 +653,9 @@ Vopc::Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
+  if (has_encoded_dpp())
+    dpp_modifiers_ = amdgpu::dpp::SourceModifiers::decode(
+        *reinterpret_cast<const VopcVopDpp16MachineInst *>(inst));
 }
 
 bool Vopc::default_encoding() {
@@ -753,6 +759,9 @@ Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exe
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
+  if (has_encoded_dpp())
+    dpp_modifiers_ = amdgpu::dpp::SourceModifiers::decode(
+        *reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst));
 }
 
 void Vop2::implicit_uses(RegisterSet &uses) const {
@@ -1540,8 +1549,9 @@ Ldsdir::Ldsdir(std::string_view mnemonic, const LdsdirMachineInst *inst, Execute
 bool Ldsdir::default_encoding() { return 1; }
 
 bool Ds::uses_split_ds_offsets() const {
-  return (inst_.op >= 14 && inst_.op <= 15) || (inst_.op >= 55 && inst_.op <= 56) ||
-         (inst_.op >= 78 && inst_.op <= 79) || (inst_.op >= 119 && inst_.op <= 120);
+  return (inst_.op >= 14 && inst_.op <= 15) || (inst_.op >= 46 && inst_.op <= 47) ||
+         (inst_.op >= 55 && inst_.op <= 56) || (inst_.op >= 78 && inst_.op <= 79) ||
+         (inst_.op >= 110 && inst_.op <= 111) || (inst_.op >= 119 && inst_.op <= 120);
 }
 
 Ds::Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn)
@@ -1576,6 +1586,15 @@ Mimg::Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exe
   opcode_ = inst_.op;
 }
 
+void Mimg::capture_nsa_words(const MachineInst *inst, const Operand *vaddr) {
+  if (!inst_.nsa)
+    return;
+  nsa_vaddr_operand_ = vaddr;
+  size_ = sizeof(OpEncoding) + sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
+}
+
 bool Mimg::has_nsa() { return (inst_.nsa == 1); }
 
 Exp::Exp(std::string_view mnemonic, const ExpMachineInst *inst, ExecuteFn exec_fn)
@@ -1596,7 +1615,7 @@ Flat::Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exe
 }
 
 void Flat::implicit_uses(RegisterSet &uses) const {
-  if (inst_.saddr == 0x7F)
+  if (inst_.saddr == 0x7C)
     return;
   if (inst_.seg == 1) {
     uses.expand(RegisterRef{RegClass::SGPR, static_cast<uint16_t>(inst_.saddr), 1});

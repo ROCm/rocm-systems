@@ -78,6 +78,51 @@ def generate_signal_api():
     return "".join([signaling_api_dec(suffix) for suffix in suffixes])
 
 
+def signal_op_dec(operation):
+    return (
+        f"__device__ ATTR_NO_INLINE void rocshmem_ctx_signal_{operation}(\n"
+        f"    rocshmem_ctx_t ctx, uint64_t *sig_addr, uint64_t signal, int pe);\n"
+        f"__device__ ATTR_NO_INLINE void rocshmem_signal_{operation}(\n"
+        f"    uint64_t *sig_addr, uint64_t signal, int pe);"
+    )
+
+
+def signal_fetch_dec():
+    declarations = [
+        "__device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch("
+        "const uint64_t *sig_addr);"
+    ]
+    for suffix, scope in [("_wg", "work-group"), ("_wave", "wave")]:
+        declarations.append(
+            "/**\n"
+            f" * @brief Atomically fetch a signal value collectively at {scope} scope.\n"
+            " *\n"
+            " * @deprecated Use rocshmem_signal_fetch() instead.\n"
+            " */\n"
+            '[[deprecated("Use rocshmem_signal_fetch() instead")]]\n'
+            f"__device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch{suffix}("
+            "const uint64_t *sig_addr);"
+        )
+    return "\n".join(declarations)
+
+
+def signal_wait_dec():
+    return (
+        "__device__ ATTR_NO_INLINE uint64_t rocshmem_signal_wait_until(\n"
+        "    uint64_t *sig_addr, int cmp, uint64_t cmp_value);"
+    )
+
+
+def standalone_signal_dec():
+    declarations = [
+        signal_op_dec("add"),
+        signal_fetch_dec(),
+        signal_op_dec("set"),
+        signal_wait_dec(),
+    ]
+    return "\n" + "\n\n".join(declarations) + "\n"
+
+
 def write_to_file(filename, content):
     with open(filename, 'w') as file:
         file.write(content)
@@ -94,6 +139,7 @@ namespace rocshmem {
 """
 
     expanded_code += generate_signal_api()
+    expanded_code += standalone_signal_dec()
 
     expanded_code += """
 }  // namespace rocshmem

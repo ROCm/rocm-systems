@@ -43,7 +43,7 @@ TEST_F(cpu_pmc_sample_test, serialize_deserialize)
     serialize(buffer.data(), original);
 
     std::uint8_t* buffer_ptr   = buffer.data();
-    auto          deserialized = deserialize<cpu_pmc_sample>(buffer_ptr);
+    auto const    deserialized = deserialize<cpu_pmc_sample>(buffer_ptr);
 
     EXPECT_EQ(deserialized.device_id, original.device_id);
     EXPECT_EQ(deserialized.timestamp, original.timestamp);
@@ -94,7 +94,7 @@ TEST_F(cpu_pmc_sample_test, empty_data)
     serialize(buffer.data(), original);
 
     std::uint8_t* buffer_ptr   = buffer.data();
-    auto          deserialized = deserialize<cpu_pmc_sample>(buffer_ptr);
+    auto const    deserialized = deserialize<cpu_pmc_sample>(buffer_ptr);
 
     EXPECT_TRUE(deserialized.freqs.empty());
     EXPECT_TRUE(deserialized.loads.empty());
