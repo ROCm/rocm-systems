@@ -7802,6 +7802,19 @@ static hipError_t capture_hipDeviceFlushGPUDirectRDMAWrites(enum hipFlushGPUDire
 }
 
 // Generated shim
+static hipError_t capture_hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library) {
+  hipError_t r = g_real_table.hipLibraryGetModule_fn(pMod, library);
+  if (r == hipSuccess) {
+    hrr_args_hipLibraryGetModule a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.library = reinterpret_cast<uint64_t>(library);
+    if (pMod) a.pMod = reinterpret_cast<uint64_t>(*pMod);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPLIBRARYGETMODULE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture___hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem, hipStream_t* stream) {
   hipError_t r = g_real_compiler_table.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
   if (r == hipSuccess) {
@@ -8537,6 +8550,7 @@ void hip_capture_build_table() {
   g_cap_table.hipInitDevice_fn = capture_hipInitDevice;
   g_cap_table.hipModuleEnumerateFunctions_fn = capture_hipModuleEnumerateFunctions;
   g_cap_table.hipDeviceFlushGPUDirectRDMAWrites_fn = capture_hipDeviceFlushGPUDirectRDMAWrites;
+  g_cap_table.hipLibraryGetModule_fn = capture_hipLibraryGetModule;
 }
 
 void hip_capture_build_compiler_table() {
