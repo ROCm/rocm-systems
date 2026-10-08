@@ -1211,16 +1211,36 @@ replay hangs. This is a known risk, not a solved one. It needs a non-matching
 overlap with a freed mapping, an exhausted device, or such a take-back, while
 such a kernel is running.
 
-**Remapping at the same address.** Once, on a gfx1201 CI runner, the
-`--kernel-filter` reservation section of `Lifetimes` read a wrong value in the
-timed pass: two of the four workgroups of one kernel saw the wrong contents of
-an 8-byte cell whose page the warm-up reset had unmapped and the timed pass
-mapped again with new memory. Replay's host ordering there is complete: a
-synchronous copy, then a device sync, with no deferred free pending. The
-suspected cause, not proven, is a stale GPU address translation after an unmap
-and a remap at the same address: VMM mappings take the `DRM_AMDGPU_GEM_VA` path,
-while `hipMalloc` memory goes through KFD, which flushes the TLBs itself. It did
-not reproduce in 100 runs on gfx950.
+**Remapping at the same address.** On gfx1201 hosts running Linux 7.0.0-34
+with its in-box amdgpu driver, `hipMemUnmap` leaves the old GPU address
+translation cached. VMM mappings take the `DRM_AMDGPU_GEM_VA` path, and that
+unmap does not flush the TLBs; `hipMalloc` memory goes through KFD, which does.
+Memory mapped next at the same address is then written by the copy engines, and
+read by some shader engines, through the physical pages it replaced, until
+something flushes them. A standalone program with no HRR in it (map, write,
+launch, unmap, map new memory at the same address, repeat) fails 26-94% of its
+iterations there. In replay it showed as the `--kernel-filter` reservation
+section of `Lifetimes`: in the timed pass, two of the four workgroups of one
+kernel read the old contents of a cell whose page the warm-up reset had
+unmapped and the timed pass mapped again. gfx1200 hosts on Linux 6.8 with a
+DKMS amdgpu, and gfx950, do not show it.
+
+This is a driver bug outside HRR, but placement maps the same addresses again by
+design, so replay works around it. With placement on, it flushes the TLBs after
+every drain that unmapped something, after the warm-up reset's unmaps, and after
+a replayed `hipMemUnmap` (`hrr_flush_gpu_tlb`). The flush allocates and frees 4
+MiB with `hipMalloc`: KFD flushes the TLBs whenever it unmaps an ordinary
+allocation from the GPU, and anything up to ROCr's 2 MiB fragment blocks would
+be carved from a block that stays mapped, so it would flush nothing. It runs on
+every platform, with no check for the affected driver, and costs about 1 ms per
+pass (0.7-1.5 ms on a 6-7 ms timed pass with about 20 unmaps). The flush reaches
+the replay thread's current device; an unmap made on another device of a
+multi-GPU host with the affected driver may stay unflushed. Once drivers with the
+fix are the minimum HRR supports, the workaround can be removed.
+`UnmapFlushesTlb` checks that a drain flushes once after unmapping and not when
+nothing was unmapped; the flush after the warm-up reset is what `Lifetimes`
+needs on the affected hosts, and no test fails without the flush after a
+replayed `hipMemUnmap`.
 
 **Several GPUs.** A placed allocation is backed on the device it was made on: the
 current device for `hipMalloc`, the stream's device for `hipMallocAsync`, and the
