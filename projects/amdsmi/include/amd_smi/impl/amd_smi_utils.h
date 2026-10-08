@@ -321,4 +321,18 @@ void init_asic_info_defaults(amdsmi_asic_info_t* info);
  */
 auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string;
 
+/**
+ *  @brief Parse one "drm-memory-<region>:" line of a DRM fdinfo file.
+ *
+ *  @details Documentation/gpu/drm-usage-stats.rst prints the value as "<n>"
+ *  (bytes), "<n> KiB" or "<n> MiB".
+ *
+ *  @param[in] line One fdinfo line.
+ *  @param[in] key The key with its colon, such as "drm-memory-vram:".
+ *  @param[out] bytes The value in bytes; unchanged unless this returns true.
+ *  @return Whether the line has that key and a value in a known unit.
+ */
+auto smi_amdgpu_parse_drm_memory(std::string_view line, std::string_view key, uint64_t* bytes)
+    -> bool;
+
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
