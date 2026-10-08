@@ -64,10 +64,27 @@ def test_parse_collect_ratio_parts():
 
 
 @pytest.mark.misc
+def test_parse_collect_ratio_splits_leading_minus():
+    parts = parse_collect_ratio_parts("COLLECT_RATIO(a - b, c)")
+    assert parts == (["a", "-b"], ["c"])
+
+
+@pytest.mark.misc
 def test_merge_dispatch_collect_ratio():
     nums = [pd.Series({1: 100.0}), pd.Series({1: 50.0})]
     dens = [pd.Series({1: 10.0}), pd.Series({1: 5.0})]
     assert merge_dispatch_collect_ratio(nums, dens) == pytest.approx(10.0)
+
+
+@pytest.mark.misc
+def test_merge_dispatch_collect_ratio_pools_unequal_dispatches():
+    nums = [pd.Series({1: 10.0, 2: 100.0})]
+    dens = [pd.Series({1: 2.0, 2: 10.0})]
+    mean_of_ratios = ((10.0 / 2.0) + (100.0 / 10.0)) / 2.0
+    pooled = (10.0 + 100.0) / (2.0 + 10.0)
+    result = merge_dispatch_collect_ratio(nums, dens)
+    assert result == pytest.approx(pooled)
+    assert result != pytest.approx(mean_of_ratios)
 
 
 @pytest.mark.misc
