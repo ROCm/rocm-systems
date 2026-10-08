@@ -20,6 +20,7 @@
 // nontemporal system-scope b128 peer stores (the store path LL/host use over xGMI).
 #include "nccl_device/rccl_ptr.h"
 #include "rccl_vector_types.h"
+#include "gin_resource_sharing.h"  // --gin_resource_sharing mode selection
 #endif
 
 // LL (low-latency, packed data+flag) small-message Broadcast path. Broadcast is
@@ -575,9 +576,9 @@ __global__ void GinHybridBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset
   const int ginContext = 0;
   const unsigned int signalIndex = 0;
   // All GIN traffic is block 0's and each peer is posted to by one thread
-  // (r=threadIdx.x stride), so each QP is single-owner: THREAD mode elides the
-  // SQ-lock atomics on the GDA bnxt/mlx5 post path.
-  ncclGin gin { devComm, ginContext, NCCL_GIN_RESOURCE_SHARING_THREAD };
+  // (r=threadIdx.x stride), so each QP is single-owner; THREAD mode
+  // (--gin_resource_sharing 0) elides the SQ-lock atomics on the GDA bnxt/mlx5 path.
+  ncclGin gin { devComm, ginContext, ginResourceSharingModeDev() };
 
   // All GIN traffic on this path is confined to block 0, and so are the signal
   // read and wait that bracket it. `bar` synchronizes same-index blocks across
@@ -678,8 +679,9 @@ __global__ void GinScatterAllgatherBroadcastKernel(ncclWindow_t sendwin, size_t 
   const int nthreads = blockDim.x * gridDim.x;
 
   // Both scatter and gather phases are block 0's, one thread per peer (r=threadIdx.x
-  // stride), so each QP is single-owner: THREAD mode drops the SQ-lock atomics.
-  ncclGin gin { devComm, /*context=*/0, NCCL_GIN_RESOURCE_SHARING_THREAD };
+  // stride), so each QP is single-owner; THREAD mode (--gin_resource_sharing 0) drops
+  // the SQ-lock atomics.
+  ncclGin gin { devComm, /*context=*/0, ginResourceSharingModeDev() };
   const unsigned int sigScatter = 0;
   const unsigned int sigGather = 1;
 
@@ -1240,6 +1242,7 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
         if (largeTier == gin_sdma::BcastLargeTier::ScatterAG) {
           bcastReportTier(BcastLaunchTier::ScatterAllgather);
           const int sagGrid = gin_sdma::bcastSagCtas(msgBytes, sagRanks, bcastThr, bcastCtasEnv, hybridPool);
+          TESTCHECK(uploadGinResourceSharingMode());
           TESTCHECK(testLaunchDeviceKernelCtas(SPECIALIZE_KERNEL(GinScatterAllgatherBroadcastKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream, sagGrid));
           return testSuccess;
         }
@@ -1260,6 +1263,7 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
             case gin_sdma::BcastTier::Flat:      bcastReportTier(BcastLaunchTier::Flat); break;
           }
           const int hybridGrid = gin_sdma::bcastHybridCtas(msgBytes, bcastThr, llSlots, g_bcastLLMaxBytes, bcastCtasEnv, hybridPool);
+          TESTCHECK(uploadGinResourceSharingMode());
           TESTCHECK(testLaunchDeviceKernelThresholdLL(SPECIALIZE_KERNEL(GinHybridBroadcastKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream, bcastThr, g_bcastLLHandle, g_bcastLLMaxBytes, hybridGrid));
         }
         return testSuccess;

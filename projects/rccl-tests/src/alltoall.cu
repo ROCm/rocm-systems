@@ -11,6 +11,7 @@
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #include "nccl_device.h"
 #include "rccl_vector_types.h"
+#include "gin_resource_sharing.h"  // --gin_resource_sharing mode selection
 #endif
 
 #if defined(NCCL_OS_LINUX)
@@ -267,9 +268,10 @@ template <typename T>
 __device__ void ginAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   int ginContext = 0;
   unsigned int signalIndex = blockIdx.x;
-  // Each peer's QP is posted to by exactly one thread (grid-strided r=tid), so
-  // the SQ is single-owner: THREAD mode drops the per-WQE SQ-lock atomics.
-  ncclGin gin { devComm, ginContext, NCCL_GIN_RESOURCE_SHARING_THREAD };
+  // Each peer's QP is posted to by exactly one thread (grid-strided r=tid), so the
+  // SQ is single-owner and THREAD mode (--gin_resource_sharing 0) can drop the
+  // per-WQE SQ-lock atomics on the rocshmem-GDA bnxt/mlx5 path.
+  ncclGin gin { devComm, ginContext, ginResourceSharingModeDev() };
   uint64_t signalValue = gin.readSignal(signalIndex);
 
   ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
@@ -322,9 +324,10 @@ __device__ void hybridAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, nccl
     /* CTA 0: remote peers via GIN */
     int ginContext = 0;
     unsigned int signalIndex = 0;
-    // One thread per remote peer (grid-strided), so each QP has a single poster:
-    // THREAD mode elides the SQ-lock atomics on the GDA bnxt/mlx5 post path.
-    ncclGin gin { devComm, ginContext, NCCL_GIN_RESOURCE_SHARING_THREAD };
+    // One thread per remote peer (grid-strided), so each QP has a single poster;
+    // THREAD mode (--gin_resource_sharing 0) elides the SQ-lock atomics on the GDA
+    // bnxt/mlx5 post path.
+    ncclGin gin { devComm, ginContext, ginResourceSharingModeDev() };
     uint64_t signalValue = gin.readSignal(signalIndex);
 
     ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, 0 };
@@ -474,9 +477,11 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
 #endif
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
       case 3:
+        TESTCHECK(uploadGinResourceSharingMode());
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(GinAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
       case 4:
+        TESTCHECK(uploadGinResourceSharingMode());
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(HybridAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
 #endif
@@ -541,6 +546,12 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
 
   // Shared scaffold: allocates per-CTA start/end stamps, launches the timed kernel,
   // reduces min(start)..max(end) over CTAs and MPI-MAX across ranks -> per-iter us.
+  // Upload the resource-sharing flag to each local GPU before the timed launch.
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(hipSetDevice(args->gpus[i]));
+    TESTCHECK(uploadGinResourceSharingMode());
+  }
+
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
       [&](int i, long long* d_start, long long* d_end) {

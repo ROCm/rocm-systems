@@ -14,6 +14,7 @@
 #include "nccl_device.h"
 #include "rccl_vector_types.h"
 #include "gin_sdma_devtime.h" // shared device-side (wall_clock64) timing scaffold
+#include "gin_resource_sharing.h"  // --gin_resource_sharing mode selection
 #endif
 
 void AllGatherGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
@@ -199,9 +200,10 @@ __device__ void ginAllGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWi
 
   const int ginContext = 0;
   const unsigned int signalIndex = blockIdx.x;
-  // Peer r is owned by exactly one thread (CTA r%gridDim.x, thread r/gridDim.x),
-  // so each QP has a single poster: THREAD mode drops the per-WQE SQ-lock atomics.
-  ncclGin gin { devComm, ginContext, NCCL_GIN_RESOURCE_SHARING_THREAD };
+  // Peer r is owned by exactly one thread (CTA r%gridDim.x, thread r/gridDim.x), so
+  // each QP has a single poster; THREAD mode (--gin_resource_sharing 0) drops the
+  // per-WQE SQ-lock atomics on the rocshmem-GDA bnxt/mlx5 path.
+  ncclGin gin { devComm, ginContext, ginResourceSharingModeDev() };
   const uint64_t signalValue = gin.readSignal(signalIndex);
 
   ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
@@ -273,6 +275,7 @@ static testResult_t AllGatherLaunchDeviceKernel(F kernel, void* sendbuff, size_t
   ncclWindow_t sendwin = (ncclWindow_t)sendbuff;
   ncclWindow_t recvwin = (ncclWindow_t)recvbuff;
   if (gridCtas < 1) gridCtas = 1;
+  TESTCHECK(uploadGinResourceSharingMode());
   kernel<<<gridCtas, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, sdmaThreshold, *devComm);
   return testSuccess;
 }
@@ -339,6 +342,11 @@ testResult_t AllGatherDeviceTime(struct threadArgs* args, ncclDataType_t type, n
   const size_t sdmaThreshold = AllGatherResolveSdmaThreshold();
   const int gridCtas = AllGatherResolveLaunchCtas(
       chunkBytes, sdmaThreshold, gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount));
+  // Upload the resource-sharing flag to each local GPU before the timed launch.
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(hipSetDevice(args->gpus[i]));
+    TESTCHECK(uploadGinResourceSharingMode());
+  }
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
       [&](int i, long long* d_start, long long* d_end) {

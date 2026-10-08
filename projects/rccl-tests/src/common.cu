@@ -172,6 +172,7 @@ int devtimeLoopLarge = 0;
 int devtimeSkipMid = -1;
 int devtimeSkipLarge = -1;
 int devtimeCheck = 0;
+int ginResourceSharingMode = 0;  // CLI: 0=thread (default), 1=CTA, 2=device
 int unalign = 0;
 int memory_report = 0;
 
@@ -2034,6 +2035,7 @@ int main(int argc, char* argv[], char **envp) {
     {"devtime_skip_mid", required_argument, 0, 'j'},
     {"devtime_skip_large", required_argument, 0, 'k'},
     {"devtime_check", required_argument, 0, 'H'},
+    {"gin_resource_sharing", required_argument, 0, 1000},
     {"help", no_argument, 0, 'h'},
     {}
   };
@@ -2238,6 +2240,14 @@ int main(int argc, char* argv[], char **envp) {
           return -1;
         }
         break;
+      case 1000:
+        ginResourceSharingMode = (int)strtol(optarg, NULL, 0);
+        if (ginResourceSharingMode < 0 || ginResourceSharingMode > 2) {
+          fprintf(stderr, "gin_resource_sharing must be 0 (thread), 1 (CTA), or 2 (device), got %d\n",
+                  ginResourceSharingMode);
+          return -1;
+        }
+        break;
       case 'L':
         devtimeLoop = (int)strtol(optarg, NULL, 0);
         break;
@@ -2323,6 +2333,7 @@ int main(int argc, char* argv[], char **envp) {
             "[-j,--devtime_skip_mid <count> skip at mid tier (-1=min(-P,2); default: -1)] \n\t"
             "[-k,--devtime_skip_large <count> skip at large tier (-1=min(-P,1); default: -1)] \n\t"
             "[-H,--devtime_check <0/1> validate timed-kernel output before datacheck (default: 0)] \n\t"
+            "[--gin_resource_sharing <0/1/2> GIN tester ncclGin resource-sharing mode: 0=thread (exclusive-QP, drops SQ lock), 1=CTA, 2=device (default: 0)] \n\t"
             "[-h,--help]\n",
           programName);
         return 0;
