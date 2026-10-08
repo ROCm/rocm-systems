@@ -4918,18 +4918,6 @@ TEST_F(DeepCopyDevCommRequirementsTest, NoLists_LeavesBothEmpty) {
 
 // Branch: an allocation part-way through the copy releases what was built and
 // reports nothing back, rather than handing over a half-copied structure.
-//
-// +2, deliberately, not +1. deepCopyDevCommRequirements memcpys the whole
-// source struct (deepCopyDevCommRequirements' memcpy), which copies the
-// caller's list-head
-// pointers into the copy, and only overwrites them on the first *successful*
-// node alloc. ncclCallocDebug returns without touching *ptr on failure
-// (alloc.h:415-418), so failing the first node alloc leaves the copy's
-// resourceRequirementsList still pointing at the caller's &res1 -- a fixture
-// member -- and the fail: label's freeDevCommRequirements then free()s it.
-// +1 is therefore the index that exposes AICOMRCCL-2180 finding 15; running it
-// would corrupt the heap rather than assert, so this covers the adjacent
-// index and the bug is documented instead of pinned.
 TEST_F(DeepCopyDevCommRequirementsTest, NodeAllocFails_ReleasesPartialCopy) {
   res1.next = &res2;
   src.resourceRequirementsList = &res1;
@@ -4937,6 +4925,39 @@ TEST_F(DeepCopyDevCommRequirementsTest, NodeAllocFails_ReleasesPartialCopy) {
 
   EXPECT_NE(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
   EXPECT_EQ(dst, nullptr);
+}
+
+// Branch: the first node alloc of a list fails. The memcpy of the whole source
+// struct also copies the caller's list heads, and a failed ncclCalloc leaves
+// *ptr untouched (alloc.h:448-450, and MicroCalloc above), so the copy's heads must be cleared
+// before the first node is allocated; otherwise fail:'s freeDevCommRequirements
+// free()s the caller's first node (AICOMRCCL-2180 finding 15). res1 and team1
+// are fixture members, so a regression aborts in free() rather than failing an
+// expectation here.
+TEST_F(DeepCopyDevCommRequirementsTest, FirstResourceNodeAllocFails_LeavesCallerListAlone) {
+  res1.bufferSize = 128;
+  res1.next = &res2;
+  src.resourceRequirementsList = &res1;
+  ScopedCallocFailure callocFail(1);  // only the top-level object succeeds
+
+  EXPECT_NE(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
+  EXPECT_EQ(dst, nullptr);
+  EXPECT_EQ(src.resourceRequirementsList, &res1);
+  EXPECT_EQ(res1.next, &res2);
+  EXPECT_EQ(res1.bufferSize, 128u);
+}
+
+TEST_F(DeepCopyDevCommRequirementsTest, FirstTeamNodeAllocFails_LeavesCallerListAlone) {
+  team1.multimem = true;
+  team1.next = &team2;
+  src.teamRequirementsList = &team1;
+  ScopedCallocFailure callocFail(1);  // only the top-level object succeeds
+
+  EXPECT_NE(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
+  EXPECT_EQ(dst, nullptr);
+  EXPECT_EQ(src.teamRequirementsList, &team1);
+  EXPECT_EQ(team1.next, &team2);
+  EXPECT_TRUE(team1.multimem);
 }
 
 // freeDevCommRequirements tolerates null, so callers can release
