@@ -323,11 +323,12 @@ HRR_TEST_CASE(Unit_HRR_TranslatePtr_TightestEnclosing) {
 //
 // The playback teardown loop releases each alloc_map entry with the API that
 // matches its AllocKind (Device -> hipFree, HostMalloc -> hipHostFree, and
-// HostRegister / DevicePtrAlias -> not via hipFree).  Passing a host pointer to
-// hipFree returns errors and can corrupt allocator bookkeeping.  These tests
-// verify the kind tagging the dispatch relies on: record_alloc preserves the
-// kind, and the free-routing decision (mirrored from hrr_playback.cpp) sends a
-// host pointer to hipFree for NONE of the host kinds.
+// HostRegister / DevicePtrAlias / HostUnregistered -> not via hipFree).
+// Passing a host pointer to hipFree returns errors and can corrupt allocator
+// bookkeeping.  These tests verify the kind tagging the dispatch relies on:
+// record_alloc preserves the kind, and the free-routing decision (mirrored
+// from hrr_playback.cpp) sends a host pointer to hipFree for NONE of the host
+// kinds.
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -335,10 +336,11 @@ namespace {
 // is released via hipFree.  Only AllocKind::Device must map to hipFree.
 bool kind_uses_hipFree(AllocKind k) {
   switch (k) {
-    case AllocKind::Device:         return true;
-    case AllocKind::HostMalloc:     return false;  // hipHostFree
-    case AllocKind::HostRegister:   return false;  // host_reg_bufs path
-    case AllocKind::DevicePtrAlias: return false;  // not separately freed
+    case AllocKind::Device:           return true;
+    case AllocKind::HostMalloc:       return false;  // hipHostFree
+    case AllocKind::HostRegister:     return false;  // host_reg_bufs path
+    case AllocKind::DevicePtrAlias:   return false;  // not separately freed
+    case AllocKind::HostUnregistered: return false;  // host_reg_bufs path
   }
   return false;
 }
@@ -350,9 +352,9 @@ bool kind_uses_hipFree(AllocKind k) {
  *   - Record one allocation of each AllocKind into a PlaybackContext.
  *   - Verify record_alloc preserved each entry's kind.
  *   - Verify the free-dispatch decision routes ONLY the Device entry to hipFree;
- *     every host-backed pointer (HostMalloc / HostRegister / DevicePtrAlias) is
- *     routed away from hipFree.  Guards against re-introducing a hipFree call on
- *     a host pointer at teardown.
+ *     every host-backed pointer (HostMalloc / HostRegister / DevicePtrAlias /
+ *     HostUnregistered) is routed away from hipFree.  Guards against
+ *     re-introducing a hipFree call on a host pointer at teardown.
  */
 HRR_TEST_CASE(Unit_HRR_AllocKind_FreeDispatch) {
   PlaybackContext ctx;
@@ -360,17 +362,20 @@ HRR_TEST_CASE(Unit_HRR_AllocKind_FreeDispatch) {
   void* hmal  = reinterpret_cast<void*>(static_cast<uintptr_t>(0x20000000u));
   void* hreg  = reinterpret_cast<void*>(static_cast<uintptr_t>(0x30000000u));
   void* alias = reinterpret_cast<void*>(static_cast<uintptr_t>(0x40000000u));
+  void* hunreg = reinterpret_cast<void*>(static_cast<uintptr_t>(0x50000000u));
 
   ctx.record_alloc(0x1000ULL, dev,   256, AllocKind::Device);
   ctx.record_alloc(0x2000ULL, hmal,  256, AllocKind::HostMalloc);
   ctx.record_alloc(0x3000ULL, hreg,  256, AllocKind::HostRegister);
   ctx.record_alloc(0x4000ULL, alias, 256, AllocKind::DevicePtrAlias);
+  ctx.record_alloc(0x5000ULL, hunreg, 256, AllocKind::HostUnregistered);
 
-  REQUIRE(ctx.alloc_map.size() == 4);
+  REQUIRE(ctx.alloc_map.size() == 5);
   CHECK(ctx.alloc_map.at(0x1000ULL).kind == AllocKind::Device);
   CHECK(ctx.alloc_map.at(0x2000ULL).kind == AllocKind::HostMalloc);
   CHECK(ctx.alloc_map.at(0x3000ULL).kind == AllocKind::HostRegister);
   CHECK(ctx.alloc_map.at(0x4000ULL).kind == AllocKind::DevicePtrAlias);
+  CHECK(ctx.alloc_map.at(0x5000ULL).kind == AllocKind::HostUnregistered);
 
   // Only the Device entry may be released via hipFree.
   for (const auto& [rec, entry] : ctx.alloc_map) {
@@ -380,6 +385,49 @@ HRR_TEST_CASE(Unit_HRR_AllocKind_FreeDispatch) {
       CHECK_FALSE(kind_uses_hipFree(entry.kind));
     }
   }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Register two host ranges and mark both unregistered, as a replayed
+ *     hipDeviceReset on one GPU does.
+ *   - Record an alias into the first, then a pinned allocation that starts
+ *     below the first range and runs into it.
+ *   - Verify the alias kept the first range, the allocation dropped it, an
+ *     address in the overlap translates into the new allocation, and the second
+ *     range, which nothing overlaps, is still tracked. Kept, the first range
+ *     would win the tightest-enclosing lookup and send that address to its
+ *     stale buffer.
+ */
+HRR_TEST_CASE(Unit_HRR_AllocMap_OverlapDropsHostUnregistered) {
+  PlaybackContext ctx;
+  void* stale = reinterpret_cast<void*>(static_cast<uintptr_t>(0xA0000000u));
+  void* other = reinterpret_cast<void*>(static_cast<uintptr_t>(0xB0000000u));
+  void* fresh = reinterpret_cast<void*>(static_cast<uintptr_t>(0xC0000000u));
+  void* alias = reinterpret_cast<void*>(static_cast<uintptr_t>(0xD0000000u));
+
+  ctx.record_alloc(0x10000ULL, stale, 0x2000, AllocKind::HostRegister);
+  ctx.record_alloc(0x40000ULL, other, 0x1000, AllocKind::HostRegister);
+  {
+    std::unique_lock lk(ctx.map_mutex);
+    ctx.mark_host_unregistered(0x10000ULL);
+    ctx.mark_host_unregistered(0x40000ULL);
+  }
+  REQUIRE(ctx.alloc_map.at(0x10000ULL).kind == AllocKind::HostUnregistered);
+
+  ctx.record_alloc(0x10100ULL, alias, 0, AllocKind::DevicePtrAlias);
+  CHECK(ctx.alloc_map.count(0x10000ULL) == 1);
+
+  // [0xF000, 0x11000) overlaps the first range's [0x10000, 0x12000).
+  ctx.record_alloc(0xF000ULL, fresh, 0x2000, AllocKind::HostMalloc);
+  CHECK(ctx.alloc_map.count(0x10000ULL) == 0);
+  void* expected =
+      reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(fresh) + 0x1800);
+  CHECK(ctx.translate_ptr(0x10800ULL) == expected);
+
+  REQUIRE(ctx.alloc_map.count(0x40000ULL) == 1);
+  CHECK(ctx.alloc_map.at(0x40000ULL).kind == AllocKind::HostUnregistered);
 }
 
 // ---------------------------------------------------------------------------

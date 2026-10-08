@@ -59,12 +59,15 @@ inline bool hrr_zero_init_needs_drain(bool zero_init_enabled,
 // release it at teardown. Mixing them up (e.g. hipFree on a host pointer)
 // returns errors and can corrupt allocator bookkeeping.
 enum class AllocKind : uint8_t {
-    Device,        // hipMalloc / hipMallocManaged / hipMallocPitch -> hipFree
-    HostMalloc,    // hipHostMalloc / hipMallocHost                 -> hipHostFree
-    HostRegister,  // hipHostRegister backing buffer  -> hipHostUnregister + free
-                   //   (released via host_reg_bufs; skipped in the alloc_map loop)
-    DevicePtrAlias // hipHostGetDevicePointer result  -> not separately freed
-                   //   (alias into an already-tracked pinned host allocation)
+    Device,           // hipMalloc / hipMallocManaged / hipMallocPitch -> hipFree
+    HostMalloc,       // hipHostMalloc / hipMallocHost                 -> hipHostFree
+    HostRegister,     // hipHostRegister backing buffer  -> hipHostUnregister + free
+                      //   (released via host_reg_bufs; skipped in the alloc_map loop)
+    DevicePtrAlias,   // hipHostGetDevicePointer result -> not separately freed
+                      //   (alias into an already-tracked pinned host allocation)
+    HostUnregistered  // HostRegister range a replayed hipDeviceReset unregistered
+                      //   (pointers into it still translate; snapshot records
+                      //   naming it are refused; released like HostRegister)
 };
 
 struct AllocEntry {
@@ -104,6 +107,9 @@ struct PlaybackContext {
 
     // Device allocations: recorded base address -> {live ptr, size}
     std::unordered_map<uint64_t, AllocEntry>     alloc_map;
+    // Recorded bases mark_host_unregistered marked. An entry may have left
+    // alloc_map or changed kind since; record_alloc checks, and drops it here.
+    std::vector<uint64_t> host_unregistered_bases;
 
     // __device__ globals, keyed by the recorded host shadow address the
     // capturing process passed to hipGetSymbolAddress and the hipMemcpy*Symbol
@@ -568,6 +574,7 @@ struct PlaybackContext {
             case AllocKind::HostMalloc:     return "pinned host";
             case AllocKind::HostRegister:   return "registered host";
             case AllocKind::DevicePtrAlias: return "pinned host alias";
+            case AllocKind::HostUnregistered: return "unregistered host";
             default:                        return "device";
         }
     }
@@ -691,10 +698,41 @@ struct PlaybackContext {
     }
 
     // ---- Allocation registration (exclusive lock) ----
+    // A new allocation over a HostUnregistered range means the application
+    // freed that range, so the range is dropped: otherwise translate_ptr,
+    // which picks the tightest enclosing entry, would send the part of the new
+    // allocation above the range's base to the range's stale buffer. The
+    // buffer stays in host_reg_bufs, and teardown frees it. An alias names
+    // memory already tracked, so it drops nothing.
     void record_alloc(uint64_t rec, void* live, size_t sz,
                       AllocKind kind = AllocKind::Device) {
         std::unique_lock lk(map_mutex);
+        if (kind != AllocKind::DevicePtrAlias && sz != 0) {
+            auto& bases = host_unregistered_bases;
+            for (size_t i = 0; i < bases.size();) {
+                auto it = alloc_map.find(bases[i]);
+                const bool live_entry =
+                    it != alloc_map.end() && it->second.kind == AllocKind::HostUnregistered;
+                const bool overlaps = live_entry && it->first < rec + sz &&
+                                      rec < it->first + it->second.size;
+                if (overlaps) alloc_map.erase(it);
+                if (!live_entry || overlaps) {
+                    bases[i] = bases.back();
+                    bases.pop_back();
+                } else {
+                    ++i;
+                }
+            }
+        }
         alloc_map[rec] = {rec, live, sz, kind};
+    }
+    // Marks the HostRegister entry at rec HostUnregistered. Caller holds
+    // map_mutex exclusively.
+    void mark_host_unregistered(uint64_t rec) {
+        auto it = alloc_map.find(rec);
+        if (it == alloc_map.end() || it->second.kind != AllocKind::HostRegister) return;
+        it->second.kind = AllocKind::HostUnregistered;
+        host_unregistered_bases.push_back(rec);
     }
     void remove_alloc(uint64_t rec) {
         std::unique_lock lk(map_mutex);
@@ -851,14 +889,21 @@ bool hrr_wait_host_restores(PlaybackContext& ctx, const void* base, const char* 
 // into it.
 bool hrr_host_release_ready(PlaybackContext& ctx, const void* live);
 
-// Called after a replayed hipDeviceReset succeeds. Drops from tracking every
-// pinned host allocation the runtime no longer knows, as capture does: with
-// one GPU the reset frees hipHostMalloc memory and drops hipHostRegister
-// registrations. A later record naming one is then refused as naming no live
-// allocation, rather than restored into released memory. A registered range
-// keeps its backing buffer in host_reg_bufs: replay allocated it and it stays
-// valid, so teardown or the replayed unregister still frees it after the
-// usual wait.
+// Called after a replayed hipDeviceReset succeeds. With one GPU the reset
+// frees hipHostMalloc memory and drops hipHostRegister registrations. Replay
+// stops tracking the hipHostMalloc memory the runtime no longer knows, as
+// capture does. A registered range the runtime no longer knows stays tracked
+// as HostUnregistered: replay allocated its backing buffer and the buffer
+// stays valid, so kernel arguments into it still translate. Teardown frees
+// the buffer after the usual wait. The application's own unregister fails
+// after the reset, and capture records only one that succeeded, so replay
+// sees one only when it has fewer GPUs than capture had; it then frees the
+// buffer too. Either way a later record naming the allocation is refused as
+// naming no live allocation, rather than restored into released or unpinned
+// memory. A later allocation over the range drops it (see record_alloc). If
+// the application registers the same pointer again after the reset, the new
+// registration replaces the entry and its buffer in host_reg_bufs, and the
+// old buffer is leaked.
 void hrr_forget_released_host_allocs(PlaybackContext& ctx);
 
 // Whether the event is a kernel launch whose payload carries pinned host
