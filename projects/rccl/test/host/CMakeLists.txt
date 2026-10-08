@@ -304,7 +304,6 @@ function(rccl_define_micro_source_lists)
   # src/algorithms/dda/
   set(TEST_MICRO_DDA_SOURCE_FILES
     algorithms/dda/fabric/fabric-mem-handler-test.cc
-    fakes/alloc_fakes.cc                 # alloc.h data symbols (allocTracker)
     fakes/bootstrap_stubs.cc             # bootstrapAllGather
     fakes/env_fakes.cc                   # NCCL_CUMEM_SKIP_FREE
     fakes/hip_fakes.cc
