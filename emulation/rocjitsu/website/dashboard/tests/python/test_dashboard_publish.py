@@ -247,9 +247,7 @@ def test_invalid_existing_manual_source_rejected_before_writes(
     before = {p: p.read_bytes() for p in publisher_context.data.rglob("*.json")}
     with pytest.raises(publisher.PublishError, match=error):
         _publish(publisher_context, run_id="next")
-    assert before == {
-        p: p.read_bytes() for p in publisher_context.data.rglob("*.json")
-    }
+    assert before == {p: p.read_bytes() for p in publisher_context.data.rglob("*.json")}
 
 
 @pytest.mark.parametrize("option", ["expected_sha", "expected_corpus_sha"])
@@ -367,9 +365,7 @@ def test_unavailable_package_versions_are_omitted(publisher_context, packages):
     "packages",
     [None, [], {"package": []}, {"package": {}}, {"package": float("inf")}],
 )
-def test_malformed_package_versions_rejected_before_writes(
-    publisher_context, packages
-):
+def test_malformed_package_versions_rejected_before_writes(publisher_context, packages):
     raw = _raw(publisher_context)
     raw["provenance"]["packages"] = packages
     with pytest.raises(publisher.PublishError):
@@ -452,14 +448,11 @@ def test_package_version_changes_reject_comparison_before_writes(
     else:
         raw["provenance"]["packages"][package] = after_version
     assert (
-        raw["provenance"]["rocmSdkVersion"]
-        == baseline["provenance"]["rocmSdkVersion"]
+        raw["provenance"]["rocmSdkVersion"] == baseline["provenance"]["rocmSdkVersion"]
     )
     with pytest.raises(publisher.PublishError, match="incompatible comparison"):
         _publish(publisher_context, raw, run_id="logging", comparison_id="experiment")
-    assert before == {
-        p: p.read_bytes() for p in publisher_context.data.rglob("*.json")
-    }
+    assert before == {p: p.read_bytes() for p in publisher_context.data.rglob("*.json")}
 
 
 def test_malformed_results_and_problems_rejected(publisher_context):
