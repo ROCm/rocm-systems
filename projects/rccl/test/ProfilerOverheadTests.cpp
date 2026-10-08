@@ -42,21 +42,24 @@ template <typename Issue, typename Check> void runTwoRanks(Issue issue, Check ch
 // Loaded in-process via NCCL_PROFILER_PLUGIN=STATIC_PLUGIN and exported in test/CMakeLists.txt. Not
 // const: HIP makes a const global an implicit __constant__, which then fails to link to host code.
 extern "C" __attribute__((visibility("default"))) ncclProfiler_v7_t ncclProfiler_v7 = {
-    "KernelPhaseCount",
-    [](void** context, uint64_t, int* eActivationMask, const char*, int, int, int, ncclDebugLogger_t) {
-      *context = &kernelChStops;
-      *eActivationMask = ncclProfileKernelCh | ncclProfileKernelPhase;
-      return ncclSuccess;
-    },
-    [](void* context, void** eHandle, ncclProfilerEventDescr_v7_t* eDescr) {
-      *eHandle = context;
-      if (eDescr->type == ncclProfileKernelPhase) ++kernelPhases;
-      return ncclSuccess;
-    }, noop,
-    [](void*, ncclProfilerEventState_v7_t eState, ncclProfilerEventStateArgs_v7_t*) {
-      if (eState == ncclProfilerKernelChStop) ++kernelChStops;
-      return ncclSuccess;
-    }, noop};
+  "KernelPhaseCount", // name
+  [](void** context, uint64_t, int* eActivationMask, const char*, int, int, int, ncclDebugLogger_t) { // init
+    *context = &kernelChStops;
+    *eActivationMask = ncclProfileKernelCh | ncclProfileKernelPhase;
+    return ncclSuccess;
+  },
+  [](void* context, void** eHandle, ncclProfilerEventDescr_v7_t* eDescr) { // startEvent
+    *eHandle = context;
+    if (eDescr->type == ncclProfileKernelPhase) ++kernelPhases;
+    return ncclSuccess;
+  },
+  noop, // stopEvent
+  [](void*, ncclProfilerEventState_v7_t eState, ncclProfilerEventStateArgs_v7_t*) { // recordEventState
+    if (eState == ncclProfilerKernelChStop) ++kernelChStops;
+    return ncclSuccess;
+  },
+  noop, // finalize
+};
 
 namespace RcclUnitTesting {
 // KernelPhase times symmetric kernels' barriers; regular kernels used to stamp it with KernelCh on.
