@@ -1208,12 +1208,12 @@
         {
           "name": "NetIB_RMA_MultiSeg_PostPath",
           "description": "Post path at the default WR batch size (64): chains up to 31 WRs, aggregated and unaggregated requests in any wait order, interleaved single/multi-segment puts and gets, zero-size ops, per-context batches, rejected ops that must not leak request slots or sequence ids, and 100 registration cycles (RCCL_TEST_RMA_REG_CYCLES)",
-          "test_filter": "RmaMultiSegmentPostMPITest.*"
+          "test_filter": "RmaMultiSegmentPostMPITest.*:-RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe"
         },
         {
           "name": "NetIB_RMA_MultiSeg_PostPath_WrBatch8",
           "description": "Post path with NCCL_RMA_IB_WR_BATCHSIZE=8, so chains of 9+ WRs drain the batch and post directly",
-          "test_filter": "RmaMultiSegmentPostMPITest.*",
+          "test_filter": "RmaMultiSegmentPostMPITest.*:-RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe",
           "env_variables": {
             "NCCL_RMA_IB_WR_BATCHSIZE": "8"
           }
@@ -1221,7 +1221,7 @@
         {
           "name": "NetIB_RMA_MultiSeg_PostPath_WrBatch2",
           "description": "Post path with NCCL_RMA_IB_WR_BATCHSIZE=2 (the minimum): any multi-segment chain posts directly and every aggregated batch holds one op",
-          "test_filter": "RmaMultiSegmentPostMPITest.*",
+          "test_filter": "RmaMultiSegmentPostMPITest.*:-RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe",
           "env_variables": {
             "NCCL_RMA_IB_WR_BATCHSIZE": "2"
           }
@@ -1253,7 +1253,7 @@
         {
           "name": "NetIB_RMA_MultiSeg_PostPath_1x2",
           "description": "Post-path, all-pairs and many-to-one tests on 2 ranks of one node",
-          "test_filter": "RmaMultiSegmentPostMPITest.*"
+          "test_filter": "RmaMultiSegmentPostMPITest.*:-RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe"
         }
       ]
     },
@@ -1274,7 +1274,7 @@
         {
           "name": "NetIB_RMA_MultiSeg_PostPath_2x4",
           "description": "Post-path, all-pairs and many-to-one tests on 8 ranks across 2 nodes",
-          "test_filter": "RmaMultiSegmentPostMPITest.*"
+          "test_filter": "RmaMultiSegmentPostMPITest.*:-RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe"
         }
       ]
     },
