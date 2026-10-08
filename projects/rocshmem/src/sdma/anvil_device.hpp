@@ -601,6 +601,16 @@ __device__ __forceinline__ void quiet(SdmaQueueSingleProducerDeviceHandle& handl
   handle.quietAll();
 }
 
+// Write index covering every packet submitted so far, the index quiet() waits for
+__device__ __forceinline__ uint64_t quietTarget(SdmaQueueDeviceHandle& handle) {
+  return __scoped_atomic_load_n(&handle.maxWritePtr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+}
+
+// Non-blocking flush: true once HW has consumed up to upToIndex
+__device__ __forceinline__ bool isFlushed(SdmaQueueDeviceHandle& handle, uint64_t upToIndex) {
+  return __scoped_atomic_load_n(handle.rptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE) >= upToIndex;
+}
+
 // Assumes signal is allocated in device memory (kept for backward compat)
 __device__ __forceinline__ bool waitForSignal(HSAuint64* addr, uint64_t expected) {
   int retries = 0;

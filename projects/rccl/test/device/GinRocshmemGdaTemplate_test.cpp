@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Suite G: GIN rocSHMEM-GDA device template coverage (Put/PutValue/Flush/
-// Signal/Counter + edge paths), the GDA analog of Suite H
+// FlushAsync/Wait/Signal/Counter, timeouts + edge paths), the GDA analog of Suite H
 // (GinAnvilSdmaTemplate_test.cpp). AllToAll drives these ncclGinApi_* template
 // specializations, so this suite unit-tests the GDA AllToAll device path
 // without a live network.
@@ -553,6 +553,159 @@ TEST_F(GinRocshmemGdaTemplateTest, ResetSignal_NoneIsNoOp) {
   syncAndCheck();
   auto sigs = env.signals.copyTo();
   EXPECT_EQ(sigs[0], 42ULL);  // untouched by non-indexed reset
+}
+
+using nccl::gin::rocshmem_gda::ncclGinRocshmemGdaRequest;
+
+constexpr uint64_t kShortBudget = 1000;
+constexpr uint64_t kLongBudget = 1ULL << 34;
+constexpr size_t kNeverDrains = ~size_t{0};
+
+static void setTryQuietBusy(size_t polls) {
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::try_quiet_busy), &polls, sizeof(polls)));
+}
+
+static ncclGinRequest_t makeRequest(int peer) {
+  ncclGinRocshmemGdaRequest req{peer};
+  ncclGinRequest_t raw{};
+  std::memcpy(&raw, &req, sizeof(req));
+  return raw;
+}
+
+static int readRequestPeer(DeviceBuffer<ncclGinRequest_t>& d_req) {
+  ncclGinRequest_t raw = d_req.download();
+  ncclGinRocshmemGdaRequest req;
+  std::memcpy(&req, &raw, sizeof(req));
+  return req.peer;
+}
+
+// G13: FlushAsync records the peer and posts no quiet.
+__global__ void kernelFlushAsync(GdaHarness* h, ncclGinRequest_t* req, int peer) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, peer, req, false, nullptr, 0);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, FlushAsync_RecordsPeerWithoutQuiet) {
+  GdaEnv env(1);
+  env.build();
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  d_req.zero();
+  resetQuietCount();
+  kernelFlushAsync<<<1, 1>>>(env.dHarness.ptr, d_req.ptr, GdaEnv::kPeer);
+  syncAndCheck();
+  EXPECT_EQ(readRequestPeer(d_req), GdaEnv::kPeer);
+  EXPECT_EQ(readQuietCount(), 0ULL);
+}
+
+// G14: Wait quiets only the QP of the recorded peer.
+__global__ void kernelWait(GdaHarness* h, ncclGinRequest_t* req) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, *req, false, nullptr, cuda::memory_order_acq_rel,
+                                                          nullptr);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, Wait_QuietsRecordedPeer) {
+  GdaEnv env(1);
+  env.build();
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  d_req.upload(makeRequest(GdaEnv::kPeer));
+  resetQuietCount();
+  kernelWait<<<1, 1>>>(env.dHarness.ptr, d_req.ptr);
+  syncAndCheck();
+  EXPECT_EQ(readQuietCount(), 1ULL);
+}
+
+// G15-G19: timed Flush and Wait poll try_quiet until it drains, the budget runs out, or abort is set.
+__global__ void kernelFlushTimeout(GdaHarness* h, uint32_t* abortFlag, uint64_t timeoutCycles, ncclResult_t* result) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  *result = ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, ncclCoopThread{}, false, nullptr, cuda::memory_order_seq_cst, abortFlag, timeoutCycles);
+}
+
+__global__ void kernelWaitTimeout(GdaHarness* h, ncclGinRequest_t* req, uint32_t* abortFlag, uint64_t timeoutCycles,
+                                  ncclResult_t* result) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  *result = ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, *req, false, nullptr, cuda::memory_order_acq_rel, abortFlag, timeoutCycles);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, FlushTimeout_DrainedQueueNeedsNoBudget) {
+  GdaEnv env(1);
+  env.build();
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+  setTryQuietBusy(0);
+  resetQuietCount();
+  kernelFlushTimeout<<<1, 1>>>(env.dHarness.ptr, nullptr, /*timeoutCycles=*/0, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclSuccess);
+  EXPECT_EQ(readQuietCount(), static_cast<size_t>(GdaEnv::kNRanks));
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, FlushTimeout_BusyQueueTimesOut) {
+  GdaEnv env(1);
+  env.build();
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+  setTryQuietBusy(kNeverDrains);
+  kernelFlushTimeout<<<1, 1>>>(env.dHarness.ptr, nullptr, kShortBudget, d_result.ptr);
+  syncAndCheck();
+  setTryQuietBusy(0);
+  EXPECT_EQ(d_result.download(), ncclTimeout);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, WaitTimeout_PollsUntilDrained) {
+  GdaEnv env(1);
+  env.build();
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  d_req.upload(makeRequest(GdaEnv::kPeer));
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+  setTryQuietBusy(3);
+  resetQuietCount();
+  kernelWaitTimeout<<<1, 1>>>(env.dHarness.ptr, d_req.ptr, nullptr, kLongBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclSuccess);
+  EXPECT_EQ(readQuietCount(), 4ULL);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, WaitTimeout_BusyQueueTimesOut) {
+  GdaEnv env(1);
+  env.build();
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  d_req.upload(makeRequest(GdaEnv::kPeer));
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+  setTryQuietBusy(kNeverDrains);
+  kernelWaitTimeout<<<1, 1>>>(env.dHarness.ptr, d_req.ptr, nullptr, kShortBudget, d_result.ptr);
+  syncAndCheck();
+  setTryQuietBusy(0);
+  EXPECT_EQ(d_result.download(), ncclTimeout);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, WaitTimeout_AbortReturnsSuccess) {
+  GdaEnv env(1);
+  env.build();
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  d_req.upload(makeRequest(GdaEnv::kPeer));
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+  DeviceBuffer<uint32_t> d_abort(1);
+  uint32_t aborted = 1;
+  d_abort.copyFrom(&aborted, 1);
+  setTryQuietBusy(kNeverDrains);
+  kernelWaitTimeout<<<1, 1>>>(env.dHarness.ptr, d_req.ptr, d_abort.ptr, kLongBudget, d_result.ptr);
+  syncAndCheck();
+  setTryQuietBusy(0);
+  EXPECT_EQ(d_result.download(), ncclSuccess);
 }
 
 }  // namespace RcclUnitTesting

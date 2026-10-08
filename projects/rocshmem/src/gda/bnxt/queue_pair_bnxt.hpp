@@ -90,6 +90,8 @@ public:
 
   __device__ __noinline__ void quiet_single();
 
+  __device__ __noinline__ bool try_quiet_single();
+
 private:
   __device__ void ring_doorbell(uint32_t slot_idx);
   __device__ void poll_cq_until(uint32_t requested_available_slots);
@@ -403,6 +405,20 @@ __device__ __noinline__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_
 // precondition: called with all active lanes using different QPs
 __device__ inline __noinline__ void QueuePairBNXT::quiet_single() {
   poll_cq_until(sq.depth);
+}
+
+// precondition: called with all active lanes using different QPs
+__device__ inline __noinline__ bool QueuePairBNXT::try_quiet_single() {
+  struct bnxt_re_req_cqe *cqe = (struct bnxt_re_req_cqe *) cq.buf;
+  uint32_t sq_depth = sq.depth;
+
+  uint32_t sq_head = (((cqe->con_indx & 0xFFFF) * GDA_BNXT_WQE_SLOT_COUNT) % sq_depth);
+  sq.head = sq_head;
+
+  uint32_t sq_tail = __scoped_atomic_load_n(&sq.tail, __ATOMIC_SEQ_CST, __MEMORY_SCOPE_DEVICE);
+
+  uint32_t consumed_slots = (sq_tail - sq_head + sq_depth) % sq_depth;
+  return consumed_slots == 0;
 }
 
 // precondition: called with all active lanes using different QPs
