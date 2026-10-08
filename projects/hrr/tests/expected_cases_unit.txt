@@ -7,6 +7,7 @@
 # intended to add or remove a case, and say so in the commit message.
 Unit_HRR_AllocKind_FreeDispatch
 Unit_HRR_AllocMap_OverlapDropsHostUnregistered
+Unit_HRR_AllocMap_PaddingDropsNothing
 Unit_HRR_Format_BadMagic
 Unit_HRR_Format_EventTypeName
 Unit_HRR_Format_HashHex
