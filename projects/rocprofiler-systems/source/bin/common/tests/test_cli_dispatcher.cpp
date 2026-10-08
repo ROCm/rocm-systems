@@ -359,11 +359,42 @@ TEST(cli_dispatcher_test, print_help_lists_subcommands_and_example)
     print_help(out, "rocsys");
     const auto text = out.str();
     EXPECT_NE(text.find("Usage:"), std::string::npos);
+    EXPECT_NE(text.find("ROCm Systems Profiler."), std::string::npos);
+    EXPECT_NE(text.find("Experimental: This is a preview of the rocsys command-line "
+                        "tool."),
+              std::string::npos);
+    EXPECT_NE(text.find("Commands and workflows are subject to change."),
+              std::string::npos);
+    EXPECT_EQ(text.find("unified command-line entry point"), std::string::npos);
     EXPECT_NE(text.find("rocsys -- ./app"), std::string::npos);
     EXPECT_NE(text.find("rocsys profile -- ./app"), std::string::npos);
     EXPECT_NE(text.find("rocsys rewrite -- ./app"), std::string::npos);
+    EXPECT_NE(
+        text.find("Documentation: "
+                  "https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/"),
+        std::string::npos);
     EXPECT_EQ(text.find("  sample"), std::string::npos);
     EXPECT_EQ(text.find("  trace"), std::string::npos);
+    const auto profile    = text.find("\n  profile       ");
+    const auto avail      = text.find("\n  avail         ");
+    const auto attach     = text.find("\n  attach        ");
+    const auto causal     = text.find("\n  causal        ");
+    const auto instrument = text.find("\n  instrument    ");
+    const auto rewrite    = text.find("\n  rewrite       ");
+    const auto python     = text.find("\n  python        ");
+    ASSERT_NE(profile, std::string::npos);
+    ASSERT_NE(avail, std::string::npos);
+    ASSERT_NE(attach, std::string::npos);
+    ASSERT_NE(causal, std::string::npos);
+    ASSERT_NE(instrument, std::string::npos);
+    ASSERT_NE(rewrite, std::string::npos);
+    ASSERT_NE(python, std::string::npos);
+    EXPECT_LT(profile, avail);
+    EXPECT_LT(avail, attach);
+    EXPECT_LT(attach, causal);
+    EXPECT_LT(causal, instrument);
+    EXPECT_LT(instrument, rewrite);
+    EXPECT_LT(rewrite, python);
     const auto missing = missing_help_entries(text);
     EXPECT_TRUE(missing.empty()) << missing;
 }
