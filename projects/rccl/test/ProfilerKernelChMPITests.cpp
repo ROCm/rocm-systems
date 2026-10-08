@@ -38,8 +38,10 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -58,6 +60,20 @@ constexpr size_t kPluginPathLimit = 255;
 long currentTid() { return (long)syscall(SYS_gettid); }
 
 bool isTask(const RcclKchRecord& r) { return r.type == ncclProfileColl || r.type == ncclProfileP2p; }
+
+// True on every rank if it is true on any, so all ranks take the same branch.
+bool onAnyRank(bool local)
+{
+    int flag = local ? 1 : 0;
+    MPI_Allreduce(MPI_IN_PLACE, &flag, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    return flag != 0;
+}
+
+bool envIsOne(const char* name)
+{
+    const char* v = getenv(name);
+    return v && atoi(v) == 1;
+}
 
 // Outcome of checking one snapshot. Kept as data so a test can add its own
 // expectations on top of the shared ones.
@@ -83,7 +99,10 @@ protected:
         MPITestBase::SetUp();
         callerTid_ = currentTid();
 
-        std::string reason;
+        // A binary built without the recorder, or a path RCCL would not accept, is
+        // a reason to skip. A recorder that is there but will not load is a broken
+        // build or install, and fails.
+        std::string skip, fail;
 #ifdef RCCL_TEST_KCH_RECORDER_NAME
         // Built and installed beside this binary, so it resolves the same way from
         // a build tree and from an install.
@@ -93,19 +112,19 @@ protected:
 #endif
         if(pluginPath_.empty())
         {
-            reason = "KernelCh recorder plugin was not built into this binary";
+            skip = "KernelCh recorder plugin was not built into this binary";
         }
         else if(pluginPath_.size() >= kPluginPathLimit)
         {
             // RCCL ignores a longer NCCL_PROFILER_PLUGIN without saying so.
-            reason = "recorder plugin path exceeds RCCL's plugin path limit: " + pluginPath_;
+            skip = "recorder plugin path exceeds RCCL's plugin path limit: " + pluginPath_;
         }
         else
         {
             handle_ = dlopen(pluginPath_.c_str(), RTLD_NOW | RTLD_LOCAL);
             if(handle_ == nullptr)
             {
-                reason = std::string("cannot dlopen ") + pluginPath_ + ": " + dlerror();
+                fail = std::string("cannot dlopen ") + pluginPath_ + ": " + dlerror();
             }
             else
             {
@@ -116,10 +135,15 @@ protected:
                 anomalies_   = (CounterFn)dlsym(handle_, "rcclKchRecorderAnomalies");
                 proxyThreads_ = (ThreadsFn)dlsym(handle_, "rcclKchRecorderProxyThreads");
                 if(!reset_ || !snapshot_ || !initCount_ || !proxyOps_ || !anomalies_ || !proxyThreads_)
-                    reason = "KernelCh recorder plugin is missing its query symbols";
+                    fail = "KernelCh recorder plugin " + pluginPath_ + " is missing its query symbols";
             }
         }
-        skipReason_ = mpiCoordinatedSkipReason(!reason.empty(), reason.c_str());
+        if(onAnyRank(!fail.empty()))
+        {
+            failReason_ = fail.empty() ? "KernelCh recorder plugin failed to load on another rank" : fail;
+            return;
+        }
+        skipReason_ = mpiCoordinatedSkipReason(!skip.empty(), skip.c_str());
         if(!skipReason_.empty()) return;
 
         const char* prev = getenv("NCCL_PROFILER_PLUGIN");
@@ -131,10 +155,17 @@ protected:
 
     void TearDown() override
     {
+        if(ownedStream_)
+        {
+            (void)hipStreamSynchronize(ownedStream_);
+            (void)hipStreamDestroy(ownedStream_);
+            ownedStream_ = nullptr;
+        }
+        freeBuffers();
         for(auto it = ownedComms_.rbegin(); it != ownedComms_.rend(); ++it) (void)ncclCommDestroy(*it);
         ownedComms_.clear();
         MPITestBase::TearDown();
-        if(skipReason_.empty())
+        if(skipReason_.empty() && failReason_.empty())
         {
             if(hadPrevPlugin_)
                 setenv("NCCL_PROFILER_PLUGIN", prevPlugin_.c_str(), 1);
@@ -150,7 +181,28 @@ protected:
     // plugin configured leaves this one without it.
     std::string createCommWithRecorder()
     {
-        if(createTestCommunicator() != ncclSuccess) return "createTestCommunicator failed";
+        bool failed = createTestCommunicator() != ncclSuccess;
+        if(onAnyRank(failed))
+        {
+            ADD_FAILURE() << (failed ? "createTestCommunicator failed" : "createTestCommunicator failed on another rank");
+            return "no communicator";
+        }
+        return recorderNotLoadedReason();
+    }
+
+    // The same for a communicator built from a config the test controls, plus a
+    // stream of its own; both are released in TearDown.
+    std::string createConfiguredCommWithRecorder(ncclConfig_t* config, ncclComm_t* comm, hipStream_t* stream)
+    {
+        bool failed = createConfiguredComm(config, comm) != ncclSuccess ||
+                      hipStreamCreate(&ownedStream_) != hipSuccess;
+        if(onAnyRank(failed))
+        {
+            ADD_FAILURE() << (failed ? "communicator or stream creation failed"
+                                     : "communicator or stream creation failed on another rank");
+            return "no communicator";
+        }
+        *stream = ownedStream_;
         return recorderNotLoadedReason();
     }
 
@@ -223,15 +275,24 @@ protected:
                 if(r.type == ncclProfileKernelCh && r.stopEvents > 0) ++stopped;
             }
             if(tasks >= minTasks && stopped >= advertised) break;
-            if(std::chrono::steady_clock::now() > deadline) break;
+            if(std::chrono::steady_clock::now() > deadline)
+            {
+                ADD_FAILURE() << "profiler thread did not drain within " << kDrainTimeoutMs << " ms: " << tasks
+                              << " of " << minTasks << " Coll/P2p recorded, " << stopped << " of " << advertised
+                              << " advertised KernelCh stopped";
+                break;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         return recs;
     }
 
     // The invariants every KernelCh-enabled workload must satisfy, whatever the
-    // transport. Non-fatal so every rank reaches the closing barrier.
-    KernelChStats checkBalanced(const std::vector<RcclKchRecord>& recs, const char* what)
+    // transport. Non-fatal so every rank reaches the closing barrier. Each
+    // communicator has one profiler thread unless it shares its parent's, so the
+    // expected thread count is the number of thread-owning communicators involved.
+    KernelChStats checkBalanced(const std::vector<RcclKchRecord>& recs, const char* what,
+                                size_t expectedThreads = 1)
     {
         KernelChStats s;
         std::map<int64_t, std::vector<int>> childChannels;  // task index -> channel ids
@@ -280,9 +341,9 @@ protected:
                                   "profiler entirely; run with RCCL_DDA_ENABLE=0";
         EXPECT_GT(s.kernelCh, 0u) << what << ": no KernelCh events recorded";
         EXPECT_EQ(s.advertised, s.kernelCh) << what << ": advertised vs delivered KernelCh";
-        // One dedicated thread per communicator, never the thread that called RCCL.
-        EXPECT_EQ(1u, s.kernelChTids.size()) << what << ": KernelCh arrived on " << s.kernelChTids.size()
-                                             << " threads";
+        // Dedicated profiler threads, never the thread that called RCCL.
+        EXPECT_EQ(expectedThreads, s.kernelChTids.size())
+            << what << ": KernelCh arrived on " << s.kernelChTids.size() << " threads";
         EXPECT_EQ(0u, s.kernelChTids.count(callerTid_))
             << what << ": KernelCh delivered on the thread that issued the collectives";
         for(long tid : proxyThreadIds())
@@ -350,10 +411,12 @@ protected:
     CounterFn anomalies_ = nullptr;
     ThreadsFn proxyThreads_ = nullptr;
     std::string skipReason_;
+    std::string failReason_;
     bool hadPrevPlugin_ = false;
     std::string prevPlugin_;
     long callerTid_ = 0;
     std::vector<ncclComm_t> ownedComms_;
+    hipStream_t ownedStream_ = nullptr;
     void* send_ = nullptr;
     void* recv_ = nullptr;
     size_t count_ = 0;
@@ -365,16 +428,23 @@ protected:
         if(!r_.empty()) { GTEST_SKIP() << r_; }    \
     } while(0)
 
+// Every test opens with this: SetUp's verdict on the recorder, agreed by all ranks.
+#define KCH_REQUIRE_RECORDER()                              \
+    do {                                                    \
+        if(!failReason_.empty()) { FAIL() << failReason_; } \
+        KCH_SKIP_IF_NEEDED(skipReason_);                    \
+    } while(0)
+
 // Eager collectives: every Coll gets exactly its advertised KernelCh children,
 // all delivered by one dedicated thread.
 TEST_F(ProfilerKernelChMPITest, EagerAllReduceIsBalanced)
 {
-    KCH_SKIP_IF_NEEDED(skipReason_);
+    KCH_REQUIRE_RECORDER();
     if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
     KCH_SKIP_IF_NEEDED(createCommWithRecorder());
     ncclComm_t comm = getActiveCommunicator();
     hipStream_t stream = getActiveStream();
-    allocBuffers(1 << 20);
+    ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 20));
 
     constexpr int kIters = 16;
     for(int i = 0; i < kIters; i++) EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
@@ -391,13 +461,13 @@ TEST_F(ProfilerKernelChMPITest, EagerAllReduceIsBalanced)
 // proxy ops at all, and must still be timed.
 TEST_F(ProfilerKernelChMPITest, ProxyLessIntraNodeIsTimed)
 {
-    KCH_SKIP_IF_NEEDED(skipReason_);
+    KCH_REQUIRE_RECORDER();
     if(!validateTestPrerequisites(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kRequireSingleNode))
         GTEST_SKIP() << "needs at least 2 ranks on a single node";
     KCH_SKIP_IF_NEEDED(createCommWithRecorder());
     ncclComm_t comm = getActiveCommunicator();
     hipStream_t stream = getActiveStream();
-    allocBuffers(1 << 20);
+    ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 20));
 
     constexpr int kIters = 8;
     for(int i = 0; i < kIters; i++) EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
@@ -407,21 +477,26 @@ TEST_F(ProfilerKernelChMPITest, ProxyLessIntraNodeIsTimed)
     // The premise first: had this path used the proxy, the old design covered it too.
     EXPECT_EQ(0u, proxyOps_()) << "intra-node AllReduce posted proxy ops, so this run does not "
                                   "exercise a proxy-less plan";
-    checkBalanced(recs, "intra-node AllReduce");
+    KernelChStats s = checkBalanced(recs, "intra-node AllReduce");
+    EXPECT_EQ((size_t)kIters, s.tasks);
     freeBuffers();
 }
 
-// Across nodes the plan does have proxy ops, and KernelCh must still come from the
-// profiler thread rather than from proxy progress as it did before the move.
-TEST_F(ProfilerKernelChMPITest, InterNodeKernelChOffProxyThread)
+// A plan with proxy ops must still get its KernelCh from the profiler thread
+// rather than from proxy progress, as it did before the move. Across nodes the
+// network gives it proxy ops; on one node, NCCL_P2P_DISABLE=1 with
+// NCCL_SHM_DISABLE=1 forces the network transport, which also shows the
+// recorder's proxy counter can move, the premise the proxy-less tests rely on.
+TEST_F(ProfilerKernelChMPITest, ProxyPathKernelChOffProxyThread)
 {
-    KCH_SKIP_IF_NEEDED(skipReason_);
-    if(!validateTestPrerequisites(2, kNoProcessLimit, kNoPowerOfTwoRequired, 2))
-        GTEST_SKIP() << "needs ranks on at least 2 nodes";
+    KCH_REQUIRE_RECORDER();
+    if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
+    if(detectNodeCount() < 2 && !(envIsOne("NCCL_P2P_DISABLE") && envIsOne("NCCL_SHM_DISABLE")))
+        GTEST_SKIP() << "needs ranks on 2 nodes, or NCCL_P2P_DISABLE=1 and NCCL_SHM_DISABLE=1 on one";
     KCH_SKIP_IF_NEEDED(createCommWithRecorder());
     ncclComm_t comm = getActiveCommunicator();
     hipStream_t stream = getActiveStream();
-    allocBuffers(1 << 20);
+    ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 20));
 
     constexpr int kIters = 8;
     for(int i = 0; i < kIters; i++) EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
@@ -432,8 +507,8 @@ TEST_F(ProfilerKernelChMPITest, InterNodeKernelChOffProxyThread)
     // ranks that touch the network have them (a tree leaf may not), so count all.
     unsigned long long localProxyOps = proxyOps_(), allProxyOps = 0;
     MPI_Allreduce(&localProxyOps, &allProxyOps, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, MPI_COMM_WORLD);
-    EXPECT_GT(allProxyOps, 0u) << "inter-node AllReduce posted no proxy ops on any rank";
-    KernelChStats s = checkBalanced(recs, "inter-node AllReduce");
+    EXPECT_GT(allProxyOps, 0u) << "network AllReduce posted no proxy ops on any rank";
+    KernelChStats s = checkBalanced(recs, "network AllReduce");
     EXPECT_EQ((size_t)kIters, s.tasks);
     freeBuffers();
 }
@@ -442,7 +517,7 @@ TEST_F(ProfilerKernelChMPITest, InterNodeKernelChOffProxyThread)
 // so the runner config sets it for this test alone.
 TEST_F(ProfilerKernelChMPITest, ShmTransportIsTimed)
 {
-    KCH_SKIP_IF_NEEDED(skipReason_);
+    KCH_REQUIRE_RECORDER();
     const char* p2pOff = getenv("NCCL_P2P_DISABLE");
     if(!p2pOff || atoi(p2pOff) == 0) GTEST_SKIP() << "set NCCL_P2P_DISABLE=1 to force the SHM transport";
     if(!validateTestPrerequisites(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kRequireSingleNode))
@@ -450,7 +525,7 @@ TEST_F(ProfilerKernelChMPITest, ShmTransportIsTimed)
     KCH_SKIP_IF_NEEDED(createCommWithRecorder());
     ncclComm_t comm = getActiveCommunicator();
     hipStream_t stream = getActiveStream();
-    allocBuffers(1 << 20);
+    ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 20));
 
     constexpr int kIters = 8;
     for(int i = 0; i < kIters; i++) EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
@@ -471,7 +546,8 @@ TEST_F(ProfilerKernelChMPITest, ShmTransportIsTimed)
 
     auto recs = waitForDrain(kIters);
     EXPECT_EQ(0u, proxyOps_()) << "SHM AllReduce posted proxy ops";
-    checkBalanced(recs, "SHM AllReduce");
+    KernelChStats s = checkBalanced(recs, "SHM AllReduce");
+    EXPECT_EQ((size_t)kIters, s.tasks);
     freeBuffers();
 }
 
@@ -479,12 +555,12 @@ TEST_F(ProfilerKernelChMPITest, ShmTransportIsTimed)
 // many KernelCh, reading the shared per-channel device slot.
 TEST_F(ProfilerKernelChMPITest, SendRecvRingIsBalanced)
 {
-    KCH_SKIP_IF_NEEDED(skipReason_);
+    KCH_REQUIRE_RECORDER();
     if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
     KCH_SKIP_IF_NEEDED(createCommWithRecorder());
     ncclComm_t comm = getActiveCommunicator();
     hipStream_t stream = getActiveStream();
-    allocBuffers(1 << 18);
+    ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 18));
     const int rank = MPIEnvironment::world_rank, n = MPIEnvironment::world_size;
 
     constexpr int kIters = 8;
@@ -507,12 +583,12 @@ TEST_F(ProfilerKernelChMPITest, SendRecvRingIsBalanced)
 // timed on its own. Before the move, ops were posted once at capture.
 TEST_F(ProfilerKernelChMPITest, GraphReplaysAreEachTimed)
 {
-    KCH_SKIP_IF_NEEDED(skipReason_);
+    KCH_REQUIRE_RECORDER();
     if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
     KCH_SKIP_IF_NEEDED(createCommWithRecorder());
     ncclComm_t comm = getActiveCommunicator();
     hipStream_t stream = getActiveStream();
-    allocBuffers(1 << 20);
+    ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 20));
 
     constexpr int kPerGraph = 4, kReplays = 6;
     hipGraph_t graph = nullptr;
@@ -528,6 +604,12 @@ TEST_F(ProfilerKernelChMPITest, GraphReplaysAreEachTimed)
     KernelChStats s = checkBalanced(recs, "graph replays");
     EXPECT_EQ((size_t)(kPerGraph * kReplays), s.tasks) << "expected one Coll per collective per replay";
     checkPerChannelOrder(recs, "graph replays");
+    // Each replay is a new collective, and RAS and plugins tell them apart by seqNumber.
+    std::vector<uint64_t> seqs;
+    for(const auto& r : recs)
+        if(r.type == ncclProfileColl) seqs.push_back(r.seqNumber);
+    EXPECT_TRUE(std::adjacent_find(seqs.begin(), seqs.end(), std::greater_equal<uint64_t>()) == seqs.end())
+        << "replayed collectives do not get increasing seqNumbers";
 
     EXPECT_EQ(hipSuccess, hipGraphExecDestroy(exec));
     EXPECT_EQ(hipSuccess, hipGraphDestroy(graph));
@@ -540,22 +622,20 @@ TEST_F(ProfilerKernelChMPITest, GraphReplaysAreEachTimed)
 // (graphUsageMode=2): without it, an eager collective issued while a graph launch
 // is outstanding is unsupported. Holding the stream ahead of every replay delays
 // the replay's host node past the eager call that follows, so a regression shows
-// up on every run rather than by chance.
+// up on every run rather than by chance; the test checks that the hold did.
 TEST_F(ProfilerKernelChMPITest, MixedEagerAndGraphPostInDeviceOrder)
 {
-    KCH_SKIP_IF_NEEDED(skipReason_);
+    KCH_REQUIRE_RECORDER();
     if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
     config.graphUsageMode = 2;
     ncclComm_t comm = nullptr;
-    ASSERT_EQ(ncclSuccess, createConfiguredComm(&config, &comm));
-    KCH_SKIP_IF_NEEDED(recorderNotLoadedReason());
     hipStream_t stream = nullptr;
-    ASSERT_EQ(hipSuccess, hipStreamCreate(&stream));
+    KCH_SKIP_IF_NEEDED(createConfiguredCommWithRecorder(&config, &comm, &stream));
 
     // Distinct sizes tell eager collectives and replayed ones apart in the record.
     constexpr size_t kEagerCount = 1 << 12, kGraphCount = 1 << 14;
-    allocBuffers(kGraphCount);
+    ASSERT_NO_FATAL_FAILURE(allocBuffers(kGraphCount));
     constexpr int kPerGraph = 2, kRounds = 8;
     hipGraph_t graph = nullptr;
     hipGraphExec_t exec = nullptr;
@@ -565,17 +645,27 @@ TEST_F(ProfilerKernelChMPITest, MixedEagerAndGraphPostInDeviceOrder)
     ASSERT_EQ(hipSuccess, hipStreamEndCapture(stream, &graph));
     ASSERT_EQ(hipSuccess, hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
 
-    auto holdStream = [](void*) { std::this_thread::sleep_for(std::chrono::milliseconds(2)); };
+    std::atomic<int> holdsDone{0};
+    auto holdStream = [](void* done) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        static_cast<std::atomic<int>*>(done)->fetch_add(1);
+    };
     std::vector<size_t> expected;
+    int heldBack = 0;  // rounds whose eager call returned while the replay was still held
     for(int i = 0; i < kRounds; i++)
     {
-        EXPECT_EQ(hipSuccess, hipLaunchHostFunc(stream, holdStream, nullptr));
+        EXPECT_EQ(hipSuccess, hipLaunchHostFunc(stream, holdStream, &holdsDone));
         EXPECT_EQ(hipSuccess, hipGraphLaunch(exec, stream));
         EXPECT_EQ(ncclSuccess, ncclAllReduce(send_, recv_, kEagerCount, ncclFloat, ncclSum, comm, stream));
+        if(holdsDone.load() <= i) ++heldBack;
         expected.insert(expected.end(), kPerGraph, kGraphCount);
         expected.push_back(kEagerCount);
     }
     EXPECT_EQ(hipSuccess, hipStreamSynchronize(stream));
+    // Otherwise the replay's host node ran first and the posting order below holds
+    // whatever the core does.
+    EXPECT_GT(heldBack, kRounds / 2) << "only " << heldBack << " of " << kRounds
+                                     << " eager calls overtook the held replay";
 
     auto recs = waitForDrain(expected.size());
     KernelChStats s = checkBalanced(recs, "mixed eager/graph");
@@ -594,20 +684,21 @@ TEST_F(ProfilerKernelChMPITest, MixedEagerAndGraphPostInDeviceOrder)
     EXPECT_EQ(hipSuccess, hipGraphExecDestroy(exec));
     EXPECT_EQ(hipSuccess, hipGraphDestroy(graph));
     freeBuffers();
-    EXPECT_EQ(hipSuccess, hipStreamDestroy(stream));
 }
 
-// A burst of small collectives with no synchronization. The device keeps 64
-// slots per channel; if the thread falls that far behind, it reads timestamps
-// that belong to later work, which shows up as out-of-order channel timelines.
-TEST_F(ProfilerKernelChMPITest, BurstKeepsChannelOrder)
+// A burst of small collectives with no synchronization, well past the 64 slots
+// the device keeps per channel. The core accepts that a thread that falls that
+// far behind may time an op from a reused slot, so timeline order is not
+// guaranteed here; every op must still be delivered exactly once, with nothing
+// left pending or stopped twice.
+TEST_F(ProfilerKernelChMPITest, BurstPastSlotRingIsBalanced)
 {
-    KCH_SKIP_IF_NEEDED(skipReason_);
+    KCH_REQUIRE_RECORDER();
     if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
     KCH_SKIP_IF_NEEDED(createCommWithRecorder());
     ncclComm_t comm = getActiveCommunicator();
     hipStream_t stream = getActiveStream();
-    allocBuffers(1024);
+    ASSERT_NO_FATAL_FAILURE(allocBuffers(1024));
 
     constexpr int kIters = 512;
     for(int i = 0; i < kIters; i++) EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
@@ -616,7 +707,6 @@ TEST_F(ProfilerKernelChMPITest, BurstKeepsChannelOrder)
     auto recs = waitForDrain(kIters);
     KernelChStats s = checkBalanced(recs, "burst");
     EXPECT_EQ((size_t)kIters, s.tasks);
-    checkPerChannelOrder(recs, "burst");
     freeBuffers();
 }
 
@@ -629,18 +719,16 @@ class ProfilerKernelChSplitMPITest : public ProfilerKernelChMPITest,
 TEST_P(ProfilerKernelChSplitMPITest, SplitThreadOwnership)
 {
     const int share = GetParam();
-    KCH_SKIP_IF_NEEDED(skipReason_);
+    KCH_REQUIRE_RECORDER();
     if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
 
     // ncclCommSplit takes splitShare from the parent's config, not the child's.
     ncclConfig_t parentConfig = NCCL_CONFIG_INITIALIZER;
     parentConfig.splitShare = share;
     ncclComm_t parent = nullptr;
-    ASSERT_EQ(ncclSuccess, createConfiguredComm(&parentConfig, &parent));
-    KCH_SKIP_IF_NEEDED(recorderNotLoadedReason());
     hipStream_t stream = nullptr;
-    ASSERT_EQ(hipSuccess, hipStreamCreate(&stream));
-    allocBuffers(1 << 18);
+    KCH_SKIP_IF_NEEDED(createConfiguredCommWithRecorder(&parentConfig, &parent, &stream));
+    ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 18));
 
     ncclComm_t child = nullptr;
     ASSERT_EQ(ncclSuccess, ncclCommSplit(parent, 0, MPIEnvironment::world_rank, &child, nullptr));
@@ -654,6 +742,8 @@ TEST_P(ProfilerKernelChSplitMPITest, SplitThreadOwnership)
     }
     EXPECT_EQ(hipSuccess, hipStreamSynchronize(stream));
     auto recs = waitForDrain(2 * kIters);
+    KernelChStats both = checkBalanced(recs, "parent and child", share ? 1 : 2);
+    EXPECT_EQ((size_t)(2 * kIters), both.tasks);
 
     std::map<uint64_t, std::set<long>> tidsByComm;
     for(const auto& r : recs)
@@ -688,7 +778,6 @@ TEST_P(ProfilerKernelChSplitMPITest, SplitThreadOwnership)
     KernelChStats s = checkBalanced(tail, "parent after child destroyed");
     EXPECT_EQ((size_t)kIters, s.tasks);
     freeBuffers();
-    EXPECT_EQ(hipSuccess, hipStreamDestroy(stream));
 }
 
 INSTANTIATE_TEST_SUITE_P(Share, ProfilerKernelChSplitMPITest, ::testing::Values(0, 1),
@@ -700,14 +789,16 @@ INSTANTIATE_TEST_SUITE_P(Share, ProfilerKernelChSplitMPITest, ::testing::Values(
 // it, so a thread stuck waiting on counters that will never advance hangs abort.
 TEST_F(ProfilerKernelChMPITest, AbortWithWorkInFlightReturns)
 {
-    KCH_SKIP_IF_NEEDED(skipReason_);
+    KCH_REQUIRE_RECORDER();
     if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
     KCH_SKIP_IF_NEEDED(createCommWithRecorder());
     ncclComm_t comm = getActiveCommunicator();
     hipStream_t stream = getActiveStream();
-    allocBuffers(1 << 20);
+    ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 22));
 
     for(int i = 0; i < 64; i++) EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
+    // Otherwise only an idle teardown is exercised.
+    EXPECT_EQ(hipErrorNotReady, hipStreamQuery(stream)) << "the work drained before ncclCommAbort was called";
     auto t0 = std::chrono::steady_clock::now();
     EXPECT_EQ(ncclSuccess, ncclCommAbort(comm));
     double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
@@ -719,16 +810,17 @@ TEST_F(ProfilerKernelChMPITest, AbortWithWorkInFlightReturns)
 }
 
 // KernelCh timers are raw device ticks. On AMD that is wall_clock64(), whose rate
-// the runtime reports; a KernelCh converted at that rate cannot outlast the whole
-// host-measured run.
+// the runtime reports. Converted at that rate, the KernelCh span must fit inside
+// a pair of stream events bracketing the same work, and fill most of it, so a
+// wrong unit fails in either direction.
 TEST_F(ProfilerKernelChMPITest, TimersAreWallClockTicks)
 {
-    KCH_SKIP_IF_NEEDED(skipReason_);
+    KCH_REQUIRE_RECORDER();
     if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
     KCH_SKIP_IF_NEEDED(createCommWithRecorder());
     ncclComm_t comm = getActiveCommunicator();
     hipStream_t stream = getActiveStream();
-    allocBuffers(1 << 22);
+    ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 22));
 
     int dev = 0, rateKHz = 0;
     ASSERT_EQ(hipSuccess, hipGetDevice(&dev));
@@ -736,31 +828,38 @@ TEST_F(ProfilerKernelChMPITest, TimersAreWallClockTicks)
     ASSERT_GT(rateKHz, 0);
     const double nsPerTick = 1e6 / rateKHz;
 
+    hipEvent_t begin = nullptr, end = nullptr;
+    ASSERT_EQ(hipSuccess, hipEventCreate(&begin));
+    ASSERT_EQ(hipSuccess, hipEventCreate(&end));
     EXPECT_EQ(hipSuccess, hipStreamSynchronize(stream));
-    auto t0 = std::chrono::steady_clock::now();
     constexpr int kIters = 8;
+    EXPECT_EQ(hipSuccess, hipEventRecord(begin, stream));
     for(int i = 0; i < kIters; i++) EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
+    EXPECT_EQ(hipSuccess, hipEventRecord(end, stream));
     EXPECT_EQ(hipSuccess, hipStreamSynchronize(stream));
-    double hostNs = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count();
+    float eventMs = 0;
+    EXPECT_EQ(hipSuccess, hipEventElapsedTime(&eventMs, begin, end));
+    const double eventNs = eventMs * 1e6;
+    (void)hipEventDestroy(begin);
+    (void)hipEventDestroy(end);
 
     auto recs = waitForDrain(kIters);
-    checkBalanced(recs, "timer units");
+    KernelChStats s = checkBalanced(recs, "timer units");
+    EXPECT_EQ((size_t)kIters, s.tasks);
     uint64_t lo = UINT64_MAX, hi = 0;
     for(const auto& r : recs)
     {
         if(r.type != ncclProfileKernelCh) continue;
-        double ns = (double)(r.stopTimer - r.startTimer) * nsPerTick;
-        EXPECT_LE(ns, hostNs) << "a KernelCh lasted " << ns << " ns at " << rateKHz
-                              << " kHz, longer than the whole " << hostNs << " ns run";
         lo = std::min(lo, r.startTimer);
         hi = std::max(hi, r.stopTimer);
     }
-    if(hi > lo)
-    {
-        double spanNs = (double)(hi - lo) * nsPerTick;
-        EXPECT_LE(spanNs, hostNs) << "KernelCh span " << spanNs << " ns exceeds host time " << hostNs << " ns";
-        EXPECT_GT(spanNs, 0.0);
-    }
+    ASSERT_GT(hi, lo);
+    // Event timestamps and wall_clock64() are separate clocks, hence the slack.
+    const double spanNs = (double)(hi - lo) * nsPerTick;
+    EXPECT_LE(spanNs, eventNs * 1.05 + 20e3) << "KernelCh span " << spanNs << " ns at " << rateKHz
+                                             << " kHz exceeds the " << eventNs << " ns between stream events";
+    EXPECT_GE(spanNs, eventNs * 0.5) << "KernelCh span " << spanNs << " ns at " << rateKHz
+                                     << " kHz covers under half of the " << eventNs << " ns between stream events";
     freeBuffers();
 }
 

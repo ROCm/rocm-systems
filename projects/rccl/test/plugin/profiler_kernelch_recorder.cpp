@@ -58,7 +58,7 @@ uint64_t gAnomalies;
 int activationMask() {
   const char* env = getenv("RCCL_TEST_KCH_EVENT_MASK");
   if (env && env[0] != '\0') return (int)strtol(env, nullptr, 0);
-  return ncclProfileColl | ncclProfileP2p | ncclProfileKernelCh | ncclProfileProxyOp;
+  return ncclProfileGroup | ncclProfileColl | ncclProfileP2p | ncclProfileKernelCh | ncclProfileProxyOp;
 }
 
 // Caller holds gMutex.
@@ -105,6 +105,12 @@ ncclResult_t recorderStartEvent(void* context, void** eHandle, ncclProfilerEvent
   const Context* ctx = static_cast<const Context*>(context);
   std::lock_guard<std::mutex> lock(gMutex);
   switch (eDescr->type) {
+    case ncclProfileGroup: {
+      // Recorded only so the core gets a handle back: with none, it leaves
+      // seqNumber unchanged across graph replays.
+      *eHandle = newRecord(eDescr->type, ctx, nullptr);
+      break;
+    }
     case ncclProfileColl: {
       Record* r = newRecord(eDescr->type, ctx, nullptr);
       copyFunc(r->view.func, eDescr->coll.func);
@@ -200,6 +206,7 @@ __attribute__((visibility("default"))) void rcclKchRecorderReset(void) {
 
 __attribute__((visibility("default"))) size_t rcclKchRecorderSnapshot(RcclKchRecord* out, size_t cap) {
   std::lock_guard<std::mutex> lock(gMutex);
+  if (cap == 0) return gRecords.size();
   std::unordered_map<const Record*, int64_t> index;
   index.reserve(gRecords.size());
   int64_t i = 0;
