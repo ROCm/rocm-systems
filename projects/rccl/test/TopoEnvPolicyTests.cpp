@@ -653,4 +653,21 @@ TEST(SymmetricMemP2pLevelTests, P2pDisable_HonoredOnZhaoxinHost)
         {{"NCCL_P2P_DISABLE", "1"}});
 }
 
+// The NCCL_P2P_LEVEL half of the same contract: the host default must not raise
+// a user level back up to PXB.
+TEST(SymmetricMemP2pLevelTests, RestrictiveLevelLOC_HonoredOnIntelHost)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "RestrictiveLevelLOC_HonoredOnIntelHost",
+        []()
+        {
+            int p2p = -1, cudaP2p = -1;
+            checkXgmiPairP2p(&p2p, &cudaP2p, NCCL_TOPO_CPU_VENDOR_INTEL);
+            EXPECT_EQ(p2p, 0) << "NCCL_P2P_LEVEL=LOC must engage the distance gate on an Intel host";
+            EXPECT_EQ(cudaP2p, 1)
+                << "raw CUDA P2P (symmetric-memory prereq) must be distance-independent";
+        },
+        {{"NCCL_P2P_LEVEL", "LOC"}});
+}
+
 }  // namespace RcclUnitTesting
