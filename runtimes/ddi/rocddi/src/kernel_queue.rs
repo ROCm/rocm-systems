@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Bounded, kernel-mediated GPU command submission.
 //!
 //! Command bytes remain in caller-owned device memory. This owner carries only
@@ -16,6 +19,8 @@ pub enum KernelQueueFormat {
     Pm4,
     /// AMD GPU SDMA command stream submitted to a copy engine.
     Sdma,
+    /// AMD GPU SDMA command stream submitted to one DRM DMA ring.
+    SdmaOnRing(u32),
 }
 
 /// One already-materialized, executable device-memory command range.
@@ -62,19 +67,41 @@ impl KernelQueue {
     /// Submits one opaque command range without a library allocation or lock.
     ///
     /// A native outcome that cannot distinguish rejection from acceptance is
-    /// conservatively published as an accepted, failed submission. The caller
-    /// retains command storage until status reports retirement.
+    /// conservatively published as an accepted, failed submission with an
+    /// identity. An error proves rejection. The caller retains command storage
+    /// until status reports retirement.
     ///
     /// # Errors
     /// Reports a proved rejection, unavailable slot, or lost device.
-    pub fn submit(&self, command: KernelCommand) -> Result<u64, Error> {
-        driver::PlatformDriver::submit_kernel_queue(&self.inner, command)
+    ///
+    /// # Safety
+    /// The command range must remain device accessible, executable, and
+    /// unchanged until [`Self::status`] or [`Self::wait`] proves its submission
+    /// retired. It must contain valid packets for this queue's format, and the
+    /// caller must synchronize writes before submission. An ambiguous native
+    /// outcome is returned as an accepted submission, whose storage must be
+    /// retained until retirement or conclusive teardown.
+    #[allow(unsafe_code)]
+    pub unsafe fn submit(&self, command: KernelCommand) -> Result<u64, Error> {
+        // SAFETY: The public caller retains and synchronizes the command range
+        // until the native retirement frontier advances.
+        unsafe { driver::PlatformDriver::submit_kernel_queue(&self.inner, command) }
     }
 
     /// Reads cached retirement and terminal state without entering the driver.
     #[must_use]
     pub fn status(&self) -> KernelQueueStatus {
         driver::PlatformDriver::kernel_queue_status(&self.inner)
+    }
+
+    /// Checks native completion once without waiting and returns the checked
+    /// retirement frontier and sticky terminal state.
+    ///
+    /// # Errors
+    /// Reports a native observation failure. Earlier checked retirement remains
+    /// available through [`Self::status`].
+    pub fn refresh_status(&self) -> Result<KernelQueueStatus, Error> {
+        driver::PlatformDriver::refresh_kernel_queue(&self.inner)
     }
 
     /// Waits through the native context under one caller-supplied deadline.
@@ -108,6 +135,15 @@ impl KernelQueue {
 }
 
 impl GpuDevice<'_> {
+    /// Returns the DRM DMA ring bitmask available for kernel-mediated SDMA
+    /// submissions on this activated device.
+    ///
+    /// # Errors
+    /// Reports an unqualified target or a native ring-query failure.
+    pub fn available_sdma_rings(&self) -> Result<u32, Error> {
+        self.device.driver.available_sdma_rings(&self.device.state)
+    }
+
     /// Creates a kernel-mediated queue with all bounded resources ready.
     ///
     /// # Errors

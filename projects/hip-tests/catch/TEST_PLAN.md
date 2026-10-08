@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 618 | 618 | 0 |
-| **total** | **618** | **618** | **0** |
+| `contract` | 623 | 623 | 0 |
+| **total** | **623** | **623** | **0** |
 
 ## Tier: `contract`
 
@@ -704,17 +704,15 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_KernelNameRef_HipKernelNameRef_ByFunction_NamesResolvedKernel` | hipKernelNameRef | resolves a hipFunction_t (from hipGetFuncBySymbol) to a non-empty name mentioning the kernel identifier |
 | `Contract_KernelNameRef_HipKernelNameRef_NvidiaUnsupported_IsSkipped` | hipKernelNameRef | NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists |
 
-### `kernel_object_attributes` (5 cases)
+### `kernel_object_attributes` (3 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_KernelObjectAttributes_HipKernelGetAttribute_Default_ReturnsSaneValues` | hipKernelGetAttribute | reports a positive max-threads-per-block and non-negative static resource usage for a loaded kernel |
 | `Contract_KernelObjectAttributes_HipKernelGetParamInfo_Default_ReturnsFirstParamLayout` | hipKernelGetParamInfo | reports the first parameter at offset zero with size at least that of a device pointer |
-| `Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NonCurrentDevice_PreservesCurrentAndReadsBack` | hipKernelSetAttributeForDevice | preserves current device and target value |
-| `Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NvidiaPre128Unsupported_IsSkipped` | hipKernelSetAttributeForDevice | unavailable before CUDA 12.8 |
 | `Contract_KernelObjectAttributes_HipKernelSetAttribute_SetMaxDynamicSharedMemory_IsAcceptedOrUnsupported` | hipKernelSetAttribute | setting max dynamic shared memory to zero is either accepted or reported as unsupported, never another error |
 
-### `library` (14 cases)
+### `library` (21 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -730,6 +728,13 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Library_HipLibraryGetKernel_Default_ResolvesKnownSymbol` | hipLibraryGetKernel | an existing symbol resolves to a non-null kernel handle |
 | `Contract_Library_HipLibraryGetKernel_LoadDataValidImage_CanResolveKernel` | hipLibraryGetKernel | a loaded valid image resolves a known kernel symbol to a non-null kernel handle |
 | `Contract_Library_HipLibraryGetKernel_UnknownSymbol_IsRejected` | hipLibraryGetKernel | resolving an undefined symbol fails with a non-success status instead of a bogus handle |
+| `Contract_Library_HipLibraryGetModule_Default_ModuleGlobalMatchesLibraryGlobal` | hipLibraryGetModule | a global resolved through the library and through its own module reports the same size |
+| `Contract_Library_HipLibraryGetModule_Default_ModuleResolvesAndLaunchesKernel` | hipLibraryGetModule | the returned module resolves a library kernel that launches and observably writes |
+| `Contract_Library_HipLibraryGetModule_Default_RepeatedQueryIsStable` | hipLibraryGetModule | repeated queries on one library return the same stable module handle |
+| `Contract_Library_HipLibraryGetModule_Default_ReturnsNonNullModule` | hipLibraryGetModule | a loaded library resolves to a non-null module handle |
+| `Contract_Library_HipLibraryGetModule_ModuleUnload_IsRejected` | hipLibraryGetModule | a module obtained from a library cannot be released with hipModuleUnload |
+| `Contract_Library_HipLibraryGetModule_NullLibrary_IsRejected` | hipLibraryGetModule | a null library handle is rejected with a non-success status |
+| `Contract_Library_HipLibraryGetModule_NullModuleOut_IsRejected` | hipLibraryGetModule | a null module out-parameter is rejected with a non-success status |
 | `Contract_Library_HipLibraryLoadData_FromRtc_Succeeds` | hipLibraryLoadData | a HIPRTC-produced code object loads into a non-null library handle and unloads cleanly |
 | `Contract_Library_HipLibraryLoadData_NullImage_IsRejected` | hipLibraryLoadData | rejects a null image with a non-success status rather than silently succeeding |
 

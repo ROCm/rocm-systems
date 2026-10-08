@@ -65,6 +65,8 @@ enum class NullGpuId : uint32
     StrixHalo,     ///< 11.5.1
     Krackan1,      ///< 11.5.2
     Krackan2,      ///< 11.5.3
+    Gfx1170,       ///< 11.7.0
+    Gfx1171,       ///< 11.7.1
     Navi44,        ///< 12.0.0
     Navi48,        ///< 12.0.1
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 958
@@ -89,6 +91,7 @@ enum class GfxIpLevel : uint32
     GfxIp10_3,     ///< GFXIP 10.3 (Navi2x, Rembrandt, Raphael, Mendocino)
     GfxIp11_0,     ///< GFXIP 11.0 (Navi3x, Phoenix)
     GfxIp11_5,     ///< GFXIP 11.5 (Strix)
+    GfxIp11_7,     ///< GFXIP 11.7
     GfxIp12,       ///< GFXIP 12.0 (Navi4x)
 };
 #endif
@@ -261,6 +264,8 @@ enum class AsicRevision : uint32
     Krackan2,             ///< 11.5.3
     Navi44,               ///< 12.0.0
     Navi48,               ///< 12.0.1
+    Gfx1170,              ///< 11.7.0
+    Gfx1171,              ///< 11.7.1
     Count,
 // These are not included in Count, since Count is the number of unique entries
 };

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 /* Direct AQL execution qualification for the GFX1201 Linux KFD provider.
  * The generated kernel uses no runtime libraries and executes fixed private
  * storage from caller-supplied scratch. The consumer owns packet construction,

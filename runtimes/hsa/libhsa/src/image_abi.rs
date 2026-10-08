@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Image and sampler ABI entry points retained for binary compatibility.
 //!
 //! The image extension is never advertised. These symbols return
@@ -8,7 +11,7 @@ use std::ffi::c_void;
 use crate::ffi::*;
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_ext_image_get_capability(
+pub extern "C" fn hsa_ext_image_get_capability(
     _agent: HsaAgent,
     _geometry: u32,
     _image_format: *const HsaExtImageFormat,
@@ -18,7 +21,7 @@ pub unsafe extern "C" fn hsa_ext_image_get_capability(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_ext_image_get_capability_with_layout(
+pub extern "C" fn hsa_ext_image_get_capability_with_layout(
     _agent: HsaAgent,
     _geometry: u32,
     _image_format: *const HsaExtImageFormat,
@@ -29,7 +32,7 @@ pub unsafe extern "C" fn hsa_ext_image_get_capability_with_layout(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_ext_image_data_get_info(
+pub extern "C" fn hsa_ext_image_data_get_info(
     _agent: HsaAgent,
     _image_descriptor: *const HsaExtImageDescriptor,
     _access_permission: u32,
@@ -39,7 +42,7 @@ pub unsafe extern "C" fn hsa_ext_image_data_get_info(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_ext_image_data_get_info_with_layout(
+pub extern "C" fn hsa_ext_image_data_get_info_with_layout(
     _agent: HsaAgent,
     _image_descriptor: *const HsaExtImageDescriptor,
     _access_permission: u32,
@@ -52,7 +55,7 @@ pub unsafe extern "C" fn hsa_ext_image_data_get_info_with_layout(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_ext_image_data_get_info_v2(
+pub extern "C" fn hsa_ext_image_data_get_info_v2(
     _agent: HsaAgent,
     _image_descriptor: *const HsaExtImageDescriptorV2,
     _access_permission: u32,
@@ -62,7 +65,7 @@ pub unsafe extern "C" fn hsa_ext_image_data_get_info_v2(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_ext_image_create(
+pub extern "C" fn hsa_ext_image_create(
     _agent: HsaAgent,
     _image_descriptor: *const HsaExtImageDescriptor,
     _image_data: *const c_void,
@@ -73,7 +76,7 @@ pub unsafe extern "C" fn hsa_ext_image_create(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_ext_image_create_with_layout(
+pub extern "C" fn hsa_ext_image_create_with_layout(
     _agent: HsaAgent,
     _image_descriptor: *const HsaExtImageDescriptor,
     _image_data: *const c_void,
@@ -87,7 +90,7 @@ pub unsafe extern "C" fn hsa_ext_image_create_with_layout(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_ext_image_create_v2(
+pub extern "C" fn hsa_ext_image_create_v2(
     _agent: HsaAgent,
     _image_descriptor: *const HsaExtImageDescriptorV2,
     _image_data: *const c_void,
@@ -98,7 +101,7 @@ pub unsafe extern "C" fn hsa_ext_image_create_v2(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_amd_image_create(
+pub extern "C" fn hsa_amd_image_create(
     _agent: HsaAgent,
     _image_descriptor: *const HsaExtImageDescriptor,
     _image_layout: *const HsaAmdImageDescriptor,
@@ -110,7 +113,7 @@ pub unsafe extern "C" fn hsa_amd_image_create(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_amd_image_create_v2(
+pub extern "C" fn hsa_amd_image_create_v2(
     _agent: HsaAgent,
     _image_descriptor: *const HsaExtImageDescriptorV2,
     _image_layout: *const HsaAmdImageDescriptor,
@@ -132,7 +135,7 @@ pub extern "C" fn hsa_ext_image_destroy_v2(_agent: HsaAgent, _image: HsaExtImage
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_ext_image_mipmap_array_get_level(
+pub extern "C" fn hsa_ext_image_mipmap_array_get_level(
     _agent: HsaAgent,
     _mipmapped_array: *const HsaExtImage,
     _mip_level: u32,
@@ -143,7 +146,7 @@ pub unsafe extern "C" fn hsa_ext_image_mipmap_array_get_level(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_ext_image_copy(
+pub extern "C" fn hsa_ext_image_copy(
     _agent: HsaAgent,
     _src_image: HsaExtImage,
     _src_offset: *const HsaDim3,
@@ -155,7 +158,7 @@ pub unsafe extern "C" fn hsa_ext_image_copy(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_ext_image_import(
+pub extern "C" fn hsa_ext_image_import(
     _agent: HsaAgent,
     _src_memory: *const c_void,
     _src_row_pitch: usize,
@@ -167,7 +170,7 @@ pub unsafe extern "C" fn hsa_ext_image_import(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_ext_image_export(
+pub extern "C" fn hsa_ext_image_export(
     _agent: HsaAgent,
     _src_image: HsaExtImage,
     _dst_memory: *mut c_void,
@@ -179,7 +182,7 @@ pub unsafe extern "C" fn hsa_ext_image_export(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_ext_image_clear(
+pub extern "C" fn hsa_ext_image_clear(
     _agent: HsaAgent,
     _image: HsaExtImage,
     _data: *const c_void,
@@ -189,7 +192,7 @@ pub unsafe extern "C" fn hsa_ext_image_clear(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_amd_image_get_info_max_dim(
+pub extern "C" fn hsa_amd_image_get_info_max_dim(
     _agent: HsaAgent,
     _attribute: u32,
     _value: *mut c_void,
@@ -198,7 +201,7 @@ pub unsafe extern "C" fn hsa_amd_image_get_info_max_dim(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_ext_sampler_create(
+pub extern "C" fn hsa_ext_sampler_create(
     _agent: HsaAgent,
     _sampler_descriptor: *const HsaExtSamplerDescriptor,
     _sampler: *mut HsaExtSampler,
@@ -207,7 +210,7 @@ pub unsafe extern "C" fn hsa_ext_sampler_create(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hsa_ext_sampler_create_v2(
+pub extern "C" fn hsa_ext_sampler_create_v2(
     _agent: HsaAgent,
     _sampler_descriptor: *const HsaExtSamplerDescriptorV2,
     _sampler: *mut HsaExtSampler,
@@ -230,21 +233,18 @@ mod tests {
         let mut capability = 0xfeed_u32;
         let mut image = HsaExtImage { handle: 0xfeed };
         let mut sampler = HsaExtSampler { handle: 0xfeed };
-        // SAFETY: The stubs do not dereference any pointer arguments.
-        unsafe {
-            assert_eq!(
-                hsa_ext_image_get_capability(agent, 0, std::ptr::null(), &raw mut capability),
-                NOT_SUPPORTED
-            );
-            assert_eq!(
-                hsa_ext_image_create(agent, std::ptr::null(), std::ptr::null(), 0, &raw mut image),
-                NOT_SUPPORTED
-            );
-            assert_eq!(
-                hsa_ext_sampler_create(agent, std::ptr::null(), &raw mut sampler),
-                NOT_SUPPORTED
-            );
-        }
+        assert_eq!(
+            hsa_ext_image_get_capability(agent, 0, std::ptr::null(), &raw mut capability),
+            NOT_SUPPORTED
+        );
+        assert_eq!(
+            hsa_ext_image_create(agent, std::ptr::null(), std::ptr::null(), 0, &raw mut image),
+            NOT_SUPPORTED
+        );
+        assert_eq!(
+            hsa_ext_sampler_create(agent, std::ptr::null(), &raw mut sampler),
+            NOT_SUPPORTED
+        );
         assert_eq!(hsa_ext_image_destroy(agent, image), NOT_SUPPORTED);
         assert_eq!(hsa_ext_sampler_destroy(agent, sampler), NOT_SUPPORTED);
         assert_eq!(capability, 0xfeed);
