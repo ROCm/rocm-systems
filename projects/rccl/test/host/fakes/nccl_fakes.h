@@ -103,9 +103,7 @@ extern std::function<ncclResult_t(struct ncclMemManager*, void* /*ptr*/,
                                   int /*ownerDev*/, void* /*ownerPtr*/)>
     g_memTrackImportFromPeer;
 
-// ncclMemTrack / ncclMemUntrackDynamic: what alloc.h's cuMem helpers record in
-// (and drop from) a memory manager. Defaults succeed without tracking anything;
-// UntrackDynamic reports a live persistent entry so the free path unmaps.
+// Defaults succeed without tracking; UntrackDynamic reports a live persistent entry.
 struct ncclMemUntrackInfo;
 extern std::function<ncclResult_t(struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,
                                   hipMemAllocationHandleType, ncclMemType_t)>

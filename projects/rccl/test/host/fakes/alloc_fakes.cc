@@ -4,11 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Data symbols alloc.h declares extern. Production defines them in src/init.cc;
-// a binary that inlines the alloc.h cuMem helpers without compiling init.cc
-// links them from here.
+// alloc.h data symbols that src/init.cc defines in production.
 
 #include "alloc.h"
 
-// Per-device counters the cuMem alloc/free helpers bump. Zero-initialised.
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
