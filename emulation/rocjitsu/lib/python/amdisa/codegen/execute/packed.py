@@ -931,13 +931,13 @@ def gen_mad_mix_f32(
     else:
         opsel, opsel_hi = opsel_exprs
         L.append(
-            f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);'
+            f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_operand({s0}, uint64_t{{1}} << lane, {s0}.register_byte_mask()).lane(lane);'
         )
         L.append(
-            f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);'
+            f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_operand({s1}, uint64_t{{1}} << lane, {s1}.register_byte_mask()).lane(lane);'
         )
         L.append(
-            f'    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
+            f'    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_operand({s2}, uint64_t{{1}} << lane, {s2}.register_byte_mask()).lane(lane);'
         )
         L.append(
             '    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,'
@@ -1014,13 +1014,13 @@ def gen_mad_mix_lo_hi(
     else:
         opsel, opsel_hi = opsel_exprs
         L.append(
-            f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);'
+            f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_operand({s0}, uint64_t{{1}} << lane, {s0}.register_byte_mask()).lane(lane);'
         )
         L.append(
-            f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);'
+            f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_operand({s1}, uint64_t{{1}} << lane, {s1}.register_byte_mask()).lane(lane);'
         )
         L.append(
-            f'    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
+            f'    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_operand({s2}, uint64_t{{1}} << lane, {s2}.register_byte_mask()).lane(lane);'
         )
         L.append(
             '    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,'
@@ -1112,13 +1112,13 @@ def gen_mad_mix_bf16(
     else:
         opsel, opsel_hi = opsel_exprs
         L.append(
-            f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);'
+            f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_operand({s0}, uint64_t{{1}} << lane, {s0}.register_byte_mask()).lane(lane);'
         )
         L.append(
-            f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);'
+            f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_operand({s1}, uint64_t{{1}} << lane, {s1}.register_byte_mask()).lane(lane);'
         )
         L.append(
-            f'    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
+            f'    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_operand({s2}, uint64_t{{1}} << lane, {s2}.register_byte_mask()).lane(lane);'
         )
         L.append(
             '    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_bf16,'
