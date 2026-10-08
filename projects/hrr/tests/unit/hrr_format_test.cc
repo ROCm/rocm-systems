@@ -323,11 +323,12 @@ HRR_TEST_CASE(Unit_HRR_TranslatePtr_TightestEnclosing) {
 //
 // The playback teardown loop releases each alloc_map entry with the API that
 // matches its AllocKind (Device -> hipFree, HostMalloc -> hipHostFree, and
-// HostRegister / DevicePtrAlias / HostUnregistered -> not via hipFree).  Passing a host pointer to
-// hipFree returns errors and can corrupt allocator bookkeeping.  These tests
-// verify the kind tagging the dispatch relies on: record_alloc preserves the
-// kind, and the free-routing decision (mirrored from hrr_playback.cpp) sends a
-// host pointer to hipFree for NONE of the host kinds.
+// HostRegister / DevicePtrAlias / HostUnregistered -> not via hipFree).
+// Passing a host pointer to hipFree returns errors and can corrupt allocator
+// bookkeeping.  These tests verify the kind tagging the dispatch relies on:
+// record_alloc preserves the kind, and the free-routing decision (mirrored
+// from hrr_playback.cpp) sends a host pointer to hipFree for NONE of the host
+// kinds.
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -335,10 +336,10 @@ namespace {
 // is released via hipFree.  Only AllocKind::Device must map to hipFree.
 bool kind_uses_hipFree(AllocKind k) {
   switch (k) {
-    case AllocKind::Device:         return true;
-    case AllocKind::HostMalloc:     return false;  // hipHostFree
-    case AllocKind::HostRegister:   return false;  // host_reg_bufs path
-    case AllocKind::DevicePtrAlias: return false;  // not separately freed
+    case AllocKind::Device:           return true;
+    case AllocKind::HostMalloc:       return false;  // hipHostFree
+    case AllocKind::HostRegister:     return false;  // host_reg_bufs path
+    case AllocKind::DevicePtrAlias:   return false;  // not separately freed
     case AllocKind::HostUnregistered: return false;  // host_reg_bufs path
   }
   return false;

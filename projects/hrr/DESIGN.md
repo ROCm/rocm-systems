@@ -896,8 +896,9 @@ bytes in front of those kernels.
   `hipHostRegister` range only loses its registration; replay's own buffer
   behind it stays allocated until teardown or the replayed unregister frees
   it. After the reset replay stops tracking the first and marks the second
-  unregistered, so no later record restores into either. Replay orders the reset against the other threads' events, so
-  that their launches do not keep queueing restores while it waits.
+  unregistered, so no later record restores into either. Replay orders the
+  reset against the other threads' events, so that their launches do not keep
+  queueing restores while it waits.
 - Replay exits after a fatal HIP error without syncing the device or draining
   queued restores. A host function that still runs keeps its own state alive,
   but the pinned memory it writes is torn down as the process exits, so it can
