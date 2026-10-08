@@ -3,11 +3,9 @@
 
 """Collectables and composite metric evaluation graph (Layer 1.5 analyze path)."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Union
 
 import pandas as pd
 
@@ -46,31 +44,31 @@ class CompositeKind(str, Enum):
 class CompositeDef:
     metric_id: str
     kind: CompositeKind
-    refs: list[str]
-    weight_meta: dict[str, Any] = field(default_factory=dict)
+    refs: List[str]
+    weight_meta: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class MetricEvalGraph:
     """Collectable rows and composite parents for one metric_table."""
 
-    collectable_ids: dict[str, str] = field(default_factory=dict)
-    collectable_row_names: set[str] = field(default_factory=set)
-    composites: list[CompositeDef] = field(default_factory=list)
+    collectable_ids: Dict[str, str] = field(default_factory=dict)
+    collectable_row_names: Set[str] = field(default_factory=set)
+    composites: List[CompositeDef] = field(default_factory=list)
 
-    def composite_order(self) -> list[CompositeDef]:
+    def composite_order(self) -> List[CompositeDef]:
         """Topological order: collectables first, then composites (v1: flat deps)."""
         return list(self.composites)
 
 
-def _metric_column_name(df: pd.DataFrame) -> str | None:
+def _metric_column_name(df: pd.DataFrame) -> Optional[str]:
     for candidate in (METRIC_NAME_COLUMN, "metric"):
         if candidate in df.columns:
             return candidate
     return None
 
 
-def _avg_column_name(df: pd.DataFrame) -> str | None:
+def _avg_column_name(df: pd.DataFrame) -> Optional[str]:
     for candidate in ("Avg", "Average", "Value"):
         if candidate in df.columns:
             return candidate
@@ -151,9 +149,9 @@ def build_metric_eval_graph(df: pd.DataFrame) -> MetricEvalGraph:
 def _eval_built_expr_on_frame(
     built_expr: str,
     frame: pd.DataFrame,
-    sys_vars: dict[str, Any],
-    empirical_peaks: dict[str, Any],
-) -> float | str:
+    sys_vars: Dict[str, Any],
+    empirical_peaks: Dict[str, Any],
+) -> Union[float, str]:
     if not built_expr:
         return "N/A"
     evaluator = MetricEvaluator(frame, sys_vars, empirical_peaks)
@@ -163,8 +161,8 @@ def _eval_built_expr_on_frame(
 def per_dispatch_ratio_series(
     built_expr: str,
     raw_pmc_df: pd.DataFrame,
-    sys_vars: dict[str, Any],
-    empirical_peaks: dict[str, Any],
+    sys_vars: Dict[str, Any],
+    empirical_peaks: Dict[str, Any],
 ) -> pd.Series:
     if raw_pmc_df.empty:
         return pd.Series(dtype=float)
@@ -177,7 +175,7 @@ def per_dispatch_ratio_series(
             return pd.Series(dtype=float)
         return pd.Series({0: float(scalar)})
 
-    values: dict[Any, float] = {}
+    values: Dict[Any, float] = {}
     for dispatch_id, group in raw_pmc_df.groupby(dispatch_col, dropna=False):
         scalar = _eval_built_expr_on_frame(built_expr, group, sys_vars, empirical_peaks)
         if scalar == "N/A" or pd.isna(scalar):
@@ -196,8 +194,8 @@ def _weight_counter_per_dispatch(counter: str, raw_pmc_df: pd.DataFrame) -> pd.S
 
 
 def cache_collectable_expressions(
-    dfs: dict[int, pd.DataFrame],
-    dfs_type: dict[int, str],
+    dfs: Dict[int, pd.DataFrame],
+    dfs_type: Dict[int, str],
 ) -> None:
     """Snapshot built Avg strings for collectable rows before eval_metric overwrites."""
     for df_id, df in dfs.items():
@@ -210,7 +208,7 @@ def cache_collectable_expressions(
         avg_col = _avg_column_name(df)
         if name_col is None or avg_col is None:
             continue
-        by_name: dict[str, str] = {}
+        by_name: Dict[str, str] = {}
         for _, row in df.iterrows():
             metric_name = row[name_col]
             if not isinstance(metric_name, str):
@@ -230,7 +228,7 @@ def _lookup_collectable_built_avg(
     df: pd.DataFrame,
     metric_name: str,
     avg_col: str,
-) -> str | None:
+) -> Optional[str]:
     cached = df.attrs.get(COLLECTABLE_EXPR_CACHE_ATTR, {})
     if isinstance(cached, dict) and metric_name in cached:
         return cached[metric_name]
@@ -251,16 +249,16 @@ def _evaluate_weighted_composite(
     composite: CompositeDef,
     df: pd.DataFrame,
     raw_pmc_df: pd.DataFrame,
-    sys_vars: dict[str, Any],
-    empirical_peaks: dict[str, Any],
-    pass_layout: Optional[PassLayout] = None,
-) -> float | str:
+    sys_vars: Dict[str, Any],
+    empirical_peaks: Dict[str, Any],
+    pass_layout: Optional["PassLayout"] = None,
+) -> Union[float, str]:
     avg_col = _avg_column_name(df)
     if avg_col is None:
         return "N/A"
 
-    ratio_series_list: list[pd.Series] = []
-    weight_series_list: list[pd.Series] = []
+    ratio_series_list: List[pd.Series] = []
+    weight_series_list: List[pd.Series] = []
 
     for ref_name in composite.refs:
         sub_meta = composite.weight_meta.get(ref_name)
@@ -301,14 +299,14 @@ def _evaluate_collect_sum_composite(
     composite: CompositeDef,
     df: pd.DataFrame,
     raw_pmc_df: pd.DataFrame,
-    sys_vars: dict[str, Any],
-    empirical_peaks: dict[str, Any],
-) -> float | str:
+    sys_vars: Dict[str, Any],
+    empirical_peaks: Dict[str, Any],
+) -> Union[float, str]:
     avg_col = _avg_column_name(df)
     if avg_col is None:
         return "N/A"
 
-    series_list: list[pd.Series] = []
+    series_list: List[pd.Series] = []
     for ref_name in composite.refs:
         built_avg = _lookup_collectable_built_avg(df, ref_name, avg_col)
         if built_avg is None:
@@ -330,9 +328,9 @@ def _evaluate_collect_ratio_composite(
     composite: CompositeDef,
     df: pd.DataFrame,
     raw_pmc_df: pd.DataFrame,
-    sys_vars: dict[str, Any],
-    empirical_peaks: dict[str, Any],
-) -> float | str:
+    sys_vars: Dict[str, Any],
+    empirical_peaks: Dict[str, Any],
+) -> Union[float, str]:
     avg_col = _avg_column_name(df)
     if avg_col is None:
         return "N/A"
@@ -343,8 +341,8 @@ def _evaluate_collect_ratio_composite(
         console_warning("COLLECT_RATIO: missing numerator/denominator metadata.")
         return "N/A"
 
-    num_series: list[pd.Series] = []
-    den_series: list[pd.Series] = []
+    num_series: List[pd.Series] = []
+    den_series: List[pd.Series] = []
     for ref_name in nums:
         built = _lookup_collectable_built_avg(df, ref_name, avg_col)
         if built is None:
@@ -373,12 +371,12 @@ def _evaluate_collect_ratio_composite(
 
 
 def apply_composite_metrics(
-    dfs: dict[int, pd.DataFrame],
-    dfs_type: dict[int, str],
+    dfs: Dict[int, pd.DataFrame],
+    dfs_type: Dict[int, str],
     raw_pmc_df: pd.DataFrame,
-    sys_vars: dict[str, Any],
-    empirical_peaks: dict[str, Any],
-    pass_layout: Optional[PassLayout] = None,
+    sys_vars: Dict[str, Any],
+    empirical_peaks: Dict[str, Any],
+    pass_layout: Optional["PassLayout"] = None,
 ) -> None:
     """Evaluate composite parents after collectable rows (graph order)."""
     for df_id, df in dfs.items():
@@ -416,5 +414,5 @@ def apply_composite_metrics(
             df.at[composite.metric_id, avg_col] = result
 
 
-def collectable_row_names_from_graph(df: pd.DataFrame) -> set[str]:
+def collectable_row_names_from_graph(df: pd.DataFrame) -> Set[str]:
     return build_metric_eval_graph(df).collectable_row_names
