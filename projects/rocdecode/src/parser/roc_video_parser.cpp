@@ -298,23 +298,35 @@ ParserResult RocVideoParser::ParseSeiMessage(uint8_t *nalu, size_t size) {
                 while (new_size < needed) {
                     new_size *= 2;
                 }
-                // sei_payload_size_ is reset per picture and the payloads come out of one packet,
-                // so needed fits in uint32_t even where the doubling has overshot it.
-                sei_payload_buf_size_ = static_cast<uint32_t>(new_size > 0xFFFFFFFFULL ? needed : new_size);
+                size_t capacity = new_size >= needed ? new_size : needed;
+                // sei_payload_buf_size_ is uint32_t, and it is what the allocation below is sized
+                // from and what the two copies are bounded by. Narrowing a capacity past 4 GB
+                // would under allocate and let both copies run past the new buffer, so fail here
+                // rather than record a size that is not the one that was needed.
+                if (capacity > 0xFFFFFFFFULL) {
+                    ErrorLog(g_rocdec_logger, "SEI payload buffer would exceed the 4 GB size field.");
+                    return PARSER_OUT_OF_RANGE;
+                }
+                sei_payload_buf_size_ = static_cast<uint32_t>(capacity);
                 uint8_t *tmp_ptr = new uint8_t [sei_payload_buf_size_];
                 memcpy(tmp_ptr, sei_payload_buf_, sei_payload_size_); // save the existing payload
                 delete [] sei_payload_buf_;
                 sei_payload_buf_ = tmp_ptr;
             }
         } else {
-            // First payload, sei_payload_size_ is 0.
-            sei_payload_buf_size_ = payload_size > INIT_SEI_PAYLOAD_BUF_SIZE ? payload_size : INIT_SEI_PAYLOAD_BUF_SIZE;
+            // First payload, sei_payload_size_ is 0. The narrowing is explicit because
+            // payload_size is size_t: it was checked above against what is left of the NAL unit,
+            // which is itself bounded by the uint32_t size the NAL unit was copied with, so a
+            // single payload always fits.
+            sei_payload_buf_size_ = payload_size > INIT_SEI_PAYLOAD_BUF_SIZE ? static_cast<uint32_t>(payload_size) : INIT_SEI_PAYLOAD_BUF_SIZE;
             sei_payload_buf_ = new uint8_t [sei_payload_buf_size_];
         }
         // Append the current payload to sei_payload_buf_
         memcpy(sei_payload_buf_ + sei_payload_size_, nalu + offset, payload_size);
 
-        sei_payload_size_ += payload_size;
+        // The running total cannot pass sei_payload_buf_size_, which the branches above just
+        // sized to hold it and confirmed fits in uint32_t, so the narrowing is safe here.
+        sei_payload_size_ += static_cast<uint32_t>(payload_size);
         sei_message_count_++;
 
         offset += payload_size;
