@@ -1218,8 +1218,8 @@ unmap does not flush the TLBs; `hipMalloc` memory goes through KFD, which does.
 Memory mapped next at the same address is then written by the copy engines, and
 read by some shader engines, through the physical pages it replaced, until
 something flushes them. A standalone program with no HRR in it (map, write,
-launch, unmap, map new memory at the same address, repeat) fails 26-94% of its
-iterations there. In replay it showed as the `--kernel-filter` reservation
+launch, unmap, map new memory at the same address, repeat) fails 26-81% of its
+iterations there, and 8-94% across the variants tried. In replay it showed as the `--kernel-filter` reservation
 section of `Lifetimes`: in the timed pass, two of the four workgroups of one
 kernel read the old contents of a cell whose page the warm-up reset had
 unmapped and the timed pass mapped again. gfx1200 hosts on Linux 6.8 with a
@@ -1227,20 +1227,39 @@ DKMS amdgpu, and gfx950, do not show it.
 
 This is a driver bug outside HRR, but placement maps the same addresses again by
 design, so replay works around it. With placement on, it flushes the TLBs after
-every drain that unmapped something, after the warm-up reset's unmaps, and after
+every drain that unmapped something, which covers the warm-up reset's placed
+mappings, after the reset's unmaps of the recording's own VMM mappings, and after
 a replayed `hipMemUnmap` (`hrr_flush_gpu_tlb`). The flush allocates and frees 4
 MiB with `hipMalloc`: KFD flushes the TLBs whenever it unmaps an ordinary
 allocation from the GPU, and anything up to ROCr's 2 MiB fragment blocks would
 be carved from a block that stays mapped, so it would flush nothing. It runs on
-every platform, with no check for the affected driver, and costs about 1 ms per
-pass (0.7-1.5 ms on a 6-7 ms timed pass with about 20 unmaps). The flush reaches
-the replay thread's current device; an unmap made on another device of a
-multi-GPU host with the affected driver may stay unflushed. Once drivers with the
-fix are the minimum HRR supports, the workaround can be removed.
-`UnmapFlushesTlb` checks that a drain flushes once after unmapping and not when
-nothing was unmapped; the flush after the warm-up reset is what `Lifetimes`
-needs on the affected hosts, and no test fails without the flush after a
-replayed `hipMemUnmap`.
+every platform, with no check for the affected driver, and costs about 35-75 µs
+per flush (measured with a 2 MiB buffer). A drain flushes once, however many
+mappings it unmapped, so the warm-up reset defers its unmaps and drains them
+together.
+
+The flush reaches only the current device, so replay makes each device current
+in turn and restores the old one. A drain flushes the device each unmapped
+mapping was on and the peers granted access to it. Placement does not track
+which devices can reach a mapping the recording made itself with `hipMemMap`, so
+after those it flushes every device. `hipMalloc` and `hipFree` invalidate an open
+graph capture. A `hipMemUnmap` replayed while one is open therefore leaves its
+flush pending, and the next drain, placed allocation or replayed `hipMemMap` with
+no capture open runs it. A `hipMemMap` replayed before the capture ends, at the
+address just unmapped, can still be reached through the old pages. The flush's
+`hipFree` waits for every stream on its device, which a drain's unmap may not
+have done there, so it widens the hang risk above slightly. A failed flush
+prints one warning and clears its error, together with any earlier error left
+sticky by a replayed call.
+
+Once drivers with the fix are the minimum HRR supports, the workaround can be
+removed. `UnmapFlushesTlb` checks that a drain flushes once, after its unmaps,
+each device that could reach what it unmapped, and not when nothing was
+unmapped; and that an unmap outside placement flushes every device, or, while a
+capture is open, leaves the flush for the next map or drain. The flush after the
+warm-up reset is what `Lifetimes` needs on the affected hosts. No test covers the
+replayed `hipMemUnmap` itself, with or without a capture open, nor flushing a
+second GPU on real hardware.
 
 **Several GPUs.** A placed allocation is backed on the device it was made on: the
 current device for `hipMalloc`, the stream's device for `hipMallocAsync`, and the
