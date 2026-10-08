@@ -102,8 +102,26 @@ _COLLECT_RATIO_CALL_RE = re.compile(
 )
 
 
+_REF_SIGN_RE = re.compile(r"\s*([+-])\s*")
+
+
 def _parse_ref_parts(part: str) -> list[str]:
-    return [token.strip() for token in part.split("+") if token.strip()]
+    """Split a COLLECT_RATIO sum on + and binary minus.
+
+    A leading minus stays on the following name so ``a - b`` is two refs.
+    """
+    refs: list[str] = []
+    sign = "+"
+    for piece in _REF_SIGN_RE.split(part.strip()):
+        if piece in {"+", "-"}:
+            sign = piece
+            continue
+        token = piece.strip()
+        if not token:
+            continue
+        refs.append(token if sign == "+" else f"-{token}")
+        sign = "+"
+    return refs
 
 
 def parse_collect_ratio_parts(formula: str) -> tuple[list[str], list[str]] | None:
@@ -136,6 +154,38 @@ def parse_collect_ratio_parts(formula: str) -> tuple[list[str], list[str]] | Non
     if not nums or not dens:
         return None
     return nums, dens
+
+
+def reject_counter_bearing_composite_extents(
+    metric_name: str,
+    body: dict,
+) -> None:
+    """Reject min/max/peak formulas that put PMCs back on a composite parent.
+
+    A YAML null min, max, or peak is allowed. A counter-bearing extent is a
+    config error: do not strip it at runtime.
+    """
+    if not isinstance(body, dict):
+        return
+    formula = body.get("avg")
+    if not isinstance(formula, str):
+        formula = body.get("value")
+    if not isinstance(formula, str) or not is_composite_avg_formula(formula):
+        return
+    for extent_key in ("min", "max", "peak"):
+        extent = body.get(extent_key)
+        if not isinstance(extent, str):
+            continue
+        extent_text = extent.strip()
+        if not extent_text or extent_text == "None":
+            continue
+        _visited, counters = gen_counter_list(extent)
+        if counters:
+            raise ValueError(
+                f"Composite metric {metric_name!r} {extent_key} references "
+                f"counters {counters}; min, max, and peak on COLLECT_SUM, "
+                "COLLECT_RATIO, and WEIGHTED_AVG must not reintroduce a PMC set"
+            )
 
 
 def is_composite_avg_formula(formula: str) -> bool:

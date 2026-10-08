@@ -20,6 +20,7 @@ from rocprof_compute_soc.counter_file import (
 from rocprof_compute_soc.counter_file import (
     LimitedSet as LimitedSet,
 )
+from rocprof_compute_soc.counter_grouping_buckets import iter_metric_groups
 from rocprof_compute_soc.counter_grouping_single_pass import (
     try_allocate_single_pass_metrics,
 )
@@ -393,41 +394,8 @@ class OmniSoC_Base:
         remaining = set(work_set)
         files = list(output_files)
 
-        # -- Build priority keys from grouping policy YAML --
-        priority_keys: set[tuple[str, Any, int]] = set()
-        for token in self._same_bucket_priority_metric_ids():
-            tid = token.strip()
-            if not METRIC_ID_RE.match(tid):
-                continue
-            file_id, panel_id, metric_idx = convert_metric_id_to_panel_info(tid)
-            if metric_idx is None:
-                continue
-            priority_keys.add((file_id, panel_id, metric_idx))
-
-        # -- Scan arch YAML metrics and collect (sort_key, counters, label) rows --
-        rows: list[tuple[tuple, frozenset[str], str]] = []
-        for (
-            stem_id,
-            panel_id,
-            metric_idx,
-            metric_name,
-            expressions,
-        ) in self._iter_arch_analysis_yaml_metrics():
-            formula_hw, _ = extract_counters_and_variables(
-                "\n".join(expressions),
-                self._mspec.gpu_series,
-                include_supported_denom=False,
-            )
-            hw = self._expand_tcc_template_counters(formula_hw)
-            counters = frozenset(hw & remaining)
-            if not counters:
-                continue
-            tier = 0 if (stem_id, panel_id, metric_idx) in priority_keys else 1
-            panel_s = str(panel_id) if panel_id is not None else ""
-            sort_key = (tier, -len(counters), stem_id, panel_s, metric_idx)
-            label = f"{stem_id}.{panel_s}.{metric_idx} ({metric_name})"
-            rows.append((sort_key, counters, label))
-        rows.sort(key=lambda r: r[0])
+        # Same groups as single-pass packing, including WEIGHTED_AVG weights.
+        rows = iter_metric_groups(self, remaining)
 
         # -- Place each metric group into an existing or new bucket --
         cfg = self.__perfmon_config
@@ -494,7 +462,7 @@ class OmniSoC_Base:
         expressions: list[str] = []
         if not filter_blocks:
             # Select all sections by default; block 30 only with --membw-analysis
-            for *_, metric_exprs in self._iter_arch_analysis_yaml_metrics():
+            for *_, metric_exprs, _metric in self._iter_arch_analysis_yaml_metrics():
                 expressions.extend(metric_exprs)
 
         for block_id in filter_blocks:
@@ -616,7 +584,7 @@ class OmniSoC_Base:
 
     def _iter_arch_analysis_yaml_metrics(
         self,
-    ) -> Iterator[tuple[str, int, int, str, list[str]]]:
+    ) -> Iterator[tuple[str, int, int, str, list[str], dict[str, Any]]]:
         """Iterate the metrics of this arch's analysis configs.
 
         Block 30 is skipped unless --membw-analysis is set. See
@@ -866,7 +834,7 @@ def _table_expressions(table: dict[str, Any]) -> list[str]:
 
 def iter_analysis_config_metrics(
     config_root: Path, exclude_file_ids: set[str]
-) -> Iterator[tuple[str, int, int, str, list[str]]]:
+) -> Iterator[tuple[str, int, int, str, list[str], dict[str, Any]]]:
     """Iterate the metrics of the analysis config files in config_root,
     skipping files whose id is in exclude_file_ids.
 
@@ -876,6 +844,7 @@ def iter_analysis_config_metrics(
         metric_idx  zero-based index of the metric within its table
         metric_name metric key string
         expressions metric_expressions of the metric
+        metric      metric body, including composite metadata
     """
     for config_path in sorted(config_root.glob("*.yaml")):
         stem_id = config_path.name.split("_")[0]
@@ -895,4 +864,5 @@ def iter_analysis_config_metrics(
                     idx,
                     metric_name,
                     metric_expressions(table, metric),
+                    metric if isinstance(metric, dict) else {},
                 )

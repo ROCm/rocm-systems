@@ -4,7 +4,7 @@
 """WEIGHTED_AVG composite metrics (AIPROFCOMP-865 Phase 2)."""
 
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import pandas as pd
 
@@ -17,6 +17,11 @@ from utils.metrics.collectable import (
     apply_composite_metrics,
     cache_collectable_expressions,
 )
+from utils.metrics.expression import parse_weighted_avg_submetrics
+from vendored import yaml
+
+if TYPE_CHECKING:
+    from utils.metrics.pass_provenance import PassLayout
 
 __all__ = [
     "WEIGHTED_AVG_ATTR",
@@ -24,8 +29,6 @@ __all__ = [
     "cache_weighted_avg_sub_expressions",
     "evaluate_weighted_avg_parent",
 ]
-from utils.metrics.expression import parse_weighted_avg_submetrics
-from vendored import yaml
 
 WEIGHTED_AVG_FIELD_NAMES = frozenset({"avg", "average"})
 WEIGHTED_AVG_SUB_EXPR_ATTR = COLLECTABLE_EXPR_CACHE_ATTR
@@ -40,6 +43,7 @@ def evaluate_weighted_avg_parent(
     raw_pmc_df: pd.DataFrame,
     sys_vars: Dict[str, Any],
     empirical_peaks: Dict[str, Any],
+    pass_layout: Optional["PassLayout"] = None,
 ) -> Union[float, str]:
     composite = CompositeDef(
         metric_id="",
@@ -48,7 +52,12 @@ def evaluate_weighted_avg_parent(
         weight_meta=weight_meta,
     )
     return _evaluate_weighted_composite(
-        composite, df, raw_pmc_df, sys_vars, empirical_peaks
+        composite,
+        df,
+        raw_pmc_df,
+        sys_vars,
+        empirical_peaks,
+        pass_layout=pass_layout,
     )
 
 
