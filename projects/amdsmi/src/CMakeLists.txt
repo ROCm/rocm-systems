@@ -46,6 +46,8 @@ set(NIC_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/")
 
 set(SRC_LIST
     "${SRC_DIR}/amd_smi.cc"
+    "${SRC_DIR}/fwupd_carveout.cc"
+    "${SRC_DIR}/fwupd_carveout_parse.cc"
     "${SRC_DIR}/amd_smi_cper.cc"
     "${SRC_DIR}/amd_smi_common.cc"
     "${SRC_DIR}/amd_smi_drm.cc"
@@ -212,6 +214,12 @@ function(amdsmi_configure_common_target _TARGET)
         target_compile_definitions(${_TARGET} PRIVATE BUILD_CUID)
         target_link_libraries(${_TARGET} PRIVATE ${AMDCUID_LIB})
         target_include_directories(${_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
+    endif()
+
+    # Compiles in test-only escape hatches (e.g. amdsmi_test_register_node_handle())
+    # that the GTest suite needs but that must not ship in production builds.
+    if(BUILD_TESTS)
+        target_compile_definitions(${_TARGET} PRIVATE BUILD_TESTS)
     endif()
 
     target_link_directories(${_TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/nic/ai-nic/amdsmi_unified/build/)

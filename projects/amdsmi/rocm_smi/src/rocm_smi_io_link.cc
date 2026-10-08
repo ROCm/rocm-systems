@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <string>
 
@@ -24,7 +25,17 @@
 
 namespace amd::smi {
 
-static const char* kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
+namespace {
+const char* g_kfd_nodes_path_root_override = nullptr;
+}  // namespace
+
+const char* KFDNodesPathRoot() {
+  return g_kfd_nodes_path_root_override ? g_kfd_nodes_path_root_override
+                                        : "/sys/class/kfd/kfd/topology/nodes";
+}
+
+void SetKFDNodesPathRootForTesting(const char* path) { g_kfd_nodes_path_root_override = path; }
+
 static const char* kKFDLinkPath[] = {"io_links", "p2p_links"};
 static_assert(sizeof(kKFDLinkPath) / sizeof(kKFDLinkPath[0]) == P2P_LINK_DIRECTORY + 1,
               "kKFDLinkPath needs one entry per LINK_DIRECTORY_TYPE");
@@ -49,7 +60,7 @@ static bool is_number(const std::string& s) {
 }
 
 static std::string LinkPathRoot(uint32_t node_indx, LINK_DIRECTORY_TYPE directory) {
-  std::string link_path_root = kKFDNodesPathRoot;
+  std::string link_path_root = KFDNodesPathRoot();
   link_path_root += '/';
   link_path_root += std::to_string(node_indx);
   link_path_root += '/';
@@ -142,11 +153,11 @@ static int DiscoverLinks(std::map<std::pair<uint32_t, uint32_t>, std::shared_ptr
 
   links->clear();
 
-  auto kfd_node_dir = opendir(kKFDNodesPathRoot);
+  auto kfd_node_dir = opendir(KFDNodesPathRoot());
 
   if (kfd_node_dir == nullptr) {
     std::string err_msg = "Failed to open KFD nodes directory ";
-    err_msg += kKFDNodesPathRoot;
+    err_msg += KFDNodesPathRoot();
     err_msg += ".";
     perror(err_msg.c_str());
     return 1;
@@ -199,7 +210,7 @@ static int DiscoverLinks(std::map<std::pair<uint32_t, uint32_t>, std::shared_ptr
 
     if (closedir(io_link_dir)) {
       std::string err_msg = "Failed to close KFD nodes directory ";
-      err_msg += kKFDNodesPathRoot;
+      err_msg += KFDNodesPathRoot();
       err_msg += ".";
       perror(err_msg.c_str());
       return 1;

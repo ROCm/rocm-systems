@@ -63,3 +63,7 @@ void ClearMicroEnv() { microEnvMap().clear(); }
 void ResetEnvFakes() { ClearMicroEnv(); }
 
 const char* ncclGetEnv(const char* name) { return micro_getenv(name); }
+
+// src/misc/param.cc:69. The real one reads /etc/nccl.conf into the environment; the microtests drive
+// the environment through SetMicroEnv instead, so this is a no-op rather than a seam.
+void initEnv() {}

@@ -15,49 +15,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#if !defined(ROCPROFSYS_SETUP_LOG_NAME)
-#    if defined(ROCPROFSYS_COMMON_LIBRARY_NAME)
-#        define ROCPROFSYS_SETUP_LOG_NAME "[" ROCPROFSYS_COMMON_LIBRARY_NAME "]"
-#    else
-#        define ROCPROFSYS_SETUP_LOG_NAME
-#    endif
-#endif
-
-#if !defined(ROCPROFSYS_SETUP_LOG_START)
-#    if defined(ROCPROFSYS_COMMON_LIBRARY_LOG_START)
-#        define ROCPROFSYS_SETUP_LOG_START ROCPROFSYS_COMMON_LIBRARY_LOG_START
-#    elif defined(TIMEMORY_LOG_COLORS_AVAILABLE)
-#        define ROCPROFSYS_SETUP_LOG_START                                               \
-            fprintf(stderr, "%s", ::tim::log::color::info());
-#    else
-#        define ROCPROFSYS_SETUP_LOG_START
-#    endif
-#endif
-
-#if !defined(ROCPROFSYS_SETUP_LOG_END)
-#    if defined(ROCPROFSYS_COMMON_LIBRARY_LOG_END)
-#        define ROCPROFSYS_SETUP_LOG_END ROCPROFSYS_COMMON_LIBRARY_LOG_END
-#    elif defined(TIMEMORY_LOG_COLORS_AVAILABLE)
-#        define ROCPROFSYS_SETUP_LOG_END fprintf(stderr, "%s", ::tim::log::color::end());
-#    else
-#        define ROCPROFSYS_SETUP_LOG_END
-#    endif
-#endif
-
-#define ROCPROFSYS_SETUP_LOG(CONDITION, ...)                                             \
-    if(CONDITION)                                                                        \
-    {                                                                                    \
-        fflush(stderr);                                                                  \
-        ROCPROFSYS_SETUP_LOG_START                                                       \
-        fprintf(stderr, "[rocprof-sys]" ROCPROFSYS_SETUP_LOG_NAME "[%i] ", getpid());    \
-        fprintf(stderr, __VA_ARGS__);                                                    \
-        ROCPROFSYS_SETUP_LOG_END                                                         \
-        fflush(stderr);                                                                  \
-    }
-
-namespace rocprofsys
-{
-inline namespace common
+namespace rocprofsys::inline common
 {
 inline std::vector<env_config<>>
 get_environ(int _verbose, std::string _search_paths = {},
@@ -96,10 +54,11 @@ setup_environ(int _verbose, const std::string& _search_paths = {},
               std::string _omnilib    = "librocprof-sys.so",
               std::string _omnilib_dl = "librocprof-sys-dl.so")
 {
-    auto _data =
+    auto const _data =
         get_environ(_verbose, _search_paths, std::move(_omnilib), std::move(_omnilib_dl));
     for(const auto& itr : _data)
+    {
         itr();
+    }
 }
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common

@@ -151,7 +151,7 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
 
   // Skip the per-region cap on Windows/DXG so over-commit requests can
   // reach WDDM; system memory still enforces the cap.
-  const bool is_windxg = core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
+  const bool is_windxg = core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
   const size_t max_alloc_size =
       IsDeviceSVM() ? max_single_alloc_size_ : max_sysmem_alloc_size_;
   if (IsSystem() && (size > max_alloc_size)) {

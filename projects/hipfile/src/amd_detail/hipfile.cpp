@@ -21,6 +21,7 @@
 #include <bit>
 #include <cerrno>
 #include <cstdint>
+#include <cstring>
 #include <hip/hip_runtime_api.h>
 #include <memory>
 #include <stdexcept>
@@ -47,6 +48,13 @@ catch (hipFileError_t e) {
 }
 catch (const Hip::RuntimeError &e) {
     return {hipFileHipDriverError, e.error};
+}
+catch (const std::system_error &err) {
+    int err_no = err.code().value();
+    if (err_no == EMFILE || err_no == ENFILE) {
+        return {hipFileGetNewFDFailed, hipSuccess};
+    }
+    return {hipFileInternalError, hipSuccess};
 }
 catch (...) {
     return {hipFileInternalError, hipSuccess};
@@ -813,6 +821,14 @@ hipFileGetStatsL3(hipFileStatsLevel3_t *stats)
             ++numGpus;
 
             hipFilePerGpuStats_t &g{stats->per_gpu_stats[gpuId]};
+
+            try {
+                hipUUID uuid{Context<Hip>::get()->hipDeviceGetUuid(static_cast<int>(gpuId))};
+                static_assert(sizeof(uuid.bytes) == HIPFILE_GPU_UUID_LEN);
+                std::memcpy(g.uuid, uuid.bytes, HIPFILE_GPU_UUID_LEN);
+            }
+            catch (const Hip::RuntimeError &) {
+            }
 
             // Fastpath maps to nvfs; fallback maps to posix
             static constexpr StatsBackend backends[]{StatsBackend::Fastpath, StatsBackend::Fallback};

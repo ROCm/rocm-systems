@@ -43,12 +43,11 @@ static void computeSymmetricExclude(int worldRank, int worldSize,
  */
 TEST_F(RevokeMPITest, Revoke_RejectsCollectives)
 {
-    ASSERT_TRUE(validateTestPrerequisites(2,
+    SKIP_UNLESS_MPI_PREREQS(2,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
                                           1,
-                                          kNoNodeLimit))
-        << "Test requires at least 2 MPI processes";
+                                          kNoNodeLimit);
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -74,12 +73,11 @@ TEST_F(RevokeMPITest, Revoke_RejectsCollectives)
  */
 TEST_F(RevokeMPITest, Revoke_ThenSplit_ChildWorks)
 {
-    ASSERT_TRUE(validateTestPrerequisites(2,
+    SKIP_UNLESS_MPI_PREREQS(2,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
                                           1,
-                                          kNoNodeLimit))
-        << "Test requires at least 2 MPI processes";
+                                          kNoNodeLimit);
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -123,12 +121,11 @@ TEST_F(RevokeMPITest, Revoke_ThenSplit_ChildWorks)
  */
 TEST_F(RevokeMPITest, RevokeThenShrink_ChildWorks)
 {
-    ASSERT_TRUE(validateTestPrerequisites(2,
+    SKIP_UNLESS_MPI_PREREQS(2,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
                                           1,
-                                          kNoNodeLimit))
-        << "Test requires at least 2 MPI processes";
+                                          kNoNodeLimit);
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -189,12 +186,11 @@ TEST_F(RevokeMPITest, RevokeThenShrink_ChildWorks)
  */
 TEST_F(RevokeMPITest, Revoke_ThenDestroy_CleanLifecycle)
 {
-    ASSERT_TRUE(validateTestPrerequisites(2,
+    SKIP_UNLESS_MPI_PREREQS(2,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
                                           1,
-                                          kNoNodeLimit))
-        << "Test requires at least 2 MPI processes";
+                                          kNoNodeLimit);
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -218,12 +214,11 @@ TEST_F(RevokeMPITest, Revoke_ThenDestroy_CleanLifecycle)
  */
 TEST_F(RevokeMPITest, Collective_Revoke_Shrink_Collective)
 {
-    ASSERT_TRUE(validateTestPrerequisites(2,
+    SKIP_UNLESS_MPI_PREREQS(2,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
                                           1,
-                                          kNoNodeLimit))
-        << "Test requires at least 2 MPI processes";
+                                          kNoNodeLimit);
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -291,12 +286,11 @@ TEST_F(RevokeMPITest, Collective_Revoke_Shrink_Collective)
  */
 TEST_F(RevokeMPITest, P2P_Revoke_Shrink_P2P)
 {
-    ASSERT_TRUE(validateTestPrerequisites(2,
+    SKIP_UNLESS_MPI_PREREQS(2,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
                                           1,
-                                          kNoNodeLimit))
-        << "Test requires at least 2 MPI processes";
+                                          kNoNodeLimit);
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -388,12 +382,11 @@ TEST_F(RevokeMPITest, P2P_Revoke_Shrink_P2P)
 // Revoking the same communicator twice must be rejected with ncclInvalidArgument.
 TEST_F(RevokeMPITest, Revoke_DoubleRevoke_Rejected)
 {
-    ASSERT_TRUE(validateTestPrerequisites(2,
+    SKIP_UNLESS_MPI_PREREQS(2,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
                                           1,
-                                          kNoNodeLimit))
-        << "Test requires at least 2 MPI processes";
+                                          kNoNodeLimit);
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -432,12 +425,11 @@ TEST_F(RevokeMPITest, Revoke_BadFlags_Rejected)
  */
 TEST_F(RevokeMPITest, Revoke_ThenFinalize_Rejected)
 {
-    ASSERT_TRUE(validateTestPrerequisites(2,
+    SKIP_UNLESS_MPI_PREREQS(2,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
                                           1,
-                                          kNoNodeLimit))
-        << "Test requires at least 2 MPI processes";
+                                          kNoNodeLimit);
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -464,12 +456,11 @@ TEST_F(RevokeMPITest, Revoke_ThenFinalize_Rejected)
  */
 TEST_F(RevokeMPITest, IncompleteCollective_Revoke_Shrink_Collective)
 {
-    ASSERT_TRUE(validateTestPrerequisites(4,
+    SKIP_UNLESS_MPI_PREREQS(4,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
                                           1,
-                                          kNoNodeLimit))
-        << "Test requires at least 4 MPI processes";
+                                          kNoNodeLimit);
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -574,10 +565,11 @@ static void computeAsymmetricExclude(int worldRank, int worldSize,
  */
 TEST_F(RevokeMPITest, Collective_Revoke_AsymmetricShrink_Collective)
 {
-    if(!validateTestPrerequisites(4, kNoProcessLimit, kNoPowerOfTwoRequired, 2, kNoNodeLimit))
-    {
-        GTEST_SKIP() << "Test requires at least 4 MPI processes across 2 nodes";
-    }
+    SKIP_UNLESS_MPI_PREREQS(4,
+                                          kNoProcessLimit,
+                                          kNoPowerOfTwoRequired,
+                                          2,
+                                          kNoNodeLimit);
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -647,12 +639,11 @@ TEST_F(RevokeMPITest, Collective_Revoke_AsymmetricShrink_Collective)
  */
 TEST_F(RevokeMPITest, ShrinkAbort_InFlight_ChildWorks_RankRenumbering)
 {
-    ASSERT_TRUE(validateTestPrerequisites(4,
+    SKIP_UNLESS_MPI_PREREQS(4,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
                                           1,
-                                          kNoNodeLimit))
-        << "Test requires at least 4 MPI processes";
+                                          kNoNodeLimit);
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -726,12 +717,11 @@ TEST_F(RevokeMPITest, ShrinkAbort_InFlight_ChildWorks_RankRenumbering)
  */
 TEST_F(RevokeMPITest, InFlightCollective_Revoke_Destroy_Clean)
 {
-    ASSERT_TRUE(validateTestPrerequisites(2,
+    SKIP_UNLESS_MPI_PREREQS(2,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
                                           1,
-                                          kNoNodeLimit))
-        << "Test requires at least 2 MPI processes";
+                                          kNoNodeLimit);
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -772,10 +762,11 @@ TEST_F(RevokeMPITest, InFlightCollective_Revoke_Destroy_Clean)
  */
 TEST_F(RevokeMPITest, RepeatedRevokeShrinkCycles_ResourceCleanup)
 {
-    if(!validateTestPrerequisites(4, kNoProcessLimit, kNoPowerOfTwoRequired, 2, kNoNodeLimit))
-    {
-        GTEST_SKIP() << "Test requires at least 4 MPI processes across 2 nodes";
-    }
+    SKIP_UNLESS_MPI_PREREQS(4,
+                                          kNoProcessLimit,
+                                          kNoPowerOfTwoRequired,
+                                          2,
+                                          kNoNodeLimit);
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -928,12 +919,11 @@ protected:
 // to ncclSuccess via ncclCommGetAsyncError; later collectives must reject.
 TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ReturnsInProgress)
 {
-    ASSERT_TRUE(validateTestPrerequisites(2,
+    SKIP_UNLESS_MPI_PREREQS(2,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
                                           1,
-                                          kNoNodeLimit))
-        << "Test requires at least 2 MPI processes";
+                                          kNoNodeLimit);
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -961,12 +951,11 @@ TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ReturnsInProgress)
 // Regression for AICOMRCCL-2232.
 TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ThenShrink_NoRace)
 {
-    ASSERT_TRUE(validateTestPrerequisites(2,
+    SKIP_UNLESS_MPI_PREREQS(2,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
                                           1,
-                                          kNoNodeLimit))
-        << "Test requires at least 2 MPI processes";
+                                          kNoNodeLimit);
 
     constexpr int kIterations = 10;
     int           rank        = MPIEnvironment::world_rank;
@@ -1053,12 +1042,11 @@ TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ThenShrink_NoRace)
 // the async-job worker via its abortFlag and return without hanging.
 TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_AbortedMidFlight)
 {
-    ASSERT_TRUE(validateTestPrerequisites(2,
+    SKIP_UNLESS_MPI_PREREQS(2,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
                                           1,
-                                          kNoNodeLimit))
-        << "Test requires at least 2 MPI processes";
+                                          kNoNodeLimit);
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 

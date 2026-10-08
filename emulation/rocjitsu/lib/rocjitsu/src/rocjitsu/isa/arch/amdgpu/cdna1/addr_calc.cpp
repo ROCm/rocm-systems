@@ -14,8 +14,9 @@
 namespace rocjitsu {
 namespace cdna1 {
 
-std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf) {
-  return amdgpu::addr_calc::smem_calculate_address(inst, wf);
+std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
+                                               amdgpu::ScalarMemState *state) {
+  return amdgpu::addr_calc::smem_calculate_address(inst, wf, state);
 }
 
 void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf,
