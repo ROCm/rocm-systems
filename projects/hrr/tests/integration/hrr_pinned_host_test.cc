@@ -1453,7 +1453,7 @@ std::string capture_case(const char* direct_case, const fs::path& cap,
        << "\nWorkload output:\n" << proc.getOutput());
   REQUIRE(ret == 0);
   if (std::strstr(direct_case, "EntryPoints") || std::strstr(direct_case, "Reset") ||
-      std::strstr(direct_case, "NoNullBarrier")) {
+      std::strstr(direct_case, "NoNullBarrier") || std::strstr(direct_case, "CrossDevice")) {
     WARN("cross-diag: " << direct_case << " skip file " << fs::exists(skip_file)
          << "\nWorkload output:\n" << proc.getOutput());
   }
