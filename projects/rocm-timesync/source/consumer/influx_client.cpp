@@ -167,7 +167,7 @@ influx_client::lookup_oldest_k(
     std::ostringstream q;
     q << "SELECT system_timestamp "
       << "FROM gpu_timesync "
-      << "WHERE client_id='" << escape_ql_string_(client_id) << "'"
+      << "WHERE client_id='" << escape_ql_string(client_id_) << "'"
       << "AND gpu_id='" << gpu_id << "' "
       << "ORDER BY time ASC "
       << "LIMIT "
@@ -219,7 +219,7 @@ influx_client::lookup_newest_k(
     std::ostringstream q;
     q << "SELECT system_timestamp "
       << "FROM gpu_timesync "
-      << "WHERE client_id='" << escape_ql_string_(client_id) << "'"
+      << "WHERE client_id='" << escape_ql_string(client_id_) << "'"
       << "AND gpu_id='" << gpu_id << "' "
       << "ORDER BY time DESC "
       << "LIMIT "
@@ -397,7 +397,7 @@ influx_client::lookup_before(
 
     q << "SELECT system_timestamp "
       << "FROM gpu_timesync "
-      << "WHERE client_id='" << escape_ql_string_(client_id) << "'"
+      << "WHERE client_id='" << escape_ql_string(client_id_) << "'"
       << "AND gpu_id='" << gpu_id << "' "
       << "WHERE gpu_id='"
       << "AND time <= " << gpu_timestamp << " "
@@ -455,7 +455,7 @@ influx_client::lookup_after(
 
     q << "SELECT system_timestamp "
       << "FROM gpu_timesync "
-      << "WHERE client_id='" << escape_ql_string_(client_id) << "'"
+      << "WHERE client_id='" << escape_ql_string(client_id_) << "'"
       << "AND gpu_id='" << gpu_id << "' "
       << "WHERE gpu_id='"
       << "AND time >= " << gpu_timestamp << " "
