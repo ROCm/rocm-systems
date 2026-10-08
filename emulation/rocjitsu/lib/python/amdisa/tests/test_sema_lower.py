@@ -210,7 +210,6 @@ class TestLowerVectorAdd:
         ('result_type', 'expected_helper', 'expected_denorm_mode'),
         [
             (SemaType.F32, 'effective_omod', 'fp_denorm_mode_f32'),
-            (SemaType.F16, 'effective_f16_omod', 'fp_denorm_mode_f16_f64'),
             (SemaType.BF16, 'effective_omod', 'fp_denorm_mode_f16_f64'),
             (SemaType.F64, 'effective_omod', 'fp_denorm_mode_f16_f64'),
         ],
@@ -241,8 +240,24 @@ class TestLowerVectorAdd:
             assert 'const uint32_t effective_omod' in result
             assert 'finalize_omod_' in result
         assert 'if (inst_.omod ==' not in result
-        if result_type == SemaType.F16:
-            assert 'false, inst_.omod' in result
+
+    @pytest.mark.parametrize(
+        ('wrapper', 'lower'),
+        [('apply_omod', _lower_apply_omod), ('apply_clamp', _lower_apply_clamp)],
+    )
+    def test_f16_output_modifiers_require_destination_lowering(self, wrapper, lower):
+        node = SemaNode(
+            SemaNodeKind.CALL,
+            call_name=wrapper,
+            ty=SemaType.F16,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name=wrapper),
+                SemaNode(SemaNodeKind.LIT, lit_value='0.5', ty=SemaType.F16),
+            ),
+        )
+
+        with pytest.raises(ValueError, match='require destination lowering'):
+            lower(node, LoweringContext(exec_model=ExecModel.VECTOR))
 
     def test_vector_add_f32(self):
         body = SemaNode(

@@ -1717,8 +1717,7 @@ SIMD_VOPC_VOP3_FLOAT: dict[str, tuple[str, str]] = _build_simd_vopc_vop3_float()
 # execution when CLAMP requests saturating arithmetic.
 SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
     # v_bcnt_u32_b32: VOP3-only (no VOP1 twin). D = CountOneBits(S0) + S1 -- the
-    # second source is an accumulator, so this is binary, not unary. Keep the
-    # functor in step with the scalar body in vector_alu.py.
+    # second source is an accumulator, so this is binary, not unary.
     'v_bcnt_u32_b32_vop3': (
         'uint32_t',
         '[](auto a, auto b) { return util::popcount_u32_simd(a) + b; }',

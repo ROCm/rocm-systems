@@ -62,19 +62,6 @@ def vop3_dst_mod(
     ]
 
 
-def legacy_vop3_dst_mod_f64(varname: str, indent: str = '    ') -> list[str]:
-    """Emit F64 OMOD/CLAMP for legacy vector generators; no production caller."""
-    return [
-        f'{indent}const uint32_t effective_omod = amdgpu::fp_mode::effective_omod('
-        'wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod);',
-        f'{indent}if (effective_omod == 1) {varname} *= 2.0;',
-        f'{indent}else if (effective_omod == 2) {varname} *= 4.0;',
-        f'{indent}else if (effective_omod == 3) {varname} *= 0.5;',
-        f'{indent}if (inst_.clamp) {varname} = amdgpu::clamp_floating_result({varname}, wf);',
-        f'{indent}{varname} = amdgpu::fp_mode::finalize_omod_f64({varname}, effective_omod);',
-    ]
-
-
 # Scalar expressions use inst_; shared-body generation qualifies it later.
 OUTPUT_POLICY = 'output_policy'
 OUTPUT_MODIFIERS = ('inst_.omod', 'inst_.clamp')
