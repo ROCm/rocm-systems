@@ -2168,6 +2168,16 @@ memory:
     # Tests double free which throws off the sanitizer
     disabled: [asan]
     tags: [alloc, P1]
+  Unit_hipFreeInteriorPtrDev:
+    <<: *level_2
+    # Frees the same allocation twice which throws off the sanitizer
+    disabled: [asan]
+    tags: [alloc, P1]
+  Unit_hipFreeInteriorPtrHost:
+    <<: *level_2
+    # Frees the same allocation twice which throws off the sanitizer
+    disabled: [asan]
+    tags: [alloc, P1]
   Unit_hipFreeDoubleArrayFree:
     <<: *level_2
     tags: [alloc]
