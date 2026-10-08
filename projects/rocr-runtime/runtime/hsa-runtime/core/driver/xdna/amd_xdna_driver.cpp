@@ -829,6 +829,8 @@ struct KmqMetadata {
   XDNADeviceType device_type = XDNADeviceType::Unknown;
   /// @brief PDIs the current hardware context has compute units configured for, indexed by CU.
   PDICache pdi_cache;
+  /// @brief Value of AieAgent::pdi_release_epoch() the entries in @ref pdi_cache were added under.
+  uint64_t pdi_epoch = 0;
   /// @brief Dispatch kind the current hardware context was built for.
   AieKernelKind mode = AieKernelKind::Undecided;
   /// @brief Command BO pool.
@@ -2393,6 +2395,16 @@ static hsa_status_t SubmitPdiInstsChain(int fd, hsa_amd_aie_kernel_dispatch_pack
   bool reconfigure_queue = false;
   // The most columns any packet's kernel declares; the context has to have at least that many.
   uint32_t batch_num_cols = 0;
+
+  // A code object destroyed since the cache was filled may have freed BOs it names, whose handles
+  // the driver can since have given to other buffers: one could then be taken for a cached PDI, or
+  // configured into the rebuilt context. Start the cache over, so every PDI in the batch is added
+  // afresh and the context is rebuilt from those alone, which are alive while their packets are.
+  const uint64_t pdi_epoch = static_cast<const AieAgent&>(agent).PdiReleaseEpoch();
+  if (kmq_metadata->pdi_epoch != pdi_epoch) {
+    kmq_metadata->pdi_cache.Truncate(0);
+    kmq_metadata->pdi_epoch = pdi_epoch;
+  }
 
   // Building a command adds its PDI to the cache, but the hardware context is only reconfigured
   // to match once every packet has been built. If the batch fails in between, those entries would
