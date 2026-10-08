@@ -51,14 +51,25 @@ inline bool hrr_zero_init_needs_drain(bool zero_init_enabled,
     return zero_init_enabled && !in_graph_capture;
 }
 
+// The key StreamCaptureFlag files a capture under. A recorded stream handle
+// names one stream wherever it is used, but 0 in an _spt call, and
+// hipStreamPerThread anywhere, name the calling thread's default stream: two
+// threads capturing their own per-thread streams are two captures. Those are
+// keyed by the recorded thread, above any address a stream handle can have.
+inline uint64_t hrr_capture_key(uint64_t stream, uint64_t thread_id) {
+    if (stream == 0 || stream == reinterpret_cast<uint64_t>(hipStreamPerThread))
+        return (1ull << 63) | thread_id;
+    return stream;
+}
+
 // ---------------------------------------------------------------------------
 // PlaybackContext — central replay state
 // ---------------------------------------------------------------------------
 
-// Which recorded streams are inside a stream capture. Keyed by the recorded
-// stream handle, so the hipStreamEndCapture replayed for a stream clears that
-// stream's capture and no other, whichever thread it runs on and however the
-// call ends. Converting to bool asks whether any capture is open: while one
+// Which recorded streams are inside a stream capture. Keyed by
+// hrr_capture_key, so the hipStreamEndCapture replayed for a stream clears
+// that stream's capture and no other, whichever thread it runs on and however
+// the call ends. Converting to bool asks whether any capture is open: while one
 // is, device synchronization and event timing fail (HIP 900/901), and
 // hipMemUnmap would sync inside the capture, because it waits for every
 // stream on the device.
@@ -362,6 +373,9 @@ struct PlaybackContext {
     // location, or the device hipDeviceGetDefaultMemPool/hipDeviceGetMemPool
     // named. -1 for a pool on the host. Guarded by map_mutex.
     std::unordered_map<uint64_t, int> pool_device;
+    // The maxSize each recorded hipMemPoolCreate gave its pool, 0 for none.
+    // Guarded by map_mutex.
+    std::unordered_map<uint64_t, size_t> pool_max_size;
 
     // ---- Guard pages ----
     // Both off by default. --guard-segments puts a gap after every allocation,
@@ -866,18 +880,20 @@ void hrr_track_capture(PlaybackContext& ctx, uint16_t event_type,
 // Called by dispatch_event after every event a handler replayed successfully.
 // Placement's bookkeeping that is not any one handler's business: reports a
 // fallback for each allocation API placement does not place, remembers which
-// device each memory pool allocates on, unmaps deferred frees at
-// hipCtxSynchronize, and under --verbose prints what hipPointerGetAttributes
-// says about the replayed pointer.
+// device each memory pool allocates on, and under --verbose prints what
+// hipPointerGetAttributes says about the replayed pointer and what
+// hipMemGetInfo says about the current device.
 void hrr_placement_after_event(PlaybackContext& ctx, uint16_t event_type,
                                const uint8_t* payload, size_t size);
 
-// A replayed device or context synchronization (`api` names it): unmap the
-// placed allocations whose free was deferred, and retry earlier unmaps that
-// failed, unless a capture is still open. hipDeviceSynchronize is a special
-// event that never reaches hrr_placement_after_event, so its handler calls
-// this directly. A stream synchronization does not drain: hipMemUnmap waits
-// for every stream on the device, which the recording did not.
+// A replayed hipDeviceSynchronize (`api` names it): unmap the placed
+// allocations whose free was deferred, and retry earlier unmaps that failed,
+// unless a capture is still open. hipDeviceSynchronize is a special event that
+// never reaches hrr_placement_after_event, so its handler calls this directly.
+// A stream synchronization does not drain: hipMemUnmap waits for every stream
+// on the device, which the recording did not. hipCtxSynchronize does not
+// either: HIP answers it with hipErrorNotSupported, and capture records only
+// calls that succeeded, so no archive holds one.
 void hrr_placement_at_sync(PlaybackContext& ctx, const char* api);
 
 // ---------------------------------------------------------------------------

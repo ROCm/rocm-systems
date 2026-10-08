@@ -1098,35 +1098,66 @@ stream too.
 The list is drained, and unmaps that failed earlier are tried again, at these
 points only:
 
-- a replayed `hipDeviceSynchronize` or `hipCtxSynchronize`, which waited for the
-  whole device in the recording too;
+- a replayed `hipDeviceSynchronize`, which waited for the whole device in the
+  recording too;
 - the reset between the `--kernel-filter` warm-up and the timed pass, and teardown;
 - an allocation that runs out of memory, described below.
 
 A `hipStreamSynchronize`, a `hipEventSynchronize`, the end of a capture and
 `hipStreamDestroy` do not drain: each waited for one stream, and an unmap there
 would wait for all of them. Nothing drains while any recorded stream is still
-capturing. HIP on Linux answers `hipCtxSynchronize` with `hipErrorNotSupported`
-and capture records only calls that succeeded, so in practice the device sync is
-the drain point.
+capturing. `hipCtxSynchronize` is not a drain point either: HIP answers it with
+`hipErrorNotSupported` on every platform, and capture records only calls that
+succeeded, so no archive holds one.
 
 An allocation over a deferred mapping is handled three ways:
 
-- The same pages on the same device, as a stream-ordered pool hands an address
-  straight back: the allocation takes the mapping back as it is. No unmap and no
-  new map, so it works inside a capture too.
+- From the same first page on the same device, and no larger, as a stream-ordered
+  pool hands a block back, for a request up to 12.5% smaller too: the allocation
+  takes the mapping back as it is, keeping its end, as the pool kept the whole
+  block. No unmap and no new map. The recording's pool reused the block only once
+  its free was done, or with the new stream ordered after it, so replay orders
+  the allocation after the free:
+  - a `hipMallocAsync` or `hipMallocFromPoolAsync` on the stream the
+    `hipFreeAsync` was made on needs nothing more, inside a capture too;
+  - on another stream, that stream waits (`hipStreamWaitEvent`) for an event
+    replay recorded on the freeing stream at the free;
+  - an allocation with no stream (`hipMalloc`, `hipExtMallocWithFlags`, a region
+    segment) waits on the host (`hipEventSynchronize`) for that event.
+
+  A free made while a capture was open has no event: recording one would add it
+  to the graph. Neither does a deferred `hipFree`. Waiting for an event while a
+  capture is open would sync inside it. In those cases the allocation is
+  handled as any other overlap. The event is destroyed when the mapping is taken
+  back, unmapped, or released at teardown or the warm-up reset. A free on a stream
+  that is then destroyed no longer counts as made on a new stream that gets the
+  same handle.
 - Any other overlap, with no capture open: the deferred mappings there are
   unmapped first, then the allocation is mapped.
 - Any other overlap while a capture is open: the allocation falls back, named.
 
 When mapping a placed allocation runs out of memory, and when an allocation that
 is not placed runs out of memory, replay unmaps every deferred mapping and tries
-once more. It does not while a capture is open.
+once more. It does not while a capture is open. The allocations retried this way
+are `hipMalloc`, `hipMallocManaged`, `hipExtMallocWithFlags`, `hipMallocAsync`,
+`hipMallocFromPoolAsync`, a region segment, a replayed `hipMemCreate`,
+`hipArrayCreate` and `hipArray3DCreate`. A `hipMallocFromPoolAsync` is not
+retried when its pool was created with a `maxSize` and the allocation would take
+it past that: the pool refuses it whatever replay unmaps. Not retried:
+`hipMallocPitch`, `hipMemAllocPitch`, `hipMalloc3D`, `hipMallocArray`,
+`hipMalloc3DArray`, `hipMallocMipmappedArray` and `hipMipmappedArrayCreate`,
+whose handlers are generated; graph memory nodes, which allocate when the graph
+runs; and memory the runtime allocates for itself, such as kernel scratch. Under
+`--guard-segments` placement is off, so nothing is deferred and there is nothing
+to retry for.
 
 A replayed `hipStreamEndCapture` closes its stream's capture even when replay's
 call fails, and so does `hipStreamEndCapture_spt`. `hipStreamBeginCaptureToGraph`
 and `hipStreamBeginCapture_spt` open one, when the stream is capturing after the
-call. The capture also closes at `hipStreamDestroy`. Failed calls are not
+call. A capture is filed under its recorded stream handle, except on a thread's
+default stream (stream 0 in an `_spt` call, or `hipStreamPerThread`), which is
+filed under the recorded thread, so two threads' per-thread captures do not end
+each other. The capture also closes at `hipStreamDestroy`. Failed calls are not
 recorded, so a capture the program's own `hipStreamEndCapture` failed to end
 leaves no end in the archive; destroying its stream is where it ends. A capture
 whose stream is never destroyed and never ends stays open for the rest of the
@@ -1137,31 +1168,36 @@ What deferral costs:
 
 - **Memory.** A deferred mapping keeps its physical memory until it drains. A
   trace that frees with `hipFreeAsync` and only ever synchronizes streams holds
-  every such allocation until the device runs out of memory, which then drains
-  them, or until teardown. The recording's pool reused that memory at once.
+  every such allocation, except those reallocated over the same range, until
+  the device runs out of memory, which then drains them, or until teardown. The
+  recording's pool reused that memory at once.
 - **`--skip-device-sync`.** It skips replayed `hipDeviceSynchronize`, and with it
   the drain there. Deferred frees then wait for an allocation that runs out of
   memory, the warm-up reset, or teardown.
 
 `hipMemUnmap` never runs under placement's lock. A drain marks the mappings it
 unmaps, releases the lock, unmaps them, and takes the lock again to drop them.
-Until then they still occupy their pages: an allocation over them waits, and
-`is_mapped` gives the answer the unmap ends with. An allocation or free elsewhere
-does not wait.
+Until then they still occupy their pages: an allocation over them waits. An
+allocation or free elsewhere does not wait.
 
 Allocations and frees are ordered events, which hold the replay's event sequence
 until they return. An unmap inside one therefore stops every other replay thread
 until every stream on the device is idle. A placed `hipFree` does this, but the
 recording's `hipFree` waited for the same streams. The overlap drain and the
 out-of-memory drain have no such counterpart: the recording's pool reused the
-memory without waiting. If a kernel already queued spins on a flag that only a
-later replayed event sets, that drain never returns and the replay hangs. This is
-a known risk, not a solved one. It needs a non-matching overlap with a freed
-mapping, or an exhausted device, while such a kernel is running.
+memory without waiting. Neither has the host wait of an allocation with no
+stream that takes back a mapping freed by `hipFreeAsync`: in the recording that
+free had finished. If a kernel already queued spins on a flag that only a later
+replayed event sets, that drain or wait never returns and the replay hangs. This
+is a known risk, not a solved one. It needs a non-matching overlap with a freed
+mapping, an exhausted device, or such a take-back, while such a kernel is
+running.
 
 **Several GPUs.** A placed allocation is backed on the device it was made on: the
 current device for `hipMalloc`, the stream's device for `hipMallocAsync`, and the
-pool's location for `hipMallocFromPoolAsync`. A pool on the host or on a device
+pool's location for `hipMallocFromPoolAsync`. `hipMemCreate` takes its memory
+from the current device and only records the location it is given as the owner,
+so replay makes that device current around the call and restores the old one. A pool on the host or on a device
 replay cannot see falls back, with the reason named. When the archive uses more
 than one device, or enables peer access, every mapping is also made accessible from
 each device that `hipDeviceCanAccessPeer` says can reach it.

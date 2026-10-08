@@ -594,12 +594,19 @@ void hold_free_pieces(uint64_t b, uint64_t e, const std::vector<VaRange>& occupi
 // A placed mapping: page range [key, end), the recorded allocation base, its
 // physical handle and the device it lives on. `unmapping` marks a freed one
 // whose hipMemUnmap is running outside the lock: it still occupies its range.
+// A mapping freed with hipFreeAsync remembers the live stream it was freed on
+// (`on_stream`, `stream`) and, when no capture was open, an event recorded on
+// that stream after the free (`event`): what an allocation taking the mapping
+// back on another stream has to wait for.
 struct PlacedMapping {
     uint64_t end;
     uint64_t rec;
     hipMemGenericAllocationHandle_t handle;
     int  device    = 0;
     bool unmapping = false;
+    bool on_stream = false;
+    hipStream_t stream = nullptr;
+    hipEvent_t  event  = nullptr;
 };
 using PlacedMap = std::map<uint64_t, PlacedMapping>;
 
@@ -623,14 +630,23 @@ inline std::vector<uint64_t> va_mappings_overlapping(const PlacedMap& m, uint64_
     return out;
 }
 
+// Create an event and record it on `stream`. On failure nothing is left.
+hipError_t hrr_record_free_event(hipStream_t stream, hipEvent_t* event);
+
 #ifdef HRR_VA_PLACEMENT_TESTING
-// Tests only: the VMM calls placement makes, replaced to run without a GPU.
+// Tests only: the HIP calls placement makes, replaced to run without a GPU.
 struct VmmOps {
     hipError_t (*map)(void* va, size_t len, int device, hipMemGenericAllocationHandle_t* h,
                       const std::vector<int>& peers) = hrr_vmm_map_into;
     hipError_t (*unmap)(void* base, size_t size)              = hipMemUnmap;
     hipError_t (*release)(hipMemGenericAllocationHandle_t h) = hipMemRelease;
     void (*clear_error)()                                     = nullptr;
+    hipError_t (*record_event)(hipStream_t s, hipEvent_t* e) = hrr_record_free_event;
+    hipError_t (*wait_event)(hipStream_t s, hipEvent_t e, unsigned int flags) =
+        hipStreamWaitEvent;
+    hipError_t (*sync_event)(hipEvent_t e)                    = hipEventSynchronize;
+    hipError_t (*destroy_event)(hipEvent_t e)                 = hipEventDestroy;
+    hipError_t (*address_free)(void* va, size_t size)         = hipMemAddressFree;
 };
 // How many times read_proc_maps() has read /proc/self/maps.
 size_t proc_maps_reads_for_test();
@@ -662,31 +678,46 @@ class VaPlacement {
 
     // Map `size` bytes at recorded address `rec` on `device`. On success
     // *live == rec. Returns false when the allocation has to fall back, after
-    // reporting why; the caller then allocates the old way.
+    // reporting why; the caller then allocates the old way. `stream` is the
+    // live stream a stream-ordered allocation is made on, and nullptr for
+    // hipMalloc, hipExtMallocWithFlags and region segments.
     //
-    // A freed mapping still waiting for its unmap, over exactly the same pages
-    // on the same device, is taken back as it is: no unmap, no new map. Any
-    // other overlap with one is unmapped first, unless `capturing` says a
-    // graph capture is open, because hipMemUnmap would wait for the capturing
-    // stream. When the map runs out of memory and no capture is open, the
-    // freed mappings are unmapped and the map is tried once more.
+    // A freed mapping still waiting for its unmap that starts at the same page
+    // on the same device and covers every page asked for, as a stream-ordered
+    // pool hands a block back for a request up to 12.5% smaller, is taken back
+    // as it is, keeping its own end: no unmap, no new map. The allocation is
+    // ordered after the free first:
+    //  - freed by hipFreeAsync on `stream` itself: nothing to wait for;
+    //  - otherwise, with an event recorded after the free and no capture
+    //    open: `stream` waits for that event, or the host does for an
+    //    allocation with no stream;
+    //  - otherwise it is handled as any other overlap.
+    // Any other overlap with a freed mapping unmaps it first, unless
+    // `capturing` says a graph capture is open, because hipMemUnmap would wait
+    // for the capturing stream; the allocation then falls back. When the map
+    // runs out of memory and no capture is open, the freed mappings are
+    // unmapped and the map is tried once more.
     bool map_at(uint64_t rec, size_t size, int device, const char* api, void** live,
-                bool capturing = false);
+                bool capturing = false, const hipStream_t* stream = nullptr);
 
     // Note a fallback decided outside map_at, e.g. during graph capture.
     void fell_back(uint64_t rec, size_t size, const char* api, const char* why);
 
     // If `live` is a placed mapping, unmap it and release its handle. The
     // reservation stays, so the next allocation recorded there lands again.
-    // With `defer` it moves to a list drain_deferred() unmaps later. Until
-    // then, an allocation over exactly its pages on the same device takes it
-    // back, and one that only overlaps it unmaps it first, or falls back while
-    // a capture is open. Replay defers when a graph capture is open, since
-    // hipMemUnmap would wait for the capturing stream, and for every
-    // hipFreeAsync, since hipMemUnmap waits for every stream.
+    // With `defer` it moves to a list drain_deferred() unmaps later, and
+    // map_at may take it back. Replay defers a hipFree while a graph capture
+    // is open, since hipMemUnmap would wait for the capturing stream.
     bool unmap(void* live, bool defer = false);
-    // Whether `live` is the base of a live placed mapping. Waits while an
-    // unmap of `live` is still running.
+    // hipFreeAsync of `live` on live stream `stream`: always deferred, since
+    // hipMemUnmap waits for every stream. Keeps the stream and, unless
+    // `capturing`, an event recorded on it now, for map_at to order a later
+    // allocation on another stream after the free.
+    bool unmap_async(void* live, hipStream_t stream, bool capturing);
+    // A live stream is being destroyed: a deferred free made on it no longer
+    // counts as made on whatever stream gets its handle next.
+    void stream_destroyed(hipStream_t stream);
+    // Whether `live` is the base of a live placed mapping.
     bool is_mapped(void* live);
     // Unmap everything unmap() deferred, and retry unmaps that failed. Call
     // only when no capture is open. Returns how many were unmapped.
@@ -741,6 +772,13 @@ class VaPlacement {
                        hipMemGenericAllocationHandle_t* h);
     void clear_error();
     bool unmap_one(uint64_t pb, const PlacedMapping& m);
+    // Destroy the event a deferred free kept, if any.
+    void drop_event(hipEvent_t e);
+    // Order work after `e`: `stream` waits for it, or the host does when
+    // there is no stream. Never under mu_.
+    void wait_for_free(hipEvent_t e, const hipStream_t* stream);
+    bool unmap_impl(void* live, bool defer, bool on_stream, hipStream_t stream,
+                    bool capturing);
     // Unmap the deferred mappings at `keys` that no other thread is
     // unmapping. They stay in deferred_, marked, while hipMemUnmap runs with
     // mu_ released; `lk` holds mu_ again on return. Returns how many went.

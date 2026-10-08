@@ -28,10 +28,12 @@
 #include "hrr_test_common.hh"
 #include "hrr_test_process.hh"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -236,7 +238,7 @@ void hrr_place_require_vmm() {
   SKIP(arch << " does not support virtual memory management");
 }
 
-// How many frees the summary says were deferred to a later sync: 0 when the
+// How many frees the summary says were deferred to a later device sync: 0 when the
 // clause is absent, -1 when the summary line is.
 int hrr_place_deferred(const std::string& out) {
   const size_t at = out.find("Placement      :");
@@ -752,7 +754,7 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_Apis) {
 }
 
 // ===========================================================================
-// When placed memory is released: frees deferred to a sync, a capture that
+// When placed memory is released: frees deferred to a device sync, a capture that
 // does not end cleanly, and a reservation still live after the warm-up pass.
 // ===========================================================================
 namespace {
@@ -818,6 +820,18 @@ TEST_CASE("Unit_HRR_VaPlacement_Lifetimes_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipStreamEndCapture(s2, &g2));
   HRR_HIP_CHECK(hipGraphDestroy(g));
   HRR_HIP_CHECK(hipStreamDestroy(s2));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+
+  // (g) A free inside a capture of this thread's default stream, opened and
+  // closed with the _spt calls code built for per-thread streams makes. It
+  // waits for the device sync after the capture ends.
+  void* z = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&z, kBytes));
+  HRR_HIP_CHECK(hipStreamBeginCapture_spt(nullptr, hipStreamCaptureModeRelaxed));
+  HRR_HIP_CHECK(hipFree(z));
+  hipGraph_t g3 = nullptr;
+  HRR_HIP_CHECK(hipStreamEndCapture_spt(nullptr, &g3));
+  if (g3) HRR_HIP_CHECK(hipGraphDestroy(g3));
   HRR_HIP_CHECK(hipDeviceSynchronize());
 
   // (d) The same device address copied into 40 cells, one H2D copy each: 40
@@ -904,55 +918,54 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_Lifetimes) {
   const LifeCapture& c = hrr_life_capture();
   INFO("capture: doomed=" << hex(c.doomed) << " again=" << hex(c.again) << " va=" << hex(c.va));
 
-  SECTION("a capture that ended badly does not hold the frees made inside it") {
+  SECTION("deferred frees are unmapped at the next device sync, and nowhere else") {
+    // One --verbose replay serves sections (a), (b), (f) and (g) of the
+    // workload.
     auto [rc, out] = hrr_playback_merged(c.archive, "--verbose");
     INFO("Replay:\n" << out);
     CHECK(rc == 0);
     int pass = 0, fail = 0;
     REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
     CHECK(fail == 0);
-    // The capture ends where its stream is destroyed, so the free made
+    int placed = 0, fell = -1;
+    REQUIRE(hrr_place_counts(out, &placed, &fell));
+    CHECK(fell == 0);
+    // Nothing is still mapped where a later allocation goes, so each lands.
+    CHECK(out.find("is still mapped") == std::string::npos);
+
+    // (a) The capture ends where its stream is destroyed, so the free made
     // inside it is unmapped at the next device sync, the first in the replay.
     const std::string want = "[HRR] Placement: unmapped 1 deferred free(s) at hipDeviceSynchronize";
     const size_t first = out.find("[HRR] Placement: unmapped ");
     REQUIRE(first != std::string::npos);
     CHECK(out.compare(first, want.size(), want) == 0);
     CHECK(out.find("deferred free(s) at hipStreamDestroy") == std::string::npos);
-    // Nothing is still mapped where `again` goes, so it lands there.
-    CHECK(out.find("is still mapped") == std::string::npos);
-    int placed = 0, fell = -1;
-    REQUIRE(hrr_place_counts(out, &placed, &fell));
-    CHECK(fell == 0);
     if (c.doomed != c.again)
       WARN("the capture's allocator did not reuse the freed address ("
            << hex(c.doomed) << " then " << hex(c.again) << "), so nothing was placed over it");
-  }
 
-  SECTION("a deferred free is unmapped at the next device sync, not at a stream sync") {
-    auto [rc, out] = hrr_playback_merged(c.archive, "--verbose");
-    INFO("Replay:\n" << out);
-    CHECK(rc == 0);
-    // hipMemUnmap waits for every stream on the device: a stream sync waited
-    // for one, so it unmaps nothing.
+    // (b) hipMemUnmap waits for every stream on the device: a stream sync
+    // waited for one, so it unmaps nothing.
     CHECK(out.find("deferred free(s) at hipStreamSynchronize") == std::string::npos);
     // a2 took a1's mapping back when the pool reused its address, so the
-    // device sync after them unmaps one; otherwise both.
+    // device sync after them unmaps one; otherwise both. This assumes a2
+    // either lands on a1's pages or misses them entirely: one that shared
+    // only some of them would unmap a1 first, and the count would be 1 with
+    // a1 != a2. A 4 KB allocation from a pool block makes that unlikely.
     const std::string b_line = std::string("[HRR] Placement: unmapped ") +
                                (c.a1 == c.a2 ? "1" : "2") +
                                " deferred free(s) at hipDeviceSynchronize";
     CHECK(out.find(b_line) != std::string::npos);
-    // doomed, x, and a2 when it took a1's mapping back.
-    CHECK(count_of(out, "[HRR] Placement: unmapped 1 deferred free(s) at hipDeviceSynchronize") ==
-          (c.a1 == c.a2 ? 3 : 2));
-    CHECK(out.find("is still mapped") == std::string::npos);
-    // doomed, a1, a2, and x, freed inside the capture hipStreamBeginCaptureToGraph opened.
-    CHECK(hrr_place_deferred(out) == 4);
-    int placed = 0, fell = -1;
-    REQUIRE(hrr_place_counts(out, &placed, &fell));
-    CHECK(fell == 0);
     if (c.a1 != c.a2)
       WARN("the pool did not hand a1's address to a2 (" << hex(c.a1) << " then " << hex(c.a2)
            << "), so no mapping was taken back");
+
+    // doomed, x, z, and a2 when it took a1's mapping back.
+    CHECK(count_of(out, "[HRR] Placement: unmapped 1 deferred free(s) at hipDeviceSynchronize") ==
+          (c.a1 == c.a2 ? 4 : 3));
+    // doomed, a1, a2, x, freed inside the capture hipStreamBeginCaptureToGraph
+    // opened, and z, freed inside the one hipStreamBeginCapture_spt opened.
+    CHECK(hrr_place_deferred(out) == 5);
   }
 
   SECTION("the H2D scan names the first 16 payloads, says why it runs, and counts the rest") {
@@ -986,10 +999,121 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_Lifetimes) {
 }
 
 // ===========================================================================
+// A freed mapping taken back on another stream waits for the free.
+// ===========================================================================
+// The pool hands a block freed on one stream to another only once the free is
+// done, or ordered after it. Replay takes the placed mapping back at once, so
+// the new stream has to wait for the free there, or its writes race the old
+// stream's last kernel. The recording sleeps, which is not a HIP call and is
+// not replayed, so in replay that kernel is still running when the second
+// stream takes the memory.
+namespace {
+#define HRR_ORDER_MARKER "HRR_PLACE_ORDER"
+// The bit patterns of 1.0f and 3.0f: the D2H check compares 4-byte words as
+// floats within a tolerance, so the two values must differ as floats too.
+constexpr int kOldFill = 0x3f800000;
+constexpr int kNewFill = 0x40400000;
+}  // namespace
+
+// Spins for `ticks` of the constant-rate wall clock, then fills `p` with `v`.
+__global__ void hrr_place_late_fill(int* p, int v, unsigned long long ticks, int n) {
+  const unsigned long long t0 = wall_clock64();
+  while (wall_clock64() - t0 < ticks) {
+  }
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) p[i] = v;
+}
+
+__global__ void hrr_place_fill(int* p, int v, int n) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) p[i] = v;
+}
+
+TEST_CASE("Unit_HRR_VaPlacement_StreamOrder_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipFree(nullptr));
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int khz = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&khz, hipDeviceAttributeWallClockRate, 0));
+  REQUIRE(khz > 0);
+  const unsigned long long one_second = static_cast<unsigned long long>(khz) * 1000;
+
+  hipStream_t s1 = nullptr, s2 = nullptr;
+  HRR_HIP_CHECK(hipStreamCreateWithFlags(&s1, hipStreamNonBlocking));
+  HRR_HIP_CHECK(hipStreamCreateWithFlags(&s2, hipStreamNonBlocking));
+
+  // The old stream's last kernel writes x a second after it starts, and x is
+  // freed behind it.
+  int* x = nullptr;
+  HRR_HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&x), kBytes, s1));
+  hipLaunchKernelGGL(hrr_place_late_fill, dim3(kElems / 256), dim3(256), 0, s1, x,
+                     kOldFill, one_second, kElems);
+  HRR_HIP_CHECK(hipGetLastError());
+  HRR_HIP_CHECK(hipFreeAsync(x, s1));
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+
+  // By now that kernel is done, so the pool hands x's block to s2.
+  int* y = nullptr;
+  HRR_HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&y), kBytes, s2));
+  hipLaunchKernelGGL(hrr_place_fill, dim3(kElems / 256), dim3(256), 0, s2, y, kNewFill,
+                     kElems);
+  HRR_HIP_CHECK(hipGetLastError());
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+  std::vector<int> got(kElems);
+  HRR_HIP_CHECK(hipMemcpy(got.data(), y, kBytes, hipMemcpyDeviceToHost));
+  for (int i = 0; i < kElems; ++i) REQUIRE(got[i] == kNewFill);
+
+  printf(HRR_ORDER_MARKER " x=0x%llx y=0x%llx\n", u64(x), u64(y));
+  fflush(stdout);
+
+  HRR_HIP_CHECK(hipFreeAsync(y, s2));
+  HRR_HIP_CHECK(hipStreamSynchronize(s2));
+  HRR_HIP_CHECK(hipStreamDestroy(s2));
+  HRR_HIP_CHECK(hipStreamDestroy(s1));
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_StreamOrder) {
+  hrr_place_require_vmm();
+  ScopedDir cap(fs::temp_directory_path() / "hrr_va_placement_order.hrr");
+  std::string cout_;
+  { hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_VaPlacement_StreamOrder_Direct\"");
+    cout_ = proc.getOutput();
+    INFO("Capture exit: " << ret << "\n" << cout_);
+    REQUIRE(ret == 0); }
+  const size_t at = cout_.find(HRR_ORDER_MARKER);
+  REQUIRE(at != std::string::npos);
+  unsigned long long x = 0, y = 0;
+  REQUIRE(sscanf(cout_.c_str() + at, HRR_ORDER_MARKER " x=0x%llx y=0x%llx", &x, &y) == 2);
+  if (x != y)
+    SKIP("the pool did not hand x's block to the second stream (" << hex(x) << " then "
+         << hex(y) << "), so no mapping is taken back across streams");
+
+  // Unordered, the second stream fills y at once, and the old kernel then
+  // overwrites it a second later: the D2H check of y fails.
+  auto [rc, out] = hrr_playback_merged(hrr_single_process_archive(cap.path), "");
+  INFO("Replay:\n" << out);
+  CHECK(rc == 0);
+  int pass = 0, fail = 0;
+  REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
+  CHECK(pass >= 1);
+  CHECK(fail == 0);
+  int placed = 0, fell = -1;
+  REQUIRE(hrr_place_counts(out, &placed, &fell));
+  CHECK(placed >= 2);
+  CHECK(fell == 0);
+}
+
+// ===========================================================================
 // Two GPUs: allocations on each, and device 0 reading device 1's memory.
 // ===========================================================================
 // Kernels run on device 0 only. Replay loads each code object for the device
 // current at load time, so a launch on device 1 is a separate limitation.
+namespace {
+constexpr size_t kMultiGpuBig = 256ull << 20;
+}  // namespace
+
 TEST_CASE("Unit_HRR_VaPlacement_MultiGpu_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(nullptr));
   int n = 0;
@@ -1018,6 +1142,26 @@ TEST_CASE("Unit_HRR_VaPlacement_MultiGpu_Direct", "[.][hrr-direct]") {
   desc.location.id   = 0;
   desc.flags         = hipMemAccessFlagsProtReadWrite;
   HRR_HIP_CHECK(hipMemPoolSetAccess(pool1, &desc, 1));
+  // A large allocation on device 1's stream, made with device 0 current,
+  // between hipMemGetInfo calls on both devices. Replay under --verbose
+  // prints what each call says there, which shows whose memory it took. It
+  // comes first and is freed at once, because the pool packs its blocks
+  // together, and one sharing a granule with a live block falls back.
+  size_t free_b = 0, total_b = 0;
+  HRR_HIP_CHECK(hipSetDevice(1));
+  HRR_HIP_CHECK(hipMemGetInfo(&free_b, &total_b));
+  HRR_HIP_CHECK(hipSetDevice(0));
+  HRR_HIP_CHECK(hipMemGetInfo(&free_b, &total_b));
+  void* big1 = nullptr;
+  HRR_HIP_CHECK(hipMallocAsync(&big1, kMultiGpuBig, s1));
+  HRR_HIP_CHECK(hipStreamSynchronize(s1));
+  HRR_HIP_CHECK(hipSetDevice(1));
+  HRR_HIP_CHECK(hipMemGetInfo(&free_b, &total_b));
+  HRR_HIP_CHECK(hipSetDevice(0));
+  HRR_HIP_CHECK(hipMemGetInfo(&free_b, &total_b));
+  HRR_HIP_CHECK(hipFreeAsync(big1, s1));
+  HRR_HIP_CHECK(hipStreamSynchronize(s1));
+
   // Allocated while device 0 is current, on device 1's stream: it lives on
   // device 1, and replay has to map it there.
   int* async1 = nullptr;
@@ -1026,6 +1170,7 @@ TEST_CASE("Unit_HRR_VaPlacement_MultiGpu_Direct", "[.][hrr-direct]") {
   hipPointerAttribute_t attr{};
   HRR_HIP_CHECK(hipPointerGetAttributes(&attr, async1));
   REQUIRE(attr.device == 1);
+
 
   // Device 0 reads its own buffer and both of device 1's through stored
   // pointers. Without peer access in replay, the last two fault.
@@ -1086,13 +1231,33 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_MultiGpu) {
   REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
   CHECK(pass >= 4);
   CHECK(fail == 0);
-  // buf1, out0, buf0, async1 and three cells.
+  // buf1, out0, buf0, async1, big1 and three cells.
   int placed = 0, fell = -1;
   REQUIRE(hrr_place_counts(out, &placed, &fell));
-  CHECK(placed >= 7);
+  CHECK(placed >= 8);
   CHECK(fell == 0);
   // The async allocation was mapped on its stream's device, not the current one.
   CHECK(out.find(hrr_place_attr_line(async1, type, 1, async1)) != std::string::npos);
+  // And its memory came from that device: hipMemCreate takes it from the
+  // current one, whatever the allocation's location says. The four
+  // hipMemGetInfo lines are device 1, device 0, before big1, then after it.
+  std::vector<std::pair<int, unsigned long long>> info;
+  const std::string tag = "[HRR] hipMemGetInfo device=";
+  for (size_t p = out.find(tag); p != std::string::npos; p = out.find(tag, p + 1)) {
+    int d = -1;
+    unsigned long long f = 0;
+    if (sscanf(out.c_str() + p + tag.size(), "%d free=%llu", &d, &f) == 2) info.push_back({d, f});
+  }
+  REQUIRE(info.size() == 4);
+  REQUIRE(info[0].first == 1);
+  REQUIRE(info[1].first == 0);
+  REQUIRE(info[2].first == 1);
+  REQUIRE(info[3].first == 0);
+  const long long took1 = static_cast<long long>(info[0].second - info[2].second);
+  const long long took0 = static_cast<long long>(info[1].second - info[3].second);
+  INFO("device 1 gave " << took1 << " bytes, device 0 " << took0);
+  CHECK(took1 >= static_cast<long long>(kMultiGpuBig));
+  CHECK(took0 < static_cast<long long>(kMultiGpuBig / 2));
 }
 
 #endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE

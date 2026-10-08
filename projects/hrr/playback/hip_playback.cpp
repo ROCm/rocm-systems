@@ -2270,12 +2270,15 @@ static hrr::VaPlacement* hrr_placing(PlaybackContext& ctx) {
     return p && p->active() ? p : nullptr;
 }
 
+// `stream` is the live stream of a stream-ordered allocation, nullptr for the
+// others: taking back a mapping freed on another stream orders after its free.
 static bool hrr_place_alloc(PlaybackContext& ctx, uint64_t rec, size_t size,
-                            const char* api, void** live, int device = -1) {
+                            const char* api, void** live, int device = -1,
+                            const hipStream_t* stream = nullptr) {
     hrr::VaPlacement* pl = hrr_placing(ctx);
     if (!pl) return false;
     if (device < 0) (void)hipGetDevice(&device);
-    return pl->map_at(rec, size, device, api, live, ctx.in_graph_capture.any());
+    return pl->map_at(rec, size, device, api, live, ctx.in_graph_capture.any(), stream);
 }
 
 // An allocation that did not go through placement returned `r`: say whether
@@ -2508,33 +2511,44 @@ void hrr_placement_at_sync(PlaybackContext& ctx, const char* api) {
         fprintf(stderr, "[HRR] Placement: unmapped %zu deferred free(s) at %s\n", n, api);
 }
 
+// The recorded thread that made the call in `payload`.
+static uint64_t hrr_event_thread(const uint8_t* payload) {
+    hrr_event_header h;
+    std::memcpy(&h, payload, sizeof(h));
+    return h.thread_id;
+}
+
 void hrr_track_capture(PlaybackContext& ctx, uint16_t event_type,
                        const uint8_t* payload) {
     switch (event_type) {
         case HRR_API_HIPSTREAMBEGINCAPTURETOGRAPH: {
-            // The handler may skip the call, so ask the stream.
+            // The handler may skip the call, so ask the stream. A null one
+            // cannot capture, and asking about it while another capture is
+            // open fails with an error that stays.
             const auto* a =
                 reinterpret_cast<const hrr_args_hipStreamBeginCaptureToGraph*>(payload);
+            hipStream_t stream = ctx.translate_stream(a->stream);
             hipStreamCaptureStatus st = hipStreamCaptureStatusNone;
-            if (hipStreamIsCapturing(ctx.translate_stream(a->stream), &st) == hipSuccess &&
+            if (stream && hipStreamIsCapturing(stream, &st) == hipSuccess &&
                 st == hipStreamCaptureStatusActive)
-                ctx.in_graph_capture.begin(a->stream);
+                ctx.in_graph_capture.begin(hrr_capture_key(a->stream, hrr_event_thread(payload)));
             break;
         }
         case HRR_API_HIPSTREAMBEGINCAPTURE_SPT: {
+            // A null stream here is this thread's default stream.
             const auto* a =
                 reinterpret_cast<const hrr_args_hipStreamBeginCapture_spt*>(payload);
             hipStreamCaptureStatus st = hipStreamCaptureStatusNone;
             if (hipStreamIsCapturing_spt(ctx.translate_stream(a->stream), &st) == hipSuccess &&
                 st == hipStreamCaptureStatusActive)
-                ctx.in_graph_capture.begin(a->stream);
+                ctx.in_graph_capture.begin(hrr_capture_key(a->stream, hrr_event_thread(payload)));
             break;
         }
         case HRR_API_HIPSTREAMENDCAPTURE_SPT: {
             // Ended whatever the call returned, as hipStreamEndCapture does.
             const auto* a =
                 reinterpret_cast<const hrr_args_hipStreamEndCapture_spt*>(payload);
-            (void)ctx.in_graph_capture.end(a->stream);
+            (void)ctx.in_graph_capture.end(hrr_capture_key(a->stream, hrr_event_thread(payload)));
             break;
         }
         default:
@@ -2556,6 +2570,7 @@ void hrr_placement_after_event(PlaybackContext& ctx, uint16_t event_type,
                                 ? props.location.id : -1;
             std::unique_lock lk(ctx.map_mutex);
             ctx.pool_device[a->mem_pool] = dev;
+            ctx.pool_max_size[a->mem_pool] = props.maxSize;
             break;
         }
         case HRR_API_HIPDEVICEGETDEFAULTMEMPOOL:
@@ -2579,9 +2594,21 @@ void hrr_placement_after_event(PlaybackContext& ctx, uint16_t event_type,
         return;
     }
     switch (event_type) {
-        case HRR_API_HIPCTXSYNCHRONIZE:
-            hrr_placement_at_sync(ctx, "hipCtxSynchronize");
+        case HRR_API_HIPMEMGETINFO: {
+            // Which device placed memory is backed on shows only in how much
+            // each device has left.
+            if (!ctx.verbose) break;
+            int dev = -1;
+            size_t free_b = 0, total_b = 0;
+            if (hipGetDevice(&dev) != hipSuccess ||
+                hipMemGetInfo(&free_b, &total_b) != hipSuccess) {
+                (void)hipGetLastError();
+                break;
+            }
+            fprintf(stderr, "[HRR] hipMemGetInfo device=%d free=%zu total=%zu\n", dev, free_b,
+                    total_b);
             break;
+        }
         case HRR_API_HIPPOINTERGETATTRIBUTES: {
             if (!ctx.verbose) break;
             const auto* a =
@@ -2864,6 +2891,7 @@ static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
         r = hipSuccess;
     } else if (managed) {
         r = hipMallocManaged(&live, pad_sz);
+        if (hrr_drain_for_retry(ctx, r)) r = hipMallocManaged(&live, pad_sz);
     } else {
         r = hipMalloc(&live, pad_sz);
         if (hrr_drain_for_retry(ctx, r)) r = hipMalloc(&live, pad_sz);
@@ -2967,7 +2995,7 @@ static bool hrr_place_async_alloc(PlaybackContext& ctx, uint64_t rec, size_t siz
         pl->fell_back(rec, size, api, "it was allocated inside a graph capture");
         return false;
     }
-    return hrr_place_alloc(ctx, rec, size, api, live, device);
+    return hrr_place_alloc(ctx, rec, size, api, live, device, &stream);
 }
 
 // The device a recorded pool allocates on, or a reason it cannot be placed.
@@ -3014,6 +3042,28 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     return r;
 }
 
+// A pool created with a maxSize refuses an allocation that would take it past
+// that, with hipErrorOutOfMemory. Unmapping placement's deferred frees gives
+// the pool nothing back, so that failure is not retried. Asked only when
+// placement is on and the allocation `r` ran out of memory.
+static bool hrr_pool_at_limit(PlaybackContext& ctx, hipError_t r, uint64_t rec_pool,
+                              hipMemPool_t pool, size_t size) {
+    if (r != hipErrorOutOfMemory || !hrr_placing(ctx)) return false;
+    size_t max = 0;
+    {
+        std::shared_lock lk(ctx.map_mutex);
+        auto it = ctx.pool_max_size.find(rec_pool);
+        if (it != ctx.pool_max_size.end()) max = it->second;
+    }
+    if (max == 0 || !pool) return false;
+    uint64_t high = 0;
+    if (hipMemPoolGetAttribute(pool, hipMemPoolAttrReservedMemHigh, &high) != hipSuccess) {
+        (void)hipGetLastError();
+        return false;
+    }
+    return high + size > max;
+}
+
 hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
                                            const uint8_t* pl) {
     const auto* a  = reinterpret_cast<const hrr_args_hipMallocFromPoolAsync*>(pl);
@@ -3032,14 +3082,14 @@ hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
     if (why) {
         hrr_placing(ctx)->fell_back(a->dev_ptr, orig_sz, "hipMallocFromPoolAsync", why);
         r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
-        if (hrr_drain_for_retry(ctx, r))
+        if (!hrr_pool_at_limit(ctx, r, a->mem_pool, pool, pad_sz) && hrr_drain_for_retry(ctx, r))
             r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
     } else if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocFromPoolAsync",
                                      stream, device, &live)) {
         pad_sz = orig_sz;
     } else {
         r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
-        if (hrr_drain_for_retry(ctx, r))
+        if (!hrr_pool_at_limit(ctx, r, a->mem_pool, pool, pad_sz) && hrr_drain_for_retry(ctx, r))
             r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
     }
     if (r == hipSuccess) {
@@ -3267,7 +3317,7 @@ hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
     void* live = ctx.translate_ptr(a->ptr);
     if (!live) return hipSuccess;
     // A placed allocation or a --guard-segments one: a VMM mapping. During a
-    // graph capture the unmap waits for the next synchronization point where
+    // graph capture the unmap waits for the next device synchronization where
     // no capture is open.
     hrr::VaPlacement* placing = hrr_placing(ctx);
     if ((placing && placing->unmap(live, ctx.in_graph_capture.any())) ||
@@ -3288,13 +3338,14 @@ hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
     // A placed allocation is a VMM mapping that the stream may still be using.
     // hipMemUnmap waits for every stream on the device, which would turn each
     // stream-ordered free into a device-wide sync the recording never had. So
-    // the unmap is deferred to the next replayed device or context
-    // synchronization. An allocation recorded at exactly the same range on
-    // the same device takes the mapping back without unmapping it. One that
-    // only overlaps it unmaps it first, unless a capture is open, in which
-    // case that allocation falls back.
+    // the unmap is deferred to the next replayed device synchronization. An
+    // allocation recorded from the same first page on the same device, no
+    // larger, takes the mapping back without unmapping it, ordered after this
+    // free when it is on another stream (VaPlacement::map_at). One that only
+    // overlaps it unmaps it first, unless a capture is open, in which case
+    // that allocation falls back.
     hrr::VaPlacement* placing = hrr_placing(ctx);
-    if (placing && placing->unmap(live, /*defer=*/true)) {
+    if (placing && placing->unmap_async(live, stream, ctx.in_graph_capture.any())) {
         ctx.remove_alloc(a->dev_ptr);
         return hipSuccess;
     }
@@ -3808,14 +3859,17 @@ hipError_t playback_hipStreamDestroy(PlaybackContext& ctx,
     const auto* a  = reinterpret_cast<const hrr_args_hipStreamDestroy*>(pl);
     hipStream_t stream = ctx.translate_stream(a->stream);
     hipError_t r = hipSuccess;
+    // A free deferred on this stream no longer matches a new stream that
+    // gets the same handle.
+    if (hrr::VaPlacement* pl = hrr_placing(ctx); pl && stream) pl->stream_destroyed(stream);
     if (stream) r = hipStreamDestroy(stream);
     ctx.remove_stream(a->stream);
     // Destroying a capturing stream ends its capture. The recording shows no
     // hipStreamEndCapture when the program's own call failed, because failed
     // calls are not recorded: a capture invalidated by a synchronous copy or
     // memset ends here. The frees deferred inside it are unmapped at the next
-    // replayed device or context synchronization, like any other.
-    (void)ctx.in_graph_capture.end(a->stream);
+    // replayed device synchronization, like any other.
+    (void)ctx.in_graph_capture.end(hrr_capture_key(a->stream, hrr_event_thread(pl)));
     return r;
 }
 
@@ -3865,7 +3919,7 @@ hipError_t playback_hipStreamBeginCapture(PlaybackContext& ctx,
                     r, hipGetErrorString(r));
     }
     if (r == hipSuccess)
-        ctx.in_graph_capture.begin(a->stream);
+        ctx.in_graph_capture.begin(hrr_capture_key(a->stream, hrr_event_thread(payload)));
     return r;
 }
 
@@ -3878,7 +3932,7 @@ hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx,
     if (!stream) {
         fprintf(stderr, "[HRR] hipStreamEndCapture: stream 0x%llx not found in map\n",
                 (unsigned long long)a->stream);
-        ctx.in_graph_capture.end(a->stream);
+        ctx.in_graph_capture.end(hrr_capture_key(a->stream, hrr_event_thread(payload)));
         return hipSuccess;  // non-fatal
     }
     hipGraph_t live_graph = nullptr;
@@ -3886,7 +3940,7 @@ hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx,
     // Cleared whatever the call returned: a capture left marked open would
     // defer every later placed free, and make the allocations recorded over
     // them fall back, for the rest of the replay.
-    ctx.in_graph_capture.end(a->stream);
+    ctx.in_graph_capture.end(hrr_capture_key(a->stream, hrr_event_thread(payload)));
     if (r == hipSuccess && live_graph) {
         ctx.record_graph(a->pGraph, live_graph);
         if (ctx.verbose)
@@ -4911,6 +4965,7 @@ hipError_t playback_hipArrayCreate(PlaybackContext& ctx, const uint8_t* pl) {
     std::memcpy(&desc, a->array_desc_bytes, sizeof(desc));
     hipArray_t arr = nullptr;
     hipError_t r = hipArrayCreate(&arr, &desc);
+    if (hrr_drain_for_retry(ctx, r)) r = hipArrayCreate(&arr, &desc);
     if (r == hipSuccess) ctx.record_array(a->pHandle, arr);
     if (hrr_replayed_recorded_error(ctx, "hipArrayCreate", a->ret, r))
         return hipSuccess;
@@ -4923,6 +4978,7 @@ hipError_t playback_hipArray3DCreate(PlaybackContext& ctx, const uint8_t* pl) {
     std::memcpy(&desc, a->array3d_desc_bytes, sizeof(desc));
     hipArray_t arr = nullptr;
     hipError_t r = hipArray3DCreate(&arr, &desc);
+    if (hrr_drain_for_retry(ctx, r)) r = hipArray3DCreate(&arr, &desc);
     if (r == hipSuccess) ctx.record_array(a->array, arr);
     if (hrr_replayed_recorded_error(ctx, "hipArray3DCreate", a->ret, r))
         return hipSuccess;
@@ -5079,6 +5135,9 @@ hipError_t playback_hipMemCreate(PlaybackContext& ctx, const uint8_t* pl) {
     hipMemGenericAllocationHandle_t live_handle{};
     hipError_t r = hipMemCreate(&live_handle, static_cast<size_t>(a->size), &prop,
                                 static_cast<unsigned long long>(a->flags));
+    if (hrr_drain_for_retry(ctx, r))
+        r = hipMemCreate(&live_handle, static_cast<size_t>(a->size), &prop,
+                         static_cast<unsigned long long>(a->flags));
     if (r == hipSuccess) {
         std::unique_lock lk(ctx.map_mutex);
         ctx.vmm_handle_map[rec_handle] = live_handle;

@@ -1554,11 +1554,7 @@ int main(int argc, char** argv) {
       hrr_release_vmm_state(ctx);
       for (uint64_t rec : ctx.placement->mapped_bases()) {
         if (ctx.regions.holds(rec)) continue;
-        void* live = reinterpret_cast<void*>(rec);
-        if (ctx.placement->is_mapped(live)) {
-          (void)ctx.placement->unmap(live);
-          ctx.remove_alloc(rec);
-        }
+        if (ctx.placement->unmap(reinterpret_cast<void*>(rec))) ctx.remove_alloc(rec);
       }
       (void)ctx.placement->drain_deferred();
       ctx.placement->reset_counts();
@@ -1734,7 +1730,7 @@ int main(int argc, char** argv) {
            (unsigned long long)ctx.placement->placed(),
            (unsigned long long)ctx.placement->fallbacks());
     if (deferred)
-      printf(", %llu frees deferred to a later sync",
+      printf(", %llu frees deferred to a later device sync",
              (unsigned long long)deferred);
     printf("\n");
   }

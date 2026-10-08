@@ -17,6 +17,7 @@
 #include "hrr_test_common.hh"
 #include "hrr_va_placement.h"
 #include "hrr_event_order.h"
+#include "hip_playback.h"
 #include "hrr/hrr_api_args.h"
 
 #include <algorithm>
@@ -328,6 +329,27 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_CapturesOpenAndCloseInOrder) {
   }
 }
 
+HRR_TEST_CASE(Unit_HRR_VaPlacement_PerThreadCapturesKeptApart) {
+  // Code built for per-thread default streams captures with
+  // hipStreamBeginCapture_spt on stream 0, and each thread's stream 0 is its
+  // own. One thread ending its capture must not end another's: replay would
+  // then unmap, drain and sync while that capture is still open.
+  const uint64_t t1 = 11, t2 = 22;
+  StreamCaptureFlag f;
+  f.begin(hrr_capture_key(0, t1));
+  f.begin(hrr_capture_key(0, t2));
+  REQUIRE(f.end(hrr_capture_key(0, t1)));
+  REQUIRE(f.any());
+  // hipStreamPerThread names the same stream as 0 on that thread.
+  REQUIRE(f.end(hrr_capture_key(reinterpret_cast<uint64_t>(hipStreamPerThread), t2)));
+  REQUIRE_FALSE(f.any());
+  // A real stream is the same stream on every thread.
+  const uint64_t s = 0x7f0000001000ull;
+  REQUIRE(hrr_capture_key(s, t1) == s);
+  REQUIRE(hrr_capture_key(s, t2) == s);
+  REQUIRE(hrr_capture_key(0, t1) != s);
+}
+
 HRR_TEST_CASE(Unit_HRR_VaPlacement_PlanSegmentsMinusReservations) {
   // The region sidecar declares a segment for every allocation it saw, so a
   // hipMemAddressReserve range comes back as a segment too. It belongs to the
@@ -578,70 +600,63 @@ hipError_t counted_map(void*, size_t, int, hipMemGenericAllocationHandle_t*,
   ++g_maps;
   return g_unmaps < g_oom_until ? hipErrorOutOfMemory : hipSuccess;
 }
-hipError_t counted_unmap(void*, size_t) {
+std::atomic<size_t> g_unmap_bytes{0};
+hipError_t counted_unmap(void*, size_t size) {
   ++g_unmaps;
+  g_unmap_bytes = size;
   return hipSuccess;
 }
 
 void* at(uint64_t va) { return reinterpret_cast<void*>(va); }
-}  // namespace
 
-HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapHoldsTheLock) {
-  // While one thread unmaps a placed allocation, the pages are still mapped.
-  // Another thread asking about them waits until the unmap is over, rather
-  // than hearing they are gone and placing over them.
-  reset_slow_unmap();
-  hrr::VaPlacement pl;
-  pl.set_vmm_ops_for_test({ok_map, slow_unmap, no_release});
-  pl.adopt_mapping_for_test(B, P);
-  REQUIRE(pl.is_mapped(at(B)));
+// Stand-ins for the event a hipFreeAsync leaves on its stream. Each record
+// makes a new fake event; waits by a stream, waits by the host and destroys
+// are counted. Called from the test's own thread only.
+int g_events = 0, g_destroyed = 0, g_host_waits = 0;
+std::vector<std::pair<hipStream_t, hipEvent_t>> g_waits;
+const hipStream_t S1 = reinterpret_cast<hipStream_t>(0x51);
+const hipStream_t S2 = reinterpret_cast<hipStream_t>(0x52);
 
-  SECTION("a free") {
-    bool unmapped = false;  // Catch2 assertions are for the main thread only
-    std::thread a([&] { unmapped = pl.unmap(at(B)); });
-    if (!wait_for(g_unmap_entered)) {
-      g_unmap_go = true;
-      a.join();
-      FAIL("unmap never reached hipMemUnmap");
-    }
-    bool done_when_answered = false;
-    bool mapped = true;
-    std::thread b([&] {
-      mapped = pl.is_mapped(at(B));
-      done_when_answered = g_unmap_done;
-    });
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    g_unmap_go = true;
-    a.join();
-    b.join();
-    REQUIRE(unmapped);
-    REQUIRE(done_when_answered);
-    REQUIRE_FALSE(mapped);
-  }
-  SECTION("a drain of deferred frees") {
-    REQUIRE(pl.unmap(at(B), /*defer=*/true));
-    size_t drained = 0;
-    std::thread a([&] { drained = pl.drain_deferred(); });
-    if (!wait_for(g_unmap_entered)) {
-      g_unmap_go = true;
-      a.join();
-      FAIL("drain_deferred never reached hipMemUnmap");
-    }
-    bool done_when_answered = false;
-    bool mapped = true;
-    std::thread b([&] {
-      mapped = pl.is_mapped(at(B));
-      done_when_answered = g_unmap_done;
-    });
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    g_unmap_go = true;
-    a.join();
-    b.join();
-    REQUIRE(drained == 1);
-    REQUIRE(done_when_answered);
-    REQUIRE_FALSE(mapped);
-  }
+hipEvent_t fake_event(int n) { return reinterpret_cast<hipEvent_t>(uintptr_t(0xe000 + n)); }
+hipError_t fake_record(hipStream_t, hipEvent_t* e) {
+  *e = fake_event(++g_events);
+  return hipSuccess;
 }
+hipError_t fake_wait(hipStream_t s, hipEvent_t e, unsigned int) {
+  g_waits.emplace_back(s, e);
+  return hipSuccess;
+}
+hipError_t fake_sync(hipEvent_t) {
+  ++g_host_waits;
+  return hipSuccess;
+}
+hipError_t fake_destroy(hipEvent_t) {
+  ++g_destroyed;
+  return hipSuccess;
+}
+hipError_t fake_address_free(void*, size_t) { return hipSuccess; }
+
+void reset_events() {
+  reset_vmm_counts();
+  g_unmap_bytes = 0;
+  g_events = g_destroyed = g_host_waits = 0;
+  g_waits.clear();
+}
+
+// Counted maps and unmaps, and fake events.
+hrr::VmmOps event_ops() {
+  hrr::VmmOps ops;
+  ops.map           = counted_map;
+  ops.unmap         = counted_unmap;
+  ops.release       = no_release;
+  ops.record_event  = fake_record;
+  ops.wait_event    = fake_wait;
+  ops.sync_event    = fake_sync;
+  ops.destroy_event = fake_destroy;
+  ops.address_free  = fake_address_free;
+  return ops;
+}
+}  // namespace
 
 HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapRunsOutsideTheLock) {
   // hipMemUnmap waits for every stream on the device. Another thread's
@@ -699,47 +714,151 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapRunsOutsideTheLock) {
 }
 
 HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedRangeTakenBack) {
-  // hipFreeAsync defers the unmap, and a stream-ordered pool hands the same
-  // address straight back. The allocation recorded there takes the mapping
-  // back as it is: no device-wide wait for an unmap the recording never had.
-  reset_vmm_counts();
+  // hipFreeAsync defers the unmap, and a stream-ordered pool hands the block
+  // straight back, for a request up to 12.5% smaller too. The allocation
+  // recorded there takes the mapping back as it is: no device-wide wait for
+  // an unmap the recording never had. The pool reused the block only once
+  // the free was done, or ordered after it, so on another stream the
+  // allocation is ordered after the free's event first.
+  reset_events();
   hrr::VaPlacement pl;
-  pl.set_vmm_ops_for_test({counted_map, counted_unmap, no_release});
+  pl.set_vmm_ops_for_test(event_ops());
   pl.adopt_reservation_for_test(B, B + 16 * P, 2);
   void* live = nullptr;
-  REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live));
-  REQUIRE(pl.unmap(at(B), /*defer=*/true));
+  REQUIRE(pl.map_at(B, 2 * P, 0, "hipMallocAsync", &live, false, &S1));
+  REQUIRE(pl.unmap_async(at(B), S1, /*capturing=*/false));
   REQUIRE(g_maps == 1);
   REQUIRE(g_unmaps == 0);
 
-  SECTION("the same pages on the same device") {
-    REQUIRE(pl.map_at(B + 64, P - 64, 0, "hipMallocAsync", &live));
+  SECTION("the same stream: nothing to wait for") {
+    REQUIRE(pl.map_at(B + 64, 2 * P - 64, 0, "hipMallocAsync", &live, false, &S1));
     REQUIRE(live == at(B + 64));
     REQUIRE(g_maps == 1);
     REQUIRE(g_unmaps == 0);
+    REQUIRE(g_waits.empty());
+    REQUIRE(g_host_waits == 0);
+    REQUIRE(g_events == 1);
+    REQUIRE(g_destroyed == 1);
     REQUIRE(pl.is_mapped(at(B + 64)));
     REQUIRE(pl.drain_deferred() == 0);
   }
-  SECTION("the same pages inside a capture") {
-    REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live, /*capturing=*/true));
+  SECTION("another stream: it waits for the event recorded after the free") {
+    REQUIRE(pl.map_at(B, 2 * P, 0, "hipMallocAsync", &live, false, &S2));
+    REQUIRE(live == at(B));
+    REQUIRE(g_maps == 1);
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(g_waits.size() == 1);
+    REQUIRE(g_waits[0].first == S2);
+    REQUIRE(g_waits[0].second == fake_event(1));
+    REQUIRE(g_host_waits == 0);
+    REQUIRE(g_destroyed == 1);
+  }
+  SECTION("no stream, as for hipMalloc: the host waits for the free") {
+    REQUIRE(pl.map_at(B, 2 * P, 0, "hipMalloc", &live));
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(g_waits.empty());
+    REQUIRE(g_host_waits == 1);
+    REQUIRE(g_destroyed == 1);
+  }
+  SECTION("another stream inside a capture: falls back, still mapped") {
+    REQUIRE_FALSE(pl.map_at(B, 2 * P, 0, "hipMallocAsync", &live, /*capturing=*/true, &S2));
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(g_waits.empty());
+    REQUIRE(g_host_waits == 0);
+    REQUIRE(pl.fallbacks() == 1);
+    REQUIRE(g_destroyed == 0);
+    REQUIRE(pl.drain_deferred() == 1);
+    REQUIRE(g_destroyed == 1);
+  }
+  SECTION("the same stream inside a capture: taken back") {
+    REQUIRE(pl.map_at(B, 2 * P, 0, "hipMallocAsync", &live, /*capturing=*/true, &S1));
     REQUIRE(g_unmaps == 0);
     REQUIRE(pl.fallbacks() == 0);
+    REQUIRE(g_destroyed == 1);
   }
-  SECTION("the same pages on another device: unmapped, then mapped") {
-    REQUIRE(pl.map_at(B, P, 1, "hipMallocAsync", &live));
+  SECTION("a smaller request from the same page keeps the whole mapping") {
+    REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(live == at(B));
+    REQUIRE(g_maps == 1);
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(pl.unmap(at(B)));
+    REQUIRE(g_unmaps == 1);
+    REQUIRE(g_unmap_bytes == 2 * P);
+  }
+  SECTION("its stream destroyed: a new stream with the same handle waits") {
+    pl.stream_destroyed(S1);
+    REQUIRE(pl.map_at(B, 2 * P, 0, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(g_waits.size() == 1);
+    REQUIRE(g_unmaps == 0);
+  }
+  SECTION("another device: unmapped, then mapped") {
+    REQUIRE(pl.map_at(B, 2 * P, 1, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(g_unmaps == 1);
+    REQUIRE(g_maps == 2);
+    REQUIRE(g_destroyed == 1);
+  }
+  SECTION("more pages over it: unmapped, then mapped") {
+    REQUIRE(pl.map_at(B, 3 * P, 0, "hipMallocAsync", &live, false, &S1));
     REQUIRE(g_unmaps == 1);
     REQUIRE(g_maps == 2);
   }
-  SECTION("more pages over it: unmapped, then mapped") {
-    REQUIRE(pl.map_at(B, 2 * P, 0, "hipMalloc", &live));
+  SECTION("starting on a later page: unmapped, then mapped") {
+    REQUIRE(pl.map_at(B + P, P, 0, "hipMallocAsync", &live, false, &S1));
     REQUIRE(g_unmaps == 1);
     REQUIRE(g_maps == 2);
   }
   SECTION("more pages over it inside a capture: falls back, still mapped") {
-    REQUIRE_FALSE(pl.map_at(B, 2 * P, 0, "hipMalloc", &live, /*capturing=*/true));
+    REQUIRE_FALSE(pl.map_at(B, 3 * P, 0, "hipMalloc", &live, /*capturing=*/true));
     REQUIRE(g_unmaps == 0);
     REQUIRE(pl.fallbacks() == 1);
     REQUIRE(pl.drain_deferred() == 1);
+  }
+  SECTION("teardown unmaps it and releases its event") {
+    pl.release_all();
+    REQUIRE(g_unmaps == 1);
+    REQUIRE(g_destroyed == 1);
+  }
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedWithNothingToWaitFor) {
+  // A free made while a capture was open keeps no event: recording one would
+  // add it to the graph. Only the stream that freed it can take it back as it
+  // is. Anything else is an ordinary overlap: unmapped first, which waits for
+  // every stream, or a fallback while a capture is open.
+  reset_events();
+  hrr::VaPlacement pl;
+  pl.set_vmm_ops_for_test(event_ops());
+  pl.adopt_reservation_for_test(B, B + 16 * P, 1);
+  void* live = nullptr;
+  SECTION("hipFreeAsync inside a capture, then another stream") {
+    REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(pl.unmap_async(at(B), S1, /*capturing=*/true));
+    REQUIRE(g_events == 0);
+    REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live, false, &S2));
+    REQUIRE(g_unmaps == 1);
+    REQUIRE(g_maps == 2);
+    REQUIRE(g_waits.empty());
+  }
+  SECTION("hipFreeAsync inside a capture, then the same stream") {
+    REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(pl.unmap_async(at(B), S1, /*capturing=*/true));
+    REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(g_maps == 1);
+  }
+  SECTION("hipFree inside a capture, then hipMallocAsync") {
+    REQUIRE(pl.map_at(B, P, 0, "hipMalloc", &live));
+    REQUIRE(pl.unmap(at(B), /*defer=*/true));
+    REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(g_unmaps == 1);
+    REQUIRE(g_maps == 2);
+  }
+  SECTION("hipFree inside a capture, then hipMalloc inside one: falls back") {
+    REQUIRE(pl.map_at(B, P, 0, "hipMalloc", &live));
+    REQUIRE(pl.unmap(at(B), /*defer=*/true));
+    REQUIRE_FALSE(pl.map_at(B, P, 0, "hipMalloc", &live, /*capturing=*/true));
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(pl.fallbacks() == 1);
   }
 }
 
