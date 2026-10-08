@@ -32,10 +32,8 @@ be used on their own, such as `--roofline-device` and `--roofline-sort`.
 Frequently used options get a short alias: a single lowercase letter with a
 single dash, such as `-v`.
 
-User-facing options are named for what they enable, not what they disable: use
-`--roofline`, not `--no-roofline`. Debug and developer options may use disabling
-names since customers rarely touch them. `--no-native-tool` is such an exception;
-mark these as "(advanced)" in their help.
+Options are named for what they enable, not what they disable: use
+`--roofline`, not `--no-roofline`.
 
 ## Renaming and Deprecation
 
