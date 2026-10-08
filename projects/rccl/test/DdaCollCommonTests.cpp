@@ -82,4 +82,24 @@ TEST(DdaCollCommon, getGridAndBlockDims_HalfPrecision)
     EXPECT_LE(gridBlock.second.x, 512u);
 }
 
+// 64 GiB is the first size where count / elementsPerThread reaches 2^32; fabric scratch can be env-sized past it.
+TEST(DdaCollCommon, getGridAndBlockDims_PastUint32ThreadCount)
+{
+    constexpr size_t kBytes = size_t{1} << 36;
+    for (int typeSize : {1, 2, 4})
+    {
+        for (size_t maxBlocks : {size_t{1}, size_t{24}, size_t{256}})
+        {
+            for (size_t count : {kBytes / typeSize - 1, kBytes / typeSize, kBytes / typeSize + 4096})
+            {
+                SCOPED_TRACE(::testing::Message() << "typeSize=" << typeSize << " maxBlocks=" << maxBlocks
+                                                  << " count=" << count);
+                auto gridBlock = dda::common::getGridAndBlockDims(count, typeSize, maxBlocks);
+                EXPECT_EQ(gridBlock.first.x, maxBlocks);
+                EXPECT_EQ(gridBlock.second.x, 512u);
+            }
+        }
+    }
+}
+
 } // namespace RcclUnitTesting

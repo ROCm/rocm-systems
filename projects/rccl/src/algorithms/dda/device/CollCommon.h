@@ -162,8 +162,9 @@ static inline __device__ void allGather(T* const* __restrict__ ipcbuffs, T* __re
   }
 }
 
-inline uint32_t divRoundUp(size_t a, size_t b) {
-  uint32_t y = static_cast<uint32_t>((a + b - 1) / b);
+// Returns size_t: at >= 64 GiB the thread and warp counts exceed uint32, so narrow only after clamping.
+inline size_t divRoundUp(size_t a, size_t b) {
+  size_t y = (a + b - 1) / b;
   if (y == 0) {
     y = 1;
   }
@@ -202,14 +203,13 @@ inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, siz
   dim3 threads(0, 1, 1);
   dim3 blocks(0, 1, 1);
   if (ddaAlltoAllSingleBlockGrid(count, typeSize)) {
-    threads.x = divRoundUp(count, elementsPerWarp) * kThreadsPerWarp;
+    threads.x = static_cast<uint32_t>(divRoundUp(count, elementsPerWarp) * kThreadsPerWarp);
     blocks.x = 1;
   } else {
     auto warpsRequired = divRoundUp(count, elementsPerWarp);
     blocks.x = calcBlockCount(divRoundUp(count, elementsPerThread), kThreadsPerBlock, maxBlocks);
     auto warpsPerBlock = divRoundUp(warpsRequired, blocks.x);
-    auto threadsPerBlock = std::min<uint32_t>(kThreadsPerBlock, warpsPerBlock * kThreadsPerWarp);
-    threads.x = threadsPerBlock;
+    threads.x = static_cast<uint32_t>(std::min<size_t>(kThreadsPerBlock, warpsPerBlock * kThreadsPerWarp));
   }
 
   return std::make_pair(blocks, threads);
