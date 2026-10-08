@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include <algorithm>
 #include <cassert>
+#include <limits>
 #include <sstream>
 
 namespace rocjitsu::plugins::race_detector {
@@ -139,9 +140,11 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
 bool RaceDetector::hasPotentialLdsConflict(int addr, int nBytes,
                                            const std::vector<LdsChunkCounts> &counts, WaveId wave,
                                            MemoryOrderClass currentMemoryOrder) {
+  if (addr < 0 || nBytes <= 0 || nBytes > std::numeric_limits<int>::max() - addr)
+    return false;
   const int limit = static_cast<int>(counts.size());
   const int cStart = addr / kCountGranularity;
-  const int cEnd = (addr + nBytes + kCountGranularity - 1) / kCountGranularity;
+  const int cEnd = (addr + nBytes - 1) / kCountGranularity + 1;
   // Every overlapping event contributes to a touched chunk. A matching owner
   // proves that the full scan would skip it by the same-wave LDS ordering rule.
   for (int c = cStart; c < cEnd && c < limit; ++c) {
@@ -155,13 +158,15 @@ bool RaceDetector::hasPotentialLdsConflict(int addr, int nBytes,
 void RaceDetector::adjustByteCounts(const IntervalSet &ivs, std::vector<LdsChunkCounts> &counts,
                                     int delta, WaveId orderedWave) {
   for (const auto &iv : ivs) {
+    if (iv.start < 0)
+      continue;
     int cStart = iv.start / kCountGranularity;
-    int cEnd = (iv.end + kCountGranularity - 1) / kCountGranularity;
+    int cEnd = (iv.end - 1) / kCountGranularity + 1;
     if (cEnd > static_cast<int>(counts.size()))
       counts.resize(cEnd);
     for (int c = cStart; c < cEnd; ++c) {
       int byteStart = std::max(iv.start, c * kCountGranularity);
-      int byteEnd = std::min(iv.end, (c + 1) * kCountGranularity);
+      int nBytes = std::min(iv.end - byteStart, kCountGranularity - byteStart % kCountGranularity);
       auto &chunk = counts[c];
       if (delta > 0) {
         if (chunk.bytes == 0)
@@ -169,7 +174,7 @@ void RaceDetector::adjustByteCounts(const IntervalSet &ivs, std::vector<LdsChunk
         else if (chunk.orderedWave != orderedWave)
           chunk.orderedWave = WaveId{-1};
       }
-      chunk.bytes += delta * (byteEnd - byteStart);
+      chunk.bytes += delta * nBytes;
     }
   }
 }
