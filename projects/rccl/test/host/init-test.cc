@@ -1124,10 +1124,6 @@ TEST_F(InitMicrotest, GetEnvCtaPolicy_CalledTwice_AccumulatesAcrossCalls) {
   EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY | NCCL_CTA_POLICY_ZERO, ctaPolicyEnv);
 }
 
-// cpuset.h's parsers call these; os_fakes.cc only fakes ncclOsCpuCount.
-void ncclOsCpuZero(ncclAffinity& affinity) { CPU_ZERO(&affinity); }
-void ncclOsCpuSet(ncclAffinity& affinity, int cpu) { CPU_SET(cpu, &affinity); }
-
 namespace {
 // strtok() has one process-wide save pointer (NCCL 2.32.3, NVIDIA/nccl#2361): a parser calling it on another thread
 // moves this thread's position into the parser's string. Runs `parse` on a second thread while this thread is
