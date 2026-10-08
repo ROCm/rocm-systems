@@ -548,6 +548,9 @@ bool VirtualGPU::Queue::waitForEvent(uint id) {
   constexpr bool IbReuse = true;
   bool result = waitForFence<!IbReuse>(slotId);
   cmbBufIdRetired_ = id;
+  // The fence is signaled even when the KMD tore the queue down after a fault,
+  // so a successful wait doesn't mean the submission ran.
+  gpu_.dev().CheckExecutionState();
   return result;
 }
 
@@ -570,6 +573,8 @@ bool VirtualGPU::Queue::isDone(uint id) {
     return false;
   }
   cmbBufIdRetired_ = id;
+  // Only on a new retirement, so polling an already retired buffer stays free.
+  gpu_.dev().CheckExecutionState();
   return true;
 }
 
