@@ -178,7 +178,8 @@ public:
                                         uint64_t                       kernel_id,
                                         rocprofiler_dispatch_id_t      dispatch_id,
                                         rocprofiler_user_data_t*       user_data,
-                                        const context::correlation_id* corr_id);
+                                        const context::correlation_id* corr_id,
+                                        bool                           locally_enabled);
 
     void        post_kernel_call(inst_pkt_t&                      aql,
                                  const hsa::queue_info_session_t& session,

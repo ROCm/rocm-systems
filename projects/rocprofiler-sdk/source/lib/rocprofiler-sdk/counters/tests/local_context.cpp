@@ -102,8 +102,17 @@ invoke_queue_cb(context::context& ctx, std::atomic<int>* hits)
     rocprofiler_user_data_t                           user_data{};
     hsa::queue_info_session_t::external_corr_id_map_t extern_ids{};
 
-    auto ret = counters::queue_cb(
-        &ctx, info, fq, pkt, /*kernel_id=*/1, /*dispatch_id=*/1, &user_data, extern_ids, &corr);
+    // Resolve the pass decision exactly as counters::kernel_dispatch_phase_enter_hook does.
+    auto ret = counters::queue_cb(&ctx,
+                                  info,
+                                  fq,
+                                  pkt,
+                                  /*kernel_id=*/1,
+                                  /*dispatch_id=*/1,
+                                  &user_data,
+                                  extern_ids,
+                                  &corr,
+                                  kernel_replay::is_locally_enabled({.handle = ctx.context_idx}));
     ASSERT_TRUE(ret.packet);
 }
 

@@ -27,8 +27,9 @@
 // replay_local_enable_context / replay_local_disable_context callbacks. Those decisions are
 // recorded in a thread-local override that lives only for the loop and is never written to global
 // context state, so only the replaying thread's dispatches (this agent, serialized by the per-agent
-// replay lock) observe them. Service consumers query local_context_override() at dispatch time to
-// honor it.
+// replay lock) observe them. The dispatch hooks resolve it once per context with
+// is_locally_enabled() and pass the result to the service's dispatch handler, so the handlers never
+// read the override map themselves.
 //
 // Two thread-local scopes are involved, both managed by the SDK (never by the tool):
 //  - loop scope (scoped_local_context_control): the override map is live for the whole replay loop,
@@ -118,5 +119,12 @@ local_context_has_overrides();
 // false = forced inactive. Callers fall back to the global/default active check on nullopt.
 std::optional<bool>
 local_context_override(rocprofiler_context_id_t context_id);
+
+// Whether `context_id` takes part in the dispatch this thread is processing: false only while a
+// replay pass has locally stopped it, true otherwise, including outside a replay loop. A local
+// start cannot promote a globally stopped context, so callers still AND this with the context's
+// own enabled state.
+bool
+is_locally_enabled(rocprofiler_context_id_t context_id);
 }  // namespace kernel_replay
 }  // namespace rocprofiler

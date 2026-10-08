@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/dispatch_counting_service.h>
@@ -660,6 +661,76 @@ TEST(counters_per_agent, enter_hook_ignores_dispatches_on_other_agents)
         EXPECT_TRUE(is_serialized)
             << "a dispatch on the context's own agent must still be serialized";
     }
+
+    ASSERT_EQ(rocprofiler_stop_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+}
+
+// A kernel-replay pass that locally stops a context must reach the counters enter hook: the
+// context's dispatch callback is skipped for that pass while the dispatch stays serialized, a local
+// start in the same loop restores collection, and nothing outlives the loop.
+TEST(counters_per_agent, enter_hook_skips_a_context_locally_stopped_by_a_replay_pass)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto agents = get_two_agents();
+    if(!agents.first) GTEST_SKIP() << "no GPU agent available";
+
+    static std::atomic<int> dispatch_hits{0};
+
+    auto ctx = rocprofiler_context_id_t{0};
+    ASSERT_EQ(rocprofiler_create_context(&ctx), ROCPROFILER_STATUS_SUCCESS);
+    ASSERT_EQ(rocprofiler_configure_callback_dispatch_counting_service(
+                  ctx,
+                  [](rocprofiler_dispatch_counting_service_data_t,
+                     rocprofiler_counter_config_id_t*,
+                     rocprofiler_user_data_t*,
+                     void*) { dispatch_hits.fetch_add(1); },
+                  nullptr,
+                  noop_record_cb,
+                  nullptr),
+              ROCPROFILER_STATUS_SUCCESS);
+    ASSERT_EQ(rocprofiler_start_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+
+    auto queue       = hsa::PerAgentFakeQueue{*agents.first, {.handle = 501}};
+    auto packet      = hsa::rocprofiler_packet{};
+    auto corr_id     = context::correlation_id{};
+    corr_id.internal = 4343;
+
+    auto dispatch = [&](rocprofiler_dispatch_id_t dispatch_id) {
+        auto inst_pkt      = hsa::inst_pkt_t{};
+        bool is_serialized = false;
+        auto user_data     = rocprofiler_user_data_t{.value = corr_id.internal};
+        dispatch_hits.store(0);
+        counters::kernel_dispatch_phase_enter_hook(
+            queue, packet, 42, dispatch_id, &user_data, {}, &corr_id, inst_pkt, is_serialized);
+        return std::make_pair(dispatch_hits.load(), is_serialized);
+    };
+
+    EXPECT_EQ(dispatch(1).first, 1) << "outside a replay loop the context collects";
+
+    {
+        auto loop = kernel_replay::scoped_local_context_control{context::get_active_contexts()};
+
+        kernel_replay::set_toggles_armed(true);
+        ASSERT_EQ(kernel_replay::replay_local_disable_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+        kernel_replay::set_toggles_armed(false);
+
+        auto [hits, serialized] = dispatch(2);
+        EXPECT_EQ(hits, 0) << "a locally stopped context must not collect on this pass";
+        EXPECT_TRUE(serialized) << "a locally stopped context must keep the dispatch serialized";
+
+        kernel_replay::set_toggles_armed(true);
+        ASSERT_EQ(kernel_replay::replay_local_enable_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+        kernel_replay::set_toggles_armed(false);
+        EXPECT_EQ(dispatch(3).first, 1) << "a local start in the same loop restores collection";
+
+        kernel_replay::set_toggles_armed(true);
+        ASSERT_EQ(kernel_replay::replay_local_disable_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+        kernel_replay::set_toggles_armed(false);
+    }
+
+    EXPECT_EQ(dispatch(4).first, 1) << "a local stop must not outlive the replay loop";
 
     ASSERT_EQ(rocprofiler_stop_context(ctx), ROCPROFILER_STATUS_SUCCESS);
 }

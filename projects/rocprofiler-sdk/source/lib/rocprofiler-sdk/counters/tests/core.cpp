@@ -443,7 +443,8 @@ TEST(core, check_callbacks)
                                               expected.dispatch_id,
                                               &user_data,
                                               extern_ids,
-                                              &corr_id);
+                                              &corr_id,
+                                              /*locally_enabled=*/true);
 
             ASSERT_TRUE(ret_pkt.packet)
                 << fmt::format("Expected a packet to be generated for - {}", metric.name());
