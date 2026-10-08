@@ -8,9 +8,9 @@ the `gh-pages-rocjitsu branch` in the `ROCm/rocm-systems` repository.
 **Live website:** [RocJitsu Performance Dashboard](https://rocm.github.io/rocm-systems/rocjitsu-dashboard/)
 
 The consumer accepts **schema 2 only**, with explicitly declared ST/MT
-`configurations[].threadingMode` values. No real schema-2 dataset has been
-published yet; schema-1 data requires migration and is not inferred or adapted. The local fixtures are
-fictional test input, not performance measurements. See the
+`configurations[].threadingMode` values. Schema-1 data requires migration and is
+not inferred or adapted. The local fixtures are fictional test input, not
+performance measurements; passing fixture tests does not verify a live publication. See the
 [schema-2 data contract](docs/website-data-contract.md) for fields, normalization,
 branch-reference rules, local processing and future publisher acceptance. This
 package does not implement that producer or publisher.
@@ -32,7 +32,7 @@ Press **Ctrl+C** to stop the preview. The fixture build uses `.test-dist/` and t
 fixture preview always uses port 4174; the production preview uses port 4173.
 
 The production build writes application files to `dist/` without dummy data and loads
-JSON from the [`gh-pages-rocjitsu` branch](https://raw.githubusercontent.com/ROCm/rocm-systems/refs/heads/gh-pages-rocjitsu/rocjitsu-dashboard/data/).
+JSON from the [`gh-pages-rocjitsu` branch](https://github.com/ROCm/rocm-systems/tree/gh-pages-rocjitsu/rocjitsu-dashboard/data).
 The data directory must contain `metadata.json`, `index.json`, `test-catalogs/`, and `runs/`.
 Before any future data publication, validate the complete staged data directory:
 

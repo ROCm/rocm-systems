@@ -21,4 +21,20 @@ Phones use list/detail CSS states without unmounting the list or local filter st
 
 ## Verification boundary
 
-Focused tests: `tests/unit/branch-v10-{selection,presentation,view,actions}.test.js`. RED→GREEN commands and outputs are recorded by the parent artifact recorder. Server rendering and direct callbacks verify semantics, not browser geometry. The integrator must run both-theme responsive/keyboard/browser-history checks under its exclusive build/browser lease, including actual desktop panel bottom alignment and phone Back scroll restoration. No production schema-2 publication currently exists; fixtures stay in test-only inputs and the shell's conspicuously marked fixture mode.
+Focused unit and component checks:
+
+- [Selection state](../../../tests/unit/branch-selection-state.test.js)
+- [Run labels and result sorting](../../../tests/unit/branch-run-labels-and-result-sorting.test.js)
+- [Rendered view semantics](../../../tests/unit/branch-runs-view.test.js)
+- [Navigation actions](../../../tests/unit/branch-navigation-actions.test.js)
+- [Picker and difference sorting](../../../tests/unit/branch-picker-and-difference-sorting.test.js)
+- [Scroll restoration](../../../tests/unit/branch-comparison-scroll-restoration.test.js)
+
+See the [build and test guide](../../../docs/build-and-test.md) for maintained
+commands and build/browser ownership. Server rendering and direct callbacks
+verify semantics, not browser geometry. Browser checks must cover both themes,
+responsive and keyboard interactions, and history navigation under exclusive
+build/browser ownership, including desktop panel bottom alignment and phone
+Back scroll restoration. Fixtures stay in test-only inputs and the shell's
+conspicuously marked fixture mode; successful fixture checks do not verify a
+live schema-2 publication.

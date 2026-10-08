@@ -561,18 +561,35 @@ position in history.
 | Consumer | Population and order |
 | --- | --- |
 | Overview and long-term benchmark history | `data.runs`: develop only; commit chronology |
-| Recent Runs | All canonical develop attempts by completion, newest first, paginated in groups of 20 with numbered pages and icon-only first/previous/next/last controls; selected target/suite/mode filters affect coverage, not the run population |
-| Benchmark records | Canonical attempts newest by completion; default record page size 25 |
+| Recent Runs | All canonical develop attempts by completion, newest first, paginated in groups of 20 with numbered pages and icon-only first/previous/next/last controls; selected target/suite/mode filters affect coverage and duration, not the run population; rows show coverage, duration and status without baseline comparisons or deltas |
+| Benchmark result inspector | Searchable choices derived from canonical develop chart series in the selected timeframe and target/suite/mode scope, including failed, timed-out and unavailable results; no fixed-size record pages |
 | General Run Comparison | Selected attempts may come from `data.allRuns`, including branches |
 | Branch Runs | Published non-develop attempts, grouped by source branch |
 
-A recent-row baseline is the nearest earlier **commit position** with completed
-selected tests and a completed exact match for every selected candidate ID;
-latest attempt wins within that earlier commit. A benchmark-record baseline is
-the nearest earlier commit with a completed result for that exact
-configuration/workload. Neither means "the last file published." Arbitrary
-Run Comparison consumes the explicit candidate/reference pair; it does not
+Arbitrary Run Comparison consumes the explicit candidate/reference pair; it does not
 require equal machines/environments or decide that differences are harmless.
+
+### Retained selector APIs
+
+The current Recent Runs table uses `selectRecentRunAttempts` and
+`selectRecentRunSummaries`; the benchmark result inspector uses
+`selectBenchmarkSeries` and `benchmarkResultChoices`. Their implementations are
+in [selectors.js](../src/data/selectors.js) and
+[benchmarkExplorer.js](../src/components/benchmarks/benchmarkExplorer.js).
+Do not infer retired baseline columns or record pagination from the retained
+API behavior below.
+
+- `selectRecentRuns` retains baseline and duration-delta calculations, with a
+  default limit of 20 attempts ordered newest by completion. Its baseline is
+  the nearest earlier **commit position** with completed selected tests and a
+  completed exact match for every selected candidate ID; latest attempt wins
+  within that earlier commit.
+- `selectBenchmarkRecords` retains completion-ordered record pagination, with a
+  default page size of 25. Its baseline is the nearest earlier commit with a
+  completed result for that exact configuration/workload.
+
+Neither retained baseline means "the last file published." These APIs are
+separate from the mounted summary table and searchable result inspector.
 
 ## 9. Scope, zero, failure and comparison calculations
 
