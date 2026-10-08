@@ -256,7 +256,8 @@ def _leaf_case_status(case):
     """Map one executed gtest JSON leaf to PASSED / FAILED / SKIPPED / UNKNOWN.
 
     Returns None for leaves that were not run (DISABLED / SUPPRESSED). Those
-    must not inflate "test cases executed" or the unique-case counts.
+    are now emitted separately with status="DISABLED" by collect_gtest_case_details
+    so callers receive a complete picture of every case in the binary.
 
     A missing or empty ``result`` is not PASSED. Google Test writes COMPLETED
     or SKIPPED on a finished leaf. If the case was started (``status`` is RUN,
@@ -282,10 +283,35 @@ def _leaf_case_status(case):
     return str(result)
 
 
-def collect_gtest_case_details(obj):
-    """Leaf cases from a gtest JSON object (suite, case, full_name, status).
+def _gtest_case_duration_ms(case):
+    """Parse the per-case ``time`` field from the gtest JSON into milliseconds.
 
-    DISABLED / SUPPRESSED entries are omitted; they were not executed.
+    gtest writes the value as a string like "0.123s" or as a bare float.
+    Returns 0.0 when the field is absent or unparseable.
+    """
+    raw = case.get("time", "")
+    if not raw:
+        return 0.0
+    try:
+        return float(str(raw).rstrip("s")) * 1000.0
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def collect_gtest_case_details(obj):
+    """Leaf cases from a gtest JSON object.
+
+    Each entry contains:
+      suite        — test suite name
+      case         — test case name
+      full_name    — "Suite.Case"
+      status       — PASSED | FAILED | SKIPPED | DISABLED
+      duration_ms  — per-case wall time in milliseconds (0 if not reported)
+      message      — first failure assertion text for FAILED cases (else "")
+
+    Previously DISABLED / SUPPRESSED entries were silently omitted.  They are
+    now included with status="DISABLED" so the report can show a complete
+    count of every case present in the binary.
     """
     details = []
     if not isinstance(obj, dict):
@@ -299,13 +325,20 @@ def collect_gtest_case_details(obj):
                 continue
             status = _leaf_case_status(case)
             if status is None:
-                continue
+                # DISABLED / SUPPRESSED — include with explicit status rather
+                # than omitting, so the report can render a DISABLED table.
+                status = "DISABLED"
+
             name = case["name"]
+            fails = case.get("failures") or []
+            message = fails[0].get("failure", "") if isinstance(fails, list) and fails else ""
             details.append({
                 "suite": suite_name,
                 "case": name,
                 "full_name": f"{suite_name}.{name}" if suite_name else name,
                 "status": status,
+                "duration_ms": _gtest_case_duration_ms(case),
+                "message": message,
             })
     return details
 
