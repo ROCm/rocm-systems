@@ -3206,7 +3206,7 @@ hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int flags, 
  *
  * @param[in, out] leastPriority  Pointer in which a value corresponding to least priority
  * is returned.
- * param[in, out] greatestPriority  Pointer in which a value corresponding to
+ * @param[in, out] greatestPriority  Pointer in which a value corresponding to
  * greatest priority. Stream priority is disabled at this time.
  * @returns #hipSuccess
  *
