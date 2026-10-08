@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 """Validate a provisioned Rust toolchain and emit the CMake Cargo invocation."""
 

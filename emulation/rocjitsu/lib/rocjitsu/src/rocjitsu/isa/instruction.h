@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_ISA_INSTRUCTION_H_
 #define ROCJITSU_ISA_INSTRUCTION_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/result.h"
@@ -69,12 +70,18 @@ enum InstFlags : uint64_t {
   MEMORY_WAIT_PRODUCER = (1ULL << 16),
   /// @brief Instruction contains an embedded memory-completion wait field.
   EMBEDDED_MEMORY_WAIT = (1ULL << 17),
-  /// @brief This execution skipped a conditional memory-counter register result.
-  MEMORY_WAIT_RESULT_SUPPRESSED = (1ULL << 18),
   /// @brief Non-control-flow instruction that implicitly drains gfx1250 XCNT.
   XCNT_DRAIN = (1ULL << 19),
   /// @brief This ISA suppresses issue of this instruction while MODE.VSKIP is set.
-  VSKIP_AFFECTED = (1ULL << 20)
+  VSKIP_AFFECTED = (1ULL << 20),
+  /// @brief Listed operands cover all possible VGPR accesses, including partial writes.
+  DIRECT_REGISTER_ACCESSES = (1ULL << 21),
+  /// @brief Unconditional full-dword memory results described by the decoded destinations.
+  SIMPLE_MEMORY_RESULT = (1ULL << 22),
+  /// @brief Memory result lanes depend on controls beyond EXEC and issue masking.
+  CONDITIONAL_MEMORY_LANES = (1ULL << 24),
+  /// @brief Matrix execution accesses register lanes independently of EXEC.
+  MATRIX_REGISTER_ACCESSES = (1ULL << 25)
 };
 
 class BasicBlock;
@@ -211,8 +218,7 @@ public:
   /// EXEC and other execution state from the current context, and restore any
   /// temporary operand delegates before returning. Put persistent per-issue
   /// state in DynamicInstState; its presence excludes decoded reuse. Any
-  /// per-execution member flags must be assigned on every execution, as with
-  /// set_memory_wait_result_written().
+  /// per-execution member flags must be assigned on every execution.
   const ExecuteFn execute;
 
   /// @brief Access the attached dynamic state, or nullptr if none.
@@ -310,16 +316,6 @@ public:
   bool is_vskip_affected() const { return flags_ & VSKIP_AFFECTED; }
   /// @brief Whether this instruction can increment a memory completion counter.
   bool is_memory_wait_producer() const { return flags_ & MEMORY_WAIT_PRODUCER; }
-  /// @brief Record whether a conditional producer wrote its result this time.
-  /// @details Conditional executors set this on every execution, including reuse.
-  void set_memory_wait_result_written(bool written) {
-    if (written)
-      flags_ &= ~MEMORY_WAIT_RESULT_SUPPRESSED;
-    else
-      flags_ |= MEMORY_WAIT_RESULT_SUPPRESSED;
-  }
-  bool memory_wait_result_written() const { return !(flags_ & MEMORY_WAIT_RESULT_SUPPRESSED); }
-
   /// @brief Whether the instruction includes a memory completion wait field.
   bool has_embedded_memory_wait() const { return flags_ & EMBEDDED_MEMORY_WAIT; }
 
@@ -365,6 +361,9 @@ public:
   /// remain exclusive to implicit_uses(). The pointed-to Operands share this
   /// instruction's lifetime.
   virtual void implicit_use_operands(std::vector<const Operand *> & /*operands*/) const {}
+
+  /// @brief Query already-decoded modifiers only when a register may be pending.
+  virtual void amdgpu_register_modifiers(amdgpu::RegisterModifiers & /*modifiers*/) const {}
 
   /// @brief Add registers implicitly written by this instruction.
   virtual void implicit_defs(RegisterSet & /*defs*/) const {}
