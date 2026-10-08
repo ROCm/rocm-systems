@@ -915,10 +915,10 @@ inline double ldexp_f16(float value, int32_t adjustment) {
 inline uint16_t finish_arithmetic_f16(double value, uint32_t round_mode, uint32_t denorm_mode,
                                       bool fp16_ovfl, uint32_t omod = 0) {
   detail::ScopedFenv environment(0);
-  uint16_t result =
+  const uint16_t rounded =
       pseudo_scalar::round_f16_result(value, round_mode, omod, false, fp16_ovfl, false);
-  if ((denorm_mode & 2u) == 0 && (result & 0x7c00u) == 0)
-    result &= 0x8000u;
+  const auto result = static_cast<uint16_t>(output_denormal::flush_output<fp_format::F16>(
+      uint32_t{rounded}, output_denormal::Policy::make(denorm_mode)));
   return finalize_omod_f16(result, omod);
 }
 

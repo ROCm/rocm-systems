@@ -20,6 +20,7 @@
 /// AMD ISA specification.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "util/amdgpu_exp.h"
 #include "util/amdgpu_log.h"
@@ -92,10 +93,9 @@ inline float log_exp_f16_nearest(float x, uint32_t denorm_mode, bool fp16_ovfl, 
     value = std::exp2(std::clamp(static_cast<double>(x), -32.0, 32.0));
   }
   // F32 evaluation can land on a half midpoint and round in the wrong direction.
-  uint16_t result = pseudo_scalar::round_f16_result(value, 0, 0, false, fp16_ovfl, false);
-  if (!(denorm_mode & 2u) && (result & 0x7c00u) == 0)
-    result &= 0x8000u;
-  return util::f16_to_f32(result);
+  const uint16_t result = pseudo_scalar::round_f16_result(value, 0, 0, false, fp16_ovfl, false);
+  return util::f16_to_f32(static_cast<uint16_t>(output_denormal::flush_output<fp_format::F16>(
+      uint32_t{result}, output_denormal::Policy::make(denorm_mode))));
 }
 } // namespace detail
 
@@ -155,10 +155,9 @@ inline float map_f16(float source, uint32_t denorm_mode, bool fp16_ovfl, bool qu
   if (fp16_ovfl && (bits & 0x7fffffffu) == 0x7f800000u &&
       (std::bit_cast<uint32_t>(source) & 0x7fffffffu) < 0x7f800000u)
     return std::bit_cast<float>((bits & 0x80000000u) | 0x477fe000u);
-  uint16_t result = util::f32_to_f16_mode(value, fp16_ovfl);
-  if (!(denorm_mode & 2u) && (result & 0x7c00u) == 0)
-    result &= 0x8000u;
-  return util::f16_to_f32(result);
+  const uint16_t result = util::f32_to_f16_mode(value, fp16_ovfl);
+  return util::f16_to_f32(static_cast<uint16_t>(output_denormal::flush_output<fp_format::F16>(
+      uint32_t{result}, output_denormal::Policy::make(denorm_mode))));
 }
 
 template <HalfOperation Op>
