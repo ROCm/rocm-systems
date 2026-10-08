@@ -1179,6 +1179,10 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
   }
   printNetAttrs(&req->netAttr, "send connect");
   *done = 1;
+  if (proxyState->ncclNet == &ncclNetIb) {
+    ncclIbCtsTelemetrySetConn(resources->netSendComm, resources->channelId, resources->tpRank,
+                              resources->tpRemoteRank);
+  }
 
   if (resources->netDeviceHandle) {
     connection->netDeviceHandle = resources->netDeviceHandle;
@@ -1440,6 +1444,10 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   }
   printNetAttrs(&req->netAttr, "recv connect");
   *done = 1;
+  if (proxyState->ncclNet == &ncclNetIb) {
+    ncclIbCtsTelemetrySetConn(resources->netRecvComm, resources->channelId, resources->tpRank,
+                              resources->tpRemoteRank);
+  }
 
   if (resources->netDeviceHandle) {
     connection->netDeviceHandle = resources->netDeviceHandle;

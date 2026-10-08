@@ -1098,6 +1098,7 @@ exit:
   stage->state = ncclIbCommStateStart;
   return ret;
 fail:
+  if (comm) ncclIbCtsTelemetryFree(&comm->base);
   free(comm);
   goto exit;
 }
@@ -1784,6 +1785,7 @@ exit:
   lComm->stage = NULL;
   return ret;
 fail:
+  if (rComm) ncclIbCtsTelemetryFree(&rComm->base);
   free(rComm);
   goto exit;
 }
@@ -1795,6 +1797,7 @@ ncclResult_t ncclIbAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle
 ncclResult_t ncclIbCloseSend(void* sendComm) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
   if (comm) {
+    NCCLCHECK(ncclIbCtsTelemetryClose(&comm->base));
     NCCLCHECK(ncclSocketClose(&comm->base.sock));
 
     for (int q = 0; q < comm->base.nqps; q++) {
@@ -1827,6 +1830,7 @@ ncclResult_t ncclIbCloseSend(void* sendComm) {
 ncclResult_t ncclIbCloseRecv(void* recvComm) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
   if (comm) {
+    NCCLCHECK(ncclIbCtsTelemetryClose(&comm->base));
     NCCLCHECK(ncclSocketClose(&comm->base.sock));
 
     for (int q = 0; q < comm->base.nqps; q++) {

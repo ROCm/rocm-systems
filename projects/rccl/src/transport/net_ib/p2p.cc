@@ -331,6 +331,7 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
   NCCLCHECKGOTO(ncclIbStatsCheckFatalCount(&comm->base.stats, __func__), ret, isendFail);
 
   if (slots[0].idx != idx) {
+    if (comm->base.ctsTel) ncclIbCtsSendNotReady(&comm->base, comm->base.ctsTel, idx, slots[0].idx);
     *request = NULL;
     return ncclSuccess;
   }
@@ -339,6 +340,7 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
   for (int r = 1; r < nreqs; r++)
     while (slots[r].idx != idx);
   std::atomic_thread_fence(std::memory_order_seq_cst); // order the nreqsPtr load against tag/rkey/addr loads below
+  if (comm->base.ctsTel) ncclIbCtsSendSeen(comm->base.ctsTel, idx, slot);
   for (int r = 0; r < nreqs; r++) {
     if (reqs[r] != NULL || slots[r].tag != tag) continue;
 
@@ -398,6 +400,11 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
     TIME_START(0);
     ncclResult_t isendRet;
     NCCLCHECKGOTO(ncclIbMultiSend(comm, slot), isendRet, isendFail);
+    if (comm->base.ctsTel) {
+      uint64_t bytes = 0;
+      for (int i = 0; i < nreqs; i++) bytes += reqs[i]->send.size;
+      ncclIbCtsSendPosted(comm->base.ctsTel, slot, bytes);
+    }
 
     comm->base.fifoHead++;
     TIME_STOP(0);
@@ -474,9 +481,14 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
   //
   // slot == devIndex - When writing to CTS FIFO slot N, and this QP lives on device index N, it should send signalled.
   // This works out that each CTS posting QP gets drained
-  if (slot == ctsQp->devIndex || comm->base.resiliency) {
+  bool signaled = slot == ctsQp->devIndex || comm->base.resiliency;
+  if (signaled) {
     wr.send_flags |= IBV_SEND_SIGNALED;
     wr.wr_id = slot;
+  }
+  if (comm->base.ctsTel && ncclIbCtsRecvPost(comm->base.ctsTel, req->id, slot, signaled) && !signaled) {
+    wr.send_flags |= IBV_SEND_SIGNALED;
+    wr.wr_id = slot | NCCL_IB_CTS_TEL_WR_ID;
   }
 
   TRACE(NCCL_NET,
@@ -785,6 +797,13 @@ static inline ncclResult_t ncclIbRequestComplete(struct ncclIbRequest* r, int* d
   TRACE(NCCL_NET, "NET/IB: %s: %s request completed (req=%p, comm=%p, id=%ld, type=%s)", __func__,
         r->base->isSend ? "Send" : "Recv", r, r->base, r->id, ncclIbReqTypeStr[r->type]);
   *done = 1;
+  if (r->base->ctsTel && r->type == NCCL_NET_IB_REQ_RECV) {
+    int* recvSizes =
+      (r->nreqs > 1 || r->recv.cmplsRecords->sizes[0] > 0) ? r->recv.cmplsRecords->sizes : &(r->recv.aggSize);
+    uint64_t bytes = 0;
+    for (int i = 0; i < r->nreqs; i++) bytes += recvSizes[i];
+    ncclIbCtsRecvDone(r->base->ctsTel, r->id, bytes);
+  }
   if (sizes && r->type == NCCL_NET_IB_REQ_RECV) {
     TRACE(NCCL_NET, "NET/IB: %s: Recv request completed (req=%p, comm=%p, id=%ld, type=%s, nreqs=%d)", __func__, r,
           r->base, r->id, ncclIbReqTypeStr[r->type], r->nreqs);
@@ -813,6 +832,7 @@ static inline ncclResult_t ncclIbRequestComplete(struct ncclIbRequest* r, int* d
     struct ncclIbSendComm* sendComm = (struct ncclIbSendComm*)r->base;
     sendComm->sendReqsCnt[slot]--;
     if (sendComm->sendReqsCnt[slot] == 0) {
+      if (sendComm->base.ctsTel) ncclIbCtsSendDone(sendComm->base.ctsTel, slot);
       // Only after completing the last send of a multi-recv, allow accepting
       // following send requests on the same slot.
       memset(&sendComm->sendReqs[slot], 0, sizeof(sendComm->sendReqs[slot]));
@@ -849,6 +869,11 @@ static ncclResult_t ncclIbLogCompletionWithError(struct ncclIbNetCommBase* commB
 
 static inline ncclResult_t ncclIbCompletionEventProcess(struct ncclIbNetCommBase* commBase, struct ibv_wc* wc,
                                                         int devIndex) {
+  if (commBase->ctsTel && !commBase->isSend && wc->opcode == IBV_WC_RDMA_WRITE) {
+    ncclIbCtsRecvCtsCompletion(commBase->ctsTel, wc->wr_id);
+    if (wc->wr_id & NCCL_IB_CTS_TEL_WR_ID) return ncclSuccess;
+  }
+
   union ncclSocketAddress addr;
   ncclSocketGetAddr(&commBase->sock, &addr);
 
@@ -924,6 +949,7 @@ static inline ncclResult_t ncclIbCompletionEventProcess(struct ncclIbNetCommBase
       }
       TRACE(NCCL_NET, "NET/IB: %s: Got completion for a recv request (req=%p, comm=%p, id=%ld, devIndex=%d, qp_num=%u)",
             __func__, req, req->base, req->id, devIndex, wc->qp_num);
+      if (commBase->ctsTel) ncclIbCtsRecvData(commBase->ctsTel, req->id);
       struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)commBase;
       if (recvComm->prepostReceiveWorkRequests) {
         // Post another receive work request on the QP
@@ -1039,6 +1065,9 @@ ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
     }
   } while (totalWrDone > 0);
 
+  if (r->base->ctsTel && r->type == NCCL_NET_IB_REQ_RECV) {
+    ncclIbCtsRecvCheckStall(r->base, r->base->ctsTel, r, r->id);
+  }
   // If no (more) CQEs found on any device, return and come back later
   return ncclSuccess;
 fail:

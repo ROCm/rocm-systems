@@ -30,6 +30,8 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport);
 
 extern ncclNet_t ncclNetIb;
 extern ncclNet_t ncclNetSocket;
+// Labels an ncclNetIb send/recv comm for RCCL_IB_CTS_TELEMETRY output.
+void ncclIbCtsTelemetrySetConn(void* netComm, int channelId, int rank, int peerRank);
 
 extern ncclResult_t rcclNetP2pPolicy(void* handle, int isP2p);
 extern int64_t ncclParamDmaBufEnable();

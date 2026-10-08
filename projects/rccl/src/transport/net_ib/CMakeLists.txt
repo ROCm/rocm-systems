@@ -2,6 +2,7 @@
 set(NET_IB_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/common.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/connect.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/cts_telemetry.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/gdr.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/init.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/p2p.cc

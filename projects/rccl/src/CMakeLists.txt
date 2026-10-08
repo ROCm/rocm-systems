@@ -470,6 +470,8 @@ set(SRC_FILES
   transport/net_ib/common.h
   transport/net_ib/connect.cc
   transport/net_ib/connect.h
+  transport/net_ib/cts_telemetry.cc
+  transport/net_ib/cts_telemetry.h
   transport/net_ib/gdr.cc
   transport/net_ib/gin.cc
   transport/net_ib/gin.h

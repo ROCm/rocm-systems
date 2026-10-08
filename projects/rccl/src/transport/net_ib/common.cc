@@ -63,6 +63,7 @@ ncclResult_t ncclIbBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend)
   baseComm->ready = 0;
 
   NCCLCHECK(ncclIbResiliencyInit(baseComm, &baseComm->resiliency));
+  NCCLCHECK(ncclIbCtsTelemetryInit(baseComm));
   baseComm->recvMatchingScheme =
     ncclParamIbReceiverSideMatchingScheme() == -2 ? BY_INDEX : ncclParamIbReceiverSideMatchingScheme();
 

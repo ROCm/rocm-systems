@@ -33,6 +33,7 @@
 
 #include "ibvwrap.h"
 #include "mlx5/mlx5dvwrap.h"
+#include "cts_telemetry.h"
 
 #define MAXSUFFIXSIZE 16
 #define MAXNAMESIZE (64 + MAXSUFFIXSIZE)
@@ -364,6 +365,8 @@ struct alignas(32) ncclIbNetCommBase {
   // statistics about the comm
   struct ncclIbStats stats;
   struct ncclIbResiliency* resiliency;
+  // NULL unless RCCL_IB_CTS_TELEMETRY is set
+  struct ncclIbCtsTelemetry* ctsTel;
 };
 
 struct ncclIbNetCommDevBase* ncclIbGetNetCommDevBase(ncclIbNetCommBase* base, int devIndex);
