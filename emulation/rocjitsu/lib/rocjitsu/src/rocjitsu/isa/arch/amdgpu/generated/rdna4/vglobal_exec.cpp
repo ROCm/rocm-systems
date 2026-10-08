@@ -1272,7 +1272,7 @@ void GlobalLoadBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
-  d->num_elems = 32;
+  d->num_elems = amdgpu::kBlockDwordCount;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1285,7 +1285,7 @@ void GlobalLoadBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
 void GlobalStoreBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
-  d->num_elems = 32;
+  d->num_elems = amdgpu::kBlockDwordCount;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1293,16 +1293,19 @@ void GlobalStoreBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   d->set_block_dword_mask(wf.m0());
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 128);
-  for (uint32_t i = 0; i < 32; ++i) {
-    if (!(d->block_dword_mask & (uint32_t{1} << i)))
+  constexpr uint32_t block_bytes = amdgpu::kBlockDwordCount * sizeof(uint32_t);
+  d->store_data.resize(wf.wf_size() * block_bytes);
+  const amdgpu::RegisterAccess registers(wf);
+  for (uint32_t i = 0; i < amdgpu::kBlockDwordCount; ++i) {
+    if (!d->block_dword_enabled(i))
       continue;
-    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base + i, 1, d->lane_mask);
+    const auto source = registers.block_store_source_vgpr(data_base + i);
+    auto data = registers.read_vgpr_region(source, 1, d->lane_mask);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(d->lane_mask & (uint64_t{1} << lane)))
         continue;
       const uint32_t value = data.lane(0, lane);
-      std::memcpy(&d->store_data[lane * 128 + i * 4], &value, 4);
+      std::memcpy(&d->store_data[lane * block_bytes + i * sizeof(value)], &value, sizeof(value));
     }
   }
   set_data(std::move(d));
