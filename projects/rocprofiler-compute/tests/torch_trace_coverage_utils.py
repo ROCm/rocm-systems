@@ -2859,6 +2859,72 @@ def builder_autograd_functional_jvp(safe_var: str) -> Tuple[List[str], str, str]
     )
 
 
+def builder_autograd_functional_hvp_family(call_expr: str) -> StructuralBuilder:
+    """hvp/vhp(func, inputs, v) on a scalar quadratic."""
+
+    def build(safe_var: str) -> Tuple[List[str], str, str]:
+        return (
+            [
+                f"_x_{safe_var} = torch.randn(4, device=device)",
+                f"_v_{safe_var} = torch.randn(4, device=device)",
+            ],
+            call_expr,
+            f"lambda z: (z * z).sum(), _x_{safe_var}, _v_{safe_var}",
+        )
+
+    return build
+
+
+def builder_size_factory(call_expr: str) -> StructuralBuilder:
+    """Call empty/ones/rand/randn/zeros with a Size, not a Tensor."""
+
+    def build(_safe_var: str) -> Tuple[List[str], str, str]:
+        return [], call_expr, "(4, 4), device=device"
+
+    return build
+
+
+def builder_torch_eq(safe_var: str) -> Tuple[List[str], str, str]:
+    """torch.eq(input, other) on two CUDA tensors."""
+    return (
+        [f"_t_{safe_var} = torch.randn(4, 4, device=device)"],
+        "torch.eq",
+        f"_t_{safe_var}, _t_{safe_var}",
+    )
+
+
+def builder_pairwise_loss(call_expr: str) -> StructuralBuilder:
+    """mse_loss(input, target) with matching float tensors."""
+
+    def build(safe_var: str) -> Tuple[List[str], str, str]:
+        return (
+            [
+                f"_in_{safe_var} = torch.randn(4, 4, device=device)",
+                f"_tg_{safe_var} = torch.randn(4, 4, device=device)",
+            ],
+            call_expr,
+            f"_in_{safe_var}, _tg_{safe_var}",
+        )
+
+    return build
+
+
+def builder_class_index_loss(call_expr: str) -> StructuralBuilder:
+    """nll_loss / cross_entropy(input, target) with class indices."""
+
+    def build(safe_var: str) -> Tuple[List[str], str, str]:
+        return (
+            [
+                f"_in_{safe_var} = torch.randn(2, 4, device=device)",
+                f"_tg_{safe_var} = torch.randint(0, 4, (2,), device=device)",
+            ],
+            call_expr,
+            f"_in_{safe_var}, _tg_{safe_var}",
+        )
+
+    return build
+
+
 # Compile / JIT builders.
 
 
@@ -3054,6 +3120,36 @@ def build_structural_builder_registry() -> Dict[str, StructuralBuilder]:
         ),
         ("torch.autograd.functional.vjp", builder_autograd_functional_vjp),
         ("torch.autograd.functional.jvp", builder_autograd_functional_jvp),
+        (
+            "torch.autograd.functional.hvp",
+            builder_autograd_functional_hvp_family(
+                "torch.autograd.functional.hvp"
+            ),
+        ),
+        (
+            "torch.autograd.functional.vhp",
+            builder_autograd_functional_hvp_family(
+                "torch.autograd.functional.vhp"
+            ),
+        ),
+        ("torch.eq", builder_torch_eq),
+        (
+            "torch.nn.functional.mse_loss",
+            builder_pairwise_loss("torch.nn.functional.mse_loss"),
+        ),
+        (
+            "torch.nn.functional.nll_loss",
+            builder_class_index_loss("torch.nn.functional.nll_loss"),
+        ),
+        (
+            "torch.nn.functional.cross_entropy",
+            builder_class_index_loss("torch.nn.functional.cross_entropy"),
+        ),
+        ("torch.empty", builder_size_factory("torch.empty")),
+        ("torch.ones", builder_size_factory("torch.ones")),
+        ("torch.rand", builder_size_factory("torch.rand")),
+        ("torch.randn", builder_size_factory("torch.randn")),
+        ("torch.zeros", builder_size_factory("torch.zeros")),
         ("torch.compile", builder_torch_compile),
         ("torch.jit.trace", builder_torch_jit_trace),
         ("torch.jit.script", builder_torch_jit_script),
