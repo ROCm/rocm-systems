@@ -1,0 +1,61 @@
+<div class="report-app mem-chart-app">
+  <header class="report-toolbar mem-chart-toolbar">
+    <div class="mem-chart-title">
+      <div class="mem-chart-title-line">
+        <h1 id="mem-chart-heading">Memory Chart</h1>
+        <span id="mem-chart-normalization" class="mem-chart-normalization"></span>
+      </div>
+      <p><span id="mem-chart-selection" aria-live="polite"></span>
+        <span id="mem-chart-scope"></span></p>
+    </div>
+    <span class="report-hint">Scroll to zoom · drag to pan · double-click to fit</span>
+    <button type="button" id="mem-chart-fit-diagram"
+            class="report-btn report-btn-sm">Fit diagram</button>
+    <button type="button" id="mem-chart-export-png"
+            class="report-btn report-btn-sm">Export PNG</button>
+    <button type="button" id="mem-chart-theme-toggle"
+            class="report-btn report-btn-sm" aria-pressed="false">Dark mode</button>
+    <span id="mem-chart-export-status" class="mem-chart-export-status"
+          role="status" hidden></span>
+  </header>
+  <div class="report-body mem-chart-body">
+    <main class="mem-chart-main">
+      <section class="mem-chart-section" aria-label="Memory hierarchy diagram">
+        <div class="mem-chart-section-heading">
+          <h2>Memory hierarchy</h2>
+          <span id="mem-chart-view-label" aria-live="polite"></span>
+        </div>
+        <div id="mem-chart-diagram" class="mem-chart-diagram" tabindex="0"
+             aria-label="Memory diagram. Scroll to zoom, drag to pan, or use Fit diagram to show the complete chart."></div>
+        <div id="mem-chart-legend" class="mem-chart-legend"
+             aria-label="Diagram legend"></div>
+      </section>
+      <details id="mem-chart-metrics" class="mem-chart-section">
+        <summary>Metrics</summary>
+        <div id="mem-chart-tables" class="mem-chart-tables"></div>
+      </details>
+      <section id="mem-chart-guidance" class="mem-chart-section mem-chart-guidance"
+               aria-label="Memory bandwidth guidance" hidden></section>
+    </main>
+    <div class="report-panel-wrap mem-chart-panel-wrap">
+      <button type="button" id="mem-chart-sidebar-toggle"
+              class="report-btn report-btn-sm mem-chart-sidebar-toggle"
+              aria-expanded="true" aria-controls="mem-chart-kernel-panel"
+              aria-label="Collapse kernel sidebar" title="Collapse kernel sidebar">›</button>
+      <aside id="mem-chart-kernel-panel" class="report-panel mem-chart-kernel-panel"
+             aria-label="Kernels">
+        <div class="report-panel-title">
+          <span class="report-panel-title-label">Kernels
+            <span id="mem-chart-kernel-count" class="report-panel-count"></span>
+          </span>
+          <button type="button" id="mem-chart-show-all"
+                  class="report-btn report-btn-sm">Show all</button>
+        </div>
+        <p class="report-panel-help">Select a kernel to see its values. Select it
+          again or choose Show all for the aggregate.</p>
+        <ul id="mem-chart-kernel-list" class="report-panel-list"></ul>
+      </aside>
+    </div>
+  </div>
+  <noscript>This memory chart needs JavaScript to display its diagram and values.</noscript>
+</div>
