@@ -232,7 +232,11 @@ __device__ __forceinline__ void regCopy(const Peers& peers, uint32_t* epoch, con
     for (int s = 0; s < kRanks; s++) push(to[s], u, s == self ? x : sentinel());
   }
   // The fill is in memory once its write-through stores are acknowledged.
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+  __builtin_amdgcn_s_storecnt(0);
+#else
   __builtin_amdgcn_s_waitcnt(0);
+#endif
   __syncthreads();
 
   __shared__ v4u* dst[kRanks];
