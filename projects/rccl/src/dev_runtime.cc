@@ -517,10 +517,7 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   // TODO(ROCM-29810): Remove when the runtime preserves imported VMM location metadata.
-  // HIP reports an imported host VMM handle as device memory, so only the owner of a
-  // host segment reports host. Propagate that one owner's type; two or more host
-  // owners beside a device owner is a genuine mix. Scan maxSegments so a rank with
-  // fewer local segments fails with its peers instead of hanging on the barrier.
+  // Imported host VMM reads as device, so propagate the one host owner's type; scan maxSegments so all ranks agree.
   if (ncclParamSymReuseSysmemHandles()) {
     for (int segment = 0; segment < maxSegments; segment++) {
       int nHost = 0, nDevice = 0;
@@ -825,17 +822,11 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
   for (int segment = 0; segment < mem->numGinSegments; segment++) {
     CUmemLocationType cuMemLocType = (CUmemLocationType)mem->ginSegmentInfos[segment].memType;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-    // Host VMM is still CPU memory. NCCL_PTR_CUDA selects the DMA-BUF MR path
-    // (ibv_reg_dmabuf_mr); NCCL_PTR_HOST would pin with ibv_reg_mr and EFAULT.
-    int ptrType = NCCL_PTR_CUDA;
-    // ncclGinRegister only requires NCCL_PTR_DMABUF when multiSegment is true.
-    bool needDmabuf = mem->maxGlobalNumSegments > 1 || ncclSymIsHostSegment(cuMemLocType);
-    // Host VMM has no ibv_reg_mr fallback; fail closed before the GIN registration.
-    if (ncclSymIsHostSegment(cuMemLocType) && !ncclParamDmaBufEnable()) {
-      WARN("Host VMM GIN segment requires NCCL_DMABUF_ENABLE=1");
-      ret = ncclInvalidUsage;
-      goto fail;
-    }
+    int ptrType;
+    bool needDmabuf;
+    NCCLCHECKGOTO(rcclDevrGinSegmentRegType(ncclSymIsHostSegment(cuMemLocType), mem->maxGlobalNumSegments, &ptrType,
+                                            &needDmabuf),
+                  ret, fail);
 #else
     // CUDA HOST_NUMA is pin-able CPU pages (NCCL_PTR_HOST); device VMM is NCCL_PTR_CUDA.
     int ptrType = ncclSymIsHostSegment(cuMemLocType) ? NCCL_PTR_HOST : NCCL_PTR_CUDA;
