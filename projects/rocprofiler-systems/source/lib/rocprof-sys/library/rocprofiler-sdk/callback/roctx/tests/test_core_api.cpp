@@ -390,6 +390,20 @@ TEST_F(roctx_core_api_test, mark_enter_interns_name_and_writes_begin)
     EXPECT_EQ(m_user_data.value, k_enter_ts);
 }
 
+TEST_F(roctx_core_api_test, mark_enter_treats_null_message_as_empty_name)
+{
+    m_payload.args.roctxMarkA.message = nullptr;
+    const auto record = make_core_record(sdk::MARKER_CORE_API_ID_roctxMarkA, &m_payload);
+
+    EXPECT_CALL(*g_externals_mock, intern_string(Eq(std::string_view{})))
+        .WillOnce(Return(3));
+    expect_writes_allowed();
+    expect_timemory_push("");
+
+    on_roctx_core_enter<sdk, ext, roctx_api_category>(record, &m_user_data, nullptr,
+                                                      k_enter_ts);
+}
+
 TEST_F(roctx_core_api_test, mark_enter_interns_name_but_skips_begin_when_writes_denied)
 {
     m_payload.args.roctxMarkA.message = "mark_a";

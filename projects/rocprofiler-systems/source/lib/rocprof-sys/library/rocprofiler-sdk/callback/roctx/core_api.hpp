@@ -79,6 +79,13 @@ push_range_id_counter()
     return s_counter;
 }
 
+// The application may pass a null message (e.g. roctxMarkA(nullptr)).
+[[nodiscard]] constexpr const char*
+message_or_empty(const char* message) noexcept
+{
+    return message != nullptr ? message : "";
+}
+
 // Marker-write gate: the roctx trigger allows writes and no other trigger holds the
 // session paused.
 template <policies::domain_service::externals Externals, typename Trigger>
@@ -191,7 +198,7 @@ void
 enter_range_push(Trigger& trigger, const typename SdkBackend::marker_payload_t& data,
                  typename SdkBackend::timestamp_t timestamp)
 {
-    const char*         name = data.args.roctxRangePushA.message;
+    const char*         name = message_or_empty(data.args.roctxRangePushA.message);
     const std::uint64_t range_id =
         push_range_id_counter().fetch_sub(1, std::memory_order_relaxed);
 
@@ -206,7 +213,7 @@ template <policies::domain_service::backend   SdkBackend,
 void
 enter_mark(const Trigger& trigger, const typename SdkBackend::marker_payload_t& data)
 {
-    const char* name = data.args.roctxMarkA.message;
+    const char* name = message_or_empty(data.args.roctxMarkA.message);
     static_cast<void>(Externals::intern_string(name));
     if(should_write<Externals>(trigger))
     {
@@ -279,8 +286,8 @@ exit_mark(const Trigger& trigger, const typename SdkBackend::marker_payload_t& d
 {
     if(should_write<Externals>(trigger))
     {
-        end_region<SdkBackend, Externals, Category>(data.args.roctxMarkA.message, span,
-                                                    record);
+        end_region<SdkBackend, Externals, Category>(
+            message_or_empty(data.args.roctxMarkA.message), span, record);
     }
 }
 
@@ -293,7 +300,7 @@ void
 exit_range_start(Trigger& trigger, const typename SdkBackend::marker_payload_t& data,
                  typename SdkBackend::timestamp_t begin_timestamp)
 {
-    const char* name     = data.args.roctxRangeStartA.message;
+    const char* name     = message_or_empty(data.args.roctxRangeStartA.message);
     const auto  range_id = data.retval.roctx_range_id_t_retval;
 
     trigger.on_range_start(range_id, name);

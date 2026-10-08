@@ -280,7 +280,7 @@ concept externals =
     // callbacks make through them.
     && requires(const char* text, std::string_view name, std::uint64_t value,
                 Externals::rocm_marker_api_category marker_category,
-                typename Externals::string_id_t     string_id) {
+                Externals::string_id_t              string_id) {
            { Externals::is_roctx_enabled() } -> std::convertible_to<bool>;
            { Externals::get_roctx_pause_resume_enabled() } -> std::convertible_to<bool>;
            {

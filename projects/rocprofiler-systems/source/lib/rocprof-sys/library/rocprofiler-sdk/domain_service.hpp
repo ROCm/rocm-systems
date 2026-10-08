@@ -31,6 +31,7 @@
 
 namespace rocprofsys
 {
+
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 class domain_service
@@ -149,13 +150,12 @@ private:
     SdkBackend::context_id_t m_code_object_context{};
     SdkBackend::context_id_t m_roctx_context{};
 
-    // The always-on code_object domain is appended after the configured callback
-    // domains.
-    static constexpr std::size_t k_always_on_callback_domains = 1;
+    // The always-on callback domains appended after the configured ones: code_object plus
+    // the roctx core and control domains.
+    static constexpr std::size_t k_always_on_callback_domains = 3;
 
     // code_object is not in the registry, so it is never user-selectable: it always
-    // runs, on its own context, so kernel names resolve even while m_context is
-    // paused.
+    // runs, on its own context, so kernel names resolve even while m_context is paused.
     void configure_code_object_domain()
     {
         SdkBackend::create_context(&m_code_object_context);
