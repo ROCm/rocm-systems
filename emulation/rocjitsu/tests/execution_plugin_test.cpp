@@ -7870,6 +7870,7 @@ TEST(InstructionMetadataTest, StoresAndGdsExposeEveryCounterObligation) {
            std::pair{ROCJITSU_CODE_ARCH_CDNA2, cdna2::build_mubuf(cdna2::kBufferStoreDwordMubuf)},
            std::pair{ROCJITSU_CODE_ARCH_RDNA2,
                      rdna2::build_mubuf(rdna2::kBufferStoreDwordMubuf)}}) {
+    SCOPED_TRACE(arch);
     auto decoder = Decoder::create(arch);
     ASSERT_NE(decoder, nullptr);
     std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
@@ -7877,9 +7878,12 @@ TEST(InstructionMetadataTest, StoresAndGdsExposeEveryCounterObligation) {
     const auto *issue = store->amdgpu_memory_issue_info();
     ASSERT_NE(issue, nullptr);
     const auto obligations = issue->counter_obligations();
-    ASSERT_EQ(obligations.size(), 2u);
-    EXPECT_EQ(obligations[1].wait_counter_type(), WaitCounterType::EXPCNT);
-    EXPECT_EQ(obligations[1].completion_class(), MemoryCompletionClass::UNORDERED);
+    ASSERT_EQ(obligations.size(), 1u);
+    EXPECT_EQ(obligations[0].wait_counter_type(),
+              arch == ROCJITSU_CODE_ARCH_CDNA2 ? WaitCounterType::VMCNT : WaitCounterType::VSCNT);
+    EXPECT_EQ(obligations[0].completion_class(), arch == ROCJITSU_CODE_ARCH_CDNA2
+                                                     ? MemoryCompletionClass::VMEM
+                                                     : MemoryCompletionClass::UNORDERED);
   }
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
@@ -7895,18 +7899,29 @@ TEST(InstructionMetadataTest, StoresAndGdsExposeEveryCounterObligation) {
   ASSERT_EQ(lds_obligations.size(), 1u);
   EXPECT_EQ(lds_obligations[0].completion_class(), MemoryCompletionClass::LDS);
   ASSERT_EQ(gds_obligations.size(), 2u);
+  EXPECT_EQ(gds_obligations[0].wait_counter_type(), WaitCounterType::LGKMCNT);
   EXPECT_EQ(gds_obligations[0].completion_class(), MemoryCompletionClass::GDS);
   EXPECT_EQ(gds_obligations[1].wait_counter_type(), WaitCounterType::EXPCNT);
+  EXPECT_EQ(gds_obligations[1].completion_class(), MemoryCompletionClass::UNORDERED);
 
   const auto flat_store_words = cdna2::build_flat(cdna2::kFlatStoreDwordFlat,
                                                   {.seg = 0, .addr = 0, .data = 1, .saddr = 0x7F});
   std::unique_ptr<Instruction> flat_store(decode_valid(*decoder, flat_store_words.data()));
   ASSERT_NE(flat_store, nullptr);
   const auto flat_store_obligations = flat_store->amdgpu_memory_issue_info()->counter_obligations();
-  ASSERT_EQ(flat_store_obligations.size(), 3u);
+  ASSERT_EQ(flat_store_obligations.size(), 2u);
   EXPECT_EQ(flat_store_obligations[0].wait_counter_type(), WaitCounterType::VMCNT);
   EXPECT_EQ(flat_store_obligations[1].wait_counter_type(), WaitCounterType::LGKMCNT);
-  EXPECT_EQ(flat_store_obligations[2].wait_counter_type(), WaitCounterType::EXPCNT);
+
+  auto cdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(cdna4_decoder, nullptr);
+  const auto cdna4_gds_words = cdna4::build_ds(cdna4::kDsReadB32Ds, {.gds = 1});
+  std::unique_ptr<Instruction> cdna4_gds(decode_valid(*cdna4_decoder, cdna4_gds_words.data()));
+  ASSERT_NE(cdna4_gds, nullptr);
+  const auto cdna4_gds_obligations = cdna4_gds->amdgpu_memory_issue_info()->counter_obligations();
+  ASSERT_EQ(cdna4_gds_obligations.size(), 1u);
+  EXPECT_EQ(cdna4_gds_obligations[0].wait_counter_type(), WaitCounterType::LGKMCNT);
+  EXPECT_EQ(cdna4_gds_obligations[0].completion_class(), MemoryCompletionClass::GDS);
 }
 
 TEST(InstructionMetadataTest, Cdna5AsyncOperationsExposeDistinctCompletionDomains) {
