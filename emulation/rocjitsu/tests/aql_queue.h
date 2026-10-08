@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 
@@ -17,6 +18,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/hsa.h"
 RJ_DIAGNOSTIC_POP
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -25,6 +27,24 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu::test {
 
+/// @brief Construct ROCr's amd_aql_pm4_ib vendor envelope for queue tests.
+/// @details The embedded type-3 INDIRECT_BUFFER selects the supplied command
+/// buffer. The remaining ten dwords pad the envelope to one AQL ring slot.
+inline hsa_kernel_dispatch_packet_t make_pm4_ib_packet(uint64_t address, uint32_t dwords,
+                                                       uint64_t completion_signal = 0) {
+  std::array<uint32_t, 16> words{};
+  words[0] = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (uint32_t{amdgpu::kAmdAqlFormatPm4Ib} << 16);
+  words[1] = 0xc0023f00;
+  words[2] = uint32_t(address);
+  words[3] = uint32_t(address >> 32);
+  words[4] = (1u << 23) | dwords;
+  words[5] = 10;
+  hsa_kernel_dispatch_packet_t packet{};
+  std::memcpy(&packet, words.data(), sizeof(packet));
+  packet.completion_signal.handle = completion_signal;
+  return packet;
+}
+
 /// Simulates what ROCR's user-mode AqlQueue does: manages a ring buffer,
 /// writes AQL packets, and rings the doorbell. Does NOT load kernels --
 /// that's the runtime's job. Tests write kernel descriptors and code
@@ -32,7 +52,7 @@ namespace rocjitsu::test {
 class AqlQueue {
 public:
   static constexpr uint64_t DEFAULT_RING_ADDR = 0xF0000000ULL;
-  static constexpr uint32_t DEFAULT_RING_SIZE = 4096; // 64 packets
+  static constexpr uint32_t DEFAULT_RING_SIZE = 64 * amdgpu::kAqlPacketBytes;
   static constexpr uint64_t DEFAULT_READ_PTR_ADDR = 0xF0010000ULL;
   static constexpr uint64_t DEFAULT_WRITE_PTR_ADDR = 0xF0010008ULL;
   static constexpr uint64_t DEFAULT_DOORBELL_ADDR = 0xF0010010ULL;
@@ -51,12 +71,15 @@ public:
   /// @param queue_id Queue id. A fan-out queue is replicated onto every XCD and its
   /// shards are routed back by (queue_id, process_id), so a test creating more than
   /// one fan-out queue must give each a distinct id.
+  /// @param address_space GPUVM address space used by the queue.
+  /// @param process_id VMID associated with @p address_space.
   AqlQueue(amdgpu::GpuMemory *memory, amdgpu::CommandProcessor *cp,
            uint64_t ring_addr = DEFAULT_RING_ADDR, uint32_t ring_size = DEFAULT_RING_SIZE,
            uint64_t read_ptr_addr = DEFAULT_READ_PTR_ADDR,
            uint64_t write_ptr_addr = DEFAULT_WRITE_PTR_ADDR,
            uint64_t doorbell_addr = DEFAULT_DOORBELL_ADDR, bool xcd_fanout = false,
-           uint32_t queue_id = 1)
+           uint32_t queue_id = 1, amdgpu::AddressSpaceHandle address_space = {},
+           uint32_t process_id = 0)
       : memory_(memory), cp_(cp), ring_addr_(ring_addr), ring_size_(ring_size),
         read_ptr_addr_(read_ptr_addr), write_ptr_addr_(write_ptr_addr),
         doorbell_addr_(doorbell_addr) {
@@ -65,22 +88,25 @@ public:
     memory_->load_image(reinterpret_cast<const uint8_t *>(&zero), 8, write_ptr_addr_);
     memory_->load_image(reinterpret_cast<const uint8_t *>(&zero), 8, doorbell_addr_);
 
-    amdgpu::HwQueue hw{};
+    amdgpu::ComputeQueueConfig hw{};
+    hw.address_space = address_space;
+    hw.process_id = process_id;
     hw.queue_id = queue_id;
     hw.ring_base_va = ring_addr_;
     hw.ring_size = ring_size_;
     hw.read_ptr_va = read_ptr_addr_;
     hw.write_ptr_va = write_ptr_addr_;
     hw.doorbell_va = doorbell_addr_;
+    hw.doorbell_mode = amdgpu::QueueDoorbellMode::VmPolled;
     hw.xcd_fanout = xcd_fanout;
     cp_->register_queue(std::move(hw));
   }
 
   /// Write an AQL dispatch packet and ring the doorbell via GPU memory.
   void submit(const hsa_kernel_dispatch_packet_t &pkt) {
-    uint32_t slot = static_cast<uint32_t>(write_idx_ % (ring_size_ / 64));
-    uint64_t pkt_addr = ring_addr_ + slot * 64;
-    memory_->load_image(reinterpret_cast<const uint8_t *>(&pkt), 64, pkt_addr);
+    uint32_t slot = static_cast<uint32_t>(write_idx_ % (ring_size_ / amdgpu::kAqlPacketBytes));
+    uint64_t pkt_addr = ring_addr_ + slot * amdgpu::kAqlPacketBytes;
+    memory_->load_image(reinterpret_cast<const uint8_t *>(&pkt), amdgpu::kAqlPacketBytes, pkt_addr);
     ++write_idx_;
     memory_->load_image(reinterpret_cast<const uint8_t *>(&write_idx_), 8, write_ptr_addr_);
     memory_->load_image(reinterpret_cast<const uint8_t *>(&write_idx_), 8, doorbell_addr_);
@@ -155,11 +181,9 @@ public:
   /// to place on every XCD rather than split.
   /// @param completion_signal_va Signal to decrement when it retires, or 0.
   void pm4_ib(uint64_t completion_signal_va = 0) {
-    hsa_kernel_dispatch_packet_t pkt{};
-    pkt.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
-    pkt.setup = amdgpu::kAmdAqlFormatPm4Ib;
-    pkt.completion_signal.handle = completion_signal_va;
-    submit(pkt);
+    constexpr uint64_t address = 0xf0020000;
+    memory_->write32(address, 0x80000000); // One type-2 NOP.
+    submit(make_pm4_ib_packet(address, 1, completion_signal_va));
   }
 
   /// Build and submit an AMD extended kernel dispatch packet with cluster shape.
@@ -204,10 +228,11 @@ private:
 /// @returns A registered fan-out queue.
 inline std::unique_ptr<AqlQueue>
 make_fanout_queue(amdgpu::GpuMemory *memory, amdgpu::CommandProcessor *cp, uint32_t queue_id = 1,
-                  uint64_t ring_addr = AqlQueue::DEFAULT_RING_ADDR) {
+                  uint64_t ring_addr = AqlQueue::DEFAULT_RING_ADDR,
+                  amdgpu::AddressSpaceHandle address_space = {}, uint32_t process_id = 0) {
   return std::make_unique<AqlQueue>(memory, cp, ring_addr, AqlQueue::DEFAULT_RING_SIZE,
                                     ring_addr + 0x10000, ring_addr + 0x10008, ring_addr + 0x10010,
-                                    /*xcd_fanout=*/true, queue_id);
+                                    /*xcd_fanout=*/true, queue_id, address_space, process_id);
 }
 
 } // namespace rocjitsu::test

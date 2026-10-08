@@ -51,9 +51,13 @@ enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
 // Reject unsupported architectures before selecting any target policies.
 [[nodiscard]] inline util::FailureOr<WaitcntModel> waitcnt_model(rj_code_arch_t arch) {
   switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
   case ROCJITSU_CODE_ARCH_CDNA3:
   case ROCJITSU_CODE_ARCH_CDNA4:
     return WaitcntModel::LegacyNoVscnt;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
     return WaitcntModel::LegacyVscnt;
@@ -75,6 +79,12 @@ enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
 
 [[nodiscard]] inline bool supports_expert_scheduling(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+}
+
+// Counter retirement order does not imply ordered VGPR writeback on GFX12.
+[[nodiscard]] inline bool has_ordered_vmem_writeback(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
 }
 
 [[nodiscard]] inline WaitCounterKind smem_wait_counter(WaitcntModel model) {
@@ -116,9 +126,13 @@ struct LegacyWaitcnt {
 }
 
 [[nodiscard]] inline LegacyWaitcnt decode_legacy_waitcnt(uint32_t value, rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5
-             ? decode_gfx11_waitcnt(value)
-             : decode_legacy_waitcnt(value);
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+    return decode_gfx11_waitcnt(value);
+  auto fields = decode_legacy_waitcnt(value);
+  // GFX10 retains the GFX9 positions but widens LGKM to six bits.
+  if (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2)
+    fields.lgkmcnt = (value >> 8u) & 0x3fu;
+  return fields;
 }
 
 [[nodiscard]] inline util::FailureOr<std::string>
@@ -232,6 +246,37 @@ struct WaitcheckTarget {
 
   [[nodiscard]] static util::FailureOr<uint32_t> maximum_dependency_wait(rj_code_arch_t arch,
                                                                          WaitCounterKind counter);
+  [[nodiscard]] static constexpr uint32_t maximum_dependency_wait(WaitcntModel model,
+                                                                  WaitCounterKind counter) {
+    // LLVM caps a dependency score at the largest non-sentinel wait value.
+    // The all-ones encoding means "no wait", so the largest useful value is
+    // one less than the hardware counter mask.
+    switch (counter) {
+    case WaitCounterKind::Load:
+    case WaitCounterKind::Store:
+      return 62;
+    case WaitCounterKind::Ds:
+      return model == WaitcntModel::LegacyNoVscnt ? 14 : 62;
+    case WaitCounterKind::Km:
+      return 30;
+    case WaitCounterKind::Sample:
+      return 62;
+    case WaitCounterKind::Bvh:
+    case WaitCounterKind::Exp:
+    case WaitCounterKind::VmVsrc:
+      return 6;
+    case WaitCounterKind::X:
+    case WaitCounterKind::Async:
+    case WaitCounterKind::Tensor:
+      return 62;
+    case WaitCounterKind::VaVdst:
+      return 14;
+    case WaitCounterKind::Depctr:
+    case WaitCounterKind::Count:
+      return std::numeric_limits<uint32_t>::max();
+    }
+    return std::numeric_limits<uint32_t>::max();
+  }
 
   [[nodiscard]] static util::FailureOr<std::optional<uint32_t>>
   counter_no_wait_value(rj_code_arch_t arch, WaitCounterKind counter);
@@ -250,6 +295,8 @@ struct WaitcheckTarget {
   normalized_hardware_event_kind(WaitCounterKind counter, WaitEventKind kind, WaitcntModel model);
 
   [[nodiscard]] static bool is_xcnt_vmem_kind(WaitEventKind kind);
+
+  [[nodiscard]] static bool is_xcnt_drain(const Instruction &inst);
 
   [[nodiscard]] static uint32_t depctr_field(uint32_t value, uint32_t shift, uint32_t width);
 
@@ -287,6 +334,11 @@ struct WaitcheckTarget {
 
   [[nodiscard]] static util::FailureOr<std::vector<ClassifiedEvent>>
   classify_events(const Instruction &inst, rj_code_arch_t arch);
+
+  // Runtime issuers retain the output storage between instructions.
+  [[nodiscard]] static util::Result classify_events_into(const Instruction &inst,
+                                                         rj_code_arch_t arch,
+                                                         std::vector<ClassifiedEvent> &events);
 };
 
 } // namespace waitcheck_detail

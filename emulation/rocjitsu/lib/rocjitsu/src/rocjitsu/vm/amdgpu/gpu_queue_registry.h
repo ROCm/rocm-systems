@@ -8,6 +8,7 @@
 
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
+#include "rocjitsu/vm/amdgpu/queue_doorbell.h"
 
 #include <condition_variable>
 #include <cstddef>
@@ -123,11 +124,17 @@ struct QueueRingLayout {
 
 /// @brief Doorbell mapping used by host-polled and explicitly notified queues.
 struct QueueDoorbellBinding {
+  QueueDoorbellMode mode = QueueDoorbellMode::Explicit;
   uint32_t offset = 0;
   void *host_base = nullptr;
   uint64_t address = 0;
   uint64_t last_value = 0;
-  bool host_accessible = false;
+};
+
+/// @brief Guest-visible metadata contract carried by a queue descriptor.
+enum class QueueAbi : uint8_t {
+  Generic,
+  KfdAql,
 };
 
 /// @brief Queue state accepted by a reconfiguration operation.
@@ -193,10 +200,11 @@ struct QueueRegistrationRequest {
   QueueDoorbellBinding doorbell;
   std::shared_ptr<QueueBindingFactory> binding_factory;
   /// @brief Optional initial hardware read cursor.
-  /// @details MES supplies the cursor captured from the SDMA MQD; legacy/KFD
-  /// queues leave it unset so the binding loads the already-published cursor
-  /// from the consumer pointer address on first service.
+  /// @details MES supplies the cursor captured from the SDMA MQD; fresh KFD SDMA
+  /// and native PM4 queues supply zero. Bindings that leave it unset load the
+  /// already-published cursor from the consumer pointer address on first service.
   std::optional<uint64_t> initial_consumer_cursor = std::nullopt;
+  QueueAbi abi = QueueAbi::Generic;
   uint64_t queue_descriptor_address = 0;
   uint64_t exception_status_address = 0;
   uint32_t exception_event_id = 0;
@@ -204,6 +212,7 @@ struct QueueRegistrationRequest {
   bool xcd_fanout = false;
   QueueType type = QueueType::Compute;
   QueuePacketFormat packet_format = QueuePacketFormat::Aql;
+  uint32_t scheduling_percentage = 100;
 };
 
 /// @brief Shared queue registry used by legacy and PCI/VFIO frontends.

@@ -9,6 +9,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/amd_ext_aql_packet.h"
 RJ_DIAGNOSTIC_POP
 
+#include <array>
 #include <bit>
 #include <cstring>
 #include <limits>
@@ -55,12 +56,14 @@ AqlPacketProcessResult AqlPacketProcessor::admit(const Request &request,
                                                  AqlPreparedPacket prepared) {
   if (!callbacks_.admit)
     return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::MissingAdmissionCallback);
+  const bool blocks_following = prepared.blocks_following;
   const AqlAdmissionResult admission = callbacks_.admit(request, std::move(prepared));
   switch (admission.status) {
   case AqlAdmissionStatus::Complete:
     return {.packet = {.status = PacketProcessStatus::Complete,
                        .retirement = PacketRetirement::Retire,
-                       .retirement_bytes = kAqlPacketBytes}};
+                       .retirement_bytes = kAqlPacketBytes},
+            .blocks_following = blocks_following};
   case AqlAdmissionStatus::Blocked:
     return blocked(AqlBlockedReason::AdmissionUnavailable);
   case AqlAdmissionStatus::Faulted:
@@ -93,10 +96,10 @@ AqlPacketProcessor::process_barrier(const Request &request,
     const AtomicLoadResult loaded = callbacks_.load_signal(request, *address);
     if (loaded.outcome == VmAccessOutcome::Unavailable)
       return blocked(AqlBlockedReason::MemoryUnavailable);
-    if (loaded.outcome == VmAccessOutcome::Faulted)
-      return terminal(PacketProcessStatus::Faulted, AqlPacketDiagnostic::None);
     if (loaded.outcome == VmAccessOutcome::Malformed)
       return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::None);
+    if (loaded.outcome != VmAccessOutcome::Complete)
+      return terminal(PacketProcessStatus::Faulted, AqlPacketDiagnostic::None);
 
     const int64_t dependency_value = std::bit_cast<int64_t>(loaded.value);
     if (dependency_value > 0) {
@@ -137,10 +140,10 @@ AqlPacketProcessor::process_vendor(const Request &request,
       const AtomicLoadResult loaded = callbacks_.load_signal(request, *address);
       if (loaded.outcome == VmAccessOutcome::Unavailable)
         return blocked(AqlBlockedReason::MemoryUnavailable);
-      if (loaded.outcome == VmAccessOutcome::Faulted)
-        return terminal(PacketProcessStatus::Faulted, AqlPacketDiagnostic::None);
       if (loaded.outcome == VmAccessOutcome::Malformed)
         return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::None);
+      if (loaded.outcome != VmAccessOutcome::Complete)
+        return terminal(PacketProcessStatus::Faulted, AqlPacketDiagnostic::None);
 
       const int64_t signal_value = std::bit_cast<int64_t>(loaded.value);
       const int64_t masked_value = signal_value & barrier.mask;
@@ -172,6 +175,8 @@ AqlPacketProcessor::process_vendor(const Request &request,
   }
 
   if (extension.amd_format == kHsaAmdPacketTypeExtKernelDispatch) {
+    if (!request.kernel_admission_enabled)
+      return blocked(AqlBlockedReason::AdmissionUnavailable);
     if (extension.dep_signal.handle != 0) {
       if (!callbacks_.load_signal)
         return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::MissingSignalReader);
@@ -181,10 +186,10 @@ AqlPacketProcessor::process_vendor(const Request &request,
       const AtomicLoadResult loaded = callbacks_.load_signal(request, *address);
       if (loaded.outcome == VmAccessOutcome::Unavailable)
         return blocked(AqlBlockedReason::MemoryUnavailable);
-      if (loaded.outcome == VmAccessOutcome::Faulted)
-        return terminal(PacketProcessStatus::Faulted, AqlPacketDiagnostic::None);
       if (loaded.outcome == VmAccessOutcome::Malformed)
         return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::None);
+      if (loaded.outcome != VmAccessOutcome::Complete)
+        return terminal(PacketProcessStatus::Faulted, AqlPacketDiagnostic::None);
       if (std::bit_cast<int64_t>(loaded.value) != 0)
         return blocked(AqlBlockedReason::DependencyUnsatisfied);
     }
@@ -224,10 +229,19 @@ AqlPacketProcessor::process_vendor(const Request &request,
   }
 
   if (extension.amd_format == kAmdAqlFormatPm4Ib) {
-    return admit(request, {.kind = AqlPreparedPacketKind::NonKernel,
+    // ROCr's amd_aql_pm4_ib: four-word INDIRECT_BUFFER, ten remaining words,
+    // eight reserved words, then the completion signal. Copy before ring retirement.
+    std::array<uint32_t, 16> words{};
+    std::memcpy(words.data(), &packet, sizeof(packet));
+    if (words[1] != 0xc0023f00 || (words[2] & 3) || words[3] > 0xffff ||
+        (words[4] & ~0x000fffffu) != (1u << 23) || !(words[4] & 0xfffff) || words[5] != 10)
+      return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::MalformedPm4Ib);
+    return admit(request, {.kind = AqlPreparedPacketKind::Pm4Ib,
+                           .pm4_ib_address = uint64_t{words[2]} | (uint64_t{words[3]} << 32),
+                           .pm4_ib_dwords = words[4] & 0xfffff,
                            .completion_signal = extension.completion_signal.handle,
                            .barrier_bit = ((packet.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
-                           .blocks_following = false});
+                           .blocks_following = true});
   }
 
   return terminal(PacketProcessStatus::Unsupported, AqlPacketDiagnostic::UnsupportedVendorFormat);
@@ -242,6 +256,8 @@ AqlPacketProcessResult AqlPacketProcessor::process(Request request) {
   case HSA_PACKET_TYPE_INVALID:
     return blocked(AqlBlockedReason::HeaderInvalid);
   case HSA_PACKET_TYPE_KERNEL_DISPATCH:
+    if (!request.kernel_admission_enabled)
+      return blocked(AqlBlockedReason::AdmissionUnavailable);
     return admit(request,
                  {.kind = AqlPreparedPacketKind::KernelDispatch, .kernel_dispatch = packet});
   case HSA_PACKET_TYPE_BARRIER_AND:

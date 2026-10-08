@@ -1,0 +1,78 @@
+{
+  "id": "rocjitsu-core-v1",
+  "tests": [
+    {
+      "id": "triton-gemm-f16-1024",
+      "suite": "Triton",
+      "name": "GEMM FP16 1024³",
+      "problem": {
+        "operation": "GEMM",
+        "dataType": "fp16",
+        "m": 1024,
+        "n": 1024,
+        "k": 1024
+      }
+    },
+    {
+      "id": "triton-gemm-bf16-4096",
+      "suite": "Triton",
+      "name": "GEMM BF16 4096³",
+      "problem": {
+        "operation": "GEMM",
+        "dataType": "bf16",
+        "m": 4096,
+        "n": 4096,
+        "k": 4096
+      }
+    },
+    {
+      "id": "triton-softmax-f32-4096",
+      "suite": "Triton",
+      "name": "Softmax FP32 4096×4096",
+      "problem": {
+        "operation": "Softmax",
+        "dataType": "fp32",
+        "rows": 4096,
+        "columns": 4096
+      }
+    },
+    {
+      "id": "triton-layernorm-bf16-8192",
+      "suite": "Triton",
+      "name": "LayerNorm BF16 8192",
+      "problem": {
+        "operation": "LayerNorm",
+        "dataType": "bf16",
+        "elements": 8192
+      }
+    },
+    {
+      "id": "tensile-gemm-f16-8192",
+      "suite": "TensileLite",
+      "name": "GEMM FP16 8192×8192×4096",
+      "problem": {
+        "operation": "GEMM",
+        "dataType": "fp16",
+        "m": 8192,
+        "n": 8192,
+        "k": 4096
+      }
+    }
+  ],
+  "targets": {
+    "gfx1250": [
+      "triton-gemm-f16-1024",
+      "triton-gemm-bf16-4096",
+      "triton-softmax-f32-4096",
+      "triton-layernorm-bf16-8192",
+      "tensile-gemm-f16-8192"
+    ],
+    "gfx950": [
+      "triton-gemm-f16-1024",
+      "triton-gemm-bf16-4096",
+      "triton-softmax-f32-4096",
+      "triton-layernorm-bf16-8192",
+      "tensile-gemm-f16-8192"
+    ]
+  }
+}

@@ -677,6 +677,9 @@ class VPermlane16SwapB32Vop1 : public Vop1 {
 public:
   VPermlane16SwapB32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.valu_permutation = amdgpu::ValuPermutation::Swap16;
+  }
   Operand vdst;
   Operand src0;
 };
@@ -1000,6 +1003,9 @@ class VPermlane64B32Vop1 : public Vop1 {
 public:
   VPermlane64B32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.valu_permutation = amdgpu::ValuPermutation::Perm64;
+  }
   Operand vdst;
   Operand src0;
 };

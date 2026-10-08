@@ -3,15 +3,18 @@
 
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 
-#include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "util/log.h"
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cassert>
+#include <deque>
 #include <format>
 #include <limits>
+#include <mutex>
+#include <shared_mutex>
 #include <type_traits>
 #include <utility>
 
@@ -19,11 +22,65 @@ namespace rocjitsu::amdgpu {
 
 class GpuVmAccessState {
 public:
-  mutable std::shared_mutex mutex;
-  bool valid = true;
+  class FaultReporter {
+  public:
+    explicit FaultReporter(std::function<void(uint64_t, VmAccessKind)> callback)
+        : callback_(std::move(callback)) {}
+
+    explicit operator bool() const { return static_cast<bool>(callback_); }
+
+    void operator()(uint64_t address, VmAccessKind access) const {
+      // A const std::function can invoke a mutable target. Every generation
+      // shares this guard along with the target; a generation's shared access
+      // lease does not exclude other readers or pinned generations. Recursive
+      // acquisition allows same-thread callback reentry through independent
+      // access states; it does not make a state's revocation lease recursive.
+      std::lock_guard lock(mutex_);
+      callback_(address, access);
+    }
+
+  private:
+    const std::function<void(uint64_t, VmAccessKind)> callback_;
+    mutable std::recursive_mutex mutex_;
+  };
+
+  GpuVmAccessState(std::shared_ptr<AddressSpaceTranslator> translator = {},
+                   std::shared_ptr<PhysicalMemoryAccess> physical_memory = {},
+                   std::shared_ptr<const FaultReporter> fault_reporter = {})
+      : translator(std::move(translator)), physical_memory(std::move(physical_memory)),
+        fault_reporter(std::move(fault_reporter)) {}
+
+  // One shared lifetime per snapshot; copying a snapshot must not copy the
+  // fault callback or separately contend on each backing object's reference count.
+  const std::shared_ptr<AddressSpaceTranslator> translator;
+  const std::shared_ptr<PhysicalMemoryAccess> physical_memory;
+  // Generations share the callable too: pinning must not copy its target while
+  // a fault callback is running under another generation's shared lease.
+  const std::shared_ptr<const FaultReporter> fault_reporter;
+  mutable util::DistributedSharedMutex mutex;
+  // Written under mutex; atomic so copied policy hits can check retirement without a lease.
+  std::atomic<bool> valid{true};
+};
+
+class GpuVmBindingState {
+public:
+  std::atomic<uint32_t> references{0};
 };
 
 namespace {
+
+std::atomic<uint64_t> next_vm_instance_id{1};
+
+struct VmAccessBatchSnapshot {
+  const GpuVm *vm = nullptr;
+  uint64_t vm_instance = 0;
+  AddressSpaceHandle handle;
+  GpuVmAccess access;
+  bool routed = false;
+};
+
+thread_local uint32_t vm_access_batch_depth = 0;
+thread_local std::deque<VmAccessBatchSnapshot> vm_access_batch_snapshots;
 
 constexpr uint64_t kGfx12PteValid = uint64_t{1} << 0;
 constexpr uint64_t kGfx12PteSystem = uint64_t{1} << 1;
@@ -79,117 +136,6 @@ bool valid_gart_config(const GartConfig &config, Gfx12VmConfig vm_config) {
   return last_pte_offset <= physical_mask - page_table_address;
 }
 
-constexpr VmAccessOutcome vm_access_outcome(CopyOutcome outcome) {
-  switch (outcome) {
-  case CopyOutcome::Complete:
-    return VmAccessOutcome::Complete;
-  case CopyOutcome::Unavailable:
-    return VmAccessOutcome::Unavailable;
-  case CopyOutcome::Faulted:
-    return VmAccessOutcome::Faulted;
-  }
-  return VmAccessOutcome::Malformed;
-}
-
-class LegacyGpuMemoryTranslator final : public AddressSpaceTranslator {
-public:
-  LegacyGpuMemoryTranslator(GpuMemory &memory, uint32_t vmid) : memory_(&memory), vmid_(vmid) {}
-
-  VmTranslationResult translate(uint64_t address, std::size_t size,
-                                VmAccessKind access) const override {
-    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address)
-      return {.outcome = VmAccessOutcome::Malformed, .translation = {}};
-    constexpr uint64_t kPageBytes = 4096;
-    return {
-        .outcome = VmAccessOutcome::Complete,
-        .translation =
-            {
-                .domain = VmMemoryDomain::Compatibility,
-                .address = address,
-                .contiguous_bytes = kPageBytes - (address & (kPageBytes - 1)),
-                .mtype = memory_->pte_mtype(address, vmid_),
-                .permissions =
-                    {
-                        .readable = access == VmAccessKind::Read || access == VmAccessKind::Atomic,
-                        .writable = access == VmAccessKind::Write || access == VmAccessKind::Atomic,
-                        .executable = access == VmAccessKind::Execute,
-                    },
-            },
-    };
-  }
-
-  VmTranslationResult probe_translation(uint64_t address, std::size_t size,
-                                        VmAccessKind access) const override {
-    const bool accessible = access == VmAccessKind::Execute ? memory_->is_fetchable(address, vmid_)
-                            : access == VmAccessKind::Write || access == VmAccessKind::Atomic
-                                ? memory_->has_writable_host_backing(address, vmid_, size)
-                                : memory_->has_host_backing(address, vmid_, size);
-    if (!accessible)
-      return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
-    return translate(address, size, access);
-  }
-
-private:
-  GpuMemory *memory_;
-  uint32_t vmid_;
-};
-
-class LegacyGpuMemoryBacking final : public PhysicalMemoryAccess {
-public:
-  LegacyGpuMemoryBacking(GpuMemory &memory, uint32_t vmid) : memory_(&memory), vmid_(vmid) {}
-
-  VmAccessOutcome read(VmMemoryDomain domain, uint64_t address,
-                       std::span<std::byte> bytes) override {
-    if (domain != VmMemoryDomain::Compatibility)
-      return VmAccessOutcome::Malformed;
-    return vm_access_outcome(memory_->read_block_strict(
-        address, std::span<uint8_t>(reinterpret_cast<uint8_t *>(bytes.data()), bytes.size()),
-        vmid_));
-  }
-
-  VmAccessOutcome write(VmMemoryDomain domain, uint64_t address,
-                        std::span<const std::byte> bytes) override {
-    if (domain != VmMemoryDomain::Compatibility)
-      return VmAccessOutcome::Malformed;
-    return vm_access_outcome(memory_->write_block_strict(
-        address,
-        std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()),
-        vmid_));
-  }
-
-  AtomicLoadResult atomic_load(VmMemoryDomain domain, uint64_t address, uint32_t width) override {
-    if (domain != VmMemoryDomain::Compatibility)
-      return {.outcome = VmAccessOutcome::Malformed, .value = 0};
-    uint64_t value = 0;
-    const VmAccessOutcome outcome =
-        vm_access_outcome(memory_->atomic_load(address, width, value, vmid_));
-    return {.outcome = outcome, .value = outcome == VmAccessOutcome::Complete ? value : 0};
-  }
-
-  VmAccessOutcome atomic_store(VmMemoryDomain domain, uint64_t address, uint32_t width,
-                               uint64_t value) override {
-    if (domain != VmMemoryDomain::Compatibility)
-      return VmAccessOutcome::Malformed;
-    return vm_access_outcome(memory_->atomic_store_strict(address, width, value, vmid_));
-  }
-
-  AtomicCompareExchangeResult compare_exchange(VmMemoryDomain domain, uint64_t address,
-                                               uint32_t width, uint64_t expected,
-                                               uint64_t desired) override {
-    if (domain != VmMemoryDomain::Compatibility)
-      return {.outcome = VmAccessOutcome::Malformed};
-    uint64_t observed = 0;
-    bool exchanged = false;
-    const CopyOutcome outcome = memory_->atomic_compare_exchange_strict(
-        address, width, expected, desired, observed, exchanged, vmid_);
-    return {.outcome = vm_access_outcome(outcome), .observed = observed, .exchanged = exchanged};
-  }
-
-private:
-  GpuMemory *memory_;
-  uint32_t vmid_;
-};
-
 Mtype gfx12_mtype(uint64_t entry) {
   switch ((entry >> 54) & 0x3) {
   case 1:
@@ -204,37 +150,147 @@ Mtype gfx12_mtype(uint64_t entry) {
 }
 
 template <typename Span>
+VmTransferStep transfer_translated_span(const AddressSpaceTranslator &translator,
+                                        PhysicalMemoryAccess &memory, uint64_t address, Span bytes,
+                                        VmAccessKind access) {
+  const VmTranslationResult translated =
+      access == VmAccessKind::Execute ? translator.probe_translation(address, bytes.size(), access)
+                                      : translator.translate(address, bytes.size(), access);
+  if (!translated)
+    return {.outcome = translated.outcome, .report_translation_fault = true};
+  if (translated.translation.contiguous_bytes == 0)
+    return {.outcome = VmAccessOutcome::Malformed};
+  const auto chunk = static_cast<std::size_t>(
+      std::min<uint64_t>(bytes.size(), translated.translation.contiguous_bytes));
+  const VmAccessOutcome outcome = [&] {
+    if constexpr (std::is_const_v<typename Span::element_type>)
+      return memory.write(translated.translation.domain, translated.translation.address,
+                          bytes.first(chunk));
+    else
+      return memory.read_for_access(translated.translation.domain, translated.translation.address,
+                                    bytes.first(chunk), access);
+  }();
+  return {.completed_bytes = outcome == VmAccessOutcome::Complete ? chunk : 0, .outcome = outcome};
+}
+
+template <typename Span>
 VmAccessOutcome access_translated(const AddressSpaceTranslator &translator,
                                   PhysicalMemoryAccess &memory, uint64_t address, Span bytes,
-                                  std::size_t &completed_bytes, VmAccessKind access) {
+                                  std::size_t &completed_bytes, VmAccessKind access,
+                                  const GpuVmAccessState::FaultReporter *fault_reporter = nullptr) {
   if (completed_bytes > bytes.size())
     return VmAccessOutcome::Malformed;
   while (completed_bytes < bytes.size()) {
-    const VmTranslationResult translated =
-        translator.translate(address + completed_bytes, bytes.size() - completed_bytes, access);
-    if (!translated)
-      return translated.outcome;
-    if (translated.translation.contiguous_bytes == 0)
-      return VmAccessOutcome::Malformed;
-    const std::size_t chunk = static_cast<std::size_t>(std::min<uint64_t>(
-        bytes.size() - completed_bytes, translated.translation.contiguous_bytes));
-    const VmAccessOutcome outcome = [&]() {
-      if constexpr (std::is_const_v<typename Span::element_type>) {
-        return memory.write(translated.translation.domain, translated.translation.address,
-                            bytes.subspan(completed_bytes, chunk));
-      } else {
-        return memory.read(translated.translation.domain, translated.translation.address,
-                           bytes.subspan(completed_bytes, chunk));
-      }
+    const VmTransferStep step = [&] {
+      if constexpr (std::is_const_v<typename Span::element_type>)
+        return translator.write_step(memory, address + completed_bytes,
+                                     bytes.subspan(completed_bytes));
+      else
+        return translator.read_step(memory, address + completed_bytes,
+                                    bytes.subspan(completed_bytes), access);
     }();
-    if (outcome != VmAccessOutcome::Complete)
-      return outcome;
-    completed_bytes += chunk;
+    if (step.outcome != VmAccessOutcome::Complete) {
+      if (step.report_translation_fault && fault_reporter && *fault_reporter &&
+          step.outcome != VmAccessOutcome::Unavailable && step.outcome != VmAccessOutcome::Revoked)
+        (*fault_reporter)(address + completed_bytes, access);
+      return step.outcome;
+    }
+    if (step.completed_bytes == 0 || step.completed_bytes > bytes.size() - completed_bytes)
+      return VmAccessOutcome::Malformed;
+    completed_bytes += step.completed_bytes;
   }
   return VmAccessOutcome::Complete;
 }
 
 } // namespace
+
+VmTransferStep AddressSpaceTranslator::read_step(PhysicalMemoryAccess &memory, uint64_t address,
+                                                 std::span<std::byte> bytes,
+                                                 VmAccessKind access) const {
+  return transfer_translated_span(*this, memory, address, bytes, access);
+}
+
+VmTransferStep AddressSpaceTranslator::write_step(PhysicalMemoryAccess &memory, uint64_t address,
+                                                  std::span<const std::byte> bytes) const {
+  return transfer_translated_span(*this, memory, address, bytes, VmAccessKind::Write);
+}
+
+GpuVmAccessBatchGuard::GpuVmAccessBatchGuard() {
+  if (vm_access_batch_depth++ == 0) {
+    vm_access_batch_snapshots.clear();
+  }
+}
+
+GpuVmAccessBatchGuard::~GpuVmAccessBatchGuard() {
+  assert(vm_access_batch_depth != 0);
+  if (--vm_access_batch_depth != 0)
+    return;
+  vm_access_batch_snapshots.clear();
+}
+
+bool GpuVmAccessBatchGuard::active() { return vm_access_batch_depth != 0; }
+
+const GpuVmAccess *GpuVmAccessBatchGuard::find_snapshot(const GpuVm *vm,
+                                                        AddressSpaceHandle handle) {
+  if (vm_access_batch_depth == 0)
+    return nullptr;
+  const auto entry = std::ranges::find_if(vm_access_batch_snapshots, [&](const auto &candidate) {
+    return candidate.vm == vm && candidate.vm_instance == vm->instance_id_ &&
+           candidate.handle == handle && candidate.access.is_current();
+  });
+  return entry != vm_access_batch_snapshots.end() ? &entry->access : nullptr;
+}
+
+const GpuVmAccess *GpuVmAccessBatchGuard::find_snapshot_vmid(const GpuVm *vm, uint32_t vmid) {
+  if (vm_access_batch_depth == 0)
+    return nullptr;
+  const auto entry = std::ranges::find_if(vm_access_batch_snapshots, [&](const auto &candidate) {
+    return candidate.vm == vm && candidate.vm_instance == vm->instance_id_ && candidate.routed &&
+           candidate.access.info().vmid == vmid && candidate.access.is_current();
+  });
+  return entry != vm_access_batch_snapshots.end() ? &entry->access : nullptr;
+}
+
+void GpuVmAccessBatchGuard::retain_snapshot(const GpuVm *vm, AddressSpaceHandle handle,
+                                            const GpuVmAccess &access, bool routed) {
+  if (vm_access_batch_depth != 0)
+    vm_access_batch_snapshots.push_back({vm, vm->instance_id_, handle, access, routed});
+}
+
+GpuVmBindingLease::GpuVmBindingLease(GpuVmBindingLease &&other) noexcept
+    : state_(std::move(other.state_)), handle_(other.handle_), info_(other.info_) {
+  other.handle_ = {};
+  other.info_ = {};
+}
+
+GpuVmBindingLease &GpuVmBindingLease::operator=(GpuVmBindingLease &&other) noexcept {
+  if (this == &other)
+    return *this;
+  release();
+  state_ = std::move(other.state_);
+  handle_ = other.handle_;
+  info_ = other.info_;
+  other.handle_ = {};
+  other.info_ = {};
+  return *this;
+}
+
+GpuVmBindingLease::~GpuVmBindingLease() { release(); }
+
+void GpuVmBindingLease::release() noexcept {
+  if (state_ == nullptr)
+    return;
+  const uint32_t previous = state_->references.fetch_sub(1, std::memory_order_acq_rel);
+  assert(previous != 0);
+  (void)previous;
+  state_.reset();
+  handle_ = {};
+  info_ = {};
+}
+
+GpuVm::GpuVm(Gfx12VmConfig gfx12_config)
+    : instance_id_(next_vm_instance_id.fetch_add(1, std::memory_order_relaxed)),
+      gfx12_config_(gfx12_config) {}
 
 VmAccessOutcome read_translated(const AddressSpaceTranslator &translator,
                                 PhysicalMemoryAccess &memory, uint64_t address,
@@ -251,37 +307,207 @@ VmAccessOutcome write_translated(const AddressSpaceTranslator &translator,
                            VmAccessKind::Write);
 }
 
+VmTranslationResult IdentityAddressSpaceTranslator::translate(uint64_t address, std::size_t size,
+                                                              VmAccessKind access) const {
+  (void)access;
+  if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address)
+    return {.outcome = VmAccessOutcome::Malformed, .translation = {}};
+
+  const uint64_t page_offset = address & (kPageSize - 1);
+  return {.outcome = VmAccessOutcome::Complete,
+          .translation = {.domain = VmMemoryDomain::Local,
+                          .address = address,
+                          .contiguous_bytes = kPageSize - page_offset,
+                          .mtype = Mtype::RW,
+                          .permissions = {.readable = true, .writable = true, .executable = true}}};
+}
+
+bool GpuVmAccess::is_current() const {
+  return access_state_ != nullptr && access_state_->valid.load(std::memory_order_acquire);
+}
+
 VmTranslationResult GpuVmAccess::translate(uint64_t address, std::size_t size,
                                            VmAccessKind access) const {
   if (access_state_ == nullptr)
     return {.outcome = VmAccessOutcome::Unavailable, .translation = {}};
   std::shared_lock state_lock(access_state_->mutex);
-  if (!access_state_->valid || translator_ == nullptr)
-    return {.outcome = VmAccessOutcome::Unavailable, .translation = {}};
-  return translator_->translate(address, size, access);
+  VmTranslationResult translated = !access_state_->valid
+                                       ? VmTranslationResult{
+                                             .outcome = VmAccessOutcome::Revoked,
+                                             .translation = {},
+                                         }
+                                   : access_state_->translator == nullptr
+                                       ? VmTranslationResult{
+                                             .outcome = VmAccessOutcome::Unavailable,
+                                             .translation = {},
+                                         }
+                                       : access_state_->translator->translate(address, size, access);
+  report_terminal_fault(address, access, translated.outcome);
+  return translated;
+}
+
+bool GpuVmAccess::try_write_private_dwords(std::span<const VmRamDwordStore> stores,
+                                           Mtype instruction_mtype, Mtype expected_mtype) const {
+  if (stores.size() < 2 || stores.size() > VmRamDwordStore::kMaxBatch || !access_state_)
+    return false;
+  const uint64_t page = stores.front().address / IdentityAddressSpaceTranslator::kPageSize;
+  for (const auto &[address, source] : stores)
+    if (!source || (address & 3) || address / IdentityAddressSpaceTranslator::kPageSize != page)
+      return false;
+  std::shared_lock state_lock(access_state_->mutex);
+  return access_state_->valid && access_state_->translator && access_state_->physical_memory &&
+         access_state_->translator->try_write_private_dwords(
+             *access_state_->physical_memory, stores, instruction_mtype, expected_mtype);
+}
+
+bool GpuVmAccess::try_read_uncached_ram(uint64_t address, std::span<std::byte> bytes) const {
+  if (!access_state_)
+    return false;
+  std::shared_lock state_lock(access_state_->mutex);
+  return access_state_->valid && access_state_->translator && access_state_->physical_memory &&
+         access_state_->translator->try_read_uncached_ram(*access_state_->physical_memory, address,
+                                                          bytes);
+}
+
+bool GpuVmAccess::revoked() const {
+  return access_state_ != nullptr && !access_state_->valid.load(std::memory_order_acquire);
+}
+
+bool GpuVmAccess::try_read_contiguous(uint64_t address, std::span<std::byte> bytes) const {
+  if (!access_state_)
+    return false;
+  std::shared_lock state_lock(access_state_->mutex);
+  if (!access_state_->valid || !access_state_->translator || !access_state_->physical_memory)
+    return false;
+  // Bypass the fault-reporting translate() wrapper for this optional span.
+  const auto translation =
+      access_state_->translator->translate(address, bytes.size(), VmAccessKind::Read);
+  return translation && translation.translation.contiguous_bytes >= bytes.size() &&
+         access_state_->physical_memory->try_read_contiguous(
+             translation.translation.domain, translation.translation.address, bytes);
+}
+
+bool GpuVmAccess::try_write_contiguous(uint64_t address, std::span<const std::byte> bytes) const {
+  if (!access_state_)
+    return false;
+  std::shared_lock state_lock(access_state_->mutex);
+  if (!access_state_->valid || !access_state_->translator || !access_state_->physical_memory)
+    return false;
+  // Bypass the fault-reporting translate() wrapper for this optional span.
+  const auto translation =
+      access_state_->translator->translate(address, bytes.size(), VmAccessKind::Write);
+  return translation && translation.translation.contiguous_bytes >= bytes.size() &&
+         access_state_->physical_memory->try_write_contiguous(
+             translation.translation.domain, translation.translation.address, bytes);
+}
+
+std::optional<Mtype> GpuVmAccess::query_mtype(uint64_t address) const {
+  if (access_state_ == nullptr)
+    return std::nullopt;
+  std::shared_lock state_lock(access_state_->mutex);
+  if (!access_state_->valid || access_state_->translator == nullptr)
+    return std::nullopt;
+  return access_state_->translator->query_mtype(address);
+}
+
+std::optional<Mtype> GpuVmAccess::query_mtype(uint64_t address, VmMtypeCache &cache) const {
+  if (access_state_ == nullptr)
+    return std::nullopt;
+  // A hit uses copied policy only. Retirement invalidates the snapshot's state
+  // before releasing any frontend storage; misses remain under its lease.
+  // Compare generation ownership without acquiring another strong reference.
+  const bool same_generation = !cache.access_state_.owner_before(access_state_) &&
+                               !access_state_.owner_before(cache.access_state_);
+  auto &snapshot = cache.snapshots_[(address >> 12) % cache.snapshots_.size()];
+  if (same_generation && access_state_->valid.load(std::memory_order_acquire) &&
+      snapshot.unchanged(address))
+    return snapshot.mtype;
+  std::shared_lock state_lock(access_state_->mutex);
+  if (!access_state_->valid || access_state_->translator == nullptr)
+    return std::nullopt;
+  if (!same_generation) {
+    cache.snapshots_ = {};
+    cache.access_state_ = access_state_;
+  }
+  snapshot = access_state_->translator->snapshot_mtype(address);
+  return snapshot.mtype;
+}
+
+bool GpuVmAccess::cached_private_uc_hint(uint64_t address, const VmMtypeCache &cache) const {
+  if (!access_state_)
+    return false;
+  const bool same_generation = !cache.access_state_.owner_before(access_state_) &&
+                               !access_state_.owner_before(cache.access_state_);
+  const auto &snapshot = cache.snapshots_[(address >> 12) % cache.snapshots_.size()];
+  return same_generation && access_state_->valid.load(std::memory_order_acquire) &&
+         snapshot.may_batch_private_uc && snapshot.unchanged(address);
+}
+
+std::optional<Mtype> GpuVmAccess::cached_private_ram_mtype(uint64_t address,
+                                                           const VmMtypeCache &cache) const {
+  if (!access_state_)
+    return std::nullopt;
+  const bool same_generation = !cache.access_state_.owner_before(access_state_) &&
+                               !access_state_.owner_before(cache.access_state_);
+  const auto &snapshot = cache.snapshots_[(address >> 12) % cache.snapshots_.size()];
+  if (same_generation && access_state_->valid.load(std::memory_order_acquire) &&
+      snapshot.may_batch_private_ram && snapshot.unchanged(address))
+    return snapshot.mtype;
+  return std::nullopt;
+}
+
+VmAccessOutcome GpuVmAccess::query_access(uint64_t address, std::size_t size,
+                                          VmAccessKind access) const {
+  return probe_impl(address, size, access, false);
 }
 
 VmAccessOutcome GpuVmAccess::probe(uint64_t address, std::size_t size, VmAccessKind access) const {
+  return probe_impl(address, size, access, true);
+}
+
+VmAccessOutcome GpuVmAccess::probe_impl(uint64_t address, std::size_t size, VmAccessKind access,
+                                        bool report_fault) const {
   if (access_state_ == nullptr)
     return VmAccessOutcome::Unavailable;
   std::shared_lock state_lock(access_state_->mutex);
-  if (!access_state_->valid || translator_ == nullptr)
+  if (!access_state_->valid)
+    return VmAccessOutcome::Revoked;
+  if (access_state_->translator == nullptr)
     return VmAccessOutcome::Unavailable;
-  if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address)
+  if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address) {
+    if (report_fault)
+      report_terminal_fault(address, access, VmAccessOutcome::Malformed);
     return VmAccessOutcome::Malformed;
+  }
 
   std::size_t completed_bytes = 0;
   while (completed_bytes < size) {
-    const VmTranslationResult translated =
-        translator_->probe_translation(address + completed_bytes, size - completed_bytes, access);
-    if (!translated)
+    const uint64_t current_address = address + completed_bytes;
+    const VmTranslationResult translated = access_state_->translator->probe_translation(
+        current_address, size - completed_bytes, access);
+    if (!translated) {
+      if (report_fault)
+        report_terminal_fault(current_address, access, translated.outcome);
       return translated.outcome;
-    if (translated.translation.contiguous_bytes == 0)
+    }
+    if (translated.translation.contiguous_bytes == 0) {
+      if (report_fault)
+        report_terminal_fault(current_address, access, VmAccessOutcome::Malformed);
       return VmAccessOutcome::Malformed;
+    }
     completed_bytes += static_cast<std::size_t>(
         std::min<uint64_t>(size - completed_bytes, translated.translation.contiguous_bytes));
   }
   return VmAccessOutcome::Complete;
+}
+
+void GpuVmAccess::report_terminal_fault(uint64_t address, VmAccessKind access,
+                                        VmAccessOutcome outcome) const {
+  if (access_state_ && access_state_->fault_reporter && *access_state_->fault_reporter &&
+      outcome != VmAccessOutcome::Complete && outcome != VmAccessOutcome::Unavailable &&
+      outcome != VmAccessOutcome::Revoked) {
+    (*access_state_->fault_reporter)(address, access);
+  }
 }
 
 VmAccessOutcome GpuVmAccess::read(uint64_t address, std::span<std::byte> bytes,
@@ -297,10 +523,12 @@ VmAccessOutcome GpuVmAccess::read(uint64_t address, std::span<std::byte> bytes,
   if (access_state_ == nullptr)
     return VmAccessOutcome::Unavailable;
   std::shared_lock state_lock(access_state_->mutex);
-  if (!access_state_->valid || translator_ == nullptr || physical_memory_ == nullptr)
+  if (!access_state_->valid)
+    return VmAccessOutcome::Revoked;
+  if (access_state_->translator == nullptr || access_state_->physical_memory == nullptr)
     return VmAccessOutcome::Unavailable;
-  return access_translated(*translator_, *physical_memory_, address, bytes, completed_bytes,
-                           access);
+  return access_translated(*access_state_->translator, *access_state_->physical_memory, address,
+                           bytes, completed_bytes, access, access_state_->fault_reporter.get());
 }
 
 VmAccessOutcome GpuVmAccess::write(uint64_t address, std::span<const std::byte> bytes) const {
@@ -313,72 +541,157 @@ VmAccessOutcome GpuVmAccess::write(uint64_t address, std::span<const std::byte> 
   if (access_state_ == nullptr)
     return VmAccessOutcome::Unavailable;
   std::shared_lock state_lock(access_state_->mutex);
-  if (!access_state_->valid || translator_ == nullptr || physical_memory_ == nullptr)
+  if (!access_state_->valid)
+    return VmAccessOutcome::Revoked;
+  if (access_state_->translator == nullptr || access_state_->physical_memory == nullptr)
     return VmAccessOutcome::Unavailable;
-  return access_translated(*translator_, *physical_memory_, address, bytes, completed_bytes,
-                           VmAccessKind::Write);
+  return access_translated(*access_state_->translator, *access_state_->physical_memory, address,
+                           bytes, completed_bytes, VmAccessKind::Write,
+                           access_state_->fault_reporter.get());
 }
 
 AtomicLoadResult GpuVmAccess::atomic_load(uint64_t address, uint32_t width) const {
-  if ((width != sizeof(uint32_t) && width != sizeof(uint64_t)) || (address & (width - 1)) != 0) {
+  if ((width != sizeof(uint16_t) && width != sizeof(uint32_t) && width != sizeof(uint64_t)) ||
+      (address & (width - 1)) != 0) {
+    report_terminal_fault(address, VmAccessKind::Atomic, VmAccessOutcome::Malformed);
     return {.outcome = VmAccessOutcome::Malformed, .value = 0};
   }
   if (access_state_ == nullptr)
     return {.outcome = VmAccessOutcome::Unavailable, .value = 0};
   std::shared_lock state_lock(access_state_->mutex);
-  if (!access_state_->valid || translator_ == nullptr || physical_memory_ == nullptr)
+  if (!access_state_->valid)
+    return {.outcome = VmAccessOutcome::Revoked, .value = 0};
+  if (access_state_->translator == nullptr || access_state_->physical_memory == nullptr)
     return {.outcome = VmAccessOutcome::Unavailable, .value = 0};
 
   const VmTranslationResult translated =
-      translator_->translate(address, width, VmAccessKind::Atomic);
-  if (!translated)
+      access_state_->translator->translate(address, width, VmAccessKind::Atomic);
+  if (!translated) {
+    report_terminal_fault(address, VmAccessKind::Atomic, translated.outcome);
     return {.outcome = translated.outcome, .value = 0};
-  if (translated.translation.contiguous_bytes < width)
+  }
+  if (translated.translation.contiguous_bytes < width) {
+    report_terminal_fault(address, VmAccessKind::Atomic, VmAccessOutcome::Malformed);
     return {.outcome = VmAccessOutcome::Malformed, .value = 0};
-  return physical_memory_->atomic_load(translated.translation.domain,
-                                       translated.translation.address, width);
+  }
+  return access_state_->physical_memory->atomic_load(translated.translation.domain,
+                                                     translated.translation.address, width);
 }
 
 VmAccessOutcome GpuVmAccess::atomic_store(uint64_t address, uint32_t width, uint64_t value) const {
   if ((width != sizeof(uint32_t) && width != sizeof(uint64_t)) || (address & (width - 1)) != 0) {
+    report_terminal_fault(address, VmAccessKind::Atomic, VmAccessOutcome::Malformed);
     return VmAccessOutcome::Malformed;
   }
   if (access_state_ == nullptr)
     return VmAccessOutcome::Unavailable;
   std::shared_lock state_lock(access_state_->mutex);
-  if (!access_state_->valid || translator_ == nullptr || physical_memory_ == nullptr)
+  if (!access_state_->valid)
+    return VmAccessOutcome::Revoked;
+  if (access_state_->translator == nullptr || access_state_->physical_memory == nullptr)
     return VmAccessOutcome::Unavailable;
 
   const VmTranslationResult translated =
-      translator_->translate(address, width, VmAccessKind::Atomic);
-  if (!translated)
+      access_state_->translator->translate(address, width, VmAccessKind::Atomic);
+  if (!translated) {
+    report_terminal_fault(address, VmAccessKind::Atomic, translated.outcome);
     return translated.outcome;
-  if (translated.translation.contiguous_bytes < width)
+  }
+  if (translated.translation.contiguous_bytes < width) {
+    report_terminal_fault(address, VmAccessKind::Atomic, VmAccessOutcome::Malformed);
     return VmAccessOutcome::Malformed;
-  return physical_memory_->atomic_store(translated.translation.domain,
-                                        translated.translation.address, width, value);
+  }
+  return access_state_->physical_memory->atomic_store(translated.translation.domain,
+                                                      translated.translation.address, width, value);
 }
 
 AtomicCompareExchangeResult GpuVmAccess::compare_exchange(uint64_t address, uint32_t width,
                                                           uint64_t expected,
                                                           uint64_t desired) const {
   if ((width != sizeof(uint32_t) && width != sizeof(uint64_t)) || (address & (width - 1)) != 0) {
+    report_terminal_fault(address, VmAccessKind::Atomic, VmAccessOutcome::Malformed);
     return {.outcome = VmAccessOutcome::Malformed};
   }
   if (access_state_ == nullptr)
     return {.outcome = VmAccessOutcome::Unavailable};
   std::shared_lock state_lock(access_state_->mutex);
-  if (!access_state_->valid || translator_ == nullptr || physical_memory_ == nullptr)
+  if (!access_state_->valid)
+    return {.outcome = VmAccessOutcome::Revoked};
+  if (access_state_->translator == nullptr || access_state_->physical_memory == nullptr)
     return {.outcome = VmAccessOutcome::Unavailable};
 
   const VmTranslationResult translated =
-      translator_->translate(address, width, VmAccessKind::Atomic);
-  if (!translated)
+      access_state_->translator->translate(address, width, VmAccessKind::Atomic);
+  if (!translated) {
+    report_terminal_fault(address, VmAccessKind::Atomic, translated.outcome);
     return {.outcome = translated.outcome};
-  if (translated.translation.contiguous_bytes < width)
+  }
+  if (translated.translation.contiguous_bytes < width) {
+    report_terminal_fault(address, VmAccessKind::Atomic, VmAccessOutcome::Malformed);
     return {.outcome = VmAccessOutcome::Malformed};
-  return physical_memory_->compare_exchange(
+  }
+  return access_state_->physical_memory->compare_exchange(
       translated.translation.domain, translated.translation.address, width, expected, desired);
+}
+
+VmAccessOutcome
+GpuVmAccess::atomic_modify(uint64_t address, uint32_t width,
+                           const PhysicalMemoryAccess::AtomicMutation &mutation) const {
+  if ((width != sizeof(uint32_t) && width != sizeof(uint64_t)) || (address & (width - 1)) != 0 ||
+      !mutation) {
+    report_terminal_fault(address, VmAccessKind::Atomic, VmAccessOutcome::Malformed);
+    return VmAccessOutcome::Malformed;
+  }
+  if (access_state_ == nullptr)
+    return VmAccessOutcome::Unavailable;
+  std::shared_lock state_lock(access_state_->mutex);
+  if (!access_state_->valid)
+    return VmAccessOutcome::Revoked;
+  if (access_state_->translator == nullptr || access_state_->physical_memory == nullptr)
+    return VmAccessOutcome::Unavailable;
+
+  const VmTranslationResult translated =
+      access_state_->translator->translate(address, width, VmAccessKind::Atomic);
+  if (!translated) {
+    report_terminal_fault(address, VmAccessKind::Atomic, translated.outcome);
+    return translated.outcome;
+  }
+  if (translated.translation.contiguous_bytes < width) {
+    report_terminal_fault(address, VmAccessKind::Atomic, VmAccessOutcome::Malformed);
+    return VmAccessOutcome::Malformed;
+  }
+  return access_state_->physical_memory->atomic_modify(
+      translated.translation.domain, translated.translation.address, width, mutation);
+}
+
+std::byte *GpuVmAccess::resolve_host_pointer(uint64_t address, std::size_t size) const {
+  if (access_state_ == nullptr)
+    return nullptr;
+  std::shared_lock state_lock(access_state_->mutex);
+  if (!access_state_->valid || access_state_->translator == nullptr ||
+      access_state_->physical_memory == nullptr)
+    return nullptr;
+  const VmTranslationResult translated =
+      access_state_->translator->translate(address, size, VmAccessKind::Read);
+  if (!translated || translated.translation.contiguous_bytes < size)
+    return nullptr;
+  return access_state_->physical_memory->resolve_host_pointer(translated.translation.domain,
+                                                              translated.translation.address, size);
+}
+
+std::pair<uint64_t, uint64_t> GpuVmAccess::host_range(uint64_t address) const {
+  if (access_state_ == nullptr)
+    return {0, 0};
+  std::shared_lock state_lock(access_state_->mutex);
+  if (!access_state_->valid || access_state_->translator == nullptr ||
+      access_state_->physical_memory == nullptr)
+    return {0, 0};
+  const VmTranslationResult translated =
+      access_state_->translator->translate(address, 1, VmAccessKind::Read);
+  if (!translated)
+    return {0, 0};
+  return access_state_->physical_memory->host_range(translated.translation.domain,
+                                                    translated.translation.address);
 }
 
 Gfx12PageTableTranslator::Gfx12PageTableTranslator(std::shared_ptr<PhysicalMemoryAccess> memory,
@@ -560,16 +873,11 @@ VmTranslationResult Gfx12GartTranslator::translate(uint64_t address, std::size_t
   };
 }
 
-void GpuVm::set_memory(GpuMemory *memory) {
-  std::lock_guard lock(mutex_);
-  assert(std::ranges::none_of(slots_, [](const Slot &slot) { return slot.binding.has_value(); }) &&
-         "GPU memory cannot change while address spaces are registered");
-  memory_ = memory;
-}
-
 AddressSpaceHandle GpuVm::allocate_locked(Binding binding) {
   if (binding.access_state == nullptr)
     binding.access_state = std::make_shared<GpuVmAccessState>();
+  if (binding.binding_state == nullptr)
+    binding.binding_state = std::make_shared<GpuVmBindingState>();
   uint32_t slot_index = 0;
   if (free_slots_.empty()) {
     slot_index = static_cast<uint32_t>(slots_.size());
@@ -597,55 +905,78 @@ const GpuVm::Binding *GpuVm::find_locked(AddressSpaceHandle handle) const {
   return slot.generation == handle.generation && slot.binding ? &*slot.binding : nullptr;
 }
 
-void GpuVm::advance_access_state_locked(Binding &binding) {
-  auto replacement = std::make_shared<GpuVmAccessState>();
-  revoke_access_state_locked(binding);
+void GpuVm::advance_access_state_locked(Binding &binding,
+                                        std::shared_ptr<GpuVmAccessState> replacement) {
+  if (binding.access_state != nullptr) {
+    std::unique_lock state_lock(binding.access_state->mutex);
+    binding.access_state->valid = false;
+  }
   binding.access_state = std::move(replacement);
 }
 
 void GpuVm::revoke_access_state_locked(Binding &binding) {
-  if (binding.access_state == nullptr)
-    return;
-  std::unique_lock state_lock(binding.access_state->mutex);
-  binding.access_state->valid = false;
+  if (binding.access_state != nullptr) {
+    std::unique_lock state_lock(binding.access_state->mutex);
+    binding.access_state->valid = false;
+  }
+  for (const std::weak_ptr<GpuVmAccessState> &weak_state : binding.pinned_access_states) {
+    if (const std::shared_ptr<GpuVmAccessState> state = weak_state.lock()) {
+      std::unique_lock state_lock(state->mutex);
+      state->valid = false;
+    }
+  }
+  binding.pinned_access_states.clear();
 }
 
-AddressSpaceHandle GpuVm::register_legacy(uint32_t vmid) {
-  std::lock_guard lock(mutex_);
-  if (memory_ == nullptr || vmid_handles_.contains(vmid))
+AddressSpaceHandle
+GpuVm::register_address_space(uint32_t vmid, std::shared_ptr<AddressSpaceTranslator> translator,
+                              std::shared_ptr<PhysicalMemoryAccess> physical_memory,
+                              std::function<void(uint64_t, VmAccessKind)> fault_reporter,
+                              bool legacy_cache_compatible) {
+  if (translator == nullptr || physical_memory == nullptr)
     return {};
-  auto translator = std::make_shared<LegacyGpuMemoryTranslator>(*memory_, vmid);
-  auto physical_memory = std::make_shared<LegacyGpuMemoryBacking>(*memory_, vmid);
-  AddressSpaceHandle handle = allocate_locked({.vmid = vmid,
-                                               .translation_epoch = 1,
-                                               .queue_references = 0,
-                                               .translator = std::move(translator),
-                                               .physical_memory = std::move(physical_memory),
-                                               .access_state = {},
-                                               .legacy_compatibility = true,
-                                               .device_gart = false});
+  std::lock_guard lock(mutex_);
+  if (vmid_handles_.contains(vmid))
+    return {};
+  AddressSpaceHandle handle = allocate_locked(
+      {.vmid = vmid,
+       .translation_epoch = 1,
+       .queue_references = 0,
+       .binding_state = {},
+       .access_state = std::make_shared<GpuVmAccessState>(
+           std::move(translator), std::move(physical_memory),
+           std::make_shared<const GpuVmAccessState::FaultReporter>(std::move(fault_reporter))),
+       .pinned_access_states = {},
+       .legacy_cache_compatible = legacy_cache_compatible,
+       .device_gart = false});
   vmid_handles_.emplace(vmid, handle);
   return handle;
+}
+
+AddressSpaceHandle GpuVm::register_unrouted_address_space(
+    uint32_t vmid, std::shared_ptr<AddressSpaceTranslator> translator,
+    std::shared_ptr<PhysicalMemoryAccess> physical_memory,
+    std::function<void(uint64_t, VmAccessKind)> fault_reporter, bool legacy_cache_compatible) {
+  if (translator == nullptr || physical_memory == nullptr)
+    return {};
+  std::lock_guard lock(mutex_);
+  return allocate_locked(
+      {.vmid = vmid,
+       .translation_epoch = 1,
+       .queue_references = 0,
+       .binding_state = {},
+       .access_state = std::make_shared<GpuVmAccessState>(
+           std::move(translator), std::move(physical_memory),
+           std::make_shared<const GpuVmAccessState::FaultReporter>(std::move(fault_reporter))),
+       .pinned_access_states = {},
+       .legacy_cache_compatible = legacy_cache_compatible,
+       .device_gart = false});
 }
 
 AddressSpaceHandle GpuVm::register_translated(uint32_t vmid,
                                               std::shared_ptr<AddressSpaceTranslator> translator,
                                               std::shared_ptr<PhysicalMemoryAccess> memory) {
-  if (translator == nullptr || memory == nullptr)
-    return {};
-  std::lock_guard lock(mutex_);
-  if (vmid_handles_.contains(vmid))
-    return {};
-  AddressSpaceHandle handle = allocate_locked({.vmid = vmid,
-                                               .translation_epoch = 1,
-                                               .queue_references = 0,
-                                               .translator = std::move(translator),
-                                               .physical_memory = std::move(memory),
-                                               .access_state = {},
-                                               .legacy_compatibility = false,
-                                               .device_gart = false});
-  vmid_handles_.emplace(vmid, handle);
-  return handle;
+  return register_address_space(vmid, std::move(translator), std::move(memory));
 }
 
 AddressSpaceHandle
@@ -658,6 +989,16 @@ GpuVm::register_gfx12_address_space(uint32_t vmid, uint64_t page_table_base,
   return register_translated(vmid, std::move(translator), std::move(memory));
 }
 
+AddressSpaceHandle
+GpuVm::register_unrouted_gfx12_address_space(uint32_t vmid, uint64_t page_table_base,
+                                             std::shared_ptr<PhysicalMemoryAccess> memory) {
+  if (page_table_base == 0 || memory == nullptr)
+    return {};
+  auto translator =
+      std::make_shared<Gfx12PageTableTranslator>(memory, page_table_base, gfx12_config_);
+  return register_unrouted_address_space(vmid, std::move(translator), std::move(memory));
+}
+
 bool GpuVm::replace_translated(AddressSpaceHandle handle,
                                std::shared_ptr<AddressSpaceTranslator> translator,
                                std::shared_ptr<PhysicalMemoryAccess> memory) {
@@ -665,12 +1006,12 @@ bool GpuVm::replace_translated(AddressSpaceHandle handle,
     return false;
   std::lock_guard lock(mutex_);
   Binding *binding = find_locked(handle);
-  if (binding == nullptr || binding->translator == nullptr || binding->legacy_compatibility ||
-      binding->device_gart)
+  if (binding == nullptr || binding->access_state->translator == nullptr ||
+      binding->legacy_cache_compatible || binding->device_gart)
     return false;
-  advance_access_state_locked(*binding);
-  binding->translator = std::move(translator);
-  binding->physical_memory = std::move(memory);
+  advance_access_state_locked(
+      *binding, std::make_shared<GpuVmAccessState>(std::move(translator), std::move(memory),
+                                                   binding->access_state->fault_reporter));
   ++binding->translation_epoch;
   if (binding->translation_epoch == 0)
     ++binding->translation_epoch;
@@ -694,10 +1035,10 @@ AddressSpaceHandle GpuVm::initialize_gart_address_space() {
   gart_address_space_ = allocate_locked({.vmid = 0,
                                          .translation_epoch = 1,
                                          .queue_references = 0,
-                                         .translator = nullptr,
-                                         .physical_memory = nullptr,
+                                         .binding_state = {},
                                          .access_state = {},
-                                         .legacy_compatibility = false,
+                                         .pinned_access_states = {},
+                                         .legacy_cache_compatible = false,
                                          .device_gart = true});
   return gart_address_space_;
 }
@@ -712,9 +1053,9 @@ bool GpuVm::publish_gart(const GartConfig &config, std::shared_ptr<PhysicalMemor
   Binding *binding = find_locked(gart_address_space_);
   if (binding == nullptr || !binding->device_gart)
     return false;
-  advance_access_state_locked(*binding);
-  binding->translator = std::move(translator);
-  binding->physical_memory = std::move(memory);
+  advance_access_state_locked(
+      *binding, std::make_shared<GpuVmAccessState>(std::move(translator), std::move(memory),
+                                                   binding->access_state->fault_reporter));
   ++binding->translation_epoch;
   if (binding->translation_epoch == 0)
     ++binding->translation_epoch;
@@ -724,11 +1065,11 @@ bool GpuVm::publish_gart(const GartConfig &config, std::shared_ptr<PhysicalMemor
 bool GpuVm::clear_gart_binding() {
   std::lock_guard lock(mutex_);
   Binding *binding = find_locked(gart_address_space_);
-  if (binding == nullptr || !binding->device_gart || binding->queue_references != 0)
+  if (binding == nullptr || !binding->device_gart || binding->queue_references != 0 ||
+      binding->binding_state->references.load(std::memory_order_acquire) != 0)
     return false;
-  advance_access_state_locked(*binding);
-  binding->translator.reset();
-  binding->physical_memory.reset();
+  revoke_access_state_locked(*binding);
+  binding->access_state = std::make_shared<GpuVmAccessState>();
   ++binding->translation_epoch;
   if (binding->translation_epoch == 0)
     ++binding->translation_epoch;
@@ -736,7 +1077,7 @@ bool GpuVm::clear_gart_binding() {
 }
 
 AddressSpaceHandle GpuVm::gart_address_space() const {
-  std::lock_guard lock(mutex_);
+  std::shared_lock lock(mutex_);
   return find_locked(gart_address_space_) != nullptr ? gart_address_space_ : AddressSpaceHandle{};
 }
 
@@ -745,7 +1086,11 @@ bool GpuVm::invalidate(AddressSpaceHandle handle) {
   Binding *binding = find_locked(handle);
   if (binding == nullptr)
     return false;
-  advance_access_state_locked(*binding);
+  auto replacement = std::make_shared<GpuVmAccessState>(binding->access_state->translator,
+                                                        binding->access_state->physical_memory,
+                                                        binding->access_state->fault_reporter);
+  revoke_access_state_locked(*binding);
+  binding->access_state = std::move(replacement);
   ++binding->translation_epoch;
   if (binding->translation_epoch == 0)
     ++binding->translation_epoch;
@@ -761,9 +1106,9 @@ std::optional<AddressSpaceInfo> GpuVm::retain_queue_address_space(AddressSpaceHa
   return AddressSpaceInfo{.vmid = binding->vmid,
                           .translation_epoch = binding->translation_epoch,
                           .queue_references = binding->queue_references,
-                          .external = !binding->legacy_compatibility,
-                          .ready = binding->translator != nullptr &&
-                                   binding->physical_memory != nullptr};
+                          .legacy_cache_compatible = binding->legacy_cache_compatible,
+                          .ready = binding->access_state->translator != nullptr &&
+                                   binding->access_state->physical_memory != nullptr};
 }
 
 bool GpuVm::retain_queue(AddressSpaceHandle handle) {
@@ -779,13 +1124,34 @@ bool GpuVm::release_queue(AddressSpaceHandle handle) {
   return true;
 }
 
+std::optional<GpuVmBindingLease> GpuVm::retain_binding(AddressSpaceHandle handle) {
+  std::lock_guard lock(mutex_);
+  Binding *binding = find_locked(handle);
+  if (binding == nullptr ||
+      binding->binding_state->references.load(std::memory_order_relaxed) == UINT32_MAX)
+    return std::nullopt;
+  binding->binding_state->references.fetch_add(1, std::memory_order_relaxed);
+  AddressSpaceInfo info{.vmid = binding->vmid,
+                        .translation_epoch = binding->translation_epoch,
+                        .queue_references = binding->queue_references,
+                        .legacy_cache_compatible = binding->legacy_cache_compatible,
+                        .ready = binding->access_state->translator != nullptr &&
+                                 binding->access_state->physical_memory != nullptr};
+  return GpuVmBindingLease(binding->binding_state, handle, info);
+}
+
 bool GpuVm::unregister_address_space(AddressSpaceHandle handle) {
   std::lock_guard lock(mutex_);
   Binding *binding = find_locked(handle);
-  if (binding == nullptr || binding->queue_references != 0 || binding->device_gart)
+  if (binding == nullptr || binding->queue_references != 0 ||
+      binding->binding_state->references.load(std::memory_order_acquire) != 0 ||
+      binding->device_gart)
     return false;
   revoke_access_state_locked(*binding);
-  vmid_handles_.erase(binding->vmid);
+  const uint32_t vmid = binding->vmid;
+  const auto routed = vmid_handles_.find(vmid);
+  if (routed != vmid_handles_.end() && routed->second == handle)
+    vmid_handles_.erase(routed);
   Slot &slot = slots_[handle.slot];
   slot.binding.reset();
   ++slot.generation;
@@ -796,18 +1162,83 @@ bool GpuVm::unregister_address_space(AddressSpaceHandle handle) {
 }
 
 std::optional<GpuVmAccess> GpuVm::snapshot(AddressSpaceHandle handle) const {
-  std::lock_guard lock(mutex_);
+  std::shared_lock lock(mutex_);
   const Binding *binding = find_locked(handle);
   if (binding == nullptr)
     return std::nullopt;
-  return GpuVmAccess(
-      handle,
-      {.vmid = binding->vmid,
-       .translation_epoch = binding->translation_epoch,
-       .queue_references = binding->queue_references,
-       .external = !binding->legacy_compatibility,
-       .ready = binding->translator != nullptr && binding->physical_memory != nullptr},
-      binding->translator, binding->physical_memory, binding->access_state);
+  return GpuVmAccess(handle,
+                     {.vmid = binding->vmid,
+                      .translation_epoch = binding->translation_epoch,
+                      .queue_references = binding->queue_references,
+                      .legacy_cache_compatible = binding->legacy_cache_compatible,
+                      .ready = binding->access_state->translator != nullptr &&
+                               binding->access_state->physical_memory != nullptr},
+                     binding->access_state);
+}
+
+std::optional<GpuVmAccess> GpuVm::snapshot_pinned(AddressSpaceHandle handle) {
+  std::lock_guard lock(mutex_);
+  Binding *binding = find_locked(handle);
+  if (binding == nullptr)
+    return std::nullopt;
+  std::erase_if(binding->pinned_access_states,
+                [](const std::weak_ptr<GpuVmAccessState> &state) { return state.expired(); });
+  auto access_state = std::make_shared<GpuVmAccessState>(binding->access_state->translator,
+                                                         binding->access_state->physical_memory,
+                                                         binding->access_state->fault_reporter);
+  binding->pinned_access_states.emplace_back(access_state);
+  return GpuVmAccess(handle,
+                     {.vmid = binding->vmid,
+                      .translation_epoch = binding->translation_epoch,
+                      .queue_references = binding->queue_references,
+                      .legacy_cache_compatible = binding->legacy_cache_compatible,
+                      .ready = binding->access_state->translator != nullptr &&
+                               binding->access_state->physical_memory != nullptr},
+                     std::move(access_state));
+}
+
+std::optional<GpuVmAccess> GpuVm::snapshot_vmid(uint32_t vmid) const {
+  std::shared_lock lock(mutex_);
+  const std::unordered_map<uint32_t, AddressSpaceHandle>::const_iterator found =
+      vmid_handles_.find(vmid);
+  if (found == vmid_handles_.end())
+    return std::nullopt;
+  const Binding *binding = find_locked(found->second);
+  if (binding == nullptr)
+    return std::nullopt;
+  return GpuVmAccess(found->second,
+                     {.vmid = binding->vmid,
+                      .translation_epoch = binding->translation_epoch,
+                      .queue_references = binding->queue_references,
+                      .legacy_cache_compatible = binding->legacy_cache_compatible,
+                      .ready = binding->access_state->translator != nullptr &&
+                               binding->access_state->physical_memory != nullptr},
+                     binding->access_state);
+}
+
+const GpuVmAccess *GpuVm::borrow_snapshot(AddressSpaceHandle handle) const {
+  assert(GpuVmAccessBatchGuard::active());
+  if (const GpuVmAccess *cached = GpuVmAccessBatchGuard::find_snapshot(this, handle))
+    return cached;
+  if (const std::optional<GpuVmAccess> access = snapshot(handle)) {
+    GpuVmAccessBatchGuard::retain_snapshot(this, handle, *access, false);
+    // A concurrent revocation makes this access retryable, not an absent binding.
+    return &vm_access_batch_snapshots.back().access;
+  }
+  return nullptr;
+}
+
+const GpuVmAccess *GpuVm::borrow_snapshot_vmid(uint32_t vmid) const {
+  assert(GpuVmAccessBatchGuard::active());
+  if (const GpuVmAccess *cached = GpuVmAccessBatchGuard::find_snapshot_vmid(this, vmid))
+    return cached;
+  if (const std::optional<GpuVmAccess> access = snapshot_vmid(vmid)) {
+    GpuVmAccessBatchGuard::retain_snapshot(this, access->cache_namespace().address_space, *access,
+                                           true);
+    // A concurrent revocation makes this access retryable, not an absent binding.
+    return &vm_access_batch_snapshots.back().access;
+  }
+  return nullptr;
 }
 
 VmTranslationResult GpuVm::translate(AddressSpaceHandle handle, uint64_t address, std::size_t size,
@@ -859,40 +1290,44 @@ AtomicCompareExchangeResult GpuVm::compare_exchange(AddressSpaceHandle handle, u
 }
 
 std::optional<AddressSpaceInfo> GpuVm::lookup(AddressSpaceHandle handle) const {
-  std::lock_guard lock(mutex_);
+  std::shared_lock lock(mutex_);
   const Binding *binding = find_locked(handle);
   if (binding == nullptr)
     return std::nullopt;
   return AddressSpaceInfo{.vmid = binding->vmid,
                           .translation_epoch = binding->translation_epoch,
                           .queue_references = binding->queue_references,
-                          .external = !binding->legacy_compatibility,
-                          .ready = binding->translator != nullptr &&
-                                   binding->physical_memory != nullptr};
+                          .legacy_cache_compatible = binding->legacy_cache_compatible,
+                          .ready = binding->access_state->translator != nullptr &&
+                                   binding->access_state->physical_memory != nullptr};
 }
 
 std::optional<AddressSpaceHandle> GpuVm::find_vmid(uint32_t vmid) const {
-  std::lock_guard lock(mutex_);
-  const auto found = vmid_handles_.find(vmid);
+  std::shared_lock lock(mutex_);
+  const std::unordered_map<uint32_t, AddressSpaceHandle>::const_iterator found =
+      vmid_handles_.find(vmid);
   return found == vmid_handles_.end() ? std::nullopt
                                       : std::optional<AddressSpaceHandle>(found->second);
 }
 
 std::size_t GpuVm::active_address_spaces() const {
-  std::lock_guard lock(mutex_);
+  std::shared_lock lock(mutex_);
   return static_cast<std::size_t>(
       std::ranges::count_if(slots_, [](const Slot &slot) { return slot.binding.has_value(); }));
 }
 
 uint64_t GpuVm::reset_epoch() const {
-  std::lock_guard lock(mutex_);
+  std::shared_lock lock(mutex_);
   return reset_epoch_;
 }
 
 bool GpuVm::reset() {
   std::lock_guard lock(mutex_);
-  const bool retained = std::ranges::any_of(
-      slots_, [](const Slot &slot) { return slot.binding && slot.binding->queue_references != 0; });
+  const bool retained = std::ranges::any_of(slots_, [](const Slot &slot) {
+    return slot.binding &&
+           (slot.binding->queue_references != 0 ||
+            slot.binding->binding_state->references.load(std::memory_order_acquire) != 0);
+  });
   if (retained)
     return false;
   for (uint32_t index = 0; index < slots_.size(); ++index) {
