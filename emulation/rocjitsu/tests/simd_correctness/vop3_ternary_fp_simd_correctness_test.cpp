@@ -332,8 +332,9 @@ struct F16OutputCase {
   uint8_t clamp = 0;
 };
 
-// Expectations describe the scalar output-stage contract. The reviewer probes
-// establish path disagreement on these targets, without validating GPU behavior.
+// These cases separate destination-format rounding from OMOD/CLAMP ordering.
+// Unless a case comment says otherwise, they pin the emulator contract rather
+// than a hardware capture.
 std::vector<F16OutputCase> f16_output_cases() {
   std::vector<F16OutputCase> cases;
   for (const auto &[name, opcode] :
@@ -359,6 +360,44 @@ std::vector<F16OutputCase> f16_output_cases() {
                      0,
                      3,
                      0x7c00});
+    // MAD_F16 currently ignores MODE input/output denormal controls and
+    // non-nearest rounding. These cases expose that separate semantic gap
+    // while requiring the scalar and SIMD paths to retain the same contract.
+    cases.push_back({std::string("Gfx950") + name + "CurrentFlushInputModeKeepsSubnormal",
+                     ROCJITSU_CODE_ARCH_CDNA4,
+                     opcode,
+                     {0x0001, 0x3c00, 0},
+                     0x00,
+                     0,
+                     0x0001});
+    cases.push_back({std::string("Gfx950") + name + "KeepsSubnormalInput",
+                     ROCJITSU_CODE_ARCH_CDNA4,
+                     opcode,
+                     {0x0001, 0x3c00, 0},
+                     0xc0,
+                     0,
+                     0x0001});
+    cases.push_back({std::string("Gfx950") + name + "CurrentFlushOutputModeKeepsTinyResult",
+                     ROCJITSU_CODE_ARCH_CDNA4,
+                     opcode,
+                     {0x0400, 0x3800, 0},
+                     0x40,
+                     0,
+                     0x0200});
+    cases.push_back({std::string("Gfx950") + name + "KeepsTinyOutput",
+                     ROCJITSU_CODE_ARCH_CDNA4,
+                     opcode,
+                     {0x0400, 0x3800, 0},
+                     0xc0,
+                     0,
+                     0x0200});
+    cases.push_back({std::string("Gfx950") + name + "CurrentRoundUpContract",
+                     ROCJITSU_CODE_ARCH_CDNA4,
+                     opcode,
+                     {0x3c00, 0x3c00, 0x1000},
+                     0xc4,
+                     0,
+                     0x3c00});
   }
   const auto add_selections = [&](const char *target, rj_code_arch_t arch, auto operations) {
     for (const auto &[name, opcode] : operations) {
@@ -375,7 +414,7 @@ std::vector<F16OutputCase> f16_output_cases() {
           {prefix + "ClampAfterOmod", arch, opcode, {0x7bff, 0x7bff, 0x7bff}, 0x0c, 1, 0x3c00, 1});
       cases.push_back(
           {prefix + "IeeeIgnoresOmod", arch, opcode, {0x8400, 0x8400, 0x8400}, 1u << 9, 3, 0x8400});
-      cases.push_back({prefix + "KeepOutputsIgnoresOmod",
+      cases.push_back({prefix + "CurrentPolicyKeepOutputsIgnoresOmod",
                        arch,
                        opcode,
                        {0x8400, 0x8400, 0x8400},
@@ -384,6 +423,9 @@ std::vector<F16OutputCase> f16_output_cases() {
                        0x8400});
     }
   };
+  // MODE 0x80 cases exercise the emulator's old-target output-denormal gate.
+  // The available gfx1030/gfx1100 captures keep output denormals disabled, so
+  // they do not measure this policy.
   add_selections("Gfx950", ROCJITSU_CODE_ARCH_CDNA4,
                  std::array{std::pair{"Min3", cdna4::kVMin3F16Vop3},
                             std::pair{"Max3", cdna4::kVMax3F16Vop3},
@@ -398,18 +440,20 @@ std::vector<F16OutputCase> f16_output_cases() {
                             std::pair{"Med3", rdna3::kVMed3F16Vop3},
                             std::pair{"Minmax", rdna3::kVMinmaxF16Vop3},
                             std::pair{"Maxmin", rdna3::kVMaxminF16Vop3}});
-  // DIV_FIXUP intentionally retains its current scalar ordering and finalizer.
-  // These distinguish that contract from the destination-format output stage.
+  // DIV_FIXUP still uses the pre-migration scalar ordering on CDNA4. gfx950 is
+  // unmeasured; gfx1201 captures on nearby boundary vectors instead round to
+  // F16 before applying OMOD. These cases pin the current emulator behavior,
+  // not an architectural result, until the measured DIV_FIXUP fix is stacked.
   for (const auto &[name, opcode] : {std::pair{"DivFixup", cdna4::kVDivFixupF16Vop3},
                                      std::pair{"DivFixupLegacy", cdna4::kVDivFixupLegacyF16Vop3}}) {
-    cases.push_back({std::string("Gfx950") + name + "Div2ClearsUnderflowSign",
+    cases.push_back({std::string("Gfx950") + name + "PinsCurrentDiv2UnderflowOrdering",
                      ROCJITSU_CODE_ARCH_CDNA4,
                      opcode,
                      {0x8400, 0x3c00, 0xbc00},
                      0,
                      3,
                      0});
-    cases.push_back({std::string("Gfx950") + name + "Mul2RtzOverflow",
+    cases.push_back({std::string("Gfx950") + name + "PinsCurrentMul2RtzOrdering",
                      ROCJITSU_CODE_ARCH_CDNA4,
                      opcode,
                      {0x7bff, 0x3c00, 0x3c00},
