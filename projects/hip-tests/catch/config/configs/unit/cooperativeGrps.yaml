@@ -208,6 +208,12 @@ cooperativeGrps:
   Unit_coop_thread_block_split_barrier:
     <<: *level_default
     tags: [cooperative, ops]
+  Unit_cg_invoke_one:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_cg_invoke_one_broadcast:
+    <<: *level_2
+    tags: [cooperative, ops]
   Unit_coop_thread_block_split_barrier_Multiple:
     <<: *level_default
     tags: [cooperative, ops]
