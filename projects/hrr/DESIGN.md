@@ -1123,14 +1123,17 @@ An allocation over a deferred mapping is handled three ways:
   its free was done, or with the new stream ordered after it, so replay orders
   the allocation after the free:
   - a `hipMallocAsync` or `hipMallocFromPoolAsync` on the stream the
-    `hipFreeAsync` was made on needs nothing more, inside a capture too;
+    `hipFreeAsync` was made on needs nothing more, while another stream
+    captures too;
   - on another stream, that stream waits (`hipStreamWaitEvent`) for an event
     replay recorded on the freeing stream at the free;
   - an allocation with no stream (`hipMalloc`, `hipExtMallocWithFlags`, a region
     segment) waits on the host (`hipEventSynchronize`) for that event.
 
   A free made while a capture was open has no event: recording one would add it
-  to the graph. Neither does a deferred `hipFree`. Waiting for an event while a
+  to the graph. Neither does a deferred `hipFree`. A `hipFreeAsync` on a
+  capturing stream counts as made on no stream: it runs when the graph is
+  launched, on whatever stream that is. Waiting for an event while a
   capture is open would sync inside it. In those cases the allocation is
   handled as any other overlap. The event is destroyed when the mapping is taken
   back, unmapped, or released at teardown or the warm-up reset. The event is

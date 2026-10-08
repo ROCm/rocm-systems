@@ -767,7 +767,7 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedRangeTakenBack) {
     REQUIRE(g_host_waits == 1);
     REQUIRE(g_destroyed == 1);
   }
-  SECTION("another stream inside a capture: falls back, still mapped") {
+  SECTION("another stream while a capture is open: falls back, still mapped") {
     REQUIRE_FALSE(pl.map_at(B, 2 * P, 0, "hipMallocAsync", &live, /*capturing=*/true, &S2));
     REQUIRE(g_unmaps == 0);
     REQUIRE(g_waits.empty());
@@ -777,7 +777,7 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedRangeTakenBack) {
     REQUIRE(pl.drain_deferred() == 1);
     REQUIRE(g_destroyed == 1);
   }
-  SECTION("the same stream inside a capture: taken back") {
+  SECTION("the same stream while another captures: taken back") {
     REQUIRE(pl.map_at(B, 2 * P, 0, "hipMallocAsync", &live, /*capturing=*/true, &S1));
     REQUIRE(g_unmaps == 0);
     REQUIRE(pl.fallbacks() == 0);
@@ -885,13 +885,15 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedWithNothingToWaitFor) {
   // A free made while a capture was open keeps no event: recording one would
   // add it to the graph. Only the stream that freed it can take it back as it
   // is. Anything else is an ordinary overlap: unmapped first, which waits for
-  // every stream, or a fallback while a capture is open.
+  // every stream, or a fallback while a capture is open. A hipFreeAsync on
+  // the capturing stream itself is deferred as a free on no stream, like a
+  // hipFree (the hipFree sections), since it runs when the graph does.
   reset_events();
   hrr::VaPlacement pl;
   pl.set_vmm_ops_for_test(event_ops());
   pl.adopt_reservation_for_test(B, B + 16 * P, 1);
   void* live = nullptr;
-  SECTION("hipFreeAsync inside a capture, then another stream") {
+  SECTION("hipFreeAsync while another stream captures, then another stream") {
     REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live, false, &S1));
     REQUIRE(pl.unmap_async(at(B), S1, /*capturing=*/true));
     REQUIRE(g_events == 0);
@@ -900,7 +902,7 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedWithNothingToWaitFor) {
     REQUIRE(g_maps == 2);
     REQUIRE(g_waits.empty());
   }
-  SECTION("hipFreeAsync inside a capture, then the same stream") {
+  SECTION("hipFreeAsync while another stream captures, then the same stream") {
     REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live, false, &S1));
     REQUIRE(pl.unmap_async(at(B), S1, /*capturing=*/true));
     REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live, false, &S1));

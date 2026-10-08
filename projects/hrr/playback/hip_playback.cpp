@@ -2947,18 +2947,23 @@ hipError_t playback_hipExtMallocWithFlags(PlaybackContext& ctx, const uint8_t* p
 // capture the allocation is a graph node with its own address, so placement
 // cannot apply and it falls back. The pool's attributes are not carried over
 // to a placed allocation; its location is, as the device the mapping is on.
+//
+// The null stream is never asked: it cannot be captured, and while another
+// stream has a blocking capture open, hipStreamIsCapturing on it fails with
+// hipErrorStreamCaptureImplicit, which would stick.
 static bool hrr_stream_capturing(hipStream_t stream) {
+    if (!stream) return false;
     hipStreamCaptureStatus st = hipStreamCaptureStatusNone;
     return hipStreamIsCapturing(stream, &st) == hipSuccess &&
            st != hipStreamCaptureStatusNone;
 }
 
 static bool hrr_place_async_alloc(PlaybackContext& ctx, uint64_t rec, size_t size,
-                                  const char* api, hipStream_t stream, int device,
-                                  void** live) {
+                                  const char* api, hipStream_t stream, bool capturing,
+                                  int device, void** live) {
     hrr::VaPlacement* pl = hrr_placing(ctx);
     if (!pl) return false;
-    if (hrr_stream_capturing(stream)) {
+    if (capturing) {
         pl->fell_back(rec, size, api, "it was allocated inside a graph capture");
         return false;
     }
@@ -2994,7 +2999,7 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     size_t pad_sz  = replay_padded_alloc_size(orig_sz);
     hipError_t r = hipSuccess;
     const bool capturing = hrr_stream_capturing(stream);
-    if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocAsync", stream,
+    if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocAsync", stream, capturing,
                               hrr::hrr_stream_device(stream), &live))
         pad_sz = orig_sz;
     else {
@@ -3030,7 +3035,7 @@ hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
         if (hrr_drain_for_retry(ctx, r))
             r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
     } else if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocFromPoolAsync",
-                                     stream, device, &live)) {
+                                     stream, capturing, device, &live)) {
         pad_sz = orig_sz;
     } else {
         r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
@@ -3286,12 +3291,16 @@ hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
     // the unmap is deferred to the next replayed device synchronization. An
     // allocation recorded from the same first page on the same device, no
     // larger and close enough in size, takes the mapping back without
-    // unmapping it, ordered after this
-    // free when it is on another stream (VaPlacement::map_at). One that only
+    // unmapping it, ordered after this free when it is on another stream
+    // (VaPlacement::map_at). One that only
     // overlaps it unmaps it first, unless a capture is open, in which case
-    // that allocation falls back.
+    // that allocation falls back. A free captured into a graph runs when the
+    // graph is launched, on whatever stream that is, so it is deferred as a
+    // free on no stream.
     hrr::VaPlacement* placing = hrr_placing(ctx);
-    if (placing && placing->unmap_async(live, stream, ctx.in_graph_capture.any())) {
+    if (placing && (hrr_stream_capturing(stream)
+                        ? placing->unmap(live, /*defer=*/true)
+                        : placing->unmap_async(live, stream, ctx.in_graph_capture.any()))) {
         ctx.remove_alloc(a->dev_ptr);
         return hipSuccess;
     }
