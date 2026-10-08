@@ -49,9 +49,9 @@
 #include <unistd.h>   // _exit
 #endif
 
-// Thread-local sequence ID — set by dispatch_event before calling any handler.
-// Kernel-launch handlers use this to wait for their submission turn and then
-// immediately unblock the next thread before doing timing/sync.
+// Thread-local sequence ID — set by dispatch_event before calling any handler,
+// which reads it to name the event in diagnostics. An ordered launch hands its
+// turn on through hrr_dispatch_release_seq.
 thread_local uint64_t hrr_dispatch_seq = 0;
 thread_local uint64_t hrr_dispatch_release_seq = 0;
 
@@ -1774,8 +1774,9 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
         return r;
     }
 
-    // Resolve any guarded blocks before the next event runs, so this launch is
-    // the only one whose memory was moved.
+    // Resolve any guarded blocks before this launch returns, so it is the only
+    // one whose memory was moved. Guarding needs region annotations, which a
+    // multi-threaded replay ignores, so no other thread runs an event meanwhile.
     if (hipError_t gr = hrr_block_guard_resolve(ctx, rls, kernel_name, kernel_ordinal);
         gr != hipSuccess)
         return gr;
