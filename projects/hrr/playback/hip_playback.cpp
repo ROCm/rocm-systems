@@ -1036,8 +1036,10 @@ static void decode_kernel_args(
 // The host function waits for what the kernel waits for: the launch stream's
 // earlier work, the null stream's when the stream is a blocking one, and every
 // blocking stream's when it is the null stream. The kernel waits for the host
-// function. Replay itself never blocks on the host here, so a launch whose
-// stream waits on work replayed later (hipStreamBatchMemOp, say) does not hang.
+// function. Replay itself does not block on the host here, so a launch whose
+// stream waits on work replayed later (hipStreamBatchMemOp, say) does not hang;
+// only releasing the allocation waits for the restore, for a bounded time
+// (hrr_host_release_ready).
 // Direction 1 is a chunk capture read unchanged while work the launch waited
 // for was still queued; that work may have written it before the kernel ran,
 // so replay leaves it to the replayed work.
