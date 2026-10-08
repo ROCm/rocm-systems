@@ -91,6 +91,7 @@ test_categories:
       - "putmem_signal_on_stream_.*"
       - "barrier_all_on_stream_.*"
       - "signal_wait_until_on_stream_.*"
+      - "signal_ops_on_stream_.*"
 
       # Specialized tests
       - "shmemptr_.*"

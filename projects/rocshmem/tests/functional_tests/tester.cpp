@@ -45,6 +45,7 @@
 #include "putmem_on_stream_tester.hpp"
 #include "putmem_signal_on_stream_tester.hpp"
 #include "signal_wait_until_on_stream_tester.hpp"
+#include "signal_ops_on_stream_tester.hpp"
 #include "ping_all_tester.hpp"
 #include "ping_pong_tester.hpp"
 #include "primitive_tester.hpp"
@@ -559,6 +560,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case SignalWaitUntilOnStreamTestType:
       test_name = "Signal_Wait_Until_On_Stream";
       testers.push_back(new SignalWaitUntilOnStreamTester(args));
+      break;
+    case SignalOpsOnStreamTestType:
+      test_name = "Signal_Ops_On_Stream";
+      testers.push_back(new SignalOpsOnStreamTester(args));
       break;
     case TeamFCollectTestType:
       test_name = "Fcollect Test";
@@ -1252,6 +1257,7 @@ bool Tester::peLaunchesKernel() {
     case PutmemOnStreamTestType:
     case PutmemSignalOnStreamTestType:
     case SignalWaitUntilOnStreamTestType:
+    case SignalOpsOnStreamTestType:
     case SignalAddTestType:
     case SignalSetTestType:
     case SignalWaitUntilTestType:

@@ -17,6 +17,7 @@
     * `rocshmem_signal_add` and `rocshmem_ctx_signal_add`
     * `rocshmem_signal_set` and `rocshmem_ctx_signal_set`
     * `rocshmem_signal_wait_until`
+    * `rocshmem_signal_add_on_stream` and `rocshmem_signal_set_on_stream`
 
 ### Deprecated
 * Deprecated `rocshmem_signal_fetch_wg` and `rocshmem_signal_fetch_wave`.

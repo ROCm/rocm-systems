@@ -184,6 +184,7 @@ declare -A TEST_NUMBERS=(
   ["signaladd"]="171"
   ["signalset"]="172"
   ["signalwaituntil"]="173"
+  ["signal_ops_on_stream"]="174"
 )
 
 # Detect which runtime to use
@@ -907,6 +908,7 @@ TestOnStream() {
   ExecTest  "getmem_on_stream" 2       1            1         1048576
 
   ExecTest  "signal_wait_until_on_stream" 2  1      1
+  ExecTest  "signal_ops_on_stream"   2  1           1
   if [[ $TEST != ro* ]]; then #AIROCSHMEM-217
   ExecTest  "putmem_signal_on_stream" 2  1          1         1048576
   else echo "Skip:   putmem_signal_on_stream (AIROCSHMEM-217: RO sometimes abort)"; fi
