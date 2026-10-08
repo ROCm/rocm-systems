@@ -5138,6 +5138,9 @@ hipError_t playback_hipMemUnmap(PlaybackContext& ctx, const uint8_t* pl) {
     void* live_va = ctx.translate_vmm_va(a->ptr);
     if (!live_va) return hipSuccess;
     hipError_t r = hipMemUnmap(live_va, static_cast<size_t>(a->size));
+    // Placement maps the same addresses again, in this pass or the next;
+    // hipMemUnmap may leave the old translation cached (hrr_flush_gpu_tlb).
+    if (r == hipSuccess && hrr_placing(ctx)) hrr::hrr_flush_gpu_tlb();
     if (r == hipSuccess) {
         std::unique_lock lk(ctx.map_mutex);
         hrr::va_untrack_mapping(ctx.vmm_mappings, reinterpret_cast<uint64_t>(live_va),
@@ -5159,6 +5162,8 @@ void hrr_release_vmm_state(PlaybackContext& ctx) {
     }
     for (const auto& [va, size] : mappings)
         (void)hipMemUnmap(reinterpret_cast<void*>(va), size);
+    // The timed pass maps these addresses again (hrr_flush_gpu_tlb).
+    if (!mappings.empty()) hrr::hrr_flush_gpu_tlb();
     for (const auto& [rec, h] : handles) (void)hipMemRelease(h);
     hrr::VaPlacement* placing = hrr_placing(ctx);
     std::vector<hrr::VaRange> rehold;

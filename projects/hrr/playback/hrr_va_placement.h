@@ -643,6 +643,15 @@ int hrr_stream_device(hipStream_t stream);
 // around both. On failure nothing is left.
 hipError_t hrr_record_free_event(hipStream_t stream, hipEvent_t* event);
 
+// Flush this process's GPU TLBs, after a hipMemUnmap of a range that may be
+// mapped again. On gfx12 under Linux 7.0's in-box amdgpu, hipMemUnmap leaves
+// the old translation cached: memory mapped at the same address next is
+// reached through the pages it replaced, by the copy engines and by some
+// shader engines, until something flushes them. KFD flushes them whenever it
+// unmaps an ordinary allocation from the GPU, so allocate and free one larger
+// than ROCr's 2 MiB fragment blocks, whose free goes straight to KFD.
+void hrr_flush_gpu_tlb();
+
 #ifdef HRR_VA_PLACEMENT_TESTING
 // Tests only: the HIP calls placement makes, replaced to run without a GPU.
 struct VmmOps {
@@ -658,6 +667,7 @@ struct VmmOps {
     hipError_t (*destroy_event)(hipEvent_t e)                 = hipEventDestroy;
     hipError_t (*address_free)(void* va, size_t size)         = hipMemAddressFree;
     int (*stream_device)(hipStream_t s)                       = hrr_stream_device;
+    void (*flush_tlb)()                                       = nullptr;
 };
 // How many times read_proc_maps() has read /proc/self/maps.
 size_t proc_maps_reads_for_test();
@@ -785,6 +795,7 @@ class VaPlacement {
     hipError_t vmm_map(uint64_t pb, uint64_t pe, int device,
                        hipMemGenericAllocationHandle_t* h);
     void clear_error();
+    void flush_tlb();
     bool unmap_one(uint64_t pb, const PlacedMapping& m);
     // Destroy the event a deferred free kept, if any.
     void drop_event(hipEvent_t e);

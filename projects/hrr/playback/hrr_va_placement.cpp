@@ -174,6 +174,12 @@ hipError_t hrr_record_free_event(hipStream_t stream, hipEvent_t* event) {
     return hipSuccess;
 }
 
+void hrr_flush_gpu_tlb() {
+    void* p = nullptr;
+    const hipError_t r = hipMalloc(&p, size_t(4) << 20);
+    if (r != hipSuccess || hipFree(p) != hipSuccess) (void)hipGetLastError();
+}
+
 bool VaPlacement::hold(PlacementPlan plan) {
 #ifdef _WIN32
     (void)plan;
@@ -379,6 +385,14 @@ void VaPlacement::clear_error() {
     if (ops_.clear_error) ops_.clear_error();
 #else
     (void)hipGetLastError();
+#endif
+}
+
+void VaPlacement::flush_tlb() {
+#ifdef HRR_VA_PLACEMENT_TESTING
+    if (ops_.flush_tlb) ops_.flush_tlb();
+#else
+    hrr_flush_gpu_tlb();
 #endif
 }
 
@@ -623,6 +637,9 @@ size_t VaPlacement::drain_locked(std::unique_lock<std::mutex>& lk,
         // failed one keeps its event for the next try.
         if (ok[i]) drop_event(work[i].second.event);
     }
+    // These ranges are mapped again later; hipMemUnmap may leave their old
+    // translations cached (hrr_flush_gpu_tlb).
+    if (std::find(ok.begin(), ok.end(), char(1)) != ok.end()) flush_tlb();
     lk.lock();
     size_t n = 0;
     for (size_t i = 0; i < work.size(); ++i) {

@@ -719,6 +719,61 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapRunsOutsideTheLock) {
   }
 }
 
+namespace {
+int g_flushes = 0;
+void counted_flush() { ++g_flushes; }
+hipError_t failed_unmap(void*, size_t) { return hipErrorInvalidValue; }
+}  // namespace
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapFlushesTlb) {
+  // hipMemUnmap can leave the old translation in the GPU's TLBs (gfx12 under
+  // Linux 7.0's in-box amdgpu), and placement maps the same address again.
+  // Every drain that unmapped something flushes them once; a drain whose
+  // unmaps all failed, or a mapping taken back, unmaps nothing and does not.
+  reset_events();
+  g_flushes = 0;
+  hrr::VaPlacement pl;
+  hrr::VmmOps ops = event_ops();
+  ops.flush_tlb = counted_flush;
+  pl.set_vmm_ops_for_test(ops);
+  pl.adopt_reservation_for_test(B, B + 16 * P, 1);
+  void* live = nullptr;
+
+  SECTION("an unmap flushes, after it") {
+    REQUIRE(pl.map_at(B, P, 0, "hipMalloc", &live));
+    REQUIRE(pl.unmap(at(B)));
+    REQUIRE(g_unmaps == 1);
+    REQUIRE(g_flushes == 1);
+    // Mapped again at the same address: no further flush.
+    REQUIRE(pl.map_at(B, P, 0, "hipMalloc", &live));
+    REQUIRE(g_flushes == 1);
+  }
+  SECTION("a drain of several unmaps flushes once") {
+    REQUIRE(pl.map_at(B, P, 0, "hipMalloc", &live));
+    REQUIRE(pl.map_at(B + 2 * P, P, 0, "hipMalloc", &live));
+    REQUIRE(pl.unmap(at(B), /*defer=*/true));
+    REQUIRE(pl.unmap(at(B + 2 * P), /*defer=*/true));
+    REQUIRE(g_flushes == 0);
+    REQUIRE(pl.drain_deferred() == 2);
+    REQUIRE(g_flushes == 1);
+  }
+  SECTION("a failed unmap does not flush") {
+    REQUIRE(pl.map_at(B, P, 0, "hipMalloc", &live));
+    ops.unmap = failed_unmap;
+    pl.set_vmm_ops_for_test(ops);
+    REQUIRE(pl.unmap(at(B), /*defer=*/true));
+    REQUIRE(pl.drain_deferred() == 0);
+    REQUIRE(g_flushes == 0);
+  }
+  SECTION("a mapping taken back is not unmapped, so nothing is flushed") {
+    REQUIRE(pl.map_at(B, 2 * P, 0, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(pl.unmap_async(at(B), S1, /*capturing=*/false));
+    REQUIRE(pl.map_at(B, 2 * P, 0, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(g_flushes == 0);
+  }
+}
+
 HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedRangeTakenBack) {
   // hipFreeAsync defers the unmap, and a stream-ordered pool hands the block
   // straight back, also when it is up to 9/8 of the request in bytes;
