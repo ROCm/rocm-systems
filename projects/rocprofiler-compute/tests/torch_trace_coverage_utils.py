@@ -2217,15 +2217,24 @@ def marker_matches_op(op_name: str, marker_leaf: str) -> bool:
             marker_norm = marker_leaf.rsplit("::", 1)[-1].rsplit(".", 1)[-1]
             if marker_norm == op_short:
                 return True
-            if marker_leaf.endswith(f".{op_short}"):
-                return True
             return False
+
+    if op_name.startswith("torch.Tensor."):
+        method = op_name[len("torch.Tensor.") :]
+        if marker_leaf == op_name:
+            return True
+        if marker_leaf.endswith("Tensor." + method):
+            return True
+        return False
+
+    if op_name.startswith("torch.") and not op_name.startswith("torch.ops."):
+        return marker_leaf == op_name
 
     op_leaf = op_name.rsplit("::", 1)[-1].rsplit(".", 1)[-1]
     marker_norm = marker_leaf.rsplit("::", 1)[-1].rsplit(".", 1)[-1]
     if marker_norm == op_leaf:
         return True
-    if marker_leaf.endswith(f".{op_leaf}"):
+    if marker_leaf.endswith("." + op_leaf):
         return True
 
     if op_name == "Optimizer.step" and marker_leaf.endswith(".step"):
