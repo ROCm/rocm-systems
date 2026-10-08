@@ -79,7 +79,7 @@ class FormulaSoc:
         self.rows = rows
 
     def metric_groups(self, profile_counters):
-        return iter_metric_groups((), self.rows, "MI300", profile_counters)
+        return iter_metric_groups(self.rows, "MI300", profile_counters)
 
 
 @pytest.mark.misc
@@ -108,7 +108,7 @@ def test_copied_counter_is_not_counted_as_split():
 
 @pytest.mark.misc
 def test_iter_metric_groups_reads_only_the_given_inputs():
-    """Priority ids, YAML rows, GPU series and expanded counters are enough."""
+    """YAML rows, GPU series and expanded counters are enough."""
     rows = [
         ("1700", 1701, 1, "waves", ["SQ_WAVES / GRBM_GUI_ACTIVE"]),
         ("2", 2, 1, "tcc hits", ["TCC_HIT[ + SQ_WAVES"]),
@@ -116,9 +116,9 @@ def test_iter_metric_groups_reads_only_the_given_inputs():
     ]
     profile = {"SQ_WAVES", "GRBM_GUI_ACTIVE", "TCC_HIT[0]", "TCC_HIT[1]"}
 
-    groups = iter_metric_groups(["17.1.1"], iter(rows), "MI300", profile)
+    groups = iter_metric_groups(iter(rows), "MI300", profile)
 
     assert [(counters, label) for _key, counters, label in groups] == [
-        (frozenset({"SQ_WAVES", "GRBM_GUI_ACTIVE"}), "1700.1701.1 (waves)"),
         (frozenset({"SQ_WAVES", "TCC_HIT[0]", "TCC_HIT[1]"}), "2.2.1 (tcc hits)"),
+        (frozenset({"SQ_WAVES", "GRBM_GUI_ACTIVE"}), "1700.1701.1 (waves)"),
     ]
