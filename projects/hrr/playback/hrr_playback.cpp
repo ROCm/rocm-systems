@@ -1553,6 +1553,12 @@ int main(int argc, char** argv) {
     ctx.region_oob_ptrs.store(0, std::memory_order_relaxed);
     ctx.guard_blocks_relocated.store(0, std::memory_order_relaxed);
     ctx.guard_blind_max.store(0, std::memory_order_relaxed);
+    // The warm-up's closing sync covers one device; a restore queued on
+    // another may still be pending, and would count in the timed pass.
+    hrr_wait_host_restores(ctx, nullptr);
+    ctx.host_restores->applied.store(0, std::memory_order_relaxed);
+    ctx.host_snapshots_rejected.store(0, std::memory_order_relaxed);
+    ctx.host_snapshots_in_graph.store(0, std::memory_order_relaxed);
     printf("[HRR] Warm-up done. Running filtered pass...\n");
   }
 

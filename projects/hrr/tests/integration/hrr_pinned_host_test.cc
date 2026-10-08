@@ -2511,6 +2511,15 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_GraphCapture) {
   CHECK(rejected == 1);
   CHECK(count_of(out, "does not match the size of its blob") == 1);
   CHECK(host_snapshots_in_graph(out) == 1);
+
+  // --kernel-filter replays everything once to warm up, then the filtered
+  // pass. The summary counts the filtered pass alone.
+  auto [frc, fout] = replay(archive, "--kernel-filter hrr_pinned_read");
+  INFO("Filtered replay:\n" << fout);
+  CHECK(frc < 128);
+  host_snapshot_summary(fout, restored, rejected);
+  CHECK(rejected == 1);
+  CHECK(host_snapshots_in_graph(fout) == 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -2541,6 +2550,15 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_FailedLaunch) {
   INFO("manifest:\n" << manifest);
   CHECK(manifest_count(manifest, "host_snapshots_unordered") == 1);
   CHECK(manifest_count(manifest, "host_snapshot_chunks") == 4);
+
+  // --kernel-filter replays everything once to warm up, then the filtered
+  // pass. The summary counts the filtered pass alone.
+  auto [frc, fout] = replay(archive, "--kernel-filter hrr_pinned_read");
+  INFO("Filtered replay:\n" << fout);
+  CHECK(frc == 0);
+  host_snapshot_summary(fout, restored, rejected);
+  CHECK(restored == 4);
+  CHECK(rejected == 0);
 
   hrr::Archive arc;
   REQUIRE(hrr::load_archive(archive.string(), arc));
