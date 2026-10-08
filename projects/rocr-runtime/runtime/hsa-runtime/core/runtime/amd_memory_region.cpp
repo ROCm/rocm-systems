@@ -158,7 +158,15 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
   if (!IsSystem() && !is_windxg && (size > max_single_alloc_size_)) {
-    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    // max_single_alloc_size_ is a discovery-time snapshot and may understate the
+    // device's current cap, so confirm against the driver's live figure before
+    // refusing. Reached only on a request the static check already rejected.
+    uint64_t available_size = 0;
+    if (owner()->driver().AvailableMemory(owner()->node_id(), &available_size) !=
+            HSA_STATUS_SUCCESS ||
+        size > available_size) {
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
   }
 
   size = AlignUp(size, GetPageSize());
