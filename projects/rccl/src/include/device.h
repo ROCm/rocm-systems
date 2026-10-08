@@ -763,19 +763,21 @@ inline __host__ __device__ int countOneBits(struct channelMasks const& x) {
   return n;
 }
 
-// n-th set bit of mask as channelId, or -1. Lane l checks bits l and WARP_SIZE + l (wave32), restarting in every word.
-__device__ __forceinline__ int ncclChannelMaskNthChannelId(struct channelMasks const& mask, int n, int lane) {
+// Channel of the channelOrdinal-th set bit of mask, or -1; needs 0 <= lane < WARP_SIZE.
+// Lane checks bits lane and WARP_SIZE + lane (wave32) per word.
+__device__ __forceinline__ int ncclChannelMaskNthChannelId(struct channelMasks const& mask, int channelOrdinal,
+                                                           int lane) {
   int total = 0;
   for (int i = 0; i < (int)(MAXCHANNELS / CHANNELS_PER_MASK_WORD); i++) {
     const uint64_t word = mask.masks[i];
-    int x = lane;
-    if ((word & (1ull << x)) && total + __popcll(word & ((1ull << x) - 1)) == n) {
-      return x + i * CHANNELS_PER_MASK_WORD;
+    int bit = lane;
+    if ((word & (1ull << bit)) && total + __popcll(word & ((1ull << bit) - 1)) == channelOrdinal) {
+      return bit + i * CHANNELS_PER_MASK_WORD;
     }
     if (WARP_SIZE < 64) {
-      x = WARP_SIZE + lane;
-      if ((word & (1ull << x)) && total + __popcll(word & ((1ull << x) - 1)) == n) {
-        return x + i * CHANNELS_PER_MASK_WORD;
+      bit = WARP_SIZE + lane;
+      if ((word & (1ull << bit)) && total + __popcll(word & ((1ull << bit) - 1)) == channelOrdinal) {
+        return bit + i * CHANNELS_PER_MASK_WORD;
       }
     }
     total += __popcll(word);

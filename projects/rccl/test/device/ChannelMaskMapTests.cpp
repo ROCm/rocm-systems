@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Block or warp n must get the n-th set bit of the mask. Wave32 runs the WARP_SIZE + lane path; wave64 is a control.
+// Pins ncclChannelMaskNthChannelId, not its ncclKernelMain call sites: block or warp n gets the n-th set bit.
 
 #include "DeviceTestBase.hpp"
 
@@ -20,6 +20,8 @@ namespace RcclUnitTesting {
 namespace {
 
 constexpr int kThreadsPerBlock = 256;  // NCCL_MAX_NTHREADS; only warp 0 runs the lookup, as in ncclKernelMain.
+constexpr int kMaxWarpsPerBlock = kThreadsPerBlock / 32;  // Wave32 has the most warps per block.
+constexpr int kMinWarpsPerBlock = kThreadsPerBlock / 64;
 
 // Mirrors ncclKernelMain's case 0, and also counts owning lanes and reports the compiled WARP_SIZE.
 __global__ void kernelBlockToChannel(channelMasks mask, int* channelIds, int* owners, int* deviceWarpSize) {
@@ -49,8 +51,8 @@ __global__ void kernelBlockToChannel(channelMasks mask, int* channelIds, int* ow
 
 // Mirrors the ENABLE_WARP_SPEED per-warp lookup in ncclKernelMain.
 __global__ void kernelWarpToChannel(channelMasks mask, int* channelIds, int* owners, int* deviceWarpSize) {
-  __shared__ int warpChannelId[kThreadsPerBlock / 32];
-  __shared__ int warpOwners[kThreadsPerBlock / 32];
+  __shared__ int warpChannelId[kMaxWarpsPerBlock];
+  __shared__ int warpOwners[kMaxWarpsPerBlock];
   const int warpCount = blockDim.x / WARP_SIZE;
   const int localWarpId = threadIdx.x / WARP_SIZE;
   const int globalWarpId = warpCount * blockIdx.x + localWarpId;
@@ -142,12 +144,15 @@ protected:
     int warpSize = 0;
     EXPECT_EQ(hipGetDevice(&device), hipSuccess);
     EXPECT_EQ(hipDeviceGetAttribute(&warpSize, hipDeviceAttributeWarpSize, device), hipSuccess);
-    return warpSize;
+    return warpSize > 0 ? warpSize : 32;
   }
 
   // A wave32 GPU must run the wave32 code object, else the WARP_SIZE + lane path is not what was tested.
-  void ExpectCompiledWarpSize(const DeviceBuffer<int>& deviceWarpSize) {
+  void ExpectCompiledWarpSize(const DeviceBuffer<int>& deviceWarpSize, int* compiledWarpSizeOut = nullptr) {
     const int compiledWarpSize = deviceWarpSize.download();
+    if (compiledWarpSizeOut != nullptr) {
+      *compiledWarpSizeOut = compiledWarpSize;
+    }
     RecordProperty("compiledWarpSize", compiledWarpSize);
     std::cout << "[ INFO     ] device code WARP_SIZE " << compiledWarpSize << std::endl;
     ASSERT_EQ(compiledWarpSize, HostWarpSize());
@@ -168,16 +173,20 @@ TEST_P(ChannelMaskMapTest, BlockMapsToNthSetBit) {
 
 TEST_P(ChannelMaskMapTest, WarpMapsToNthSetBit) {
   const std::vector<int>& want = GetParam().channels;
-  const int warpsPerBlock = kThreadsPerBlock / HostWarpSize();
-  const int blocks = static_cast<int>(want.size()) / warpsPerBlock + 1;  // At least one spare warp at the end.
-  const int slots = blocks * warpsPerBlock;
-  DeviceBuffer<int> channelIds(slots), owners(slots), deviceWarpSize(1);
+  const int blocks = static_cast<int>(want.size()) / kMinWarpsPerBlock + 1;  // At least one spare warp at the end.
+  DeviceBuffer<int> channelIds(blocks * kMaxWarpsPerBlock), owners(blocks * kMaxWarpsPerBlock), deviceWarpSize(1);
 
   kernelWarpToChannel<<<blocks, kThreadsPerBlock>>>(MaskOf(want), channelIds.ptr, owners.ptr, deviceWarpSize.ptr);
   syncAndCheck();
 
-  ASSERT_NO_FATAL_FAILURE(ExpectCompiledWarpSize(deviceWarpSize));
-  EXPECT_EQ(Mismatches(want, channelIds.copyTo(), owners.copyTo()), "") << "warpSize " << HostWarpSize();
+  int compiledWarpSize = 0;
+  ASSERT_NO_FATAL_FAILURE(ExpectCompiledWarpSize(deviceWarpSize, &compiledWarpSize));
+  const size_t slots = static_cast<size_t>(blocks) * (kThreadsPerBlock / compiledWarpSize);
+  std::vector<int> got = channelIds.copyTo();
+  std::vector<int> gotOwners = owners.copyTo();
+  got.resize(slots);
+  gotOwners.resize(slots);
+  EXPECT_EQ(Mismatches(want, got, gotOwners), "") << "warpSize " << compiledWarpSize;
 }
 
 INSTANTIATE_TEST_SUITE_P(Masks, ChannelMaskMapTest, ::testing::ValuesIn(MaskCases()),
