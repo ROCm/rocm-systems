@@ -431,8 +431,9 @@ bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
     bool drained_oom     = false;  // this call unmapped every freed mapping
     std::vector<uint64_t> drained;
     // Every device's null stream has the same handle: the device tells them
-    // apart.
+    // apart. A negative `device` means the stream's own.
     const int sdev = stream ? stream_device(*stream) : -1;
+    if (device < 0 && stream) device = sdev;
     std::unique_lock<std::mutex> lk(mu_);
     while (!why) {
         if (pe != 0 && va_overlaps(plan_.exported, pb, pe)) {

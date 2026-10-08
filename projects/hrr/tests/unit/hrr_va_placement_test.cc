@@ -916,6 +916,16 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_NullStreamsOfTwoDevices) {
     REQUIRE(g_waits.empty());
     REQUIRE(g_destroyed == 1);
   }
+  SECTION("no device given: the stream's own") {
+    // As playback_hipMallocAsync passes it. Placed on device 1, the null
+    // stream's, so device 1 takes it back.
+    const uint64_t C = B + 4 * P;
+    REQUIRE(pl.map_at(C, P, -1, "hipMallocAsync", &live, false, &null_stream));
+    REQUIRE(pl.unmap_async(at(C), null_stream, /*capturing=*/false));
+    REQUIRE(pl.map_at(C, P, 1, "hipMallocAsync", &live, false, &null_stream));
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(g_maps == 2);
+  }
 }
 
 HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedWithNothingToWaitFor) {

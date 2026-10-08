@@ -2255,7 +2255,8 @@ static bool hrr_place_alloc(PlaybackContext& ctx, uint64_t rec, size_t size,
                             const hipStream_t* stream = nullptr) {
     hrr::VaPlacement* pl = hrr_placing(ctx);
     if (!pl) return false;
-    if (device < 0) (void)hipGetDevice(&device);
+    // With a stream, map_at resolves a negative device to the stream's own.
+    if (device < 0 && !stream) (void)hipGetDevice(&device);
     return pl->map_at(rec, size, device, api, live, ctx.in_graph_capture.any(), stream);
 }
 
@@ -2968,7 +2969,6 @@ static bool hrr_place_async_alloc(PlaybackContext& ctx, uint64_t rec, size_t siz
         pl->fell_back(rec, size, api, "it was allocated inside a graph capture");
         return false;
     }
-    if (device < 0) device = hrr::hrr_stream_device(stream);
     return hrr_place_alloc(ctx, rec, size, api, live, device, &stream);
 }
 

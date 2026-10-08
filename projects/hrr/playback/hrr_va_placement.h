@@ -691,7 +691,8 @@ class VaPlacement {
     // *live == rec. Returns false when the allocation has to fall back, after
     // reporting why; the caller then allocates the old way. `stream` is the
     // live stream a stream-ordered allocation is made on, and nullptr for
-    // hipMalloc, hipExtMallocWithFlags and region segments.
+    // hipMalloc, hipExtMallocWithFlags and region segments. With a stream, a
+    // negative `device` means the stream's own.
     //
     // A freed mapping still waiting for its unmap that starts at the same page
     // on the same device and ends where the allocation's pages do is taken
