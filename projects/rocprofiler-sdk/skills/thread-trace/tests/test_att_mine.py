@@ -636,6 +636,14 @@ class OccupancyTests(unittest.TestCase):
         cap = mine.Capture.from_waves([], dispatches=[], occupancy=[start, end])
         self.assertEqual([r["active_waves"] for r in cap.occupancy_rows()], [1, 0])
 
+    def test_a_wave_ends_even_when_its_pipe_id_changed(self):
+        # The decoder matches a wave's start and end by slot (cu, simd, wave); on gfx942 the end
+        # record carried pipe_id 0 where the start had 1.
+        start, end = self.occ(10, 0, 1), self.occ(20, 0, 0)
+        start.pipe_id = 1
+        cap = mine.Capture.from_waves([], dispatches=[], occupancy=[start, end])
+        self.assertEqual([r["active_waves"] for r in cap.occupancy_rows()], [1, 0])
+
     def test_active_waves_and_registers_follow_the_occupancy_sample(self):
         dispatch = SimpleNamespace(
             time=0,

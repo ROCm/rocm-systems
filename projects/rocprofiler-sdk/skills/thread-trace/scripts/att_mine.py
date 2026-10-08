@@ -985,14 +985,7 @@ class Capture:
                     record.vgprs,
                 )
                 continue
-            key = (
-                se,
-                record.cu,
-                record.simd,
-                record.wave_id,
-                record.me_id,
-                record.pipe_id,
-            )
+            key = (se, record.cu, record.simd, record.wave_id)
             wave_sgprs, wave_vgprs = resources.get(
                 (se, record.me_id, record.pipe_id), (0, 0)
             )
