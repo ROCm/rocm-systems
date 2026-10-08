@@ -340,6 +340,37 @@ in the following table.
           ``NCCL_IB_SUBNET_AWARE_ROUTING``.
       - | Integer value, bits (default: ``24``)
 
+    * - | ``NCCL_IB_WQE_LATENCY_THRESHOLD_NS``
+        | Enables per-queue-pair (QP) CPU-side WQE post-to-poll latency
+          monitoring in the ``IB`` network transport (``net_ib``). When set
+          above ``0``, each send-side QP measures the time from posting a
+          signaled work request (``ibv_post_send``) to the CPU polling its
+          completion, which includes any delay before RCCL polls the
+          completion queue (CQ). It is not the hardware completion time.
+        | Each QP samples one signaled WQE at a time. The next one is sampled
+          only after the previous sample completes, so under pipelined
+          traffic the statistics cover a subset of WQEs.
+        | Samples longer than the threshold are counted as slow and logged
+          as ``NET/IB: WQE slow`` lines. A sampled WQE that has been
+          outstanding longer than the threshold without a completion is
+          logged as ``NET/IB: WQE stall (no CQE)``. Both messages are logged
+          at most once per second per QP, at ``INFO`` level with the ``NET``
+          subsystem (``NCCL_DEBUG=INFO``, ``NCCL_DEBUG_SUBSYS=NET``). Each
+          line identifies the local and remote QP number, device, port, LID
+          and GID.
+        | Read once per process. Not applied by the ``IB-CAST`` transport.
+      - | Integer value, nanoseconds (default: ``0``, disabled)
+
+    * - | ``NCCL_IB_WQE_LATENCY_REPORT``
+        | Controls the per-QP latency summary logged when a send connection
+          is closed while ``NCCL_IB_WQE_LATENCY_THRESHOLD_NS`` is enabled.
+          The summary (``NET/IB: WQE latency summary``) reports the sample
+          count, slow count, threshold and the post-to-poll mean, standard
+          deviation, P50/P90/P99/P99.9 estimates and maximum. QPs with no
+          samples are not reported.
+      - | ``1``: Log a summary per QP on close (default).
+        | ``0``: Disabled. Slow and stall messages are still logged.
+
     * - | ``NCCL_PXN_C2C``
         | Allows PXN routing through a C2C link to reach a NIC attached to a
           peer GPU. The C2C path is NVIDIA-specific and is not currently
