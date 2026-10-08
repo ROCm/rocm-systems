@@ -1,5 +1,5 @@
 import { Box, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from '@mui/material';
-import { provenanceDetails } from '../../data/provenance';
+import { runEnvironmentDetails } from '../../data/provenance';
 import { shortSha } from '../../utils/formatters';
 import { monoFont } from '../../theme/tokens';
 
@@ -16,17 +16,9 @@ function display(value) {
   return typeof value === 'object' ? JSON.stringify(value) : String(value);
 }
 
-function environmentFor(run) {
-  return new Map([
-    ...provenanceDetails(run?.provenance),
-    ...(run?.provenance?.details ?? []),
-    ...(run?.environment ?? []),
-  ].map((detail) => [detail.key, detail]));
-}
-
 export default function RunMetadataDiff({ baseline, candidate, filters }) {
-  const oldDetails = environmentFor(baseline);
-  const newDetails = environmentFor(candidate);
+  const oldDetails = runEnvironmentDetails(baseline);
+  const newDetails = runEnvironmentDetails(candidate);
   const keys = [...new Set([...oldDetails.keys(), ...newDetails.keys()])].sort();
   const facts = [
     ['coverage', 'Selected coverage', (run) => coverage(run, filters)],

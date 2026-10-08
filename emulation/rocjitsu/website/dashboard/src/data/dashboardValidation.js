@@ -10,7 +10,12 @@ const ISO = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-
 const hasText = (value) => typeof value === 'string' && Boolean(value.trim());
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const scalar = (value) => typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number' && Number.isFinite(value);
-const sameSet = (left, right) => left.length === right.length && [...left].sort().every((v, i) => v === [...right].sort()[i]);
+const sameSet = (left, right) => {
+  if (left.length !== right.length) return false;
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.every((value, index) => value === sortedRight[index]);
+};
 const identity = (value) => JSON.stringify(value);
 const environmentIdentity = (environment) => identity(environment.map(({ key, value }) => [key, value]).sort(([a], [b]) => a.localeCompare(b)));
 const definitionIdentity = (test) => identity([test.suite, test.name, Object.entries(test.problem).sort(([a], [b]) => a.localeCompare(b))]);
@@ -164,12 +169,6 @@ export function loadDashboardData(raw) {
   });
   const metadata = { schemaVersion: raw.schemaVersion, repository: raw.repository, isBeta: raw.isBeta, canonicalBranch: shape.canonicalBranch };
   return validatePublishedDashboardData({ metadata, index: { generatedAt: raw.generatedAt, runFiles: runs.map(({ id }) => `runs/${id}.json`) }, runs, catalogs }).data;
-}
-
-// Independent branches, machines and environments are supported; no equality policy applies.
-export function validatePublicationPolicy(runs) {
-  if (!Array.isArray(runs)) throw new Error('Expected published runs to be an array');
-  return [];
 }
 
 export function validatePublishedDashboardData({ metadata, index, runs, runErrors = [], catalogs = {}, catalogErrors = {} }) {

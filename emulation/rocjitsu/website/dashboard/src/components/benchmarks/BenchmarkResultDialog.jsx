@@ -17,7 +17,7 @@ import { DetailGrid, DetailSectionHeading } from '../shared/DetailLayout';
 import StatusChip from '../shared/StatusChip';
 import { commitTimestampFor } from '../../data/runOrdering';
 import { problemDetails } from '../../data/problemDetails';
-import { provenanceDetails } from '../../data/provenance';
+import { runEnvironmentDetails } from '../../data/provenance';
 import { formatDuration, formatFullDate, shortSha } from '../../utils/formatters';
 import { hasDisplayValue } from '../../utils/values';
 
@@ -27,7 +27,7 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
   const provenance = run?.provenance ?? {};
   const commitSha = provenance.rocjitsuCommitSha;
   const testProblemDetails = problemDetails(test?.problem);
-  const environmentDetails = [...new Map([...provenanceDetails(provenance), ...(provenance.details ?? []), ...(run?.environment ?? [])].map((detail) => [detail.key, detail])).values()];
+  const environmentDetails = [...runEnvironmentDetails({ provenance, environment: run?.environment }).values()];
 
   return (
     <Dialog open={Boolean(record)} onClose={onClose} fullWidth maxWidth="md">

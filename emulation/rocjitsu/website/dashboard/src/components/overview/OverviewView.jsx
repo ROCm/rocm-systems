@@ -9,8 +9,6 @@ export default function OverviewView({
   viewModel,
   data,
   state,
-  onCompareRun,
-  onExploreRun,
   onOpenBenchmarks,
 }) {
   return (
@@ -31,7 +29,7 @@ export default function OverviewView({
           baseline={viewModel.history.firstRun}
         />
       </Box>
-      <RecentRuns data={data} filters={state.filters} onCompareRun={onCompareRun} onExploreRun={onExploreRun} />
+      <RecentRuns data={data} filters={state.filters} />
     </Stack>
   );
 }

@@ -39,3 +39,11 @@ export function provenanceDetails(provenance = {}) {
   legacyDetails.forEach(([key, label]) => addDetail(key, label, provenance[key]));
   return details;
 }
+
+export function runEnvironmentDetails(run) {
+  return new Map([
+    ...provenanceDetails(run?.provenance),
+    ...(run?.provenance?.details ?? []),
+    ...(run?.environment ?? []),
+  ].map((detail) => [detail.key, detail]));
+}

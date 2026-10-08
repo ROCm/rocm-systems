@@ -110,10 +110,11 @@ function currentWorkload(data, filters) {
     const catalog = data.catalogs?.[reference?.testCatalog];
     const ids = (catalog?.configurations?.[pair.key] ?? [])
       .filter((id) => filters.suites.includes(definitions.get(id)?.suite));
+    const selectedIds = new Set(ids);
     const anchors = new Map();
     for (const run of ordered) {
       if (run.catalogId !== reference?.catalogId) continue;
-      for (const test of run.tests) if (test.target === pair.target && test.mode === pair.mode && ids.includes(test.logicalTestId) && completed(test) && !anchors.has(test.logicalTestId)) {
+      for (const test of run.tests) if (test.target === pair.target && test.mode === pair.mode && selectedIds.has(test.logicalTestId) && completed(test) && !anchors.has(test.logicalTestId)) {
         anchors.set(test.logicalTestId, { testId: test.testId, logicalTestId: test.logicalTestId, target: pair.target, mode: pair.mode,
           durationSeconds: test.durationSeconds, runId: run.runId, catalogId: run.catalogId, timestamp: run.timestamp });
       }

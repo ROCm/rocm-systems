@@ -154,23 +154,9 @@ function Dashboard({ data, state, dataError = null, onRetry = null }) {
       : null),
     [data, hasData, state.filters, state.historyRange, state.tab],
   );
-  const openRunComparison = (runIds) => {
-    const selectedRuns = runIds
-      .map((runId) => data.runs.find((run) => run.runId === runId))
-      .filter(Boolean);
-    if (selectedRuns.length !== 2) return;
-    state.setComparisonPair({ candidateId: selectedRuns[0].runId, baselineId: selectedRuns[1].runId });
-    state.setTab('compare');
-  };
   const openBranchComparison = (selection) => {
     state.openComparison(selection);
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
-  };
-  const openRunInExplorer = (runId) => {
-    state.setExplorerRunIds([runId]);
-    state.setBenchmarkMode('single');
-    state.setTab('benchmarks');
-    window.requestAnimationFrame(() => window.scrollTo({ top: 0 }));
   };
   const openBenchmarks = () => {
     state.setExplorerRunIds([]);
@@ -216,8 +202,6 @@ function Dashboard({ data, state, dataError = null, onRetry = null }) {
               viewModel={overview}
               data={data}
               state={state}
-              onCompareRun={openRunComparison}
-              onExploreRun={openRunInExplorer}
               onOpenBenchmarks={openBenchmarks}
             />
           )}

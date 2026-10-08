@@ -23,6 +23,7 @@ import Chart from '../shared/Chart';
 import SectionCard from '../shared/SectionCard';
 import StatusChip from '../shared/StatusChip';
 import { selectRunComparison } from '../../data/selectors';
+import { compareRunExecution } from '../../data/runOrdering';
 import {
   escapeHtml,
   formatDuration,
@@ -103,7 +104,7 @@ export default function CompareRunsView({
   const baseline = publishedRuns.find((run) => run.runId === selectedBaselineId) ?? null;
   const viewModel = selectRunComparison(candidate, baseline, filters, NOISE_TOLERANCE);
   const hasRuns = Boolean(candidate && baseline);
-  const runOptions = publishedRuns.slice().sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp) || b.runId.localeCompare(a.runId));
+  const runOptions = publishedRuns.slice().sort((a, b) => compareRunExecution(b, a));
   const chartItems = viewModel.comparable.filter((item) => Number.isFinite(item.delta));
   const maximumDelta = Math.max(...chartItems.map((item) => Math.abs(item.delta)), 0);
   const axisLimit = Math.max(5, Math.ceil(maximumDelta * 1.25));
