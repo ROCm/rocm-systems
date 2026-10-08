@@ -46,8 +46,9 @@ ncclResult_t rcclDevrProbeNonSymWindow(struct ncclComm* comm, void* userPtr, siz
     size_t baseSize = 0;
     noteProbeFailure(cuMemGetAddressRange(&base, &baseSize, (CUdeviceptr)userPtr));
     if (probeRet == ncclSuccess) {
+      // Host VMM can report base 0; query at userPtr then, as the 7.0.2.x walk does.
       noteProbeFailure(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE,
-                                             (CUdeviceptr)base));
+                                             base != 0 ? base : (CUdeviceptr)userPtr));
     }
     if (probeRet == ncclSuccess && !legacyIpcCap) {
       CUdeviceptr memAddr = 0;
@@ -92,13 +93,26 @@ ncclResult_t rcclDevrProbeNonSymWindow(struct ncclComm* comm, void* userPtr, siz
     }
     if (anyFail) return (probeRet != ncclSuccess) ? probeRet : ncclInternalError;
     if (anyHost) {
-      WARN("Host-backed VMM cannot be exported via IPC for an LSA team of %d", comm->localRanks);
+      WARN("Host-backed VMM cannot be exported via IPC for an LSA team of %d", devr->lsaSize);
       return ncclInvalidArgument;
     }
     return ncclSuccess;
   }
   if (probeRet != ncclSuccess) return probeRet;
-  if (hasSysmemSegment) NCCLCHECK(ncclDevrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment, winFlags));
+  if (hasSysmemSegment) {
+    NCCLCHECK(ncclDevrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment, winFlags));
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t rcclDevrGinSegmentRegType(bool isHost, int maxGlobalNumSegments, int* ptrType, bool* needDmabuf) {
+  // Host VMM is CPU memory, but NCCL_PTR_HOST would pin it with ibv_reg_mr and EFAULT; use the DMA-BUF MR path.
+  *ptrType = NCCL_PTR_CUDA;
+  *needDmabuf = maxGlobalNumSegments > 1 || isHost;
+  if (isHost && !ncclParamDmaBufEnable()) {
+    WARN("Host VMM GIN segment requires NCCL_DMABUF_ENABLE=1");
+    return ncclInvalidUsage;
+  }
   return ncclSuccess;
 }
 #endif
