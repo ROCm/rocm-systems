@@ -70,7 +70,8 @@ def build_kernel_hover_template(
             "<b>Details</b>",
             "%{customdata[2]}",
             f"Dispatch Count: {format_hover_number(pct_dispatches, ',.2f')}% "
-            f"({_format_integer(dispatches.kernel)} / {_format_integer(dispatches.total)})",
+            f"({_format_integer(dispatches.kernel)}"
+            f" / {_format_integer(dispatches.total)})",
             f"Duration: {format_hover_number(pct_runtime, ',.2f')}% "
             f"({format_hover_number(duration.kernel, ',.0f')} / "
             f"{format_hover_number(duration.total, ',.0f')} {duration.unit})",

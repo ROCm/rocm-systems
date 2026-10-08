@@ -414,7 +414,9 @@ class Roofline:
             limiter, limiter_category, roof_value = self._determine_kernel_limiter(
                 level_ai, ceiling_data, points[0]["perf"], compute_peaks
             )
-            limiting_peak = self._resolve_limiting_peak(limiter, limiter_category, points)
+            limiting_peak = self._resolve_limiting_peak(
+                limiter, limiter_category, points
+            )
             self._attach_kernel_hover_cells(points, roof_value, bandwidth_html)
 
             traces.append(
@@ -514,7 +516,9 @@ class Roofline:
             # instead of silently disappearing from the tooltip.
             achieved_bandwidth = performance / ai_value if has_traffic else 0.0
             bandwidth_entries.append(
-                self._build_bandwidth_entry(level_name, achieved_bandwidth, peak_bandwidth)
+                self._build_bandwidth_entry(
+                    level_name, achieved_bandwidth, peak_bandwidth
+                )
             )
             if not has_traffic:
                 continue

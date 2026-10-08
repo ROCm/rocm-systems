@@ -181,9 +181,7 @@ def pct_roof(kernel: dict, point_index: int = 0) -> float:
     return float(kernel["points"][point_index]["hoverCells"][1])
 
 
-def test_kernel_traces_given_multiple_stacked_compute_peaks__limiter_names_the_one_that_binds() -> (
-    None
-):
+def test_kernel_traces_stacked_compute_peaks__limiter_names_binding_one() -> None:
     ai_data = {"ai_hbm": [[100.0], [50000.0]], "kernelNames": ["kA"]}
 
     traces, _ = kernel_traces(
@@ -195,9 +193,7 @@ def test_kernel_traces_given_multiple_stacked_compute_peaks__limiter_names_the_o
     assert "Limited by Compute: FP32 MFMA" in traces[0].hovertemplate
 
 
-def test_kernel_traces_given_memory_roof_already_exceeded__falls_back_to_compute_peak() -> (
-    None
-):
+def test_kernel_traces_exceeded_memory_roof__falls_back_to_compute_peak() -> None:
     traces, _ = kernel_traces(
         make_roofline(["FP32"]),
         {"ai_hbm": [[1.0], [5000.0]], "kernelNames": ["kA"]},
@@ -289,9 +285,7 @@ def test_kernel_traces_expose_the_leftmost_peak_when_the_limiter_is_unknown() ->
     assert model[0]["limitingPeak"] == "L2"
 
 
-def test_kernel_traces_given_differing_level_bandwidths__all_points_share_the_binding_roofs_percentage() -> (
-    None
-):
+def test_kernel_traces_differing_bandwidths__points_share_binding_roof_pct() -> None:
     ceiling = {
         "hbm": [[0.01, 1.0], [1.0, 2000.0], 2000.0],
         "l2": [[0.01, 1.0], [1.0, 3000.0], 3000.0],
@@ -314,7 +308,7 @@ def test_kernel_traces_given_differing_level_bandwidths__all_points_share_the_bi
     assert points["L2"]["hoverCells"][:2] == ["1,500", "66.67"]
 
 
-def test_bandwidth_hover_given_a_level_with_no_traffic__still_lists_it_at_zero() -> None:
+def test_bandwidth_hover_no_traffic_level__still_lists_at_zero() -> None:
     ceiling = dict(CEILING, lds=[[0.01, 1.0], [1.0, 800.0], 800.0])
     _, model = kernel_traces(
         make_roofline(["FP32"]),
@@ -722,9 +716,7 @@ def test_dash_figures_keep_every_ceiling(benchmarked_roofline) -> None:
     assert drawn_roof_knees(flops_figure) == roof_extents
 
 
-def test_default_precisions_given_fp32_fp16_fp8_present__orders_fp32_before_fp16_before_fp8() -> (
-    None
-):
+def test_default_precisions_fp32_fp16_fp8_present__orders_fp32_first() -> None:
     from roofline.roofline_main import _default_precisions
 
     assert _default_precisions(["FP16", "FP32", "FP8", "FP64"]) == [
@@ -735,9 +727,7 @@ def test_default_precisions_given_fp32_fp16_fp8_present__orders_fp32_before_fp16
     assert _default_precisions(["FP8"]) == ["FP8"]
 
 
-def test_default_precisions_given_none_preferred_present__falls_back_to_first_datatype() -> (
-    None
-):
+def test_default_precisions_no_preferred__falls_back_to_first_datatype() -> None:
     from roofline.roofline_main import _default_precisions
 
     assert _default_precisions(["FP64", "BF16"]) == ["FP64"]
