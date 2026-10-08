@@ -120,6 +120,13 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     every header declaring a renamed name must precede it and the undef half
     must immediately follow the unit -- see `fakes/libc_seam.h:9-19`) instead
     of the shared `fakes/nccl_fakes.cc` the other units in this binary use.
+  - `ras/ras_param.cc` (`RAS_PARAM_CC_PATH`, from `ras-param-test.cc`); suite
+    `RasParamMicrotest.*`. Covers environment parsing, invalid-value fallback,
+    cached parameter reads, and nanosecond/second scaling. The test includes the
+    production file under renamed `ncclParamRasTimeoutFactor`,
+    `rasTimeoutFactorNs`, and `rasTimeoutFactorSec` symbols so it can link beside
+    `fakes/ras_param_fakes.cc` and the `ras-test.cc` timeout fake in the shared
+    microtest binary.
   - `tuning/tuning_general.cc` (`TUNING_GENERAL_CC_PATH`, from
     `tuning-general-test.cc`); suite `TuningGeneralMicrotest.*`. Covers the
     shared step-count, hardware-index, time-estimation, thread-threshold,
@@ -359,7 +366,7 @@ symbol.
 | `src/plugin/env.cc` | `fakes/env_plugin_fakes.cc` |
 | `src/plugin/gin.cc`, `src/gin/gin_host.cc` | `fakes/gin_fakes.cc` |
 | `src/proxy.cc` | `fakes/proxy_fakes.cc` |
-| `src/ras/ras_param.cc` | `fakes/ras_param_fakes.cc` |
+| `src/ras/ras_param.cc` | `fakes/ras_param_fakes.cc` (the direct `ras-param-test.cc` inclusion uses renamed symbols) |
 | `src/rccl_wrap.cc`'s own public entry points (targets that don't compile the real file, e.g. `rccl-UnitTestsMicroEnqueue`) | `fakes/rccl_wrap_fakes.cc` |
 | `src/rccl_wrap.cc`'s dependencies (`rccl-UnitTestsMicro`, which compiles the real file and tests it directly) | `fakes/wrap_fakes.cc` |
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |
