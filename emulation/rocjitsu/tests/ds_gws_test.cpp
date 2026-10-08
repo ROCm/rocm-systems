@@ -250,10 +250,10 @@ TEST_P(DsGwsTest, DecodesWithoutGdsBit) {
 }
 
 // ---------------------------------------------------------------------------
-// Stateful GWS: co-residency-gated parking. These exercise the CU-local
-// counter table through execute_instruction(), which runs the generated
-// execute body (decode rid, read count, call the CU hook). Resources are
-// workgroup-private, so a rendezvous only ever blocks co-resident waves.
+// Stateful GWS: dispatch-global rendezvous. These exercise the shared counter
+// table through execute_instruction(), which runs the generated execute body
+// (decode rid, read count, call the CU hook). Resources are dispatch-global, so
+// a signal/arrival from any workgroup releases a waiter parked by another.
 // ---------------------------------------------------------------------------
 
 // Decode one GWS op, publish @p count in the ADDR VGPR's first active lane, and
@@ -536,10 +536,10 @@ TEST_P(DsGwsTest, SemaphoreRidSumWrapsToSameResource) {
   wf1->halt();
 }
 
-// A P whose only possible producer lives in another workgroup cannot rendezvous
-// in this CU-local, workgroup-private model, so it completes structurally
-// instead of parking (otherwise it would hang forever).
-TEST_P(DsGwsTest, CrossWorkgroupSemaphorePStaysStructural) {
+// GWS state is dispatch-global, so a P parked by one workgroup is released by a
+// V issued from another workgroup of the same dispatch -- the hardware
+// rendezvous the workgroup-private model could not express.
+TEST_P(DsGwsTest, CrossWorkgroupSemaphorePWakesOnCrossWgV) {
   const auto arch = GetParam();
   amdgpu::GpuMemory mem("ds_gws_xwg_mem");
   amdgpu::L2Cache l2("ds_gws_xwg_l2");
@@ -556,10 +556,120 @@ TEST_P(DsGwsTest, CrossWorkgroupSemaphorePStaysStructural) {
   wf1->set_exec(0x1);
   wf1->set_m0(0);
 
-  // wf1 is the only peer and lives in a different workgroup, so wf0's P has no
-  // in-scope signaller and must not park.
+  // wf0 (wg0) waits with no credit and parks on the shared resource.
+  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *wf0, /*count=*/0);
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
+
+  // wf1 (wg1) signals the same dispatch-global resource and wakes wf0.
+  run_gws(*cu, *decoder, arch, GwsOp::kSemaV, *wf1, /*count=*/0);
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
+
+  wf0->halt();
+  wf1->halt();
+}
+
+// INIT seeds a semaphore credit on the shared resource: with a second resident
+// wave, the first P consumes that credit and keeps running, while the second P
+// finds no credit and parks. Guards the `res.credits = count` write in gws_init.
+TEST_P(DsGwsTest, InitSeedsCreditFirstPConsumesSecondParks) {
+  const auto arch = GetParam();
+  amdgpu::GpuMemory mem("ds_gws_initcredit_mem");
+  amdgpu::L2Cache l2("ds_gws_initcredit_l2");
+  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto decoder = Decoder::create(arch);
+  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  ASSERT_NE(wf0, nullptr);
+  ASSERT_NE(wf1, nullptr);
+  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
+  for (auto *wf : {wf0, wf1}) {
+    wf->set_exec(0x1);
+    wf->set_m0(0);
+  }
+
+  // Seed exactly one credit.
+  run_gws(*cu, *decoder, arch, GwsOp::kInit, *wf0, /*count=*/1);
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
+
+  // First P consumes the seeded credit and stays running.
   run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *wf0, /*count=*/0);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
+
+  // Second P finds no credit and parks.
+  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *wf1, /*count=*/0);
+  EXPECT_EQ(wf1->state(), amdgpu::WfState::GWS_WAIT);
+
+  wf0->halt();
+  wf1->halt();
+}
+
+// Polling regression: a sibling that merely spins (stays RUNNING, never signals)
+// must not prevent a cross-workgroup V from waking a parked P. The wake is
+// event-driven and does not depend on the quiescence backstop, which a running
+// sibling would otherwise block.
+TEST_P(DsGwsTest, PollingSiblingDoesNotBlockCrossWgSemaphoreWake) {
+  const auto arch = GetParam();
+  amdgpu::GpuMemory mem("ds_gws_poll_mem");
+  amdgpu::L2Cache l2("ds_gws_poll_l2");
+  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto decoder = Decoder::create(arch);
+  auto *consumer = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  auto *sibling = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  auto *producer = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, 102, 16);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_NE(sibling, nullptr);
+  ASSERT_NE(producer, nullptr);
+  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
+  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1);
+  for (auto *wf : {consumer, sibling, producer}) {
+    wf->set_exec(0x1);
+    wf->set_m0(0);
+  }
+
+  // Consumer (wg0) parks on P; its sibling stays RUNNING (a spin/poll loop).
+  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *consumer, /*count=*/0);
+  EXPECT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT);
+  EXPECT_EQ(sibling->state(), amdgpu::WfState::RUNNING);
+
+  // Producer (wg1) signals: the consumer wakes even though the sibling is still
+  // running, so the running poll loop cannot deadlock the rendezvous.
+  run_gws(*cu, *decoder, arch, GwsOp::kSemaV, *producer, /*count=*/0);
+  EXPECT_EQ(consumer->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(sibling->state(), amdgpu::WfState::RUNNING);
+
+  consumer->halt();
+  sibling->halt();
+  producer->halt();
+}
+
+// GWS barriers are dispatch-global too: two single-wave workgroups that each
+// arrive at a barrier programmed for two participants rendezvous across the
+// workgroup boundary (the early arrival parks, the second releases it).
+TEST_P(DsGwsTest, CrossWorkgroupBarrierReleasesBothParticipants) {
+  const auto arch = GetParam();
+  amdgpu::GpuMemory mem("ds_gws_xwgbar_mem");
+  amdgpu::L2Cache l2("ds_gws_xwgbar_l2");
+  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto decoder = Decoder::create(arch);
+  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  auto *wf1 = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, 102, 16);
+  ASSERT_NE(wf0, nullptr);
+  ASSERT_NE(wf1, nullptr);
+  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
+  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1);
+  wf0->set_exec(0x1);
+  wf0->set_m0(0);
+  wf1->set_exec(0x1);
+  wf1->set_m0(0);
+
+  // Two participants -> programmed value 1. wf0 (wg0) arrives first and parks.
+  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/1);
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
+
+  // wf1 (wg1) is the releasing arrival and wakes the cross-workgroup peer.
+  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf1, /*count=*/1);
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
 
   wf0->halt();
   wf1->halt();
