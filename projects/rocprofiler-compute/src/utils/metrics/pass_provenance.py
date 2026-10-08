@@ -447,21 +447,42 @@ def resolve_weight_counter_column(
     df: pd.DataFrame,
     pass_layout: Optional[PassLayout],
 ) -> str:
-    """Qualify a WEIGHTED_AVG weight counter to the sub-metric's bound pass."""
+    """Read a WEIGHTED_AVG weight from the sub-metric's bound pass.
+
+    A weight from another replay is a different sample. When that pass does
+    not hold the counter, the qualified name is returned so analysis does
+    not use another pass.
+    """
     if pass_layout is None or not pass_layout.has_duplicates:
         return weight_counter
-    if weight_counter not in pass_layout.duplicated:
+    pass_key = _bound_pass_for_sub_metric(df, sub_metric_name)
+    if pass_key is None:
         return weight_counter
+    in_pass = weight_counter in pass_layout.counters_by_pass.get(pass_key, frozenset())
+    if not in_pass:
+        console_warning(
+            "pass_provenance",
+            f"WEIGHTED_AVG weight {weight_counter!r} for {sub_metric_name!r} "
+            f"is not in {pass_key}; not using another pass",
+        )
+        return pass_layout.qualified_column(weight_counter, pass_key)
+    if weight_counter in pass_layout.duplicated:
+        return pass_layout.qualified_column(weight_counter, pass_key)
+    return weight_counter
+
+
+def _bound_pass_for_sub_metric(
+    df: pd.DataFrame,
+    sub_metric_name: str,
+) -> Optional[str]:
+    """Pass key same-pass bind stored for the sub-metric row."""
     row_pass = df.attrs.get(METRIC_ROW_PASS_ATTR, {})
-    # Sub-metric rows are keyed by metric name in the Metric column.
-    if "Metric" not in df.columns:
-        return weight_counter
+    if not isinstance(row_pass, dict) or "Metric" not in df.columns:
+        return None
     matches = df.index[df["Metric"] == sub_metric_name]
     if len(matches) == 0:
-        return weight_counter
+        return None
     pass_key = row_pass.get(matches[0])
-    if not pass_key:
-        return weight_counter
-    if weight_counter not in pass_layout.counters_by_pass.get(pass_key, frozenset()):
-        return weight_counter
-    return pass_layout.qualified_column(weight_counter, pass_key)
+    if not isinstance(pass_key, str) or not pass_key:
+        return None
+    return pass_key
