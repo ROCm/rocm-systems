@@ -231,9 +231,10 @@ struct marker_payload_t
 using hip_stream_operation_t = int;
 struct hip_stream_data
 {
-    std::uint64_t    size{};
-    struct stream_id stream_id{};
-    std::uint64_t    stream_value{};
+    std::uint64_t size{};
+    struct stream_id stream_id
+    {};
+    std::uint64_t stream_value{};
 };
 
 // ─── Tracing-name table stub ────────────────────────────────────────────────
@@ -400,7 +401,7 @@ public:
                 (counter_id id, available_dimensions_cb_t cb, void* user_data));
 
     MOCK_METHOD(status_t, get_version,
-                (std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch));
+                (std::uint32_t * major, std::uint32_t* minor, std::uint32_t* patch));
     MOCK_METHOD(status_t, get_timestamp, (timestamp * ts));
     MOCK_METHOD(const char*, get_status_string, (status_t s));
 
