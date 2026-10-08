@@ -2081,17 +2081,6 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph(bool reuseKernargSl
         size_t j = i;
         while (j < segment.nodes.size() && segment.nodes[j]->GraphCaptureEnabled()) {
           auto& currentNode = segment.nodes[j];
-          // Empty nodes are pure dependency points — no GPU commands or markers.
-          // Cross-stream ordering is handled by BuildSyncPlan barrier packets.
-          if (currentNode->GetType() == hipGraphNodeTypeEmpty) {
-            const size_t rangeIndex = newBatch.nodeRanges.size();
-            newBatch.nodeRanges.push_back({newBatch.dispatchPackets.size(), 0, true});
-            newBatch.nodeToRangeIndex[currentNode] = rangeIndex;
-            currentSegBatch.node_capture_status[j] = true;
-            ++j;
-            continue;
-          }
-          // Capture packets for this node
           std::vector<uint8_t*> nodePackets;
           std::vector<const std::string*> nodeKernelNames;
           std::vector<uint8_t*> nodeMetadataPackets;
@@ -2110,7 +2099,6 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph(bool reuseKernargSl
           }
 
           // Create NodeRange for this node
-          // RangeIndex is 0 at the start
           const size_t rangeIndex = newBatch.nodeRanges.size();
           const size_t startIndex = newBatch.dispatchPackets.size();
           const size_t packetCount = nodePackets.size();

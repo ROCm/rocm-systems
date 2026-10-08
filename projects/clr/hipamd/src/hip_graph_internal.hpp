@@ -303,7 +303,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   //! packet for each AQL packet (pointer-parallel to |batchPackets|). Entries are
   //! nullptr for packets that produced no metadata (e.g. device has no metadata
   //! ring buffer), so the batch's flat metadata buffer stays index-aligned.
-  hipError_t CaptureAndFormPacket(GraphKernelArgManager* kernArgMgr,
+  virtual hipError_t CaptureAndFormPacket(GraphKernelArgManager* kernArgMgr,
                                   std::vector<uint8_t*>* batchPackets = nullptr,
                                   std::vector<const std::string*>* batchKernelNames = nullptr,
                                   std::vector<uint8_t*>* batchMetadataPackets = nullptr,
@@ -3437,10 +3437,30 @@ class GraphEmptyNode : public GraphNode {
 
   GraphNode* clone() const override { return new GraphEmptyNode(*this); }
 
-  // Empty nodes participate in AQL capture as zero-packet dependency points.
-  // The capture loop registers them as zero-packet nodeRanges so dependency
-  // tracking works without emitting any GPU commands.
   bool GraphCaptureEnabled() override { return true; }
+
+  // submitMarker -> dispatchBarrierPacket writes directly to the HSA ring buffer,
+  // bypassing dispatchAqlPacket (the capture intercept), so no packet reaches
+  // gpuPackets_ via the Marker path.  Allocate a NOP barrier directly instead so
+  // BuildSyncPlan can embed the completion signal on it.
+  hipError_t CaptureAndFormPacket(GraphKernelArgManager*,
+                                  std::vector<uint8_t*>* batchPackets,
+                                  std::vector<const std::string*>* batchKernelNames,
+                                  std::vector<uint8_t*>* batchMetadataPackets,
+                                  bool /*reuseKernargSlots*/ = true) override {
+    for (auto* p : gpuPackets_) { delete[] p; }
+    gpuPackets_.clear();
+
+    uint8_t* barrier = g_devices[dev_id_]->devices()[0]->CreateBarrierPacket(0);
+    gpuPackets_.push_back(barrier);
+
+    if (batchPackets != nullptr && batchKernelNames != nullptr) {
+      batchPackets->push_back(barrier);
+      batchKernelNames->push_back(nullptr);
+      if (batchMetadataPackets != nullptr) batchMetadataPackets->push_back(nullptr);
+    }
+    return hipSuccess;
+  }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);
