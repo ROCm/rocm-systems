@@ -71,13 +71,16 @@ in the following table.
 
     * - | ``NCCL_MIN_CTAS``
         | Minimum number of CTAs (channels) used for a collective. Overrides
-          the ``minCTAs`` field of ``ncclConfig_t``.
+          the ``minCTAs`` field of ``ncclConfig_t``. The ``minCTAs`` and
+          ``maxCTAs`` config fields can each be set without the other; an
+          unset ``minCTAs`` defaults to ``1``.
       - | Positive integer (values ``<= 0`` are ignored).
         | Default: unset (uses the RCCL default).
 
     * - | ``NCCL_MAX_CTAS``
         | Maximum number of CTAs (channels) used for a collective. Overrides
-          the ``maxCTAs`` field of ``ncclConfig_t``.
+          the ``maxCTAs`` field of ``ncclConfig_t``. An unset ``maxCTAs``
+          defaults to the maximum channel count of the build.
       - | Positive integer (values ``<= 0`` are ignored).
         | Default: unset (uses the RCCL default).
 
