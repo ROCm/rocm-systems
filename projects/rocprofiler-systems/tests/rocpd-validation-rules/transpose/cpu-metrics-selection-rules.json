@@ -1,0 +1,56 @@
+{
+    "required_tables": [
+        {
+            "min_rows": 0,
+            "name": "pmc_info",
+            "required_columns": [
+                "id",
+                "guid",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "--cpu-metrics frequency,load must register a per-core cpu_frequency PMC",
+                    "error_message": "No cpu_frequency PMC registered; the frequency selection never reached the CPU collector",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM pmc_info WHERE name LIKE 'cpu_frequency%'"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "--cpu-metrics frequency,load must register a per-core cpu_load PMC",
+                    "error_message": "No cpu_load PMC registered; the load selection never reached the CPU collector",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM pmc_info WHERE name LIKE 'cpu_load%'"
+                }
+            ]
+        },
+        {
+            "min_rows": 0,
+            "name": "rocpd_pmc_event",
+            "required_columns": [
+                "id",
+                "guid",
+                "event_id",
+                "pmc_id",
+                "value"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "The registered cpu_frequency PMC must actually carry samples. Registering the PMC and then dropping every sample looks identical to a working run in any rule that only counts rocpd_pmc_event rows, because the thread_* metrics fill that table on their own",
+                    "error_message": "cpu_frequency is registered in pmc_info but has zero samples in rocpd_pmc_event. Check the run log for 'CPU PMC sample skipped: PMC info not registered'",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_pmc_event E INNER JOIN pmc_info I ON I.id = E.pmc_id WHERE I.name LIKE 'cpu_frequency%'"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "The registered cpu_load PMC must actually carry samples",
+                    "error_message": "cpu_load is registered in pmc_info but has zero samples in rocpd_pmc_event. Check the run log for 'CPU PMC sample skipped: PMC info not registered'",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_pmc_event E INNER JOIN pmc_info I ON I.id = E.pmc_id WHERE I.name LIKE 'cpu_load%'"
+                }
+            ]
+        }
+    ]
+}
