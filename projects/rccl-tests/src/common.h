@@ -367,6 +367,12 @@ extern int devtimeLoopLarge;  // --devtime_loop_large: loop at per-peer >= 64 Mi
 extern int devtimeSkipMid;    // --devtime_skip_mid (-1: min(base skip, 2))
 extern int devtimeSkipLarge;  // --devtime_skip_large (-1: min(base skip, 1))
 extern int devtimeCheck;      // --devtime_check: validate timed-kernel output
+// --gin_resource_sharing: resource-sharing mode the GIN device testers pass to the
+// ncclGin constructor. 0=thread (default; exclusive QP, drops the SQ lock on the
+// rocshmem-GDA bnxt/mlx5 post path), 1=CTA, 2=device (GPU-shared, keeps the lock).
+// Note the CLI numbering is NOT the enum numbering (enum GPU=0, CTA=1, THREAD=2);
+// gin_devtime::ginResourceSharingModeFromCli() maps CLI -> enum.
+extern int ginResourceSharingMode;
 constexpr int test_opNumMax = (int)ncclNumOps + (NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0) ? 1 : 0);
 extern int test_opnum;
 extern int test_typenum;
