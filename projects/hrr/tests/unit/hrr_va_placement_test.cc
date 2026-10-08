@@ -903,9 +903,7 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedWithNothingToWaitFor) {
   // A free made while a capture was open keeps no event: recording one would
   // add it to the graph. Only the stream that freed it can take it back as it
   // is. Anything else is an ordinary overlap: unmapped first, which waits for
-  // every stream, or a fallback while a capture is open. A hipFreeAsync on
-  // the capturing stream itself is deferred as a free on no stream, like a
-  // hipFree (the hipFree sections), since it runs when the graph does.
+  // every stream, or a fallback while a capture is open.
   reset_events();
   hrr::VaPlacement pl;
   pl.set_vmm_ops_for_test(event_ops());

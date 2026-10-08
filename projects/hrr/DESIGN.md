@@ -1131,9 +1131,7 @@ An allocation over a deferred mapping is handled three ways:
     segment) waits on the host (`hipEventSynchronize`) for that event.
 
   A free made while a capture was open has no event: recording one would add it
-  to the graph. Neither does a deferred `hipFree`. A `hipFreeAsync` on a
-  capturing stream counts as made on no stream: it runs when the graph is
-  launched, on whatever stream that is. Waiting for an event while a
+  to the graph. Neither does a deferred `hipFree`. Waiting for an event while a
   capture is open would sync inside it. In those cases the allocation is
   handled as any other overlap. The event is destroyed when the mapping is taken
   back, unmapped, or released at teardown or the warm-up reset. The event is
@@ -1292,8 +1290,6 @@ have one GPU:
   handlers: `PerThreadCapturesKeptApart` tests `hrr_capture_key` and the capture
   flag, and `Lifetimes` runs its per-thread capture on one thread, where it
   passes with or without the thread in the key;
-- a `hipFreeAsync` on a capturing stream, deferred as a free on no stream: CLR
-  accepts only a graph allocation there, which placed memory never is;
 - the host wait `wait_for_free` falls back to when `hipStreamWaitEvent` fails,
   and a free whose event could not be recorded (the unit tests use stand-ins
   that always succeed);

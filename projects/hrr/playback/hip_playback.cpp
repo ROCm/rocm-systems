@@ -3292,15 +3292,11 @@ hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
     // allocation recorded from the same first page on the same device, no
     // larger and close enough in size, takes the mapping back without
     // unmapping it, ordered after this free when it is on another stream
-    // (VaPlacement::map_at). One that only
-    // overlaps it unmaps it first, unless a capture is open, in which case
-    // that allocation falls back. A free captured into a graph runs when the
-    // graph is launched, on whatever stream that is, so it is deferred as a
-    // free on no stream.
+    // (VaPlacement::map_at). One that only overlaps it unmaps it first, unless
+    // a capture is open, in which case that allocation falls back. CLR accepts
+    // a captured hipFreeAsync only of a graph allocation, which is never placed.
     hrr::VaPlacement* placing = hrr_placing(ctx);
-    if (placing && (hrr_stream_capturing(stream)
-                        ? placing->unmap(live, /*defer=*/true)
-                        : placing->unmap_async(live, stream, ctx.in_graph_capture.any()))) {
+    if (placing && placing->unmap_async(live, stream, ctx.in_graph_capture.any())) {
         ctx.remove_alloc(a->dev_ptr);
         return hipSuccess;
     }
