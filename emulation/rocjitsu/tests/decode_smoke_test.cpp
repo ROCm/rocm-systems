@@ -28,6 +28,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
@@ -96,6 +97,74 @@ TEST(OperandLayoutTest, DeferredSelectorStateFitsExistingPadding) {
   EXPECT_EQ(sizeof(Operand), 32u);
   EXPECT_EQ(sizeof(cdna5::Operand), 80u);
   EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 512u);
+}
+
+TEST(OperandLayoutTest, DecodedVectorRegistersExcludeScalarAndLiteralSelectors) {
+  auto check = []<typename Op, typename Type>() {
+    for (int bits : {16, 32, 64, 128}) {
+      for (int selector = 0; selector < 512; ++selector) {
+        Op source(bits, Type::OPR_SRC, selector);
+        if (selector < 256) {
+          EXPECT_FALSE(source.decoded_vgpr()) << selector;
+        } else {
+          EXPECT_EQ(source.decoded_vgpr(),
+                    (RegisterRef{RegClass::VGPR, static_cast<uint16_t>(selector - 256),
+                                 static_cast<uint8_t>(std::max(1, bits / 32))}));
+        }
+        Op literal(bits, Type::OPR_SIMM32, selector);
+        EXPECT_FALSE(literal.decoded_vgpr());
+      }
+      for (int index = 0; index < 256; ++index) {
+        Op destination(bits, Type::OPR_VGPR, index);
+        EXPECT_EQ(destination.decoded_vgpr(),
+                  (RegisterRef{RegClass::VGPR, static_cast<uint16_t>(index),
+                               static_cast<uint8_t>(std::max(1, bits / 32))}));
+      }
+    }
+    Op fieldless(32, Type::OPR_VGPR, 4);
+    fieldless.apply_fieldless_caps(false, false, false);
+    EXPECT_FALSE(fieldless.decoded_vgpr());
+  };
+  check.operator()<cdna1::Operand, cdna1::OperandType>();
+  check.operator()<cdna5::Operand, cdna5::OperandType>();
+  check.operator()<rdna3::Operand, rdna3::OperandType>();
+  check.operator()<rdna4::Operand, rdna4::OperandType>();
+  for (int index = 0; index < 256; ++index) {
+    cdna1::Operand accumulator(32, cdna1::OperandType::OPR_ACCVGPR, 768 + index);
+    cdna4::Operand accumulator4(32, cdna4::OperandType::OPR_ACCVGPR, 512 + index);
+    EXPECT_EQ(accumulator.decoded_vgpr(),
+              (RegisterRef{RegClass::VGPR, static_cast<uint16_t>(256 + index), 1}));
+    EXPECT_EQ(accumulator4.decoded_vgpr(), accumulator.decoded_vgpr());
+  }
+  for (int index = 0; index < 256; ++index) {
+    cdna5::Operand source(16, cdna5::OperandType::OPR_SRC, 256 + index, true, false);
+    cdna5::Operand destination(16, cdna5::OperandType::OPR_VGPR, index, false, true);
+    EXPECT_EQ(source.decoded_vgpr(),
+              (RegisterRef{RegClass::VGPR, static_cast<uint16_t>(index % 128), 1}));
+    EXPECT_EQ(destination.decoded_vgpr(), source.decoded_vgpr());
+  }
+}
+
+TEST(OperandLayoutTest, DecodedVectorIdentityCoversEverySelectorType) {
+  auto check = []<typename Op, typename Type>(Type last_type) {
+    for (int type = 0; type <= static_cast<int>(last_type); ++type)
+      for (int selector = 0; selector < 1024; ++selector) {
+        Op operand(64, static_cast<Type>(type), selector);
+        auto expected = operand.to_register_ref();
+        if (expected && expected->cls == RegClass::ACC_VGPR) {
+          expected->cls = RegClass::VGPR;
+          expected->index += 256;
+        }
+        if (expected && expected->cls != RegClass::VGPR)
+          expected.reset();
+        ASSERT_EQ(operand.decoded_vgpr(), expected) << "type=" << type << " selector=" << selector;
+      }
+  };
+  check.operator()<cdna1::Operand>(cdna1::OperandType::OPR_WAITCNT);
+  check.operator()<cdna4::Operand>(cdna4::OperandType::OPR_WAITCNT);
+  check.operator()<cdna5::Operand>(cdna5::OperandType::OPR_WAIT_MEM_DS);
+  check.operator()<rdna3::Operand>(rdna3::OperandType::OPR_WAITCNT_DEPCTR);
+  check.operator()<rdna4::Operand>(rdna4::OperandType::OPR_WAITCNT);
 }
 
 TEST(CodeArchApiTest, PreservesExistingPublicEnumValues) {

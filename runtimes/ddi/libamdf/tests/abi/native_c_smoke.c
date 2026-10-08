@@ -1,6 +1,7 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/* AMDF v3 negotiation and inert instance checks. No endpoint is activated. */
+/* AMDF v5 negotiation and inert instance checks. No endpoint is activated. */
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -24,7 +25,7 @@
 int main(void) {
   const amdf_api_t *api = NULL;
   CHECK(amdf_query_api(AMDF_ABI_VERSION_1, AMDF_ABI_VERSION_LATEST, &api) == AMDF_STATUS_OK);
-  CHECK(api != NULL && api->abi_version == AMDF_ABI_VERSION_3);
+  CHECK(api != NULL && api->abi_version == AMDF_ABI_VERSION_5);
   CHECK(api->structure_size >= sizeof(*api));
   amdf_api_t original;
   memcpy(&original, api, sizeof(original));
@@ -33,12 +34,14 @@ int main(void) {
   CHECK(again == api);
   CHECK(amdf_query_api(2, 2, &again) == API_ERROR(VERSION_MISMATCH));
   CHECK(again == api);
-  CHECK(amdf_query_api(3, 3, &again) == AMDF_STATUS_OK);
+  CHECK(amdf_query_api(3, 3, &again) == API_ERROR(VERSION_MISMATCH));
+  CHECK(again == api);
+  CHECK(amdf_query_api(5, 5, &again) == AMDF_STATUS_OK);
   CHECK(again == api);
   CHECK(amdf_query_api(2, 1, &again) == API_ERROR(INVALID_ARGUMENT));
   CHECK(again == api);
   CHECK(amdf_query_api(2, 2, NULL) == API_ERROR(INVALID_ARGUMENT));
-  /* Every v3 slot exists, including operations whose implementation reports
+  /* Every v5 slot exists, including operations whose implementation reports
    * Unsupported for this provider. New slots may only append to this table. */
   CHECK(api->instance_create != NULL);
   CHECK(api->instance_destroy != NULL);
@@ -78,6 +81,8 @@ int main(void) {
   CHECK(api->user_queue_destroy != NULL);
   CHECK(api->memory_query_address != NULL);
   CHECK(api->memory_scope_query_pair_info != NULL);
+  CHECK(api->kernel_queue_refresh_status != NULL);
+  CHECK(api->kernel_queue_request_notification != NULL);
   const void *extension = NULL;
   CHECK(api->query_extension(AMDF_EXTENSION_GPU, 1, 1, &extension) == AMDF_STATUS_OK);
   CHECK(extension != NULL);
