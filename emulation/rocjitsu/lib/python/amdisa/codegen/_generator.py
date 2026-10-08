@@ -7904,6 +7904,18 @@ class CodeGenerator:
         return '\n'.join(L)
 
     def _gen_smem_atomic(self, sem: InstructionSemantics) -> str:
+        # This emitter uses a global pointer and one 32-bit data register.
+        if (
+            sem.name.upper() != 'S_ATOMIC_DEC'
+            or sem.operation != 'dec'
+            or sem.elem_size != 4
+            or sem.num_elems != 1
+        ):
+            raise ValueError(
+                f'{sem.name}: smem_atomic supports only 32-bit S_ATOMIC_DEC '
+                f'(operation={sem.operation!r}, elem_size={sem.elem_size}, '
+                f'num_elems={sem.num_elems})'
+            )
         L = [
             '  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);',
             '  if (!data_register) return;',
@@ -7911,7 +7923,7 @@ class CodeGenerator:
             '  d->dst_register = *data_register;',
             '  d->num_dwords = 1;',
             '  d->elem_size = 4;',
-            f'  d->atomic_op = amdgpu::AtomicOp::{sem.operation.upper()};',
+            f'  d->atomic_op = {self._ATOMIC_OP_ENUM[sem.operation]};',
             # Scalar atomic GLC selects return data, not cache policy.
             '  d->is_load = inst_.glc != 0;',
             '  d->mtype = amdgpu::Mtype::UC;',
