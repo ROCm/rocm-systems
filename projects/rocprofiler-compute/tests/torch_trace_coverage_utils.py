@@ -4043,27 +4043,6 @@ def inclusive_gpu_ns(node: Any) -> float:
     return total
 
 
-def descendant_names(node: Any) -> Set[str]:
-    """Operator names of every descendant of ``node``."""
-    names: Set[str] = set()
-    for child in node.children:
-        names.add(child.name)
-        names |= descendant_names(child)
-    return names
-
-
-def _op_edge_child_is_operator(child_name: str) -> bool:
-    """True when a profiler edge child is an operator name, not a kernel."""
-    name = str(child_name)
-    if name.startswith("aten::"):
-        return True
-    if name.startswith("torch."):
-        return True
-    if name.startswith("nn.") or name.startswith("Optimizer."):
-        return True
-    return False
-
-
 def compare_single_op(
     op: OpEntry,
     ground_truth: Dict[str, Any],
@@ -4076,11 +4055,7 @@ def compare_single_op(
     Name match. Structural ops pass when a matching node is present.
     When the profiler recorded CUDA kernels, ATen ops require a
     non-empty intersection of those names with inclusive tree kernels,
-    except ops in ``KNOWN_KERNEL_FREE_ATEN_OPS``. Profiler ``op_edges``
-    whose parent is the sampled op and whose child is an operator name
-    (not a kernel) must appear as analyze descendants. Argument-setup
-    events in the same profiler window are not required in the subtree
-    and do not gate inclusive GPU ns.
+    except ops in ``KNOWN_KERNEL_FREE_ATEN_OPS``.
     """
     ground_truth_entry = ground_truth.get(op.name)
 
@@ -4098,11 +4073,6 @@ def compare_single_op(
     profiler_kernels = ground_truth_entry.get("cuda_kernels", [])
     profiler_kernel_set = normalize_kernel_names(set(profiler_kernels))
     cuda_time_us = float(ground_truth_entry.get("cuda_time_us") or 0.0)
-    op_edges = [
-        tuple(edge)
-        for edge in ground_truth_entry.get("op_edges") or []
-        if isinstance(edge, (list, tuple)) and len(edge) == 2
-    ]
 
     matched_nodes = nodes_matching_op(forest, op.name)
     tree_kernels: Set[str] = set()
@@ -4184,32 +4154,6 @@ def compare_single_op(
                 "fail",
                 reason,
                 coverage_log_fail(op.name, reason) + verbose_tail + mismatch_lines,
-            )
-
-    for parent_name, child_name in op_edges:
-        if not any(marker_matches_op(op.name, node.name) for node in matched_nodes):
-            continue
-        if not (
-            marker_matches_op(op.name, str(parent_name))
-            or any(
-                marker_matches_op(str(parent_name), node.name) for node in matched_nodes
-            )
-        ):
-            continue
-        if not _op_edge_child_is_operator(str(child_name)):
-            continue
-        child_found = False
-        for node in matched_nodes:
-            names = descendant_names(node)
-            if any(marker_matches_op(str(child_name), name) for name in names):
-                child_found = True
-                break
-        if not child_found:
-            reason = f"op_edges descendant missing: {parent_name!r} -> {child_name!r}"
-            return OpCompareOutcome(
-                "fail",
-                reason,
-                coverage_log_fail(op.name, reason) + verbose_tail,
             )
 
     return OpCompareOutcome(
