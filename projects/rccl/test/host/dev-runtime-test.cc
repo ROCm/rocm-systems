@@ -97,7 +97,9 @@ private:
 #include <gtest/gtest.h>
 
 #include "ScopedHook.h"
+#include "../common/LogCapture.hpp"  // CaptureLog: assert on WARN text
 
+#include <malloc.h>  // mallinfo2: heap in-use bytes for the DevCommCreate leak checks
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -5472,6 +5474,96 @@ TEST_F(DevCommCreateTest, RequirementsFilterFails_ReturnsErrorWithoutQueueing) {
 
   EXPECT_NE(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
   EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
+}
+
+
+// ---------------------------------------------------------------------------
+// ncclDevCommCreate deep-copies the caller's requirements before it checks
+// them against the communicator, so a request rejected after the copy must
+// release that copy (NVIDIA/nccl#2225). The in-group task path and the
+// enqueue-rearch job path each hold the copy in their own object, so both are
+// driven. Heap in-use bytes are the oracle: a leaked copy per call adds up to
+// far more than one copy over the loop.
+
+class DevCommCreateFailureTest : public DevCommCreateTest {
+protected:
+  static constexpr int kResourceNodes = 64;
+  static constexpr int kTeamNodes = 8;
+  static constexpr int kCalls = 200;
+
+  std::vector<ncclDevResourceRequirements> resources;
+  std::vector<ncclTeamRequirements> teams;
+
+  void SetUp() override {
+    DevCommCreateTest::SetUp();
+    resources.assign(kResourceNodes, ncclDevResourceRequirements{});
+    for (int i = 0; i + 1 < kResourceNodes; i++) resources[i].next = &resources[i + 1];
+    teams.assign(kTeamNodes, ncclTeamRequirements{});
+    for (int i = 0; i + 1 < kTeamNodes; i++) teams[i].next = &teams[i + 1];
+    reqs.resourceRequirementsList = resources.data();
+    reqs.teamRequirementsList = teams.data();
+    reqs.cftCaps = NCCL_CFT_MULTIMEM;
+  }
+
+  static long long CopyBytes() {
+    return static_cast<long long>(sizeof(ncclDevCommRequirements) +
+                                  kResourceNodes * sizeof(ncclDevResourceRequirements) +
+                                  kTeamNodes * sizeof(ncclTeamRequirements));
+  }
+
+  static long long HeapInUse() { return static_cast<long long>(mallinfo2().uordblks); }
+
+  void ExpectRejectedWithoutLeak(bool rearch, const char* warning) {
+    auto prevLoadParam = g_loadParam;
+    ScopedHook rearchParam(g_loadParam, [rearch, prevLoadParam](const char* env, int64_t deft) {
+      return std::strcmp(env, "ENQUEUE_REARCH_ENABLE") == 0 ? int64_t(rearch) : prevLoadParam(env, deft);
+    });
+
+    // The first call names the check that fired, so the loop below is known to
+    // fail after the copy; it also runs ncclDevrInitOnce and warms up any lazily
+    // allocated logging state.
+    ncclResult_t res = ncclSuccess;
+    const std::string log =
+        RcclUnitTesting::CaptureLog([&] { res = ncclDevCommCreate(comm, &reqs, &outDevComm); });
+    ASSERT_EQ(res, ncclInvalidArgument) << "actual log:\n" << log;
+    ASSERT_TRUE(RcclUnitTesting::LogHas(log, warning)) << "actual log:\n" << log;
+    EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
+
+    int rejected = 0;
+    long long growth = 0;
+    RcclUnitTesting::CaptureLog([&] {
+      const long long before = HeapInUse();
+      for (int i = 0; i < kCalls; i++) {
+        if (ncclDevCommCreate(comm, &reqs, &outDevComm) == ncclInvalidArgument) rejected++;
+      }
+      growth = HeapInUse() - before;
+    });
+    EXPECT_EQ(rejected, kCalls);
+    EXPECT_LT(growth, CopyBytes()) << kCalls << " rejected calls left " << growth
+                                   << " heap bytes behind; one copy is " << CopyBytes();
+  }
+};
+
+TEST_F(DevCommCreateFailureTest, CftUnsupported_TaskPath_ReleasesCopy) {
+  comm->gpuCftSupport = 0;
+  ExpectRejectedWithoutLeak(false, "not all ranks in the communicator support CFT");
+}
+
+TEST_F(DevCommCreateFailureTest, CftUnsupported_RearchJobPath_ReleasesCopy) {
+  comm->gpuCftSupport = 0;
+  ExpectRejectedWithoutLeak(true, "not all ranks in the communicator support CFT");
+}
+
+TEST_F(DevCommCreateFailureTest, MultimemWithoutNvls_TaskPath_ReleasesCopy) {
+  comm->gpuCftSupport = 1;
+  comm->nvlsSupport = 0;
+  ExpectRejectedWithoutLeak(false, "NVLS is disabled or unsupported");
+}
+
+TEST_F(DevCommCreateFailureTest, MultimemWithoutNvls_RearchJobPath_ReleasesCopy) {
+  comm->gpuCftSupport = 1;
+  comm->nvlsSupport = 0;
+  ExpectRejectedWithoutLeak(true, "NVLS is disabled or unsupported");
 }
 
 
