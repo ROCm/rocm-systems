@@ -1098,17 +1098,17 @@ stream too.
 The list is drained, and unmaps that failed earlier are tried again, at these
 points only:
 
-- a replayed `hipDeviceSynchronize` or `hipCtxSynchronize`, which waited for the
-  whole device in the recording too;
+- a replayed `hipDeviceSynchronize`, which waited for the whole device in the
+  recording too;
 - the reset between the `--kernel-filter` warm-up and the timed pass, and teardown;
 - an allocation that runs out of memory, described below.
 
 A `hipStreamSynchronize`, a `hipEventSynchronize`, the end of a capture and
 `hipStreamDestroy` do not drain: each waited for one stream, and an unmap there
 would wait for all of them. Nothing drains while any recorded stream is still
-capturing. HIP on Linux answers `hipCtxSynchronize` with `hipErrorNotSupported`
-and capture records only calls that succeeded, so in practice the device sync is
-the drain point.
+capturing. `hipCtxSynchronize` is not a drain point either: HIP answers it with
+`hipErrorNotSupported` on every platform, and capture records only calls that
+succeeded, so no archive holds one.
 
 An allocation over a deferred mapping is handled three ways:
 
