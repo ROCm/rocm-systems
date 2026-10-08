@@ -1134,17 +1134,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaHandleImportDesc* import_des
 }
 
 HSAuint64 MapDrmPerm(HsaMemoryMapFlags flags) {
-  switch (flags) {
-  case HSA_MEMORY_ACCESS_RO:
-    return AMDGPU_VM_PAGE_READABLE;
-  case HSA_MEMORY_ACCESS_WO:
-    return AMDGPU_VM_PAGE_WRITEABLE;
-  case HSA_MEMORY_ACCESS_RW:
-    return AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
-  case HSA_MEMORY_ACCESS_NONE:
-  default:
-    return 0;
-  }
+  HSAuint64 drm_flags = 0;
+
+  if (flags & HSA_MEMORY_ACCESS_RO)
+    drm_flags |= AMDGPU_VM_PAGE_READABLE;
+  if (flags & HSA_MEMORY_ACCESS_WO)
+    drm_flags |= AMDGPU_VM_PAGE_WRITEABLE;
+  if (flags & HSA_MEMORY_ACCESS_EX)
+    drm_flags |= AMDGPU_VM_PAGE_EXECUTABLE;
+
+  return drm_flags;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
