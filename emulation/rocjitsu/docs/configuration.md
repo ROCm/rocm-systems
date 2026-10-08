@@ -319,8 +319,9 @@ or overwrites a pending memory result without a sufficient wait. Results still
 execute eagerly. See
 [memory wait diagnostics](memory-wait-diagnostics.md) for coverage and the
 `memory_wait_diagnostics` setting (`off`, the default, or `warn`).
-On gfx1250, this setting also controls XCNT replay-source warnings. Both checks
-are disabled by default and enabled together with `memory_wait_diagnostics=warn`.
+On gfx1250, XCNT replay-source warnings are independently opt-in through
+`xcnt_diagnostics=warn` (default: `off`). Both settings belong in each
+`compute_unit` node's `config` array.
 
 ### KFD device sections
 
