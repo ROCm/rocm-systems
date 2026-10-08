@@ -814,7 +814,8 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FallbackRetriesAfterOutOfMemory) {
 }
 
 // Placement holds its placeholders with mmap, so it is off on Windows and
-// these tests have nothing to hold there.
+// these tests have nothing to hold there. Every test case is still compiled
+// there, and skips, so the list of cases is the same on every platform.
 #ifndef _WIN32
 namespace {
 // A range of `pages` pages that nothing in this process maps right now.
@@ -836,8 +837,12 @@ bool page_taken(uint64_t va) {
   return p != want;
 }
 }  // namespace
+#endif  // _WIN32
 
 HRR_TEST_CASE(Unit_HRR_VaPlacement_HoldFreePieces) {
+#ifdef _WIN32
+  SKIP("POSIX only: it holds ranges with mmap");
+#else
   const uint64_t R = free_range(8);
   // Something else takes page 3.
   void* other = mmap(reinterpret_cast<void*>(R + 3 * P), P, PROT_READ,
@@ -859,6 +864,7 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_HoldFreePieces) {
     for (const auto& r : held) munmap(reinterpret_cast<void*>(r.base), r.end - r.base);
   }
   munmap(other, P);
+#endif
 }
 
 #if defined(__has_feature)
@@ -871,6 +877,9 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_HoldFreePieces) {
 #endif
 
 HRR_TEST_CASE(Unit_HRR_VaPlacement_HoldStopsOnARefusal) {
+#ifdef _WIN32
+  SKIP("POSIX only: it uses fork and RLIMIT_AS");
+#else
   // Under RLIMIT_AS every mmap fails with ENOMEM. Nothing is mapped in the
   // range, so splitting it would only fail again for each of its 16M pages.
   // In a child, since the limit cannot be lifted again by an unprivileged
@@ -908,9 +917,13 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_HoldStopsOnARefusal) {
   REQUIRE(WIFEXITED(status));
   if (WEXITSTATUS(status) == 3) SKIP("the address-space limit could not be set here");
   REQUIRE(WEXITSTATUS(status) == 0);
+#endif
 }
 
 HRR_TEST_CASE(Unit_HRR_VaPlacement_VmmHoldRestoredAfterMiss) {
+#ifdef _WIN32
+  SKIP("POSIX only: it holds ranges with mmap");
+#else
   // A recorded hipMemAddressReserve range is held until the replayed reserve
   // asks for it. If the runtime then reserves somewhere else, the recorded
   // range must be held again, or a later allocation can land in it.
@@ -939,9 +952,13 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_VmmHoldRestoredAfterMiss) {
   pl.release_all();
   REQUIRE_FALSE(pl.active());
   REQUIRE_FALSE(page_taken(R));
+#endif
 }
 
 HRR_TEST_CASE(Unit_HRR_VaPlacement_VmmHoldsRestoredWithOneRead) {
+#ifdef _WIN32
+  SKIP("POSIX only: it holds ranges with mmap");
+#else
   // Between the warm-up and the timed pass every hipMemAddressReserve range is
   // held again. A trace with thousands of them must not read /proc/self/maps,
   // which can list a million mappings, once for each.
@@ -967,9 +984,13 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_VmmHoldsRestoredWithOneRead) {
   pl.release_all();
   REQUIRE_FALSE(page_taken(R1));
   REQUIRE_FALSE(page_taken(R2));
+#endif
 }
 
 HRR_TEST_CASE(Unit_HRR_VaPlacement_DeniedHeldWithPlacementOff) {
+#ifdef _WIN32
+  SKIP("POSIX only: it holds ranges with mmap");
+#else
   // With placement off, HIP_HRR_REPLAY_PLACE_DENY still holds the denied
   // ranges, so the runtime cannot return a recorded address by chance. The
   // holds leave placement inactive, and teardown drops them.
@@ -982,8 +1003,10 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_DeniedHeldWithPlacementOff) {
   pl.release_all();
   REQUIRE_FALSE(page_taken(R));
   REQUIRE_FALSE(page_taken(R + 3 * P));
+#endif
 }
 
+#ifndef _WIN32
 namespace {
 // What `fn` writes to stderr.
 template <class Fn>
@@ -1012,8 +1035,12 @@ size_t count_of(const std::string& text, const std::string& what) {
   return n;
 }
 }  // namespace
+#endif  // _WIN32
 
 HRR_TEST_CASE(Unit_HRR_VaPlacement_FallbackLinesCapped) {
+#ifdef _WIN32
+  SKIP("POSIX only: it redirects stderr with dup2");
+#else
   const std::string named = "not placed at its recorded address";
   const std::string more  = "further fallbacks are only counted; --verbose names every one";
   SECTION("16 lines, then one saying the rest are counted") {
@@ -1062,8 +1089,8 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FallbackLinesCapped) {
     REQUIRE(pl.fallbacks() == 3);
     REQUIRE(count_of(err, named) == 3);
   }
+#endif
 }
-#endif  // _WIN32
 
 /**
  * End doxygen group HRR.
