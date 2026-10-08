@@ -208,7 +208,10 @@ TEST_P(ScalarAtomicTest, DecrementWrapAndOptionalReturn) {
 TEST_P(ScalarAtomicTest, ImmediateRegisterAndCombinedOffsets) {
   const std::array fields{
       cdna3::SmemBuilderFields{.sbase = 3, .sdata = 4, .glc = 1, .imm = 1, .offset = 12},
+      // LLVM accepts SGPR offsets, but their hardware behavior is unverified.
+      // CDNA1-4 manuals specify immediate/M0 atomic offsets (MI300 Table 38).
       cdna3::SmemBuilderFields{.sbase = 3, .sdata = 4, .glc = 1, .offset = 8},
+      // Likewise, this immediate + SGPR form covers LLVM/simulator compatibility.
       cdna3::SmemBuilderFields{.sbase = 3,
                                .sdata = 4,
                                .soffset_en = 1,
@@ -247,6 +250,8 @@ TEST_P(ScalarAtomicTest, SourceAndAddressAreCapturedBeforeReturn) {
     write_sgpr(4, 16);
     const uint64_t address = kAddress + (aliases_base ? 0 : 16);
     memory.write32(address, 4);
+    // The SGPR-offset alias case covers an LLVM-accepted encoding whose hardware
+    // behavior is unverified, as in ImmediateRegisterAndCombinedOffsets above.
     auto inst = prepare(aliases_base ? cdna3::SmemBuilderFields{.sdata = 0, .glc = 1, .imm = 1}
                                      : cdna3::SmemBuilderFields{.sdata = 4, .glc = 1, .offset = 4});
     ASSERT_NE(inst, nullptr);
