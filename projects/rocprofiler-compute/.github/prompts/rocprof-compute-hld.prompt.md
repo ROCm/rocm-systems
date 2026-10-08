@@ -1,6 +1,6 @@
 ---
 agent: 'agent'
-description: Draft or review a high-level design against the project template.
+description: Grill a high-level design against the project template, then draft or review it.
 ---
 
 Follow [`.ai/skills/rocprof-compute-hld.md`](../../.ai/skills/rocprof-compute-hld.md).
