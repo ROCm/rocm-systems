@@ -7766,9 +7766,10 @@ amdsmi_status_t amdsmi_get_npm_balancing_mode(amdsmi_node_handle node_handle,
  *            ::AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING).
  *
  * @return ::AMDSMI_STATUS_SUCCESS on success. ::AMDSMI_STATUS_NOT_SUPPORTED if NPM is disabled on
- * the node (no write is attempted), or if the requested mode is not present in this platform's
- * supported balancing modes (see ::amdsmi_get_npm_supported_balancing_modes).
- * ::AMDSMI_STATUS_NO_PERM if the caller lacks elevation.
+ * the node (no write is attempted). ::AMDSMI_STATUS_SETTING_UNAVAILABLE if the requested mode is
+ * not present in this platform's supported balancing modes (see
+ * ::amdsmi_get_npm_supported_balancing_modes). ::AMDSMI_STATUS_NO_PERM if the caller lacks
+ * elevation.
  */
 amdsmi_status_t amdsmi_set_npm_balancing_mode(amdsmi_node_handle node_handle,
                                               amdsmi_npm_balancing_mode_t mode);

@@ -61,6 +61,7 @@
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_npm.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
 // a global instance of std::mutex to protect data passed during threads
@@ -716,12 +717,7 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
   try {
     // Navigate to the board directory from the DRM device path
     fs::path board_dir = drm_device_path / "board";
-    // MI4xx exposes npm_status under board/npm/; MI350 exposes it directly
-    // under board/. Check both locations, no ASIC-specific branching.
-    fs::path npm_status = board_dir / "npm" / "npm_status";
-    if (!fs::exists(npm_status)) {
-      npm_status = board_dir / "npm_status";
-    }
+    fs::path npm_status = amd::smi::resolve_npm_dir(board_dir) / "npm_status";
 
     // Check if board directory and npm_status exist
     if (fs::exists(board_dir) && fs::is_directory(board_dir) && fs::exists(npm_status)) {
@@ -1755,6 +1751,25 @@ static_assert(offsetof(amdsmi_npm_info_t, max_node_power_limit) ==
 static_assert(offsetof(amdsmi_npm_info_t, current_node_power) ==
                   offsetof(rsmi_npm_info_t, current_node_power),
               "current_node_power offset mismatch between amdsmi_npm_info_t and rsmi_npm_info_t");
+
+// amdsmi_npm_balancing_mode_t and rsmi_npm_balancing_mode_t are static_cast
+// between each other; keep their enumerator values identical so that cast
+// stays correct if either enum changes.
+static_assert(
+    static_cast<int>(AMDSMI_NPM_BALANCING_MODE_INVALID) ==
+        static_cast<int>(RSMI_NPM_BALANCING_MODE_INVALID),
+    "AMDSMI_NPM_BALANCING_MODE_INVALID value mismatch with RSMI_NPM_BALANCING_MODE_INVALID");
+static_assert(static_cast<int>(AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING) ==
+                  static_cast<int>(RSMI_NPM_BALANCING_MODE_POWER_BALANCING),
+              "AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING value mismatch with "
+              "RSMI_NPM_BALANCING_MODE_POWER_BALANCING");
+static_assert(static_cast<int>(AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING) ==
+                  static_cast<int>(RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
+              "AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING value mismatch with "
+              "RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING");
+static_assert(static_cast<int>(AMDSMI_NPM_BALANCING_MODE_MAX) ==
+                  static_cast<int>(RSMI_NPM_BALANCING_MODE_MAX),
+              "AMDSMI_NPM_BALANCING_MODE_MAX value mismatch with RSMI_NPM_BALANCING_MODE_MAX");
 
 amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_info_t* npm_info) {
   AMDSMI_CHECK_INIT();

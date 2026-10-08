@@ -1085,9 +1085,9 @@ change it (AMD-SMI-only; not exposed via BMC Redfish/APML).
 It also includes `SUPPORTED_BALANCING_MODES`, the balancing modes supported by
 this node's platform/ASIC (e.g. `POWER_BALANCING, FREQUENCY_BALANCING`),
 independent of current NPM enablement. `amd-smi set --node-balancing-mode`
-returns `AMDSMI_STATUS_NOT_SUPPORTED` with a message naming the requested mode
-if it is absent from this set, distinct from the same status code's "NPM is
-disabled on this node" message.
+returns `AMDSMI_STATUS_SETTING_UNAVAILABLE` with a message naming the
+requested mode if it is absent from this set, distinct from
+`AMDSMI_STATUS_NOT_SUPPORTED`'s "NPM is disabled on this node" message.
 
 ## Interpreting the output
 

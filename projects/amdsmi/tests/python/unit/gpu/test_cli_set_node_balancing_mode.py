@@ -56,13 +56,15 @@ Two layers are covered here, modeled on ``test_cli_set_clk_limit.py`` /
   * ``AMDSMI_STATUS_NOT_SUPPORTED`` (the balancing-mode-specific divergence
     from ``amdsmi_set_npm_limit()``, which uses ``AMDSMI_STATUS_INVAL`` for
     its own disabled-check) returns a "not supported on this node" message
-    without raising. To tell this apart from "the requested mode is absent
-    from this platform's ``supported_mode`` bitmask" (same status code),
-    the catch block separately queries
-    ``amdsmi_get_npm_supported_balancing_modes()``: if the requested mode is
-    missing from that result, the message becomes ``"BALANCING_MODE:
-    [AMDSMI_STATUS_NOT_SUPPORTED] <mode> is not supported on this
-    platform"`` instead of the generic message above.
+    without raising. This is reported either by a pre-check
+    (``amdsmi_get_npm_info()`` status) when NPM itself is disabled, or by the
+    set call itself when the board/mode sysfs file is missing/unreadable
+    while NPM is enabled.
+  * ``AMDSMI_STATUS_SETTING_UNAVAILABLE`` -- a distinct status from
+    ``AMDSMI_STATUS_NOT_SUPPORTED`` -- means the requested mode is absent
+    from this platform's ``supported_mode`` bitmask, and is reported as
+    ``"BALANCING_MODE: [AMDSMI_STATUS_SETTING_UNAVAILABLE] <mode> is not
+    supported on this platform"``.
   * Any other library exception (e.g. ``AMDSMI_STATUS_INVAL``) is reported as
     an error message referencing the requested mode, without raising.
 
@@ -87,6 +89,7 @@ SET_VALUE_PATH = os.path.join(_CLI_DIR, "subcommands", "set_value.py") if _CLI_D
 _STATUS_NOT_SUPPORTED = 2
 _STATUS_NO_PERM = 10
 _STATUS_INVAL = 5
+_STATUS_SETTING_UNAVAILABLE = 55
 
 # Modules imported (directly or transitively) when the source CLI loads
 # against the faked ``amdsmi`` package; cleared/restored around each suite so
@@ -125,6 +128,7 @@ def _build_fake_amdsmi():
     wrapper.AMDSMI_STATUS_NOT_SUPPORTED = _STATUS_NOT_SUPPORTED
     wrapper.AMDSMI_STATUS_NO_PERM = _STATUS_NO_PERM
     wrapper.AMDSMI_STATUS_INVAL = _STATUS_INVAL
+    wrapper.AMDSMI_STATUS_SETTING_UNAVAILABLE = _STATUS_SETTING_UNAVAILABLE
     # amdsmi_helpers.py's CPER_DECODE_MESSAGES class-body dict (unrelated to
     # this feature) is evaluated at import time and needs these to resolve.
     wrapper.AMDSMI_STATUS_UNEXPECTED_SIZE = 100
@@ -140,11 +144,6 @@ def _build_fake_amdsmi():
     # Defaults to "NPM enabled" so existing tests reach the set call below the
     # enablement pre-check; overwritten per-test to exercise the disabled path.
     interface.amdsmi_get_npm_info = lambda _handle: {"status": wrapper.AMDSMI_NPM_STATUS_ENABLED}
-    # Defaults to "both modes supported" so existing NOT_SUPPORTED tests (which
-    # pre-date this query and mean "requested mode absent from platform") keep
-    # getting the generic message; overwritten per-test to exercise the "mode
-    # not supported on this platform" branch.
-    interface.amdsmi_get_npm_supported_balancing_modes = lambda _handle: ["PB", "FB"]
 
     exception.AmdSmiLibraryException = _FakeLibraryException
 
@@ -344,9 +343,6 @@ class TestValidateAndSetNodeBalancingMode(unittest.TestCase):
         self.interface.amdsmi_get_npm_info = lambda h: {
             "status": self.interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_ENABLED
         }
-        # Reset to "both modes supported" each test -- individual tests
-        # override this to exercise the "mode absent from platform" branch.
-        self.interface.amdsmi_get_npm_supported_balancing_modes = lambda h: ["PB", "FB"]
 
     def _validate(self, node_handle, requested_mode):
         # A lightweight duck-typed ``self`` -- exercises the real, unbound
@@ -428,27 +424,27 @@ class TestValidateAndSetNodeBalancingMode(unittest.TestCase):
             _STATUS_NOT_SUPPORTED
         )
 
-    def test_not_supported_mode_absent_from_platform_reports_distinct_message(self):
-        # Disambiguates from the generic "NPM disabled" message above: when the
-        # requested mode is absent from amdsmi_get_npm_supported_balancing_modes()'s
-        # bitmask, the same AMDSMI_STATUS_NOT_SUPPORTED is reported with a
-        # platform-specific message instead.
+    def test_setting_unavailable_mode_absent_from_platform_reports_distinct_message(self):
+        # Disambiguates from the generic "NPM disabled"/"not supported" messages
+        # above: when the requested mode is absent from this platform's
+        # supported_mode bitmask, the library raises the distinct
+        # AMDSMI_STATUS_SETTING_UNAVAILABLE status instead of NOT_SUPPORTED.
         self.interface.amdsmi_set_npm_balancing_mode = lambda h, m: (_ for _ in ()).throw(
             _FakeLibraryException(
-                _STATUS_NOT_SUPPORTED, "AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
+                _STATUS_SETTING_UNAVAILABLE,
+                "AMDSMI_STATUS_SETTING_UNAVAILABLE - Setting is not available",
             )
         )
-        self.interface.amdsmi_get_npm_supported_balancing_modes = lambda h: ["FB"]
 
         fake_self, result = self._validate(node_handle=object(), requested_mode="POWER_BALANCING")
 
         self.assertIn(
-            "BALANCING_MODE: [AMDSMI_STATUS_NOT_SUPPORTED] "
+            "BALANCING_MODE: [AMDSMI_STATUS_SETTING_UNAVAILABLE] "
             "POWER_BALANCING is not supported on this platform",
             result,
         )
         fake_self.error_collector.record_library_error.assert_called_once_with(
-            _STATUS_NOT_SUPPORTED
+            _STATUS_SETTING_UNAVAILABLE
         )
 
     def test_other_library_error_reports_message_without_raising(self):

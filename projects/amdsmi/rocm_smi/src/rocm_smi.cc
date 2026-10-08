@@ -3388,8 +3388,8 @@ rsmi_status_t rsmi_dev_npm_balancing_mode_set(uint32_t dv_ind, uintptr_t node_ha
 
   // supported_mode is not yet implemented on all platforms, so its absence
   // (RSMI_STATUS_NOT_SUPPORTED) must not block the write. Any other read
-  // failure (e.g. corrupt content) fails closed, like the npm_status check
-  // below.
+  // failure (e.g. corrupt content) fails closed with RSMI_STATUS_SETTING_UNAVAILABLE,
+  // since we can't confirm the requested mode is allowed.
   uint64_t supported_modes = 0;
   rsmi_status_t supported_ret =
       amd::smi::get_npm_supported_modes(*board_path_str, &supported_modes);
@@ -3399,14 +3399,14 @@ rsmi_status_t rsmi_dev_npm_balancing_mode_set(uint32_t dv_ind, uintptr_t node_ha
          << " | get_npm_supported_modes failed: " << getRSMIStatusString(supported_ret, false)
          << " -> rejecting write (fail closed)";
       LOG_ERROR(ss);
-      return RSMI_STATUS_NOT_SUPPORTED;
+      return RSMI_STATUS_SETTING_UNAVAILABLE;
     }
     if ((supported_modes & (1ULL << static_cast<unsigned>(mode))) == 0) {
       ss << __PRETTY_FUNCTION__ << " | mode=" << mode
          << " not in supported_modes bitmask=" << supported_modes << " -> returning "
-         << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED);
+         << getRSMIStatusString(RSMI_STATUS_SETTING_UNAVAILABLE);
       LOG_ERROR(ss);
-      return RSMI_STATUS_NOT_SUPPORTED;
+      return RSMI_STATUS_SETTING_UNAVAILABLE;
     }
   }
 

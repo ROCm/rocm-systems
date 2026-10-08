@@ -3226,6 +3226,7 @@ Exceptions that can be thrown by `amdsmi_set_npm_balancing_mode` function:
 #### Possible Library Exceptions
 
 - `AMDSMI_STATUS_NOT_SUPPORTED` - NPM is disabled on this node
+- `AMDSMI_STATUS_SETTING_UNAVAILABLE` - requested mode absent from this platform's supported balancing modes
 - `AMDSMI_STATUS_NO_PERM` - Caller lacks elevated privileges
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
 

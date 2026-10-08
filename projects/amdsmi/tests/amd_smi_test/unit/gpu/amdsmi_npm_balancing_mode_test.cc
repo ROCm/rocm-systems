@@ -425,7 +425,7 @@ TEST(GpuUnit, SetNpmBalancingModeRootRejectsModeAbsentFromSupportedBitmask) {
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
   EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING),
-            AMDSMI_STATUS_NOT_SUPPORTED);
+            AMDSMI_STATUS_SETTING_UNAVAILABLE);
   // The file must be untouched.
   EXPECT_EQ(board.ReadFile("mode"), "1");
 }
@@ -457,8 +457,8 @@ TEST(GpuUnit, SetNpmBalancingModeRootAllowsModePresentInSupportedBitmask) {
 
 TEST(GpuUnit, SetNpmBalancingModeRootRejectsCorruptSupportedModesFile) {
   // A read failure other than NOT_SUPPORTED (e.g. corrupt/unparsable
-  // content) must fail closed and reject the write, matching the
-  // npm_status gate's policy -- it must not be treated like a missing file.
+  // content) must fail closed as SETTING_UNAVAILABLE and reject the write --
+  // it must not be treated like a missing file.
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -478,7 +478,7 @@ TEST(GpuUnit, SetNpmBalancingModeRootRejectsCorruptSupportedModesFile) {
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
   EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
-            AMDSMI_STATUS_NOT_SUPPORTED);
+            AMDSMI_STATUS_SETTING_UNAVAILABLE);
   // The file must be untouched.
   EXPECT_EQ(board.ReadFile("mode"), "1");
 }
