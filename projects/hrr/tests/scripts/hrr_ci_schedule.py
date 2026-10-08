@@ -12,6 +12,7 @@ if it is still waiting when the budget expires the suite is skipped.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 # Matches the budget documented on the integration dispatcher.
@@ -38,6 +39,31 @@ def schedule_action(
     if elapsed_s >= limit_s:
         return "skip"
     return "poll"
+
+
+def choose_dispatched_run(runs, title: str, seen_ids) -> str:
+    """Id of the GPU run this dispatch created.
+
+    Re-running failed jobs keeps the parent ``github.run_id``, so the previous
+    attempt's GPU run is still listed. ``seen_ids`` are the runs that already
+    had this title before the dispatch; their artifact must not be reused.
+    """
+    seen = {str(item) for item in seen_ids if str(item)}
+    chosen = ""
+    chosen_at = ""
+    for run in runs:
+        if not isinstance(run, dict) or run.get("event") != "workflow_dispatch":
+            continue
+        if title not in (run.get("displayTitle"), run.get("name")):
+            continue
+        run_id = str(run.get("databaseId") or "")
+        if not run_id or run_id in seen:
+            continue
+        created = str(run.get("createdAt") or "")
+        if not chosen or created >= chosen_at:
+            chosen = run_id
+            chosen_at = created
+    return chosen
 
 
 def skip_junit(message: str) -> str:
@@ -69,7 +95,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=SCHEDULE_LIMIT_S)
     parser.add_argument("--write-skip")
     parser.add_argument("--message")
+    parser.add_argument("--choose-run", action="store_true")
+    parser.add_argument("--title", default="")
+    parser.add_argument("--seen", default="")
     args = parser.parse_args(argv)
+
+    if args.choose_run:
+        if not args.title:
+            parser.error("--choose-run requires --title")
+        raw = sys.stdin.read()
+        runs = json.loads(raw) if raw.strip() else []
+        print(choose_dispatched_run(runs, args.title, args.seen.split()))
+        return 0
 
     if args.write_skip is not None:
         if not args.message:

@@ -46,6 +46,43 @@ class ScheduleActionTest(unittest.TestCase):
         )
 
 
+class ChooseDispatchedRunTest(unittest.TestCase):
+    def test_rerun_ignores_the_previous_attempt(self):
+        title = "hrr-gpu-37789160788-gfx90a"
+        runs = [
+            {
+                "databaseId": 37794673233,
+                "displayTitle": title,
+                "name": "HRR CI",
+                "event": "workflow_dispatch",
+                "createdAt": "2026-10-08T14:42:32Z",
+            },
+            {
+                "databaseId": 37789851414,
+                "displayTitle": title,
+                "name": "HRR CI",
+                "event": "workflow_dispatch",
+                "createdAt": "2026-10-08T14:07:11Z",
+            },
+        ]
+        # The list can put the finished attempt first. That result is already
+        # known and must not be downloaded again.
+        self.assertEqual(
+            sched.choose_dispatched_run(list(reversed(runs)), title, ["37789851414"]),
+            "37794673233",
+        )
+
+    def test_no_new_run_yet(self):
+        title = "hrr-gpu-1-2-gfx90a"
+        runs = [{
+            "databaseId": 9,
+            "displayTitle": title,
+            "event": "workflow_dispatch",
+            "createdAt": "2026-10-08T14:07:11Z",
+        }]
+        self.assertEqual(sched.choose_dispatched_run(runs, title, ["9"]), "")
+
+
 class SkipJunitTest(unittest.TestCase):
     def test_message_is_a_single_skip(self):
         root = ET.fromstring(

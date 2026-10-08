@@ -656,12 +656,20 @@ jobs:
           BUILD_WORKSPACE: ${{ needs.build.outputs.workspace }}
           BUILD_RUN_ID: ${{ github.run_id }}
           IGNORE_TEST_CONFIG: ${{ inputs.ignore_test_config && 'true' || 'false' }}
-          DISPATCH_ID: ${{ github.run_id }}-${{ matrix.family }}
+          # run_attempt changes on "Rerun failed jobs". The run id does not, so
+          # without it the previous GPU run is still listed under this title.
+          DISPATCH_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.family }}
         run: |
           set -euo pipefail
           title="hrr-gpu-${DISPATCH_ID}"
           sched="projects/hrr/tests/scripts/hrr_ci_schedule.py"
-          gh workflow run hrr-ci.yml --ref "${REF}" \
+          # Runs already using this title belong to an earlier dispatch.
+          seen="$(gh run list --workflow hrr-ci.yml --branch "${REF}" --limit 40 \
+            --json databaseId,displayTitle,name,event \
+            --jq "[.[] | select(.event==\"workflow_dispatch\" and (.displayTitle==\"${title}\" or .name==\"${title}\")) | .databaseId] | join(\" \")" \
+            || true)"
+          set +e
+          dispatch_out="$(gh workflow run hrr-ci.yml --ref "${REF}" \
             -f gpu_only=true \
             -f "family=${FAMILY}" \
             -f "runner=${RUNNER}" \
@@ -670,19 +678,47 @@ jobs:
             -f "build_workspace=${BUILD_WORKSPACE}" \
             -f "build_run_id=${BUILD_RUN_ID}" \
             -f "dispatch_id=${DISPATCH_ID}" \
-            -f "ignore_test_config=${IGNORE_TEST_CONFIG}"
+            -f "ignore_test_config=${IGNORE_TEST_CONFIG}" 2>&1)"
+          dispatch_rc=$?
+          set -e
+          printf '%s\n' "${dispatch_out}"
+          if [ "${dispatch_rc}" -ne 0 ]; then
+            exit "${dispatch_rc}"
+          fi
+
+          # gh prints the new run URL once it exists. Prefer that id. A URL
+          # that was already in the list is the previous attempt.
+          printed=""
+          while IFS= read -r line; do
+            case "${line}" in
+              *actions/runs/[0-9]*)
+                printed="${line##*/}"
+                printed="${printed%%[^0-9]*}"
+                break
+                ;;
+            esac
+          done <<EOF
+          ${dispatch_out}
+          EOF
+          case " ${seen} " in
+            *" ${printed} "*) printed="" ;;
+          esac
 
           run_id=""
-          for _ in $(seq 1 24); do
-            run_id="$(gh run list --workflow hrr-ci.yml --branch "${REF}" --limit 40 \
-              --json databaseId,displayTitle,name,event \
-              --jq "[.[] | select(.event==\"workflow_dispatch\" and (.displayTitle==\"${title}\" or .name==\"${title}\"))][0].databaseId // empty" \
-              || true)"
-            if [ -n "${run_id}" ]; then
-              break
-            fi
-            sleep 5
-          done
+          if [ -n "${printed}" ]; then
+            run_id="${printed}"
+          else
+            for _ in $(seq 1 24); do
+              listing="$(gh run list --workflow hrr-ci.yml --branch "${REF}" --limit 40 \
+                --json databaseId,displayTitle,name,event,createdAt || true)"
+              run_id="$(printf '%s' "${listing}" | python3 "${sched}" --choose-run \
+                --title "${title}" --seen "${seen}" || true)"
+              if [ -n "${run_id}" ]; then
+                break
+              fi
+              sleep 5
+            done
+          fi
           if [ -z "${run_id}" ]; then
             echo "::error::GPU workflow run ${title} did not appear"
             gh run list --workflow hrr-ci.yml --branch "${REF}" --limit 10 \
