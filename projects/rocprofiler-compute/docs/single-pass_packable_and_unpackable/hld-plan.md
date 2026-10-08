@@ -67,7 +67,7 @@ POLICY_GAP here means a shipping-layout diagnosis: the metric is multi-pass toda
 
 | Term | Meaning | Example |
 |------|---------|---------|
-| **Single-pass packable (SPP)** | A metric whose counters can share one perfmon pass. Each hardware block in that pass has its own slot budget, so counters from different blocks (GRBM and SQ, for example) can sit together. **Collection:** that pass holds the metric's full PMC set. The same counter may also be copied into other passes. **Analyze:** same-pass bind — each expression uses counters from that one pass (`{counter}@pass:{key}`), so a ratio is not evaluated on values merged across different replays. | `CPC Utilization` (one replay; same-pass bind) |
+| **Single-pass packable (SPP)** | A metric whose counters can share one perfmon pass. Each hardware block in that pass has its own slot budget, so counters from different blocks (GRBM and SQ, for example) can sit together. **Collection:** that pass holds the metric's full PMC set. The same counter may also be copied into other passes. **Analyze:** same-pass bind — each expression uses counters from that one pass (`{counter}@pass:{key}`). `key` is the perfmon result-file stem, such as `pmc_perf_3`. | `CPC Utilization` (one replay; same-pass bind) |
 | **Single-pass unpackable (SPU)** | Cannot fit one pass even after that placement. Phase 2 splits the parent into collectables. `WEIGHTED_AVG` only for split-weight ratios; `COLLECT_SUM` and `COLLECT_RATIO` for sums and ratios of those pieces. | `VALU FLOPs` (F16/F32/F64 rates) |
 | **Collectable** | A single-pass fragment (formula + PMC set) collected together, then composed into a display metric ([Layer 1.5](../design/analysis-config-redesign/hld-analysis-config-redesign.md#layer-details) on today’s panel YAML). Used for SPU parents. | `hbm_read_sub` (HBM Bandwidth read fragment) |
 | **POLICY_GAP** | Shipping-layout diagnosis only. Multi-pass today, SPP under the new packer, fixed in Phase 1. | `CPC Utilization` (shipping layout splits it; SPP places it in one pass) |
@@ -149,6 +149,8 @@ Code: `src/rocprof_compute_soc/counter_grouping_single_pass.py`, `counter_groupi
 
 **Analyze.** When a counter is copied across passes, keep per-pass columns as `{counter}@pass:{key}` at load time, and bind each SPP expression to one co-located pass. Wire both CLI (`eval_metric`) and DB (`calc_expressions` / `bind_expression_dataframe`).
 
+`key` is the perfmon result-file stem from `_pass_key_from_result_file`: `results_pmc_perf_3.csv.gz` becomes `pmc_perf_3`. Shadow columns are written only for a counter that appears in more than one pass (`PassLayout.duplicated` in `process_rocpd_csv`); a counter that appears in one pass keeps its bare name, and that column is the value from that pass. When more than one pass holds every counter the expression needs, `select_pass` chooses the earliest stem in natural order (`pmc_perf_2` before `pmc_perf_10`). If no pass holds the whole set, the row stays on the bare columns.
+
 Code: `src/utils/metrics/pass_provenance.py`, plus the shadow columns in file I/O and analysis utilities.
 
 TCC series affinity (channel instances of one event base, affinity pairs in the same pass) is a layout harden on this phase. It does not add passes on gfx942 (14 stays 14) and it is not a Phase 2 concern. Panel 1805 stays one packing group: `TCC_EA0_RDREQ`, `TCC_EA0_WRREQ`, and `TCC_EA0_ATOMIC` are one replay, in the pass that already holds them with `TCC_EA0_ATOMIC_LEVEL`. The extra `RDREQ` and `WRREQ` copies in that pass stay. Rows 1806 and 1807 bind to the pass that holds each LEVEL with its request series. Row 1808 binds to the pass that holds `ATOMIC_LEVEL` and `ATOMIC`. Details are in the grouping note.
@@ -175,6 +177,8 @@ _weighted_avg:
   write_ratio_sub:
     weight_counter: TCC_EA0_WRREQ_sum
 ```
+
+The weight and its sub-ratio are one sample. When same-pass bind has chosen a pass for the sub-metric, `resolve_weight_counter_column` reads `weight_counter` from that pass. A weight from another replay changes \((M_0 C_0 + M_1 C_1)/(C_0 + C_1)\). If that pass does not hold the weight, the composite stays unset instead of using the other replay.
 
 Two possible solutions are (1) the current explicit structured YAML and (2) dynamic runtime Python handling; this delivery keeps option 1, and option 2 will be evaluated later.
 

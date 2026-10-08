@@ -15,9 +15,9 @@ A **PMC set** is the counters of one metric that must share one perfmon pass. A 
 
 Why this allocator: the shipping pack minimizes passes for the whole counter list, so metrics whose PMC sets fit one pass stay split. Largest-first gives a large set a bucket before smaller sets fragment the open passes.
 
-1. Collect each **Single-pass packable (SPP)** metric's PMC set and keep the unique sets (skip **Single-pass unpackable (SPU)** parents).
+1. Collect each **Single-pass packable (SPP)** metric's PMC set and keep the unique sets (skip **Single-pass unpackable (SPU)** parents). An SPU parent is a metric whose in-profile PMC set does not fit one empty bucket (`counters_fit_one_bucket` is false). Allocation does not read a YAML flag, a collectable operator, or a metric-id list. A metric with no profile PMCs is omitted before this step and is not an SPU parent.
 2. Largest-first: place each PMC set with the existing-bucket and per-block slot checks in §2 (copy a PMC into another pass when two sets cannot share a bucket).
-3. Run **SPU residual fill** so leftover SPU counters appear somewhere. Open a new bucket only for a counter that fits in none of the open buckets (+0 extra passes on gfx942).
+3. Run **SPU residual fill** so leftover SPU counters appear somewhere. Try the open buckets, then open one new bucket for the largest subset that fits an empty bucket (+0 extra passes on gfx942). If no remaining counter fits even that empty bucket, residual fill raises `ValueError` and does not drop the counter or keep looping.
 4. Harden **TCC series affinity + coverage** (and ACCUM slot charging where required). See §3.
 
 **Locked decisions** (from the high-level design):
@@ -46,7 +46,7 @@ Overlap-first keeps the new counters in a pass that already has the rest of the 
 flowchart TD
   A[Profile PMC set] --> B{LEGACY_HEURISTIC=1<br/>or SINGLE_PASS_PACKABLE=0?}
   B -->|yes| SH[Legacy path:<br/>heuristic coalesce + first-fit]
-  B -->|no default| U[Unique SPP PMC sets<br/>skip SPU parents]
+  B -->|no default| U[Unique SPP PMC sets<br/>skip a set that does not fit<br/>one empty bucket]
   U --> O[Order by size:<br/>largest PMC sets first]
   O --> L[Next SPP PMC set]
   L --> H{An existing bucket<br/>already holds that PMC set?}
@@ -64,9 +64,11 @@ flowchart TD
   S1 -->|yes| G[pmc_perf buckets<br/>gfx942: 14 total, +0 for SPU fill]
   S1 -->|no| S2{Fit remaining PMCs<br/>into an existing bucket?}
   S2 -->|yes| S3[Place into that bucket]
-  S2 -->|no| S4[Open a new bucket<br/>with the largest fitting subset]
+  S2 -->|no| S4{Any remaining PMC<br/>fits an empty bucket?}
+  S4 -->|yes| S5[Open one new bucket<br/>with the largest fitting subset]
+  S4 -->|no| S6[Error: that counter exceeds<br/>its block budget alone]
   S3 --> S1
-  S4 --> S1
+  S5 --> S1
 ```
 
 ### Sample walk-through
@@ -97,7 +99,7 @@ The TCC handling here is a **short-term solution**. Those rules live in one modu
 
 An L2 channel map can change between replays, so the counters one expression joins share a pass. gfx942 is the example, not the only architecture, and the pass count there stays **14**. A selected series keeps every collectable channel. Channel expansion follows that architecture's own L2 channels, and single-die parts (gfx908, gfx115x) are not an XCD multiple of a multi-die (XCD) part.
 
-A multi-column L2-fabric request row (read, write, and atomic; panel 1805) stays one group so those columns are one replay. Each latency row keeps its LEVEL counter with its request series. Extra request copies stay when the request row needs them. Same-pass bind uses the pass that holds the whole expression.
+A multi-column L2-fabric request row (read, write, and atomic; panel 1805) stays one group so those columns are one replay. Each latency row keeps its LEVEL counter with its request series. Extra request copies stay when the request row needs them. Same-pass bind uses the pass that holds the whole expression. `key` in `{counter}@pass:{key}` is the result-file stem (`pmc_perf_3`). Only a counter copied into more than one pass is suffixed; a counter that appears in one pass keeps its bare name. If several passes each hold the whole expression, the earliest stem in natural order wins (`pmc_perf_2` before `pmc_perf_10`).
 
 ```mermaid
 flowchart TD
