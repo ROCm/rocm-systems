@@ -13,11 +13,9 @@
 #include "scheduler.h"
 #include "tuning.h"
 #include "enqueue.h"
-#include "bootstrap.h"
 #include "config/algorithm_registry.h"
 #include "profiler.h"
 #include <cuda_fp16.h>
-#include <vector>
 #if defined(__CUDA_FP8_TYPES_EXIST__)
 #include <cuda_fp8.h>
 #endif
@@ -116,10 +114,6 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       NCCLCHECK(ncclDevrFindWindow(comm, task->sendbuff, &task->sendWin));
       NCCLCHECK(ncclDevrFindWindow(comm, task->recvbuff, &task->recvWin));
       NCCLCHECK(ncclGetSymRegType(task->sendWin, task->recvWin, &task->winRegType));
-      // Partial registration (NCCL_CHECK_MODE default accepts it) cannot run a
-      // symmetric kernel. Require both windows; peers then allgather so a mix of
-      // SYM and RING does not hang.
-      if (task->winRegType != ncclSymSendRegRecvReg) wantSym = false;
 #ifndef GENERATE_SYM_KERNELS
     // without GENERATE_SYM_KERNELS, ncclSymkGetKernelPtr()
     // returns nullptr for AllReduce, which causes a 'invalid device function'
@@ -130,20 +124,6 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       if (task->func == ncclFuncAllReduce) wantSym = false;
 #endif
     }
-    // Local windows can disagree across ranks (NCCL_CHECK_MODE default does not
-    // reject that). Mixing SYM and RING hangs; fall back unless every rank wants SYM.
-    if (comm->nRanks >= 2 && comm->bootstrap != nullptr) {
-      std::vector<uint8_t> flags((size_t)comm->nRanks, 0);
-      flags[(size_t)comm->rank] = wantSym ? 1 : 0;
-      NCCLCHECK(bootstrapAllGather(comm->bootstrap, flags.data(), sizeof(uint8_t)));
-      for (int r = 0; r < comm->nRanks; r++) {
-        if (flags[(size_t)r] == 0) {
-          wantSym = false;
-          break;
-        }
-      }
-    }
-
     if (wantSym) {
       index =
         (((int)task->func * ncclNumDevRedOps + symkOp) * ncclNumTypes + (int)task->datatype) * ncclNumSymRegTypes +
@@ -226,12 +206,18 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       input.countMax = countMax;
       input.nWorks = nWorks;
       input.winRegType = headTask->winRegType;
+      input.inPlace = nWorks == 1 && headTask->func == ncclFuncAllGather &&
+                      ncclAllGatherIsInPlace(headTask->sendbuff, headTask->recvbuff, comm->rank,
+                                             headTask->count * ncclTypeSize(headTask->datatype));
       input.symAligned16B = symBatchAligned16B(headTask);
       input.minCTAs = headTask->minCTAs;
       input.maxCTAs = headTask->maxCTAs;
       input.CTAPolicy = headTask->CTAPolicy;
-      input.nvlsSupport = comm->nvlsSupport && (ncclNvlsSupported(headTask->opDev.op, headTask->datatype) ||
-                                                headTask->func == ncclFuncAllGather);
+      // Symmetric kernels use comm->symkState.hasLsaMultimem for multicast capability.
+      // input.nvlsSupport only gates NVLS/NVLS_TREE during general-kernel fallback tuning.
+      input.nvlsSupport =
+        ncclNvlsTransportEnabled(comm) &&
+        (ncclNvlsSupported(headTask->opDev.op, headTask->datatype) || headTask->func == ncclFuncAllGather);
       NCCLCHECK(ncclGetCollNetSupport(comm, headTask, &input.collNetSupport));
       NCCLCHECK(ncclGetRegBuff(comm, headTask, &input.regBuff));
       struct ncclTuningResult_t bestTuning = NCCL_TUNING_RESULT_INIT;
@@ -297,6 +283,28 @@ exit:
   return ret;
 }
 
+// Tma kernels cut a ncclTmaShmemScratchWarpSize() staging window per warp out of the block's grant
+// (ncclSymkTileSmem()). sym_kernels.h static_asserts the constants; the width this launch actually
+// carries and the grant it actually received are only visible here. No-op for every other kernel.
+static ncclResult_t symCheckTmaLaunch(ncclSymkKernelId kernelId, const char* kernelName, int nWarps,
+                                      int maxDynamicSmem) {
+  if (!(1 & (ncclSymkTmaKernelMask() >> (int)kernelId))) return ncclSuccess;
+  // An overrun would DMA a neighbour's window to every peer.
+  if (nWarps * ncclTmaShmemScratchWarpSize() > maxDynamicSmem) {
+    WARN("Symmetric kernel %s needs %d warps x %d B of tile staging LDS (%d B) but the launch reserves %d B",
+         kernelName, nWarps, ncclTmaShmemScratchWarpSize(), nWarps * ncclTmaShmemScratchWarpSize(), maxDynamicSmem);
+    return ncclInternalError;
+  }
+  // ncclTuningSymkModelSim() is the only producer of this width, so a mismatch means something
+  // downstream overwrote it or the kernel took the LL arm by mistake.
+  if (nWarps != ncclSymkWarpsPerBlock) {
+    WARN("Symmetric kernel %s launching with %d warps, expected the tuned %d", kernelName, nWarps,
+         ncclSymkWarpsPerBlock);
+    return ncclInternalError;
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
                                         struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next>* symTaskQueue,
                                         struct ncclKernelPlan* plan) {
@@ -325,6 +333,7 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
 #else
   plan->threadPerBlock = headTask->nWarps * WARP_SIZE;
 #endif
+  plan->launchCompletionEvent = headTask->launchCompletionEvent;
   plan->hasProxyOps = false;
   ncclSymkKernelId kernelId = (ncclSymkKernelId)headTask->devFuncId;
   int kernelIndex = ncclSymkGetKernelIndex(kernelId, headTask->opDev.op, headTask->datatype);
@@ -341,6 +350,7 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
                      ncclSymkKernelList[kernelIndex];
   int maxDynamicSmem = ncclSymkKernelMaxDynamicSmem[kernelIndex];
   plan->kernelDynSmem = (1 & (ncclSymkDynamicSmemKernelMask() >> (int)kernelId)) ? maxDynamicSmem : 0;
+  NCCLCHECKGOTO(symCheckTmaLaunch(kernelId, kernelName, headTask->nWarps, maxDynamicSmem), ret, fail);
   task = headTask;
   while (task != nullptr && task->devFuncId == devFuncId) {
     workCount++;
@@ -358,7 +368,9 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
 
   argsBuf->nMaxChannels = nMaxChannels;
   argsBuf->maxDynamicSmem = maxDynamicSmem;
-  argsBuf->profilerEnabled = profilerEnabled ? 1 : 0;
+  // KernelCh-only launches leave the phase bit clear, so the profile variant skips the
+  // phase stamps and their fence at runtime.
+  argsBuf->profilerMode = profilerEnabled ? ncclProfilerDeviceMode(headTask->eActivationMask) : ncclDevProfilerModeNone;
 
   remainCell = cellPerChannel = DIVUP(DIVUP(totalCount, nMaxChannels), cellCount);
   workRangePtr = argsBuf->getWorkRange();
@@ -385,11 +397,6 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
           devWork.nChannels = 1;
         } else if (cellLeft <= remainCell) {
           // the last segment of the task
-          if (devWork.nChannels <= 0) {
-            WARN("Symmetric work channel count is %d", devWork.nChannels);
-            ret = ncclInternalError;
-            goto fail;
-          }
           // if the remaining cell is less than 1024 bytes, we can fuse the last channel
           if ((remainCell - cellLeft) * NCCL_SYM_KERNEL_CELL_SIZE <= (1 << 10) || ncclIntruQueueEmpty(symTaskQueue))
             devWork.nChannels++;

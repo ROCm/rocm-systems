@@ -34,7 +34,6 @@
 
 #include "hsakmt/hsakmt.h"
 #include "hsakmt/hsakmttypes.h"
-#include "log.hpp"
 #include "sdma_pkt_struct.h"
 #include "sdma_pkt_struct_mi4.h"
 
@@ -47,34 +46,6 @@ constexpr int MAX_RETRIES = 1 << 30;
 constexpr bool BREAK_ON_RETRIES = false;
 
 #if defined(__HIPCC__) || defined(__CUDACC__)
-
-// RCCL device TUs poison __hip_atomic_* (poison_hip_atomics.h). Clang scoped
-// atomics are the supported replacement. HIP agent scope and Clang device scope
-// lower to the same thing on this target; system stays system (doorbell).
-namespace hip_scoped {
-
-__device__ __forceinline__ unsigned int hipScopeToClang(int hipScope) {
-  if (hipScope == __HIP_MEMORY_SCOPE_SYSTEM) return __MEMORY_SCOPE_SYSTEM;
-  return __MEMORY_SCOPE_DEVICE;
-}
-
-template <typename T>
-__device__ __forceinline__ T atomicLoad(T* ptr, int memorder, int hipScope) {
-  return __scoped_atomic_load_n(ptr, memorder, hipScopeToClang(hipScope));
-}
-
-template <typename T>
-__device__ __forceinline__ void atomicStore(T* ptr, T val, int memorder, int hipScope) {
-  __scoped_atomic_store_n(ptr, val, memorder, hipScopeToClang(hipScope));
-}
-
-__device__ __forceinline__ bool atomicCmpXchg(uint64_t* ptr, uint64_t& expected, uint64_t desired,
-                                              int succ, int fail, int hipScope) {
-  return __scoped_atomic_compare_exchange_n(ptr, &expected, desired, /*weak=*/false, succ, fail,
-                                            hipScopeToClang(hipScope));
-}
-
-}  // namespace hip_scoped
 
 __device__ __forceinline__ SDMA_PKT_COPY_LINEAR CreateCopyPacket(void* srcBuf, void* dstBuf,
                                                                  long long int packetSize) {
@@ -237,7 +208,7 @@ struct SdmaQueueDeviceHandle {
 
       if (CanWriteUpto(new_index)) {
         if (__scoped_atomic_compare_exchange_n(
-                cachedWptr, &cur_index, new_index, false,
+                cachedWptr, &cur_index, new_index, /* weak */ false,
                 __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE)) {
           break;
         }
@@ -283,8 +254,7 @@ struct SdmaQueueDeviceHandle {
   __device__ __forceinline__ void submitPacket(uint64_t base, uint64_t pendingWptr) {
     int retries = 0;
     while (true) {
-      uint64_t val =
-        __scoped_atomic_load_n(committedWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+      uint64_t val = __scoped_atomic_load_n(committedWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
       if (val == base) {
         // All stores inside the loop to avoid SIMD reconvergence deadlock:

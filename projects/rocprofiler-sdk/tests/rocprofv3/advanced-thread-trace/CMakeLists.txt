@@ -42,19 +42,7 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
 
 find_package(rocprofiler-sdk REQUIRED)
 
-find_library(
-    attdecoder_LIBRARY
-    NAMES rocprof-trace-decoder
-    HINTS ${ROCM_PATH}
-    PATHS ${ROCM_PATH}
-    PATH_SUFFIXES lib)
-
-if(attdecoder_LIBRARY)
-    cmake_path(GET attdecoder_LIBRARY PARENT_PATH attdecoder_LIB_DIR)
-endif()
-
-find_package_handle_standard_args(attdecoder REQUIRED_VARS attdecoder_LIB_DIR
-                                                           attdecoder_LIBRARY)
+rocprofiler_sdk_find_trace_decoder()
 
 set(COMMON_PARAMS_NO_LIB ${PRELOAD_ARGS} --att --output-format json --log-level env -d
                          ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/)
@@ -366,8 +354,8 @@ endif()
 
 # Other SIMD file tests. Requires both a supported arch (gfx11/12) AND the
 # rocprof-trace-decoder library: the test sets ROCPROF_ATT_LIBRARY_PATH and aborts with
-# "rocprof-trace-decoder library path not found" when the decoder is absent (e.g. WSL, or
-# any environment without the decoder installed). Gate on IS_DISABLED (which is ON when
+# "rocprof-trace-decoder library path not found" when the decoder is absent (any
+# environment without the decoder installed). Gate on IS_DISABLED (which is ON when
 # attdecoder is not found) like the other ATT tests, so it is skipped rather than failing
 # when the decoder is unavailable.
 set(ATT_NO_DETAIL_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-no-detail")
@@ -476,6 +464,14 @@ rocprofiler_add_integration_execute_test(
     DISABLED ${IS_DISABLED}
     FAIL_REGULAR_EXPRESSION "att-consecutive-kernels options are mutually exclusive")
 
+# --att-no-intercept needs multi-buffer thread trace, which only MI3xx and gfx12 support
+rocprofiler_sdk_sqtt_triple_buffer_disabled(IS_TRIPLE_BUFFER_DISABLED)
+
+set(ATT_NO_INTERCEPT_DISABLE ${IS_DISABLED})
+if(${IS_TRIPLE_BUFFER_DISABLED})
+    set(ATT_NO_INTERCEPT_DISABLE ON)
+endif()
+
 set(ATT_NO_INTERCEPT_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-no-intercept-out")
 
 rocprofiler_add_integration_execute_test(
@@ -487,7 +483,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS thread-trace-test-app
     LABELS "integration-tests;thread-trace"
     TIMEOUT 45
-    DISABLED ${IS_DISABLED}
+    DISABLED ${ATT_NO_INTERCEPT_DISABLE}
     ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-att-no-intercept)
@@ -500,9 +496,38 @@ rocprofiler_add_integration_validate_test(
     DISCOVERY_ARGS -k test_att_no_intercept_target_kernel
     TIMEOUT 45
     LABELS "integration-tests;thread-trace"
-    DISABLED ${IS_DISABLED}
+    DISABLED ${ATT_NO_INTERCEPT_DISABLE}
     FIXTURES_REQUIRED rocprofv3-test-att-no-intercept
     ARGS --att-no-intercept-out-dir ${ATT_NO_INTERCEPT_OUT_DIR}
+    FAIL_REGULAR_EXPRESSION "AssertionError")
+
+set(ATT_CODE_OBJECT_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-code-object-out")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-code-object-resources
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_CODE_OBJECT_OUT_DIR} --att
+        --att-resource-mode code-object --output-format json -o out --
+        $<TARGET_FILE:thread-trace-test-app>
+    DEPENDS thread-trace-test-app
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-att-code-object-resources)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-code-object-resources
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_shaderdata
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-code-object-resources
+    ARGS --att-shaderdata-out-dir ${ATT_CODE_OBJECT_OUT_DIR}
     FAIL_REGULAR_EXPRESSION "AssertionError")
 
 set(ATT_HSA_FALLBACK_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-hsa-fallback-out")
