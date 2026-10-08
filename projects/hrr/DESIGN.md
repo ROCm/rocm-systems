@@ -721,9 +721,13 @@ leaves alone are not reported.
 **Tests.** `hrr_pinned_host_test.cc` covers the behaviour above, including a
 failed launch, every launch entry point, a free that fails and `hipDeviceReset`.
 Most cases capture a workload and replay it; the ones that check only what
-capture records or trusts do not replay. Two paths are untested by design: the
-fork handlers and a blob or event that cannot be written. Each needs a fault
-injected into the process under capture, which no test hook provides.
+capture records or trusts do not replay. Two cases can skip. The
+`hipDeviceReset` case skips its last check when the reset leaves no address in
+the old buffer that the runtime does not know. The cross-device free needs two
+devices. Three paths are untested by design: the fork handlers, a blob or event
+that cannot be written, and a restore `hipLaunchHostFunc` refuses. Each needs a
+fault injected into the capture or replay process, which no test hook
+provides.
 
 ### Threat Model: Pinned Host Snapshots
 
@@ -784,6 +788,12 @@ exists to put chosen bytes in front of those kernels.
   there too. Replay of `hipStreamBatchMemOp` waits for real, so a launch stream
   can stay blocked until later replayed work releases it; the restore waits
   with the kernel rather than hanging the replay.
+- Restores of one allocation queued by launches on streams that do not wait
+  for each other run when each stream reaches them, not in the order of the
+  launches. An earlier launch on a busy stream can write its bytes after a
+  later launch on an idle stream wrote its own. The later kernel can then read
+  the earlier bytes, and the host is left holding them. The earlier launch was
+  recorded unordered, so the application raced there too.
 - A free or unregister waits for the restores queued for its allocation. When
   such a restore's stream is held by work that only later replayed events
   release, replay waits for it. It prints a line after 10 s. CLR's own
