@@ -1869,6 +1869,9 @@ SIMD_VOP3_BINARY_TRUE16_SRC: dict[str, tuple[str, str]] = {
         'uint32_t',
         '[](auto a, auto b) { return (a & 0xFFFFu) | ((b & 0xFFFFu) << 16); }',
     ),
+    # The NORM functors widen each half with f16_to_f32_simd as read. gfx1201
+    # flushes a subnormal half to zero before widening when MODE disables F16
+    # input denormals; these functors convert the subnormal value instead.
     'v_cvt_pk_norm_i16_f16_vop3': (
         'uint32_t',
         '[](auto a, auto b) {'

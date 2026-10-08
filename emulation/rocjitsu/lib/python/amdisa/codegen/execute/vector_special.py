@@ -1412,6 +1412,10 @@ def gen_vector_cvt_pk(
         )
     elif cls == 'vector_cvt_pknorm':
         if dtype == 'f16':
+            # The halves are widened without MODE input-denormal handling.
+            # gfx1201 flushes a subnormal half to zero before widening when MODE
+            # disables F16 input denormals; this body converts the subnormal
+            # value instead.
             if is_vop3:
                 L.append(
                     f'    float s0 = util::f16_to_f32(static_cast<uint16_t>({_read_vop3_true16_src(src[0], opsel, 0)}));'
@@ -1436,8 +1440,12 @@ def gen_vector_cvt_pk(
         if is_vop3:
             L.extend(vop3_src_mod('s0', 0, has_abs))
             L.extend(vop3_src_mod('s1', 1, has_abs))
-        # Ties to even in every MODE.FP_ROUND, as the SIMD helper; see the ISA
-        # discrepancy and the pending F16 input flush in util::round_normalized_simd.
+        # Round to nearest even under every MODE.FP_ROUND setting. The ISA applies
+        # FP_ROUND to VALU float operations, and the packed NORM entries
+        # (V_CVT_PK_NORM_* and V_CVT_PKNORM_*) give no exception. gfx1100 and
+        # gfx1201 captures of V_CVT_PK_NORM_{I,U}16_{F16,F32} nevertheless do not
+        # change with FP_ROUND. CDNA1-5, RDNA1-2 and RDNA3.5 reuse this rounding
+        # without hardware verification.
         if op == 'i16':
             L.append('    auto cvt_i16 = [](float f) -> int16_t {')
             L.append('      if (std::isnan(f)) return 0;')

@@ -559,19 +559,19 @@ def test_vop3_pack_and_pknorm_f16_use_true16_source_halves():
 
 
 @pytest.mark.parametrize('op', ['i16', 'u16'])
-def test_gfx9_pknorm_f16_spelling_matches_rdna3_pk_norm(op):
+def test_pknorm_f16_spelling_matches_pk_norm(op):
     # GFX9 and RDNA1/2 spell V_CVT_PK_NORM_*_F16 as V_CVT_PKNORM_*_F16.
-    gfx9 = derive_semantics(f'V_CVT_PKNORM_{op.upper()}_F16', 'ENC_VOP3')
-    rdna3 = derive_semantics(f'V_CVT_PK_NORM_{op.upper()}_F16', 'ENC_VOP3')
-    assert (gfx9.semantic_class, gfx9.operation, gfx9.data_type) == (
+    pknorm = derive_semantics(f'V_CVT_PKNORM_{op.upper()}_F16', 'ENC_VOP3')
+    pk_norm = derive_semantics(f'V_CVT_PK_NORM_{op.upper()}_F16', 'ENC_VOP3')
+    assert (pknorm.semantic_class, pknorm.operation, pknorm.data_type) == (
         'vector_cvt_pknorm',
         op,
         'f16',
     )
-    assert (gfx9.semantic_class, gfx9.operation, gfx9.data_type) == (
-        rdna3.semantic_class,
-        rdna3.operation,
-        rdna3.data_type,
+    assert (pknorm.semantic_class, pknorm.operation, pknorm.data_type) == (
+        pk_norm.semantic_class,
+        pk_norm.operation,
+        pk_norm.data_type,
     )
     assert simd_probe_line(f'v_cvt_pknorm_{op}_f16_vop3') == simd_probe_line(
         f'v_cvt_pk_norm_{op}_f16_vop3'
