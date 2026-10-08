@@ -45,10 +45,12 @@ if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
 # Import from existing modules to maintain single source of truth
+from rocprof_compute_soc.counter_file import (  # noqa: E402
+    flat_counters_in_perfmon_file,
+)
 from rocprof_compute_soc.soc_base import (  # noqa: E402
     CounterFile,
     OmniSoC_Base,
-    flat_counters_in_perfmon_file,
     is_tcc_channel_counter,
     iter_analysis_config_metrics,
 )

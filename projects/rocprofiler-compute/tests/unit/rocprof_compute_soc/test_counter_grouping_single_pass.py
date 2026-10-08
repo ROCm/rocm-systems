@@ -5,6 +5,7 @@
 
 import pytest
 
+from rocprof_compute_soc.counter_file import flat_counters_in_perfmon_file
 from rocprof_compute_soc.counter_grouping_buckets import rebuild_counter_file
 from rocprof_compute_soc.counter_grouping_single_pass import (
     _any_bucket_has_full_group,
@@ -15,7 +16,6 @@ from rocprof_compute_soc.counter_grouping_single_pass import (
     fill_multi_pass_metrics_into_existing_passes,
     try_allocate_single_pass_metrics,
 )
-from rocprof_compute_soc.soc_base import flat_counters_in_perfmon_file
 
 TCC_BUDGET_CONFIG = {"TCC": 4, "SQ": 8}
 
@@ -379,3 +379,4 @@ def test_allocator_keeps_tcc_request_row_and_level_pairs():
         assert bucket_holding(files, latency) is not None
     read_home = bucket_holding(files, read_level | read)
     assert read_home is not row_home
+
