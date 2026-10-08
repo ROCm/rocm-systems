@@ -234,11 +234,11 @@ inline float apply_source_modifiers(float value, bool absolute, bool negate) {
 
 } // namespace detail
 
-/// @brief Apply F16 result modifiers and perform one direct F64-to-F16 rounding.
-/// @details This is the supported policy surface for fused operations whose exact result is
-/// representable in F64. It avoids exposing pseudo-scalar implementation details to other
-/// execution helpers. CLAMP's NaN conversion is selected separately because older profiles
-/// require MODE.DX10_CLAMP while GFX12 and gfx1250 always convert NaN to positive zero.
+/// @brief Scale/clamp a wide result, then round directly from F64 to F16.
+/// @details SDWA supplies a wide value; FMA modifier calls supply an already-rounded half.
+/// Migrated rounding stages disable modifiers here and modify the returned bits
+/// afterward. The caller owns MODE denormal controls; clamp_nan_to_zero selects
+/// CLAMP's NaN conversion separately.
 inline uint16_t round_f16_result(double value, uint32_t round_mode, uint32_t omod, bool clamp,
                                  bool fp16_ovfl, bool clamp_nan_to_zero) {
   const bool effective_clamp = clamp && (clamp_nan_to_zero || !std::isnan(value));

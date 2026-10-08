@@ -6,8 +6,8 @@
 /// @file output_denormal.h
 /// @brief Output-denormal handling on scalar or SIMD floating-point encodings.
 /// @details Applies to a result already rounded to its destination format.
-/// Operations that detect tininess while rounding call this at that point;
-/// OMOD's own zero and subnormal rules belong to output_modifier.h.
+/// The operation selects the flush point. Specialized FMA tininess detection
+/// stays in fp_mode.h; OMOD's zero/subnormal rules belong to output_modifier.h.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal.h"
 

@@ -698,7 +698,8 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         ' auto f = util::f16_to_f32_simd(a);'
         ' return util::f32_to_f16_simd(f - util::floor_simd(f)); }',
     ),
-    # Half transcendentals apply input policy and round before output modifiers.
+    # VOP1 TRANS: flush the raw half, widen, evaluate, round and flush the result.
+    # These forms have no OMOD/CLAMP; VOP3 uses its separate modifier glue.
     'v_rcp_f16_vop1': (
         'uint32_t',
         'uint32_t',
@@ -732,7 +733,7 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
             'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
         ),
     ),
-    # Half LOG/EXP rounds once before applying output modifiers.
+    # LOG/EXP helpers return an already-rounded half represented in F32.
     'v_exp_f16_vop1': (
         'uint32_t',
         'uint32_t',

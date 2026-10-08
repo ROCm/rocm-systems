@@ -1163,9 +1163,9 @@ def _lower_dst_write(
     elif selection_node is not rhs_node and (
         result := _destination_result(selection_node, ctx)
     ):
-        # The operation has already rounded its result to the destination
-        # format. Apply output modifiers to those bits using GPU MODE,
-        # independently of the host rounding mode.
+        # _destination_result supplies destination-format bits, rounding here
+        # when the operation has not already done so. Apply OMOD/CLAMP to those
+        # bits using GPU MODE, independently of host rounding.
         dtype, bits, transcendental = result
         declaration = vop3_modifiers.output_policy_decl(
             dtype, output_fields, transcendental=transcendental

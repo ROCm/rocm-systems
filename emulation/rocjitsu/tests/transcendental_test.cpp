@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file transcendental_test.cpp
-/// @brief Phase C unit tests for shared transcendental functions.
+/// @brief Unit tests for transcendental mappings, special cases, and rounding.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 

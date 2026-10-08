@@ -2856,6 +2856,7 @@ INSTANTIATE_TEST_SUITE_P(InputFlush, ValuIntegralRoundingModeTest,
 
 class ValuRoundedResultModifierTest : public testing::TestWithParam<ArithmeticCase> {};
 
+// Both execution settings are checked; unsupported SIMD cases use scalar fallback.
 TEST_P(ValuRoundedResultModifierTest, MatchesGfx1201OnScalarAndSimdPaths) {
   ForceScalarGuard guard;
   for (const bool scalar : {true, false}) {
@@ -2871,6 +2872,7 @@ INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuRoundedResultModifierTest,
                            return info.param.name;
                          });
 
+// "Legacy" here denotes the pre-RDNA4 architecture/MODE gate for OMOD.
 class ValuLegacyRoundedResultModifierTest : public testing::TestWithParam<ArithmeticCase> {};
 
 // The MODE-aware F16 ADD/MUL SIMD path supports these output modifiers and
@@ -3195,6 +3197,8 @@ TEST(ValuFpModeHelpers, FusedResultAndOutputFlush) {
 }
 
 TEST(ValuFpModeHelpers, OutputScalePrecedesF16Rounding) {
+  // Explicit omod exercises SDWA's pre-round helper contract. Migrated VOP3
+  // callers leave it zero and apply output_modifier to the rounded result.
   EXPECT_EQ(amdgpu::fp_mode::finish_arithmetic_f16(65504.0 * 2.0, 0, 1, false, 3), 0x7bffu);
   EXPECT_EQ(amdgpu::fp_mode::finish_arithmetic_f16(1.0 + 0x1p-24, 1, 1, false, 1), 0x4001u);
   EXPECT_EQ(amdgpu::fp_mode::finish_arithmetic_f16(-0.0, 0, 1, false, 1), 0u);

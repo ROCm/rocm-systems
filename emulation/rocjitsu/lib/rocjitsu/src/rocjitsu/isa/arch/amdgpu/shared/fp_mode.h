@@ -777,8 +777,9 @@ inline float apply_omod_f32(float value, uint32_t omod) {
 }
 
 /// @brief Scale an already rounded half result represented in F32.
-/// @details Live SDWA helper: preserve NaNs, flush input subnormals, and round
-/// scaling to F16. Legacy vector generators also emit calls to this helper.
+/// @details Used by SDWA finish_rounded_f16. Active OMOD preserves NaNs, maps
+/// zero/subnormal results to +0, and rounds scaling to F16. Newly tiny results
+/// flush to signed zero. This path is outside the shared raw-bit output stage.
 inline float apply_omod_f16(float value, uint32_t omod, bool fp16_ovfl) {
   if (omod == 0)
     return value;
@@ -892,8 +893,10 @@ inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
       });
 }
 
-/// @brief Evaluate F16 arithmetic before output modifiers and destination rounding.
-/// @details The caller flushes each source half under MODE before widening it.
+/// @brief Evaluate prepared F16 arithmetic operands in F64.
+/// @details The caller flushes each raw source half before widening. Destination
+/// rounding and output flushing belong to finish_arithmetic_f16; migrated VOP3
+/// callers apply OMOD/CLAMP to the returned half afterward.
 template <Arithmetic operation>
 inline double arithmetic_f16(float lhs, float rhs, float addend, uint32_t round_mode) {
   detail::ScopedFenv environment(round_mode);
@@ -901,8 +904,9 @@ inline double arithmetic_f16(float lhs, float rhs, float addend, uint32_t round_
                                                 static_cast<double>(addend));
 }
 
-/// @brief Scale an F16 input exactly before output modifiers and final F16 rounding.
-/// @details The caller flushes the source half under MODE before widening it.
+/// @brief Evaluate F16 LDEXP in F64 before destination rounding.
+/// @details The caller flushes the raw source half before widening. Migrated
+/// VOP3 callers round to F16 before applying the shared OMOD/CLAMP stage.
 inline double ldexp_f16(float value, int32_t adjustment) {
   detail::ScopedFenv environment(0);
   // Every finite nonzero half lies in [2^-24, 2^16). Bounding the adjustment
@@ -912,6 +916,8 @@ inline double ldexp_f16(float value, int32_t adjustment) {
 }
 
 /// @brief Round an F16 arithmetic destination and apply output-denormal policy.
+/// @details Migrated VOP3 callers leave omod=0 and modify the rounded bits
+/// afterward. SDWA supplies omod here to retain its pre-round scaling contract.
 inline uint16_t finish_arithmetic_f16(double value, uint32_t round_mode, uint32_t denorm_mode,
                                       bool fp16_ovfl, uint32_t omod = 0) {
   detail::ScopedFenv environment(0);
@@ -923,6 +929,9 @@ inline uint16_t finish_arithmetic_f16(double value, uint32_t round_mode, uint32_
 }
 
 /// @brief Whether a host SIMD arithmetic fast path implements the wave's FP policy.
+/// @details Requires nearest rounding and preserved host inputs/outputs.
+/// MODE-aware helpers that implement flushing themselves pass denorm_mode=3
+/// for this host check, then apply the wave's actual denormal policy separately.
 inline bool native_arithmetic_matches(uint32_t round_mode, uint32_t denorm_mode) {
   if (round_mode != 0 || denorm_mode != 3 || std::fegetround() != FE_TONEAREST)
     return false;
