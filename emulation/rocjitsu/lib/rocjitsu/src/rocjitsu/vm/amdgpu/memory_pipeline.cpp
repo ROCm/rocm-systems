@@ -974,6 +974,17 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
   }
 }
 
+void execute_lds_access(VectorMemState &d, Lds &lds, const std::array<uint64_t, 64> &addresses,
+                        uint64_t lane_mask, const std::vector<uint8_t> &store_data,
+                        std::vector<uint8_t> &response_data) {
+  if (d.atomic_op != AtomicOp::NONE)
+    execute_lds_atomic_rmw(d, &lds, addresses, store_data, response_data, lane_mask);
+  else if (d.is_load)
+    lds.vector_load(addresses.data(), lane_mask, d.elem_size, d.num_elems, response_data.data());
+  else
+    lds.vector_store(addresses.data(), lane_mask, d.elem_size, d.num_elems, store_data.data());
+}
+
 } // namespace
 
 VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
@@ -993,15 +1004,7 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
     if (shared_lanes & (uint64_t{1} << lane))
       addresses[lane] = d.flat_shared_address_in_lds(lane, wf.lds_base());
   }
-  auto &lds = wf.lds();
-  if (d.atomic_op != AtomicOp::NONE) {
-    execute_lds_atomic_rmw(d, &lds, addresses, d.store_data, d.response_data, shared_lanes);
-  } else if (d.is_load) {
-    lds.vector_load(addresses.data(), shared_lanes, d.elem_size, d.num_elems,
-                    d.response_data.data());
-  } else {
-    lds.vector_store(addresses.data(), shared_lanes, d.elem_size, d.num_elems, d.store_data.data());
-  }
+  execute_lds_access(d, wf.lds(), addresses, shared_lanes, d.store_data, d.response_data);
   return VmAccessOutcome::Complete;
 }
 
@@ -1112,24 +1115,22 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
     execute_lds_stack(wf, d);
     return VmAccessOutcome::Complete;
   }
-  if (d.atomic_op != AtomicOp::NONE) {
-    execute_lds_atomic_rmw(d, &lds, d.per_lane_addr, d.store_data, d.response_data, d.lane_mask);
-    if (d.ds2_active) {
-      execute_lds_atomic_rmw(d, &lds, d.ds2_per_lane_addr, d.ds2_store_data, d.ds2_response_data,
-                             d.lane_mask);
-    }
-    return VmAccessOutcome::Complete;
+  const bool plain_load = d.is_load && d.atomic_op == AtomicOp::NONE;
+  if (plain_load) {
+    d.response_data.resize(d.wf_size * d.num_elems * d.elem_size);
+    if (d.ds2_active)
+      d.ds2_response_data.resize(d.wf_size * d.num_elems * d.elem_size);
   }
+  const uint64_t request_lanes =
+      plain_load ? transpose_request_lane_mask(d, wf.wf_size()) : d.lane_mask;
+  execute_lds_access(d, lds, d.per_lane_addr, request_lanes, d.store_data, d.response_data);
+  if (d.ds2_active)
+    execute_lds_access(d, lds, d.ds2_per_lane_addr, d.lane_mask, d.ds2_store_data,
+                       d.ds2_response_data);
+  if (d.atomic_op != AtomicOp::NONE)
+    return VmAccessOutcome::Complete;
 
   if (d.is_load) {
-    d.response_data.resize(d.wf_size * d.num_elems * d.elem_size);
-    lds.vector_load(d.per_lane_addr.data(), transpose_request_lane_mask(d, wf.wf_size()),
-                    d.elem_size, d.num_elems, d.response_data.data());
-    if (d.ds2_active) {
-      d.ds2_response_data.resize(d.wf_size * d.num_elems * d.elem_size);
-      lds.vector_load(d.ds2_per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
-                      d.ds2_response_data.data());
-    }
     // Per-lane LDS load trace: log addresses and loaded values for first 4 lanes.
     util::Logger::vm([&](auto &os) {
       static thread_local uint64_t ds_ld_trace = 0;
@@ -1191,12 +1192,6 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
         }
       }
     });
-    lds.vector_store(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
-                     d.store_data.data());
-    if (d.ds2_active) {
-      lds.vector_store(d.ds2_per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
-                       d.ds2_store_data.data());
-    }
   }
   return VmAccessOutcome::Complete;
 }
