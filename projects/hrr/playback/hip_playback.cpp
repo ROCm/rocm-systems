@@ -1147,7 +1147,10 @@ void hrr_forget_released_host_allocs(PlaybackContext& ctx) {
     std::unique_lock lk(ctx.map_mutex);
     for (auto& [rec, live] : gone) {
         auto it = ctx.alloc_map.find(rec);
-        if (it != ctx.alloc_map.end() && it->second.live_ptr == live)
+        if (it == ctx.alloc_map.end() || it->second.live_ptr != live) continue;
+        if (it->second.kind == AllocKind::HostRegister)
+            it->second.kind = AllocKind::HostUnregistered;
+        else
             ctx.alloc_map.erase(it);
     }
 }
@@ -1206,7 +1209,8 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
         void* live = ctx.translate_ptr(ptr);
         void* abase = nullptr; size_t asize = 0; uint64_t arec = 0;
         AllocKind akind = AllocKind::Device;
-        if (!live || !ctx.live_alloc_of(live, &abase, &asize, &arec, &akind)) {
+        if (!live || !ctx.live_alloc_of(live, &abase, &asize, &arec, &akind) ||
+            akind == AllocKind::HostUnregistered) {
             skip(i, ptr, off, len, "names no live allocation");
             continue;
         }
@@ -3366,7 +3370,10 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
         return hipSuccess;
     }
     hipError_t r = hipHostUnregister(live);
-    if (r == hipSuccess) ctx.remove_alloc(a->hostPtr);
+    // The buffer is freed below even when the unregister fails, as it does for
+    // a range a replayed hipDeviceReset already unregistered, so nothing may
+    // translate into it afterwards.
+    if (r == hipSuccess || buf) ctx.remove_alloc(a->hostPtr);
 
 #ifdef _WIN32
     _aligned_free(buf);

@@ -826,15 +826,17 @@ that point the record must name a pinned host allocation replay made, lie
 inside its bounds, and come with a blob of exactly the recorded length. A record
 that names device memory, no allocation, a range outside its allocation, an
 unknown direction or a blob of another size is refused. So is a record naming
-an allocation a replayed `hipDeviceReset` released: after the reset, replay
-stops tracking every pinned allocation the runtime no longer knows, as capture
-does. For a record it accepts, replay keeps the allocation alive until the
-restore has run or the process exits: a free, an unregister or teardown waits
-for it, and leaks the allocation rather than free it when the wait runs out.
-Once the summary's wait or one teardown wait has run out, teardown leaks
-without waiting. Two paths release the allocation anyway, so a restore queued
-before them can write archive-chosen bytes into memory that has been released
-and may have been reused:
+memory a replayed `hipDeviceReset` released: after the reset, replay stops
+tracking the pinned allocations the runtime no longer knows, as capture does,
+except that a registered range stays tracked, marked unregistered, so that
+pointers into replay's copy of it still translate. For a record it accepts,
+replay keeps the allocation alive until the restore has run or the process
+exits: a free, an unregister or teardown waits for it, and leaks the
+allocation rather than free it when the wait runs out. Once the summary's wait
+or one teardown wait has run out, teardown leaks without waiting. Two paths
+release the allocation anyway, so a restore queued before them can write
+archive-chosen bytes into memory that has been released and may have been
+reused:
 
 - a replayed `hipDeviceReset` whose bounded wait runs out, when replay sees one
   GPU (with more, a reset frees no pinned host memory). An archive can arrange

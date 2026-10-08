@@ -63,8 +63,11 @@ enum class AllocKind : uint8_t {
     HostMalloc,    // hipHostMalloc / hipMallocHost                 -> hipHostFree
     HostRegister,  // hipHostRegister backing buffer  -> hipHostUnregister + free
                    //   (released via host_reg_bufs; skipped in the alloc_map loop)
-    DevicePtrAlias // hipHostGetDevicePointer result  -> not separately freed
+    DevicePtrAlias, // hipHostGetDevicePointer result -> not separately freed
                    //   (alias into an already-tracked pinned host allocation)
+    HostUnregistered // HostRegister range a replayed hipDeviceReset unregistered
+                   //   (pointers into it still translate; snapshot records
+                   //   naming it are refused; released like HostRegister)
 };
 
 struct AllocEntry {
@@ -568,6 +571,7 @@ struct PlaybackContext {
             case AllocKind::HostMalloc:     return "pinned host";
             case AllocKind::HostRegister:   return "registered host";
             case AllocKind::DevicePtrAlias: return "pinned host alias";
+            case AllocKind::HostUnregistered: return "unregistered host";
             default:                        return "device";
         }
     }
@@ -851,14 +855,18 @@ bool hrr_wait_host_restores(PlaybackContext& ctx, const void* base, const char* 
 // into it.
 bool hrr_host_release_ready(PlaybackContext& ctx, const void* live);
 
-// Called after a replayed hipDeviceReset succeeds. Drops from tracking every
-// pinned host allocation the runtime no longer knows, as capture does: with
-// one GPU the reset frees hipHostMalloc memory and drops hipHostRegister
-// registrations. A later record naming one is then refused as naming no live
-// allocation, rather than restored into released memory. A registered range
-// keeps its backing buffer in host_reg_bufs: replay allocated it and it stays
-// valid, so teardown or the replayed unregister still frees it after the
-// usual wait.
+// Called after a replayed hipDeviceReset succeeds. With one GPU the reset
+// frees hipHostMalloc memory and drops hipHostRegister registrations. Replay
+// stops tracking the hipHostMalloc memory the runtime no longer knows, as
+// capture does. A registered range the runtime no longer knows stays tracked
+// as HostUnregistered: replay allocated its backing buffer and the buffer
+// stays valid, so kernel arguments into it still translate, and teardown or
+// the replayed unregister still frees it after the usual wait. Either way a
+// later record naming the allocation is refused as naming no live allocation,
+// rather than restored into released or unpinned memory. If the application
+// registers the same pointer again after the reset, the new registration
+// replaces the entry and its buffer in host_reg_bufs, and the old buffer is
+// leaked.
 void hrr_forget_released_host_allocs(PlaybackContext& ctx);
 
 // Whether the event is a kernel launch whose payload carries pinned host

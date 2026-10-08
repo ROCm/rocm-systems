@@ -1616,6 +1616,7 @@ int main(int argc, char** argv) {
     //   Device         -> hipFree
     //   HostMalloc     -> hipHostFree
     //   HostRegister   -> released below via host_reg_bufs (hipHostUnregister+free)
+    //   HostUnregistered -> likewise
     //   DevicePtrAlias -> not separately freed (alias into a pinned host alloc)
     for (auto& [rec, entry] : ctx.alloc_map) {
       switch (entry.kind) {
@@ -1624,6 +1625,7 @@ int main(int argc, char** argv) {
           if (release_ready(entry.live_ptr)) (void)hipHostFree(entry.live_ptr);
           break;
         case AllocKind::HostRegister:                                     break;
+        case AllocKind::HostUnregistered:                                 break;
         case AllocKind::DevicePtrAlias:                                   break;
       }
     }
