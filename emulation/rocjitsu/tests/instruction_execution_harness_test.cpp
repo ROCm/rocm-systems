@@ -311,29 +311,7 @@ public:
 };
 
 using Gfx1250MemoryTestCu = MemoryTestCu<cdna5::Isa>;
-
-class Cdna4MemoryTestCu
-    : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna4::Isa> {
-public:
-  using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna4::Isa>;
-
-  Cdna4MemoryTestCu(std::string name, const amdgpu::ComputeUnitCore::Config &config,
-                    amdgpu::GpuMemory *memory, amdgpu::L2Cache *l2)
-      : Base(std::move(name), config, memory, l2) {
-    if (l2)
-      l2->set_backing_memory(memory);
-    set_memory(memory);
-    set_l2(l2);
-  }
-
-  void execute_and_route(Instruction *inst, amdgpu::Wavefront &wf) {
-    EXPECT_TRUE(execute_instruction(inst, wf).succeeded());
-    if (inst->is_memory_op())
-      route_memory_inst(inst, wf);
-    else
-      delete inst;
-  }
-};
+using Cdna4MemoryTestCu = MemoryTestCu<cdna4::Isa>;
 
 class Gfx1250VgprReadRecorder final : public ExecutionPlugin {
 public:
