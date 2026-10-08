@@ -39,8 +39,9 @@ namespace {
 
 // Runs ncclTransportPatConnect on every rank of a communicator whose node n has
 // localRanksPerNode[n] ranks and returns each rank's ncclTransportP2pSetup calls.
-// NVLS is usable with one head per local rank, so a multi-rank node passes the
-// NVLS check and reaches setup unless a PAT-specific guard stops it first.
+// NVLS is usable, and nvls.nHeads is comm-wide as in production: the smallest
+// node's head count (graph/connect.cc). So a node passes the NVLS check only if
+// it has that many local ranks.
 std::vector<int> setupCallsPerRank(const std::vector<int>& localRanksPerNode, int patEnable) {
   fakePatEnable = patEnable;
   auto minMax = std::minmax_element(localRanksPerNode.begin(), localRanksPerNode.end());
@@ -60,7 +61,7 @@ std::vector<int> setupCallsPerRank(const std::vector<int>& localRanksPerNode, in
       comm->nChannels = 2;
       comm->nvlsSupport = 1;
       comm->nvlsChannels = 2;
-      comm->channels[0].nvls.nHeads = comm->localRanks;
+      comm->channels[0].nvls.nHeads = comm->minLocalRanks;
       comm->channels[0].nvls.headRank = i;
       comm->denseToUserRank = denseToUserRank.data();
       p2pSetupCalls = 0;
@@ -77,10 +78,16 @@ TEST(PatConnectMicrotest, OneRankPerNodeSetsUpEveryRank) {
   for (int calls : setupCallsPerRank({1, 1}, /*patEnable=*/1)) EXPECT_GT(calls, 0);
 }
 
-// Every rank here would reach setup, so only the uneven-local-ranks guard keeps
-// them all out of it.
+// Without the uneven-local-ranks guard, only the one-rank node passes the NVLS
+// check, so its rank alone would enter setup ({0, 0, 1}): the hang.
 TEST(PatConnectMicrotest, UnevenLocalRanksSkipSetupOnEveryRank) {
   EXPECT_EQ(std::vector<int>({0, 0, 0}), setupCallsPerRank({2, 1}, /*patEnable=*/1));
+}
+
+// The guard above must be about unevenness: an even multi-rank layout still
+// sets up every rank.
+TEST(PatConnectMicrotest, EvenMultiRankPerNodeSetsUpEveryRank) {
+  for (int calls : setupCallsPerRank({2, 2}, /*patEnable=*/1)) EXPECT_GT(calls, 0);
 }
 
 TEST(PatConnectMicrotest, PatDisabledSkipsSetupOnEveryRank) {
