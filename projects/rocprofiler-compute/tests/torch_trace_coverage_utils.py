@@ -1772,8 +1772,8 @@ _register_bulk_binary_tensor_elementwise_builders()
 _register_high_impact_individual_builders()
 
 
-# Zero-copy view ops that launch no GPU kernels. A correct ROCTX trace
-# shows the marker with an empty kernel-correlation set.
+# Zero-copy view ops that launch no GPU kernels. RecordFunction often
+# does not emit a ROCTX marker for them; compare_single_op then skips.
 KNOWN_KERNEL_FREE_ATEN_OPS: Set[str] = {
     "view",
     "view_as_real",
@@ -4058,6 +4058,7 @@ def compare_single_op(
     When the profiler recorded CUDA kernels, ATen ops require a
     non-empty intersection of those names with inclusive tree kernels,
     except ops in ``KNOWN_KERNEL_FREE_ATEN_OPS``.
+    Kernel-free ATen ops with no matching node skip; other ATen ops fail.
     """
     ground_truth_entry = ground_truth.get(op.name)
 
@@ -4108,6 +4109,16 @@ def compare_single_op(
     if not matched_nodes:
         if op.category == "structural":
             skip_msg = "no matching analyze node — inject_roctx instrumentation gap"
+            return OpCompareOutcome(
+                "skip",
+                skip_msg,
+                coverage_log_skip(op.name, skip_msg) + verbose_tail,
+            )
+        short_name = aten_op_short_name(op.name)
+        if short_name and short_name in KNOWN_KERNEL_FREE_ATEN_OPS:
+            skip_msg = (
+                "no matching analyze node — kernel-free ATen op has no ROCTX marker"
+            )
             return OpCompareOutcome(
                 "skip",
                 skip_msg,
