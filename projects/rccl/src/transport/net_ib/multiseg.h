@@ -18,7 +18,7 @@
 #include <cstring>
 
 // Cap on physical segments per registered buffer for the classic NET/IB path.
-// Mirrors NCCL_RMA_MAX_SEGMENTS (net_ib/gin.cc): a ROCm/HIP dma-buf export only
+// Mirrors NCCL_RMA_MAX_SEGMENTS (net_ib/rma_multiseg.h): a ROCm/HIP dma-buf export only
 // describes the first physical segment, so multi-segment cuMem/VMM buffers are
 // registered as one MR per segment (AIRUNTIME-2351 classic-path follow-up).
 // Defined here (rather than common.h) so the wire-protocol structs and the
