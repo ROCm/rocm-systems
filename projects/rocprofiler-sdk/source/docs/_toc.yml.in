@@ -130,6 +130,11 @@ subtrees:
           title: Downstream tools
         - file: conceptual/kernel_replay/kernel_replay_callback_api_design
           title: Design history
+    - file: conceptual/queue_hooks/queue_callback_removal_architecture
+      title: Queue callback registry removal
+      subtrees:
+      - entries:
+        - glob: conceptual/queue_hooks/*_queue_hooks
   - caption: License
     entries:
     - file: license

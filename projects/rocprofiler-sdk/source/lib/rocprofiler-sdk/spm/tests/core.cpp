@@ -1550,3 +1550,91 @@ TEST(spm_core, concurrent_overlapping_context_starts_admit_exactly_one)
     context::pop_client(1);
     set_client_ctx(get_client_ctx());
 }
+
+// set_dispatch_agents() refuses an active context, but a start that has passed its conflict scan is
+// not active until it publishes its slot. Replacing the agent set in between starts the context on
+// agents it was never checked against: here, the agent another SPM context already holds.
+TEST(spm_core, set_agents_does_not_race_context_start)
+{
+    rocprofiler::common::set_env("ROCPROFILER_SPM_BETA_ENABLED", true);
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    registration::set_fini_status(0);
+
+    auto spm_agents = get_spm_agents();
+    if(spm_agents.size() < 2)
+    {
+        registration::set_init_status(1);
+        registration::finalize();
+        context::pop_client(1);
+        set_client_ctx(get_client_ctx());
+        ROCP_ERROR << "SPM unavailable on two agents";
+        return;
+    }
+
+    rocprofiler_context_id_t held{};
+    rocprofiler_context_id_t moving{};
+    ROCPROFILER_CALL(rocprofiler_create_context(&held), "create held");
+    ROCPROFILER_CALL(rocprofiler_create_context(&moving), "create moving");
+    ROCPROFILER_CALL(rocprofiler_spm_configure_callback_dispatch_service(
+                         held, null_dispatch_callback, nullptr, null_record_callback, nullptr),
+                     "configure held");
+    ROCPROFILER_CALL(rocprofiler_spm_configure_callback_dispatch_service(
+                         moving, null_dispatch_callback, nullptr, null_record_callback, nullptr),
+                     "configure moving");
+    ROCPROFILER_CALL(rocprofiler_spm_dispatch_counting_service_set_agents(held, &spm_agents[0], 1),
+                     "set agents held");
+    ROCPROFILER_CALL(
+        rocprofiler_spm_dispatch_counting_service_set_agents(moving, &spm_agents[1], 1),
+        "set agents moving");
+    ROCPROFILER_CALL(rocprofiler_start_context(held), "start held");
+
+    const auto* moving_p = context::get_registered_context(moving);
+    ASSERT_TRUE(moving_p && moving_p->dispatch_spm);
+
+    auto unexpected = std::atomic<int>{0};
+    auto done       = std::atomic<bool>{false};
+    auto setter     = std::thread{[&]() {
+        for(size_t i = 0; !done.load(std::memory_order_acquire); ++i)
+        {
+            auto status =
+                rocprofiler_spm_dispatch_counting_service_set_agents(moving, &spm_agents[i % 2], 1);
+            if(status != ROCPROFILER_STATUS_SUCCESS &&
+               status != ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED)
+                unexpected.fetch_add(1, std::memory_order_relaxed);
+        }
+    }};
+
+    int overlaps = 0;
+    for(int i = 0; i < 1000; ++i)
+    {
+        auto status = rocprofiler_start_context(moving);
+        if(status == ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT) continue;
+        if(status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            unexpected.fetch_add(1, std::memory_order_relaxed);
+            continue;
+        }
+        if(moving_p->dispatch_spm->collects_on(spm_agents[0])) ++overlaps;
+        EXPECT_EQ(rocprofiler_stop_context(moving), ROCPROFILER_STATUS_SUCCESS);
+    }
+
+    done.store(true, std::memory_order_release);
+    setter.join();
+    ROCPROFILER_CALL(rocprofiler_stop_context(held), "stop held");
+
+    EXPECT_EQ(overlaps, 0) << "an SPM context started on an agent another context holds";
+    EXPECT_EQ(unexpected.load(std::memory_order_relaxed), 0);
+    for(auto agent : spm_agents)
+        EXPECT_FALSE(hsa::get_queue_controller()->is_serialization_enabled(agent));
+    EXPECT_FALSE(spm::is_any_active());
+
+    registration::set_init_status(1);
+    registration::finalize();
+    context::pop_client(1);
+    set_client_ctx(get_client_ctx());
+}
