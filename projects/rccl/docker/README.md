@@ -6,12 +6,12 @@ Assuming you have docker installed on your system:
 
 ### To build the docker image :
 
-By default, the given Dockerfile uses `docker.io/rocm/dev-ubuntu-22.04:latest` as the base docker image, and then installs RCCL (develop branch) and RCCL-Tests (develop branch), targetting `gfx942` GPUs.
+By default, the given Dockerfile uses `docker.io/rocm/dev-ubuntu-22.04:latest` as the base docker image, and then builds RCCL and RCCL-Tests from `projects/rccl` and `projects/rccl-tests` of the [rocm-systems](https://github.com/ROCm/rocm-systems) repository (develop branch), targetting `gfx942` GPUs.
 ```shell
 $ docker build -t rccl-tests -f Dockerfile.ubuntu --pull .
 ```
 
-The base docker image, rccl repo, rccl-tests repo, and GPU targets can be modified using `--build-args` in the `docker build` command above. E.g., to use a different base docker image for the MI250 GPU:
+The base docker image, rocm-systems repo (`ROCM_SYSTEMS_REPO`), branch/tag/commit (`ROCM_SYSTEMS_REF`), and GPU targets can be modified using `--build-args` in the `docker build` command above. E.g., to use a different base docker image for the MI250 GPU:
 ```shell
 $ docker build -t rccl-tests -f Dockerfile.ubuntu --build-arg="ROCM_IMAGE_NAME=rocm/dev-ubuntu-20.04" --build-arg="ROCM_IMAGE_TAG=6.2" --build-arg="GPU_TARGETS=gfx90a" --pull .
 ```

@@ -3,13 +3,10 @@ ARG ROCM_IMAGE_NAME=rocm/dev-ubuntu-22.04
 ARG ROCM_IMAGE_TAG=latest
 FROM "${ROCM_IMAGE_NAME}:${ROCM_IMAGE_TAG}"
 
-## rccl repo
-ARG RCCL_REPO=https://github.com/ROCm/rccl
-ARG RCCL_BRANCH=develop
-
-## rccl-tests repo
-ARG RCCL_TESTS_REPO=https://github.com/ROCm/rccl-tests
-ARG RCCL_TESTS_BRANCH=develop
+## rocm-systems monorepo (RCCL and RCCL-Tests live in projects/rccl and projects/rccl-tests)
+ARG ROCM_SYSTEMS_REPO=https://github.com/ROCm/rocm-systems
+## branch, tag or commit SHA to build
+ARG ROCM_SYSTEMS_REF=develop
 
 ## AMD GPU Targets
 ARG GPU_TARGETS=gfx942
@@ -99,24 +96,34 @@ RUN wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.g
     && rm -rf ompi4 openmpi-4.1.6.tar.gz
 
 
+## fetching RCCL and RCCL-Tests sources (shallow, blobless, sparse checkout of the monorepo)
+ENV ROCM_SYSTEMS_DIR=${WORKDIR}/rocm-systems
+RUN git init "${ROCM_SYSTEMS_DIR}" \
+    && cd "${ROCM_SYSTEMS_DIR}" \
+    && git remote add origin "${ROCM_SYSTEMS_REPO}" \
+    && git sparse-checkout init --cone \
+    && git sparse-checkout set projects/rccl projects/rccl-tests \
+    && git fetch --depth 1 --filter=blob:none origin "${ROCM_SYSTEMS_REF}" \
+    && git checkout FETCH_HEAD
+
 ## building RCCL
 ENV RCCL_INSTALL_PREFIX=${WORKDIR}/rccl/install
-RUN git clone --recurse-submodules -b "${RCCL_BRANCH}" "${RCCL_REPO}" \
-    && cd ./rccl \
+RUN cd "${ROCM_SYSTEMS_DIR}/projects/rccl" \
     && ./install.sh --amdgpu_targets=${GPU_TARGETS} --prefix=${RCCL_INSTALL_PREFIX}
 
-## building RCCL-Tests
-RUN git clone -b "${RCCL_TESTS_BRANCH}" "${RCCL_TESTS_REPO}" ./rccl-tests \
-    && cd ./rccl-tests \
+## building RCCL-Tests (symlinked to ${WORKDIR}/rccl-tests so the binaries stay at ${WORKDIR}/rccl-tests/build)
+## RCCL_DIR is required: rccl-tests prepends ROCM_PATH to CMAKE_PREFIX_PATH, which would pick the base image RCCL
+RUN cd "${ROCM_SYSTEMS_DIR}/projects/rccl-tests" \
     && mkdir build \
     && cd build \
-    && cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" -DGPU_TARGETS=${GPU_TARGETS} .. \
-    && make -j16
+    && cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" -DRCCL_DIR="${RCCL_INSTALL_PREFIX}/lib/cmake/rccl" -DGPU_TARGETS=${GPU_TARGETS} .. \
+    && make -j16 \
+    && ln -s "${ROCM_SYSTEMS_DIR}/projects/rccl-tests" "${WORKDIR}/rccl-tests"
 
 
 ## set environment variables
 ENV PATH="${MPI_INSTALL_PREFIX}/bin:${ROCM_PATH}/bin:${PATH}"
-ENV LD_LIBRARY_PATH="${RCCL_INSTALL_PREFIX}:${MPI_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${RCCL_INSTALL_PREFIX}/lib:${MPI_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH}"
 ENV UCX_WARN_UNUSED_ENV_VARS=n
 ENV OMPI_ALLOW_RUN_AS_ROOT=1
 ENV OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
