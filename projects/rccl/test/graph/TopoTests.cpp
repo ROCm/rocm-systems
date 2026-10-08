@@ -298,29 +298,32 @@ protected:
     return nullptr;
   }
 
-  // Calls f(path, target) for every computed path entry of every node.
+  // Calls f(path, source, target) for every computed path entry of every node.
   template <typename F>
   static void forEachPath(struct ncclTopoSystem* s, F&& f) {
     for (int t1 = 0; t1 < NCCL_TOPO_NODE_TYPES; t1++) {
       for (int n = 0; n < s->nodes[t1].count; n++) {
+        struct ncclTopoNode* source = s->nodes[t1].nodes + n;
         for (int t2 = 0; t2 < NCCL_TOPO_NODE_TYPES; t2++) {
-          struct ncclTopoLinkList* paths = s->nodes[t1].nodes[n].paths[t2];
+          struct ncclTopoLinkList* paths = source->paths[t2];
           if (paths == nullptr) continue;
-          for (int i = 0; i < s->nodes[t2].count; i++) f(paths + i, s->nodes[t2].nodes + i);
+          for (int i = 0; i < s->nodes[t2].count; i++) f(paths + i, source, s->nodes[t2].nodes + i);
         }
       }
     }
   }
 
-  // Each hop has to leave the node the previous hop reached, and the last one has to reach target.
+  // Each hop has to leave the node the previous hop reached, starting at source, and the last one
+  // has to reach target.
   static void expectPathReaches(const struct ncclTopoLinkList* path,
+                                const struct ncclTopoNode* source,
                                 const struct ncclTopoNode* target) {
     ASSERT_NE(path->list, nullptr);
-    for (int h = 1; h < path->count; h++) {
-      const struct ncclTopoNode* from = path->list[h - 1]->remNode;
+    for (int h = 0; h < path->count; h++) {
+      const struct ncclTopoNode* from = h == 0 ? source : path->list[h - 1]->remNode;
       bool found = false;
       for (int l = 0; l < from->nlinks; l++) found |= (from->links + l == path->list[h]);
-      EXPECT_TRUE(found) << "hop " << h << " does not leave the node hop " << h - 1 << " reached";
+      EXPECT_TRUE(found) << "hop " << h << " does not leave the node it starts from";
     }
     EXPECT_EQ(path->list[path->count - 1]->remNode, target);
   }
@@ -1099,12 +1102,13 @@ TEST_F(TopoTest, ComputePaths_SizesLinkListsToHopCount) {
   ASSERT_NE(built, nullptr);
 
   int nonEmpty = 0;
-  forEachPath(built, [&](struct ncclTopoLinkList* path, struct ncclTopoNode* target) {
+  forEachPath(built, [&](struct ncclTopoLinkList* path, struct ncclTopoNode* source,
+                         struct ncclTopoNode* target) {
     EXPECT_LE(path->count, path->capacity);
     EXPECT_LT(path->capacity, NCCL_TOPO_MAX_HOPS);
     if (path->count == 0) return;
     nonEmpty++;
-    expectPathReaches(path, target);
+    expectPathReaches(path, source, target);
   });
   EXPECT_GT(nonEmpty, 0);
 
@@ -1135,11 +1139,11 @@ TEST_F(TopoTest, ComputePaths_GrowsDivertedPathBeyondInitialReserve) {
   ASSERT_EQ(path->type, PATH_PHB) << "precondition: without GDR the path goes through the CPU";
   EXPECT_EQ(path->count, gpu->paths[CPU][localCpu].count +
                              built->nodes[CPU].nodes[localCpu].paths[NET][0].count);
-  // The search reserves two entries beyond the GPU's own hop when it first reaches the GPU.
-  EXPECT_GT(path->count, gpu->gpu.parent->paths[NET][0].count + 3)
+  // The search first reserved the GPU's list for one hop more than its DEV parent's.
+  EXPECT_GT(path->count, gpu->gpu.parent->paths[NET][0].capacity + 1)
       << "the diverted path must not fit in the entries the search reserved";
   EXPECT_LE(path->count, path->capacity);
-  expectPathReaches(path, net);
+  expectPathReaches(path, gpu, net);
 
   ncclTopoFree(built);
 }
@@ -1188,7 +1192,7 @@ TEST_F(TopoTest, ComputePaths_RecomputeKeepsPaths) {
   };
   auto snapshot = [&]() {
     std::vector<PathEntry> entries;
-    forEachPath(built, [&](struct ncclTopoLinkList* path, struct ncclTopoNode*) {
+    forEachPath(built, [&](struct ncclTopoLinkList* path, struct ncclTopoNode*, struct ncclTopoNode*) {
       entries.push_back({path->count, path->type, path->bw,
                          std::vector<struct ncclTopoLink*>(path->list, path->list + path->count)});
     });
