@@ -3,6 +3,8 @@
 
 """Unit tests for single-pass-packable packing helpers."""
 
+import pytest
+
 from rocprof_compute_soc.counter_grouping_buckets import rebuild_counter_file
 from rocprof_compute_soc.counter_grouping_single_pass import (
     _any_bucket_has_full_group,
@@ -201,6 +203,20 @@ def test_slot_limit_fill_keeps_tcc_series_channels_together():
     ]
     assert len(homes) == 1
     assert series <= set(flat_counters_in_perfmon_file(homes[0]))
+
+
+def test_slot_limit_fill_raises_when_counter_fits_no_bucket():
+    """A counter over its block budget, even alone, is an error."""
+    cfg = {"SQ": 1}
+    full = rebuild_counter_file("0", cfg, {"SQ_A"})
+    assert full is not None
+
+    with pytest.raises(ValueError, match="SQ_WIDE_ACCUM"):
+        fill_slot_limit_into_existing_passes(
+            [full],
+            [frozenset({"SQ_B", "SQ_WIDE_ACCUM"})],
+            cfg,
+        )
 
 
 def test_slot_limit_fill_zero_extra_when_already_covered():

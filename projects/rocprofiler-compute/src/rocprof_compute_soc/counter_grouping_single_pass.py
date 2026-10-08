@@ -236,8 +236,9 @@ def fill_slot_limit_into_existing_passes(
 
     For each unique SPU PMC set (the full set cannot fit one bucket):
     repeatedly pack the largest remaining subset into the best existing
-    bucket, else open a new bucket with the largest empty-bucket-fitting
-    subset.
+    bucket, else open one new bucket with the largest subset that fits an
+    empty bucket. A counter that fits no bucket, including a fresh empty
+    one, raises ValueError.
 
     Returns:
         Updated files, the next file count, and fill stats.
@@ -265,16 +266,12 @@ def fill_slot_limit_into_existing_passes(
 
             subset = _largest_subset_fitting_empty(need, perfmon_config)
             if not subset:
-                console_warning(
-                    "profiling",
-                    "single-pass-packable: SPU PMC cannot fit any bucket.",
-                )
-                break
+                _raise_unplaceable_spu_counters(need)
             new_bucket = rebuild_counter_file(
                 str(file_count), perfmon_config, set(subset)
             )
             if new_bucket is None:
-                break
+                _raise_unplaceable_spu_counters(set(subset))
             files.append(new_bucket)
             file_count += 1
             pmc_into_new += len(subset)
@@ -345,6 +342,15 @@ def _largest_subset_fitting_empty(
     """Largest subset of remaining that fits an empty hardware bucket."""
     empty = CounterFile("trial", perfmon_config)
     return _largest_subset_fitting_bucket(empty, remaining, perfmon_config)
+
+
+def _raise_unplaceable_spu_counters(counters: Set[str]) -> None:
+    """Stop residual fill when a counter exceeds a block budget alone."""
+    names = ", ".join(sorted(counters))
+    raise ValueError(
+        "single-pass-packable: SPU counter(s) exceed a block budget "
+        f"even in an empty bucket: {names}"
+    )
 
 
 def _bucket_has_full_group(bucket: CounterFile, group: FrozenSet[str]) -> bool:
