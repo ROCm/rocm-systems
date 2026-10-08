@@ -230,15 +230,15 @@ NCCL_DEVICE_INLINE void quietOwnedSdmaDirtyBits(ncclGinAnvilSdmaGPUContext* rsCt
     __scoped_atomic_fetch_and(sdmaDirty, ~owned, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     return;
   }
+  // Bit p * numCh + ch is also that queue's index in handles[], and owned has
+  // already dropped bits past kSdmaDirtyBitWidth.
+  uint64_t rem = dirty;
 #pragma unroll 1
-  for (int p = threadRank; p < nRanks; p += stride) {
-    for (int ch = 0; ch < numCh; ++ch) {
-      const int bitIdx = p * numCh + ch;
-      if (bitIdx >= kSdmaDirtyBitWidth) break;
-      if ((dirty & (1ULL << bitIdx)) == 0) continue;
-      auto* h = loadConst(handles + bitIdx);
-      if (h != nullptr) ::sdma_anvil::quiet(*h);
-    }
+  while (rem != 0) {
+    const int bitIdx = __builtin_ctzll(rem);
+    rem &= rem - 1;
+    auto* h = loadConst(handles + bitIdx);
+    if (h != nullptr) ::sdma_anvil::quiet(*h);
   }
   __scoped_atomic_fetch_and(sdmaDirty, ~dirty, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 }
