@@ -276,16 +276,25 @@ ParserResult RocVideoParser::ParseSeiMessage(uint8_t *nalu, size_t size) {
             return PARSER_OUT_OF_RANGE;
         }
 
+        // An extended payload type, written as one or more ff_bytes, is valid syntax but cannot be
+        // reported: RocdecSeiMessage::sei_message_type is uint8_t, so type 261 would reach the
+        // callback as type 5, which the SEI consumers in utils read as
+        // SEI_TYPE_USER_DATA_UNREGISTERED and parse accordingly. Skip the message rather than
+        // describe it as one it is not. The size was bounded above, so stepping over it is safe
+        // and the messages either side of it are still delivered.
+        if (payload_type > 0xFF) {
+            ErrorLog(g_rocdec_logger, "SEI payload type " + ROCDEC_TOSTR(payload_type) + " does not fit the message type field. This message is skipped.");
+            offset += payload_size;
+            continue;
+        }
+
         // We start with INIT_SEI_MESSAGE_COUNT. Should be enough for normal use cases. If not, resize.
         if((sei_message_count_ + 1) > sei_message_list_.size()) {
             sei_message_list_.resize((sei_message_count_ + 1));
         }
         // Both fields of the public RocdecSeiMessage are narrower than the accumulators, so both
-        // conversions are spelled out. sei_message_type is uint8_t, so a type above 255 truncates
-        // and the value stored is not the one parsed; payload_type is still accumulated wide so
-        // that the running total cannot wrap before the range checks above act on it.
-        // sei_message_size is uint32_t and payload_size was bounded by the size - offset check
-        // above, so that one is exact.
+        // conversions are spelled out. Both are exact here: payload_type was just checked against
+        // what the type field holds, and payload_size against what is left of the NAL unit.
         sei_message_list_[sei_message_count_].sei_message_type = static_cast<uint8_t>(payload_type);
         sei_message_list_[sei_message_count_].sei_message_size = static_cast<uint32_t>(payload_size);
 
