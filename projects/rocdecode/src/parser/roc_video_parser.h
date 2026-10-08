@@ -196,7 +196,7 @@ protected:
 
     uint32_t            num_slices_;
     uint8_t*            pic_stream_data_ptr_;
-    int                 pic_stream_data_size_;
+    uint32_t            pic_stream_data_size_;
 
     uint8_t             *sei_rbsp_buf_; // buffer to store SEI RBSP. Allocated at run time.
     uint32_t            sei_rbsp_buf_size_;
