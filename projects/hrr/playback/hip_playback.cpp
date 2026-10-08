@@ -3022,9 +3022,11 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
 
 // A pool created with a maxSize refuses an allocation that would take it past
 // that, with hipErrorOutOfMemory. Unmapping placement's deferred frees gives
-// the pool nothing back, so that failure is not retried.
-static bool hrr_pool_at_limit(PlaybackContext& ctx, uint64_t rec_pool, hipMemPool_t pool,
-                              size_t size) {
+// the pool nothing back, so that failure is not retried. Asked only when
+// placement is on and the allocation `r` ran out of memory.
+static bool hrr_pool_at_limit(PlaybackContext& ctx, hipError_t r, uint64_t rec_pool,
+                              hipMemPool_t pool, size_t size) {
+    if (r != hipErrorOutOfMemory || !hrr_placing(ctx)) return false;
     size_t max = 0;
     {
         std::shared_lock lk(ctx.map_mutex);
@@ -3058,14 +3060,14 @@ hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
     if (why) {
         hrr_placing(ctx)->fell_back(a->dev_ptr, orig_sz, "hipMallocFromPoolAsync", why);
         r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
-        if (!hrr_pool_at_limit(ctx, a->mem_pool, pool, pad_sz) && hrr_drain_for_retry(ctx, r))
+        if (!hrr_pool_at_limit(ctx, r, a->mem_pool, pool, pad_sz) && hrr_drain_for_retry(ctx, r))
             r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
     } else if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocFromPoolAsync",
                                      stream, device, &live)) {
         pad_sz = orig_sz;
     } else {
         r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
-        if (!hrr_pool_at_limit(ctx, a->mem_pool, pool, pad_sz) && hrr_drain_for_retry(ctx, r))
+        if (!hrr_pool_at_limit(ctx, r, a->mem_pool, pool, pad_sz) && hrr_drain_for_retry(ctx, r))
             r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
     }
     if (r == hipSuccess) {
