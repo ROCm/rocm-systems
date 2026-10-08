@@ -4542,28 +4542,37 @@ TEST_F(InitMicrotestIsolated, NcclInit_NumaBalancingOffAndIommuPassthrough_Warns
       });
 }
 
-// An empty read used to reach strstr(NULL, "cray"). The check runs before call_once, so this arm
-// is reachable in-process.
+// An empty read used to reach strstr(NULL, "cray"). The check runs before call_once, so a later
+// ncclInit() in the same process can still succeed once the read works.
 TEST_F(InitMicrotestIsolated, NcclInit_UnreadableKernelVersion_ReturnsSystemError) {
   RUN_ISOLATED_TEST(
       "Init_NcclInit_UnreadableKernelVersion",
       []() {
+        ncclResult_t res = ncclSuccess;
+        std::string log;
+        {
+          ScopedHook sysText(g_microTopoGetStrFromSys,
+                             [](const char*, const char* file, char* out, int maxLen) {
+                               if (!out || maxLen <= 0) return ncclSuccess;
+                               if (file && std::strcmp(file, "version") == 0) {
+                                 out[0] = '\0';
+                                 return ncclSuccess;
+                               }
+                               return SysFileText(file, "0", out, maxLen);
+                             });
+          ScopedHook iommu(g_microIommuPassthroughOk, [](const char*) { return false; });
+          log = RcclUnitTesting::CaptureLog([&] { res = ncclInit(); });
+          ASSERT_EQ(ncclSystemError, res);
+          ASSERT_TRUE(LogHas(log, "Could not read kernel version from /proc/version")) << "actual log:\n" << log;
+          ASSERT_EQ(0, iommu.calls);
+        }
+        // The empty-version hook is gone. A regression that stored the error in initResult
+        // before returning would make this second call fail.
         ScopedHook sysText(g_microTopoGetStrFromSys,
                            [](const char*, const char* file, char* out, int maxLen) {
-                             if (!out || maxLen <= 0) return ncclSuccess;
-                             if (file && std::strcmp(file, "version") == 0) {
-                               out[0] = '\0';
-                               return ncclSuccess;
-                             }
-                             std::snprintf(out, maxLen, "0");
-                             return ncclSuccess;
+                             return SysFileText(file, "0", out, maxLen);
                            });
-        ScopedHook iommu(g_microIommuPassthroughOk, [](const char*) { return false; });
-        ncclResult_t res = ncclSuccess;
-        const std::string log = RcclUnitTesting::CaptureLog([&] { res = ncclInit(); });
-        ASSERT_EQ(ncclSystemError, res);
-        ASSERT_TRUE(LogHas(log, "Could not read kernel version from /proc/version")) << "actual log:\n" << log;
-        ASSERT_EQ(0, iommu.calls);
+        ASSERT_EQ(ncclSuccess, ncclInit());
       });
 }
 
