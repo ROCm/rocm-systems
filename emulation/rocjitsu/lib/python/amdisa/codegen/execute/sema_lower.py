@@ -2386,7 +2386,7 @@ def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
 def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
     """Lower expression-level OMOD for results not handled at the destination."""
     if node.ty == SemaType.F16:
-        raise ValueError('F16 output modifiers require destination lowering')
+        raise ValueError('F16 output modifiers must be handled by _destination_result')
     if len(node.children) < 2:
         return '0'
     if any(_contains_call(node.children[1], op) for op in CUBE_OPERATIONS):
@@ -2469,7 +2469,7 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
 def _lower_apply_clamp(node: SemaNode, ctx: LoweringContext) -> str:
     """Lower expression-level CLAMP for results not handled at the destination."""
     if node.ty == SemaType.F16:
-        raise ValueError('F16 output modifiers require destination lowering')
+        raise ValueError('F16 output modifiers must be handled by _destination_result')
     if len(node.children) < 2:
         return '0'
     rhs = _lower_expr(node.children[1], ctx)

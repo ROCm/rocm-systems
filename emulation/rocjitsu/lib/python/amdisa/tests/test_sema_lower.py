@@ -245,7 +245,7 @@ class TestLowerVectorAdd:
         ('wrapper', 'lower'),
         [('apply_omod', _lower_apply_omod), ('apply_clamp', _lower_apply_clamp)],
     )
-    def test_f16_output_modifiers_require_destination_lowering(self, wrapper, lower):
+    def test_f16_output_modifiers_name_destination_result_owner(self, wrapper, lower):
         node = SemaNode(
             SemaNodeKind.CALL,
             call_name=wrapper,
@@ -256,7 +256,7 @@ class TestLowerVectorAdd:
             ),
         )
 
-        with pytest.raises(ValueError, match='require destination lowering'):
+        with pytest.raises(ValueError, match='must be handled by _destination_result'):
             lower(node, LoweringContext(exec_model=ExecModel.VECTOR))
 
     def test_vector_add_f32(self):
