@@ -42,11 +42,20 @@
 # allocation lands where it was recorded (ROCM-31827). Contains its own hidden
 # [.][hrr-direct] workload.
 #
+# hrr_fatbin_header_test.cc covers which registered fat binaries capture stores:
+# its hidden [.][hrr-direct] workload registers valid and altered bundle
+# headers itself, before and after HIP initialises. It compiles its kernel with
+# hipRTC, so it is a plain C++ translation unit.
+#
 # hrr_disk_space_test.cc covers how capture stops before the file system
 # holding the archive fills. The binary defines statvfs, statvfs64 and fsync to
 # fake a small file system under HIP_HRR_CAPTURE_OUTPUT when the test sets
 # HRR_TEST_FAKE_FS_TOTAL; every other call goes on to libc. Contains its own
 # hidden [.][hrr-direct] workloads. POSIX only.
+#
+# hrr_clock_hook.cc defines clock_gettime for the binary, so a workload can run
+# a hook on one thread's clock reads, as the capture writer timestamps a record.
+# POSIX only.
 
 # The workload translation units carry __global__ kernels, device built-ins
 # (blockIdx/blockDim/threadIdx), hipLaunchKernelGGL, and HIP_SYMBOL, so they must
@@ -79,7 +88,9 @@ add_executable(hrr-integration-tests
   hrr_pitched_d2h_test.cc
   hrr_roundtrip_test.cc
   hrr_api_matrix_test.cc
+  hrr_fatbin_header_test.cc
   hrr_secure_exec_test.cc
+  hrr_clock_hook.cc
 )
 set_target_properties(hrr-integration-tests PROPERTIES
   CXX_STANDARD 17
