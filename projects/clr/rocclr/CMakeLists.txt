@@ -10,3 +10,9 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(ROCclr)
+
+# ROCCLR_BUILD_TESTS is declared -- and enable_testing() runs -- at the CLR
+# root so that `ctest` discovers these tests from the top-level build directory.
+if(ROCCLR_BUILD_TESTS)
+  add_subdirectory(tests/unit)
+endif()

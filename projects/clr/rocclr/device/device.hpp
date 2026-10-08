@@ -1488,6 +1488,25 @@ class MemObjMap : public AllStatic {
   //!< Remove an entry of mem object from the container
   static void RemoveMemObj(const void* k);
 
+  //!< Outcome of TryRemoveMemObj.
+  enum class RemoveStatus {
+    kRemovedAll,    //!< k is a base key of mem; every entry pointing at mem was erased
+    kNotTracked,    //!< mem has no entry in any map; nothing to erase, the free may proceed
+    kBaseMismatch,  //!< mem is indexed, but never under k; nothing erased, reject the free
+  };
+
+  //!< Non-fatal de-index for user-facing frees (hipFree), where a pointer can
+  //!< legitimately be absent from the global map (per-device VA on Windows, or
+  //!< external memory indexed elsewhere). Atomically, under the map lock: when
+  //!< `k` is one of the base keys `mem` is indexed under, erases every entry --
+  //!< in the global map and in every device's per-device VA map -- whose value
+  //!< is `mem`, so no map retains a dangling pointer once the caller releases
+  //!< the object. An interior pointer, or one that only range-resolved into a
+  //!< covering allocation, matches no base key of `mem`: nothing is erased and
+  //!< kBaseMismatch tells the caller to reject the free. A `mem` with no entry
+  //!< anywhere is kNotTracked: nothing to erase and nothing can dangle.
+  static RemoveStatus TryRemoveMemObj(const void* k, const amd::Memory* mem);
+
   //!< Find the mem object based on the input pointer, outputs the offset
   static amd::Memory* FindMemObj(const void* k, size_t* offset = nullptr, Device* dev = nullptr);
   //!< Find any registered mem object whose range overlaps [ptr, ptr + size).
@@ -2519,6 +2538,11 @@ class Device : public RuntimeObject {
   std::recursive_mutex* vaCacheAccess_;               //!< Lock to serialize VA caching access
   std::map<uintptr_t, device::Memory*>* vaCacheMap_;  //!< VA cache map
   uint32_t index_;                                    //!< Unique device index
+
+  //! MemObjMap sweeps devMemObjMap_ across all devices_ (under its own
+  //! AllocatedLock_, which already guards this map) when it de-indexes an
+  //! allocation's aliases during a user-facing free.
+  friend class MemObjMap;
 
   std::map<uintptr_t, amd::Memory*>
       devMemObjMap_;  //!< Per-device VA map for interleaved device VAs (Windows)
