@@ -10,6 +10,7 @@ import common
 import pandas as pd
 import pytest
 
+from utils import file_io
 from utils.file_io import (
     create_df_kernel_top_stats,
     create_df_pmc,
@@ -397,6 +398,44 @@ def test_create_df_pmc_keeps_native_dispatch_order_past_nine(tmp_path) -> None:
     df = create_df_pmc(str(tmp_path), verbose=0)
 
     assert df["SQ_WAVES"].tolist() == list(dispatch_ids)
+
+
+def test_create_df_pmc_sums_native_counter_instances_across_chunks(
+    tmp_path, monkeypatch
+) -> None:
+    """Instances split across chunks still add up to one total per dispatch."""
+    monkeypatch.setattr(file_io, "_CSV_CHUNK_ROWS", 2)
+    write_native_process(
+        tmp_path,
+        "pmc_perf_0",
+        100,
+        [(1, "SQ_WAVES", 10), (1, "SQ_BUSY", 5), (1, "SQ_WAVES", 32)],
+        [1],
+    )
+
+    df = create_df_pmc(str(tmp_path), verbose=0)
+
+    assert df["SQ_WAVES"].tolist() == [42]
+    assert df["SQ_BUSY"].tolist() == [5]
+
+
+def test_create_df_pmc_errors_on_truncated_native_counters(tmp_path) -> None:
+    """A truncated gzip is caught while it is read in chunks."""
+    write_native_process(tmp_path, "pmc_perf_0", 100, [(1, "SQ_WAVES", 4)], [1])
+    rows = "".join(f"1,5,SQ_WAVES,{i}\n" for i in range(2000))
+    whole = gzip.compress((NATIVE_COUNTERS_HEADER + rows).encode("utf-8"))
+    counters = tmp_path / "counters_pmc_perf_0_100.csv.gz"
+    counters.write_bytes(whole[: len(whole) // 2])
+
+    with pytest.raises(SystemExit):
+        create_df_pmc(str(tmp_path), verbose=0)
+
+
+def test_read_profiling_csv_rejects_an_aggregation_that_cannot_chunk(tmp_path):
+    with pytest.raises(ValueError, match="mean"):
+        file_io._read_profiling_csv(
+            tmp_path / "unused.csv.gz", group_by=("a",), agg={"b": "mean"}
+        )
 
 
 def test_create_df_pmc_errors_when_no_native_counter_joins(tmp_path) -> None:

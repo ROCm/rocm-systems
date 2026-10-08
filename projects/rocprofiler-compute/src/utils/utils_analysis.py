@@ -903,14 +903,11 @@ def join_native_counters(
 ) -> pd.DataFrame:
     """Join one process's native counters to its dispatches and kernel symbols.
 
-    Counter instances are summed per dispatch. A row whose dispatch or kernel
-    symbol is missing is dropped. The pid fills GUID, since the native tool has
-    no session uuid and GUID only tells processes apart.
+    counters holds one total per dispatch and counter. A row whose dispatch or
+    kernel symbol is missing is dropped. The pid fills GUID, since the native
+    tool has no session uuid and GUID only tells processes apart.
     """
-    totals = counters.groupby(
-        ["dispatch_id", "counter_name"], sort=False, as_index=False
-    )["counter_value"].sum()
-    joined = totals.merge(dispatches, on="dispatch_id", how="inner").merge(
+    joined = counters.merge(dispatches, on="dispatch_id", how="inner").merge(
         symbols, on="kernel_id", how="inner"
     )
     return joined.rename(columns=_NATIVE_TO_RESULTS_COLUMNS).assign(GUID=pid, PID=pid)

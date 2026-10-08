@@ -6,7 +6,7 @@ import json
 import re
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Sequence
 
 import pandas as pd
 import yaml
@@ -26,6 +26,10 @@ from utils.utils_common import (
 )
 
 KERNEL_SYMBOLS_CSV_GLOB = f"rocpd_kernel_symbols_*.csv{csv_compression.GZIP_SUFFIX}"
+
+_CSV_CHUNK_ROWS = 1_000_000
+# Aggregations that can run per chunk, mapped to how their chunk results combine.
+_CHUNK_COMBINERS = {"sum": "sum", "min": "min", "max": "max", "count": "sum"}
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -416,7 +420,11 @@ def _read_native_counter_rows(
     for fbase in sorted({artifact.fbase for artifact in artifacts}):
         processes = [
             utils_analysis.join_native_counters(
-                _read_profiling_csv(artifact.counters),
+                _read_profiling_csv(
+                    artifact.counters,
+                    group_by=("dispatch_id", "counter_name"),
+                    agg={"counter_value": "sum"},
+                ),
                 _read_profiling_csv(artifact.dispatch),
                 _read_profiling_csv(artifact.kernel_symbols),
                 artifact.pid,
@@ -453,10 +461,21 @@ def _read_counter_results(result_file: Path) -> pd.DataFrame:
     return df
 
 
-def _read_profiling_csv(csv_path: Path) -> pd.DataFrame:
-    """Read one profiling CSV, stopping the run if it is empty or corrupt."""
+def _read_profiling_csv(
+    csv_path: Path,
+    group_by: Sequence[str] = (),
+    agg: Optional[dict[str, str]] = None,
+) -> pd.DataFrame:
+    """Read one profiling CSV, stopping the run if it is empty or corrupt.
+
+    With agg, reads only the group_by and agg columns, a chunk at a time, and
+    returns them aggregated per group_by.
+    """
     try:
-        df = pd.read_csv(csv_path)
+        if agg is None:
+            df = pd.read_csv(csv_path)
+        else:
+            df = _aggregate_csv_in_chunks(csv_path, list(group_by), agg)
     except pd.errors.EmptyDataError:
         console_error(
             "profiling",
@@ -479,6 +498,27 @@ def _read_profiling_csv(csv_path: Path) -> pd.DataFrame:
             f"No counter data in {csv_path}.\nPlease re-run 'rocprof-compute profile'.",
         )
     return df
+
+
+def _aggregate_csv_in_chunks(
+    csv_path: Path, group_by: List[str], agg: dict[str, str]
+) -> pd.DataFrame:
+    """Aggregate each chunk, then aggregate the per-chunk results."""
+    unsupported = set(agg.values()) - _CHUNK_COMBINERS.keys()
+    if unsupported:
+        raise ValueError(f"Cannot aggregate in chunks with {sorted(unsupported)}")
+
+    chunks = pd.read_csv(csv_path, usecols=[*group_by, *agg], chunksize=_CSV_CHUNK_ROWS)
+    partials = [
+        chunk.groupby(group_by, sort=False, as_index=False).agg(agg) for chunk in chunks
+    ]
+    combine = {column: _CHUNK_COMBINERS[func] for column, func in agg.items()}
+    return (
+        pd
+        .concat(partials, ignore_index=True)
+        .groupby(group_by, sort=False, as_index=False)
+        .agg(combine)
+    )
 
 
 def is_single_panel_config(
