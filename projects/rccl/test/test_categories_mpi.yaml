@@ -221,6 +221,7 @@ test_categories:
       - "NetTransportMPITest.*"
       - "ShmMPITest.*"
       - "NetIbMPITest.*"
+      - "GdrFlushTest.*"
       - "ImplicitLaunchOrderMPITest.*"
       - "UBR_AllReduce.*"
       - "UBR_AllGather.*"

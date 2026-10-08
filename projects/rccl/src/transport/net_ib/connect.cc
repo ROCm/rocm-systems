@@ -1822,14 +1822,13 @@ ib_recv:
           } else if (peermemAvailable) {
             // Registered without IBV_ACCESS_RELAXED_ORDERING so the flush write to it is strictly ordered.
             if (wrap_ibv_reg_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, rCommDev->gpuFlush.gpuFlushGpuMem,
-                                sizeof(int), IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ) ==
+                                sizeof(int),
+                                IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ) ==
                 ncclSuccess) {
               gpuFlushRegistered = true;
               static std::once_flag logOnce;
               std::call_once(logOnce,
                              [] { INFO(NCCL_INIT | NCCL_NET, "NET/IB: GDR flush scratchpad registered via peermem"); });
-            } else {
-              rCommDev->gpuFlush.gpuMr = nullptr;
             }
           }
         }
