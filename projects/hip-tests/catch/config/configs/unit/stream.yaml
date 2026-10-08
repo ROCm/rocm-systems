@@ -380,6 +380,9 @@ stream:
     # Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
     tags: [synchronization, P1]
+  Unit_hipStreamWaitEvent_PendingProducerData:
+    <<: *level_2
+    tags: [synchronization, P1]
   Unit_hipStreamGetFlags_spt_Basic:
     <<: *level_2
     tags: [properties, streamperthread, P1]

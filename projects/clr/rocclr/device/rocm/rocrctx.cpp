@@ -43,6 +43,7 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_signal_create)
   GET_ROCR_SYMBOL(hsa_signal_destroy)
   GET_ROCR_SYMBOL(hsa_signal_load_relaxed)
+  GET_ROCR_SYMBOL(hsa_signal_load_scacquire)
   GET_ROCR_SYMBOL(hsa_signal_store_relaxed)
   GET_ROCR_SYMBOL(hsa_signal_silent_store_relaxed)
   GET_ROCR_SYMBOL(hsa_signal_store_screlease)
