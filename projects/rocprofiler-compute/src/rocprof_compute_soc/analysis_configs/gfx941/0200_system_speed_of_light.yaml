@@ -14,7 +14,7 @@ Panel Config:
         pct_of_peak: Percent of Peak
       metric:
         VALU FLOPs:
-          value: 64 * SUM(SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + 2 * SQ_INSTS_VALU_FMA_F64) / SUM(End_Timestamp - Start_Timestamp)
+          value: COLLECT_SUM(_collect.valu_flops_f16, _collect.valu_flops_f32, _collect.valu_flops_f64)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 64 * 2 / 1000
           pct_of_peak: true
@@ -100,7 +100,7 @@ Panel Config:
           peak: 32
           pct_of_peak: true
         vL1D Cache Hit Rate:
-          value: 100 - 100 * SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          value: COLLECT_SUM(_collect.vl1d_hit_non_rw, _collect.vl1d_hit_atom)
           unit: Percent
           peak: 100
           pct_of_peak: false
@@ -170,6 +170,21 @@ Panel Config:
           unit: Percent
           peak: 100
           pct_of_peak: false
+        _collect.valu_flops_f16:
+          value: 64 * SUM(SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + 2 * SQ_INSTS_VALU_FMA_F16) / SUM(End_Timestamp - Start_Timestamp)
+          _collectable_id: collect.valu_flops_f16
+        _collect.valu_flops_f32:
+          value: 64 * SUM(SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + 2 * SQ_INSTS_VALU_FMA_F32) / SUM(End_Timestamp - Start_Timestamp)
+          _collectable_id: collect.valu_flops_f32
+        _collect.valu_flops_f64:
+          value: 64 * SUM(SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + 2 * SQ_INSTS_VALU_FMA_F64) / SUM(End_Timestamp - Start_Timestamp)
+          _collectable_id: collect.valu_flops_f64
+        _collect.vl1d_hit_non_rw:
+          value: 100 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          _collectable_id: collect.vl1d_hit_non_rw
+        _collect.vl1d_hit_atom:
+          value: -100 * SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          _collectable_id: collect.vl1d_hit_atom
   metrics_description:
     VALU FLOPs: >-
       The total floating-point operations executed per second on the VALU.

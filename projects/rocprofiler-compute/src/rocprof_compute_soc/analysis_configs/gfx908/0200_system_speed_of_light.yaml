@@ -95,7 +95,7 @@ Panel Config:
           peak: 32
           pct_of_peak: true
         vL1D Cache Hit Rate:
-          value: 100 - 100 * SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          value: COLLECT_SUM(_collect.vl1d_hit_non_rw, _collect.vl1d_hit_atom)
           unit: Percent
           peak: 100
           pct_of_peak: false
@@ -165,6 +165,12 @@ Panel Config:
           unit: Percent
           peak: 100
           pct_of_peak: false
+        _collect.vl1d_hit_non_rw:
+          value: 100 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          _collectable_id: collect.vl1d_hit_non_rw
+        _collect.vl1d_hit_atom:
+          value: -100 * SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          _collectable_id: collect.vl1d_hit_atom
   metrics_description:
     VALU FLOPs: >-
       The total floating-point operations executed per second on the VALU.
