@@ -482,6 +482,9 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       DRM_PFN(amdgpu_query_gpu_info) = (DRM_DEF(amdgpu_query_gpu_info)*)rocr::os::GetExportAddress(thunk_handle, "amdgpu_query_gpu_info");
       if (DRM_PFN(amdgpu_query_gpu_info) == nullptr) goto LOAD_ERROR;
 
+      DRM_PFN(amdgpu_query_info) = (DRM_DEF(amdgpu_query_info)*)rocr::os::GetExportAddress(thunk_handle, "amdgpu_query_info");
+      if (DRM_PFN(amdgpu_query_info) == nullptr) goto LOAD_ERROR;
+
       DRM_PFN(amdgpu_bo_cpu_map) = (DRM_DEF(amdgpu_bo_cpu_map)*)rocr::os::GetExportAddress(thunk_handle, "amdgpu_bo_cpu_map");
       if (DRM_PFN(amdgpu_bo_cpu_map) == nullptr) goto LOAD_ERROR;
 
@@ -632,6 +635,7 @@ LOAD_ERROR:
       DRM_PFN(amdgpu_device_initialize) = (DRM_DEF(amdgpu_device_initialize)*)(&amdgpu_device_initialize);
       DRM_PFN(amdgpu_device_deinitialize) = (DRM_DEF(amdgpu_device_deinitialize)*)(&amdgpu_device_deinitialize);
       DRM_PFN(amdgpu_query_gpu_info) = (DRM_DEF(amdgpu_query_gpu_info)*)(&amdgpu_query_gpu_info);
+      DRM_PFN(amdgpu_query_info) = (DRM_DEF(amdgpu_query_info)*)(&amdgpu_query_info);
       DRM_PFN(amdgpu_bo_cpu_map) = (DRM_DEF(amdgpu_bo_cpu_map)*)(&amdgpu_bo_cpu_map);
       DRM_PFN(amdgpu_bo_free) = (DRM_DEF(amdgpu_bo_free)*)(&amdgpu_bo_free);
       DRM_PFN(amdgpu_bo_export) = (DRM_DEF(amdgpu_bo_export)*)(&amdgpu_bo_export);

@@ -96,6 +96,12 @@
 #define MAX_WAVE_SCRATCH_GFX12 67106816 // 2MB stack size per wave
 #define MAX_NUM_DOORBELLS 0x400
 
+// AMDGPU_INFO ioctl query id reporting the per-AID persisting GL2 cache
+// maximum (in bytes). Not yet present in the system libdrm uAPI headers.
+#ifndef AMDGPU_INFO_GL2_PERSISTING_CACHE_SIZE_MAX
+#define AMDGPU_INFO_GL2_PERSISTING_CACHE_SIZE_MAX 0x25
+#endif
+
 namespace rocr {
 
 namespace AMD {
@@ -708,12 +714,17 @@ void GpuAgent::InitCacheList() {
 }
 
 size_t GpuAgent::GetMaxPersistingL2CacheSize() const {
-  for (const auto& cache : cache_props_) {
-    if ((cache.CacheLevel == 2) && (cache.PersistingCacheSizeMax)) {
-      return cache.PersistingCacheSizeMax;
-    }
-  }
-  return 0;
+  if (ldrm_dev_ == nullptr) return 0;
+
+  // Query the per-AID persisting GL2 cache maximum (in bytes) from the kernel
+  // through the DRM render node (AMDGPU_INFO ioctl). ASICs/kernels that do not
+  // support the feature report 0 or fail the query, self-gating the feature.
+  uint32_t max_size = 0;
+  int err = DRM_CALL(amdgpu_query_info)(
+      ldrm_dev_, AMDGPU_INFO_GL2_PERSISTING_CACHE_SIZE_MAX, sizeof(max_size), &max_size);
+  if (err) return 0;
+
+  return max_size;
 }
 
 void GpuAgent::InitDerivedCuid() {

@@ -410,6 +410,11 @@ class ThunkLoader {
     typedef int (DRM_DEF(amdgpu_query_gpu_info))(amdgpu_device_handle dev, \
                                       struct amdgpu_gpu_info *info);
 
+    typedef int (DRM_DEF(amdgpu_query_info))(amdgpu_device_handle dev, \
+                                      unsigned info_id, \
+                                      unsigned size, \
+                                      void *value);
+
     typedef int (DRM_DEF(amdgpu_bo_cpu_map))(amdgpu_bo_handle bo, \
                                       void **cpu);
 
@@ -582,6 +587,7 @@ class ThunkLoader {
     DRM_DEF(amdgpu_device_initialize)* DRM_PFN(amdgpu_device_initialize);
     DRM_DEF(amdgpu_device_deinitialize)* DRM_PFN(amdgpu_device_deinitialize);
     DRM_DEF(amdgpu_query_gpu_info)* DRM_PFN(amdgpu_query_gpu_info);
+    DRM_DEF(amdgpu_query_info)* DRM_PFN(amdgpu_query_info);
     DRM_DEF(amdgpu_bo_cpu_map)* DRM_PFN(amdgpu_bo_cpu_map);
     DRM_DEF(amdgpu_bo_free)* DRM_PFN(amdgpu_bo_free);
     DRM_DEF(amdgpu_bo_export)* DRM_PFN(amdgpu_bo_export);
