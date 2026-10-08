@@ -1075,7 +1075,7 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_StreamOrder) {
   hrr_place_require_vmm();
   ScopedDir cap(fs::temp_directory_path() / "hrr_va_placement_order.hrr");
   std::string cout_;
-  { hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
+  { hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     int ret = proc.run("\"Unit_HRR_VaPlacement_StreamOrder_Direct\"");
