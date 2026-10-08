@@ -574,8 +574,8 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
             pkt.metadata_kernargs
                 ? AtomicLoadResult{.outcome = VmAccessOutcome::Complete,
                                    .value = (*pkt.metadata_kernargs)[preload_index]}
-                : pkt.execution_access ? read_gpu_u32(*pkt.execution_access, address)
-                                       : read_gpu_u32(pkt.address_space, address);
+            : pkt.execution_access ? read_gpu_u32(*pkt.execution_access, address)
+                                   : read_gpu_u32(pkt.address_space, address);
         if (loaded.outcome != VmAccessOutcome::Complete)
           return loaded.outcome;
         cu->write_sgpr(sbase + idx + preload_index, static_cast<uint32_t>(loaded.value));

@@ -2781,6 +2781,10 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
       is_sdma ? nullptr : gpu->soc->assign_queue_owner_cp(owner_ordinal);
   if (!is_sdma && target_cp == nullptr)
     return -EINVAL;
+  if (args->metadata_ring_size &&
+      (target_cp->compute_units().empty() ||
+       target_cp->compute_units()[0]->arch() != ROCJITSU_CODE_ARCH_CDNA5))
+    return -EINVAL;
   const uint32_t target_xcc_id =
       is_sdma ? args->sdma_engine_id : gpu->soc->queue_xcd_id(owner_ordinal);
 
@@ -2799,15 +2803,10 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
 
     if (!daemon_mode_) {
-      map_to_gpu(proc, args->ring_base_address, reinterpret_cast<void *>(args->ring_base_address),
-                 mapped_ring_size, amdgpu::Mtype::UC);
-      map_to_gpu(proc, args->read_pointer_address,
-                 reinterpret_cast<void *>(args->read_pointer_address), sizeof(uint64_t),
-                 amdgpu::Mtype::UC);
+      proc.map_identity_gaps(args->ring_base_address, mapped_ring_size);
+      proc.map_identity_gaps(args->read_pointer_address, sizeof(uint64_t));
       if (args->write_pointer_address != args->read_pointer_address)
-        map_to_gpu(proc, args->write_pointer_address,
-                   reinterpret_cast<void *>(args->write_pointer_address), sizeof(uint64_t),
-                   amdgpu::Mtype::UC);
+        proc.map_identity_gaps(args->write_pointer_address, sizeof(uint64_t));
     }
 
     queue_id = proc.next_queue_id_++;

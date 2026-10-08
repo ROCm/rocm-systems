@@ -393,6 +393,45 @@ public:
     publish_page_table_mutation_locked();
   }
 
+  /// @brief Back only uncovered queue bytes with their application CPU addresses.
+  /// @details Queue GPU VAs can refer to BOs with separate CPU aliases. Preserve
+  /// existing extents, ownership, and PTE policy, including partial-page backing.
+  void map_identity_gaps(uint64_t gpu_va, size_t size) {
+    std::unique_lock request_lock(*page_table_request_mutex_);
+    std::unique_lock lock(page_table_mutex_);
+    invalidate_page_policies_locked();
+    size_t mapped_bytes = 0;
+    while (mapped_bytes < size) {
+      const uint64_t address = gpu_va + mapped_bytes;
+      const uint64_t page_base = address & ~(kPageSize - 1);
+      const size_t offset = address - page_base;
+      const size_t chunk = std::min<size_t>(kPageSize - offset, size - mapped_bytes);
+      const size_t end = offset + chunk;
+      auto [page, inserted] = page_table_.try_emplace(address >> kPageShift);
+      if (inserted)
+        page->second.mtype = amdgpu::Mtype::UC;
+      std::vector<HostExtent> missing;
+      const auto add_gap = [&](size_t begin, size_t gap_end) {
+        if (begin < gap_end)
+          missing.push_back({reinterpret_cast<uint8_t *>(page_base + begin), gap_end - begin, begin,
+                             HostExtentOwner::Application});
+      };
+      size_t cursor = offset;
+      for (const auto &extent : page->second.host_extents) {
+        add_gap(cursor, std::min(end, extent.gpu_page_offset));
+        cursor = std::max(cursor, extent.gpu_page_offset + extent.host_backed_bytes);
+        if (cursor >= end)
+          break;
+      }
+      add_gap(cursor, end);
+      auto &extents = page->second.host_extents;
+      extents.insert(extents.end(), missing.begin(), missing.end());
+      normalize_host_extents(page->second);
+      mapped_bytes += chunk;
+    }
+    publish_page_table_mutation_locked();
+  }
+
   /// @brief Unmap pages from this process's GPU page table.
   void unmap_pages(uint64_t gpu_va, size_t size) {
     std::unique_lock request_lock(*page_table_request_mutex_);
