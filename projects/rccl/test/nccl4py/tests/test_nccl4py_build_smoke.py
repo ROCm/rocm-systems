@@ -9,8 +9,8 @@ These validate the NCCL 2.29.7 "Added CMake for NCCL4Py build" feature as
 adopted by RCCL: the ``BUILD_NCCL4PY`` CMake option and the ``nccl4py``
 target (backed by ``uv build``) produce an importable wheel, and the
 CPU-only pytest modules under ``bindings/nccl4py/tests`` pass against it.
-GPU-backed shim tests are included as an optional case that self-skips
-when no HIP devices are visible.
+GPU-backed modules are included as optional cases; each self-skips
+without enough HIP devices.
 """
 
 import os
@@ -67,7 +67,7 @@ def test_cpu_smoke_modules(relative_test_path, run_nccl4py_pytest):
     ids=[p.split("/")[-1] for p in GPU_SMOKE_TESTS],
 )
 def test_gpu_smoke_modules(relative_test_path, run_nccl4py_pytest):
-    """Run optional GPU shim tests (module skips when no HIP devices)."""
+    """Run optional GPU-backed modules (each skips without enough HIP devices)."""
     log_name = relative_test_path.replace("/", "_").replace(".py", ".log")
     proc, log = run_nccl4py_pytest(relative_test_path, log_name)
     # Exit 0 means pass or skip-all; 5 is pytest's "no tests collected" which
