@@ -66,8 +66,18 @@ void drop_hold(uint64_t b, uint64_t e) {
 
 }  // namespace
 
+#ifdef HRR_VA_PLACEMENT_TESTING
+namespace {
+std::atomic<size_t> g_proc_maps_reads{0};
+}  // namespace
+size_t proc_maps_reads_for_test() { return g_proc_maps_reads.load(); }
+#endif
+
 std::vector<VaRange> read_proc_maps() {
 #ifndef _WIN32
+#ifdef HRR_VA_PLACEMENT_TESTING
+    ++g_proc_maps_reads;
+#endif
     std::string text;
     if (FILE* f = fopen("/proc/self/maps", "r")) {
         char buf[65536];
@@ -310,66 +320,134 @@ void VaPlacement::fell_back(uint64_t rec, size_t size, const char* api,
                 api, where);
 }
 
+hipError_t VaPlacement::vmm_map(uint64_t pb, uint64_t pe, int device,
+                                hipMemGenericAllocationHandle_t* h) {
+    void* va = reinterpret_cast<void*>(pb);
+#ifdef HRR_VA_PLACEMENT_TESTING
+    return ops_.map(va, pe - pb, device, h, peers_[device]);
+#else
+    return hrr_vmm_map_into(va, pe - pb, device, h, peers_[device]);
+#endif
+}
+
+// A failed HIP call leaves a sticky error. The recorded allocation succeeded,
+// so the replayed program must not find one in its next hipGetLastError.
+void VaPlacement::clear_error() {
+#ifdef HRR_VA_PLACEMENT_TESTING
+    if (ops_.clear_error) ops_.clear_error();
+#else
+    (void)hipGetLastError();
+#endif
+}
+
+bool VaPlacement::any_unmapping() const {
+    for (const auto& kv : deferred_)
+        if (kv.second.unmapping) return true;
+    return false;
+}
+
 bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
                          void** live, bool capturing) {
     if (!active_ || size == 0 || rec > UINT64_MAX - size) return false;
     const uint64_t pb = va_floor(rec, gran_);
     const uint64_t pe = va_ceil(rec + size, gran_);
-    char buf[128];
+    char buf[160];
     const char* why = nullptr;
-    for (int attempt = 0; attempt < 2 && !why; ++attempt) {
-        uint64_t freed = 0;
-        {
-            std::lock_guard<std::mutex> lk(mu_);
-            if (pe != 0 && va_overlaps(plan_.exported, pb, pe)) {
-                why = "the recording exports it to another process, which VMM memory "
-                      "does not support";
-                break;
-            }
-            if (pe == 0 || !va_find_containing(reserved_, pb, pe)) {
-                why = "its range could not be held";
-                break;
-            }
-            if (device < 0 || device >= device_count_) {
-                snprintf(buf, sizeof(buf), "device %d is not one replay can see", device);
-                why = buf;
-                break;
-            }
-            if (const auto* m = va_mapping_overlapping(deferred_, pb, pe)) {
-                freed = m->rec;
-            } else if (const auto* l = va_mapping_overlapping(mapped_, pb, pe)) {
-                snprintf(buf, sizeof(buf), "it shares a page with live allocation 0x%llx",
-                         (ull)l->rec);
-                why = buf;
-                break;
-            } else {
-                hipMemGenericAllocationHandle_t h{};
-                const hipError_t r = hrr_vmm_map_into(reinterpret_cast<void*>(pb), pe - pb,
-                                                      device, &h, peers_[device]);
-                if (r == hipSuccess) {
-                    mapped_[pb] = {pe, rec, h};
-                    *live = reinterpret_cast<void*>(rec);
-                    ++placed_;
-                    return true;
-                }
-                snprintf(buf, sizeof(buf), "mapping it failed (%s)", hipGetErrorString(r));
-                why = buf;
-                break;
-            }
+    bool drained_overlap = false;  // this call unmapped the freed mappings here
+    bool drained_oom     = false;  // this call unmapped every freed mapping
+    std::vector<uint64_t> drained;
+    std::unique_lock<std::mutex> lk(mu_);
+    while (!why) {
+        if (pe != 0 && va_overlaps(plan_.exported, pb, pe)) {
+            why = "the recording exports it to another process, which VMM memory "
+                  "does not support";
+            break;
         }
-        // A mapping freed there is still mapped, its unmap deferred. Unmap the
-        // deferred ones now if no capture is open, then look again; never map
-        // over one, because a capture or a stream may still use it. The drain
-        // can find nothing when another thread drained first; the second look
-        // tells.
-        if (capturing || attempt == 1) {
-            snprintf(buf, sizeof(buf), "allocation 0x%llx, freed there, is still mapped (%s)",
-                     (ull)freed, capturing ? "a graph capture is open" : "its unmap failed");
+        if (pe == 0 || !va_find_containing(reserved_, pb, pe)) {
+            why = "its range could not be held";
+            break;
+        }
+        if (device < 0 || device >= device_count_) {
+            snprintf(buf, sizeof(buf), "device %d is not one replay can see", device);
             why = buf;
-        } else {
-            (void)drain_deferred();
+            break;
         }
+        // A live allocation there means a fallback whatever else is freed
+        // there, so nothing is unmapped for it.
+        if (const auto* l = va_mapping_overlapping(mapped_, pb, pe)) {
+            snprintf(buf, sizeof(buf), "it shares a page with live allocation 0x%llx",
+                     (ull)l->rec);
+            why = buf;
+            break;
+        }
+        const std::vector<uint64_t> freed = va_mappings_overlapping(deferred_, pb, pe);
+        bool busy = false;
+        for (uint64_t k : freed) busy |= deferred_.at(k).unmapping;
+        if (busy) {
+            // Another thread's unmap there is still running: the pages are
+            // still mapped. Look again when it is over.
+            cv_.wait(lk);
+            continue;
+        }
+        if (freed.size() == 1) {
+            auto it = deferred_.find(freed[0]);
+            if (it->first == pb && it->second.end == pe && it->second.device == device) {
+                // Freed over exactly these pages on this device, as a
+                // stream-ordered pool hands the same address back: take the
+                // mapping back as it is. That needs no unmap, so no
+                // device-wide wait, and it works inside a capture too.
+                PlacedMapping m = it->second;
+                m.rec = rec;
+                deferred_.erase(it);
+                mapped_[pb] = m;
+                *live = reinterpret_cast<void*>(rec);
+                ++placed_;
+                return true;
+            }
+        }
+        if (!freed.empty()) {
+            // Never map over a freed mapping: a capture or a stream may still
+            // use it. Unmap it first if no capture is open, then look again.
+            if (capturing || drained_overlap) {
+                const uint64_t k = freed[0];
+                const bool failed =
+                    std::find(drained.begin(), drained.end(), k) != drained.end();
+                snprintf(buf, sizeof(buf), "allocation 0x%llx, freed there, is still mapped (%s)",
+                         (ull)deferred_.at(k).rec,
+                         capturing ? "a graph capture is open, and unmapping it would sync inside it"
+                         : failed  ? "its unmap failed"
+                                   : "another thread freed it there while this one unmapped");
+                why = buf;
+                break;
+            }
+            drained_overlap = true;
+            drained = freed;
+            (void)drain_locked(lk, freed);
+            continue;
+        }
+        PlacedMapping m{pe, rec, {}, device, false};
+        const hipError_t r = vmm_map(pb, pe, device, &m.handle);
+        if (r == hipSuccess) {
+            mapped_[pb] = m;
+            *live = reinterpret_cast<void*>(rec);
+            ++placed_;
+            return true;
+        }
+        clear_error();
+        // Freed mappings still hold their memory until a sync drains them.
+        // Out of memory with some waiting: unmap them all, then try again.
+        if (r == hipErrorOutOfMemory && !capturing && !drained_oom && !deferred_.empty()) {
+            drained_oom = true;
+            cv_.wait(lk, [&] { return !any_unmapping(); });
+            std::vector<uint64_t> all;
+            for (const auto& kv : deferred_) all.push_back(kv.first);
+            (void)drain_locked(lk, all);
+            continue;
+        }
+        snprintf(buf, sizeof(buf), "mapping it failed (%s)", hipGetErrorString(r));
+        why = buf;
     }
+    lk.unlock();
     fell_back(rec, size, api, why);
     return false;
 }
@@ -377,72 +455,126 @@ bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
 bool VaPlacement::unmap_one(uint64_t pb, const PlacedMapping& m) {
     // hipMemUnmap waits for every stream, so nothing still queued can touch
     // the pages once they are gone. The reservation stays.
+#ifdef HRR_VA_PLACEMENT_TESTING
     hipError_t r = ops_.unmap(reinterpret_cast<void*>(pb), m.end - pb);
+#else
+    hipError_t r = hipMemUnmap(reinterpret_cast<void*>(pb), m.end - pb);
+#endif
     if (r != hipSuccess) {
         fprintf(stderr,
                 "[HRR] Placement: hipMemUnmap of 0x%llx (%llu bytes) failed (%s); the "
                 "mapping stays and nothing is placed over it\n",
                 (ull)m.rec, (ull)(m.end - pb), hipGetErrorString(r));
+        clear_error();
         return false;
     }
+#ifdef HRR_VA_PLACEMENT_TESTING
     r = ops_.release(m.handle);
-    if (r != hipSuccess)
+#else
+    r = hipMemRelease(m.handle);
+#endif
+    if (r != hipSuccess) {
         fprintf(stderr,
                 "[HRR] Placement: hipMemRelease for 0x%llx failed (%s); its memory is "
                 "lost until exit\n",
                 (ull)m.rec, hipGetErrorString(r));
+        clear_error();
+    }
     return true;
 }
 
-// unmap and drain_deferred hold mu_ across unmap_one. Until hipMemUnmap
-// returns, the pages are still mapped: another thread's map_at must not place
-// over them, and is_mapped must not yet say they are gone.
+// hipMemUnmap waits for every stream on the device, which can take as long as
+// the longest kernel queued there, so it never runs under mu_: another
+// thread's unrelated alloc or free would wait for it too, and a kernel that
+// needs a later replayed event to finish would never be reached. The mapping
+// stays in deferred_, marked, while the unmap runs. Until hipMemUnmap returns
+// the pages are still mapped: map_at does not place over them, and is_mapped
+// does not yet say they are gone.
+size_t VaPlacement::drain_locked(std::unique_lock<std::mutex>& lk,
+                                 const std::vector<uint64_t>& keys) {
+    std::vector<std::pair<uint64_t, PlacedMapping>> work;
+    for (uint64_t k : keys) {
+        auto it = deferred_.find(k);
+        if (it == deferred_.end() || it->second.unmapping) continue;
+        it->second.unmapping = true;
+        work.emplace_back(it->first, it->second);
+    }
+    if (work.empty()) return 0;
+    lk.unlock();
+    std::vector<char> ok(work.size());
+    for (size_t i = 0; i < work.size(); ++i) ok[i] = unmap_one(work[i].first, work[i].second);
+    lk.lock();
+    size_t n = 0;
+    for (size_t i = 0; i < work.size(); ++i) {
+        auto it = deferred_.find(work[i].first);
+        if (it == deferred_.end()) continue;
+        // A failed unmap stays, still mapped, for the next drain to retry.
+        if (ok[i]) { deferred_.erase(it); ++n; }
+        else it->second.unmapping = false;
+    }
+    cv_.notify_all();
+    return n;
+}
+
 bool VaPlacement::unmap(void* live, bool defer) {
     if (!active_ || !live) return false;
     const uint64_t v = reinterpret_cast<uint64_t>(live);
-    std::lock_guard<std::mutex> lk(mu_);
+    std::unique_lock<std::mutex> lk(mu_);
     auto it = mapped_.upper_bound(v);
     if (it == mapped_.begin()) return false;
     --it;
     if (it->second.rec != v) return false;
-    const uint64_t      pb = it->first;
-    const PlacedMapping m  = it->second;
+    const uint64_t pb = it->first;
+    deferred_[pb] = it->second;
     mapped_.erase(it);
     if (defer) {
-        deferred_[pb] = m;
         ++deferred_total_;
         return true;
     }
-    // Still mapped after a failed unmap: keep it where map_at will not place
-    // over it and the next drain tries again.
-    if (!unmap_one(pb, m)) deferred_[pb] = m;
+    (void)drain_locked(lk, {pb});
     return true;
 }
 
 size_t VaPlacement::drain_deferred() {
-    std::lock_guard<std::mutex> lk(mu_);
-    size_t n = 0;
-    for (auto it = deferred_.begin(); it != deferred_.end();) {
-        if (unmap_one(it->first, it->second)) {
-            it = deferred_.erase(it);
-            ++n;
-        } else {
-            ++it;
-        }
-    }
-    return n;
+    std::unique_lock<std::mutex> lk(mu_);
+    std::vector<uint64_t> keys;
+    for (const auto& kv : deferred_) keys.push_back(kv.first);
+    return drain_locked(lk, keys);
 }
 
-void VaPlacement::adopt_mapping_for_test(uint64_t rec, size_t size) {
+size_t VaPlacement::drain_for_retry(hipError_t r, bool capturing) {
+    if (!active_ || r != hipErrorOutOfMemory || capturing) return 0;
+    return drain_deferred();
+}
+
+#ifdef HRR_VA_PLACEMENT_TESTING
+void VaPlacement::adopt_reservation_for_test(uint64_t b, uint64_t e, int devices) {
+    std::lock_guard<std::mutex> lk(mu_);
+    active_       = true;
+    device_count_ = devices;
+    peers_.assign(devices, {});
+    reserved_.push_back({b, e});
+    std::sort(reserved_.begin(), reserved_.end(),
+              [](const VaRange& x, const VaRange& y) { return x.base < y.base; });
+}
+
+void VaPlacement::adopt_mapping_for_test(uint64_t rec, size_t size, int device) {
     std::lock_guard<std::mutex> lk(mu_);
     active_ = true;
-    mapped_[va_floor(rec, gran_)] = {va_ceil(rec + size, gran_), rec, {}};
+    mapped_[va_floor(rec, gran_)] = {va_ceil(rec + size, gran_), rec, {}, device, false};
 }
+#endif
 
 bool VaPlacement::is_mapped(void* live) {
     if (!active_ || !live) return false;
     const uint64_t v = reinterpret_cast<uint64_t>(live);
-    std::lock_guard<std::mutex> lk(mu_);
+    std::unique_lock<std::mutex> lk(mu_);
+    // An unmap of `live` still running: its pages are still mapped, and the
+    // answer is the one it ends with.
+    cv_.wait(lk, [&] {
+        const auto* d = va_mapping_overlapping(deferred_, v, v + 1);
+        return !(d && d->unmapping && d->rec == v);
+    });
     auto it = mapped_.upper_bound(v);
     if (it == mapped_.begin()) return false;
     --it;
@@ -477,25 +609,34 @@ bool VaPlacement::release_vmm_hold(uint64_t base, size_t size) {
 }
 
 void VaPlacement::restore_vmm_hold(uint64_t base, size_t size) {
+    if (size) restore_vmm_holds({{base, base + size}});
+}
+
+void VaPlacement::restore_vmm_holds(const std::vector<VaRange>& ranges) {
 #ifndef _WIN32
-    if (!active_ || size == 0) return;
+    if (!active_ || ranges.empty()) return;
     std::lock_guard<std::mutex> lk(mu_);
-    // Hold again exactly what release_vmm_hold gave up, minus whatever the
-    // runtime has put there since.
-    std::vector<VaRange> want;
-    auto it = vmm_released_.find(base);
-    if (it != vmm_released_.end()) {
-        want = std::move(it->second);
-        vmm_released_.erase(it);
-    } else {
-        want.push_back({base, base + size});
-    }
+    // One read of the address map for every range. A range held since is
+    // found by hold_free_pieces itself, which splits around what collides.
     const std::vector<VaRange> occ = read_proc_maps();
     std::vector<VaRange> got = vmm_held_;
-    for (const auto& r : want) hold_free_pieces(r.base, r.end, occ, &got);
+    for (const auto& r : ranges) {
+        if (r.base >= r.end) continue;
+        // Hold again exactly what release_vmm_hold gave up, minus whatever
+        // the runtime has put there since.
+        std::vector<VaRange> want;
+        auto it = vmm_released_.find(r.base);
+        if (it != vmm_released_.end()) {
+            want = std::move(it->second);
+            vmm_released_.erase(it);
+        } else {
+            want.push_back(r);
+        }
+        for (const auto& w : want) hold_free_pieces(w.base, w.end, occ, &got);
+    }
     vmm_held_ = va_round_merge(std::move(got), kPlacePage);
 #else
-    (void)base; (void)size;
+    (void)ranges;
 #endif
 }
 
@@ -510,14 +651,18 @@ void VaPlacement::vmm_reserved(uint64_t rec, size_t size, bool held, uint64_t li
 
 void VaPlacement::release_all() {
 #ifndef _WIN32
-    std::lock_guard<std::mutex> lk(mu_);
+    std::unique_lock<std::mutex> lk(mu_);
     for (const auto& r : denied_held_) drop_hold(r.base, r.end);
     denied_held_.clear();
     if (!active_) return;
-    for (const auto* m : {&mapped_, &deferred_})
-        for (const auto& [pb, mm] : *m) (void)unmap_one(pb, mm);
+    cv_.wait(lk, [&] { return !any_unmapping(); });
+    PlacedMap left = std::move(mapped_);
+    left.insert(deferred_.begin(), deferred_.end());
     mapped_.clear();
     deferred_.clear();
+    lk.unlock();
+    for (const auto& [pb, mm] : left) (void)unmap_one(pb, mm);
+    lk.lock();
     for (const auto& r : reserved_)
         (void)hipMemAddressFree(reinterpret_cast<void*>(r.base), r.end - r.base);
     reserved_.clear();

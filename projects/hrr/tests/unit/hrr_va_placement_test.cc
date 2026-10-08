@@ -24,6 +24,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <string>
 #include <thread>
 #include <vector>
@@ -448,11 +449,55 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_MappingOverlap) {
   REQUIRE(hrr::va_mapping_overlapping({}, B, B + P) == nullptr);
 }
 
+HRR_TEST_CASE(Unit_HRR_VaPlacement_VmmMappingsTracked) {
+  // The warm-up reset unmaps every VMM mapping replay still tracks. A recorded
+  // hipMemUnmap may span several hipMemMap pieces, or cover only part of one.
+  // Each piece it touched must be forgotten, and only the part it covered.
+  using M = std::map<uint64_t, size_t>;
+  SECTION("one unmap over several pieces drops them all") {
+    M m;
+    for (int i = 0; i < 4; ++i) hrr::va_track_mapping(m, B + i * P, P);
+    hrr::va_untrack_mapping(m, B, 4 * P);
+    REQUIRE(m.empty());
+  }
+  SECTION("unmapping a large mapping piece by piece leaves the rest tracked") {
+    M m;
+    hrr::va_track_mapping(m, B, 4 * P);
+    hrr::va_untrack_mapping(m, B, P);
+    REQUIRE(m == M{{B + P, 3 * P}});
+    hrr::va_untrack_mapping(m, B + 2 * P, P);
+    REQUIRE(m == M{{B + P, P}, {B + 3 * P, P}});
+    hrr::va_untrack_mapping(m, B + P, P);
+    hrr::va_untrack_mapping(m, B + 3 * P, P);
+    REQUIRE(m.empty());
+  }
+  SECTION("an unmap that straddles two pieces keeps their outer parts") {
+    M m;
+    hrr::va_track_mapping(m, B, 2 * P);
+    hrr::va_track_mapping(m, B + 2 * P, 2 * P);
+    hrr::va_untrack_mapping(m, B + P, 2 * P);
+    REQUIRE(m == M{{B, P}, {B + 3 * P, P}});
+  }
+  SECTION("a range outside every mapping changes nothing") {
+    M m;
+    hrr::va_track_mapping(m, B + 2 * P, P);
+    hrr::va_untrack_mapping(m, B, 2 * P);
+    hrr::va_untrack_mapping(m, B + 3 * P, P);
+    REQUIRE(m == M{{B + 2 * P, P}});
+  }
+  SECTION("a map over a tracked range keeps the entries disjoint") {
+    M m;
+    hrr::va_track_mapping(m, B, 4 * P);
+    hrr::va_track_mapping(m, B + P, P);
+    REQUIRE(m == M{{B, P}, {B + P, P}, {B + 2 * P, 2 * P}});
+  }
+}
+
 HRR_TEST_CASE(Unit_HRR_VaPlacement_SubtractScalesWithTheAnswer) {
   // Startup holds each planned range minus what /proc/self/maps lists, one
-  // range at a time. With a million mappings and five thousand ranges, a walk
-  // from the first mapping on every call is billions of steps.
-  constexpr size_t M = 1000000, R = 5000;
+  // range at a time. With a million mappings and fifty thousand ranges, a
+  // walk from the first mapping on every call is tens of billions of steps.
+  constexpr size_t M = 1000000, R = 50000;
   std::vector<VaRange> maps;
   maps.reserve(M);
   for (size_t i = 0; i < M; ++i) maps.push_back({B + 2 * i * P, B + (2 * i + 1) * P});
@@ -476,6 +521,12 @@ std::atomic<bool> g_unmap_entered{false};
 std::atomic<bool> g_unmap_go{false};
 std::atomic<bool> g_unmap_done{false};
 
+void reset_slow_unmap() {
+  g_unmap_entered = false;
+  g_unmap_go      = false;
+  g_unmap_done    = false;
+}
+
 hipError_t slow_unmap(void*, size_t) {
   g_unmap_entered = true;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
@@ -485,40 +536,267 @@ hipError_t slow_unmap(void*, size_t) {
   return hipSuccess;
 }
 hipError_t no_release(hipMemGenericAllocationHandle_t) { return hipSuccess; }
+hipError_t ok_map(void*, size_t, int, hipMemGenericAllocationHandle_t*,
+                  const std::vector<int>&) {
+  return hipSuccess;
+}
+
+// Wait up to `secs` seconds for `flag`.
+bool wait_for(const std::atomic<bool>& flag, int secs = 10) {
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(secs);
+  while (!flag && std::chrono::steady_clock::now() < deadline) std::this_thread::yield();
+  return flag;
+}
+
+// Stand-ins that count the maps and unmaps placement makes. Maps run out of
+// memory until g_oom_until unmaps have happened.
+std::atomic<int> g_maps{0};
+std::atomic<int> g_unmaps{0};
+std::atomic<int> g_oom_until{0};
+
+void reset_vmm_counts() {
+  g_maps = 0;
+  g_unmaps = 0;
+  g_oom_until = 0;
+}
+hipError_t counted_map(void*, size_t, int, hipMemGenericAllocationHandle_t*,
+                       const std::vector<int>&) {
+  ++g_maps;
+  return g_unmaps < g_oom_until ? hipErrorOutOfMemory : hipSuccess;
+}
+hipError_t counted_unmap(void*, size_t) {
+  ++g_unmaps;
+  return hipSuccess;
+}
+
+void* at(uint64_t va) { return reinterpret_cast<void*>(va); }
 }  // namespace
 
 HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapHoldsTheLock) {
   // While one thread unmaps a placed allocation, the pages are still mapped.
   // Another thread asking about them waits until the unmap is over, rather
   // than hearing they are gone and placing over them.
+  reset_slow_unmap();
   hrr::VaPlacement pl;
-  pl.set_unmap_ops_for_test({slow_unmap, no_release});
+  pl.set_vmm_ops_for_test({ok_map, slow_unmap, no_release});
   pl.adopt_mapping_for_test(B, P);
-  REQUIRE(pl.is_mapped(reinterpret_cast<void*>(B)));
+  REQUIRE(pl.is_mapped(at(B)));
 
-  bool unmapped = false;  // Catch2 assertions are for the main thread only
-  std::thread a([&] { unmapped = pl.unmap(reinterpret_cast<void*>(B)); });
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-  while (!g_unmap_entered && std::chrono::steady_clock::now() < deadline)
-    std::this_thread::yield();
-  if (!g_unmap_entered) {
+  SECTION("a free") {
+    bool unmapped = false;  // Catch2 assertions are for the main thread only
+    std::thread a([&] { unmapped = pl.unmap(at(B)); });
+    if (!wait_for(g_unmap_entered)) {
+      g_unmap_go = true;
+      a.join();
+      FAIL("unmap never reached hipMemUnmap");
+    }
+    bool done_when_answered = false;
+    bool mapped = true;
+    std::thread b([&] {
+      mapped = pl.is_mapped(at(B));
+      done_when_answered = g_unmap_done;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
     g_unmap_go = true;
     a.join();
-    FAIL("unmap never reached hipMemUnmap");
+    b.join();
+    REQUIRE(unmapped);
+    REQUIRE(done_when_answered);
+    REQUIRE_FALSE(mapped);
   }
-  bool done_when_answered = false;
-  bool mapped = true;
-  std::thread b([&] {
-    mapped = pl.is_mapped(reinterpret_cast<void*>(B));
-    done_when_answered = g_unmap_done;
-  });
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
-  g_unmap_go = true;
-  a.join();
-  b.join();
-  REQUIRE(unmapped);
-  REQUIRE(done_when_answered);
-  REQUIRE_FALSE(mapped);
+  SECTION("a drain of deferred frees") {
+    REQUIRE(pl.unmap(at(B), /*defer=*/true));
+    size_t drained = 0;
+    std::thread a([&] { drained = pl.drain_deferred(); });
+    if (!wait_for(g_unmap_entered)) {
+      g_unmap_go = true;
+      a.join();
+      FAIL("drain_deferred never reached hipMemUnmap");
+    }
+    bool done_when_answered = false;
+    bool mapped = true;
+    std::thread b([&] {
+      mapped = pl.is_mapped(at(B));
+      done_when_answered = g_unmap_done;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    g_unmap_go = true;
+    a.join();
+    b.join();
+    REQUIRE(drained == 1);
+    REQUIRE(done_when_answered);
+    REQUIRE_FALSE(mapped);
+  }
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapRunsOutsideTheLock) {
+  // hipMemUnmap waits for every stream on the device. Another thread's
+  // allocation or free elsewhere must not wait for that too: a kernel still
+  // queued may need that thread's next event to finish. An allocation over
+  // the pages being unmapped waits, and is placed once they are gone.
+  const uint64_t C = B + 8 * P;
+  for (bool drain : {false, true}) {
+    INFO((drain ? "drain_deferred" : "unmap"));
+    reset_slow_unmap();
+    hrr::VaPlacement pl;
+    pl.set_vmm_ops_for_test({ok_map, slow_unmap, no_release});
+    pl.adopt_reservation_for_test(B, B + 16 * P, 1);
+    pl.adopt_mapping_for_test(B, P);
+    pl.adopt_mapping_for_test(C, P);
+    if (drain) REQUIRE(pl.unmap(at(B), /*defer=*/true));
+
+    std::thread a([&] {
+      if (drain) (void)pl.drain_deferred();
+      else (void)pl.unmap(at(B));
+    });
+    if (!wait_for(g_unmap_entered)) {
+      g_unmap_go = true;
+      a.join();
+      FAIL("hipMemUnmap never reached");
+    }
+    // Another mapping: answered while the unmap is still running.
+    std::atomic<bool> answered{false};
+    bool other_mapped = false, done_when_answered = true;
+    std::thread b([&] {
+      other_mapped = pl.is_mapped(at(C));
+      done_when_answered = g_unmap_done;
+      answered = true;
+    });
+    // The pages being unmapped: placed only once the unmap is over.
+    bool placed = false, done_when_placed = false;
+    void* live = nullptr;
+    std::thread c([&] {
+      placed = pl.map_at(B, P, 0, "hipMalloc", &live);
+      done_when_placed = g_unmap_done;
+    });
+    const bool in_time = wait_for(answered, 2);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    g_unmap_go = true;
+    a.join();
+    b.join();
+    c.join();
+    REQUIRE(in_time);
+    REQUIRE(other_mapped);
+    REQUIRE_FALSE(done_when_answered);
+    REQUIRE(placed);
+    REQUIRE(live == at(B));
+    REQUIRE(done_when_placed);
+  }
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedRangeTakenBack) {
+  // hipFreeAsync defers the unmap, and a stream-ordered pool hands the same
+  // address straight back. The allocation recorded there takes the mapping
+  // back as it is: no device-wide wait for an unmap the recording never had.
+  reset_vmm_counts();
+  hrr::VaPlacement pl;
+  pl.set_vmm_ops_for_test({counted_map, counted_unmap, no_release});
+  pl.adopt_reservation_for_test(B, B + 16 * P, 2);
+  void* live = nullptr;
+  REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live));
+  REQUIRE(pl.unmap(at(B), /*defer=*/true));
+  REQUIRE(g_maps == 1);
+  REQUIRE(g_unmaps == 0);
+
+  SECTION("the same pages on the same device") {
+    REQUIRE(pl.map_at(B + 64, P - 64, 0, "hipMallocAsync", &live));
+    REQUIRE(live == at(B + 64));
+    REQUIRE(g_maps == 1);
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(pl.is_mapped(at(B + 64)));
+    REQUIRE(pl.drain_deferred() == 0);
+  }
+  SECTION("the same pages inside a capture") {
+    REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live, /*capturing=*/true));
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(pl.fallbacks() == 0);
+  }
+  SECTION("the same pages on another device: unmapped, then mapped") {
+    REQUIRE(pl.map_at(B, P, 1, "hipMallocAsync", &live));
+    REQUIRE(g_unmaps == 1);
+    REQUIRE(g_maps == 2);
+  }
+  SECTION("more pages over it: unmapped, then mapped") {
+    REQUIRE(pl.map_at(B, 2 * P, 0, "hipMalloc", &live));
+    REQUIRE(g_unmaps == 1);
+    REQUIRE(g_maps == 2);
+  }
+  SECTION("more pages over it inside a capture: falls back, still mapped") {
+    REQUIRE_FALSE(pl.map_at(B, 2 * P, 0, "hipMalloc", &live, /*capturing=*/true));
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(pl.fallbacks() == 1);
+    REQUIRE(pl.drain_deferred() == 1);
+  }
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_OutOfMemoryDrainsFreed) {
+  // Deferred frees still hold their memory. A map that runs out of it unmaps
+  // them and tries once more, unless a capture is open.
+  reset_vmm_counts();
+  hrr::VaPlacement pl;
+  pl.set_vmm_ops_for_test({counted_map, counted_unmap, no_release});
+  pl.adopt_reservation_for_test(B, B + 16 * P, 1);
+  void* live = nullptr;
+  REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live));
+  REQUIRE(pl.unmap(at(B), /*defer=*/true));
+  REQUIRE(g_maps == 1);
+
+  SECTION("memory comes back once the freed mapping is unmapped") {
+    g_oom_until = 1;
+    REQUIRE(pl.map_at(B + 4 * P, P, 0, "hipMalloc", &live));
+    REQUIRE(live == at(B + 4 * P));
+    REQUIRE(g_unmaps == 1);
+    REQUIRE(g_maps == 3);
+    REQUIRE(pl.fallbacks() == 0);
+  }
+  SECTION("inside a capture nothing is unmapped") {
+    g_oom_until = 1;
+    REQUIRE_FALSE(pl.map_at(B + 4 * P, P, 0, "hipMalloc", &live, /*capturing=*/true));
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(g_maps == 2);
+    REQUIRE(pl.fallbacks() == 1);
+  }
+  SECTION("still out of memory after the drain: one retry, then a fallback") {
+    g_oom_until = 100;
+    REQUIRE_FALSE(pl.map_at(B + 4 * P, P, 0, "hipMalloc", &live));
+    REQUIRE(g_unmaps == 1);
+    REQUIRE(g_maps == 3);
+    REQUIRE(pl.fallbacks() == 1);
+  }
+  SECTION("nothing freed: no retry") {
+    REQUIRE(pl.drain_deferred() == 1);
+    g_oom_until = 100;
+    REQUIRE_FALSE(pl.map_at(B + 4 * P, P, 0, "hipMalloc", &live));
+    REQUIRE(g_maps == 2);
+  }
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_FallbackRetriesAfterOutOfMemory) {
+  // An allocation placement did not place ran out of memory. Replay unmaps
+  // the deferred frees and tries it once more, unless a capture is open or
+  // the call failed for another reason.
+  reset_vmm_counts();
+  hrr::VaPlacement pl;
+  pl.set_vmm_ops_for_test({counted_map, counted_unmap, no_release});
+  pl.adopt_reservation_for_test(B, B + 16 * P, 1);
+  void* live = nullptr;
+  REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live));
+  REQUIRE(pl.unmap(at(B), /*defer=*/true));
+
+  SECTION("out of memory: the freed mapping is unmapped") {
+    REQUIRE(pl.drain_for_retry(hipErrorOutOfMemory, /*capturing=*/false) == 1);
+    REQUIRE(g_unmaps == 1);
+    // Nothing left to give back, so no second retry.
+    REQUIRE(pl.drain_for_retry(hipErrorOutOfMemory, false) == 0);
+  }
+  SECTION("inside a capture nothing is unmapped") {
+    REQUIRE(pl.drain_for_retry(hipErrorOutOfMemory, /*capturing=*/true) == 0);
+    REQUIRE(g_unmaps == 0);
+  }
+  SECTION("another error: nothing is unmapped") {
+    REQUIRE(pl.drain_for_retry(hipErrorInvalidValue, false) == 0);
+    REQUIRE(g_unmaps == 0);
+  }
 }
 
 // Placement holds its placeholders with mmap, so it is off on Windows and
@@ -569,11 +847,25 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_HoldFreePieces) {
   munmap(other, P);
 }
 
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define HRR_TEST_ASAN 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__)
+#define HRR_TEST_ASAN 1
+#endif
+
 HRR_TEST_CASE(Unit_HRR_VaPlacement_HoldStopsOnARefusal) {
   // Under RLIMIT_AS every mmap fails with ENOMEM. Nothing is mapped in the
   // range, so splitting it would only fail again for each of its 16M pages.
   // In a child, since the limit cannot be lifted again by an unprivileged
   // process. The alarm turns a hang into a failure.
+#ifdef HRR_TEST_ASAN
+  // ASan reserves terabytes of shadow memory, and its allocator fails
+  // under any address-space limit near what the process maps.
+  SKIP("RLIMIT_AS cannot be used under AddressSanitizer");
+#endif
   constexpr uint64_t kRange = 64ull << 30;
   const uint64_t b = free_range(kRange / P);
   const pid_t pid = fork();
@@ -585,6 +877,8 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_HoldStopsOnARefusal) {
     // What the process maps now, so the next mapping is over the limit.
     size_t vm = 0;
     for (const auto& r : hrr::read_proc_maps()) vm += r.end - r.base;
+    // A hard limit below that already: the soft one cannot be set to it.
+    if (lim.rlim_max != RLIM_INFINITY && lim.rlim_max < vm) _exit(3);
     lim.rlim_cur = vm;
     if (setrlimit(RLIMIT_AS, &lim) != 0) _exit(3);
     const auto t0 = std::chrono::steady_clock::now();
@@ -596,8 +890,9 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_HoldStopsOnARefusal) {
   }
   int status = 0;
   REQUIRE(waitpid(pid, &status, 0) == pid);
-  INFO("child status " << status << " (exit 1: something was held, 2: over 1 s, 3: no limit)");
+  INFO("child status " << status << " (exit 1: something was held, 2: over 1 s)");
   REQUIRE(WIFEXITED(status));
+  if (WEXITSTATUS(status) == 3) SKIP("the address-space limit could not be set here");
   REQUIRE(WEXITSTATUS(status) == 0);
 }
 
@@ -630,6 +925,34 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_VmmHoldRestoredAfterMiss) {
   pl.release_all();
   REQUIRE_FALSE(pl.active());
   REQUIRE_FALSE(page_taken(R));
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_VmmHoldsRestoredWithOneRead) {
+  // Between the warm-up and the timed pass every hipMemAddressReserve range is
+  // held again. A trace with thousands of them must not read /proc/self/maps,
+  // which can list a million mappings, once for each.
+  const uint64_t R1 = free_range(12);
+  const uint64_t R2 = R1 + 8 * P;
+  hrr::PlacementPlan plan;
+  plan.vmm = {{R1, R1 + 4 * P}, {R2, R2 + 4 * P}};
+  hrr::VaPlacement pl;
+  REQUIRE(pl.hold(plan));
+  REQUIRE(pl.release_vmm_hold(R1, 4 * P));
+  REQUIRE(pl.release_vmm_hold(R2, 4 * P));
+  REQUIRE_FALSE(page_taken(R1));
+  REQUIRE_FALSE(page_taken(R2));
+
+  const size_t before = hrr::proc_maps_reads_for_test();
+  pl.restore_vmm_holds({{R1, R1 + 4 * P}, {R2, R2 + 4 * P}});
+  REQUIRE(hrr::proc_maps_reads_for_test() - before == 1);
+  REQUIRE(page_taken(R1));
+  REQUIRE(page_taken(R1 + 3 * P));
+  REQUIRE(page_taken(R2));
+  REQUIRE(page_taken(R2 + 3 * P));
+
+  pl.release_all();
+  REQUIRE_FALSE(page_taken(R1));
+  REQUIRE_FALSE(page_taken(R2));
 }
 
 HRR_TEST_CASE(Unit_HRR_VaPlacement_DeniedHeldWithPlacementOff) {
