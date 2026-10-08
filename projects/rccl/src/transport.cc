@@ -34,7 +34,7 @@ static ncclResult_t selectTransport(struct ncclComm* comm, struct ncclTopoGraph*
     NCCLCHECK(ncclTopoGetIntraNetDev(comm->topo, peer, graph, channelId, (type == 1) ? 0 : 1, nullptr, &n2));
   }
   bool xgmi;
-  NCCLCHECK(ncclTopoGetLinkType(comm->topo, myInfo->cudaDev, peerInfo->cudaDev, &xgmi));
+  NCCLCHECK(ncclTopoGetLinkType(comm->topo, myInfo->rank, peerInfo->rank, &xgmi));
 
   for (int t = 0; t < NTRANSPORTS; t++) {
     if (graph == NULL && connIndex == NCCL_CONN_IDX_P2P_NET && (t == TRANSPORT_SHM || (!xgmi && t == TRANSPORT_P2P)))

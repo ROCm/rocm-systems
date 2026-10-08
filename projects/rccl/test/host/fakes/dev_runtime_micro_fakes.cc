@@ -140,15 +140,6 @@ ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
 // Group state machine.
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Param loader.
-// ---------------------------------------------------------------------------
-int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int8_t* noCache) {
-  if (cache) *cache = deftVal;
-  if (noCache) *noCache = 0;
-  return deftVal;
-}
-
 // Emitted by init.cc, which this binary does not link, so the redirected
 // NCCL_PARAM in dev_runtime.cc does not cover it. Routed through g_loadParam
 // like the params dev_runtime.cc owns, so a test can drive the NCCL_WIN_ENABLE=0

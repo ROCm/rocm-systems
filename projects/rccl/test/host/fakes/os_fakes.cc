@@ -111,6 +111,27 @@ ncclResult_t ncclOsGetPciDeviceComputePartitionByBusId(const char* busId, char* 
   return ncclSuccess;
 }
 
+void ncclOsCpuZero(ncclAffinity& affinity) { CPU_ZERO(&affinity); }
+void ncclOsCpuSet(ncclAffinity& affinity, int cpu) { CPU_SET(cpu, &affinity); }
+
+// Topology discovery's sysfs reads. With no PCI path, ncclTopoGetXmlFromSys keeps whatever attributes a test pre-built.
+ncclResult_t ncclOsGetPciPath(const char*, char** path) {
+  *path = nullptr;
+  return ncclSystemError;
+}
+ncclResult_t ncclOsGetBcmLinks(const char*, int* nlinks, char** peers) {
+  *nlinks = 0;
+  *peers = nullptr;
+  return ncclSuccess;
+}
+ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int, char* affinityStr, size_t maxLen, int* cpuOffset) {
+  *cpuOffset = 0;
+  if (maxLen > 0) {
+    affinityStr[0] = '\0';
+  }
+  return ncclSuccess;
+}
+
 void ResetOsFakes() {
   g_ncclOsCpuCountValue = 0;
   g_ncclOsCpuCountCalls = 0;

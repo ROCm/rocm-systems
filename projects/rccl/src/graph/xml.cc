@@ -952,7 +952,7 @@ exit:
 // at that BDF is missing or a different function. Link those HIP siblings with
 // 1-hop XGMI even when SMI only enumerates the physical GPU.
 static ncclResult_t ncclTopoXmlAddHipPartitionXgmi(struct ncclXml* xml, struct ncclXmlNode* gpuNode,
-                                                   struct ncclXmlNode* pciNode, uint32_t xmlDev) {
+                                                   struct ncclXmlNode* pciNode, uint32_t hipDev) {
   const char* pciBusId = NULL;
   NCCLCHECK(xmlGetAttr(pciNode, "busid", &pciBusId));
   if (pciBusId == NULL) return ncclSuccess;
@@ -962,7 +962,7 @@ static ncclResult_t ncclTopoXmlAddHipPartitionXgmi(struct ncclXml* xml, struct n
   int nHip = 0;
   if (hipGetDeviceCount(&nHip) != hipSuccess) return ncclSuccess;
   for (int h = 0; h < nHip; h++) {
-    if (h == (int)xmlDev) continue;
+    if (h == (int)hipDev) continue;
     char peerBus[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
     if (hipDeviceGetPCIBusId(peerBus, sizeof(peerBus), h) != hipSuccess) continue;
     int64_t peerId = 0;
@@ -985,10 +985,11 @@ static ncclResult_t ncclTopoXmlAddHipPartitionXgmi(struct ncclXml* xml, struct n
 }
 #endif
 
-ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t xmlDev, uint32_t smiDev, struct ncclXml* xml,
+// dev is the machine-wide SMI index, unique per partition; HIP ordinals restart at 0 per process and would collide.
+ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t hipDev, uint32_t smiDev, struct ncclXml* xml,
                                    struct ncclXmlNode** gpuNodeRet) {
   struct ncclXmlNode* gpuNode = NULL;
-  NCCLCHECK(xmlGetSubKvInt(pciNode, "gpu", &gpuNode, "dev", (int)xmlDev));
+  NCCLCHECK(xmlGetSubKvInt(pciNode, "gpu", &gpuNode, "dev", (int)smiDev));
   if (gpuNode == NULL) NCCLCHECK(xmlAddNode(xml, pciNode, "gpu", &gpuNode));
 
   int index = -1;
@@ -996,7 +997,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t xmlDev,
   int dev = -1;
   NCCLCHECK(xmlGetAttrIndex(gpuNode, "dev", &index));
   if (index == -1) {
-    NCCLCHECK(xmlSetAttrInt(gpuNode, "dev", xmlDev));
+    NCCLCHECK(xmlSetAttrInt(gpuNode, "dev", smiDev));
   }
   NCCLCHECK(xmlGetAttrInt(gpuNode, "dev", &dev));
   if (dev == -1) {
@@ -1007,7 +1008,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t xmlDev,
   NCCLCHECK(xmlGetAttrIndex(gpuNode, "sm", &index));
   if (index == -1) {
     cudaDeviceProp devProp;
-    CUDACHECK(cudaGetDeviceProperties(&devProp, (int)xmlDev));
+    CUDACHECK(cudaGetDeviceProperties(&devProp, (int)hipDev));
     NCCLCHECK(xmlSetAttrInt(gpuNode, "sm", devProp.multiProcessorCount));
   }
   int sm;
@@ -1018,7 +1019,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t xmlDev,
   NCCLCHECK(xmlGetAttrIndex(gpuNode, "gcn", &index));
   if (index == -1) {
     hipDeviceProp_t devProp;
-    CUDACHECK(hipGetDeviceProperties(&devProp, (int)xmlDev));
+    CUDACHECK(hipGetDeviceProperties(&devProp, (int)hipDev));
     // extract only the releveant info from the gcnArchName attribute
     // e.g.: convert "gfx908:sramecc+:xnack-" to "gfx908"
     char gcnArchNameSubstr[128];
@@ -1036,7 +1037,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t xmlDev,
   NCCLCHECK(xmlGetAttrIndex(gpuNode, "arch", &index));
   if (index == -1) {
     hipDeviceProp_t devProp;
-    CUDACHECK(hipGetDeviceProperties(&devProp, (int)xmlDev));
+    CUDACHECK(hipGetDeviceProperties(&devProp, (int)hipDev));
     memcpy(&arch.arch, &devProp.arch, sizeof(hipDeviceArch_t));
     NCCLCHECK(xmlSetAttrInt(gpuNode, "arch", arch.value));
   }
@@ -1240,7 +1241,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t xmlDev,
 #endif
   }
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  NCCLCHECK(ncclTopoXmlAddHipPartitionXgmi(xml, gpuNode, pciNode, xmlDev));
+  NCCLCHECK(ncclTopoXmlAddHipPartitionXgmi(xml, gpuNode, pciNode, hipDev));
 #endif
 #if CUDART_VERSION >= 11080
   struct ncclXmlNode* c2cNode = NULL;

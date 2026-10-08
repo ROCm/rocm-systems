@@ -1743,17 +1743,18 @@ ncclResult_t ncclTopoGetIntraNetDev(struct ncclTopoSystem* system, int rank, str
   return ncclSuccess;
 }
 
-ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* system, int cudaDev1, int cudaDev2, bool* isXGMI, int maxInter,
+// GPUs are keyed by comm rank: HIP ordinals are per process, so peers that each see one GPU all report ordinal 0.
+ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* system, int rank1, int rank2, bool* isXGMI, int maxInter,
                                  int nInter, int* inter) {
   int interGpus[MAX_XGMI_INTER_GPUS + 1];
   int ngpus = system->nodes[GPU].count;
   *isXGMI = false;
   // check for direct XGMI connection
   for (int i = 0; i < ngpus; i++) {
-    if (system->nodes[GPU].nodes[i].gpu.dev == cudaDev1) {
+    if (system->nodes[GPU].nodes[i].gpu.rank == rank1) {
       struct ncclTopoNode* node = system->nodes[GPU].nodes + i;
       for (int k = 0; k < system->nodes[GPU].count; k++) {
-        if (system->nodes[GPU].nodes[k].gpu.dev == cudaDev2) {
+        if (system->nodes[GPU].nodes[k].gpu.rank == rank2) {
           // NCCL 2.30 routes GPU->GPU through DEV nodes, so detect XGMI via path type (not a single hop).
           if (node->paths[GPU][k].count > 0 && node->paths[GPU][k].type == PATH_NVL) {
             *isXGMI = true;
@@ -1775,27 +1776,27 @@ ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* system, int cudaDev1, in
     }
     if (j < nInter) return ncclSuccess;
     if (nInter > 0 && inter != nullptr) {
-      ncclTopoGetLinkType(system, inter[nInter], cudaDev2, &res2, 0);
+      ncclTopoGetLinkType(system, inter[nInter], rank2, &res2, 0);
       if (res2) {
         *isXGMI = true;
         return ncclSuccess;
       }
       memcpy(interGpus + 1, inter + 1, sizeof(int) * nInter);
     }
-    interGpus[0] = cudaDev1;
+    interGpus[0] = rank1;
     // add one more intermediate GPU recursively util reaching max depth
     nInter++;
     if (nInter + 2 > ngpus || nInter > MAX_XGMI_INTER_GPUS || nInter > maxInter) return ncclSuccess;
     for (int i = 0; i < ngpus; i++) {
-      int dev = system->nodes[GPU].nodes[i].gpu.dev;
+      int rank = system->nodes[GPU].nodes[i].gpu.rank;
       // skip duplicated GPU
-      if (dev == cudaDev2) continue;
+      if (rank == rank2) continue;
       for (j = 0; j < nInter; j++)
-        if (dev == interGpus[j]) break;
+        if (rank == interGpus[j]) break;
       if (j < nInter) continue;
       // check connectivity with intermediate GPUs
-      interGpus[nInter] = dev;
-      ncclTopoGetLinkType(system, cudaDev1, cudaDev2, &res3, maxInter, nInter, interGpus);
+      interGpus[nInter] = rank;
+      ncclTopoGetLinkType(system, rank1, rank2, &res3, maxInter, nInter, interGpus);
       if (res3) {
         *isXGMI = true;
         return ncclSuccess;

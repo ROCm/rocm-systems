@@ -51,6 +51,7 @@ ASSERT_HOOK_MATCHES_PROD(g_hipMemMap,                     hipMemMap);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemSetAccess,               hipMemSetAccess);
 ASSERT_HOOK_MATCHES_PROD(g_hipIpcOpenMemHandle,           hipIpcOpenMemHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipDeviceGetPCIBusId,          hipDeviceGetPCIBusId);
+ASSERT_HOOK_MATCHES_PROD(g_hipDeviceGetByPCIBusId,        hipDeviceGetByPCIBusId);
 ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamBatchMemOp,           hipStreamBatchMemOp);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWriteValue64,         hipStreamWriteValue64);
@@ -230,6 +231,7 @@ std::function<hipError_t(int*)> g_hipGetDeviceCount = DefaultHipGetDeviceCount;
 static hipError_t DefaultHipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device);
 static hipError_t DefaultHipDeviceSetLimit(hipLimit_t limit, size_t value);
 static hipError_t DefaultHipDeviceGetPCIBusId(char* pciBusId, int len, int device);
+static hipError_t DefaultHipDeviceGetByPCIBusId(int* device, const char* pciBusId);
 static hipError_t DefaultHipEventRecord(hipEvent_t event, hipStream_t stream);
 
 static hipError_t DefaultHipDeviceCanAccessPeer(int* canAccessPeer, int, int)
@@ -593,6 +595,7 @@ void ResetHipFakes()
     g_hipDeviceGetAttributeResult   = hipErrorInvalidValue;
     g_hipDeviceGetPCIBusIdResult    = hipErrorInvalidValue;
     g_hipDeviceGetPCIBusId          = DefaultHipDeviceGetPCIBusId;
+    g_hipDeviceGetByPCIBusId        = DefaultHipDeviceGetByPCIBusId;
     g_hipEventCreateResult          = hipErrorInvalidValue;
     g_hipMemPoolResult              = hipErrorInvalidValue;
     g_hipStreamCreateResult         = hipErrorInvalidValue;
@@ -732,6 +735,13 @@ std::function<hipError_t(char*, int, int)> g_hipDeviceGetPCIBusId =
 hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device)
 {
     return g_hipDeviceGetPCIBusId(pciBusId, len, device);
+}
+
+static hipError_t DefaultHipDeviceGetByPCIBusId(int*, const char*) { return hipErrorInvalidValue; }
+std::function<hipError_t(int*, const char*)> g_hipDeviceGetByPCIBusId = DefaultHipDeviceGetByPCIBusId;
+hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId)
+{
+    return g_hipDeviceGetByPCIBusId(device, pciBusId);
 }
 
 hipError_t hipEventCreate(hipEvent_t* event)
