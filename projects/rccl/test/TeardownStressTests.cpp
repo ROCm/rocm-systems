@@ -153,10 +153,14 @@ namespace RcclUnitTesting
     // teardown. Returns true if the rank taking the normal destroy path returned
     // from ncclCommDestroy before the deadline.
     //
+    // pxnDisable is pinned in each child rather than inherited, because whether
+    // the destroy barrier runs at all is derived from it -- an ambient
+    // NCCL_PXN_DISABLE would silently change which path is under test.
+    //
     // Nothing here may touch HIP or RCCL before fork(): initializing the runtime
     // in the parent leaves the children with unusable state and they die in
     // hipSetDevice.
-    bool DestroyReturnsWhenPeer(PeerTeardown peer, int deadlineSeconds)
+    bool DestroyReturnsWhenPeer(PeerTeardown peer, char const* pxnDisable, int deadlineSeconds)
     {
       constexpr int    nRanks      = 2;
       constexpr size_t numElements = 32 * 1024;
@@ -176,6 +180,8 @@ namespace RcclUnitTesting
         }
         if (pid == 0)
         {
+          if (setenv("NCCL_PXN_DISABLE", pxnDisable, 1) != 0) _exit(69);
+
           ncclUniqueId id;
           if (rank == 0)
           {
@@ -211,9 +217,16 @@ namespace RcclUnitTesting
           if (hipStreamSynchronize(stream) != hipSuccess) _exit(79);
 
           if (rank == 1 && peer == PeerTeardown::Abort)
-            ncclCommAbort(comm);
+          {
+            if (ncclCommAbort(comm) != ncclSuccess) _exit(80);
+          }
           else
-            ncclCommDestroy(comm);  // rank 0 always takes the barrier path
+          {
+            // rank 0 always takes the barrier path. A non-success rc here is a real
+            // failure, not a hang -- without this check the parent reads exit 0 and
+            // scores a broken destroy as a pass.
+            if (ncclCommDestroy(comm) != ncclSuccess) _exit(81);
+          }
 
           _exit(0);
         }
@@ -265,15 +278,39 @@ namespace RcclUnitTesting
       ProcessIsolatedTestRunner::TestConfig(
         "DivergentTeardown_PeerDestroys",
         []() {
-          EXPECT_TRUE(DestroyReturnsWhenPeer(PeerTeardown::Destroy, /*deadlineSeconds*/ 60))
+          EXPECT_TRUE(DestroyReturnsWhenPeer(PeerTeardown::Destroy, "1", /*deadlineSeconds*/ 60))
             << "rank 0 did not return from ncclCommDestroy even though its peer "
                "also destroyed -- the host-local destroy barrier is broken";
         })
         .withTimeout(std::chrono::seconds(120)));
   }
 
+  // Same control with PXN on, so the barrier is actually entered. Guards against
+  // "fixing" the hang by disabling the barrier outright: with every rank
+  // participating it must still rendezvous and complete.
+  TEST(Teardown, DivergentTeardown_PeerDestroys_PxnEnabled_Completes)
+  {
+    if (!isIsolatedChild() && getDetectedGpuCount() < 2)
+      GTEST_SKIP() << "Divergent teardown requires at least 2 GPUs (detected "
+                   << getDetectedGpuCount() << ")";
+
+    RUN_ISOLATED_TESTS(
+      ProcessIsolatedTestRunner::TestConfig(
+        "DivergentTeardown_PeerDestroysPxn",
+        []() {
+          EXPECT_TRUE(DestroyReturnsWhenPeer(PeerTeardown::Destroy, "0", /*deadlineSeconds*/ 60))
+            << "rank 0 did not return from ncclCommDestroy with NCCL_PXN_DISABLE=0 -- "
+               "the destroy barrier does not complete even when every rank enters it";
+        })
+        .withTimeout(std::chrono::seconds(120)));
+  }
+
   // Regression: the peer aborts, so it skips the barrier. Rank 0 must still
   // return instead of blocking forever in bootstrapRecv.
+  //
+  // Pinned to NCCL_PXN_DISABLE=1, RCCL's default. With PXN genuinely enabled an
+  // ncclCommAbort peer still strands the barrier -- that needs a cancellation
+  // protocol and is tracked separately; do not widen this case without one.
   TEST(Teardown, DivergentTeardown_PeerAborts_DoesNotHang)
   {
     if (!isIsolatedChild() && getDetectedGpuCount() < 2)
@@ -284,7 +321,7 @@ namespace RcclUnitTesting
       ProcessIsolatedTestRunner::TestConfig(
         "DivergentTeardown_PeerAborts",
         []() {
-          EXPECT_TRUE(DestroyReturnsWhenPeer(PeerTeardown::Abort, /*deadlineSeconds*/ 60))
+          EXPECT_TRUE(DestroyReturnsWhenPeer(PeerTeardown::Abort, "1", /*deadlineSeconds*/ 60))
             << "rank 0 hung in ncclCommDestroy after its host-local peer aborted "
                "and skipped the destroy barrier (AICOMRCCL-2467 / AICOMRCCL-2468)";
         })

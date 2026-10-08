@@ -8928,77 +8928,86 @@ TEST_F(InitMicrotest, InitChildComm_Shrink_SortsCallerListAndCopiesItIntoTheJob)
   Rank_ReleaseComm(r.jobComm, /*ownsAbortResources=*/true);
 }
 
-TEST_F(InitMicrotest, InitChildComm_ShrinkAbort_ExcludingSameHostRank_SetsHasExcludedHostRank) {
+// Reads back the ranks a shrink recorded on the parent for the destroy barrier to skip.
+static std::vector<int> Grow_AbortExcludedRanks(ncclComm* comm) {
+  return std::vector<int>(comm->abortExcludedRanks, comm->abortExcludedRanks + comm->nAbortExcludedRanks);
+}
+
+TEST_F(InitMicrotest, InitChildComm_ShrinkAbort_RecordsExcludedRanksOnParent) {
   Grow_AllowHostAlloc();
   Grow_ParentComm parent;
-  parent->peerInfo[0].hostHash = 0xAAAA;
-  parent->peerInfo[1].hostHash = 0xAAAA;
-  parent->peerInfo[2].hostHash = 0xBBBB;
-  parent->peerInfo[3].hostHash = 0xBBBB;
-  parent->rank = 0;
-  int exclude[1] = {1};
+  ASSERT_NE(0, parent->rank) << "the recording must not depend on the caller being rank 0";
+  int exclude[2] = {3, 1};
   Grow_LaunchSpy spy;
   ncclComm_t out = kGrow_NewcommPoison;
 
-  ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_ABORT, exclude, 1, &out));
+  ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_ABORT, exclude, 2, &out));
 
-  EXPECT_TRUE(parent->hasExcludedHostRank) << "excluded rank 1 is on same host as rank 0";
+  EXPECT_EQ(std::vector<int>({1, 3}), Grow_AbortExcludedRanks(parent.get()))
+    << "every excluded rank is recorded; the destroy barrier filters by host, not this path";
   Rank_ReleaseComm(spy.rec().jobComm, /*ownsAbortResources=*/true);
+  free(parent->abortExcludedRanks);
 }
 
-TEST_F(InitMicrotest, InitChildComm_ShrinkDefault_ExcludingSameHostRank_DoesNotSetFlag) {
+TEST_F(InitMicrotest, InitChildComm_ShrinkDefault_RecordsNothing) {
   Grow_AllowHostAlloc();
   Grow_ParentComm parent;
-  parent->peerInfo[0].hostHash = 0xAAAA;
-  parent->peerInfo[1].hostHash = 0xAAAA;
-  parent->peerInfo[2].hostHash = 0xBBBB;
-  parent->peerInfo[3].hostHash = 0xBBBB;
-  parent->rank = 0;
   int exclude[1] = {1};
   Grow_LaunchSpy spy;
   ncclComm_t out = kGrow_NewcommPoison;
 
   ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_DEFAULT, exclude, 1, &out));
 
-  EXPECT_FALSE(parent->hasExcludedHostRank)
+  EXPECT_EQ(0, parent->nAbortExcludedRanks)
     << "a NCCL_SHRINK_DEFAULT excluded rank is healthy and still enters the destroy barrier";
+  EXPECT_EQ(nullptr, parent->abortExcludedRanks);
   Rank_ReleaseComm(spy.rec().jobComm, /*ownsAbortResources=*/true);
 }
 
-TEST_F(InitMicrotest, InitChildComm_ShrinkAbort_ExcludingOnlyRemoteHostRank_DoesNotSetFlag) {
+TEST_F(InitMicrotest, InitChildComm_ShrinkAbort_AccumulatesAcrossShrinksAndIgnoresLaterDefault) {
   Grow_AllowHostAlloc();
   Grow_ParentComm parent;
-  parent->peerInfo[0].hostHash = 0xAAAA;
-  parent->peerInfo[1].hostHash = 0xAAAA;
-  parent->peerInfo[2].hostHash = 0xBBBB;
-  parent->peerInfo[3].hostHash = 0xBBBB;
-  parent->rank = 0;
-  int exclude[1] = {3};
-  Grow_LaunchSpy spy;
   ncclComm_t out = kGrow_NewcommPoison;
 
-  ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_ABORT, exclude, 1, &out));
+  {
+    int exclude[1] = {1};
+    Grow_LaunchSpy spy;
+    ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_ABORT, exclude, 1, &out));
+    Rank_ReleaseComm(spy.rec().jobComm, /*ownsAbortResources=*/true);
+  }
+  {
+    int exclude[1] = {3};
+    Grow_LaunchSpy spy;
+    ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_ABORT, exclude, 1, &out));
+    Rank_ReleaseComm(spy.rec().jobComm, /*ownsAbortResources=*/true);
+  }
+  {
+    int exclude[1] = {0};
+    Grow_LaunchSpy spy;
+    ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_DEFAULT, exclude, 1, &out));
+    Rank_ReleaseComm(spy.rec().jobComm, /*ownsAbortResources=*/true);
+  }
 
-  EXPECT_FALSE(parent->hasExcludedHostRank) << "excluded rank 3 is on a different host from rank 0";
-  Rank_ReleaseComm(spy.rec().jobComm, /*ownsAbortResources=*/true);
+  EXPECT_EQ(std::vector<int>({1, 3}), Grow_AbortExcludedRanks(parent.get()))
+    << "a later shrink must never drop a peer an earlier NCCL_SHRINK_ABORT already killed";
+  free(parent->abortExcludedRanks);
 }
 
-TEST_F(InitMicrotest, InitChildComm_ShrinkAbort_MultiExcludeHitsLocalOnSecondEntry_SetsFlag) {
-  Grow_AllowHostAlloc();
+TEST_F(InitMicrotest, CommRankWasAbortExcluded_MatchesOnlyRecordedRanks) {
   Grow_ParentComm parent;
-  parent->peerInfo[0].hostHash = 0xAAAA;
-  parent->peerInfo[1].hostHash = 0xBBBB;
-  parent->peerInfo[2].hostHash = 0xBBBB;
-  parent->peerInfo[3].hostHash = 0xAAAA;
-  parent->rank = 0;
-  int exclude[2] = {1, 3};
-  Grow_LaunchSpy spy;
-  ncclComm_t out = kGrow_NewcommPoison;
+  EXPECT_FALSE(commRankWasAbortExcluded(parent.get(), 1)) << "nothing recorded yet";
 
-  ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_ABORT, exclude, 2, &out));
+  int recorded[2] = {1, 3};
+  parent->abortExcludedRanks = recorded;
+  parent->nAbortExcludedRanks = 2;
 
-  EXPECT_TRUE(parent->hasExcludedHostRank) << "rank 3 shares host with rank 0; loop must continue past rank 1";
-  Rank_ReleaseComm(spy.rec().jobComm, /*ownsAbortResources=*/true);
+  EXPECT_TRUE(commRankWasAbortExcluded(parent.get(), 1));
+  EXPECT_TRUE(commRankWasAbortExcluded(parent.get(), 3));
+  EXPECT_FALSE(commRankWasAbortExcluded(parent.get(), 2));
+  EXPECT_FALSE(commRankWasAbortExcluded(parent.get(), parent->rank));
+
+  parent->abortExcludedRanks = nullptr;
+  parent->nAbortExcludedRanks = 0;
 }
 
 TEST_F(InitMicrotest, InitChildComm_ConfigProvided_ParsesInsteadOfCopyingParent) {

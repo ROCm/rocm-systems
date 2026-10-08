@@ -1054,7 +1054,6 @@ struct ncclComm {
   bool globalRmaProxySupport;
   bool hostRmaSupport;
   int childCount;
-  bool hasExcludedHostRank; // NCCL_SHRINK_ABORT excluded a rank on this host; skip destroy barrier
 
   struct ncclDevrState devrState; // The symmetric runtime state
   struct ncclSymkState symkState; // The symmetric kernels state (built on previous)
@@ -1081,6 +1080,12 @@ struct ncclComm {
   int ll128DataElems;
   // [RCCL] Host mirror of device side NCCL_LL128_SHMEM_ELEMS_PER_THREAD
   int ll128ShmemElemsPerThread;
+
+  // [RCCL] Global ranks removed by an NCCL_SHRINK_ABORT on this comm. Those peers keep a non-zero
+  // abortFlag, so they never reach the host-local barrier in commDestroySync() and must be filtered
+  // out of it. Accumulated across shrinks, never cleared; freed in commFree().
+  int* abortExcludedRanks;
+  int nAbortExcludedRanks;
 
 #ifdef ENABLE_ROCSHMEM
   // circular ring buffer in rocshmem symmetric heap
