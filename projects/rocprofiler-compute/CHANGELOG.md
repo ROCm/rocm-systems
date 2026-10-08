@@ -20,6 +20,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Scalar data cache utilization, latency, stall rate, and bandwidth.
   * GL1 request latency.
 
+* Added a self-contained Memory Chart HTML report to CLI analysis. Each analyzed
+  workload with a Memory Chart now gets a `mem_chart*.html` page with aggregate
+  and per-kernel views, GPU and dispatch filtering, metric tables, memory bandwidth
+  guidance, zoom and pan controls, PNG export, and an offline theme toggle.
+
 ### Changed
 
 * `--triton-trace` no longer captures the Triton kernels that `torch.compile` generates. Use `--torch-trace` for those kernels.
