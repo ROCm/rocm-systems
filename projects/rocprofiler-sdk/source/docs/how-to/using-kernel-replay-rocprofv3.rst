@@ -172,8 +172,10 @@ Limitations (CLI)
 * **Single process.** There is no MPI or cross-process coordination, and there is no multi-GPU
   end-to-end CLI test. Replaying a kernel that participates in an inter-process collective is
   unsafe. The SDK already selects groups per agent; what is missing is a multi-GPU / MPI test.
-* **Async copies are not fenced** (SDK). An ``hsa_amd_memory_async_copy`` on another thread can
-  mutate device memory during the replay window.
+* **Batched async copies are not fenced** (SDK). Async copies (``hipMemcpyAsync``,
+  ``hsa_amd_memory_async_copy``) and replay windows on the same GPU wait for each other, but an
+  ``hsa_amd_memory_async_batch_copy`` on another thread can still mutate device memory during the
+  replay window.
 * **Stuck drains abort the process** (SDK, roughly 60 s).
 * **Host RAM duplication** of the tracked device footprint. For large footprints, snapshot plus
   restore can cost more than re-running the application.

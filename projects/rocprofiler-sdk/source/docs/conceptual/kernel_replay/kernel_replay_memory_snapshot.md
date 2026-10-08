@@ -158,9 +158,9 @@ Stated plainly, because each one has a concrete cause in the mechanism above.
   rather than through one of the wrapped allocations is therefore invisible to the snapshot — which
   covers **`hipMallocAsync` and other pool-backed, stream-ordered allocations**. A kernel that writes
   such a buffer will not have those writes reverted between passes.
-- **Async SDMA copies are not fenced by the replay window.** `hsa_amd_memory_async_copy` and its
-  variants are not kernel dispatches, so they bypass both the AQL queues and the per-agent replay
-  gate. The source marks serializing them as a follow-up. See
+- **Batched async copies are not fenced.** `hsa_amd_memory_async_copy`, `_on_engine` and `_rect`
+  wait for an open replay window, and the window waits for those already in flight before it
+  snapshots; `hsa_amd_memory_async_batch_copy` does not take part yet. See
   [Concurrency and isolation](kernel_replay_concurrency_and_isolation.md#what-is-not-isolated).
 - **Coarse-grained device memory only.** Kernarg, host, fine-grained and executable allocations are
   excluded by design, as is unified and managed memory.

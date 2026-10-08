@@ -20,6 +20,7 @@ take per-agent WRITER lock
   capture and suppress the application's completion signal
   submit a barrier packet on this queue and wait on it   (queue drain)
   poll every queue on this agent until no async handler is in flight (agent-wide drain)
+  hold off new async copies on this agent; wait for those in flight   (copy fence)
   snap()                                                 (device -> host)
   install the localized-context-control guard
   for each pass:
@@ -30,6 +31,7 @@ take per-agent WRITER lock
       ask the tool whether to continue; break if not
       restore()                                          (host -> device)
   fire the application's completion signal exactly once
+  let async copies on this agent start again
 release per-agent WRITER lock
 ```
 
@@ -38,7 +40,7 @@ memory in the state the application expects, so no restore follows the loop brea
 
 ## Isolation model
 
-Isolation has three independent layers. None of them is sufficient alone.
+Isolation has four independent layers. None of them is sufficient alone.
 
 ### 1. Per-agent reader/writer serialization
 
@@ -97,6 +99,25 @@ memory tracker tags each allocation with its owning agent at allocation time (fr
 Combined with the per-agent lock, this makes multi-GPU replay genuinely concurrent: replays on
 different agents take different mutexes, snapshot disjoint memory, and proceed at the same time.
 
+### 4. Async copy fence
+
+Async copies (`hsa_amd_memory_async_copy`, `hsa_amd_memory_async_copy_on_engine` and
+`hsa_amd_memory_async_copy_rect`; HIP issues `hipMemcpyAsync` through them) are not kernel
+dispatches: they never reach the `WriteInterceptor`, and neither drain above sees them. Without a
+fence, a copy in flight when the window takes its snapshot is captured half-written, and the
+restores between passes write it back over bytes the copy has since delivered, so the application
+later reads stale data.
+
+While kernel replay is configured, the SDK wraps those three entries of the application's HSA API
+table. Each copy counts itself in flight on every agent it touches until its completion signal
+fires, and does not start while a replay window is open on any of those agents. After the
+agent-wide drain, the window first lets the copies that the previous window held off start (so a
+thread that replays dispatches back to back cannot starve another thread's copies), then holds off
+new copies on its agent and waits for the copies in flight. If they do not finish within 5 s (for example, a copy waiting on a signal that only a thread
+blocked by this window would raise), the window does not snapshot: the dispatch runs once without
+replay, and a warning is logged once. The SDK's own snapshot and restore copies use the
+synchronous `hsa_memory_copy`, so they never wait on the fence.
+
 ## Async completion handler drain
 
 Each pass drains its async completion handler before PASS `PHASE_EXIT`, before the tool's
@@ -121,6 +142,7 @@ snapshot or restore memory that is still being mutated.
 | `replay_drain_or_fatal()` — per-pass async handler drain | up to 12 slices of `Queue::sync()`, roughly 60 s total | `ROCP_FATAL` |
 | `replay_drain_agent_or_fatal()` — agent-wide drain | 60 s deadline, polled every ~2 ms outside the queue-map lock | `ROCP_FATAL` |
 | `Queue::sync()` — one drain slice | 5 s HSA signal timeout hint | returns `false` and warns; `replay_drain_or_fatal()` takes another slice, teardown callers proceed |
+| `copy_fence::open_window()` — async copies in flight on the agent | 5 s | the dispatch runs once without replay; warning logged once |
 | Queue profiling setup signal waits (adjacent to, not inside, the replay window) | 1 s timeout hint — three attempts in one path, a single attempt in the other | `ROCP_FATAL` |
 
 Each expired `Queue::sync()` slice logs its own timeout warning naming the number of kernels still
@@ -137,13 +159,10 @@ complete.
 
 ## What is not isolated
 
-Two gaps are known and marked as follow-up work in the source rather than papered over.
+Two gaps are known.
 
-**Async SDMA copies.** `hsa_amd_memory_async_copy` and its variants are not kernel dispatches, so
-they never reach the `WriteInterceptor` and never pass through the per-agent replay gate. The
-agent-wide drain closes the *kernel* half of the race, but a thread can still run an SDMA copy
-against shared device memory inside another thread's replay window. Serializing those is tracked as
-a separate change.
+**Batched async copies.** `hsa_amd_memory_async_batch_copy` is not covered by the async copy fence
+yet: a batch issued on another thread can still write device memory inside a replay window.
 
 **HIP graphs.** Graph launches are not replayed at all; see
 [Memory snapshot and restore](kernel_replay_memory_snapshot.md#hip-graphs) for the two-tier warn
@@ -183,5 +202,6 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Agent-wide drain | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `replay_drain_agent_or_fatal()` |
 | One drain slice | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `Queue::sync()` |
 | Agent-scoped inventory | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp` | `snap_inventory()` |
+| Async copy fence | `source/lib/rocprofiler-sdk/kernel_replay/copy_fence.cpp` | `copy_fence_init()`, `copy_fence::open_window()`, `copy_fence::close_window()` |
 | Localized context scopes | `source/lib/rocprofiler-sdk/kernel_replay/local_context.hpp` | `scoped_local_context_control`, `set_toggles_armed()` |
 | Localized context consumer | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `local_context_has_overrides()` call in `process_packet_batch` |

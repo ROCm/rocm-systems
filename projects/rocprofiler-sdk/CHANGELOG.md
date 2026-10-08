@@ -10,6 +10,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+  - Fixed kernel replay corrupting data written by asynchronous copies (`hipMemcpyAsync`, `hsa_amd_memory_async_copy`) that were in flight when a replay window took its snapshot: the restores between passes wrote the half-written snapshot back over the copied bytes. Copies and replay windows on the same GPU now wait for each other; if copies do not finish within 5 s, the dispatch runs once without replay. `hsa_amd_memory_async_batch_copy` is not covered yet.
+
 ### Known issues
 
 ### Removed

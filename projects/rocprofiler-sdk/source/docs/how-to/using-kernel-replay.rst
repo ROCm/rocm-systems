@@ -221,8 +221,11 @@ Limitations
 * **Writer lock serializes the agent** for the whole replay window. Different GPUs use different
   locks (multi-GPU concurrent at the SDK), but there is no in-tree multi-GPU test and no MPI
   coordination.
-* **Async copies are not fenced.** ``hsa_amd_memory_async_copy`` (or HIP async memcpy) on another
-  thread can mutate device memory during the replay window.
+* **Batched async copies are not fenced.** ``hsa_amd_memory_async_copy`` (and HIP async memcpy)
+  waits while a replay window is open on its GPU, and the window waits up to 5 s for copies already
+  in flight before it snapshots (if they do not finish, the dispatch runs once without replay).
+  ``hsa_amd_memory_async_batch_copy`` is not fenced yet and can still mutate device memory during
+  the replay window.
 * **Stuck drains abort the process** rather than hanging (roughly 60 s bounds inside the window).
 * **Host RAM duplication** of the tracked device footprint for the duration of the replay. Under
   host memory pressure the snapshot is declined and the dispatch runs once rather than aborting.
