@@ -33,15 +33,15 @@
 
 #include "palDeque.h"
 #include "palDevice.h"
+#include "palGpuMemory.h"
 #include "palGpuUtil.h"
 #include "palHashSet.h"
 #include "palMutex.h"
 #include "palPipeline.h"
-#include "palVector.h"
 #include "palPlatform.h"
+#include "palSpan.h"
 #include "palSysMemory.h"
-#include "palGpuMemory.h"
-#include "palMemTrackerImpl.h"
+#include "palVector.h"
 
 // Forward declarations.
 namespace Pal
@@ -60,11 +60,13 @@ namespace Pal
     enum   ThreadTraceWaveStartExt : Pal::uint32;
     enum   PipelineStageFlag : uint32;
 }
-struct SqttFileChunkCpuInfo;
-struct SqttFileChunkAsicInfo;
-struct SqttCodeObjectDatabaseRecord;
 
-struct GpuMemoryInfo;
+namespace Util
+{
+    class SpanWriter;
+}
+
+struct SqttCodeObjectDatabaseRecord;
 
 namespace GpuUtil
 {
@@ -93,7 +95,7 @@ enum class UpdateSampleTraceMode : Pal::uint32
                                 ///  active sample.
 };
 
-/// Specifies basic type of sample to perform - either a normal set of "global" perf counters, or a trace consisting
+/// Specifies basic type of sample to perfom - either a normal set of "global" perf counters, or a trace consisting
 /// of SQ thread trace and/or streaming performance counters.
 enum class GpaSampleType : Pal::uint32
 {
@@ -335,14 +337,28 @@ struct PerfExperimentMemory
     size_t memorySize;  // Size of the memory allocated in pMemory.
 };
 
+/// Struct for storing information about shader object correlation.
+struct ShaderObjectCorrelationInfo
+{
+    Pal::uint64     apiShaderObjectHash; ///< Client-provided PSO hash.
+    Pal::ShaderType apiShaderType;       ///< Client-provided shader type.
+};
+
 /// Struct for supplying API-dependent information about pipelines.
 struct RegisterPipelineInfo
 {
-    Pal::uint64 apiPsoHash;  ///< Client-provided PSO hash.
+    Pal::uint64                             apiPsoHash;    ///< Client-provided PSO hash.
+    Util::Span<ShaderObjectCorrelationInfo> soCorrelation; ///< Whether to emit shader correlation.
 };
 
 /// Struct for supplying API-dependent information about libraries.
 struct RegisterLibraryInfo
+{
+    Pal::uint64 apiHash;      ///< Client-provided api hash.
+};
+
+/// Struct for supplying API-dependent information about code objects.
+struct RegisterCodeObjectInfo
 {
     Pal::uint64 apiHash;      ///< Client-provided api hash.
 };
@@ -472,7 +488,7 @@ struct QueueTimingsTraceInfo
 *       written, are allocated from internal pools managed by the session.
 *     - A session is moved from the _building_ state to the _complete_ state by calling End().
 *     - The application will submit all command buffers referenced by the session.
-*     - The session is confirmed as _ready_, either using standard PAL fences to confirm all associated submission have
+*     - The session is confirmed as _ready_, either using standard PAL fences to confirm all assocated submission have
 *       completed, or by polling IsReady() on the session.
 *     - Results for all samples in the session can be queried via GetResults().
 *     - Reset() should be called once results have been gathered and before building a new session.  Resources are
@@ -873,6 +889,25 @@ public:
     /// @returns Success if the library has been unregistered with GpaSession successfully.
     Pal::Result UnregisterElfBinary(const ElfBinaryInfo& elfBinaryInfo);
 
+#if PAL_BUILD_CODE_OBJECT_INTERFACE
+    /// Register code object with GpaSession for obtaining shader dumps and load events in the RGP file.
+    ///
+    /// @param [in] pCodeObject The PAL code object to be tracked.
+    /// @param [in] clientInfo  API-dependent information for this code object to also be recorded.
+    ///
+    /// @returns Success if the code object has been registered with GpaSession successfully.
+    ///          + AlreadyExists if a duplicate code object is provided.
+    Pal::Result RegisterCodeObject(const Pal::ICodeObject* pCodeObject, const RegisterCodeObjectInfo& clientInfo);
+
+    /// Unregister code object with GpaSession for obtaining unload events in the RGP file.
+    /// This should be called immediately before destroying the PAL code object.
+    ///
+    /// @param [in] pCodeObject  The PAL code object to be tracked.
+    ///
+    /// @returns Success if the code object has been unregistered with GpaSession successfully.
+    Pal::Result UnregisterCodeObject(const Pal::ICodeObject* pCodeObject);
+#endif
+
     /// Given a Pal device, validate a list of perfcounters.
     ///
     /// @param [in] pDevice      a given device
@@ -890,7 +925,7 @@ private:
     struct GpuMemoryInfo
     {
         Pal::IGpuMemory* pGpuMemory;
-        void*            pCpuAddr;
+        Util::ByteSpan   mappedSpan;
     };
 
     // Event type for code object load events
@@ -916,6 +951,14 @@ private:
         Pal::PipelineHash  internalPipelineHash;
     };
 
+    // Represents all information to be contained in one SqttSoCorrelationRecord
+    struct SoCorrelationRecord
+    {
+        Pal::uint64     apiPsoHash;          /// Hash of the API-level Pipeline State Object
+        Pal::uint64     apiShaderObjectHash; /// Hash of the API-level Shader Object
+        Pal::ShaderType apiShaderType;       /// Type of the shader
+    };
+
     // Registers a single (non-archive) pipeline with the GpaSession. Returns AlreadyExists on duplicate PAL pipeline.
     Pal::Result RegisterSinglePipeline(const Pal::IPipeline* pPipeline, const RegisterPipelineInfo& clientInfo);
 
@@ -925,13 +968,14 @@ private:
     Pal::IDevice*const            m_pDevice;                    // Device associated with this GpaSession.
     Pal::DeviceProperties         m_deviceProps;
     Pal::SetClockModeOutput       m_peakClockFrequency;         // Output of query for stable peak, values in Mhz
-    Pal::PerfExperimentProperties m_perfExperimentProps;
     Pal::uint32                   m_timestampAlignment;         // Pre-calculated timestamp data alignment.
     ApiType                       m_apiType;                    // API type, e.g. Vulkan, used in RGP dumps.
     Pal::uint16                   m_apiMajorVer;                // API major version, used in RGP dumps.
     Pal::uint16                   m_apiMinorVer;                // API minor version, used in RGP dumps.
     Pal::uint16                   m_instrumentationSpecVersion; // Spec version of RGP instrumetation.
     Pal::uint16                   m_instrumentationApiVersion;  // Api version of RGP instrumetation.
+
+    const Pal::PerfExperimentProperties* m_pPerfExpProps;
 
     Pal::IGpuEvent*               m_pGpuEvent;
     GpaSessionState               m_sessionState;
@@ -993,6 +1037,11 @@ private:
     Util::Deque<PsoCorrelationRecord, GpaAllocator>  m_psoCorrelationRecordsCache;
     // List of PSO correlation records that were registered during a trace
     Util::Deque<PsoCorrelationRecord, GpaAllocator>  m_curPsoCorrelationRecords;
+
+    // List of cached SO correlation records that will be copied to the final database at the end of a trace
+    Util::Deque<SoCorrelationRecord, GpaAllocator>  m_soCorrelationRecordsCache;
+    // List of SO correlation records that were registered during a trace
+    Util::Deque<SoCorrelationRecord, GpaAllocator>  m_curSoCorrelationRecords;
 
     Util::RWLock m_registerPipelineLock;
 
@@ -1074,19 +1123,27 @@ private:
                                         TimedQueueState** ppQueueState,
                                         Pal::uint32* pQueueIndex);
 
-    /// Injects an external timed queue semaphore operation event
+    // Injects an external timed queue semaphore operation event
     Pal::Result ExternalTimedQueueSemaphoreOperation(Pal::uint64 queueContext,
                                                      Pal::uint64 cpuSubmissionTimestamp,
                                                      Pal::uint64 cpuCompletionTimestamp,
                                                      const TimedQueueSemaphoreInfo& timedSemaphoreInfo,
                                                      bool isSignalOperation);
 
-    /// Converts a CPU timestamp to a GPU timestamp using a CalibratedTimestamps struct
+    // Converts a CPU timestamp to a GPU timestamp using a CalibratedTimestamps struct
     Pal::uint64 ConvertCpuTimestampToGpuTimestamp(Pal::uint64                      cpuTimestamp,
                                                   const Pal::CalibratedTimestamps& calibration) const;
 
-    /// Extracts a GPU timestamp from a queue event
-    Pal::uint64 ExtractGpuTimestampFromQueueEvent(const TimedQueueEventItem& queueEvent) const;
+    // Converts a queue event's CPU timestamp into the GPU timestamp timeline.
+    Pal::uint64 GetCpuTimestampInGpuDomain(const TimedQueueEventItem& queueEvent) const;
+
+    // Gets one of the two GPU timestamps in a queue event.
+    static Pal::uint64 GetGpuTimestamp(const TimedQueueEventItem& queueEvent,
+                                       Pal::uint32                timestampIdx);
+
+    // Helper functions for GetQueueTimingsData and DumpRgpData.
+    QueueTimingsTraceInfo GetQueueTimingsInfo() const;
+    void WriteQueueTimingsData(Util::SpanWriter* pWriter) const;
 
     // Creates a new command buffer for use on pQueue
     Pal::Result CreateCmdBufferForQueue(Pal::IQueue* pQueue,
@@ -1139,27 +1196,18 @@ private:
         Pal::gpusize*           pHeapSize,
         Pal::IQueryPool**       ppQuery);
 
-    // Dump SQ thread trace data in rgp format
-    Pal::Result DumpRgpData(const GpaSampleConfig* pTraceConfig,
-                            TraceSample*           pTraceSample,
-                            void*                  pRgpOutput,
-                            size_t*                pTraceSize) const;
-
-    // Dumps the spm trace data in the buffer provided.
-    Pal::Result AppendSpmTraceData(TraceSample*  pTraceSample,
-                                   size_t        bufferSize,
-                                   void*         pData,
-                                   Pal::gpusize* pSizeInBytes) const;
-
-    // Dumps the df spm trace data in the buffer provided.
-    Pal::Result AppendDfSpmTraceData(TraceSample*  pTraceSample,
-                                     size_t        bufferSize,
-                                     void*         pData,
-                                     Pal::gpusize* pSizeInBytes) const;
+    // Dump SQ thread trace data in rgp format. The writer must start out with nothing written to it!
+    void DumpRgpData(const GpaSampleConfig& traceConfig,
+                     TraceSample*           pTraceSample,
+                     Util::SpanWriter*      pWriter) const;
 
     Pal::Result AddCodeObjectLoadEvent(const Pal::IPipeline* pPipeline, CodeObjectLoadEventType eventType);
     Pal::Result AddCodeObjectLoadEvent(const Pal::IShaderLibrary* pLibrary, CodeObjectLoadEventType eventType);
     Pal::Result AddCodeObjectLoadEvent(const ElfBinaryInfo& elfBinaryInfo, CodeObjectLoadEventType eventType);
+
+#if PAL_BUILD_CODE_OBJECT_INTERFACE
+    Pal::Result AddCodeObjectLoadEvent(const Pal::ICodeObject* pCodeObject, CodeObjectLoadEventType eventType);
+#endif
 
     // Recycle used Gart rafts and put back to available pool
     void RecycleGartGpuMem();

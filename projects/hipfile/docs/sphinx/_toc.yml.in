@@ -14,6 +14,14 @@ subtrees:
         title: AMD Infinity Storage
   - caption: How to
     entries:
+      - file: how-to/checking-system-compatibility
+        title: Check for fastpath compatibility
+      - file: how-to/setup-local-nvme
+        title: Set up a local NVMe drive
+      - file: how-to/setup-nvmeof
+        title: Set up an NVMe-oF disk
+      - file: how-to/setup-nfsordma
+        title: Set up an NFSoRDMA share
       - file: how-to/register-file-and-buffer
         title: Register a file and buffer
       - file: how-to/use-with-fio
@@ -26,6 +34,8 @@ subtrees:
         title: Copying a file
       - file: tutorials/async-multistream-io
         title: Asynchronous multistream I/O
+      - file: tutorials/batch-io
+        title: Batch I/O
       - file: tutorials/get-version
         title: Query the hipFile version
       - file: tutorials/python-gpu-io
@@ -55,6 +65,7 @@ subtrees:
           - file: reference/api-file-and-buffer
           - file: reference/api-async
           - file: reference/api-batch
+          - file: reference/api-stats
           - file: reference/api-errors
           - file: reference/api-python
   - caption: Troubleshooting
@@ -63,3 +74,8 @@ subtrees:
         title: Troubleshooting
       - file: troubleshooting/known-issues
         title: Known issues
+      - file: troubleshooting/limitations
+        title: Limitations
+  - caption: About
+    entries:
+      - file: license.rst

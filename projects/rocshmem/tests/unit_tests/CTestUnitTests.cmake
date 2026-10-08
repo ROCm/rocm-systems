@@ -60,9 +60,9 @@ function(write_install_unit_test_definition TEST_NAME TEST_COMMAND TEST_LABELS T
             # Relative from working dir: ../../../../share/rocshmem/unit_test_wrapper.sh
             list(APPEND INSTALL_CMD_PARTS "../../../../share/rocshmem/unit_test_wrapper.sh")
         elseif("${part}" STREQUAL "$<TARGET_FILE:rocshmem_unit_tests>")
-            # Executable is at: <install>/share/rocshmem/rocshmem_unit_tests
-            # Relative from working dir: ../../../../share/rocshmem/rocshmem_unit_tests
-            list(APPEND INSTALL_CMD_PARTS "../../../../share/rocshmem/rocshmem_unit_tests")
+            # Executable is at: <install>/bin/rocshmem_unit_tests
+            # Relative from working dir bin/rocshmem/tests/unit: ../../../rocshmem_unit_tests
+            list(APPEND INSTALL_CMD_PARTS "../../../rocshmem_unit_tests")
         elseif("${part}" STREQUAL "${MPIEXEC_EXECUTABLE}")
             # Use the MPI executable found at configure time (absolute path)
             list(APPEND INSTALL_CMD_PARTS "${MPIEXEC_EXECUTABLE}")

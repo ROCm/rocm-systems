@@ -5,8 +5,10 @@ These tests simulate real artifact splitting scenarios with mock data.
 """
 
 import shutil
+import struct
 from argparse import Namespace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -17,10 +19,76 @@ from rocm_kpack.artifact_splitter import (
     ExtractedKernel,
     base_arch,
 )
+from elf_test_utils import patch_hip_fatbin_size
 from rocm_kpack.artifact_utils import read_artifact_manifest, write_artifact_manifest
-from rocm_kpack.database_handlers import MIOpenHandler, RocBLASHandler
+from rocm_kpack.coff.kpack_transform import HIPF_MAGIC as COFF_HIPF_MAGIC
+from rocm_kpack.coff.kpack_transform import HIPK_MAGIC as COFF_HIPK_MAGIC
+from rocm_kpack.coff.kpack_transform import WRAPPER_SIZE as COFF_WRAPPER_SIZE
+from rocm_kpack.coff.surgery import CoffSurgery
+from rocm_kpack.database_handlers import AotritonHandler, MIOpenHandler, RocBLASHandler
+from rocm_kpack.elf.kpack_transform import HIPF_MAGIC as ELF_HIPF_MAGIC
+from rocm_kpack.elf.surgery import ElfSurgery
+from rocm_kpack.kpack_transform import kpack_offload_binary, read_kpack_ref_marker
 from rocm_kpack.tools.split_artifacts import batch_split, parse_artifact_name
 from rocm_kpack.tools.verify_artifacts import ArtifactVerifier
+
+
+@pytest.mark.parametrize(
+    "bundle_key,image_arch",
+    [("gfx11", "gfx11xx"), ("gfx12_0", "gfx120x"), ("gfx942", "gfx942")],
+)
+def test_aotriton_split_then_verify(tmp_path, toolchain, bundle_key, image_arch):
+    input_dir = tmp_path / "input"
+    prefix = "ml-libs/aotriton/stage"
+    relative_kernel = Path(f"lib/aotriton.images/amd-{image_arch}/flash/kernel.aks2")
+    kernel = input_dir / prefix / relative_kernel
+    kernel.parent.mkdir(parents=True)
+    kernel.write_bytes(b"kernel payload")
+    write_artifact_manifest(input_dir, [prefix])
+    output_dir = tmp_path / "output"
+    splitter = ArtifactSplitter(
+        artifact_prefix="aotriton_lib",
+        toolchain=toolchain,
+        database_handlers=[AotritonHandler()],
+    )
+    splitter.split(input_dir, output_dir)
+    artifact = output_dir / f"aotriton_lib_{bundle_key}"
+    assert (artifact / prefix / relative_kernel).read_bytes() == b"kernel payload"
+    verifier = ArtifactVerifier(output_dir, toolchain)
+    assert verifier.run_all_checks(), verifier.results
+
+
+@pytest.mark.parametrize(
+    "bundle_key,image_arch,payload_path,accepted",
+    [
+        ("gfx11", "gfx11xx", "flash/kernel.aks2", True),
+        ("gfx12_0", "gfx120x", "flash/kernel.aks2", True),
+        ("gfx942", "gfx942", "flash/kernel.aks2", True),
+        ("gfx11", "gfx120x", "flash/kernel.aks2", False),
+        ("gfx12_0", "gfx11xx", "flash/kernel.aks2", False),
+        ("gfx12_1", "gfx120x", "flash/kernel.aks2", False),
+        ("gfx11", "gfx11xx", "gfx942/kernel.aks2", False),
+        ("gfx11", "gfx11xx", "flash/kernel_gfx942.aks2", False),
+        ("gfx1250", "gfx1250-strict", "flash/kernel.aks2", False),
+        ("gfx1250-strict", "gfx1250", "flash/kernel.aks2", False),
+    ],
+)
+def test_verifier_aotriton_layout(
+    tmp_path, toolchain, bundle_key, image_arch, payload_path, accepted
+):
+    artifact = tmp_path / f"aotriton_lib_{bundle_key}"
+    kernel = (
+        artifact
+        / "ml-libs/aotriton/stage/lib/aotriton.images"
+        / f"amd-{image_arch}"
+        / payload_path
+    )
+    kernel.parent.mkdir(parents=True)
+    kernel.write_bytes(b"kernel payload")
+    verifier = ArtifactVerifier(tmp_path, toolchain)
+    verifier._check_architecture_separation([artifact])
+    result = verifier.results[-1]
+    assert result.passed == accepted, result.details
 
 
 class TestBaseArch:
@@ -52,6 +120,32 @@ class TestBaseArch:
 
 class TestArtifactSplitterIntegration:
     """Integration tests for the complete artifact splitting workflow."""
+
+    @staticmethod
+    def _require_materialized_binary(binary_path: Path, magic: bytes) -> None:
+        with open(binary_path, "rb") as f:
+            assert (
+                f.read(len(magic)) == magic
+            ), f"{binary_path.name} must be materialized by Git LFS"
+
+    @staticmethod
+    def _create_generic_artifact_binary(
+        tmp_path: Path, binary_relpath: str
+    ) -> tuple[Path, str, Path]:
+        artifacts_dir = tmp_path / "artifacts"
+        generic_dir = artifacts_dir / "rocwmma_test_generic"
+        generic_dir.mkdir(parents=True)
+
+        prefix = "math-libs/rocWMMA/stage"
+        write_artifact_manifest(generic_dir, [prefix])
+
+        binary_path = generic_dir / prefix / binary_relpath
+        binary_path.parent.mkdir(parents=True)
+        return artifacts_dir, prefix, binary_path
+
+    @staticmethod
+    def _details_text(details: list[str]) -> str:
+        return "\n".join(details).replace("\\", "/")
 
     @pytest.fixture
     def create_test_artifact(self, tmp_path):
@@ -230,6 +324,235 @@ class TestArtifactSplitterIntegration:
         verifier = ArtifactVerifier(output_dir, toolchain, verbose=False)
         all_checks_passed = verifier.run_all_checks()
         assert all_checks_passed, "Artifact verification should pass all checks"
+
+    def test_split_binary_finds_kpack_beside_relocated_binary(
+        self, test_assets_dir, toolchain, tmp_path
+    ):
+        """A binary split under lib/ and bundled into an application directory
+        with .kpack/ beside it must find that archive, although the original
+        prefix-relative location is absent."""
+        input_dir = tmp_path / "test_artifact"
+        input_dir.mkdir()
+        prefix = "test/lib/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        lib_dir = input_dir / prefix / "lib"
+        lib_dir.mkdir(parents=True)
+        shutil.copy2(
+            test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_multi.so",
+            lib_dir / "libtest.so",
+        )
+
+        output_dir = tmp_path / "output"
+        splitter = ArtifactSplitter(
+            artifact_prefix="test_lib", toolchain=toolchain, database_handlers=[]
+        )
+        splitter.split(input_dir, output_dir)
+
+        split_binary = output_dir / "test_lib_generic" / prefix / "lib" / "libtest.so"
+        marker = read_kpack_ref_marker(split_binary)
+        assert marker is not None
+
+        # An application bundles the binary and its archives together.
+        app_dir = tmp_path / "app"
+        app_dir.mkdir()
+        bundled_binary = app_dir / "libtest.so"
+        shutil.copy2(split_binary, bundled_binary)
+        archive = app_dir / ".kpack" / "test_lib_gfx1100.kpack"
+        archive.parent.mkdir()
+        archive.touch()
+
+        # Expand the embedded patterns relative to the relocated binary.
+        candidates = [
+            bundled_binary.parent / pattern.replace("@GFXARCH@", "gfx1100")
+            for pattern in marker["kpack_search_paths"]
+        ]
+
+        # The original prefix-relative location cannot satisfy this layout.
+        assert not candidates[0].exists()
+        assert archive in candidates
+        assert next(path for path in candidates if path.is_file()) == archive
+
+    @staticmethod
+    def _make_single_binary_artifact(
+        tmp_path: Path, binary_relpath: str, source: Path
+    ) -> tuple[Path, str]:
+        """Build a one-binary artifact tree and return (artifact_dir, prefix)."""
+        artifact_dir = tmp_path / "input_artifact"
+        prefix = "test/lib/stage"
+        (artifact_dir / prefix).mkdir(parents=True)
+        write_artifact_manifest(artifact_dir, [prefix])
+
+        dest = artifact_dir / prefix / binary_relpath
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, dest)
+        return artifact_dir, prefix
+
+    @staticmethod
+    def _split(toolchain, input_dir: Path, output_dir: Path) -> None:
+        ArtifactSplitter(
+            artifact_prefix="test_lib",
+            toolchain=toolchain,
+            database_handlers=[],
+            verbose=False,
+        ).split(input_dir, output_dir)
+
+    def test_resplit_of_already_split_elf_artifact_is_a_noop(
+        self, test_assets_dir, toolchain, tmp_path
+    ):
+        """Re-driving the splitter over an already-split ELF tree does nothing.
+
+        Populating a build tree from previously split outputs, or simply
+        re-running the split step, feeds the splitter binaries it has already
+        processed. Those keep their .hip_fatbin section header, so the second
+        pass used to re-enter kpack_offload_binary() and abort with
+        "Section '.rocm_kpack_ref' already exists".
+
+        The .hip_fatbin here is patched below one page so that
+        conservative_zero_page() declines and the section stays SHT_PROGBITS.
+        That isolates this from the separated-debug-file case: the SHT_NOBITS
+        guard cannot classify this binary, only the .rocm_kpack_ref marker can.
+        """
+        source = patch_hip_fatbin_size(
+            test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_single.so",
+            tmp_path / "libsmall.so",
+            new_size=3000,
+        )
+        input_dir, prefix = self._make_single_binary_artifact(
+            tmp_path, "lib/libtest.so", source
+        )
+
+        first_output = tmp_path / "output_pass1"
+        self._split(toolchain, input_dir, first_output)
+
+        first_generic = first_output / "test_lib_generic"
+        split_binary = first_generic / prefix / "lib/libtest.so"
+        surgery = ElfSurgery.load(split_binary)
+        assert surgery.find_section(".rocm_kpack_ref") is not None
+        assert not surgery.find_section(".hip_fatbin").header.is_nobits, (
+            "fixture must keep .hip_fatbin PROGBITS so this test covers the "
+            "already-split case rather than the SHT_NOBITS case"
+        )
+        assert list(first_output.glob("test_lib_gfx*")), "pass 1 must split something"
+
+        # Second pass over the already-split generic artifact must not raise.
+        second_output = tmp_path / "output_pass2"
+        self._split(toolchain, first_generic, second_output)
+
+        assert (
+            list(second_output.glob("test_lib_gfx*")) == []
+        ), "re-split must not produce per-arch artifacts; the device code is gone"
+        assert (
+            second_output / "test_lib_generic" / prefix / "lib/libtest.so"
+        ).read_bytes() == split_binary.read_bytes(), (
+            "binary must pass through unchanged"
+        )
+
+    def test_resplit_of_already_split_coff_artifact_is_a_noop(
+        self, test_assets_dir, toolchain, tmp_path
+    ):
+        """Same idempotency guarantee for PE/COFF, keyed off .kpackrf.
+
+        No zero-paging happens on the COFF path, so .hip_fat always survives
+        the transform with its contents and every re-split failed.
+        """
+        source = (
+            test_assets_dir / "bundled_binaries/windows/cov5/test_kernel_single.dll"
+        )
+        self._require_materialized_binary(source, b"MZ")
+        input_dir, prefix = self._make_single_binary_artifact(
+            tmp_path, "bin/test.dll", source
+        )
+
+        first_output = tmp_path / "output_pass1"
+        self._split(toolchain, input_dir, first_output)
+
+        first_generic = first_output / "test_lib_generic"
+        split_binary = first_generic / prefix / "bin/test.dll"
+        surgery = CoffSurgery.load(split_binary)
+        assert surgery.find_section(".kpackrf") is not None
+        assert surgery.find_section(".hip_fat") is not None
+        assert list(first_output.glob("test_lib_gfx*")), "pass 1 must split something"
+
+        second_output = tmp_path / "output_pass2"
+        self._split(toolchain, first_generic, second_output)
+
+        assert (
+            list(second_output.glob("test_lib_gfx*")) == []
+        ), "re-split must not produce per-arch artifacts; the device code is gone"
+        assert (
+            second_output / "test_lib_generic" / prefix / "bin/test.dll"
+        ).read_bytes() == split_binary.read_bytes(), (
+            "binary must pass through unchanged"
+        )
+
+    @pytest.mark.parametrize("binary_format", ["elf", "coff"])
+    @pytest.mark.parametrize("layout", ["same-prefix", "processed-first", "fat-first"])
+    @pytest.mark.parametrize("reuse_output", [False, True])
+    def test_mixed_resplit_rejected_before_writing(
+        self, test_assets_dir, toolchain, tmp_path, binary_format, layout, reuse_output
+    ):
+        """A partial rebuild must not replace an archive with only new kernels.
+
+        Validate across the entire artifact, including prefixes visited before
+        the processed binary is discovered, and preserve any previous output.
+        """
+        if binary_format == "elf":
+            source = patch_hip_fatbin_size(
+                test_assets_dir
+                / "bundled_binaries/linux/cov5/libtest_kernel_single.so",
+                tmp_path / "small.so",
+                new_size=3000,
+            )
+        else:
+            source = (
+                test_assets_dir / "bundled_binaries/windows/cov5/test_kernel_single.dll"
+            )
+
+        processed_prefix = "a/stage"
+        fat_prefix = processed_prefix if layout == "same-prefix" else "b/stage"
+        prefixes = [processed_prefix]
+        if fat_prefix != processed_prefix:
+            prefixes.append(fat_prefix)
+        if layout == "fat-first":
+            prefixes.reverse()
+
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        write_artifact_manifest(input_dir, prefixes)
+        processed_relpath = Path(processed_prefix) / "lib/a.so"
+        fat_relpath = Path(fat_prefix) / "lib/b.so"
+        for relpath in (processed_relpath, fat_relpath):
+            dest = input_dir / relpath
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, dest)
+
+        first_output = tmp_path / "first_output"
+        self._split(toolchain, input_dir, first_output)
+        mixed_input = tmp_path / "mixed_input"
+        shutil.copytree(first_output / "test_lib_generic", mixed_input)
+        shutil.copy2(source, mixed_input / fat_relpath)
+
+        output_dir = first_output if reuse_output else tmp_path / "new_output"
+
+        def snapshot(root):
+            return {
+                path.relative_to(root): path.read_bytes() if path.is_file() else None
+                for path in root.rglob("*")
+            }
+
+        input_before = snapshot(mixed_input)
+        output_before = snapshot(output_dir)
+        with pytest.raises(
+            RuntimeError, match="both already kpack-processed and unprocessed"
+        ) as exc:
+            self._split(toolchain, mixed_input, output_dir)
+
+        assert processed_relpath.as_posix() in str(exc.value)
+        assert fat_relpath.as_posix() in str(exc.value)
+        assert snapshot(mixed_input) == input_before
+        assert snapshot(output_dir) == output_before
+        assert output_dir.exists() == reuse_output
 
     def test_artifact_with_database_files(
         self, create_test_artifact, toolchain, tmp_path
@@ -512,6 +835,42 @@ class TestArtifactSplitterIntegration:
         assert (arch_db_path / "TensileLibrary_gfx1100.dat").exists()
         assert (arch_db_path / "TensileLibrary_gfx1100.co").exists()
 
+    def test_hotswap_cache_moves_only_to_gfx1250(self, toolchain, tmp_path):
+        parent_dir = tmp_path / "shard"
+        input_dir = parent_dir / "rccl_lib_gfx1250-gfx1100"
+        input_dir.mkdir(parents=True)
+        prefix = "comm-libs/rccl-translate/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        prefix_dir = input_dir / prefix
+        (prefix_dir / "share").mkdir(parents=True)
+        (prefix_dir / "share/common.txt").write_text("generic")
+        digest = "0123456789abcdef" * 4
+        cache_dir = prefix_dir / "share/rocjitsu/translations/gfx1250-b0-a0/v1"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / f"{digest}.obj").write_text("translated object")
+        (cache_dir / f"{digest}.man").write_text("manifest")
+
+        output_dir = tmp_path / "output"
+        args = Namespace(
+            input_dir=parent_dir,
+            output_dir=output_dir,
+            split_databases=["hotswap_cache"],
+            verbose=False,
+            tmp_dir=tmp_path / "tmp",
+            gpu_targets=["gfx1250", "gfx1100"],
+        )
+        batch_split(args, toolchain)
+
+        relative_cache = Path("share/rocjitsu/translations/gfx1250-b0-a0/v1")
+        gfx1250_prefix = output_dir / "rccl_lib_gfx1250" / prefix
+        generic_prefix = output_dir / "rccl_lib_generic" / prefix
+        assert (gfx1250_prefix / relative_cache / f"{digest}.obj").exists()
+        assert (gfx1250_prefix / relative_cache / f"{digest}.man").exists()
+        assert not (generic_prefix / relative_cache).exists()
+        assert (generic_prefix / "share/common.txt").exists()
+        assert not (output_dir / "rccl_lib_gfx1100").exists()
+
     def test_kpack_uses_original_prefix_not_synthetic(
         self, test_assets_dir, toolchain, tmp_path
     ):
@@ -778,9 +1137,9 @@ class TestArtifactSplitterIntegration:
             visitor.visit_file(ck_so, test_dir)
 
         # Should be in database_files_by_arch, NOT in fat_binaries
-        assert len(visitor.fat_binaries) == 0, (
-            "CK .so should not be classified as a fat binary"
-        )
+        assert (
+            len(visitor.fat_binaries) == 0
+        ), "CK .so should not be classified as a fat binary"
         assert "gfx942" in visitor.database_files_by_arch
         assert len(visitor.database_files_by_arch["gfx942"]) == 1
         assert visitor.database_files_by_arch["gfx942"][0][0] == ck_so
@@ -808,9 +1167,9 @@ class TestArtifactSplitterIntegration:
             visitor.visit_file(ck_dll, test_dir)
 
         # Should be in database_files_by_arch, NOT in fat_binaries
-        assert len(visitor.fat_binaries) == 0, (
-            "CK .dll should not be classified as a fat binary"
-        )
+        assert (
+            len(visitor.fat_binaries) == 0
+        ), "CK .dll should not be classified as a fat binary"
         assert "gfx942" in visitor.database_files_by_arch
         assert len(visitor.database_files_by_arch["gfx942"]) == 1
         assert visitor.database_files_by_arch["gfx942"][0][0] == ck_dll
@@ -866,32 +1225,30 @@ class TestArtifactSplitterIntegration:
         # gfx942 db file should NOT be in generic
         generic_dir = output_dir / "miopen_lib_generic"
         generic_gfx942_db = generic_dir / prefix / "share/miopen/db/gfx942_68.HIP.model"
-        assert not generic_gfx942_db.exists(), (
-            "gfx942 db file should not be in generic artifact"
-        )
+        assert (
+            not generic_gfx942_db.exists()
+        ), "gfx942 db file should not be in generic artifact"
 
         # Filtered-out architectures should NOT have per-arch directories
-        assert not (output_dir / "miopen_lib_gfx1100").exists(), (
-            "gfx1100 per-arch directory should not exist when filtered out"
-        )
-        assert not (output_dir / "miopen_lib_gfx90a").exists(), (
-            "gfx90a per-arch directory should not exist when filtered out"
-        )
+        assert not (
+            output_dir / "miopen_lib_gfx1100"
+        ).exists(), "gfx1100 per-arch directory should not exist when filtered out"
+        assert not (
+            output_dir / "miopen_lib_gfx90a"
+        ).exists(), "gfx90a per-arch directory should not exist when filtered out"
 
         # Filtered-out database files should NOT be in generic either
         # (per-arch content doesn't belong in generic — the correct arch job produces it)
         generic_gfx1100_db = (
             generic_dir / prefix / "share/miopen/db/gfx1100_68.HIP.model"
         )
-        generic_gfx90a_db = (
-            generic_dir / prefix / "share/miopen/db/gfx90a_68.HIP.model"
-        )
-        assert not generic_gfx1100_db.exists(), (
-            "gfx1100 db file should not be in generic artifact"
-        )
-        assert not generic_gfx90a_db.exists(), (
-            "gfx90a db file should not be in generic artifact"
-        )
+        generic_gfx90a_db = generic_dir / prefix / "share/miopen/db/gfx90a_68.HIP.model"
+        assert (
+            not generic_gfx1100_db.exists()
+        ), "gfx1100 db file should not be in generic artifact"
+        assert (
+            not generic_gfx90a_db.exists()
+        ), "gfx90a db file should not be in generic artifact"
 
         # Regular library should be in generic
         generic_lib = generic_dir / prefix / "lib/libMIOpen.so"
@@ -937,15 +1294,15 @@ class TestArtifactSplitterIntegration:
         splitter.split(input_dir, output_dir)
 
         # All three per-arch directories should exist
-        assert (output_dir / "miopen_lib_gfx942").exists(), (
-            "gfx942 per-arch directory should exist"
-        )
-        assert (output_dir / "miopen_lib_gfx1100").exists(), (
-            "gfx1100 per-arch directory should exist"
-        )
-        assert (output_dir / "miopen_lib_gfx90a").exists(), (
-            "gfx90a per-arch directory should exist"
-        )
+        assert (
+            output_dir / "miopen_lib_gfx942"
+        ).exists(), "gfx942 per-arch directory should exist"
+        assert (
+            output_dir / "miopen_lib_gfx1100"
+        ).exists(), "gfx1100 per-arch directory should exist"
+        assert (
+            output_dir / "miopen_lib_gfx90a"
+        ).exists(), "gfx90a per-arch directory should exist"
 
         # All database files should be in their respective per-arch directories
         assert (
@@ -1016,15 +1373,17 @@ class TestArtifactSplitterIntegration:
         splitter.split(input_dir, output_dir)
 
         # Only gfx942 per-arch directory should exist (feature flags stripped)
-        assert (output_dir / "miopen_lib_gfx942").exists(), (
+        assert (
+            output_dir / "miopen_lib_gfx942"
+        ).exists(), (
             "gfx942 per-arch directory should exist despite feature flags in target"
         )
-        assert not (output_dir / "miopen_lib_gfx1100").exists(), (
-            "gfx1100 per-arch directory should not exist when filtered out"
-        )
-        assert not (output_dir / "miopen_lib_gfx90a").exists(), (
-            "gfx90a per-arch directory should not exist when filtered out"
-        )
+        assert not (
+            output_dir / "miopen_lib_gfx1100"
+        ).exists(), "gfx1100 per-arch directory should not exist when filtered out"
+        assert not (
+            output_dir / "miopen_lib_gfx90a"
+        ).exists(), "gfx90a per-arch directory should not exist when filtered out"
 
     def test_gpu_targets_keeps_xnack_variant_database_files(self, toolchain, tmp_path):
         """
@@ -1132,9 +1491,7 @@ class TestArtifactSplitterIntegration:
             },
         )()
 
-        with patch(
-            "rocm_kpack.artifact_splitter.BundledBinary"
-        ) as MockBinary:
+        with patch("rocm_kpack.artifact_splitter.BundledBinary") as MockBinary:
             MockBinary.return_value.unbundle.return_value = mock_unbundled
 
             # With gpu_targets=["gfx1100"], only gfx1100 kernels should appear
@@ -1166,23 +1523,404 @@ class TestArtifactSplitterIntegration:
             )
 
         # Filtered: only targeted architecture should be present
-        assert "gfx1100" in result_filtered, (
-            "gfx1100 should be in filtered results (in gpu_targets)"
-        )
-        assert len(result_filtered["gfx1100"]) == 1, (
-            "gfx1100 kernel should be preserved intact"
-        )
-        assert result_filtered["gfx1100"][0].kernel_data == b"\x00" * 100, (
-            "gfx1100 kernel data should be unchanged by filtering"
-        )
-        assert "gfx906" not in result_filtered, (
-            "gfx906 should not be in filtered results (not in gpu_targets)"
-        )
+        assert (
+            "gfx1100" in result_filtered
+        ), "gfx1100 should be in filtered results (in gpu_targets)"
+        assert (
+            len(result_filtered["gfx1100"]) == 1
+        ), "gfx1100 kernel should be preserved intact"
+        assert (
+            result_filtered["gfx1100"][0].kernel_data == b"\x00" * 100
+        ), "gfx1100 kernel data should be unchanged by filtering"
+        assert (
+            "gfx906" not in result_filtered
+        ), "gfx906 should not be in filtered results (not in gpu_targets)"
 
         # Unfiltered: all architectures should be present
-        assert "gfx1100" in result_unfiltered, (
-            "gfx1100 should be in unfiltered results"
+        assert "gfx1100" in result_unfiltered, "gfx1100 should be in unfiltered results"
+        assert "gfx906" in result_unfiltered, "gfx906 should be in unfiltered results"
+
+    def test_gpu_targets_rejects_generic_when_all_fat_binary_kernels_filtered(
+        self, toolchain, tmp_path
+    ):
+        """
+        Test that split() fails instead of emitting a raw generic artifact when
+        gpu_targets filters out every code object from detected fat binaries.
+        """
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+
+        prefix = "math-libs/rocWMMA/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        lib_dir = input_dir / prefix / "lib"
+        lib_dir.mkdir(parents=True)
+        fat_binary = lib_dir / "librocwmma.so"
+        fat_binary.write_text("placeholder")
+
+        mock_unbundled = type(
+            "MockUnbundled",
+            (),
+            {
+                "target_list": [("hipv4-amdgcn-amd-amdhsa--gfx906", "gfx906.hsaco")],
+                "dest_dir": tmp_path / "unbundled",
+                "__enter__": lambda s: s,
+                "__exit__": lambda s, *a: None,
+            },
+        )()
+        mock_unbundled.dest_dir.mkdir()
+
+        with patch(
+            "rocm_kpack.artifact_splitter.is_fat_binary", return_value=True
+        ), patch("rocm_kpack.artifact_splitter.BundledBinary") as MockBinary:
+            MockBinary.return_value.unbundle.return_value = mock_unbundled
+
+            splitter = ArtifactSplitter(
+                artifact_prefix="rocwmma_test",
+                toolchain=toolchain,
+                database_handlers=[],
+                verbose=True,
+                gpu_targets=["gfx1100"],
+            )
+
+            with pytest.raises(
+                RuntimeError,
+                match="no device code objects matched --gpu-targets",
+            ):
+                splitter.split(input_dir, tmp_path / "output")
+
+    @pytest.mark.parametrize(
+        ("fixture_name", "binary_relpath", "wrapper_failure"),
+        [
+            (
+                "test_kernel_single.exe",
+                "bin/vector_iterator_test",
+                "1 wrapper(s) still use HIPF magic",
+            ),
+            (
+                "test_kernel_multi.exe",
+                "bin/multi_arch_vector_iterator_test",
+                "1 wrapper(s) still use HIPF magic",
+            ),
+            (
+                "libtest_multi_wrapper.so",
+                "lib/libtest_multi_wrapper.so",
+                "2 wrapper(s) still use HIPF magic",
+            ),
+        ],
+    )
+    def test_verifier_rejects_raw_generic_elf_fat_binaries(
+        self,
+        fixture_name,
+        binary_relpath,
+        wrapper_failure,
+        test_assets_dir,
+        toolchain,
+        tmp_path,
+    ):
+        """
+        Test that verification scans generic executables and libraries, then
+        rejects raw untransformed ELF HIPF fat binaries.
+        """
+        raw_fat_binary = test_assets_dir / "bundled_binaries/linux/cov5" / fixture_name
+        self._require_materialized_binary(raw_fat_binary, b"\x7fELF")
+        artifacts_dir, prefix, generic_binary = self._create_generic_artifact_binary(
+            tmp_path, binary_relpath
         )
-        assert "gfx906" in result_unfiltered, (
-            "gfx906 should be in unfiltered results"
+        shutil.copy2(raw_fat_binary, generic_binary)
+
+        verifier = ArtifactVerifier(artifacts_dir, toolchain, verbose=False)
+
+        assert verifier.run_all_checks() is False
+
+        fat_binary_result = next(
+            result
+            for result in verifier.results
+            if result.check_name == "Fat Binary Conversion"
+        )
+        assert fat_binary_result.passed is False
+        details = self._details_text(fat_binary_result.details)
+        assert f"{prefix}/{binary_relpath}" in details
+        assert "still has PROGBITS .hip_fatbin" in details
+        assert "missing .rocm_kpack_ref marker" in details
+        assert wrapper_failure in details
+
+    def test_verifier_accepts_kpack_transformed_elf_multi_wrapper_fat_binary(
+        self, test_assets_dir, toolchain, tmp_path
+    ):
+        """Test that all wrappers in a transformed ELF multi-wrapper binary pass."""
+        raw_fat_binary = (
+            test_assets_dir / "bundled_binaries/linux/cov5/libtest_multi_wrapper.so"
+        )
+        self._require_materialized_binary(raw_fat_binary, b"\x7fELF")
+        artifacts_dir, prefix, generic_binary = self._create_generic_artifact_binary(
+            tmp_path, "lib/libtest_multi_wrapper.so"
+        )
+
+        kpack_offload_binary(
+            input_path=raw_fat_binary,
+            output_path=generic_binary,
+            kpack_search_paths=["../.kpack/rocwmma_test_@GFXARCH@.kpack"],
+            kernel_name=f"{prefix}/lib/libtest_multi_wrapper.so",
+        )
+
+        verifier = ArtifactVerifier(artifacts_dir, toolchain, verbose=False)
+
+        assert verifier.run_all_checks() is True
+
+        fat_binary_result = next(
+            result
+            for result in verifier.results
+            if result.check_name == "Fat Binary Conversion"
+        )
+        details = self._details_text(fat_binary_result.details)
+        assert "lib/libtest_multi_wrapper.so" in details
+        assert "ELF" in details
+        assert "NOBITS" in details
+
+    def test_verifier_rejects_transformed_elf_with_stale_hipf_wrapper_magic(
+        self, test_assets_dir, toolchain, tmp_path
+    ):
+        """
+        Test that a binary with stripped fatbin contents and a kpack marker still
+        fails if any wrapper remains HIPF instead of HIPK.
+        """
+        raw_fat_binary = (
+            test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_single.exe"
+        )
+        self._require_materialized_binary(raw_fat_binary, b"\x7fELF")
+        artifacts_dir, prefix, generic_binary = self._create_generic_artifact_binary(
+            tmp_path, "bin/vector_iterator_test"
+        )
+
+        kpack_offload_binary(
+            input_path=raw_fat_binary,
+            output_path=generic_binary,
+            kpack_search_paths=["../.kpack/rocwmma_test_@GFXARCH@.kpack"],
+            kernel_name=f"{prefix}/bin/vector_iterator_test",
+        )
+
+        surgery = ElfSurgery.load(generic_binary)
+        wrapper_section = surgery.find_section(".hipFatBinSegment")
+        assert wrapper_section is not None
+        wrapper_offset = surgery.vaddr_to_file_offset(wrapper_section.header.sh_addr)
+        assert wrapper_offset is not None
+        surgery.write_bytes_at_offset(
+            wrapper_offset,
+            struct.pack("<I", ELF_HIPF_MAGIC),
+            "restore stale HIPF wrapper magic",
+        )
+        surgery.save(generic_binary)
+
+        verifier = ArtifactVerifier(artifacts_dir, toolchain, verbose=False)
+
+        assert verifier.run_all_checks() is False
+
+        fat_binary_result = next(
+            result
+            for result in verifier.results
+            if result.check_name == "Fat Binary Conversion"
+        )
+        assert fat_binary_result.passed is False
+        details = self._details_text(fat_binary_result.details)
+        assert f"{prefix}/bin/vector_iterator_test" in details
+        assert "1 wrapper(s) still use HIPF magic" in details
+        assert "still has PROGBITS .hip_fatbin" not in details
+        assert "missing .rocm_kpack_ref marker" not in details
+
+    def test_verifier_rejects_raw_generic_coff_fat_binary(
+        self, test_assets_dir, toolchain, tmp_path
+    ):
+        """Test that generic PE/COFF HIPF fat binaries are rejected."""
+        raw_fat_binary = (
+            test_assets_dir / "bundled_binaries/windows/cov5/test_kernel_single.exe"
+        )
+        self._require_materialized_binary(raw_fat_binary, b"MZ")
+        artifacts_dir, prefix, generic_binary = self._create_generic_artifact_binary(
+            tmp_path, "bin/vector_iterator_test.exe"
+        )
+        shutil.copy2(raw_fat_binary, generic_binary)
+
+        verifier = ArtifactVerifier(artifacts_dir, toolchain, verbose=False)
+
+        assert verifier.run_all_checks() is False
+
+        fat_binary_result = next(
+            result
+            for result in verifier.results
+            if result.check_name == "Fat Binary Conversion"
+        )
+        assert fat_binary_result.passed is False
+        details = self._details_text(fat_binary_result.details)
+        assert f"{prefix}/bin/vector_iterator_test.exe" in details
+        assert "still has unstripped" in details
+        assert ".hip_fat" in details
+        assert "missing .kpackrf marker" in details
+        assert "1 wrapper(s) still use HIPF magic" in details
+
+    def test_verifier_accepts_kpack_transformed_coff_fat_binary(
+        self, test_assets_dir, toolchain, tmp_path
+    ):
+        """Test that transformed PE/COFF fat binaries pass verifier checks."""
+        raw_fat_binary = (
+            test_assets_dir / "bundled_binaries/windows/cov5/test_kernel_single.exe"
+        )
+        self._require_materialized_binary(raw_fat_binary, b"MZ")
+        artifacts_dir, prefix, generic_binary = self._create_generic_artifact_binary(
+            tmp_path, "bin/vector_iterator_test.exe"
+        )
+
+        kpack_offload_binary(
+            input_path=raw_fat_binary,
+            output_path=generic_binary,
+            kpack_search_paths=["../.kpack/rocwmma_test_@GFXARCH@.kpack"],
+            kernel_name=f"{prefix}/bin/vector_iterator_test.exe",
+        )
+
+        verifier = ArtifactVerifier(artifacts_dir, toolchain, verbose=False)
+
+        assert verifier.run_all_checks() is True
+
+        fat_binary_result = next(
+            result
+            for result in verifier.results
+            if result.check_name == "Fat Binary Conversion"
+        )
+        details = self._details_text(fat_binary_result.details)
+        assert "bin/vector_iterator_test.exe" in details
+        assert "COFF" in details
+
+    def test_verifier_pads_coff_wrapper_section_to_virtual_size(
+        self, toolchain, tmp_path
+    ):
+        """Test that virtual wrapper bytes are included when reading COFF magic."""
+        raw_wrapper = struct.pack("<I", COFF_HIPK_MAGIC) + b"\x00" * (
+            COFF_WRAPPER_SIZE - 4
+        )
+        section = SimpleNamespace(virtual_size=COFF_WRAPPER_SIZE * 2)
+
+        class FakeSurgery:
+            def find_section(self, section_name):
+                assert section_name == ".hipFatB"
+                return section
+
+            def get_section_content(self, found_section):
+                assert found_section is section
+                return raw_wrapper
+
+        verifier = ArtifactVerifier(tmp_path, toolchain, verbose=False)
+
+        wrapper_magics, wrapper_error = verifier._read_wrapper_magics(
+            FakeSurgery(), ".hipFatB", COFF_WRAPPER_SIZE
+        )
+
+        assert wrapper_error is None
+        assert wrapper_magics == [COFF_HIPK_MAGIC, 0]
+
+    def test_verifier_rejects_transformed_coff_with_stale_hipf_wrapper_magic(
+        self, test_assets_dir, toolchain, tmp_path
+    ):
+        """Test that transformed-looking PE/COFF binaries fail on stale HIPF magic."""
+        raw_fat_binary = (
+            test_assets_dir / "bundled_binaries/windows/cov5/test_kernel_single.exe"
+        )
+        self._require_materialized_binary(raw_fat_binary, b"MZ")
+        artifacts_dir, prefix, generic_binary = self._create_generic_artifact_binary(
+            tmp_path, "bin/vector_iterator_test.exe"
+        )
+
+        kpack_offload_binary(
+            input_path=raw_fat_binary,
+            output_path=generic_binary,
+            kpack_search_paths=["../.kpack/rocwmma_test_@GFXARCH@.kpack"],
+            kernel_name=f"{prefix}/bin/vector_iterator_test.exe",
+        )
+
+        surgery = CoffSurgery.load(generic_binary)
+        wrapper_section = surgery.find_section(".hipFatB")
+        assert wrapper_section is not None
+        surgery.write_bytes_at_offset(
+            wrapper_section.file_offset,
+            struct.pack("<I", COFF_HIPF_MAGIC),
+            "restore stale HIPF wrapper magic",
+        )
+        surgery.save(generic_binary)
+
+        verifier = ArtifactVerifier(artifacts_dir, toolchain, verbose=False)
+
+        assert verifier.run_all_checks() is False
+
+        fat_binary_result = next(
+            result
+            for result in verifier.results
+            if result.check_name == "Fat Binary Conversion"
+        )
+        assert fat_binary_result.passed is False
+        details = self._details_text(fat_binary_result.details)
+        assert f"{prefix}/bin/vector_iterator_test.exe" in details
+        assert "1 wrapper(s) still use HIPF magic" in details
+        assert "missing .kpackrf marker" not in details
+
+    def test_verifier_rejects_unreadable_generic_binary(self, toolchain, tmp_path):
+        """
+        Test that a file with ELF magic that cannot be parsed does not get
+        classified as a host-only binary.
+        """
+        artifacts_dir = tmp_path / "artifacts"
+        generic_dir = artifacts_dir / "rocwmma_test_generic"
+        generic_dir.mkdir(parents=True)
+
+        prefix = "math-libs/rocWMMA/stage"
+        write_artifact_manifest(generic_dir, [prefix])
+
+        bin_dir = generic_dir / prefix / "bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "truncated_test").write_bytes(b"\x7fELF")
+
+        verifier = ArtifactVerifier(artifacts_dir, toolchain, verbose=False)
+
+        assert verifier.run_all_checks() is False
+
+        fat_binary_result = next(
+            result
+            for result in verifier.results
+            if result.check_name == "Fat Binary Conversion"
+        )
+        assert fat_binary_result.passed is False
+        assert any("truncated_test" in detail for detail in fat_binary_result.details)
+        assert any(
+            "failed to inspect ELF binary" in detail
+            for detail in fat_binary_result.details
+        )
+
+    def test_verifier_rejects_unreadable_generic_coff_binary(self, toolchain, tmp_path):
+        """
+        Test that a file with PE/COFF magic that cannot be parsed does not get
+        classified as a host-only binary.
+        """
+        artifacts_dir, _, generic_binary = self._create_generic_artifact_binary(
+            tmp_path, "bin/truncated_test.exe"
+        )
+        truncated_coff = bytearray(0x44)
+        truncated_coff[0:2] = b"MZ"
+        truncated_coff[0x3C:0x40] = (0x40).to_bytes(4, "little")
+        truncated_coff[0x40:0x44] = b"PE\x00\x00"
+        generic_binary.write_bytes(truncated_coff)
+
+        verifier = ArtifactVerifier(artifacts_dir, toolchain, verbose=False)
+
+        assert verifier.run_all_checks() is False
+
+        fat_binary_result = next(
+            result
+            for result in verifier.results
+            if result.check_name == "Fat Binary Conversion"
+        )
+        assert fat_binary_result.passed is False
+        assert any(
+            "truncated_test.exe" in detail for detail in fat_binary_result.details
+        )
+        assert any(
+            "failed to inspect COFF binary" in detail
+            for detail in fat_binary_result.details
         )

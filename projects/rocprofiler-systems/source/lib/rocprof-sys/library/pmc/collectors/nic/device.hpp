@@ -41,6 +41,8 @@ template <nic_backend_contract Backend>
 class device
 {
 public:
+    using backend_type = Backend;
+
     /**
      * @brief Construct a NIC device wrapper.
      *
@@ -94,7 +96,7 @@ public:
 
         try
         {
-            auto stats = m_backend->get_nic_rdma_port_statistics(0);
+            auto const stats = m_backend->get_nic_rdma_port_statistics(0);
 
             static const std::unordered_map<std::string_view, std::uint64_t metrics::*>
                 METRIC_MAP = { { "rx_rdma_ucast_bytes", &metrics::rx_rdma_ucast_bytes },
@@ -111,10 +113,10 @@ public:
 
             for(const auto& stat : stats)
             {
-                auto it = METRIC_MAP.find(stat.name);
+                auto const it = METRIC_MAP.find(stat.name);
                 if(it != METRIC_MAP.end())
                 {
-                    nic_metrics.*(it->second) = stat.value;
+                    nic_metrics.*it->second = stat.value;
                 }
             }
         } catch(const std::runtime_error& e)
@@ -138,9 +140,9 @@ private:
     {
         try
         {
-            auto asic      = m_backend->get_nic_asic_info();
-            m_product_name = asic.product_name;
-            m_vendor_name  = asic.vendor_name;
+            auto const asic = m_backend->get_nic_asic_info();
+            m_product_name  = asic.product_name;
+            m_vendor_name   = asic.vendor_name;
         } catch(const std::runtime_error& e)
         {
             LOG_DEBUG("NIC device [{}]: {}", m_index, e.what());
@@ -148,8 +150,8 @@ private:
 
         try
         {
-            auto port     = m_backend->get_nic_port_info();
-            m_device_name = port.device_name;
+            auto const port = m_backend->get_nic_port_info();
+            m_device_name   = port.device_name;
         } catch(const std::runtime_error& e)
         {
             LOG_DEBUG("NIC device [{}]: {}", m_index, e.what());
@@ -157,7 +159,7 @@ private:
 
         try
         {
-            auto rdma         = m_backend->get_nic_rdma_info();
+            auto const rdma   = m_backend->get_nic_rdma_info();
             m_rdma_port_count = rdma.port_count;
         } catch(const std::runtime_error& e)
         {
@@ -173,7 +175,7 @@ private:
 
         try
         {
-            auto stats = m_backend->get_nic_rdma_port_statistics(0);
+            auto const stats = m_backend->get_nic_rdma_port_statistics(0);
             if(stats.empty())
             {
                 LOG_DEBUG("NIC device [{}] has no RDMA statistics available", m_index);

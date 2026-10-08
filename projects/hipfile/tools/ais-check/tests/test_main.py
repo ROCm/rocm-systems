@@ -18,18 +18,32 @@ _UNAME = namedtuple("uname_result", "sysname nodename release version machine")
 @pytest.fixture
 def stub_checks(monkeypatch, ais_check):
     """
-    Stub the three component checks plus os.uname so main() runs hermetically.
+    Stub the four component checks plus os.uname so main() runs hermetically.
     Returns a setter that fixes each component's support and the HIP library map.
     """
 
-    def configure(*, p2pdma=True, amdgpu=True, hip_libraries=None):
+    def configure(*, p2pdma=True, amdgpu=True, hip_libraries=None, volumes=True):
         if hip_libraries is None:
             hip_libraries = {"/opt/rocm/lib/libamdhip64.so": True}
+        # capable_volumes() touches /proc/self/mountinfo and probes O_DIRECT, so
+        # stub it to keep main() hermetic. Return one row whose capability tracks
+        # the requested `volumes` flag.
+        rows = [
+            {
+                "mountpoint": "/data",
+                "fstype": "xfs",
+                "device": "nvme0n1",
+                "backing": "nvme",
+                "odirect": volumes,
+                "capable": volumes,
+            }
+        ]
         monkeypatch.setattr(ais_check, "kernel_supports_p2pdma", lambda: p2pdma)
         monkeypatch.setattr(ais_check, "amdgpu_supports_ais", lambda: amdgpu)
         monkeypatch.setattr(
             ais_check, "hip_runtime_supports_ais", lambda: dict(hip_libraries)
         )
+        monkeypatch.setattr(ais_check, "capable_volumes", lambda: (rows, volumes))
         monkeypatch.setattr(
             ais_check.os,
             "uname",
@@ -56,6 +70,7 @@ def test_all_supported_exit_zero(monkeypatch, stub_checks, ais_check):
         {"amdgpu": False},
         {"hip_libraries": {"/opt/rocm/lib/libamdhip64.so": False}},
         {"hip_libraries": {}},
+        {"volumes": False},
     ],
 )
 def test_any_missing_component_exit_nonzero(
@@ -84,6 +99,10 @@ def test_default_output_lists_components(monkeypatch, capsys, stub_checks, ais_c
     assert "Kernel P2PDMA support" in out
     assert "HIP runtime" in out
     assert "amdgpu" in out
+    assert "hipFile-capable volume" in out
+    # The volume table is printed on every normal run.
+    assert "Mounted volumes:" in out
+    assert "MOUNTPOINT" in out
     # The uname banner is printed.
     assert "Linux host 6.6.0" in out
 

@@ -58,6 +58,9 @@ namespace {
         ptr_dispatch_table->pfn_hipfile_set_parameter_size_t = hipFile::hipFileSetParameterSizeT;
         ptr_dispatch_table->pfn_hipfile_set_parameter_bool   = hipFile::hipFileSetParameterBool;
         ptr_dispatch_table->pfn_hipfile_set_parameter_string = hipFile::hipFileSetParameterString;
+        ptr_dispatch_table->pfn_hipfile_get_stats_l1         = hipFile::hipFileGetStatsL1;
+        ptr_dispatch_table->pfn_hipfile_get_stats_l2         = hipFile::hipFileGetStatsL2;
+        ptr_dispatch_table->pfn_hipfile_get_stats_l3         = hipFile::hipFileGetStatsL3;
     }
 
 #if HIPFILE_ROCPROFILER_REGISTER > 0
@@ -169,14 +172,18 @@ HIPFILE_ENFORCE_ABI(hipFileDispatchTable, pfn_hipfile_set_parameter_size_t, 28)
 HIPFILE_ENFORCE_ABI(hipFileDispatchTable, pfn_hipfile_set_parameter_bool, 29)
 HIPFILE_ENFORCE_ABI(hipFileDispatchTable, pfn_hipfile_set_parameter_string, 30)
 // HIPFILE_RUNTIME_API_TABLE_STEP_VERSION == 1
+HIPFILE_ENFORCE_ABI(hipFileDispatchTable, pfn_hipfile_get_stats_l1, 31)
+HIPFILE_ENFORCE_ABI(hipFileDispatchTable, pfn_hipfile_get_stats_l2, 32)
+HIPFILE_ENFORCE_ABI(hipFileDispatchTable, pfn_hipfile_get_stats_l3, 33)
+// HIPFILE_RUNTIME_API_TABLE_STEP_VERSION == 2
 
 // If HIPFILE_ENFORCE_ABI entries are added for each new function pointer in the table,
 // the number below will be one greater than the number in the last HIPFILE_ENFORCE_ABI line. For example:
-//  HIPFILE_ENFORCE_ABI(<table>, <functor>, 30)
-//  HIPFILE_ENFORCE_ABI_VERSIONING(<table>, 31) <- 30 + 1 = 31
-HIPFILE_ENFORCE_ABI_VERSIONING(hipFileDispatchTable, 31)
+//  HIPFILE_ENFORCE_ABI(<table>, <functor>, 33)
+//  HIPFILE_ENFORCE_ABI_VERSIONING(<table>, 34) <- 33 + 1 = 34
+HIPFILE_ENFORCE_ABI_VERSIONING(hipFileDispatchTable, 34)
 
-static_assert(HIPFILE_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIPFILE_RUNTIME_API_TABLE_STEP_VERSION == 0,
+static_assert(HIPFILE_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIPFILE_RUNTIME_API_TABLE_STEP_VERSION == 1,
               "If you encounter this error, add the new HIPFILE_ENFORCE_ABI(...) code for the updated "
               "function pointers, "
               "and then modify this check to ensure it evaluates to true.");

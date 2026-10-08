@@ -24,6 +24,7 @@ THE SOFTWARE.
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 
 namespace {
 // Test value constant
@@ -32,6 +33,8 @@ constexpr int kTestValueBase = 100;
 // Standard buffer size
 constexpr size_t kTestBufferElements = 1024;
 constexpr size_t kTestBufferBytes = kTestBufferElements * sizeof(int);
+
+__managed__ int g_managed_prefetch_data[kTestBufferElements];
 
 // Macro for tests requiring managed access support
 #define REQUIRE_MANAGED_ACCESS_DEVICE(device_var)                                                  \
@@ -283,8 +286,62 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity) {
 /**
  * Test Description
  * ------------------------
- *  - Test NULL dptrs, sizes, prefetchLocs, prefetchLocIdxs arrays and freed memory pointers
- *  - Verify API returns appropriate error for invalid NULL parameters and invalid pointers
+ *  - Blocks the stream with a kernel that spins until the host sets a release flag
+ *  - Enqueues a batch prefetch behind the kernel and verifies that hipStreamQuery reports
+ *    hipErrorNotReady until the host releases the kernel
+ */
+HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Sync_Behavior) {
+  REQUIRE_MANAGED_ACCESS_DEVICE(device);
+
+  const auto stream_type = GENERATE(Streams::perThread, Streams::created);
+  StreamGuard stream_guard(stream_type);
+  LinearAllocGuard<int> release(LinearAllocs::hipHostMalloc, sizeof(int));
+  *release.ptr() = 0;
+  LinearAllocGuard<int> managed_memory(LinearAllocs::hipMallocManaged, kTestBufferBytes);
+
+  std::array<void*, 1> managed_ptrs = {managed_memory.ptr()};
+  std::array<size_t, 1> buffer_sizes = {kTestBufferBytes};
+  std::array<size_t, 1> location_indices = {0};
+  constexpr unsigned long long flags = 0;
+
+  std::array<hipMemLocation, 1> device_location;
+  device_location[0].type = hipMemLocationTypeDevice;
+  device_location[0].id = device;
+
+  std::array<hipMemLocation, 1> host_location;
+  host_location[0].type = hipMemLocationTypeHost;
+  host_location[0].id = 0;
+
+  HIP_CHECK(hipMemPrefetchBatchAsync(managed_ptrs.data(), buffer_sizes.data(), managed_ptrs.size(),
+                                     device_location.data(), location_indices.data(),
+                                     location_indices.size(), flags, stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  WaitForHostRelease<<<1, 1, 0, stream_guard.stream()>>>(release.ptr());
+  HIP_CHECK(hipGetLastError());
+
+  const auto prefetch_error = hipMemPrefetchBatchAsync(
+      managed_ptrs.data(), buffer_sizes.data(), managed_ptrs.size(), host_location.data(),
+      location_indices.data(), location_indices.size(), flags, stream_guard.stream());
+
+  auto query_while_blocked = hipErrorNotReady;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{100};
+  while (query_while_blocked == hipErrorNotReady && std::chrono::steady_clock::now() < deadline) {
+    query_while_blocked = hipStreamQuery(stream_guard.stream());
+  }
+
+  __atomic_store_n(release.ptr(), 1, __ATOMIC_RELEASE);
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  HIP_CHECK(prefetch_error);
+  REQUIRE(query_while_blocked == hipErrorNotReady);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Test NULL dptrs, sizes, prefetchLocs, and prefetchLocIdxs arrays
+ *  - Verify API returns hipErrorInvalidValue for NULL parameters and hipMalloc device memory
  */
 HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_NullAndInvalidPointers) {
   REQUIRE_MANAGED_ACCESS_DEVICE(device);
@@ -330,18 +387,15 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_NullAndInvalidPointers) {
                     hipErrorInvalidValue);
   }
 
-  SECTION("Freed memory pointer") {
-    int* freed_ptr = nullptr;
-    HIP_CHECK(hipMallocManaged(&freed_ptr, kTestBufferBytes));
-    HIP_CHECK(hipFree(freed_ptr));
+  SECTION("hipMalloc device memory") {
+    LinearAllocGuard<int> device_memory(LinearAllocs::hipMalloc, kTestBufferBytes);
+    std::array<void*, 1> device_ptrs = {device_memory.ptr()};
 
-    std::array<void*, 1> freed_ptrs = {freed_ptr};
-    std::array<size_t, 1> freed_sizes = {kTestBufferBytes};
-
-    HIP_CHECK_ERROR(hipMemPrefetchBatchAsync(
-                        freed_ptrs.data(), freed_sizes.data(), freed_ptrs.size(), locations.data(),
-                        location_indices.data(), locations.size(), flags, stream_guard.stream()),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(
+        hipMemPrefetchBatchAsync(device_ptrs.data(), buffer_sizes.data(), device_ptrs.size(),
+                                 locations.data(), location_indices.data(), locations.size(), flags,
+                                 stream_guard.stream()),
+        hipErrorInvalidValue);
   }
 }
 
@@ -635,4 +689,36 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_MultiDevice) {
   for (size_t op = 0; op < num_operations; op++) {
     HIP_CHECK(hipFree(managed_ptrs[op]));
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Verify hipMemPrefetchBatchAsync works with a __managed__ global variable.
+ */
+HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_ManagedGlobalVariable) {
+  REQUIRE_MANAGED_ACCESS_DEVICE(device);
+
+  std::fill_n(g_managed_prefetch_data, kTestBufferElements, kTestValueBase);
+
+  StreamGuard stream_guard(Streams::created);
+
+  void* managed_ptr = g_managed_prefetch_data;
+  size_t buffer_size = kTestBufferBytes;
+  hipMemLocation location{};
+  location.type = hipMemLocationTypeDevice;
+  location.id = device;
+  size_t location_index = 0;
+  constexpr unsigned long long flags = 0;
+
+  HIP_CHECK(hipMemPrefetchBatchAsync(&managed_ptr, &buffer_size, 1, &location, &location_index, 1,
+                                     flags, stream_guard.stream()));
+
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  int last_prefetch_location = -1;
+  HIP_CHECK(hipMemRangeGetAttribute(&last_prefetch_location, sizeof(int),
+                                    hipMemRangeAttributeLastPrefetchLocation,
+                                    g_managed_prefetch_data, kTestBufferBytes));
+  REQUIRE(last_prefetch_location == device);
 }

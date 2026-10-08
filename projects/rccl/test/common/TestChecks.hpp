@@ -16,6 +16,9 @@
  * MPI-only (requires MPI_TESTS_ENABLED):
  * - MPI error checking (MPICHECK with 3 overload variants)
  * - MPI-aware assertions (ASSERT_MPI_*)
+ * - Rank-local MPI checks (ASSERT_MPI_*_ON_RANK)
+ * - MPI-coordinated skip reasons (mpiCoordinatedSkipReason)
+ * - GIN communicator skip (SKIP_IF_GIN_UNSUPPORTED)
  * - Debug logging (TEST_WARN, TEST_INFO, TEST_ABORT, TEST_TRACE)
  */
 
@@ -218,6 +221,8 @@
 
 #include <cstring>
 #include <mpi.h>
+#include <string>
+#include <vector>
 #include "utils.h" // For RCCL's getHostName utility
 
 // Forward declaration of MPIEnvironment class (defined in MPIEnvironment.hpp)
@@ -270,6 +275,71 @@ inline bool isMultiNodeTest()
     // If not yet computed (== -1), assume single node to be safe
     return getMPIEnvironmentCachedMultiNodeResult() == 1;
 }
+
+/**
+ * @brief MPI-coordinated skip reason: all ranks skip if ANY rank would skip locally.
+ *
+ * Uses MPI_Allreduce(MAX) on a local skip flag so uneven node splits (e.g. 4+2
+ * ranks) cannot leave some ranks in GTEST_SKIP() while others enter the test body.
+ *
+ * @param localSkip   true when this rank's local prerequisite check failed
+ * @param localReason message for ranks that failed locally (ignored on others)
+ * @return empty string if no rank skips; otherwise a skip reason for GTEST_SKIP()
+ */
+inline std::string mpiCoordinatedSkipReason(bool localSkip, const char* localReason)
+{
+    int flag = localSkip ? 1 : 0;
+    MPI_Allreduce(MPI_IN_PLACE, &flag, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    if(flag == 0)
+        return {};
+    if(localSkip)
+        return localReason ? localReason : "skip";
+    return "Skipping: prerequisite failed on another rank";
+}
+
+/**
+ * @def SKIP_IF_GIN_REQUIRES
+ * @brief Coordinated skip when the communicator cannot satisfy a GIN connection type.
+ *
+ * Expand after createTestCommunicator() on every rank. The skip is an
+ * MPI_Allreduce; a rank that does not reach it will hang. GTEST_SKIP() only
+ * returns from the enclosing function, so expand it in the test body or in a
+ * helper whose call is the last statement of that body.
+ *
+ * NCCL_GIN_CONNECTION_FULL skips unless globalGinSupport is FULL. RAIL-only
+ * communicators make ncclDevCommCreate(FULL) return ncclInvalidArgument.
+ * Any other required type skips only on NCCL_GIN_CONNECTION_NONE, so a RAIL
+ * test can still run on a rail-only communicator. Requires comm.h. Does not
+ * replace ginProxyTestSkipReason env gates.
+ */
+#define SKIP_IF_GIN_REQUIRES(requiredType)                                                         \
+    do                                                                                             \
+    {                                                                                              \
+        ncclComm_t skipGinComm = getActiveCommunicator();                                          \
+        const ncclGinConnectionType_t skipGinRequired = (requiredType);                            \
+        const bool skipGinNeedsFull = skipGinRequired == NCCL_GIN_CONNECTION_FULL;                 \
+        const bool skipGinLocal =                                                                  \
+            skipGinComm != nullptr &&                                                              \
+            (skipGinNeedsFull ? skipGinComm->globalGinSupport != NCCL_GIN_CONNECTION_FULL          \
+                              : skipGinComm->globalGinSupport == NCCL_GIN_CONNECTION_NONE);        \
+        const std::string skipGinReason = mpiCoordinatedSkipReason(                                \
+            skipGinLocal,                                                                          \
+            skipGinNeedsFull                                                                       \
+                ? "GIN full connectivity is required; communicator is NONE or RAIL"                \
+                : "GIN not supported on this communicator (plugin missing or NET backend has no GIN)"); \
+        if(!skipGinReason.empty())                                                                 \
+            GTEST_SKIP() << skipGinReason;                                                         \
+    } while(0)
+
+/**
+ * @def SKIP_IF_GIN_UNSUPPORTED
+ * @brief Skip unless the communicator has full GIN connectivity.
+ *
+ * Callers that pass defaultGinReqs() request NCCL_GIN_CONNECTION_FULL. A
+ * RAIL-only communicator must skip here rather than fail ncclDevCommCreate.
+ * Tests that request RAIL should use SKIP_IF_GIN_REQUIRES(NCCL_GIN_CONNECTION_RAIL).
+ */
+#define SKIP_IF_GIN_UNSUPPORTED() SKIP_IF_GIN_REQUIRES(NCCL_GIN_CONNECTION_FULL)
 
 // Debug Logging Macros (TEST_*)
 
@@ -468,6 +538,77 @@ inline bool isMultiNodeTest()
                 << ": Aborting - assertion failed on another rank";                            \
         }                                                                                     \
     }                                                                                         \
+    while(0)
+
+/**
+ * @def ASSERT_MPI_EQ_ON_RANK
+ * @brief MPI-aware equality on one rank; others supply tautological operands.
+ *
+ * Every rank must invoke this macro. Only @p checkRank compares @p expected
+ * against @p actual; other ranks pass (expected == expected) so the underlying
+ * MPI_Allreduce still runs on all ranks.
+ *
+ * Must be a macro (not a helper function): ASSERT_MPI_EQ expands to FAIL() /
+ * GTEST_SKIP(), which return from the enclosing function.
+ */
+#define ASSERT_MPI_EQ_ON_RANK(rank, checkRank, expected, actual)              \
+    do                                                                         \
+    {                                                                          \
+        auto       _mpiEqOnRank_expected = (expected);                         \
+        auto       _mpiEqOnRank_actual   = (actual);                           \
+        const auto _mpiEqOnRank_observed =                                     \
+            ((rank) == (checkRank)) ? _mpiEqOnRank_actual : _mpiEqOnRank_expected; \
+        ASSERT_MPI_EQ(_mpiEqOnRank_expected, _mpiEqOnRank_observed);           \
+    }                                                                          \
+    while(0)
+
+/**
+ * @def ASSERT_MPI_HIP_OK_ON_RANK
+ * @brief MPI-aware hipSuccess check on one rank (see ASSERT_MPI_EQ_ON_RANK).
+ */
+#define ASSERT_MPI_HIP_OK_ON_RANK(rank, checkRank, err)                       \
+    do                                                                         \
+    {                                                                          \
+        const hipError_t _mpiHipOkOnRank_status =                              \
+            ((rank) == (checkRank)) ? (err) : hipSuccess;                      \
+        ASSERT_MPI_EQ(hipSuccess, _mpiHipOkOnRank_status);                    \
+    }                                                                          \
+    while(0)
+
+/**
+ * @def ASSERT_MPI_BUFFER_EQ_ON_RANK
+ * @brief MPI-aware byte-vector equality on one rank (see ASSERT_MPI_EQ_ON_RANK).
+ *
+ * @p expected and @p actual must support .size() and operator[] (e.g. std::vector<uint8_t>).
+ */
+#define ASSERT_MPI_BUFFER_EQ_ON_RANK(rank, checkRank, expected, actual)        \
+    do                                                                         \
+    {                                                                          \
+        bool _mpiBufEqOnRank_localOk = true;                                   \
+        if((rank) == (checkRank))                                              \
+        {                                                                      \
+            const auto& _mpiBufEqOnRank_exp = (expected);                      \
+            const auto& _mpiBufEqOnRank_act = (actual);                        \
+            if(_mpiBufEqOnRank_exp.size() != _mpiBufEqOnRank_act.size())       \
+            {                                                                  \
+                _mpiBufEqOnRank_localOk = false;                               \
+            }                                                                  \
+            else                                                               \
+            {                                                                  \
+                for(size_t _mpiBufEqOnRank_i = 0; _mpiBufEqOnRank_i < _mpiBufEqOnRank_exp.size(); \
+                    ++_mpiBufEqOnRank_i)                                       \
+                {                                                              \
+                    if(_mpiBufEqOnRank_exp[_mpiBufEqOnRank_i] !=               \
+                       _mpiBufEqOnRank_act[_mpiBufEqOnRank_i])                 \
+                    {                                                          \
+                        _mpiBufEqOnRank_localOk = false;                       \
+                        break;                                                 \
+                    }                                                          \
+                }                                                              \
+            }                                                                  \
+        }                                                                      \
+        ASSERT_MPI_TRUE(_mpiBufEqOnRank_localOk);                              \
+    }                                                                          \
     while(0)
 
 /**

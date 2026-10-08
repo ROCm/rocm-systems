@@ -33,6 +33,7 @@
 
 #include "pal.h"
 #include "palDestroyable.h"
+#include "palSpan.h"
 
 #if defined(_WIN32)
 struct _SECURITY_ATTRIBUTES;
@@ -77,7 +78,7 @@ enum class GpuMemPriorityOffset : uint32
     Count
 };
 
-/// Specifies access mode for unmapped pages in a virtual GPU memory.
+/// Speicfies access mode for unmapped pages in a virtual Gpu Memory.
 enum class VirtualGpuMemAccessMode : uint32
 {
     Undefined = 0x0, ///< Used in situations where no special accessMode needed.
@@ -133,12 +134,6 @@ union GpuMemoryCreateFlags
                                                   ///  indicating the driver must manage both
                                                   ///  CPU caches and GPU caches that are not flushed on
                                                   ///  command buffer boundaries.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 948
-        uint64 xdmaBuffer                   :  1; ///< GPU memory will be used for an XDMA cache buffer for
-                                                  ///  transferring data
-#else
-        uint64 reserved1                    :  1; ///< Delete this bit when the MAJOR_VERSION backcompat is removed.
-#endif
                                                   ///  between GPUs in a multi-GPU configuration.
         uint64 turboSyncSurface             :  1; ///< The memory will be used for TurboSync private swapchain primary.
         uint64 typedBuffer                  :  1; ///< GPU memory will be permanently considered a single
@@ -165,11 +160,15 @@ union GpuMemoryCreateFlags
                                                   ///  submission that references it.
         uint64 sharedViaNtHandle            :  1; ///< Memory will be shared by using Nt handle.
         uint64 peerWritable                 :  1; ///< The memory can be open as peer memory and be writable.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1011
         uint64 tmzProtected                 :  1; ///< The memory is protected using TMZ (Trusted Memory Zone) or HSFB
                                                   ///  (Hybrid Secure Framebuffer). It is not CPU accessible,
                                                   ///  and GPU access is restricted by the hardware such that data
                                                   ///  cannot be copied from protected memory into unprotected memory.
-        uint64 placeholder0                 :  1; ///< Placeholder.
+#else
+        uint64 placeholder0                 :  1;
+#endif
+        uint64 placeholder1                 :  1; ///< Placeholder.
         uint64 externalOpened               :  1; ///< Specifies the GPUMemory is opened.
         uint64 restrictedContent            :  1; ///< Specifies the GPUMemory is protected content.
         uint64 restrictedAccess             :  1; ///< Specifies the GPUMemory is restricted shared access resource.
@@ -193,7 +192,7 @@ union GpuMemoryCreateFlags
         uint64 kmdShareUmdSysMem            :  1; ///< UMD will allocate/free a memory buffer to be shared with KMD.
         uint64 deferCpuVaReservation        :  1; ///< KMD will allocate with the "CpuVisibleOnDemand" alloc flag.
                                                   ///  Ignored for non-CPU-visible allocations.
-        uint64 placeholder1                 :  1;
+        uint64 placeholder2                 :  1;
         uint64 startVaHintFlag              :  1; ///< startVaHintFlag is set to 1 for passing startVaHint address
                                                   ///  to set baseVirtAddr as startVaHint for memory allocation.
 #if PAL_AMDGPU_BUILD
@@ -203,7 +202,7 @@ union GpuMemoryCreateFlags
         uint64 discardable                  :  1; ///< If set, this gpu memory object can be discarded under memory
                                                   ///  pressure without keeping the content.
 #else
-        uint64 placeholder2                 :  2;
+        uint64 placeholder3                 :  2;
 #endif
         uint64 directCaptureSource          :  1; ///< Memory will be mapped to DirectCapture resource's KMD-managed
                                                   ///  private VA.
@@ -214,10 +213,14 @@ union GpuMemoryCreateFlags
                                                   ///  completes. Required for ISP camera capture surfaces
                                                   ///  (D3D11_DDI_BIND_CAPTURE) and any other allocation that
                                                   ///  needs post-residency MC address notification.
-        uint64 reserved                     : 25; ///< Reserved for future use.
+        uint64 noUnmappedSmemAccess         :  1; ///< Memory won't be accessed by scalar loads. Ignored if not virtual.
+        uint64 haltOnAccess                 :  1; ///< Allocation will have read/write access tracked per page.
+        uint64 reserved                     : 24; ///< Reserved for future use.
     };
     uint64     u64All;                            ///< Flags packed as 64-bit uint.
 };
+
+static_assert(sizeof(GpuMemoryCreateFlags) == sizeof(uint64));
 
 /// Specifies properties of a typed buffer pseudo-object. When this is specified in GpuMemoryCreateInfo along with the
 /// typedBuffer flag, the GPU memory object has been permanently cast as a single typed buffer.  A typed buffer is very
@@ -298,9 +301,9 @@ struct GpuMemoryCreateInfo
                                            ///  This GPU memory will be permanently considered a typed buffer.
 
     VirtualGpuMemAccessMode virtualAccessMode; ///< Access mode for virtual GPU memory's unmapped pages, WDDM only.
-    gpusize                 surfaceBusAddr;    ///< Surface bus address of Bus Addressable Memory.
+    gpusize                 surfaceBusAddr;    ///< Surface bus address of Bus Addresable Memory.
                                                ///  Only valid when GpuMemoryCreateFlags::sdiExternal is set.
-    gpusize                 markerBusAddr;     ///< Marker bus address of Bus Addressable Memory. The client can:
+    gpusize                 markerBusAddr;     ///< Marker bus address of Bus Addresable Memory. The client can:
                                                ///  1. Write to marker
                                                ///  2. Let GPU wait until a value is written to marker before issuing
                                                ///     the next command.
@@ -325,6 +328,15 @@ struct GpuMemoryCreateInfo
     /// the first buffer, it will compress the second buffer as well. Reading the second buffer will result in corrupted
     /// content.
     TriState compression;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 1011
+    /// Sets the tmz mode of this memory.
+    /// If not set to Disabled, the memory is protected using TMZ (Trusted Memory Zone) or HSFB (Hybrid Secure
+    /// Framebuffer). It is not CPU accessible, and GPU access is restricted by the hardware such that data, cannot be
+    /// copied from protected memory into unprotected memory. Note that some TmzMode values additionally restrict
+    /// GPU access to specific groups of HW functionality (e.g. HwdrmPlus forbids shader access).
+    TmzMode tmzMode;
+#endif
 };
 
 /// Specifies properties for @ref IGpuMemory creation.  Input structure to IDevice::CreatePinnedGpuMemory().
@@ -344,6 +356,18 @@ struct PinnedGpuMemoryCreateInfo
     GpuMemMallRange   mallRange;  ///< These parameters are only meaningful if flags.mallRangeActive
                                   ///  is set.  Any pages outside of this range will use the opposite
                                   ///  MALL policy from what is specified in "mallPolicy".
+    union
+    {
+        struct
+        {
+            uint32 reserved0         : 1;   ///< Reserved for future use.
+            uint32 gl2Uncached       : 1;   ///< Specifies the GPU Memory is un-cached on GPU L2 cache.
+                                            ///  But the memory still would be cached by other cache hierarchy
+                                            ///  like L0, RB caches, L1, and L3.
+            uint32 reserved          : 30;  ///< Reserved for future use.
+        };
+        uint32 u32All;                      ///< Flags packed as 32-bit uint.
+    } flags;                                ///< Pinned Gpu memory create info flags.
 };
 
 /// Specifies properties for @ref IGpuMemory creation.  Input structure to IDevice::CreateSvmGpuMemory().
@@ -410,7 +434,10 @@ struct ExternalGpuMemoryOpenInfo
 };
 
 /// The fundamental information that describes a GPU memory object that is stored directly in each IGpuMemory.
-/// It can be accessed without a virtual call via IGpuMemory::Desc().
+///
+/// Anything added here must be constant for the life of the GPU memory object except for:
+/// 1. The @ref gpuVirtAddr, @ref surfaceBusAddr, and @ref markerBusAddr fields for sdiExternal GPU memory.
+///    These fields are modified by the client via @ref SetSdiRemoteBusAddress or @ref InitBusAddressableGpuMemory.
 struct GpuMemoryDesc
 {
     gpusize gpuVirtAddr;         ///< GPU virtual address of the GPU memory allocation.
@@ -424,6 +451,7 @@ struct GpuMemoryDesc
                                  ///  InitBusAddressableGpuMemory() to query and update before this is valid.
     union
     {
+        uint32 u32All;                ///< Flags packed as 32-bit uint.
         struct
         {
             uint32 isVirtual    :  1; ///< GPU memory is not backed by physical memory and must be remapped before the
@@ -447,12 +475,17 @@ struct GpuMemoryDesc
 
             uint32 isCompressed :  1; ///< Set for physical allocations where UMD requested PTE.D=1 to enable
                                       ///  GFX12-style distributed compression.
-            uint32 reserved     : 23; ///< Reserved for future use
+            uint32 isVmAlwaysValid  :  1; ///< VM addresses are always valid, no need for per-submit BO list.
+            uint32 reserved         : 22; ///< Reserved for future use
         };
-        uint32 u32All;               ///< Flags packed as 32-bit uint.
     } flags;                         ///< GPU memory desc flags.
 
     uint64 uniqueId; ///< Unique ID given to each GPU memory object, allows client tracking of GPU memory allocations.
+
+    /// This specifies this image's TMZ key ID. Zero indicates TMZ is disabled, otherwise it will be a value in the
+    /// range [1, 15]. If the current device supports multi-key TMZ this value is the underlying TMZ key index. On
+    /// platforms that only support legacy TMZ, this will be set to one if TMZ is enabled.
+    uint8 tmzKeyId;
 };
 
 /// Defines GPU memory sub allocation info. Contains a GPU memory handle to the whole memory. And the offset and size
@@ -611,7 +644,7 @@ public:
         GpuMemPriority       priority,
         GpuMemPriorityOffset priorityOffset) = 0;
 
-    /// Makes the GPU memory available for CPU access and gives the client a pointer to reference it.
+    /// Makes the GPU memory available for CPU access and gives the client a ByteSpan to reference it.
     ///
     /// The allocation should be unmapped by the client once CPU access is complete, although it _is_ legal to keep an
     /// allocation mapped while the GPU references the allocation from a command buffer.
@@ -621,19 +654,46 @@ public:
     ///
     /// @see Unmap.
     ///
-    /// @param [out] ppData CPU pointer to the GPU memory object.
+    /// @param [out] pSpan  A Span which contains this memory's CPU base address and size.
     ///
-    /// @returns Success if the map succeeded.  Otherwise, *ppData will not be valid and one of the following errors may
+    /// @returns Success if the map succeeded.  Otherwise, *pSpan will be empty and one of the following errors may
     ///          be returned.
-    ///          + ErrorInvalidPointer if ppData is null.
+    ///          + ErrorInvalidPointer if pSpan is null.
     ///          + ErrorGpuMemoryMapFailed if the object is busy and cannot be mapped by the OS.
     ///          + ErrorNotMappable if the memory object cannot be mapped due to some of its heaps not having the CPU
     ///            visible flag set.
     ///          + ErrorUnavailable if the memory object is not a real allocation.
     virtual Result Map(
-        void** ppData) = 0;
+        Util::ByteSpan* pSpan) = 0;
 
-    /// Removes CPU access from a previously mapped GPU memory object.
+    /// @deprecated This function is deprecated, use the ByteSpan variant of Map instead!
+    Result Map(Util::Span<void>* pSpan)
+    {
+        Result result = Result::ErrorInvalidPointer;
+        if (pSpan != nullptr)
+        {
+            Util::ByteSpan span;
+            result = Map(&span);
+            *pSpan = span;
+        }
+        return result;
+    }
+
+    /// @deprecated This function is deprecated, use the ByteSpan variant of Map instead!
+    Result Map(void** ppData)
+    {
+        Result result = Result::ErrorInvalidPointer;
+        if (ppData != nullptr)
+        {
+            Util::ByteSpan span;
+            result = Map(&span);
+            *ppData = span.Data();
+        }
+        return result;
+    }
+
+    /// Removes CPU access from a previously mapped GPU memory object. It is illegal to retain pointers to the
+    /// previously mapped memory.
     ///
     /// This call is thread safe for calls referencing the same memory object.
     ///
@@ -656,7 +716,10 @@ public:
     virtual OsExternalHandle ExportExternalHandle(const GpuMemoryExportInfo& exportInfo) const = 0;
 #endif
 
-    /// Returns a structure containing some fundamental information that describes this GPU memory object.
+    /// Returns a structure containing some fundamental information that describes this GPU memory object. The returned
+    /// reference is guaranteed to:
+    ///   1. Be valid until this queue is destroyed.
+    ///   2. Refer to the same address on every call to this queue.
     ///
     /// @returns A reference to this allocation's GpuMemoryDesc.
     const GpuMemoryDesc& Desc() const { return m_desc; }
@@ -703,7 +766,7 @@ public:
 protected:
     /// @internal Constructor. Prevent use of new operator on this interface. Client must create objects by explicitly
     /// called the proper create method.
-    IGpuMemory() : m_pClientData(nullptr) {}
+    IGpuMemory() : m_desc{}, m_pClientData(nullptr) {}
 
     /// @internal Destructor.  Prevent use of delete operator on this interface.  Client must destroy objects by
     /// explicitly calling IDestroyable::Destroy() and is responsible for freeing the system memory allocated for the

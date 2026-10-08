@@ -42,11 +42,19 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-rocm
         rocprofiler-systems::rocprofiler-systems-amd-smi-backend
         rocprofiler-systems::rocprofiler-systems-procfs-backend
+        rocprofiler-systems::rocprofiler-systems-backend-concepts
 )
 
 if(TARGET rocprofiler-systems::rocprofiler-systems-rocprofiler-sdk-backend)
     target_link_libraries(
         rocprofiler-systems-pmc-library
         PRIVATE rocprofiler-systems::rocprofiler-systems-rocprofiler-sdk-backend
+    )
+endif()
+
+if(ROCPROFSYS_HIPFILE_SUPPORT)
+    target_link_libraries(
+        rocprofiler-systems-pmc-library
+        PRIVATE rocprofiler-systems::rocprofiler-systems-hipfile-backend
     )
 endif()

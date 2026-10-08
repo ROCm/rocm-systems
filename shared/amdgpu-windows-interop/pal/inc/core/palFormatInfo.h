@@ -108,7 +108,7 @@ static constexpr uint32 CompressedEtcBlockDim = 4;
 extern const FormatInfo FormatInfoTable[static_cast<size_t>(ChNumFormat::Count)];
 
 /// Convert a floating-point representation of a color value in RGBA order to the appropriate bit representation for
-/// each channel based on the specified format. Swizzling is enabled by default to maintain backwards compatibility.
+/// each channel based on the specified format. Swizzling is enabled by default to maintain backwards compatability.
 /// There will be no swizzling functionality going forwards.
 extern void ConvertColor(
     SwizzledFormat format,
@@ -124,7 +124,7 @@ extern void ConvertYuvColor(
     uint32*        pColorOut);
 
 /// Packs a clear color value in RGBA order to a single element of the provided format and stores it in the
-/// memory provided. Swizzling is enabled by default to maintain backwards compatibility. There will be
+/// memory provided. Swizzling is enabled by default to maintain backwards compatability. There will be
 /// no swizzling functionality going forwards.
 extern void PackRawClearColor(
     SwizzledFormat format,
@@ -786,17 +786,13 @@ inline Extent3d Log2SubsamplingRatio(
         {
         // 4:4:4 formats have the same number of samples in every direction.
         case ChNumFormat::P412:
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 924
         case ChNumFormat::YUV_444P10:
         case ChNumFormat::YUV_444P12:
         case ChNumFormat::YUV_444P16:
-#endif
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 925
         case ChNumFormat::YV24:
         case ChNumFormat::NV24:
         case ChNumFormat::P410:
         case ChNumFormat::P416:
-#endif
             break;
         // 4:2:0 formats have 1/2 as many samples in both the horizontal and vertical directions.
         case ChNumFormat::YV12:
@@ -805,11 +801,9 @@ inline Extent3d Log2SubsamplingRatio(
         case ChNumFormat::P010:
         case ChNumFormat::P012:
         case ChNumFormat::P016:
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 924
         case ChNumFormat::YUV_420P10:
         case ChNumFormat::YUV_420P12:
         case ChNumFormat::YUV_420P16:
-#endif
             ratio.width  = 1;  // log2(1/2) = -1
             ratio.height = 1;
             break;
@@ -818,17 +812,11 @@ inline Extent3d Log2SubsamplingRatio(
         case ChNumFormat::P208:
         case ChNumFormat::P210:
         case ChNumFormat::P212:
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 923
         case ChNumFormat::P216:
-#endif
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 924
         case ChNumFormat::YUV_422P10:
         case ChNumFormat::YUV_422P12:
         case ChNumFormat::YUV_422P16:
-#endif
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 925
         case ChNumFormat::YV16:
-#endif
             ratio.width = 1;
             break;
         // 4:1:1 formats have 1/4 as many samples in the horizontal direction, and the same number of samples

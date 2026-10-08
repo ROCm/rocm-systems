@@ -27,7 +27,7 @@
 #include <windows.h>
 /* Winsock2 must be included before iphlpapi.h so IP_ADAPTER_ADDRESSES and GetAdaptersAddresses are declared */
 #pragma warning(push)
-#pragma warning(disable: 4005) /* _WINSOCKAPI_ redefinition when we already defined it to avoid winsock.h */
+#pragma warning(disable:4005) /* _WINSOCKAPI_ redefinition when we already defined it to avoid winsock.h */
 #include <winsock2.h>
 #pragma warning(pop)
 #include <ws2ipdef.h>
@@ -51,7 +51,16 @@
 #define NCCL_INVALID_SOCKET INVALID_SOCKET
 typedef SOCKET ncclSocketDescriptor;
 
-typedef DWORD_PTR ncclAffinity;
+#define NCCL_WINDOWS_PROCESSOR_GROUP_COUNT 64
+#define NCCL_WINDOWS_PROCESSORS_PER_GROUP (sizeof(KAFFINITY) * 8)
+#define NCCL_WINDOWS_MAX_CPUS (NCCL_WINDOWS_PROCESSOR_GROUP_COUNT * NCCL_WINDOWS_PROCESSORS_PER_GROUP)
+
+// A Windows processor number is only unique together with its processor group.
+// Store one affinity mask per group so topology masks and saved thread affinity
+// retain that identity instead of being applied to the thread's current group.
+typedef struct {
+  KAFFINITY masks[NCCL_WINDOWS_PROCESSOR_GROUP_COUNT];
+} ncclAffinity;
 
 typedef unsigned long ncclPid_t;
 

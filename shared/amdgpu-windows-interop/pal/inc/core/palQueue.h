@@ -94,6 +94,18 @@ enum class SubmitOptMode : uint32
     Count
 };
 
+/// Bitflags for @ref RemapVirtualMemoryPages and @ref CopyVirtualMemoryPageMappings
+///
+/// @note The "wait" flags are ignored on platforms which do not support them.
+enum RemapFlags : uint32
+{
+    RemapWaitNone              = 0x0, ///< Do not wait.
+    RemapWaitBefore            = 0x1, ///< Wait for prior queue operations to complete before executing paging ops.
+    RemapWaitAfter             = 0x2, ///< Wait for paging operations to complete before executing subsequent queue ops.
+    RemapForceConsecutiveWaits = 0x4, ///< Disallow an optimization where we skip syncs for consecutive paging calls.
+    RemapAllFlags              = 0x7, ///< Clients should NOT use it, for internal static_assert purpose only.
+};
+
 /// Enumerates vcn instance affinity statuses
 enum MmAffinityStatus : uint32
 {
@@ -154,6 +166,10 @@ typedef void (PAL_STDCALL* CmdDumpCallback)(
     uint32                        numChunks,
     void*                         pUserData);
 
+/// Defines callback function to allow client to modify WaveSize value.
+/// waveSize is defined as scratch allocated per wave, in units of bytes.
+typedef gpusize (PAL_STDCALL *CalcWaveSizeFunc)(gpusize waveSize);
+
 /// Specifies properties for @ref IQueue creation.  Input structure to IDevice::CreateQueue().
 struct QueueCreateInfo
 {
@@ -172,8 +188,12 @@ struct QueueCreateInfo
         uint32 aqlQueue                        :  1; ///< Compute queue will process AQL packets and kernels
         uint32 windowedPriorBlit               :  1; ///< All windowed presents on this queue are notifications
                                                      ///  that the client has manually done a blit present
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1011
         uint32 tmzOnly                         :  1; ///< This queue allows only TMZ submissions. Required for
                                                      ///  compute TMZ submits.
+#else
+        uint32 placeholder4                    :  1;
+#endif
 
 #if PAL_AMDGPU_BUILD
         uint32 enableGpuMemoryPriorities       :  1; ///< Enables support for GPU memory priorities on this Queue.
@@ -197,6 +217,12 @@ struct QueueCreateInfo
 
     uint32 numReservedCu;           ///< The number of reserved compute units for RT CU queue
     uintptr_t aqlPacketList;        ///< Location of the HIP runtime's info about this queue
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 1011
+    /// Sets the tmz mode for this queue.
+    /// If not set to Disabled, then this queue allows only TMZ submissions. Note that some TmzMode values additionally
+    /// restrict GPU access to specific groups of HW functionality (e.g. HwdrmPlus forbids shader access).
+    TmzMode tmzMode;
+#endif
 };
 
 /// Contains general information about a living IQueue which the client might want to query.
@@ -220,6 +246,9 @@ struct PerSubQueueSubmitInfo
     const CmdBufInfo* pCmdBufInfoList;  ///< Null, or an array of cmdBufferCount structs providing additional
                                         ///  info about the command buffers being submitted.  If non-null,
                                         ///  elements are ignored if their isValid flag is false.
+    gpusize**         ppWaveSizes;      ///< Array of pointers that PAL will write the calculated wave size into
+    uint32            numWaveSizes;     ///< Number of entries in ppWaveSizes
+    CalcWaveSizeFunc  pfnCalcWaveSize;  ///< Optional callback used to modify wave size
 };
 
 /// Specifies all information needed to execute a set of command buffers.  Input structure to IQueue::Submit().
@@ -251,6 +280,11 @@ struct MultiSubmitInfo
     const GpuMemoryRef*     pGpuMemoryRefs;       ///< Array of gpuMemRefCount GPU memory references.  Can be null if
                                                   ///  gpuMemRefCount is zero.  The GPU memory objects will be made
                                                   ///  resident for the duration of this submit.
+#if PAL_AMDGPU_BUILD
+    bool                    perSubmitPinnedRefs;  ///< If true, pinned memory Refs(known as host memory, this kind of memory
+                                                  ///  owned by CPU, such as malloc, mmap, etc) are provided in pGpuMemoryRefs
+                                                  ///  m_globalPinnedRefMap will be skipped while m_globalRefMap still merged
+#endif
     uint32                  doppRefCount;         ///< Number of DOPP desktop texture references for this submit.
     const DoppRef*          pDoppRefs;            ///< Array of doppRefCount DOPP texture references.  Can be null if
                                                   ///  doppRefCount is zero.
@@ -279,14 +313,43 @@ struct MultiSubmitInfo
                                                   ///  multiply by 2 if a Wave64 shader that needs scratch is used.
                                                   ///  Note that the size will not shrink for the lifetime of the queue
                                                   ///  once it is grown and only affects compute scratch ring.
-    const IGpuMemory*       pFreeMuxMemory;       ///< The gpu memory object of the private flip primary surface for the
-                                                  ///  FreeMux feature.
 };
 
 typedef MultiSubmitInfo SubmitInfo;
 
 /// The value of blockIfFlippingCount in @ref SubmitInfo cannot be greater than this value.
 constexpr uint32 MaxBlockIfFlippingCount = 16;
+
+/// Identifies a frame's position within a frame-generation sequence.
+enum class FramePacingId : uint32
+{
+    RealFrame        = 0, ///< The application-rendered frame.
+    GeneratedFrame0  = 1, ///< The first generated frame. Subsequent generated frames increment this value.
+};
+
+/// Frame-pacing flags for a present operation.
+union FramePacingPresentFlags
+{
+    struct
+    {
+        uint32 forcePresent :  1; ///< Force the present regardless of pacing.
+        uint32 skipPacing   :  1; ///< Bypass pacing for this present.
+        uint32 reserved     : 30; ///< Reserved for future use.
+    };
+    uint32 u32All; ///< Flags packed as a 32-bit value.
+};
+
+/// Frame-generation pacing information for the next present.
+struct FramePacingPresentInfo
+{
+    uint64                  sequenceId;          ///< Identifier shared by all frames in a generation sequence.
+    uint64                  qpcPresentTimestamp; ///< Target QPC timestamp for this present.
+    uint32                  appFrameTimeNs;      ///< Application frame time in nanoseconds, or zero when unknown.
+    FramePacingId           frameGenId;          ///< Position of this frame within its generation sequence.
+    FramePacingPresentFlags flags;               ///< Flags controlling pacing for this present.
+    uint32                  clientSpecificData;  ///< Opaque client data associated with this present.
+    uint32                  reserved[6];         ///< Reserved for future use.
+};
 
 /// Specifies properties for the presentation of an image to the screen.  Input structure to IQueue::PresentDirect().
 struct PresentDirectInfo
@@ -351,7 +414,7 @@ struct PresentSwapChainInfo
     PresentMode presentMode;    ///< Chooses between windowed and fullscreen present.
     IImage*     pSrcImage;      ///< The image to be presented.
     ISwapChain* pSwapChain;     ///< The swap chain associated with the source image.
-    uint32      imageIndex;     ///< The index of the source image within the swap chain. Ownership of this image
+    uint32      imageIndex;     ///< The index of the source image within the swap chain. Owership of this image
                                 ///  index will be released back to the swap chain if this call succeeds.
     uint32      rectangleCount; ///< Number of valid rectangles in the pRectangles array.
     uint32      syncInterval;   ///< Applicable only when syncIntervalOverride is set
@@ -368,17 +431,15 @@ struct PresentSwapChainInfo
                                 ///  WsiPlatform::Win32. XGL/OGLP must fall back to WsiPlatform::Win32 if frameId is
                                 ///  required, otherwise DXXP will update frameId for DXGI presents.
 
+    const FramePacingPresentInfo* pFramePacingInfo; ///< Optional frame generation pacing info for this present.
+
     union
     {
         struct
         {
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 941
-            uint32 notifyOnly           :  1; ///< True if it is a notify-only present
-#else
             uint32 notifyOnly           :  1; ///< Indicates that a present occurred outside of PAL. PAL must not
                                               ///  execute a present if this is true but may update internal
                                               ///  tracking state.
-#endif
             uint32 isTemporaryMono      :  1; ///< True if WS Stereo is enabled, but 3D display mode turned off.
             uint32 turboSyncEnabled     :  1; ///< Whether TurboSync is enabled.
             uint32 syncIntervalOverride :  1; ///< Override default syncInterval with the value in syncInterval
@@ -574,7 +635,7 @@ public:
     /// the presentable image index, eventually deadlocking the swap chain.
     ///
     /// Overall support for direct presents can be queried at platform creation time via supportNonSwapChainPresents
-    /// in @ref PlatformProperties.  Support for particular present modes is specified via supportedDirectPresentModes
+    /// in @ref PlatformProperties.  Support for particular present modes is specifed via supportedDirectPresentModes
     /// in @ref DeviceProperties.
     ///
     /// @note  Any images specified in presentInfo must be made resident before calling this function.
@@ -645,9 +706,7 @@ public:
     /// @param [in] rangeCount  Number of ranges to remap (i.e., size of the pRanges array).
     /// @param [in] pRanges     Defines the set of remappings from virtual GPU memory object pages to real GPU
     ///                         memory object pages.
-    /// @param [in] doNotWait   If true, then this paging operation will be executed on the Queue immediately, without
-    ///                         waiting for any previous rendering to finish first. On platforms that don't support
-    ///                         this, the flag will be ignored.
+    /// @param [in] remapFlags  Bitflags which control the paging operations, see @ref RemapFlags.
     /// @param [in] pFence      Optional. Pointer to an IFence, which will be signaled after the VA remapping.
     ///
     /// @returns Success if the remappings were executed successfully.  It is assumed that the following conditions are
@@ -660,16 +719,30 @@ public:
     virtual Result RemapVirtualMemoryPages(
         uint32                         rangeCount,
         const VirtualMemoryRemapRange* pRanges,
-        bool                           doNotWait,
+        uint32                         remapFlags,
         IFence*                        pFence) = 0;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 998
+    /// Backwards compatible API
+    Result RemapVirtualMemoryPages(
+        uint32                         rangeCount,
+        const VirtualMemoryRemapRange* pRanges,
+        bool                           doNotWait,
+        IFence*                        pFence)
+    {
+        uint32 flags = doNotWait ? RemapWaitNone : RemapWaitBefore;
+        return RemapVirtualMemoryPages(rangeCount,
+                                       pRanges,
+                                       flags,
+                                       pFence);
+    }
+#endif
 
     /// Copies page mappings from one virtual GPU memory object to another.
     ///
     /// @param [in] rangeCount  Number of ranges to copy (i.e., size of the pRanges array).
     /// @param [in] pRanges     Defines the set of page mappings to copy between virtual GPU memory objects.
-    /// @param [in] doNotWait   If true, then this paging operation will be executed on the Queue immediately, without
-    ///                         waiting for any previous rendering to finish first. On platforms that don't support
-    ///                         this, the flag will be ignored.
+    /// @param [in] remapFlags  Bitflags which control the paging operations, see @ref RemapFlags.
     ///
     /// @returns Success if the mappings were copied successfully.  It is assumed that the following conditions are
     ///          met for the input to this function:
@@ -681,7 +754,21 @@ public:
     virtual Result CopyVirtualMemoryPageMappings(
         uint32                                    rangeCount,
         const VirtualMemoryCopyPageMappingsRange* pRanges,
-        bool                                      doNotWait) = 0;
+        uint32                                    remapFlags) = 0;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 998
+    /// Backwards compatible API
+    Result CopyVirtualMemoryPageMappings(
+        uint32                                    rangeCount,
+        const VirtualMemoryCopyPageMappingsRange* pRanges,
+        bool                                      doNotWait)
+    {
+        uint32 flags = doNotWait ? RemapWaitNone : RemapWaitBefore;
+        return CopyVirtualMemoryPageMappings(rangeCount,
+                                             pRanges,
+                                             flags);
+    }
+#endif
 
     /// Associates the provided Fence object with the last submission on this queue object. The Fence can be used via
     /// GetStatus() to get the status of the last Submit, however no event will be created/set for the Fence so

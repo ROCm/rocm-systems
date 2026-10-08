@@ -45,7 +45,7 @@ version = version_number
 release = version_number
 
 setting_all_article_info = True
-all_article_info_os = ["linux"]
+all_article_info_os = ["linux", "windows"]
 
 external_toc_path = "./sphinx/_toc.yml"
 
@@ -58,3 +58,16 @@ external_projects_current_project = "rocdecode"
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+
+# Theme-related settings
+html_theme = "rocm_docs_theme"
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-systems",
+    "path_to_docs": "projects/rocdecode/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+}
+# Generate llms.txt and llms-full.txt
+rocm_docs_generate_llms = True

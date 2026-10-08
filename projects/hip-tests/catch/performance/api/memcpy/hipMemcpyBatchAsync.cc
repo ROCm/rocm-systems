@@ -6,9 +6,11 @@
 
 #include "memcpy_performance_common.hh"
 
-#include <array>
-#include <cstdint>
+#include <cstring>
+#include <iomanip>
+#include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 /**
@@ -17,12 +19,14 @@
  * @ingroup PerformanceTestMemory
  */
 
-#if HT_AMD
-
 namespace {
 
-constexpr size_t kBatchCount = 8;
 constexpr unsigned char kPattern = 0x5a;
+
+enum class PointerPattern {
+  kBasePointers,
+  kBroadcastSource,
+};
 
 std::string GetSizeSectionName(size_t size) {
   if (size < 1_MB) {
@@ -31,129 +35,206 @@ std::string GetSizeSectionName(size_t size) {
   return std::to_string(size / 1_MB) + " MB";
 }
 
-size_t AlignUp(size_t value, size_t alignment) {
-  return ((value + alignment - 1) / alignment) * alignment;
+std::string GetPointerPatternSectionName(PointerPattern pointer_pattern) {
+  switch (pointer_pattern) {
+    case PointerPattern::kBasePointers:
+      return "base pointers";
+    case PointerPattern::kBroadcastSource:
+      return "broadcast source";
+  }
+  return "unknown pointer pattern";
 }
 
-class MemcpyBatchAsyncDtoDBenchmark
-    : public Benchmark<MemcpyBatchAsyncDtoDBenchmark> {
-public:
-  void operator()(void **dsts, void **srcs, size_t *sizes, size_t count,
-                  const hipStream_t &stream) {
-    constexpr size_t kNumAttrs = 0;
-    size_t attrs_idxs[1] = {0};
-    size_t fail_idx = 0;
-
+class MemcpyBatchAsync : public Benchmark<MemcpyBatchAsync> {
+ public:
+  void operator()(void** dsts, void** srcs, size_t* sizes, size_t count, hipStream_t stream) {
     TIMED_SECTION_STREAM(kTimerTypeCpu, stream) {
-      HIP_CHECK(hipMemcpyBatchAsync(dsts, srcs, sizes, count, nullptr,
-                                    attrs_idxs, kNumAttrs, &fail_idx, stream));
+      HIP_CHECK(
+          hipMemcpyBatchAsync(dsts, srcs, sizes, count, nullptr, nullptr, 0, nullptr, stream));
     }
   }
 };
 
-void ValidateCopy(void *dst, size_t size) {
-  std::array<unsigned char, 16> prefix = {};
-  unsigned char suffix = 0;
-
-  HIP_CHECK(
-      hipMemcpy(prefix.data(), dst, prefix.size(), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(&suffix, static_cast<unsigned char *>(dst) + size - 1,
-                      sizeof(suffix), hipMemcpyDeviceToHost));
-
-  for (const auto value : prefix) {
-    REQUIRE(value == kPattern);
+class MemcpySequentialAsync : public Benchmark<MemcpySequentialAsync> {
+ public:
+  void operator()(void** dsts, void** srcs, size_t* sizes, size_t count, hipMemcpyKind kind,
+                  hipStream_t stream) {
+    TIMED_SECTION_STREAM(kTimerTypeCpu, stream) {
+      for (size_t i = 0; i < count; ++i) {
+        HIP_CHECK(hipMemcpyAsync(dsts[i], srcs[i], sizes[i], kind, stream));
+      }
+    }
   }
-  REQUIRE(suffix == kPattern);
-}
+};
 
-void RunBenchmark(size_t copy_size, size_t offset) {
-  MemcpyBatchAsyncDtoDBenchmark benchmark;
+template <typename BenchmarkType>
+void AddCommonSectionNames(BenchmarkType& benchmark, size_t copy_size, size_t batch_copy_count,
+                           PointerPattern pointer_pattern) {
+  benchmark.AddSectionName(GetPointerPatternSectionName(pointer_pattern));
   benchmark.AddSectionName(GetSizeSectionName(copy_size));
-  benchmark.AddSectionName(offset == 0 ? "aligned" : "4-byte offset");
-  benchmark.AddSectionName(std::to_string(kBatchCount) + " copies");
-  benchmark.RegisterBandwidth(copy_size * kBatchCount);
+  benchmark.AddSectionName(std::to_string(batch_copy_count) + " copies");
+  benchmark.RegisterBandwidth(copy_size * batch_copy_count);
+}
 
-  constexpr size_t kAllocationAlignment = 256;
-  const size_t stride = AlignUp(copy_size + offset, kAllocationAlignment);
-  const size_t allocation_size = stride * kBatchCount;
+std::string FormatSpeedupRatio(float batch_mean, float sequential_mean) {
+  std::ostringstream ratio;
+  ratio << std::fixed << std::setprecision(2) << sequential_mean / batch_mean;
+  return ratio.str();
+}
 
-  void *src_allocation = nullptr;
-  void *dst_allocation = nullptr;
-  HIP_CHECK(hipMalloc(&src_allocation, allocation_size));
-  HIP_CHECK(hipMalloc(&dst_allocation, allocation_size));
-  HIP_CHECK(hipMemset(src_allocation, kPattern, allocation_size));
-  HIP_CHECK(hipMemset(dst_allocation, 0, allocation_size));
+void RunComparison(void** dsts, void** srcs, size_t* sizes, size_t count, size_t copy_size,
+                   size_t batch_copy_count, PointerPattern pointer_pattern, hipMemcpyKind kind) {
+  const StreamGuard stream_guard{Streams::created};
+  const hipStream_t stream = stream_guard.stream();
 
-  std::vector<void *> srcs(kBatchCount);
-  std::vector<void *> dsts(kBatchCount);
-  std::vector<size_t> sizes(kBatchCount, copy_size);
-  for (size_t i = 0; i < kBatchCount; ++i) {
-    srcs[i] =
-        static_cast<unsigned char *>(src_allocation) + (i * stride) + offset;
-    dsts[i] =
-        static_cast<unsigned char *>(dst_allocation) + (i * stride) + offset;
+  MemcpySequentialAsync sequential_benchmark;
+  sequential_benchmark.SetDisplayOutput(false);
+  const auto sequential_stats = sequential_benchmark.Run(dsts, srcs, sizes, count, kind, stream);
+  const float sequential_mean = std::get<0>(sequential_stats);
+
+  MemcpyBatchAsync batch_benchmark;
+  AddCommonSectionNames(batch_benchmark, copy_size, batch_copy_count, pointer_pattern);
+  batch_benchmark.RegisterStatsSuffix([sequential_mean](float batch_mean) {
+    return " Ratio " + FormatSpeedupRatio(batch_mean, sequential_mean) + "x";
+  });
+  batch_benchmark.Run(dsts, srcs, sizes, count, stream);
+}
+
+void RunDeviceToDeviceBenchmark(size_t copy_size, size_t batch_copy_count,
+                                PointerPattern pointer_pattern) {
+  const size_t allocation_size = copy_size * batch_copy_count;
+
+  LinearAllocGuard<unsigned char> src_allocation(LinearAllocs::hipMalloc, allocation_size);
+  LinearAllocGuard<unsigned char> dst_allocation(LinearAllocs::hipMalloc, allocation_size);
+  HIP_CHECK(hipMemset(src_allocation.ptr(), kPattern, allocation_size));
+
+  std::vector<void*> srcs(batch_copy_count);
+  std::vector<void*> dsts(batch_copy_count);
+  std::vector<size_t> sizes(batch_copy_count, copy_size);
+  for (size_t i = 0; i < batch_copy_count; ++i) {
+    srcs[i] = pointer_pattern == PointerPattern::kBroadcastSource
+                  ? src_allocation.ptr()
+                  : src_allocation.ptr() + (i * copy_size);
+    dsts[i] = dst_allocation.ptr() + (i * copy_size);
   }
 
-  const StreamGuard stream_guard(Streams::created);
-  benchmark.Run(dsts.data(), srcs.data(), sizes.data(), sizes.size(),
-                stream_guard.stream());
+  RunComparison(dsts.data(), srcs.data(), sizes.data(), sizes.size(), copy_size, batch_copy_count,
+                pointer_pattern, hipMemcpyDeviceToDevice);
+}
 
-  for (size_t i = 0; i < kBatchCount; ++i) {
-    ValidateCopy(dsts[i], copy_size);
+void RunPeerToPeerBenchmark(size_t copy_size, size_t batch_copy_count,
+                            PointerPattern pointer_pattern) {
+  const size_t allocation_size = copy_size * batch_copy_count;
+  HIP_CHECK(hipSetDevice(0));
+  auto [src_device, dst_device] = GetDeviceIds(true);
+
+  HIP_CHECK(hipSetDevice(src_device));
+  LinearAllocGuard<unsigned char> src_allocation(LinearAllocs::hipMalloc, allocation_size);
+  HIP_CHECK(hipMemset(src_allocation.ptr(), kPattern, allocation_size));
+
+  HIP_CHECK(hipSetDevice(dst_device));
+  LinearAllocGuard<unsigned char> dst_allocation(LinearAllocs::hipMalloc, allocation_size);
+
+  std::vector<void*> srcs(batch_copy_count);
+  std::vector<void*> dsts(batch_copy_count);
+  std::vector<size_t> sizes(batch_copy_count, copy_size);
+  for (size_t i = 0; i < batch_copy_count; ++i) {
+    srcs[i] = pointer_pattern == PointerPattern::kBroadcastSource
+                  ? src_allocation.ptr()
+                  : src_allocation.ptr() + (i * copy_size);
+    dsts[i] = dst_allocation.ptr() + (i * copy_size);
   }
 
-  HIP_CHECK(hipFree(src_allocation));
-  HIP_CHECK(hipFree(dst_allocation));
+  HIP_CHECK(hipSetDevice(src_device));
+  RunComparison(dsts.data(), srcs.data(), sizes.data(), sizes.size(), copy_size, batch_copy_count,
+                pointer_pattern, hipMemcpyDeviceToDevice);
 }
 
-} // namespace
+void RunHostDeviceBenchmark(size_t copy_size, size_t batch_copy_count,
+                            LinearAllocs src_allocation_type, LinearAllocs dst_allocation_type,
+                            PointerPattern pointer_pattern) {
+  const size_t allocation_size = copy_size * batch_copy_count;
 
-/**
- * Test Description
- * ------------------------
- *  - Executes `hipMemcpyBatchAsync` with kBatchCount same-device D2D copies:
- *    -# Copy sizes: 4 KB, 64 KB, 128 KB, 256 KB, 1 MB, 4 MB,
- *       16 MB, 64 MB, 128 MB, 256 MB, 1024 MB
- *    -# Source and destination allocation type: hipMalloc on the current device
- *    -# Source and destination pointers are 256-byte aligned
- * Test source
- * ------------------------
- * - performance/api/memcpy/hipMemcpyBatchAsync.cc
- * Test requirements
- * ------------------------
- *  - AMD
- *  - HIP_VERSION >= 7.1
- */
-HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_D2D_OptimizedPath_Aligned) {
-  const auto copy_size = GENERATE(4_KB, 64_KB, 128_KB, 256_KB, 1_MB, 4_MB,
-                                  16_MB, 64_MB, 128_MB, 256_MB, 1024_MB);
-  RunBenchmark(copy_size, 0);
+  LinearAllocGuard<unsigned char> src_allocation(src_allocation_type, allocation_size);
+  LinearAllocGuard<unsigned char> dst_allocation(dst_allocation_type, allocation_size);
+  if (src_allocation_type == LinearAllocs::hipMalloc) {
+    HIP_CHECK(hipMemset(src_allocation.ptr(), kPattern, allocation_size));
+  } else {
+    std::memset(src_allocation.host_ptr(), kPattern, allocation_size);
+  }
+
+  std::vector<void*> srcs(batch_copy_count);
+  std::vector<void*> dsts(batch_copy_count);
+  std::vector<size_t> sizes(batch_copy_count, copy_size);
+  for (size_t i = 0; i < batch_copy_count; ++i) {
+    srcs[i] = pointer_pattern == PointerPattern::kBroadcastSource
+                  ? src_allocation.ptr()
+                  : src_allocation.ptr() + (i * copy_size);
+    dsts[i] = dst_allocation.ptr() + (i * copy_size);
+  }
+
+  const hipMemcpyKind kind = src_allocation_type == LinearAllocs::hipMalloc ? hipMemcpyDeviceToHost
+                                                                            : hipMemcpyHostToDevice;
+  RunComparison(dsts.data(), srcs.data(), sizes.data(), sizes.size(), copy_size, batch_copy_count,
+                pointer_pattern, kind);
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Executes `hipMemcpyBatchAsync` with kBatchCount same-device D2D copies:
- *    -# Copy sizes: 4 KB, 64 KB, 128 KB, 256 KB, 1 MB, 4 MB,
- *       16 MB, 64 MB, 128 MB, 256 MB, 1024 MB
- *    -# Source and destination allocation type: hipMalloc on the current device
- *    -# Source and destination pointers are offset by 4 bytes from a
- *       256-byte-aligned stride
- * Test source
- * ------------------------
- * - performance/api/memcpy/hipMemcpyBatchAsync.cc
- * Test requirements
- * ------------------------
- *  - AMD
- *  - HIP_VERSION >= 7.1
- */
-HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_D2D_OptimizedPath_4ByteOffset) {
-  const auto copy_size = GENERATE(4_KB, 64_KB, 128_KB, 256_KB, 1_MB, 4_MB,
-                                  16_MB, 64_MB, 128_MB, 256_MB, 1024_MB);
-  RunBenchmark(copy_size, sizeof(uint32_t));
+}  // namespace
+
+HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_D2D) {
+  const PointerPattern pointer_pattern =
+      GENERATE(PointerPattern::kBasePointers, PointerPattern::kBroadcastSource);
+  const auto [copy_size, batch_copy_count] = GENERATE(table<size_t, size_t>(
+      {{4_KB, 4096}, {16_KB, 1024}, {64_KB, 256}, {256_KB, 64}, {1024_KB, 16}}));
+  RunDeviceToDeviceBenchmark(copy_size, batch_copy_count, pointer_pattern);
 }
 
-#endif
+HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_P2P) {
+  if (HipTest::getDeviceCount() < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+  const PointerPattern pointer_pattern =
+      GENERATE(PointerPattern::kBasePointers, PointerPattern::kBroadcastSource);
+  const auto [copy_size, batch_copy_count] = GENERATE(table<size_t, size_t>(
+      {{4_KB, 4096}, {16_KB, 1024}, {64_KB, 256}, {256_KB, 64}, {1024_KB, 16}}));
+  RunPeerToPeerBenchmark(copy_size, batch_copy_count, pointer_pattern);
+}
+
+HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_H2D_Pageable) {
+  const PointerPattern pointer_pattern =
+      GENERATE(PointerPattern::kBasePointers, PointerPattern::kBroadcastSource);
+  const auto [copy_size, batch_copy_count] = GENERATE(table<size_t, size_t>(
+      {{4_KB, 4096}, {16_KB, 1024}, {64_KB, 256}, {256_KB, 64}, {1024_KB, 16}}));
+  RunHostDeviceBenchmark(copy_size, batch_copy_count, LinearAllocs::malloc, LinearAllocs::hipMalloc,
+                         pointer_pattern);
+}
+
+HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_H2D_Pinned) {
+  const PointerPattern pointer_pattern =
+      GENERATE(PointerPattern::kBasePointers, PointerPattern::kBroadcastSource);
+  const auto [copy_size, batch_copy_count] = GENERATE(table<size_t, size_t>(
+      {{4_KB, 4096}, {16_KB, 1024}, {64_KB, 256}, {256_KB, 64}, {1024_KB, 16}}));
+  RunHostDeviceBenchmark(copy_size, batch_copy_count, LinearAllocs::hipHostMalloc,
+                         LinearAllocs::hipMalloc, pointer_pattern);
+}
+
+HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_D2H_Pageable) {
+  const PointerPattern pointer_pattern =
+      GENERATE(PointerPattern::kBasePointers, PointerPattern::kBroadcastSource);
+  const auto [copy_size, batch_copy_count] = GENERATE(table<size_t, size_t>(
+      {{4_KB, 4096}, {16_KB, 1024}, {64_KB, 256}, {256_KB, 64}, {1024_KB, 16}}));
+  RunHostDeviceBenchmark(copy_size, batch_copy_count, LinearAllocs::hipMalloc, LinearAllocs::malloc,
+                         pointer_pattern);
+}
+
+HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_D2H_Pinned) {
+  const PointerPattern pointer_pattern =
+      GENERATE(PointerPattern::kBasePointers, PointerPattern::kBroadcastSource);
+  const auto [copy_size, batch_copy_count] = GENERATE(table<size_t, size_t>(
+      {{4_KB, 4096}, {16_KB, 1024}, {64_KB, 256}, {256_KB, 64}, {1024_KB, 16}}));
+  RunHostDeviceBenchmark(copy_size, batch_copy_count, LinearAllocs::hipMalloc,
+                         LinearAllocs::hipHostMalloc, pointer_pattern);
+}
 
 /**
  * End doxygen group memcpy.

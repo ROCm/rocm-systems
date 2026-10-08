@@ -10,7 +10,7 @@
 #      gfx950-dcgpu nightly index, plus numpy.
 #   3. Install aorta from GitHub (pinned commit by default).
 #   4. Run `rocm-sdk init` so the devel package's compressed contents
-#      (headers, libs incl. librocjitsu_kmd.so) are unpacked.
+#      (headers, libs incl. librocjitsu.so) are unpacked.
 #
 # After this you can run, e.g.:
 #   source <venv>/bin/activate
@@ -76,7 +76,7 @@ else
 fi
 
 # 4. Expand the devel package. rocm[devel] ships its contents (headers,
-#    libs incl. librocjitsu_kmd.so) compressed; `rocm-sdk init` unpacks
+#    libs incl. librocjitsu.so) compressed; `rocm-sdk init` unpacks
 #    them into site-packages/_rocm_sdk_devel. Safe to re-run.
 if [[ -x "$VENV/bin/rocm-sdk" ]]; then
   log "expanding ROCm devel contents (rocm-sdk init)"

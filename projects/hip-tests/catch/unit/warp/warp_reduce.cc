@@ -83,13 +83,12 @@ template <class T> void runTestMultipleMasks(unsigned long long masks[], int num
   LinearAllocGuard<T> d_output(LinearAllocs::hipMalloc, wavefrontSize * sizeof(T));
   std::plus<T> op;
   std::mt19937_64 gen(123);
-  typename distribution::result_type a = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::lowest() :
-                                         (std::is_signed<T>::value? -1023 : 0);
-  typename distribution::result_type b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() :
-                                         1023;
+  typename distribution::result_type a = TestRange<T>::minimum;
+  typename distribution::result_type b = TestRange<T>::maximum;
   distribution distInput(a, b);
   dim3 blkDim{wavefrontSize};
   dim3 grdDim{1u};
+  T expectedByLane[64];
 
   HIP_CHECK(hipMemcpy(d_masks.ptr(), &masks[0], d_masks.size_bytes(), hipMemcpyHostToDevice));
   genRandomBuffers(d_input, input, distInput, gen, wavefrontSize);
@@ -99,7 +98,7 @@ template <class T> void runTestMultipleMasks(unsigned long long masks[], int num
 
   for (int numMask = 0; numMask < numMasks; numMask++) {
     unsigned long long mask = masks[numMask];
-    T expected = calculateExpected<T>(input.ptr(), op, mask);
+    T expected = calculateExpected<T>(expectedByLane, input.ptr(), op, mask, AggregationType::Reduce);
     int lane = 0;
 
     while (lane < wavefrontSize) {
@@ -109,11 +108,12 @@ template <class T> void runTestMultipleMasks(unsigned long long masks[], int num
         if constexpr (std::is_integral<T>::value) {
           // for integral types the result should match exactly
           if (result != expected) {
-            printMismatch(result, expected, input.ptr(), mask);
+            printMismatch(result, expected, input.ptr(), mask, lane);
             REQUIRE(result == expected);
           }
-        } else
-          compareFloatingPoint(result, expected, mask, input.ptr());
+        } else {
+          compareFloatingPoint<std::plus<T>>(result, expected, mask, input.ptr(), lane);
+        }
       }
 
       lane++;

@@ -25,9 +25,64 @@
 #include "log.hpp"
 #include "topology.hpp"
 #include "ibv_wrapper.hpp"
-#include "numa_wrapper.hpp"
+
+#include <cstdlib>
+#include <numa.h>
+#include <numaif.h>
 
 using namespace rocshmem;
+
+#define ERR_CHECK(cmd)                                                        \
+  do {                                                                        \
+    int error = cmd;                                                          \
+    if (error != 0) {                                                         \
+      fprintf(stderr, "error: %d at %s:%d\n", error, __FILE__, __LINE__);     \
+      exit(EXIT_FAILURE);                                                     \
+    }                                                                         \
+} while (0)
+
+// Helper macros for calling RDMA functions and reporting errors
+#ifdef VERBS_DEBUG
+#define IBV_CALL(__func__, ...)                                               \
+  do {                                                                        \
+    int error = __func__(__VA_ARGS__);                                        \
+    if (error != 0) {                                                         \
+      fprintf(stderr,"Encountered IbVerbs error (%d) at line (%d) "           \
+              "and function (%s)", (error), __LINE__, #__func__);             \
+      exit(EXIT_FAILURE);                                                     \
+    }                                                                         \
+  } while (0)
+
+#define IBV_PTR_CALL(__ptr__, __func__, ...)                                  \
+  do {                                                                        \
+    __ptr__ = __func__(__VA_ARGS__);                                          \
+    if (__ptr__ == nullptr) {                                                 \
+      fprintf(stderr, "Encountered IbVerbs nullptr error at line (%d) "       \
+              "and function (%s)", __LINE__, #__func__);                      \
+      exit(EXIT_FAILURE);                                                     \
+    }                                                                         \
+  } while (0)
+#else
+#define IBV_CALL(__func__, ...)                                               \
+  do {                                                                        \
+    int error = __func__(__VA_ARGS__);                                        \
+    if (error != 0) {                                                         \
+      fprintf(stderr, "Encountered IbVerbs error (%d) in func (%s) "          \
+              , error, #__func__);                                            \
+      exit(EXIT_FAILURE);                                                     \
+    }                                                                         \
+  } while (0)
+
+#define IBV_PTR_CALL(__ptr__, __func__, ...)                                  \
+  do {                                                                        \
+    __ptr__ = __func__(__VA_ARGS__);                                          \
+    if (__ptr__ == nullptr) {                                                 \
+      fprintf(stderr, "Encountered IbVerbs nullptr error in func (%s) ",      \
+               #__func__);                                                    \
+      exit(EXIT_FAILURE);                                                     \
+    }                                                                         \
+  } while (0)
+#endif
 
 namespace rocshmem
 {
@@ -55,7 +110,7 @@ namespace rocshmem
       pages[i] = (char*)pages[i-1] + pageSize;
     }
 
-    long const retCode = numa.move_pages(0, numPages, pages.data(), NULL, status.data(), 0);
+    long const retCode = move_pages(0, numPages, pages.data(), NULL, status.data(), 0);
     if (retCode) {
       LOG_ERROR("Unable to collect page table information for allocated memory. "
                 "Ensure NUMA library is installed properly");
@@ -76,7 +131,7 @@ namespace rocshmem
                 mistakeCount, numPages, targetId);
       return -1;
     }
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
   // Allocate memory
@@ -92,7 +147,7 @@ namespace rocshmem
 
     if (IsCpuMemType(memType)) {
       // Set numa policy prior to call to hipHostMalloc
-      numa.set_preferred(memDevice.memIndex);
+      numa_set_preferred(memDevice.memIndex);
 
       // Allocate host-pinned memory (should respect NUMA mem policy)
       CHECK_HIP(hipHostMalloc((void **)memPtr, numBytes, hipHostMallocNumaUser | hipHostMallocNonCoherent));
@@ -101,7 +156,7 @@ namespace rocshmem
       memset(*memPtr, 0, numBytes);
       ERR_CHECK(CheckPages((char*)*memPtr, numBytes, memDevice.memIndex));
       // Reset to default numa mem policy
-      numa.set_preferred(-1);
+      numa_set_preferred(-1);
     } else if (IsGpuMemType(memType)) {
       int prev_dev;
       CHECK_HIP(hipGetDevice(&prev_dev));
@@ -122,7 +177,7 @@ namespace rocshmem
       LOG_ERROR("Unsupported memory type (%d)", memType);
       return -1;
     }
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
   // Deallocate memory
@@ -149,7 +204,7 @@ namespace rocshmem
       LOG_ERROR("Attempting to deallocate unrecognized memory type (%d)", memType);
       return -1;
     }
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
 
@@ -213,7 +268,7 @@ namespace rocshmem
              exeDevice.exeType);
       return -1;
     }
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
   // Get the hsa_agent_t associated with a MemDevice
@@ -284,7 +339,7 @@ namespace rocshmem
         version = 2;
       }
     }
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
   static bool IsIPv4MappedIPv6(const union ibv_gid &gid)
@@ -307,7 +362,7 @@ namespace rocshmem
                          int const&                   portNum,
                          std::pair<int, std::string>& gidInfo)
   {
-    if(gidInfo.first >= 0) return ROCSHMEM_SUCCESS; // honor user choice
+    if(gidInfo.first >= 0) return 0; // honor user choice
     union ibv_gid gid;
 
     GidPriority highestPriority = GidPriority::UNKNOWN;
@@ -317,7 +372,7 @@ namespace rocshmem
       IBV_CALL(ibv.query_gid, context, portNum, i, &gid);
       if (!IsConfiguredGid(gid)) continue;
       int gidCurrRoceVersion;
-      if(GetRoceVersionNumber(context, portNum, i, gidCurrRoceVersion) != ROCSHMEM_SUCCESS) continue;
+      if(GetRoceVersionNumber(context, portNum, i, gidCurrRoceVersion) != 0) continue;
       GidPriority currPriority;
       if (IsIPv4MappedIPv6(gid)) {
         currPriority = (gidCurrRoceVersion == 2) ? GidPriority::ROCEV2_IPV4 : GidPriority::ROCEV1_IPV4;
@@ -339,7 +394,7 @@ namespace rocshmem
     }
     gidInfo.first = gidIndex;
     gidInfo.second = GidPriorityStr[highestPriority];
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
   vector<IbvDevice> const& GetIbvDeviceList()
@@ -349,6 +404,12 @@ namespace rocshmem
 
     // Build list on first use
     if (!isInitialized) {
+
+      if (!ibv.is_initialized) {
+        LOG_WARN("libibverbs not available; no InfiniBand devices will be reported.");
+        isInitialized = true;
+        return ibvDeviceList;
+      }
 
       // Query the number of IBV devices
       int numIbvDevices = 0;
@@ -379,7 +440,7 @@ namespace rocshmem
                       ibvDevice.isRoce = true;
                       std::pair<int, std::string> gidInfo (-1, "");
                       auto res = GetGidIndex(context, portAttr.gid_tbl_len, activePort, gidInfo);
-                      if (res == ROCSHMEM_SUCCESS) {
+                      if (res == 0) {
                         ibvDevice.gidIndex = gidInfo.first;
                         ibvDevice.gidDescriptor = gidInfo.second;
                       }
@@ -579,7 +640,7 @@ namespace rocshmem
     }
     currNode->description = description;
 
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
   // Returns root node for PCIe tree.  Constructed on first use
@@ -772,7 +833,7 @@ namespace rocshmem
   {
     switch (exeType) {
     case rocshmem::EXE_CPU:
-      return numa.num_configured_nodes();
+      return numa_num_configured_nodes();
     case rocshmem::EXE_GPU:
       {
         int numDetectedGpus = 0;
@@ -1092,8 +1153,8 @@ namespace rocshmem
     // Build CPU remapping on first use
     // Skip numa nodes that are not configured
     if (remappingCpu.empty()) {
-      for (int node = 0; node <= numa.max_node(); node++)
-        if (numa.bitmask_isbitset(numa.get_mems_allowed(), node))
+      for (int node = 0; node <= numa_max_node(); node++)
+        if (numa_bitmask_isbitset(numa_get_mems_allowed(), node))
           remappingCpu.push_back(node);
     }
     return remappingCpu[origIdx];
@@ -1144,7 +1205,7 @@ namespace rocshmem
     } else {
       printf("\nDetected Topology:\n");
       printf("==================\n");
-      printf("  %d configured CPU NUMA node(s) [%d total]\n", numCpus, numa.max_node() + 1);
+      printf("  %d configured CPU NUMA node(s) [%d total]\n", numCpus, numa_max_node() + 1);
       printf("  %d GPU device(s)\n", numGpus);
       printf("  %d Supported NIC device(s)\n", numNics);
     }
@@ -1170,13 +1231,13 @@ namespace rocshmem
       printf("NUMA %02d (%02d)%c", i, nodeI, sep);
       for (int j = 0; j < numCpus; j++) {
         int nodeJ = RemappedCpuIndex(j);
-        int numaDist = numa.distance(nodeI, nodeJ);
+        int numaDist = numa_distance(nodeI, nodeJ);
         printf(" %5d %c", numaDist, sep);
       }
 
       int numCpuCores = 0;
-      for (int j = 0; j < numa.num_configured_cpus(); j++)
-        if (numa.node_of_cpu(j) == nodeI) numCpuCores++;
+      for (int j = 0; j < numa_num_configured_cpus(); j++)
+        if (numa_node_of_cpu(j) == nodeI) numCpuCores++;
       printf(" %5d %c", numCpuCores, sep);
 
       for (int j = 0; j < numGpus; j++) {

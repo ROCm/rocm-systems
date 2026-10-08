@@ -104,6 +104,18 @@ def block_token_or_alias(s: str) -> str:
         return s
 
 
+def non_negative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected an integer, got {value!r}")
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(
+            f"must be a non-negative integer (0 means all), got {parsed}"
+        )
+    return parsed
+
+
 def print_avail_arch(avail_arch: list[str], args: str) -> str:
     ret_str = f"List all available {args} for analysis on specified arch:"
     for arch in avail_arch:
@@ -170,8 +182,11 @@ def add_general_group(
             "Enable experimental feature(s):\n"
             "   GUI (--gui)\n"
             "   TUI (--tui)\n"
-            "   Spatial multiplexing (--spatial-multiplexing)\n"
             "   Torch trace (--torch-trace, --list-torch-operators, --torch-operator)\n"
+            "   Triton trace (--triton-trace, --list-triton-operators, "
+            "--triton-operator)\n"
+            "   ML API trace (--ml-api-trace)\n"
+            "   Memory Bandwidth Analysis (--membw-analysis)\n"
             "   PC Sampling (--pc-sampling, --pc-sampling-method, "
             "--pc-sampling-interval)\n"
         ),
@@ -199,6 +214,9 @@ def omniarg_parser(
     )
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
+    skills_note = _skills_note(rocprof_compute_home)
+    if skills_note is not None:
+        parser.description = f"{parser.description}\n\n{skills_note}"
 
     subparsers = parser.add_subparsers(
         dest="mode", help="Select mode of interaction with the target application:"
@@ -209,6 +227,7 @@ def omniarg_parser(
     profile_parser = subparsers.add_parser(
         "profile",
         help="Profile the target application",
+        description=skills_note,
         usage="""
 
 `rocprof-compute profile --name <workload_name> [profile options] [roofline options] -- <workload_cmd>`
@@ -216,9 +235,9 @@ def omniarg_parser(
 ---------------------------------------------------------------------------------
 Examples:
 \trocprof-compute profile -n vcopy_all -- ./vcopy -n 1048576 -b 256
-\trocprof-compute profile -n vcopy_SPI_TCC -b SQ TCC -- ./vcopy -n 1048576 -b 256
+\trocprof-compute profile -n vcopy_blocks -b sol -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_kernel -k vecCopy -- ./vcopy -n 1048576 -b 256
-\trocprof-compute profile -n vcopy_disp -d 0 -- ./vcopy -n 1048576 -b 256
+\trocprof-compute profile -n vcopy_iter --kernel-iteration-range 1 -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_roof --roof-only -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n my_bench --bench-only
 ---------------------------------------------------------------------------------
@@ -248,7 +267,8 @@ Examples:
         dest="name",
         help=(
             "\t\t\tAssign a name to workload.\n"
-            "\t\t\t--name will be ignored if used together with --output-directory."
+            "\t\t\t--name will be ignored if used together with --output-directory.\n"
+            "\t\t\tUse --overwrite to re-profile into an existing directory."
         ),
     )
     profile_group.add_argument(
@@ -280,6 +300,7 @@ Examples:
         ),
     )
     profile_group.add_argument(
+        "-d",
         "--output-directory",
         metavar="",
         type=str,
@@ -294,7 +315,21 @@ Examples:
             "\t\t\t   %%rank%%: MPI process rank\n"
             '\t\t\t   %%env{NAME}%%: Environment variable "NAME"\n'
             "\t\t\t(DEFAULT: <current-working-directory>/workloads/<name>/%%gpumodel%%) without MPI,\n"  # noqa: E501
-            "\t\t\t <current-working-directory>/workloads/<name>/%%rank%% with MPI.)"
+            "\t\t\t <current-working-directory>/workloads/<name>/%%rank%% with MPI.)\n"
+            "\t\t\tUse --overwrite to re-profile into an existing directory."
+        ),
+    )
+    profile_group.add_argument(
+        "--overwrite",
+        dest="overwrite",
+        required=False,
+        default=False,
+        action="store_true",
+        help=(
+            "\t\t\tOverwrite an existing workload directory.\n"
+            "\t\t\tWithout it, profiling into a non-empty directory fails\n"
+            "\t\t\tinstead of mixing runs. Use a fresh directory per run;\n"
+            "\t\t\tpass this flag only to re-profile in place."
         ),
     )
     profile_group.add_argument(
@@ -319,7 +354,7 @@ Examples:
         feature_label="Torch trace",
         help=(
             "\t\t\tTorch Trace, maps PyTorch operators to performance counters.\n"
-            "\t\t\tShould be used only when profiling PyTorch applications."
+            "\t\t\tRequires PyTorch 2.13 or 2.14."
         ),
     )
     profile_group.add_argument(
@@ -334,15 +369,14 @@ Examples:
         help="\t\t\tKernel filtering.",
     )
     profile_group.add_argument(
-        "-d",
-        "--dispatch",
+        "--kernel-iteration-range",
         type=str,
         metavar="",
         nargs="+",
-        dest="dispatch",
+        dest="kernel_iteration_range",
         required=False,
         help=(
-            "\t\t\tWhich dispatch iterations of each kernel to filter \n"
+            "\t\t\tWhich iterations of each kernel to profile \n"
             "\t\t\t(1-based; positive integer or 'start:end'/'start-end' \n"
             "\t\t\trange, e.g. 1 3:5 captures 1st, 3rd, 4th and 5th \n"
             "\t\t\titerations)."
@@ -390,8 +424,9 @@ Examples:
             "(e.g. 12, 12.1, 12.1.1).\n"
             "\t\t\tAlternatively, specify block id(s) for filtering "
             "(e.g. 12, 13, 14).\n"
-            "\t\t\tAlternatively, specify block alias(es) for filtering "
-            "(e.g. lds, l1i, sl1d).\n"
+            "\t\t\tAlternatively, specify block alias(es) for filtering.\n"
+            "\t\t\tAliases are arch-specific; run --list-blocks <arch> to see\n"
+            "\t\t\tall valid block ids and aliases.\n"
             "\t\t\tCan provide multiple space separated arguments.\n"
             "\t\t\tCannot be used with --set, --roof-only, or --bench-only"
         ),
@@ -413,18 +448,6 @@ Examples:
         ),
     )
     profile_group.add_argument(
-        "--join-type",
-        metavar="",
-        required=False,
-        choices=["kernel", "grid"],
-        default="grid",
-        help=(
-            "\t\t\tChoose how to join rocprof runs: (DEFAULT: grid)\n"
-            "\t\t\t   kernel (i.e. By unique kernel name dispatches)\n"
-            "\t\t\t   grid (i.e. By unique kernel name + grid size dispatches)"
-        ),
-    )
-    profile_group.add_argument(
         "--no-roof",
         required=False,
         default=False,
@@ -437,15 +460,6 @@ Examples:
         default=None,
         nargs=argparse.REMAINDER,
         help="\t\t\tProvide command for profiling after double dash.",
-    )
-    profile_group.add_argument(
-        "--format-rocprof-output",
-        required=False,
-        metavar="",
-        dest="format_rocprof_output",
-        choices=["csv", "rocpd"],
-        default="rocpd",
-        help=("\t\t\tSet the format of output file of rocprof."),
     )
     profile_group.add_argument(
         "--rocprofiler-sdk-tool-path",
@@ -481,7 +495,6 @@ Examples:
         help=(
             "\t\t\t(DEPRECATED) Retain the large raw rocpd database "
             "in workload directory.\n"
-            "\t\t\tThis option requires --format-rocprof-output rocpd.\n"
             "\t\t\t --retain-rocpd-output is deprecated. .db files "
             "will be retained by default in a future release."
         ),
@@ -527,20 +540,39 @@ Examples:
     ## ----------------------------
 
     profile_group.add_argument(
-        "--spatial-multiplexing",
-        dest="spatial_multiplexing",
+        "--triton-trace",
+        dest="triton_trace",
         required=False,
-        default=None,
-        base_action="store",
+        default=False,
+        const=True,
+        nargs=0,
+        base_action="store_true",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
-        feature_label="Spatial multiplexing",
-        type=int,
-        nargs="*",
-        metavar="",
-        help="\t\t\tProvide Node ID and GPU number per node.",
+        feature_label="Triton trace",
+        help=(
+            "\t\t\tTriton Trace, maps Triton kernels to performance counters.\n"
+            "\t\t\tUse when profiling Triton kernels, including those generated\n"
+            "\t\t\tby torch.compile / Inductor.\n"
+            "\t\t\tCan be combined with --torch-trace."
+        ),
     )
-
+    profile_group.add_argument(
+        "--ml-api-trace",
+        dest="ml_api_trace",
+        required=False,
+        default=False,
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="ML API trace",
+        help=(
+            "\t\t\tML API Trace, enables tracing for all supported machine\n"
+            "\t\t\tlearning framework backends (e.g. PyTorch, Triton)."
+        ),
+    )
     profile_group.add_argument(
         "--membw-analysis",
         dest="membw_analysis",
@@ -552,7 +584,7 @@ Examples:
         feature_label="Memory Bandwidth Analysis",
         nargs=0,
         const=True,
-        help="\t\t\tEnable block 30 (memory bandwidth specific) for profile mode.",
+        help="\t\t\tEnable Memory Bandwidth Analysis counters (block 30).",
     )
 
     profile_group.add_argument(
@@ -596,9 +628,11 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="PC Sampling",
         help=(
-            "\t\t\tSet the interval of pc sampling.\n"
-            "\t\t\t  For stochastic sampling, the interval is in cycles; it "
-            "must be a power of 2 and at least 65536 (DEFAULT: 1048576).\n"
+            "\t\t\tSet the interval of pc sampling. The accepted range is "
+            "read from the device; see 'rocprofv3-avail info --pc-sampling'. "
+            "When the device cannot be queried, 1 to 1048576 is accepted.\n"
+            "\t\t\t  For stochastic sampling, the interval is in cycles and "
+            "must be a power of 2 (DEFAULT: 1048576).\n"
             "\t\t\t  For host_trap sampling, the interval is in microseconds "
             "(DEFAULT: 512)."
         ),
@@ -609,6 +643,7 @@ Examples:
     analyze_parser = subparsers.add_parser(
         "analyze",
         help="Analyze existing profiling results at command line",
+        description=skills_note,
         usage="""
 rocprof-compute analyze --path <workload_path> [analyze options]
 
@@ -646,6 +681,12 @@ Examples:
         help="\t\tSpecify the raw data root dirs or desired results directory.",
     )
     analyze_group.add_argument(
+        "--verify-deps",
+        dest="verify_deps",
+        action="store_true",
+        help="\t\tCheck the Python dependencies analyze mode needs, then exit.",
+    )
+    analyze_group.add_argument(
         "--list-stats",
         action="store_true",
         help="\t\tList all detected kernels and kernel dispatches.",
@@ -669,7 +710,7 @@ Examples:
         help=(
             "\t\tList PyTorch operators as a unified call tree grouped by "
             "source location with kernel launch stats. "
-            "Recreates torch_trace output directory."
+            "Recreates ml_api_trace output directory."
         ),
     )
     analyze_group.add_argument(
@@ -700,6 +741,44 @@ Examples:
         ),
     )
     analyze_group.add_argument(
+        "--list-triton-operators",
+        dest="list_triton_operators",
+        default=False,
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="List triton operators",
+        help=(
+            "\t\tList Triton kernels as a unified call tree grouped by "
+            "source location with kernel launch stats. "
+            "Recreates ml_api_trace output directory."
+        ),
+    )
+    analyze_group.add_argument(
+        "--triton-operator",
+        metavar="",
+        type=str,
+        dest="triton_operator",
+        nargs="*",
+        base_action="store",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Triton operator filter",
+        help=(
+            "\t\tFilter Triton kernels using shell-style glob patterns\n"
+            "\t\t\t(fnmatch), select their GPU kernels, and display metrics.\n"
+            "\t\t\tWith no arguments, matches all kernels (default: **).\n"
+            "\t\t\tExamples:\n"
+            "\t\t\t  *matmul*            contains matmul\n"
+            "\t\t\t  all  or  '*'        match every kernel\n"
+            "\t\t\tMultiple patterns (space or comma-separated):\n"
+            "\t\t\t  --triton-operator *matmul*,*softmax*\n"
+            "\t\t\tCombine with -k to intersect with kernel IDs."
+        ),
+    )
+    analyze_group.add_argument(
         "-k",
         "--kernel",
         metavar="",
@@ -716,7 +795,7 @@ Examples:
         metavar="",
         nargs="+",
         action="append",
-        help="\t\tSpecify dispatch id(s) for filtering.",
+        help="\t\tSpecify dispatch id(s) for filtering (1-based).",
     )
     analyze_group.add_argument(
         "-b",
@@ -745,11 +824,11 @@ Examples:
             "\t\t  stdout - print report to the terminal (no file/folder created).\n"
             "\t\t  txt    - write report to <name>.txt; disables terminal output.\n"
             "\t\t  csv    - write one CSV per analysis view into a folder <name>/.\n"
-            "\t\t           Requires profiles collected with\n"
-            "\t\t           --format-rocprof-output rocpd. Disables terminal output.\n"
+            "\t\t           Requires profiles collected in rocpd format. "
+            "Disables terminal output.\n"
             "\t\t  db     - write a SQLite database <name>.db (see analysis\n"
             "\t\t           database schema in the docs). Requires profiles\n"
-            "\t\t           collected with --format-rocprof-output rocpd.\n"
+            "\t\t           collected in rocpd format.\n"
             "\t\t           Disables terminal output.\n"
             "\t\tDefault <name> is rocprof_compute_<uuid>; override with"
             " --output-name.\n"
@@ -771,10 +850,21 @@ Examples:
         required=False,
         metavar="",
         dest="pc_sampling_sorting_type",
-        default="offset",
+        default="count",
         type=str,
+        choices=["offset", "count"],
         help="\t\tSet the sorting type of pc sampling: "
-        "offset or count (DEFAULT: offset).",
+        "offset or count (DEFAULT: count).",
+    )
+    analyze_group.add_argument(
+        "--pc-sampling-rows",
+        required=False,
+        metavar="",
+        dest="pc_sampling_rows",
+        default=10,
+        type=non_negative_int,
+        help="\t\tSpecify the maximum number of rows shown in the PC "
+        "sampling table; use 0 to show all rows (DEFAULT: 10).",
     )
 
     ## Roofline Command Line Options (analyze: visualization)
@@ -796,7 +886,7 @@ Examples:
         "-m",
         "--mem-level",
         required=False,
-        choices=["HBM", "L2", "vL1D", "LDS"],
+        choices=["HBM", "L2", "vL1D", "L0", "LDS"],
         metavar="",
         nargs="+",
         type=str,
@@ -806,6 +896,7 @@ Examples:
             "\t\t   HBM\n"
             "\t\t   L2\n"
             "\t\t   vL1D\n"
+            "\t\t   L0\n"
             "\t\t   LDS"
         ),
     )
@@ -817,6 +908,7 @@ Examples:
             "FP4",
             "FP6",
             "FP8",
+            "MXFP8",
             "FP16",
             "BF16",
             "FP32",
@@ -834,6 +926,7 @@ Examples:
             "\t\t   FP4\n"
             "\t\t   FP6\n"
             "\t\t   FP8\n"
+            "\t\t   MXFP8\n"
             "\t\t   FP16\n"
             "\t\t   BF16\n"
             "\t\t   FP32\n"
@@ -937,16 +1030,6 @@ Examples:
         help="\t\tList the installation dependency.",
     )
     analyze_advanced_group.add_argument(
-        "--kernel-verbose",
-        required=False,
-        metavar="",
-        help="\t\tSpecify Kernel Name verbose level 1-5. "
-        "Lower the level, shorter the kernel name. "
-        "(DEFAULT: 5) (DISABLE: 5)",
-        default=5,
-        type=int,
-    )
-    analyze_advanced_group.add_argument(
         "--report-diff", default=0, nargs="?", type=int, help=argparse.SUPPRESS
     )
     analyze_advanced_group.add_argument(
@@ -956,54 +1039,10 @@ Examples:
         help="\t\tSpecify the specs to correct. e.g. "
         '--specs-correction="specname1:specvalue1,specname2:specvalue2"',
     )
-    analyze_advanced_group.add_argument(
-        "--list-nodes",
-        action="store_true",
-        help="\t\tMulti-node option: list all node names.",
-    )
-    analyze_advanced_group.add_argument(
-        "--nodes",
-        metavar="",
-        type=str,
-        dest="nodes",
-        nargs="*",
-        help=(
-            "\t\tMulti-node option: filter with node names. "
-            "Enable it without node names means ALL."
-        ),
-    )
 
     ## ----------------------------
     # Experimental Features
     ## ----------------------------
-    analyze_group.add_argument(
-        "--spatial-multiplexing",
-        dest="spatial_multiplexing",
-        required=False,
-        default=False,
-        base_action="store_const",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="Spatial multiplexing",
-        nargs=0,
-        const=True,
-        help="\t\tMode of spatial multiplexing.",
-    )
-
-    analyze_group.add_argument(
-        "--membw-analysis",
-        dest="membw_analysis",
-        required=False,
-        default=False,
-        base_action="store_const",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="Memory Bandwidth Analysis",
-        nargs=0,
-        const=True,
-        help="\t\tEnable block 30 (memory bandwidth specific) for analysis mode.",
-    )
-
     analyze_group.add_argument(
         "--gui",
         type=int,
@@ -1015,8 +1054,10 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="GUI",
         help=(
-            "\t\tActivate a GUI to interate with rocprofiler-compute metrics.\n"
-            "\t\tOptionally, specify port to launch application (DEFAULT: 8050)"
+            "\t\t(DEPRECATED) Activate a GUI to interate with rocprofiler-compute "
+            "metrics.\n"
+            "\t\tOptionally, specify port to launch application (DEFAULT: 8050)\n"
+            "\t\t--gui is deprecated and will be removed in a future release."
         ),
     )
     analyze_group.add_argument(
@@ -1028,6 +1069,20 @@ Examples:
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
         feature_label="TUI",
-        help="\t\tActivate a Textual User Interface (TUI) to "
-        "interact with rocprofiler-compute metrics.",
+        help="\t\t(DEPRECATED) Activate a Textual User Interface (TUI) to "
+        "interact with rocprofiler-compute metrics.\n"
+        "\t\t--tui is deprecated and will be removed in a future release.",
     )
+
+
+def _skills_note(rocprof_compute_home: Path) -> Optional[str]:
+    """Return the help line that points to the Agent Skills README, if shipped."""
+    # Source checkout first, then the install's share directory.
+    for skills_dir in (
+        rocprof_compute_home.parent / "skills",
+        rocprof_compute_home.parent.parent / "share" / "rocprofiler-compute" / "skills",
+    ):
+        readme = skills_dir / "README.md"
+        if readme.is_file():
+            return f"Agent Skills: see {readme} to install them."
+    return None

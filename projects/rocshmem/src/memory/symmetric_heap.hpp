@@ -138,6 +138,31 @@ class SymmetricHeap {
   auto get_size() { return single_heap_.get_size(); }
 
   /**
+   * @brief Accessor for the allocator type backing the symmetric heap
+   */
+  AllocatorType get_type() { return single_heap_.get_type(); }
+
+  /**
+   * @brief Accessor for the allocation granularity of the symmetric heap
+   */
+  size_t get_granularity() { return single_heap_.get_granularity(); }
+
+  /**
+   * @brief Accessor for the allocator used to back the symmetric heap
+   */
+  HIPAllocator *get_allocator() { return single_heap_.get_allocator(); }
+
+  /**
+   * @brief Whether the symmetric heap is backed by HIP VMM memory
+   *
+   * @return true if the heap allocator is a VMM allocator (POSIX fd or fabric)
+   */
+  bool is_vmm() {
+    auto type = single_heap_.get_type();
+    return type == AllocatorTypeVMMPosix || type == AllocatorTypeVMMFabric;
+  }
+
+  /**
    * @brief Accessor method for heap_window_info_
    */
   auto get_window_info() { return remote_heap_info_->get_window_info(); }

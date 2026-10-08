@@ -234,132 +234,6 @@ __attribute__((target("avx512vbmi,avx512bw,avx512f,bmi2"))) size_t scan_gfx9_avx
     return n_out;
 }
 
-// AVX-512BW path. Per 64-byte chunk:
-//   1. Load 64 bytes into a zmm register.
-//   2. Mask low nibble (vpand with 0x0F).
-//   3. vpshufb against a broadcast 16-byte combined-info LUT — single
-//      cross-lane-free instruction since vpshufb operates per 128-bit lane
-//      and our LUT is broadcast 4 times into the zmm.
-//   4. vptestmb against splat(INFO_RARE) — 64-bit mask of rare positions.
-//   5. If mask is zero (the 99%+ case), micro-walk over the stack info_buf
-//      to advance bp without any rare-capture overhead, then jump to the
-//      next chunk.
-//   6. If mask is non-zero, full walk over info_buf with rare capture at
-//      each set position.
-//
-// The fast-skip on empty rare-mask is the actual SIMD win — most chunks
-// have no rare tokens at all, so we skip the rare-capture branch entirely
-// and the walk loop reduces to `pos += info_buf[pos] & 0x0F`.
-//
-// State carried across chunks: `entry` (byte offset within the next chunk
-// where the next token starts; 0..7).
-__attribute__((target("avx512bw,avx512f,bmi2"))) size_t scan_gfx9_avx512bw(
-    const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap
-)
-{
-    if (!buf || !out || out_cap == 0 || size == 0) return 0;
-
-    const Tables& T = tables();
-
-    // Broadcast the 16-byte combined-info LUT into all four 128-bit lanes
-    // of a zmm register. vpshufb operates per-lane, and indices < 16 hit
-    // the per-lane LUT (high bit of index = output 0; we mask first so
-    // that never happens).
-    const __m512i info_lut_v = _mm512_broadcast_i32x4(_mm_load_si128(reinterpret_cast<const __m128i*>(T.info_lut)));
-    const __m512i nibble_mask = _mm512_set1_epi8(0x0F);
-    const __m512i rare_mask_v = _mm512_set1_epi8(static_cast<char>(INFO_RARE));
-
-    constexpr size_t CHUNK = 64;
-    constexpr size_t TAIL_GUARD = 16;
-
-    size_t bp = 0;
-    size_t entry = 0;
-    size_t n_out = 0;
-
-    while (bp + CHUNK + TAIL_GUARD <= size && n_out < out_cap)
-    {
-        const __m512i bytes_v = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(buf + bp));
-        const __m512i nibbles_v = _mm512_and_si512(bytes_v, nibble_mask);
-        const __m512i info_v = _mm512_shuffle_epi8(info_lut_v, nibbles_v);
-
-        // 64-bit mask of byte positions whose info has the RARE bit set.
-        // For valid streams these are all true token starts (lengths line
-        // up); even if a payload byte happens to alias a rare nibble, the
-        // walk-from-entry will skip past it (we only emit captures from
-        // positions actually visited by the walk).
-        const __mmask64 any_rare_mask = _mm512_test_epi8_mask(info_v, rare_mask_v);
-
-        alignas(64) uint8_t info_buf[CHUNK];
-        _mm512_store_si512(reinterpret_cast<__m512i*>(info_buf), info_v);
-
-        size_t pos = entry;
-
-        if (__builtin_expect(any_rare_mask == 0, 1))
-        {
-            // Fast-skip: no rare token possible in this chunk. Just advance
-            // through lengths to update bp/entry. No memcpys, no out writes,
-            // no rare branches — straight 4-cycle critical path.
-            while (pos < CHUNK)
-            {
-                const unsigned bytes = info_buf[pos] & INFO_LEN;
-                pos += bytes ? bytes : 2;
-            }
-        }
-        else
-        {
-            // Full walk: rare-capture branch live.
-            while (pos < CHUNK)
-            {
-                const uint8_t v = info_buf[pos];
-                const unsigned bytes = v & INFO_LEN;
-
-                if (__builtin_expect(v & INFO_RARE, 0))
-                {
-                    uint64_t contents;
-                    std::memcpy(&contents, buf + bp + pos, 8);
-                    // type = nibble = pos's byte & 0x0F; we already have
-                    // it implicitly (the LUT is keyed by nibble, so
-                    // info[pos] tells us this position is rare iff its
-                    // nibble was rare). Recompute to populate QuickToken.type:
-                    out[n_out++] = QuickToken{contents, static_cast<uint64_t>(buf[bp + pos] & 0x0F), bp + pos};
-                    if (n_out >= out_cap) goto done;
-                }
-
-                pos += bytes ? bytes : 2;
-            }
-        }
-
-        entry = pos - CHUNK;
-        bp += CHUNK;
-    }
-
-    bp += entry;
-
-done:
-    // Scalar tail: handles the last <CHUNK+TAIL_GUARD bytes with
-    // bounds-checked memcpy on rare hits.
-    while (bp < size && n_out < out_cap)
-    {
-        const uint8_t nibble = buf[bp] & 0x0F;
-        const uint8_t v = T.info_lut[nibble];
-        const unsigned bytes = v & INFO_LEN;
-
-        if (__builtin_expect(v & INFO_RARE, 0))
-        {
-            uint64_t contents = 0;
-            const size_t avail = size - bp;
-            const size_t to_copy = avail < 8 ? avail : 8;
-            std::memcpy(&contents, buf + bp, to_copy);
-            out[n_out++] = QuickToken{contents, nibble, bp};
-            if (n_out >= out_cap) break;
-        }
-
-        bp += bytes ? bytes : 2;
-    }
-
-    return n_out;
-}
-
 // AVX2 fallback for CPUs without AVX-512. Per 16-byte chunk:
 //   1. Load 16 bytes.
 //   2. Decode low-nibble token info with vpshufb against a duplicated 16B LUT.
@@ -500,13 +374,19 @@ ScanFn select_scanner()
     __builtin_cpu_init();
     if (__builtin_cpu_supports("avx512vbmi") && __builtin_cpu_supports("avx512bw") && __builtin_cpu_supports("avx512f"))
         return &scan_gfx9_avx512vbmi;
-    if (__builtin_cpu_supports("avx512bw") && __builtin_cpu_supports("avx512f")) return &scan_gfx9_avx512bw;
     if (__builtin_cpu_supports("avx2")) return &scan_gfx9_avx2;
 #endif
     return nullptr;
 }
 
 } // namespace
+
+#if GFX9_QUICK_SCAN_HAS_X86
+size_t scan_gfx9_avx2_for_testing(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap)
+{
+    return scan_gfx9_avx2(buf, size, out, out_cap);
+}
+#endif
 
 } // namespace gfx9::quick_scan
 

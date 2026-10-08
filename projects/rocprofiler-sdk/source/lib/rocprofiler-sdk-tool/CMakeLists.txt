@@ -4,9 +4,23 @@
 
 rocprofiler_activate_clang_tidy()
 
-set(TOOL_HEADERS config.hpp execution_profile.hpp helper.hpp stream_stack.hpp)
+set(TOOL_HEADERS
+    att_no_intercept.hpp
+    att_no_intercept_impl.hpp
+    config.hpp
+    execution_profile.hpp
+    graph_stack.hpp
+    helper.hpp
+    kernel_filter_range.hpp
+    kernel_iteration_filter.hpp
+    stream_stack.hpp)
 
-set(TOOL_SOURCES config.cpp main.c tool.cpp stream_stack.cpp)
+set(TOOL_SOURCES att_no_intercept.cpp config.cpp graph_stack.cpp kernel_filter_range.cpp
+                 kernel_iteration_filter.cpp main.c stream_stack.cpp tool.cpp)
+
+if(rocprof-trace-decoder_FOUND)
+    list(APPEND TOOL_SOURCES att_no_intercept_quick_scan.cpp)
+endif()
 
 add_library(rocprofiler-sdk-tool SHARED)
 target_sources(rocprofiler-sdk-tool PRIVATE ${TOOL_SOURCES} ${TOOL_HEADERS})
@@ -27,6 +41,16 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-att-parser
             rocprofiler-sdk::rocprofiler-sdk-sqlite3)
 
+if(rocprof-trace-decoder_FOUND)
+    target_link_libraries(rocprofiler-sdk-tool
+                          PRIVATE rocprof-trace-decoder::rocprof-trace-decoder)
+    target_compile_definitions(rocprofiler-sdk-tool
+                               PRIVATE ROCPROFILER_ATT_QUICK_SCAN_ENABLED=1)
+else()
+    target_compile_definitions(rocprofiler-sdk-tool
+                               PRIVATE ROCPROFILER_ATT_QUICK_SCAN_ENABLED=0)
+endif()
+
 set_target_properties(
     rocprofiler-sdk-tool
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY
@@ -34,7 +58,7 @@ set_target_properties(
                SOVERSION ${PROJECT_VERSION_MAJOR}
                VERSION ${PROJECT_VERSION}
                BUILD_RPATH "\$ORIGIN:\$ORIGIN/.."
-               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..:\$ORIGIN/../rocm_sysdeps/lib")
 
 install(
     TARGETS rocprofiler-sdk-tool
@@ -43,3 +67,4 @@ install(
     EXPORT rocprofiler-sdk-tool-targets)
 
 add_subdirectory(kokkosp)
+add_subdirectory(list-avail)

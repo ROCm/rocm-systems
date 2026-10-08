@@ -23,7 +23,7 @@
 # Misc local working artifacts
 *.swp
 .vscode
-build
+/build*/
 third_party
 Testing
 tmp
@@ -40,3 +40,9 @@ __pycache__
 
 # agents
 .claude
+.codex
+.agents
+
+# Local website settings
+/website/**/*.local
+/website/**/.DS_Store

@@ -43,10 +43,9 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
 #define HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
 
-#include <array>
-#include <climits>
-#include <map>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "core/inc/amd_aie_agent.h"
 #include "core/inc/driver.h"
@@ -61,23 +60,6 @@ namespace AMD {
 /// @details The user-mode driver for AMD AIE that provides APIs for the ROCr core to allocate
 /// memory, manage DMA buffers, allocate queues, and more.
 class XdnaDriver final : public core::Driver {
-  /// @brief BO handle information.
-  struct BOHandle {
-    /// Mapped address.
-    void* vaddr = nullptr;
-    /// Handle returned by xdna. Same value as AMDXDNA_INVALID_BO_HANDLE.
-    uint32_t handle = 0;
-    /// Size in bytes.
-    size_t size = 0;
-    /// True if @ref vaddr needs to be unmapped.
-    bool unmap_vaddr = false;
-
-    constexpr BOHandle() = default;
-    constexpr BOHandle(void* vaddr, uint32_t handle, size_t size)
-        : vaddr{vaddr}, handle{handle}, size{size} {}
-    constexpr bool IsValid() const { return handle != 0; }
-  };
-
 public:
   XdnaDriver(std::string devnode_name);
 
@@ -102,11 +84,10 @@ public:
                                    std::vector<HsaMemoryProperties>& mem_props) const override;
   hsa_status_t GetCacheProperties(uint32_t node_id, uint32_t processor_id,
                                   std::vector<HsaCacheProperties>& cache_props) const override;
-  hsa_status_t AllocateMemory(const core::MemoryRegion &mem_region,
-                              core::MemoryRegion::AllocateFlags alloc_flags,
-                              void **mem, size_t size,/* uint64_t* mmap_offset, */
-                              uint32_t node_id) override;
-  hsa_status_t FreeMemory(void *mem, size_t size) override;
+  hsa_status_t AllocateMemory(const core::MemoryRegion& mem_region,
+                              core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
+                              uint32_t node_id, core::DriverMemoryHandle* handle) override;
+  hsa_status_t FreeMemory(const core::DriverMemoryHandle& handle) override;
   hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                            HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id, void* queue_addr,
                            uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes, HsaEvent* event,
@@ -119,8 +100,14 @@ public:
   /// dispatch queue.
   ///
   /// @param[in] queue_size size of the dispatch queue in number of packets
+  /// @param[in] num_core_tiles number of core tiles to give the queue's hardware context. The
+  /// driver divides this by the number of core rows to get a column count, so a value smaller
+  /// than one row's worth of tiles asks for zero columns and is rejected.
+  /// @param[in] device_id PCI device ID of the agent the queue dispatches to, resolved here so
+  /// dispatch does not look the device type up per batch
   /// @param[out] queue_metadata KMQ metadata created for the dispatch queue
-  hsa_status_t CreateKernelModeQueue(size_t queue_size, void** queue_metadata) const;
+  hsa_status_t CreateKernelModeQueue(size_t queue_size, uint32_t num_core_tiles, uint16_t device_id,
+                                     void** queue_metadata) const;
 
   /// @brief Destroy the Kernel Mode Queue (KMQ) metadata.
   ///
@@ -136,18 +123,16 @@ public:
   hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
                              uint32_t* first_gws) const override;
   hsa_status_t ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
-                                  core::ShareType type, uint32_t flags, void* export_handle,
-                                  uint64_t* export_offset = nullptr) override;
+                                  core::ShareType type, void* export_handle) override;
   hsa_status_t ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
                                   core::ShareType type, void* import_handle,
                                   void* mem = nullptr) override;
-  hsa_status_t DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) override;
   hsa_status_t Map(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
                    size_t size, hsa_access_permission_t perms, uint32_t node_id) override;
   hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
                      size_t size, uint32_t node_id) override;
-  hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size, const core::Agent& agent,
-                                     core::DriverMemoryHandle* handle, uint64_t* offset) override;
+  hsa_status_t CreateShareableHandle(core::DriverMemoryHandle* handle, const core::Agent& agent,
+                                     uint64_t* offset) override;
   hsa_status_t DestroyMemoryHandle(core::DriverMemoryHandle* handle) override;
 
   /// @brief Submits packets to the driver for execution.
@@ -159,9 +144,13 @@ public:
   /// driver needs to create a new hardware context.
   /// @param[in] first_pkt_idx index of the first packet in the queue
   /// @param[in] num_pkts number of packets in the queue to be submitted. Must be greater than 0.
-  /// @param[in] num_core_tiles number of core tiles in the AIE device
+  /// @param[in] agent agent that owns the queue
+  /// @param[out] num_completed how many packets, counting from @p first_pkt_idx, executed and had
+  /// their completion signals released. @p num_pkts on success. On failure this is the prefix the
+  /// device got through before it stopped, so the caller can consume exactly those and leave the
+  /// failing packet and everything after it in the ring.
   hsa_status_t SubmitCmdChain(hsa_queue_t& q, void* queue_metadata, uint64_t first_pkt_idx,
-                              uint64_t num_pkts, uint32_t num_core_tiles);
+                              uint64_t num_pkts, const core::Agent& agent, uint64_t* num_completed);
 
   hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
   hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;
@@ -180,7 +169,7 @@ public:
   hsa_status_t RegisterMemory(void* ptr, uint64_t size, HsaMemFlags mem_flags) const override;
   hsa_status_t DeregisterMemory(void* ptr) const override;
   hsa_status_t MakeMemoryResident(const void* mem, size_t size, uint64_t* alternate_va,
-                                  const HsaMemMapFlags* mem_flags, uint32_t num_nodes,
+                                  const HsaMemFlags* mem_flags, uint32_t num_nodes,
                                   const uint32_t* nodes) const override;
   hsa_status_t MakeMemoryUnresident(const void* mem) const override;
 
@@ -188,48 +177,36 @@ public:
 
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
 
+  hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
+
+  hsa_status_t SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) override {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
  private:
-  /// @brief Destroys @p bo_handle.
-  ///
-  /// @note This function will unmap the virtual address and close the BO, even if the former fails.
-  ///
-  /// @param[in,out] bo_handle BO handle to destroy.
-  hsa_status_t DestroyBOHandle(BOHandle& bo_handle) const;
-
-  /// @brief Returns the BO associated with the address.
-  ///
-  /// @param[in] mem virtual address to query.
-  BOHandle FindBOHandle(void* mem) const;
-
   /// @brief Queries the driver version and updates internal state.
   hsa_status_t QueryDriverVersion();
 
-  /// @brief Allocate device accessible heap space.
+  /// @brief Allocate device accessible heap (dev heap) space.
   hsa_status_t InitDeviceHeap();
 
-  /// @brief Free device accessible heap space.
+  /// @brief Free device accessible heap (dev heap) space.
   hsa_status_t FreeDeviceHeap();
 
-  /// @brief Creates a command BO and returns it to @p bo_info.
+  /// @brief Device heap BO.
   ///
-  /// @param[in] size size of memory to allocate
-  /// @param[out] bo_info allocated BO
-  hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info) const;
+  /// Its mapping is @ref dev_heap_vaddr, which BO_DEV allocations carve their VA out of.
+  uint32_t dev_heap_bo = 0;
 
-  std::map<void*, BOHandle> vmem_addr_mappings;
+  /// @brief The aligned device heap mapping, of size @ref dev_heap_size and alignment
+  /// @ref dev_heap_alignment.
+  void* dev_heap_vaddr = nullptr;
 
-  /// @brief Virtual address range allocated for the device heap.
-  ///
-  /// Allocate a large enough space so we can carve out the device heap in
-  /// this range and ensure it is aligned to 64MB. Currently, npu1 supports
-  /// 64MB device heap and it must be aligned to 64MB.
-  BOHandle dev_heap_handle;
-
-  /// @brief The aligned device heap.
-  void *dev_heap_aligned = nullptr;
-
+  /// @brief Device heap size in bytes.
   static constexpr size_t dev_heap_size = 64 * 1024 * 1024;
-  static constexpr size_t dev_heap_align = 64 * 1024 * 1024;
+
+  /// @brief Device heap alignment in bytes.
+  static constexpr size_t dev_heap_alignment = 64 * 1024 * 1024;
 };
 
 } // namespace AMD

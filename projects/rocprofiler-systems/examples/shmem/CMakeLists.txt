@@ -25,7 +25,7 @@ if(NOT OSHCC_EXECUTABLE)
     endif()
     message(
         ${_MSG_TYPE}
-        "oshcc not found. Skipping SHMEM examples (shmem_hello, shmem_pingpong)."
+        "oshcc not found. Skipping SHMEM examples (shmem-hello, shmem-pingpong)."
     )
     return()
 else()
@@ -35,38 +35,38 @@ endif()
 # Build with oshcc so shmem.h and OpenSHMEM libs are found. Output to project build root.
 set(_SHMEM_BINDIR ${CMAKE_BINARY_DIR})
 set(_SHMEM_SRCDIR ${CMAKE_CURRENT_SOURCE_DIR})
-set(_SHMEM_HELLO_EXE ${_SHMEM_BINDIR}/shmem_hello${CMAKE_EXECUTABLE_SUFFIX})
-set(_SHMEM_PINGPONG_EXE ${_SHMEM_BINDIR}/shmem_pingpong${CMAKE_EXECUTABLE_SUFFIX})
+set(_SHMEM_HELLO_EXE ${_SHMEM_BINDIR}/shmem-hello${CMAKE_EXECUTABLE_SUFFIX})
+set(_SHMEM_PINGPONG_EXE ${_SHMEM_BINDIR}/shmem-pingpong${CMAKE_EXECUTABLE_SUFFIX})
 
 add_custom_command(
     OUTPUT ${_SHMEM_HELLO_EXE}
-    COMMAND ${OSHCC_EXECUTABLE} ${_SHMEM_SRCDIR}/shmem_hello.c -o ${_SHMEM_HELLO_EXE}
-    DEPENDS ${_SHMEM_SRCDIR}/shmem_hello.c
-    COMMENT "Building shmem_hello with oshcc"
+    COMMAND ${OSHCC_EXECUTABLE} ${_SHMEM_SRCDIR}/shmem-hello.c -o ${_SHMEM_HELLO_EXE}
+    DEPENDS ${_SHMEM_SRCDIR}/shmem-hello.c
+    COMMENT "Building shmem-hello with oshcc"
     VERBATIM
 )
-add_custom_target(shmem_hello ALL DEPENDS ${_SHMEM_HELLO_EXE})
+add_custom_target(shmem-hello ALL DEPENDS ${_SHMEM_HELLO_EXE})
 
 add_custom_command(
     OUTPUT ${_SHMEM_PINGPONG_EXE}
     COMMAND
-        ${OSHCC_EXECUTABLE} ${_SHMEM_SRCDIR}/shmem_pingpong.c -o ${_SHMEM_PINGPONG_EXE}
-    DEPENDS ${_SHMEM_SRCDIR}/shmem_pingpong.c
-    COMMENT "Building shmem_pingpong with oshcc"
+        ${OSHCC_EXECUTABLE} ${_SHMEM_SRCDIR}/shmem-pingpong.c -o ${_SHMEM_PINGPONG_EXE}
+    DEPENDS ${_SHMEM_SRCDIR}/shmem-pingpong.c
+    COMMENT "Building shmem-pingpong with oshcc"
     VERBATIM
 )
-add_custom_target(shmem_pingpong ALL DEPENDS ${_SHMEM_PINGPONG_EXE})
+add_custom_target(shmem-pingpong ALL DEPENDS ${_SHMEM_PINGPONG_EXE})
 
 # Export paths for rocprof-sys-shmem-tests.cmake (same project)
 set(ROCPROFSYS_SHMEM_HELLO_EXE
     "${_SHMEM_HELLO_EXE}"
     CACHE INTERNAL
-    "Path to shmem_hello executable"
+    "Path to shmem-hello executable"
 )
 set(ROCPROFSYS_SHMEM_PINGPONG_EXE
     "${_SHMEM_PINGPONG_EXE}"
     CACHE INTERNAL
-    "Path to shmem_pingpong executable"
+    "Path to shmem-pingpong executable"
 )
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)

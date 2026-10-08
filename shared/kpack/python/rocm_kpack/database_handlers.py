@@ -15,7 +15,7 @@ from typing import Optional, List
 # Compile regex patterns once at module level
 # Matches architecture IDs like gfx908, gfx90a, gfx942-xnack+, gfx90a-xnack-
 # Note: Tensile filenames use hyphens (gfx90a-xnack+), not colons (gfx90a:xnack+)
-_GFX_ARCH_PATTERN = re.compile(r"gfx\d+[a-z]*(?:-xnack[+-])?")
+_GFX_ARCH_PATTERN = re.compile(r"gfx\d+[a-z]*(?:-strict)?(?:-xnack[+-])?")
 
 # MIOpen-specific arch pattern. MIOpen filenames concatenate arch ID + CU count
 # without a separator (e.g., gfx90878 = gfx908 + 78 CUs, gfx942130 = gfx942 + 130).
@@ -27,7 +27,7 @@ _GFX_ARCH_PATTERN = re.compile(r"gfx\d+[a-z]*(?:-xnack[+-])?")
 _MIOPEN_ARCH_PATTERN = re.compile(
     r"gfx(?:"
     r"90a|900|906|908|940|941|942|950"
-    r"|1010|1030|1100|1101|1102|1150|1151|1200|1201"
+    r"|1010|1030|1100|1101|1102|1150|1151|1200|1201|1250(?:-strict)?"
     r")"
 )
 
@@ -280,6 +280,93 @@ class MIOpenHandler(DatabaseHandler):
         return None
 
 
+class HipKernelProviderArchContentHandler(DatabaseHandler):
+    """Handler for hipKernelProvider per-architecture kernel content.
+
+    Content lives under a container in the plugin engines dir: ``arch_content``
+    for runtime, ``test_arch_content`` for the test component. The container is
+    the anchor -- the bundle key is the first arch directory at any depth beneath
+    it, and the producer segment in between is a convention this handler does not
+    inspect, so a new producer needs no handler change. Example paths:
+        .../engines/arch_content/hip-kernel-provider/<arch>/...
+        .../engines/arch_content/rocke/<arch>/...
+        .../engines/test_arch_content/hip-kernel-provider/unit/shared/<arch>/...
+        .../engines/arch_content/<arch>/...
+
+    Both containers split per arch. Content that is not detected here stays generic,
+    where the last per-arch build to upload overwrites same-named content from
+    the others.
+    """
+
+    #: Containers under ``engines/`` whose arch subdirectories are split per arch.
+    _ARCH_CONTAINERS = ("arch_content", "test_arch_content")
+
+    def name(self) -> str:
+        return "hipkernelprovider"
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        """
+        Detect per-arch content by its arch directory.
+
+        Pattern: */engines/<container>/[.../]<arch>/... for each container in
+        ``_ARCH_CONTAINERS``.  In an installed tree that dir is hipDNN's plugin
+        engine dir, ``lib/hipdnn_plugins/engines/``, but only the immediate
+        ``engines`` parent is required -- ``hipdnn_plugins`` is not matched, so
+        any engines dir qualifies. TheRock's ``**/engines/arch_content/**`` and
+        ``**/engines/test_arch_content/**`` includes are anchored the same way.
+
+        Returns:
+            Bundle key (the gfx arch directory, e.g. 'gfx942') or None.
+        """
+        parts = Path(self._relative_path(path, prefix_root)).parts
+        root = next(
+            (
+                i
+                for i in range(1, len(parts))
+                if parts[i] in self._ARCH_CONTAINERS and parts[i - 1] == "engines"
+            ),
+            None,
+        )
+        if root is None:
+            return None
+        # First arch dir under the container with a file beneath it is the key.
+        for i in range(root + 1, len(parts) - 1):
+            if _GFX_ARCH_PATTERN.fullmatch(parts[i]):
+                return parts[i]
+        return None
+
+
+class HotswapCacheHandler(DatabaseHandler):
+    """Handler for packaged RocJitsu ahead-of-time translations.
+
+    RocJitsu owns the directory-domain spelling. Keep the mapping explicit so
+    a new translator profile cannot accidentally be assigned to an architecture
+    merely because its directory happens to contain a gfx-looking substring.
+    """
+
+    _DOMAIN_TO_BUNDLE = {
+        "gfx1250-b0-a0": "gfx1250",
+    }
+    _ENTRY_PATTERN = re.compile(r"^[0-9a-f]{64}\.(?:man|obj)$")
+
+    def name(self) -> str:
+        return "hotswap_cache"
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        parts = Path(self._relative_path(path, prefix_root)).parts
+        if len(parts) != 6 or parts[:3] != (
+            "share",
+            "rocjitsu",
+            "translations",
+        ):
+            return None
+
+        domain, schema, filename = parts[3:]
+        if schema != "v1" or not self._ENTRY_PATTERN.fullmatch(filename):
+            return None
+        return self._DOMAIN_TO_BUNDLE.get(domain)
+
+
 # Registry of available handlers
 AVAILABLE_HANDLERS = {
     "rocblas": RocBLASHandler,
@@ -287,6 +374,8 @@ AVAILABLE_HANDLERS = {
     "hipsparselt": HipSparseLtHandler,
     "aotriton": AotritonHandler,
     "miopen": MIOpenHandler,
+    "hipkernelprovider": HipKernelProviderArchContentHandler,
+    "hotswap_cache": HotswapCacheHandler,
 }
 
 

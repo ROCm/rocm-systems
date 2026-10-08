@@ -24,6 +24,8 @@ THE SOFTWARE.
 #include <cmath>
 #include <iomanip>
 #include <sstream>
+#include <cstdint>
+#include <limits>
 
 RocJpegStreamParser::RocJpegStreamParser() : stream_{nullptr}, stream_start_{nullptr}, stream_end_{nullptr}, stream_length_{0},
     jpeg_stream_parameters_{} {
@@ -61,11 +63,20 @@ bool RocJpegStreamParser::ParseJpegStream(const uint8_t *jpeg_stream, uint32_t j
     jpeg_stream_parameters_ = {};
     bool soi_marker_found = false;
     bool sos_marker_found = false;
+    bool sof_marker_found = false;
     bool dht_marker_found = false;
     bool dqt_marker_found = false;
     uint8_t marker;
     const uint8_t *next_chunck;
     int32_t chuck_len;
+
+    // A JPEG needs at least the SOI and EOI markers to be well formed.
+    if (stream_length_ < 4) {
+        ErrorLog(g_rocjpeg_logger, "Invalid JPEG: stream is too small (" +
+            ROCJPEG_TOSTR(stream_length_) + " bytes)!");
+        FunctionExitLog(g_rocjpeg_logger);
+        return false;
+    }
 
     // The first two bytes of a JPEG must be 0XFFD8
     if (*stream_ != 0xFF || *(stream_ + 1) != SOI) {
@@ -79,24 +90,117 @@ bool RocJpegStreamParser::ParseJpegStream(const uint8_t *jpeg_stream, uint32_t j
         ErrorLog(g_rocjpeg_logger, "Failed to find the SOI marker!");
     }
 
-    while (!sos_marker_found  && stream_ <= stream_end_) {
-        while ((*stream_ == 0xFF))
+    while (!sos_marker_found && stream_ < stream_end_) {
+        // ISO/IEC 10918-1 B.1.1.3: every marker is a 0xFF byte followed by a code
+        // that is neither 0x00 nor 0xFF, and a marker may be preceded by any
+        // number of additional 0xFF fill bytes. Skip the fill without running off
+        // the end of the buffer.
+        const uint8_t *marker_prefix = stream_;
+        while (stream_ < stream_end_ && *stream_ == 0xFF) {
             stream_++;
+        }
+        if (stream_ == marker_prefix) {
+            ErrorLog(g_rocjpeg_logger, "Invalid JPEG: marker at offset " +
+                ROCJPEG_TOSTR(static_cast<uint32_t>(stream_ - stream_start_)) +
+                " is not preceded by the 0xFF prefix byte!");
+            FunctionExitLog(g_rocjpeg_logger);
+            return false;
+        }
+        if (stream_ >= stream_end_) {
+            ErrorLog(g_rocjpeg_logger, "Truncated JPEG: no marker found before the end of the stream!");
+            FunctionExitLog(g_rocjpeg_logger);
+            return false;
+        }
         marker = *stream_++;
+
+        // A 0x00 following the prefix is a stuffed byte belonging to entropy-coded
+        // data, not a marker, so it has no place in the header sequence.
+        if (marker == 0x00) {
+            ErrorLog(g_rocjpeg_logger, "Invalid JPEG: byte stuffing (0xFF00) found outside of entropy-coded data!");
+            FunctionExitLog(g_rocjpeg_logger);
+            return false;
+        }
+
+        // EOI ends the image, so reaching it before the scan means the stream
+        // carries no entropy-coded data at all.
+        if (marker == EOI) {
+            ErrorLog(g_rocjpeg_logger, "Invalid JPEG: EOI encountered before the SOS marker!");
+            FunctionExitLog(g_rocjpeg_logger);
+            return false;
+        }
+
+        // The remaining standalone markers (TEM, RST0-RST7, SOI) carry neither a
+        // length field nor a payload, so there is nothing to skip past.
+        if (marker == 0x01 || (marker >= 0xD0 && marker <= SOI)) {
+            continue;
+        }
+
+        // Every other marker is followed by a 16-bit big-endian segment length
+        // that includes the two length bytes themselves. Compare the remaining
+        // distance rather than forming stream_ + 2, which would be undefined
+        // when fewer than two bytes are left.
+        if (stream_end_ - stream_ < 2) {
+            ErrorLog(g_rocjpeg_logger, "Truncated JPEG: marker segment length runs past the end of the stream!");
+            FunctionExitLog(g_rocjpeg_logger);
+            return false;
+        }
         chuck_len = swap_bytes(stream_);
+        if (chuck_len < 2 || chuck_len > stream_end_ - stream_) {
+            ErrorLog(g_rocjpeg_logger, "Invalid JPEG: marker segment length (" +
+                ROCJPEG_TOSTR(chuck_len) + ") is out of bounds!");
+            FunctionExitLog(g_rocjpeg_logger);
+            return false;
+        }
         next_chunck = stream_ + chuck_len;
 
-        switch (marker) {
-            case SOF:
-                if (!ParseSOF()) {
-                    FunctionExitLog(g_rocjpeg_logger);
-                    return false;
+        // Frame headers are handled ahead of the switch because they are a range
+        // of marker codes rather than a single one. Matching only SOF0 and SOF2
+        // would leave the other twelve to fall through as unknown segments, and
+        // an unknown segment is skipped: a stream could then pair a valid SOF0
+        // with an SOF1 and carry two frame headers past both checks below.
+        if (IsFrameMarker(marker)) {
+            // Of the frame headers only SOF0 names a coding process this library
+            // decodes. The rest are rejected on the marker alone, whether or not
+            // a frame has already been seen, since none of them describes a
+            // stream the decoder could go on to handle.
+            if (marker != SOF) {
+                if (marker == SOF2) {
+                    ErrorLog(g_rocjpeg_logger, "Progressive JPEG is not supported!");
+                } else {
+                    std::ostringstream oss;
+                    oss << "Unsupported JPEG: frame header 0xFF" << std::uppercase << std::hex
+                        << static_cast<int>(marker)
+                        << " names a coding process other than baseline sequential DCT!";
+                    ErrorLog(g_rocjpeg_logger, oss.str());
                 }
-                break;
-            case SOF2:
-                ErrorLog(g_rocjpeg_logger, "Progressive JPEG is not supported!");
                 FunctionExitLog(g_rocjpeg_logger);
                 return false;
+            }
+            // ISO/IEC 10918-1 B.2: a baseline image has exactly one frame.
+            // A second frame header is not just redundant - ParseSOF writes
+            // only the components it declares, so a shorter frame behind a
+            // longer one leaves the earlier frame's sampling factors in the
+            // unused slots. GetChromaSubsampling reads components 1 and 2
+            // unconditionally and matches 4:0:0 on their factors being
+            // zero, so a one-component frame behind a three-component one
+            // is classified as a colour subsampling: num_components says 1
+            // while chroma_subsampling says 4:2:0, and the decoder then
+            // allocates and copies out a chroma plane nothing ever wrote.
+            if (sof_marker_found) {
+                ErrorLog(g_rocjpeg_logger, "Invalid JPEG: the stream has more than one frame header!");
+                FunctionExitLog(g_rocjpeg_logger);
+                return false;
+            }
+            if (!ParseSOF()) {
+                FunctionExitLog(g_rocjpeg_logger);
+                return false;
+            }
+            sof_marker_found = true;
+            stream_ = next_chunck;
+            continue;
+        }
+
+        switch (marker) {
             case DHT:
                 if (!ParseDHT()) {
                     FunctionExitLog(g_rocjpeg_logger);
@@ -130,6 +234,14 @@ bool RocJpegStreamParser::ParseJpegStream(const uint8_t *jpeg_stream, uint32_t j
         stream_ = next_chunck;
     }
 
+    // The loop also exits when the buffer runs out, so an absent scan has to be
+    // rejected explicitly - otherwise the stream would be reported as parsed
+    // with an empty slice and no entropy-coded data to decode.
+    if (!sos_marker_found) {
+        ErrorLog(g_rocjpeg_logger, "Didn't find the SOS marker!");
+        FunctionExitLog(g_rocjpeg_logger);
+        return false;
+    }
     if (!dht_marker_found) {
         ErrorLog(g_rocjpeg_logger, "Didn't find any Huffman table!");
         FunctionExitLog(g_rocjpeg_logger);
@@ -161,12 +273,12 @@ bool RocJpegStreamParser::ParseSOI() {
     if (stream_ == nullptr) {
         return false;
     }
-    while (!(*stream_ == 0xFF  && *(stream_ + 1) == SOI)) {
-        if (stream_ <= stream_end_) {
-            stream_++;
-            continue;
-        } else
-            return false;
+    // stream_ + 1 must stay addressable, so stop one byte before the end.
+    while (stream_end_ - stream_ > 1 && !(*stream_ == 0xFF && *(stream_ + 1) == SOI)) {
+        stream_++;
+    }
+    if (stream_end_ - stream_ <= 1) {
+        return false;
     }
     stream_ += 2;
 
@@ -194,14 +306,55 @@ bool RocJpegStreamParser::ParseSOF() {
 
     const uint8_t *sof_header = stream_;
 
+    // The caller has verified that [stream_, stream_ + frame_length) is inside the
+    // buffer; check that the segment is large enough for the fixed SOF header.
+    uint16_t frame_length = swap_bytes(stream_);
+    if (frame_length < 8) {
+        ErrorLog(g_rocjpeg_logger, "Truncated JPEG: SOF segment too small (" +
+            ROCJPEG_TOSTR(frame_length) + " bytes)!");
+        return false;
+    }
+
     jpeg_stream_parameters_.picture_parameter_buffer.picture_height = swap_bytes(stream_ + 3);
     jpeg_stream_parameters_.picture_parameter_buffer.picture_width = swap_bytes(stream_ + 5);
     jpeg_stream_parameters_.picture_parameter_buffer.num_components = stream_[7];
+
+    // Clamp SOF dimensions to the safe JPEG maximum (ISO 10918-1 allows up to
+    // 65535, but values that large cause downstream arithmetic to overflow).
+    static constexpr uint16_t kMaxSafeDimension = 65500;
+    if (jpeg_stream_parameters_.picture_parameter_buffer.picture_width > kMaxSafeDimension ||
+        jpeg_stream_parameters_.picture_parameter_buffer.picture_height > kMaxSafeDimension) {
+        ErrorLog(g_rocjpeg_logger, "JPEG dimensions exceed safe maximum (" +
+            ROCJPEG_TOSTR(kMaxSafeDimension) + "): " +
+            ROCJPEG_TOSTR(jpeg_stream_parameters_.picture_parameter_buffer.picture_width) + "x" +
+            ROCJPEG_TOSTR(jpeg_stream_parameters_.picture_parameter_buffer.picture_height));
+        return false;
+    }
+    if (jpeg_stream_parameters_.picture_parameter_buffer.picture_width == 0 ||
+        jpeg_stream_parameters_.picture_parameter_buffer.picture_height == 0) {
+        ErrorLog(g_rocjpeg_logger, "JPEG has zero dimension!");
+        return false;
+    }
+
+    // A frame with no components has nothing to decode, and leaves every
+    // sampling factor at zero for the divisions further down.
+    if (jpeg_stream_parameters_.picture_parameter_buffer.num_components == 0) {
+        ErrorLog(g_rocjpeg_logger, "Invalid JPEG: the frame header declares no components!");
+        return false;
+    }
 
     if (jpeg_stream_parameters_.picture_parameter_buffer.num_components > NUM_COMPONENTS - 1) {
         ErrorLog(g_rocjpeg_logger, "Unsupported JPEG: " +
             ROCJPEG_TOSTR(static_cast<int>(jpeg_stream_parameters_.picture_parameter_buffer.num_components)) +
             " components found (CMYK/YCCK not supported, only YCbCr/grayscale with up to 3 components)!");
+        return false;
+    }
+
+    // Each component contributes a 3-byte descriptor after the 8-byte header.
+    if (frame_length < 8 + 3 * jpeg_stream_parameters_.picture_parameter_buffer.num_components) {
+        ErrorLog(g_rocjpeg_logger, "Truncated JPEG: SOF segment too small for " +
+            ROCJPEG_TOSTR(static_cast<int>(jpeg_stream_parameters_.picture_parameter_buffer.num_components)) +
+            " component descriptors!");
         return false;
     }
 
@@ -220,13 +373,77 @@ bool RocJpegStreamParser::ParseSOF() {
         jpeg_stream_parameters_.picture_parameter_buffer.components[i].v_sampling_factor = sampling_factor & 0xF;
         jpeg_stream_parameters_.picture_parameter_buffer.components[i].h_sampling_factor = sampling_factor >> 4;
         jpeg_stream_parameters_.picture_parameter_buffer.components[i].quantiser_table_selector = quantiser_table_selector;
+
+        // ISO/IEC 10918-1 B.2.2: H and V are in the range 1 to 4 for every
+        // component of the frame, not just the first one. Checking only
+        // component 0 would let the chroma factors be zero, which
+        // GetChromaSubsampling reads as 4:0:0 and so turns a multi-component
+        // frame header into what looks like a valid grayscale image.
+        const uint8_t h_factor = jpeg_stream_parameters_.picture_parameter_buffer.components[i].h_sampling_factor;
+        const uint8_t v_factor = jpeg_stream_parameters_.picture_parameter_buffer.components[i].v_sampling_factor;
+        if (h_factor < 1 || h_factor > 4 || v_factor < 1 || v_factor > 4) {
+            ErrorLog(g_rocjpeg_logger, "Invalid SOF sampling factor for component " + ROCJPEG_TOSTR(i) +
+                " (H=" + ROCJPEG_TOSTR(static_cast<int>(h_factor)) +
+                ", V=" + ROCJPEG_TOSTR(static_cast<int>(v_factor)) + "); both must be between 1 and 4!");
+            return false;
+        }
+    }
+
+    // ISO/IEC 10918-1 A.2.2: an interleaved MCU holds sum(H_i * V_i) blocks and
+    // that total shall not exceed 10. The per-component range check above is not
+    // enough on its own, because every factor can sit inside 1 to 4 while the
+    // products still add up past the limit: three 4x4 components describe a
+    // 48-block MCU, which GetChromaSubsampling happily classifies as 4:4:4. The
+    // components of a baseline frame are all carried in one interleaved scan, so
+    // the frame is where the limit can be applied.
+    //
+    // Only when the frame has more than one component, though. A.2.2 is the
+    // interleaved case; a single-component scan is non-interleaved and A.2.1
+    // gives it an MCU of exactly one data unit whatever H and V say. Summing the
+    // products there would reject 4x4 grayscale, which is one of the two
+    // layouts GetChromaSubsampling maps to 4:0:0.
+    uint32_t blocks_per_mcu = 0;
+    for (int32_t i = 0; i < jpeg_stream_parameters_.picture_parameter_buffer.num_components; i++) {
+        blocks_per_mcu += jpeg_stream_parameters_.picture_parameter_buffer.components[i].h_sampling_factor *
+                          jpeg_stream_parameters_.picture_parameter_buffer.components[i].v_sampling_factor;
+    }
+    if (jpeg_stream_parameters_.picture_parameter_buffer.num_components > 1 &&
+        blocks_per_mcu > MAX_BLOCKS_PER_MCU) {
+        ErrorLog(g_rocjpeg_logger, "Invalid JPEG: the frame header describes an MCU of " +
+            ROCJPEG_TOSTR(static_cast<int>(blocks_per_mcu)) + " blocks; at most " +
+            ROCJPEG_TOSTR(static_cast<int>(MAX_BLOCKS_PER_MCU)) + " are allowed!");
+        return false;
     }
 
     uint8_t max_h_factor = jpeg_stream_parameters_.picture_parameter_buffer.components[0].h_sampling_factor;
     uint8_t max_v_factor = jpeg_stream_parameters_.picture_parameter_buffer.components[0].v_sampling_factor;
 
-    jpeg_stream_parameters_.slice_parameter_buffer.num_mcus = ((jpeg_stream_parameters_.picture_parameter_buffer.picture_width + max_h_factor * 8 - 1) / (max_h_factor * 8)) *
-                                       ((jpeg_stream_parameters_.picture_parameter_buffer.picture_height + max_v_factor * 8 - 1) / (max_v_factor * 8));
+    // Compute pixel-count product in 64-bit to detect overflow before it
+    // propagates to allocations. Reject images whose raw pixel footprint
+    // (width * height * num_components) would exceed SIZE_MAX/4.
+    {
+        uint64_t w = jpeg_stream_parameters_.picture_parameter_buffer.picture_width;
+        uint64_t h = jpeg_stream_parameters_.picture_parameter_buffer.picture_height;
+        uint64_t nf = jpeg_stream_parameters_.picture_parameter_buffer.num_components;
+        uint64_t pixel_count = w * h * nf;
+        constexpr uint64_t kMaxPixelCount = static_cast<uint64_t>(SIZE_MAX) / 4;
+        if (pixel_count > kMaxPixelCount) {
+            ErrorLog(g_rocjpeg_logger, "JPEG pixel count (" + ROCJPEG_TOSTR(pixel_count) +
+                ") exceeds safe allocation limit!");
+            return false;
+        }
+    }
+
+    {
+        uint64_t mcus_h = (static_cast<uint64_t>(jpeg_stream_parameters_.picture_parameter_buffer.picture_width)  + max_h_factor * 8u - 1u) / (max_h_factor * 8u);
+        uint64_t mcus_v = (static_cast<uint64_t>(jpeg_stream_parameters_.picture_parameter_buffer.picture_height) + max_v_factor * 8u - 1u) / (max_v_factor * 8u);
+        uint64_t total_mcus = mcus_h * mcus_v;
+        if (total_mcus > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) {
+            ErrorLog(g_rocjpeg_logger, "JPEG MCU count overflows uint32_t!");
+            return false;
+        }
+        jpeg_stream_parameters_.slice_parameter_buffer.num_mcus = static_cast<uint32_t>(total_mcus);
+    }
 
     jpeg_stream_parameters_.chroma_subsampling = GetChromaSubsampling(jpeg_stream_parameters_.picture_parameter_buffer.components[0].h_sampling_factor,
                                                                       jpeg_stream_parameters_.picture_parameter_buffer.components[1].h_sampling_factor,
@@ -260,7 +477,6 @@ bool RocJpegStreamParser::ParseSOF() {
         static const char* css_names[] = { "4:4:4", "4:4:0", "4:2:2", "4:2:0", "4:1:1", "4:0:0" };
         int css_idx = static_cast<int>(jpeg_stream_parameters_.chroma_subsampling);
         uint32_t sof_offset = static_cast<uint32_t>(sof_header - stream_start_) - 2;
-        uint16_t frame_length = swap_bytes(sof_header);
         uint8_t precision = sof_header[2];
         uint16_t width = jpeg_stream_parameters_.picture_parameter_buffer.picture_width;
         uint16_t height = jpeg_stream_parameters_.picture_parameter_buffer.picture_height;
@@ -317,7 +533,7 @@ bool RocJpegStreamParser::ParseDQT() {
     }
 
     uint16_t table_length = swap_bytes(stream_);
-    if (table_length < 2 || stream_ + table_length > stream_end_) {
+    if (table_length < 2 || table_length > stream_end_ - stream_) {
         ErrorLog(g_rocjpeg_logger, "Invalid DQT marker length!");
         return false;
     }
@@ -326,7 +542,7 @@ bool RocJpegStreamParser::ParseDQT() {
     stream_ += 2;
 
     while (stream_ < dqt_block_end) {
-        if (stream_ + 1 + 64 > dqt_block_end) {
+        if (dqt_block_end - stream_ < 1 + 64) {
             ErrorLog(g_rocjpeg_logger, "Truncated JPEG: DQT segment too small to contain a complete quantization table!");
             return false;
         }
@@ -433,14 +649,21 @@ bool RocJpegStreamParser::ParseDHT() {
 
     const uint8_t *dht_header = stream_;
     uint16_t segment_length = swap_bytes(stream_);
-    if (segment_length < 2 || stream_ + segment_length > stream_end_) {
+    if (segment_length < 2 || segment_length > stream_end_ - stream_) {
         ErrorLog(g_rocjpeg_logger, "Invalid DHT marker length!");
         return false;
     }
     length = static_cast<int32_t>(segment_length) - 2;
     stream_ += 2;
 
+    const uint8_t *dht_block_end = dht_header + segment_length;
+
     while (length > 0) {
+        // Each table needs at least the 1-byte class/id plus the 16 code counts.
+        if (length < 17) {
+            ErrorLog(g_rocjpeg_logger, "Truncated JPEG: DHT segment too small to contain a Huffman table header!");
+            return false;
+        }
         index = *stream_++;
 
         ac_huffman_table = index & 0xF0;
@@ -460,6 +683,13 @@ bool RocJpegStreamParser::ParseDHT() {
         count = 0;
         for (i = 0; i < 16; i++) {
             count += *stream_++;
+        }
+
+        // The value bytes must fit inside the remaining DHT segment.
+        if (count > static_cast<uint32_t>(length - 17) ||
+            count > static_cast<uint32_t>(dht_block_end - stream_)) {
+            ErrorLog(g_rocjpeg_logger, "Truncated JPEG: DHT code values run past the end of the segment!");
+            return false;
         }
 
         if (ac_huffman_table) {
@@ -541,7 +771,27 @@ bool RocJpegStreamParser::ParseSOS() {
     }
 
     const uint8_t *sos_header = stream_;
+    uint16_t sos_length = swap_bytes(stream_);
+    // Scan header: 2 length + 1 component count + 2 per component + 3 trailing
+    // (Ss, Se, Ah/Al) bytes.
+    if (sos_length < 6 || sos_length > stream_end_ - stream_) {
+        ErrorLog(g_rocjpeg_logger, "Invalid SOS marker length!");
+        return false;
+    }
     uint32_t num_components = stream_[2];
+
+    if (sos_length < 6 + 2 * num_components) {
+        ErrorLog(g_rocjpeg_logger, "Truncated JPEG: SOS segment too small for " +
+            ROCJPEG_TOSTR(num_components) + " component descriptors!");
+        return false;
+    }
+
+    // ISO/IEC 10918-1 requires a scan to cover at least one component. A zero
+    // count would otherwise be accepted and leave the slice parameters empty.
+    if (num_components == 0) {
+        ErrorLog(g_rocjpeg_logger, "Invalid JPEG: SOS declares zero scan components!");
+        return false;
+    }
 
     if (num_components > NUM_COMPONENTS - 1) {
         ErrorLog(g_rocjpeg_logger, "SOS has " + ROCJPEG_TOSTR(num_components) +
@@ -581,7 +831,6 @@ bool RocJpegStreamParser::ParseSOS() {
 
     if (g_rocjpeg_logger.GetLogLevel() >= kRocJpegLogDebug) {
         uint32_t sos_offset = static_cast<uint32_t>(sos_header - stream_start_) - 2;
-        uint16_t sos_length = swap_bytes(sos_header);
         // stream_ now points at Ss, Se, Ah/Al bytes
         uint8_t spectral_start = stream_[0];
         uint8_t spectral_end   = stream_[1];
@@ -632,6 +881,10 @@ bool RocJpegStreamParser::ParseDRI() {
         ErrorLog(g_rocjpeg_logger,"invalid size for DRI marker");
         return false;
     }
+    if (stream_end_ - stream_ < 4) {
+        ErrorLog(g_rocjpeg_logger, "Truncated JPEG: DRI marker runs past the end of the stream!");
+        return false;
+    }
 
     jpeg_stream_parameters_.slice_parameter_buffer.restart_interval = swap_bytes(stream_ + 2);
 
@@ -652,14 +905,65 @@ bool RocJpegStreamParser::ParseEOI() {
         return false;
     }
 
+    // stream_temp + 1 must stay addressable, so stop one byte before the end. If
+    // no EOI is present the entropy-coded data simply runs to the end of the buffer.
     const uint8_t *stream_temp = stream_;
-    while (stream_temp <= stream_end_ && !(*stream_temp == 0xFF  && *(stream_temp + 1) == EOI)) {
+    while (stream_end_ - stream_temp > 1 && !(*stream_temp == 0xFF && *(stream_temp + 1) == EOI)) {
         stream_temp++;
-        continue;
+    }
+    if (stream_end_ - stream_temp <= 1) {
+        stream_temp = stream_end_;
     }
 
     jpeg_stream_parameters_.slice_parameter_buffer.slice_data_size = stream_temp - stream_;
     jpeg_stream_parameters_.slice_data_buffer = stream_;
+
+    // A scan header with no entropy-coded data behind it describes nothing to
+    // decode. This happens when the buffer ends right after the SOS segment,
+    // when an EOI immediately follows it, and when the only thing between them
+    // is fill or restart markers, and all of those were reported as a
+    // successful parse.
+    //
+    // Deciding that from the byte count alone is not enough, because not every
+    // byte of the scan is coded data. Walk the scan as ISO/IEC 10918-1 B.1.1.2
+    // and B.1.1.3 define it instead: a 0xFF starts either a run of fill bytes
+    // before a marker, a stuffed 0x00 that stands for a real 0xFF of coded
+    // data, or a restart marker that carries no bits of its own. Anything else
+    // is coded data. Counting bytes rather than tokens let a scan of "FF FF D9"
+    // measure one byte, an all-0xFF tail measure its whole length, and a scan
+    // of nothing but RST0 measure two, none of which contain a coded bit.
+    bool has_entropy_data = false;
+    const uint8_t *scan = stream_;
+    while (scan < stream_temp) {
+        if (*scan != 0xFF) {
+            has_entropy_data = true;
+            break;
+        }
+        // Any number of 0xFF fill bytes may precede a marker, so the code is
+        // the first byte after the run.
+        while (scan < stream_temp && *scan == 0xFF) {
+            scan++;
+        }
+        if (scan >= stream_temp) {
+            // A trailing 0xFF run is fill or a truncated marker, never data.
+            break;
+        }
+        const uint8_t marker_code = *scan;
+        if (marker_code == 0x00) {
+            // Byte stuffing: this pair stands for one 0xFF of coded data.
+            has_entropy_data = true;
+            break;
+        }
+        if (marker_code < RST0 || marker_code > RST7) {
+            // Any other marker terminates the scan, so nothing beyond it counts.
+            break;
+        }
+        scan++;
+    }
+    if (!has_entropy_data) {
+        ErrorLog(g_rocjpeg_logger, "Invalid JPEG: the scan contains no entropy-coded data!");
+        return false;
+    }
 
     if (g_rocjpeg_logger.GetLogLevel() >= kRocJpegLogDebug) {
         uint32_t eoi_offset = static_cast<uint32_t>(stream_temp - stream_start_);

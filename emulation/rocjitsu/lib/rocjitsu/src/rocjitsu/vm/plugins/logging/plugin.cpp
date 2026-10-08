@@ -8,7 +8,8 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-KernelLoggingPlugin::KernelLoggingPlugin() : ExecutionPlugin("logging") {}
+KernelLoggingPlugin::KernelLoggingPlugin(const char * /*config_json*/)
+    : ExecutionPlugin("logging") {}
 
 KernelLoggingPlugin::~KernelLoggingPlugin() {}
 
@@ -26,7 +27,15 @@ void KernelLoggingPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchIn
 
 void KernelLoggingPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,
                                                           Wavefront &wf) {
-  auto dispatch_id = wf.dispatch_id();
+  record_mma(inst, wf.dispatch_id());
+}
+
+void KernelLoggingPlugin::onAmdgpuAsyncInstructionIssued(uint64_t /*pc*/, const Instruction &inst,
+                                                         Wavefront &wf) {
+  record_mma(inst, wf.dispatch_id());
+}
+
+void KernelLoggingPlugin::record_mma(const Instruction &inst, uint32_t dispatch_id) {
   bool is_mfma = inst.is_mfma() || inst.mnemonic().starts_with("v_wmma_");
   if (is_mfma) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -37,8 +46,3 @@ void KernelLoggingPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-// extern "C" + raw new: needed for planned dlsym-based dynamic loading (#6628).
-extern "C" rocjitsu::ExecutionPlugin *createKernelLoggingPlugin() {
-  return new rocjitsu::amdgpu::KernelLoggingPlugin();
-}

@@ -18,7 +18,6 @@ class gfx1151_soc(OmniSoC_Base):
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx1151"))
 
-        # Set arch specific specs for RDNA3.5
         self._mspec.l2_banks = 8
         self._mspec.lds_banks_per_cu = 32
         self._mspec.pipes_per_gpu = 2

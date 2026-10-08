@@ -21,7 +21,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import csv
 import pytest
 import json
 
@@ -80,6 +79,21 @@ def pytest_addoption(parser):
         action="store",
         help="Path to ATT marker trace output directory.",
     )
+    parser.addoption(
+        "--att-no-intercept-out-dir",
+        action="store",
+        help="Path to ATT no-intercept output directory.",
+    )
+    parser.addoption(
+        "--att-no-detail-out-dir",
+        action="store",
+        help="Path to ATT no-detail output directory.",
+    )
+    parser.addoption(
+        "--att-pmc-input",
+        action="store",
+        help="Path to JSON file from a combined ATT + counter collection run.",
+    )
 
 
 @pytest.fixture
@@ -110,7 +124,7 @@ def code_object_file_path(request):
     # hsa_file_load = re.compile(".*copy.hsaco$")
     code_object_files = {}
     code_object_memory = []
-    hsa_memory_load_pattern = "gfx[a-z0-9]+_copy_memory.hsaco"
+    hsa_memory_load_pattern = "gfx[a-zA-Z0-9_-]+_copy_memory.hsaco"
     for root, dirs, files in os.walk(file_path, topdown=True):
         for file in files:
             filename = os.path.join(root, file)
@@ -150,3 +164,28 @@ def att_marker_trace_out_dir_path(request):
     if not output_dir_path:
         pytest.skip("--att-marker-trace-out-dir not provided")
     return output_dir_path
+
+
+@pytest.fixture
+def att_no_intercept_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-no-intercept-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-no-intercept-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
+def att_no_detail_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-no-detail-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-no-detail-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
+def att_pmc_json_data(request):
+    filename = request.config.getoption("--att-pmc-input")
+    if not filename:
+        pytest.skip("--att-pmc-input not provided")
+    with open(filename, "r") as inp:
+        return dotdict(collapse_dict_list(json.load(inp)))

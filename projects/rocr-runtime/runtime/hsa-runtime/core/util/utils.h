@@ -60,8 +60,18 @@
 #include <thread>
 #include <locale>
 
-#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
+#ifndef __has_builtin
+#define __has_builtin(x) 0
+#endif
+
+#if defined(__GNUC__)
+#if defined(__i386__) || defined(__x86_64__)
 #include <x86intrin.h>
+#elif defined(__powerpc64__) || defined(__PPC64__)
+// PowerPC compatibility shim for x86 intrinsics
+#define NO_WARN_X86_INTRINSICS
+#include <x86intrin.h>
+#endif
 #endif
 #if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
 #include "intrin.h"
@@ -83,7 +93,6 @@ typedef uint64_t uint64;
 void log_printf(const char* file, int line, const char* format, ...);
 
 #if defined(__GNUC__)
-
 #define __forceinline __inline__ __attribute__((always_inline))
 #define __declspec(x) __attribute__((x))
 #undef __stdcall
@@ -175,6 +184,23 @@ static __forceinline unsigned long long int strtoull(const char* str,
     count++;                                                                                       \
   }                                                                                                \
 } while (false)
+#endif
+
+/* Limited printing when in release mode, always prints when in debug mode */
+#ifdef NDEBUG
+#define log_warning_n(limit, fmt, ...)                                                             \
+  do {                                                                                             \
+    static std::atomic<unsigned int> count(0);                                                     \
+    if (limit == 0 || count < limit) {                                                             \
+      fprintf(stderr, "Warning: " fmt, ##__VA_ARGS__);                                           \
+      count++;                                                                                     \
+    }                                                                                              \
+  } while (false)
+#else
+#define log_warning_n(limit, fmt, ...)                                                             \
+  do {                                                                                             \
+    fprintf(stderr, "Warning: " fmt, ##__VA_ARGS__);                                             \
+  } while (false)
 #endif
 
 #ifdef NDEBUG
@@ -400,12 +426,62 @@ static __forceinline std::string& rtrim(std::string& s) {
 
 static __forceinline std::string& trim(std::string& s) { return ltrim(rtrim(s)); }
 
+static __forceinline void cpu_relax() {
+#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
+  _mm_pause();
+#elif __has_builtin(__builtin_arm_yield)
+  __builtin_arm_yield();
+#elif __has_builtin(__builtin_riscv_pause)
+  __builtin_riscv_pause();
+#else
+#warning "No cpu_relax() implementation for this processor"
+#endif
+}
+
+static __forceinline void store_fence() {
+#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
+  _mm_sfence();
+#elif __has_builtin(__builtin_arm_dmb)
+  __builtin_arm_dmb(0x2);  // oshst
+#elif defined(__riscv)
+  __asm__ __volatile__("fence ow, ow" ::: "memory");
+#else
+  __atomic_thread_fence(__ATOMIC_SEQ_CST);
+#endif
+}
+
+static __forceinline void memory_fence() {
+#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
+  _mm_mfence();
+#elif __has_builtin(__builtin_arm_dsb)
+  __builtin_arm_dsb(0xf);  // sy
+#elif defined(__riscv)
+  __asm__ __volatile__("fence iorw, iorw" ::: "memory");
+#else
+  __atomic_thread_fence(__ATOMIC_SEQ_CST);
+#endif
+}
+
+static __forceinline void cacheline_flush(const void* p) {
+#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
+  _mm_clflush(p);
+#elif defined(__aarch64__) && defined(__linux__)
+  __asm__ __volatile__("dc civac, %0" ::"r"(p) : "memory");
+#else
+#warning "No cacheline_flush() implementation for this processor"
+  (void)p;
+#endif
+}
+
 /// @brief: Flush the cachelines associated with the
 /// provided address, offset, and length
 /// @param: base(Input), base address to flush
 /// @param: offset(Input), offset of base address to flush
 /// @param: len(Input), length of buffer to flush
 inline void FlushCpuCache(const void* base, size_t offset, size_t len) {
+  // The loop below is a do-while: an empty range would still flush one cacheline.
+  if (len == 0) return;
+
   static long cacheline_size = 0;
 
   if (!cacheline_size) {
@@ -427,7 +503,7 @@ inline void FlushCpuCache(const void* base, size_t offset, size_t len) {
   cur += offset;
   uintptr_t lastline = (uintptr_t)(cur + len - 1) | (cacheline_size - 1);
   do {
-    _mm_clflush((const void*)cur);
+    cacheline_flush(cur);
     cur += cacheline_size;
   } while (cur <= (const char*)lastline);
 }

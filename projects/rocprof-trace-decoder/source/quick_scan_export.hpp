@@ -100,3 +100,16 @@ size_t scan_mi400(const uint8_t* buf, size_t size, QuickToken* __restrict__ out,
 // ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED.
 bool avx512_available();
 }; // namespace quick_scan
+
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
+namespace gfx9::quick_scan
+{
+// Testing-visible entry point for the AVX2 implementation. Production code
+// uses quick_scan::scan_gfx9(), which chooses the best supported SIMD path at
+// runtime. Tests call this to verify the AVX2 scanner's public scanner
+// contract even on hosts where the default runtime path is AVX-512.
+size_t scan_gfx9_avx2_for_testing(
+    const uint8_t* buf, size_t size, ::quick_scan::QuickToken* __restrict__ out, size_t out_cap
+);
+} // namespace gfx9::quick_scan
+#endif

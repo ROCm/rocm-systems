@@ -6,8 +6,8 @@
 Command processor (CP)
 **********************
 
-The command processor (CP) is responsible for interacting with the AMDGPU kernel
-driver -- the Linux kernel -- on the CPU and for interacting with user-space
+The command processor (CP) is responsible for interacting with the AMD GPU kernel
+driver and the Linux kernel on the CPU and for interacting with user-space
 HSA clients when they submit commands to HSA queues. Basic tasks of the CP
 include reading commands (such as, corresponding to a kernel launch) out of
 :hsa-runtime-pdf:`HSA queues <68>`, scheduling work to subsequent parts of the
@@ -24,22 +24,21 @@ The command processor consists of two sub-components:
   kernels) passes them to the :ref:`workgroup processors <desc-spi>` for
   scheduling.
 
-Before scheduling work to the accelerator, the command processor can
+Before scheduling work to the GPU, the command processor can
 first acquire a memory fence to ensure system consistency
 (:hsa-runtime-pdf:`Section 2.6.4 <91>`). After the work is complete, the
-command processor can apply a memory-release fence. Depending on the AMD CDNA™
-accelerator under question, either of these operations *might* initiate a cache
+command processor can apply a memory-release fence. Depending on the CDNA architecture-based AMD Instinct GPUs, either of these operations *might* initiate a cache
 write-back or invalidation.
 
 Analyzing command processor performance is most interesting for kernels
-that you suspect to be limited by scheduling or launch rate. The command
-processor’s metrics therefore are focused on reporting, for example:
+that you suspect to be limited by scheduling or launch rate. Therefore, the command
+processor's metrics are focused on reporting, for example:
 
-*  Utilization of the fetcher
+*  Utilization of the fetcher.
 
-*  Utilization of the packet processor, and decoding processing packets
+*  Utilization of the packet processor, and decoding processing packets.
 
-*  Stalls in fetching and processing
+*  Stalls in fetching and processing.
 
 .. _cpf-metrics:
 

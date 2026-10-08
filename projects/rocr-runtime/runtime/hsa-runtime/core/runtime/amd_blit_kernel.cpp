@@ -46,6 +46,7 @@
 #include <cstring>
 #include <sstream>
 #include <string>
+#include <atomic>
 
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/hsa_internal.h"
@@ -577,6 +578,10 @@ hsa_status_t BlitKernel::Initialize(const core::Agent& agent) {
     KernelCode& kernel = kernels_[kernel_name.first];
     gpuAgent->AssembleShader(kernel_name.second, AMD::GpuAgent::AssembleTarget::AQL, kernel.code_buf_,
                             kernel.code_buf_size_);
+    // Publish the code object the same way RegionMemory::Freeze() does.
+    gpuAgent->PcieWcFlush(kernel.code_buf_, kernel.code_buf_size_);
+    const_cast<AMD::GpuAgent*>(gpuAgent)->InvalidateCodeCaches(kernel.code_buf_,
+                                                               kernel.code_buf_size_);
   }
 
   if (agent_->profiling_enabled()) {
@@ -613,6 +618,13 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(void* dst, const void* src,
   // Protect completion_signal_.
   std::lock_guard<std::mutex> guard(lock_);
 
+  if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy()) {
+    LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] src = %p, dst = %p, size = 0x%lx", src, dst, size);
+    memcpy(dst, src, size);
+    LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] Fast copy success");
+    return HSA_STATUS_SUCCESS;
+  }
+
   HSA::hsa_signal_store_relaxed(completion_signal_, 1);
 
   std::vector<core::Signal*> dep_signals(0);
@@ -644,6 +656,20 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
     void* dst, const void* src, size_t size,
     std::vector<core::Signal*>& dep_signals, core::Signal& out_signal,
     std::vector<core::Signal*>& gang_signals) {
+
+  if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy() && dep_signals.empty()) {
+    LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] src = %p, dst = %p, size = 0x%lx", src, dst, size);
+    memcpy(dst, src, size);
+    LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] Fast copy success");
+
+    hsa_signal_t signal = {(core::Signal::Convert(&out_signal)).handle};
+    if (signal.handle) {
+      LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] completion_signal = 0x%zx", signal.handle);
+      hsa_signal_subtract_relaxed(signal, 1);
+    }
+    return HSA_STATUS_SUCCESS;
+  }
+
   // Reserve write index for barrier(s) + dispatch packet.
   const uint32_t num_barrier_packet = uint32_t((dep_signals.size() + 4) / 5);
   const uint32_t total_num_packet = num_barrier_packet + 1;
@@ -897,7 +923,7 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
   std::atomic_thread_fence(std::memory_order_release);
   if (queue_->IsDeviceMemRingBuf() && queue_->needsPcieOrdering()) {
     // Ensure the packet body is written as header may get reordered when writing over PCIE
-    _mm_sfence();
+    store_fence();
   }
 #if defined(__linux__)
   __atomic_store_n(&(queue_buffer[index & queue_bitmask_].full_header),

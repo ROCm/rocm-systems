@@ -16,6 +16,24 @@
 #include "hip_platform.hpp"
 #include "hip_comgr_helper.hpp"
 
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <intsafe.h>
+#endif
+
+// returns true if there is overflow
+static bool multiplyOverflow(__hip_uint32_t operand,
+                             __hip_uint32_t multiplier,
+                             __hip_uint32_t& result)
+{
+#if defined(__GNUC__)
+  // gcc, clang and clang-cl
+  return __builtin_mul_overflow(operand, multiplier, &result);
+#else
+  // cl.exe
+  return UIntMult(operand, multiplier, &result);
+#endif
+}
+
 namespace hip {
 
 hipError_t ihipModuleLoadData(hipModule_t* module, const void* mmap_ptr, size_t mmap_size);
@@ -92,6 +110,20 @@ hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod) {
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
   HIP_RETURN(PlatformState::Instance().GetFuncCount(count, mod));
+}
+
+hipError_t hipModuleEnumerateFunctions(hipFunction_t* functions, unsigned int numFunctions,
+                                       hipModule_t mod) {
+  HIP_INIT_API(hipModuleEnumerateFunctions, functions, numFunctions, mod);
+
+  if ((functions == nullptr) || (mod == nullptr)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (numFunctions == 0) {
+    HIP_RETURN(hipSuccess);
+  }
+
+  HIP_RETURN(PlatformState::Instance().EnumerateFunctions(functions, numFunctions, mod));
 }
 
 hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
@@ -189,7 +221,7 @@ inline hipError_t GetDeviceKernel(const void* func, device::Kernel** d_kernel) {
 
   hipError_t err = PlatformState::Instance().StatCO().GetFunc(&h_func, func, ihipGetDevice());
   if (h_func == nullptr) {
-    if (PlatformState::Instance().IsValidDynFunc(func)) {
+    if (PlatformState::Instance().IsValidFuncHandle(func)) {
       h_func = reinterpret_cast<hipFunction_t>(const_cast<void*>(func));
     } else {
       return hipErrorInvalidDeviceFunction;
@@ -220,7 +252,7 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
 
   hipError_t err = PlatformState::Instance().StatCO().GetFunc(&h_func, func, ihipGetDevice());
   if (h_func == nullptr) {
-    if (PlatformState::Instance().IsValidDynFunc((func))) {
+    if (PlatformState::Instance().IsValidFuncHandle((func))) {
       h_func = reinterpret_cast<hipFunction_t>(const_cast<void*>(func));
     } else {
       HIP_RETURN(hipErrorInvalidDeviceFunction);
@@ -375,14 +407,44 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
 }
 
 // =================================================================================================
-bool UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Kernel* kernel,
-                                 amd::LaunchParams& launch_params) {
+hipError_t UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Kernel* kernel,
+                                       amd::LaunchParams& launch_params) {
 
   const amd::Device& device = stream->vdev()->device();
   amd::device::Kernel* devKernel = const_cast<device::Kernel*>(kernel->getDeviceKernel(device));
+  // All-zero dims mean "no cluster" and emit no metadata, so a zero here is malformed. The
+  // kernel's block index is computed from it, so no dispatch of such a kernel is correct.
+  if (devKernel->hasClusterAttr() &&
+      (devKernel->getClusterSize(0) == 0 || devKernel->getClusterSize(1) == 0 ||
+       devKernel->getClusterSize(2) == 0)) {
+    LogPrintfError("Kernel %s was compiled for cluster dimensions (%zu, %zu, %zu) "
+                   "with a zero dimension",
+                   kernel->name().c_str(), devKernel->getClusterSize(0),
+                   devKernel->getClusterSize(1), devKernel->getClusterSize(2));
+    return hipErrorInvalidConfiguration;
+  }
   // If cluster size from device kernel is > 1, then we need to update the cluster params.
   if (devKernel->getClusterSize(0) > 1 || devKernel->getClusterSize(1) > 1 ||
       devKernel->getClusterSize(2) > 1) {
+    // Code-object dims bypass the hipLaunchKernelExC() checks. An oversized cluster is dropped
+    // by the SPI without signalling completion, which hangs the host, so bound it here.
+    if (device.info().clusterMaxSize_ == 0) {
+      LogPrintfError("Kernel %s requires a multi-workgroup cluster, "
+                     "but this device does not support clusters",
+                     kernel->name().c_str());
+      return hipErrorInvalidClusterSize;
+    }
+    const size_t requestedClusterSize = devKernel->getClusterSize(0) *
+                                        devKernel->getClusterSize(1) *
+                                        devKernel->getClusterSize(2);
+    if (requestedClusterSize > device.info().clusterMaxSize_) {
+      LogPrintfError("Kernel %s was compiled for a cluster of %zu workgroups (%zu, %zu, %zu), "
+                     "but this device supports at most %zu",
+                     kernel->name().c_str(), requestedClusterSize, devKernel->getClusterSize(0),
+                     devKernel->getClusterSize(1), devKernel->getClusterSize(2),
+                     device.info().clusterMaxSize_);
+      return hipErrorInvalidClusterSize;
+    }
     if (!launch_params.UpdateClusterLaunchParams(devKernel->getClusterSize(0),
                                                  devKernel->getClusterSize(1),
                                                  devKernel->getClusterSize(2))) {
@@ -394,10 +456,10 @@ bool UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Kernel* k
                       launch_params.local_[1], launch_params.local_[2],
                       devKernel->getClusterSize(0), devKernel->getClusterSize(1),
                       devKernel->getClusterSize(2));
-      return false;
+      return hipErrorInvalidValue;
     }
   }
-  return true;
+  return hipSuccess;
 }
 
 // =================================================================================================
@@ -411,8 +473,9 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
   amd::Kernel* kernel = hip::asKernel(f);
 
   // Check if the kernel metadata has cluster info we need to act on.
-  if (!UpdateNumClustersFromKernel(stream, kernel, launch_params)) {
-    return hipErrorInvalidValue;
+  hipError_t clusterStatus = UpdateNumClustersFromKernel(stream, kernel, launch_params);
+  if (clusterStatus != hipSuccess) {
+    return clusterStatus;
   }
 
   size_t globalWorkOffset[3] = {0};
@@ -1000,7 +1063,7 @@ hipError_t ihipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsL
     // Not supported while stream is capturing
     hip::Stream* s = reinterpret_cast<hip::Stream*>(launch.stream);
     if (s->GetCaptureStatus() == hipStreamCaptureStatusActive) {
-      s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+      s->InvalidateCapture();
       return hipErrorStreamCaptureUnsupported;
     }
     if (s->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
@@ -1369,6 +1432,27 @@ hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr,
     }
   }
 
+  const auto& deviceInfo = hip::getCurrentDevice()->devices()[0]->info();
+  __hip_uint32_t requestedClusterSize;
+
+  if (multiplyOverflow(clusterDims.x,
+                       clusterDims.y,
+                       requestedClusterSize)) {
+    HIP_RETURN(hipErrorInvalidClusterSize);
+  }
+
+  if (multiplyOverflow(requestedClusterSize,
+                       clusterDims.z,
+                       requestedClusterSize)) {
+    HIP_RETURN(hipErrorInvalidClusterSize);
+  }
+
+  // Check cluster size against device maximum
+  if (deviceInfo.clusterMaxSize_ > 0 &&
+      requestedClusterSize > deviceInfo.clusterMaxSize_) {
+    HIP_RETURN(hipErrorInvalidClusterSize);
+  }
+
   HIP_RETURN_DURATION(hipLaunchKernel_common(fPtr, config->gridDim, config->blockDim, args,
     config->dynamicSmemBytes, config->stream, clusterDims,
     dynDataPrefetchConfig.isEnabled() ? &dynDataPrefetchConfig : nullptr));
@@ -1404,7 +1488,7 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
   }
 
   if (config->numAttrs == 0) {
-    HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, nullptr,
+    HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, extra,
                                       nullptr, nullptr, 0));
   }
 
@@ -1417,7 +1501,7 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
       case hipLaunchAttributeCooperative: {
         if (attr.value.cooperative != 0) {
           HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams,
-                                            nullptr, nullptr, nullptr, 0,
+                                            extra, nullptr, nullptr, 0,
                                             amd::NDRangeKernelCommand::CooperativeGroups));
         }
         break;

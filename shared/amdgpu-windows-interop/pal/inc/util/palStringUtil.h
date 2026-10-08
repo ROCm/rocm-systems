@@ -39,25 +39,6 @@
 
 namespace Util
 {
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 919
-/// Returns the length of a wchar_t based string.
-///
-/// @param [in]  wide string to query
-///
-/// @returns The length of the given string in wide characters
-extern size_t PalWcslen(
-    const wchar_t* pWideStr);
-
-/// Performs a reverse string find of wide character wc.
-///
-/// @param [in]  wide string to scan
-/// @param [in]  wide character to find
-///
-/// @returns The matching character at the end of the string or nullptr if not found.
-extern wchar_t* PalWcsrchr(
-    wchar_t *pStr,
-    wchar_t wc);
-#endif
 
 /// When the -fshort-char compiler option is specified, wchar_t is 16 bits, but mbstowcs still treats the dest
 /// as 32 bit so we provide our own implementation.
@@ -122,7 +103,7 @@ extern void CopyUtf16String(
 /// @param [in]  dstSize    The length of pDst in bytes.
 /// @param [in]  pBuffer    The arbitrary data blob to turn into a string.
 /// @param [in]  bufferSize The length of pBuffer in bytes.
-/// @param [in]  blockSize  How many bytes to combine into one hexadecimal big endian string.
+/// @param [in]  blockSize  How many bytes to combine into one hexidecimal big endian string.
 ///
 /// @returns The number of bytes from pBuffer that were formatted into pDst.
 extern size_t BytesToStr(

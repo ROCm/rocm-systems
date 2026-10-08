@@ -121,6 +121,15 @@ class TestPresets(RocprofsysTest):
             ],
         )
 
+    def test_trace_hpc_uses_flat_profile(self, target):
+        """trace-hpc profiles flat by default (no call-stack hierarchy)."""
+        _assert_baseline_output(
+            self,
+            target=target,
+            run_args=["--preset=trace-hpc", "-v", "2", "--", "ls"],
+            pass_regex=["ROCPROFSYS_FLAT_PROFILE=true"],
+        )
+
 
 # ============================================================================
 # Legacy preset flag translation --preset=<name>

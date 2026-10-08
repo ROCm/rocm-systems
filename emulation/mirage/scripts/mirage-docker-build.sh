@@ -22,13 +22,15 @@
 # standard layout:
 #   <prefix>/bin/mirage
 #   <prefix>/bin/rocjitsu
-#   <prefix>/lib/librocjitsu.so            (combined rocjitsu library)
-#   <prefix>/lib/librocjitsu_kmd.so        (KMD interposer)
+#   <prefix>/lib/librocjitsu.so            (combined rocjitsu library:
+#                                          VM API + KMD interposer)
 #   <prefix>/lib/librocjitsu_hooks.so      (DBT HSA hooks)
 #   <prefix>/share/rocjitsu/configs/*.json
-# `mirage` searches `../lib` relative to its own binary (see
-# rocjitsu/src/lib.rs kmd_search_dirs), so `<prefix>/bin/mirage` finds
-# its sibling `<prefix>/lib/librocjitsu*.so` automatically.
+# `mirage` searches `<prefix>/lib` beside its own binary (see
+# mirage/core/src/discovery.rs, module docs), ahead of any rocjitsu build
+# it can reach by walking up from itself, so `<prefix>/bin/mirage` finds
+# its sibling `<prefix>/lib/librocjitsu*.so` and not a host-glibc build
+# left in the checkout.
 #
 # Usage:
 #   ./scripts/mirage-docker-build.sh [output-prefix]

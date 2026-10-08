@@ -6,10 +6,11 @@
 
 <!-- Explain the changes along with any relevant GitHub links. -->
 
-## JIRA ID
+## Issue Tracking
 
-<!-- If applicable, mention the JIRA ID resolved by this PR (Example: Resolves SWDEV-12345). -->
-<!-- Do not post any JIRA links here. -->
+<!-- Include a GitHub Issue and/or JIRA ID. Do not post any full JIRA links here. -->
+<!-- GitHub issue: https://github.com/ROCm/rocm-systems/issues/1234 -->
+<!-- JIRA ID: EXAMPLECOMPONENT-1234 -->
 
 ## Test Plan
 
@@ -21,4 +22,4 @@
 
 ## Submission Checklist
 
-- [ ] Look over the contributing guidelines at https://github.com/ROCm/ROCm/blob/develop/CONTRIBUTING.md#pull-requests.
+- [ ] Look over the contributing guidelines at https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md.

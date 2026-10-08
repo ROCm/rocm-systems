@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <cstring>
+#include <type_traits>
+
 #include <hip/hip_runtime.h>
 #include "device.hpp"
 #include "hip/driver_types.h"
@@ -127,6 +130,15 @@ hipMemoryType getMemoryType(const amd::Memory* memory) {
 }
 
 // ================================================================================================
+bool IsManagedMemory(cl_mem_flags flags) {
+  constexpr cl_mem_flags kHipMallocManagedFlags =
+      CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR;
+  constexpr cl_mem_flags kManagedVarFlags = CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR;
+  return ((flags & kHipMallocManagedFlags) == kHipMallocManagedFlags) ||
+         ((flags & kManagedVarFlags) == kManagedVarFlags);
+}
+
+// ================================================================================================
 amd::Memory* getMemoryObjectWithOffset(hip::Device* device, const void* ptr, const size_t size) {
   size_t offset = 0;
   amd::Memory* memObj = getMemoryObject(device, ptr, offset);
@@ -166,7 +178,9 @@ hipError_t ihipFree(void* ptr) {
         amd::MemObjMap::RemoveMemObj(ptr);
         memory_object->release();
       } else {
-        amd::SvmBuffer::free(memory_object->getContext(), ptr);
+        if (!amd::SvmBuffer::free(memory_object->getContext(), ptr)) {
+          return hipErrorInvalidValue;
+        }
       }
     }
     return hipSuccess;
@@ -633,9 +647,13 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, amd
   hip::MemcpyType type = ihipGetMemcpyType(srcMemory, dstMemory, kind);
   switch (type) {
     case hipCopyBufferP2P:
+      if (kind == hipMemcpyDeviceToDeviceNoCU) {
+        helper.copyMetadata().copyEnginePreference_ =
+            amd::CopyMetadata::CopyEnginePreference::SDMA;
+      }
       command = new amd::CopyMemoryP2PCommand(
           stream, CL_COMMAND_COPY_BUFFER, helper.waitList(), *srcMemory->asBuffer(),
-          *dstMemory->asBuffer(), srcOffset, dstOffset, sizeBytes);
+          *dstMemory->asBuffer(), srcOffset, dstOffset, sizeBytes, helper.copyMetadata());
       {
         hipError_t status = MemcpyCommandHelper::checkCommand(command);
         if (status != hipSuccess) {
@@ -1395,6 +1413,10 @@ hipError_t ihipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags)
         return hipErrorInvalidValue;
       }
       memFlags |= ROCCLR_MEM_IO_MEMORY;
+    }
+
+    if (flags & hipExtHostRegisterCoarseGrained) {
+      memFlags &= ~CL_MEM_SVM_ATOMICS;
     }
 
     amd::Memory* mem =
@@ -2936,6 +2958,58 @@ static amd::CopyMetadata buildCopyMetadataFromAttrs(hipMemcpyAttributes* attrs, 
   return metadata;
 }
 
+template <typename Command, typename Operation>
+static hipError_t EnqueueBatchCommands(std::vector<std::vector<Operation>>& operations_by_device,
+                                       cl_command_type command_type, hip::Stream& stream,
+                                       bool is_async, amd::Command* stream_wait_cmd,
+                                       amd::Command::EventWaitList& marker_wait_list) {
+  for (size_t device_id = 0; device_id < operations_by_device.size(); ++device_id) {
+    std::vector<Operation>& operations = operations_by_device[device_id];
+    if (operations.empty()) {
+      continue;
+    }
+
+    hip::Stream* queue_stream = static_cast<int>(device_id) == stream.DeviceId()
+                                    ? &stream
+                                    : hip::getNullStream(*g_devices[device_id]->asContext());
+    amd::Command::EventWaitList wait_list;
+    if (queue_stream != &stream && stream_wait_cmd != nullptr) {
+      wait_list.push_back(stream_wait_cmd);
+    }
+
+    Command* batch_cmd = nullptr;
+    if constexpr (std::is_same_v<Operation, amd::BatchWriteMemoryOp>) {
+      std::vector<std::vector<char>> host_snapshots;
+      if (!AMD_DIRECT_DISPATCH) {
+        for (Operation& op : operations) {
+          if (op.metadata.srcAccessOrder_ == amd::CopyMetadata::kSrcAccessOrderDuringApiCall) {
+            host_snapshots.emplace_back(op.size);
+            std::memcpy(host_snapshots.back().data(), op.src_host, op.size);
+            op.src_host = host_snapshots.back().data();
+          }
+        }
+      }
+      batch_cmd = new amd::BatchWriteMemoryCommand(
+          *queue_stream, command_type, wait_list, std::move(operations), std::move(host_snapshots));
+    } else {
+      batch_cmd = new Command(*queue_stream, command_type, wait_list, std::move(operations));
+    }
+    if (batch_cmd == nullptr) {
+      return hipErrorOutOfMemory;
+    }
+
+    batch_cmd->enqueue();
+    if (!is_async) {
+      batch_cmd->queue()->finishCommand(batch_cmd);
+    } else if (queue_stream != &stream) {
+      batch_cmd->retain();
+      marker_wait_list.push_back(batch_cmd);
+    }
+    batch_cmd->release();
+  }
+  return hipSuccess;
+}
+
 // ================================================================================================
 // Returns the attribute flags that apply to copy `copyIdx`.
 static inline unsigned int getBatchCopyFlags(hipMemcpyAttributes* attrs, size_t* attrsIdxs,
@@ -3026,16 +3100,14 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     }
   }
 
-  // Classify copies by type and group them
-  std::vector<size_t> bufferCopyIndices;
+  // Classify copies by type and group them by the queue device that will execute each batch.
+  std::vector<std::vector<amd::BatchCopyOp>> copy_ops_by_device(g_devices.size());
+  std::vector<std::vector<amd::BatchWriteMemoryOp>> write_ops_by_device(g_devices.size());
+  std::vector<std::vector<amd::BatchReadMemoryOp>> read_ops_by_device(g_devices.size());
   std::vector<size_t> hostToHostIndices;
-  std::vector<size_t> writeBufferIndices;
-  std::vector<size_t> readBufferIndices;
 
-  // The ExtOp flags (hipMemcpyFlagExtOpSwap / hipMemcpyFlagExtOpIndirect*) are
-  // only honored by the SDMA batch path (BatchCopyMemoryCommand ->
-  // DmaBlitManager::hsaCopyBatch), which restricts them to transfers between
-  // device memory and pinned host memory. All other combinations are rejected up front.
+  // Swap and indirect operations require the SDMA batch path. Allow device-to-device
+  // and pinned host/device transfers; reject host-only and pageable-host copies.
   const unsigned int kExtOpFlagMask =
       hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
   size_t attrIdx = 0;
@@ -3045,9 +3117,9 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     if (srcMemories[i] == nullptr && dstMemories[i] == nullptr) {
       type = hipHostToHost;
     } else if (srcMemories[i] == nullptr) {
-      type = hipWriteBuffer;
+      type = (getMemoryType(dstMemories[i]) == hipMemoryTypeHost) ? hipHostToHost : hipWriteBuffer;
     } else if (dstMemories[i] == nullptr) {
-      type = hipReadBuffer;
+      type = (getMemoryType(srcMemories[i]) == hipMemoryTypeHost) ? hipHostToHost : hipReadBuffer;
     } else {
       type = ihipGetMemcpyType(srcMemories[i], dstMemories[i], hipMemcpyDefault);
     }
@@ -3056,39 +3128,60 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     if (copyFlags & kExtOpFlagMask) {
       switch (type) {
         case hipCopyBuffer:
-        case hipCopyBufferSDMA:
-        case hipCopyBufferP2P: {
-          // Narrow to H<->D for both swap and indirect.
+        case hipCopyBufferSDMA: {
           amd::Memory* sMem = srcMemories[i];
           amd::Memory* dMem = dstMemories[i];
-          if (sMem == nullptr || dMem == nullptr || getMemoryType(sMem) == getMemoryType(dMem)) {
+          if (sMem == nullptr || dMem == nullptr ||
+              (getMemoryType(sMem) == hipMemoryTypeHost &&
+               getMemoryType(dMem) == hipMemoryTypeHost)) {
             return hipErrorNotSupported;
           }
           break;
         }
+        case hipCopyBufferP2P:
+          break;
         case hipHostToHost:
         case hipWriteBuffer:
         case hipReadBuffer:
-
           return hipErrorNotSupported;
       }
     }
 
+    amd::CopyMetadata metadata = buildCopyMetadataFromAttrs(attrs, attrsIdxs, numAttrs, i, isAsync);
     switch (type) {
       case hipCopyBuffer:
-      case hipCopyBufferSDMA:
-      case hipCopyBufferP2P:
-        bufferCopyIndices.push_back(i);
+      case hipCopyBufferSDMA: {
+        const hipMemoryType src_memory_type = getMemoryType(srcMemories[i]);
+        const hipMemoryType dst_memory_type = getMemoryType(dstMemories[i]);
+        const int device_id =
+            (src_memory_type == hipMemoryTypeDevice && dst_memory_type == hipMemoryTypeHost)
+                ? srcMemories[i]->getUserData().deviceId
+                : dstMemories[i]->getUserData().deviceId;
+        copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i],
+                                                   dstOffsets[i], sizes[i], metadata);
         break;
+      }
+      case hipCopyBufferP2P: {
+        const int device_id = stream.DeviceId();
+        copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i],
+                                                   dstOffsets[i], sizes[i], metadata);
+        break;
+      }
       case hipHostToHost:
         hostToHostIndices.push_back(i);
         break;
-      case hipWriteBuffer:
-        writeBufferIndices.push_back(i);
+      case hipWriteBuffer: {
+        const int device_id = dstMemories[i]->getUserData().deviceId;
+        write_ops_by_device[device_id].emplace_back(srcs[i], dstMemories[i], dstOffsets[i],
+                                                    sizes[i], metadata);
         break;
-      case hipReadBuffer:
-        readBufferIndices.push_back(i);
+      }
+      case hipReadBuffer: {
+        const int device_id = srcMemories[i]->getUserData().deviceId;
+        read_ops_by_device[device_id].emplace_back(srcMemories[i], dsts[i], srcOffsets[i], sizes[i],
+                                                   metadata);
         break;
+      }
     }
   }
 
@@ -3102,53 +3195,46 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     }
   }
 
-  // Handle buffer-to-buffer copies as a batch
-  if (!bufferCopyIndices.empty()) {
-    std::vector<amd::BatchCopyOp> copyOps;
-    copyOps.reserve(bufferCopyIndices.size());
+  amd::Command::EventWaitList marker_wait_list;
+  amd::Command* stream_wait_cmd = stream.getLastQueuedCommand(true);
 
-    for (size_t idx : bufferCopyIndices) {
-      if (srcMemories[idx] == nullptr || dstMemories[idx] == nullptr) {
-        return hipErrorInvalidValue;
-      }
+  status = EnqueueBatchCommands<amd::BatchCopyMemoryCommand>(
+      copy_ops_by_device, ROCCLR_COMMAND_BATCH_COPY_BUFFER, stream, isAsync, stream_wait_cmd,
+      marker_wait_list);
+  if (status == hipSuccess) {
+    status = EnqueueBatchCommands<amd::BatchWriteMemoryCommand>(
+        write_ops_by_device, ROCCLR_COMMAND_BATCH_WRITE_BUFFER, stream, isAsync, stream_wait_cmd,
+        marker_wait_list);
+  }
+  if (status == hipSuccess) {
+    status = EnqueueBatchCommands<amd::BatchReadMemoryCommand>(
+        read_ops_by_device, ROCCLR_COMMAND_BATCH_READ_BUFFER, stream, isAsync, stream_wait_cmd,
+        marker_wait_list);
+  }
 
-      amd::CopyMetadata metadata = buildCopyMetadataFromAttrs(attrs, attrsIdxs, numAttrs, idx, isAsync);
-      copyOps.emplace_back(srcMemories[idx], dstMemories[idx], srcOffsets[idx], dstOffsets[idx], sizes[idx],
-                           metadata);
+  if (stream_wait_cmd != nullptr) {
+    stream_wait_cmd->release();
+  }
+
+  if (status != hipSuccess) {
+    for (auto* cmd : marker_wait_list) {
+      cmd->release();
     }
+    return status;
+  }
 
-    // Create and enqueue batch copy command
-    amd::Command::EventWaitList waitList;
-    amd::BatchCopyMemoryCommand* batchCmd = new amd::BatchCopyMemoryCommand(
-        stream, ROCCLR_COMMAND_BATCH_COPY_BUFFER, waitList, std::move(copyOps));
-
-    if (batchCmd == nullptr) {
+  if (!marker_wait_list.empty()) {
+    amd::Command* dependent_marker = new amd::Marker(stream, true, marker_wait_list);
+    if (dependent_marker == nullptr) {
+      for (auto* cmd : marker_wait_list) {
+        cmd->release();
+      }
       return hipErrorOutOfMemory;
     }
-
-    batchCmd->enqueue();
-    if (!isAsync) {
-      batchCmd->queue()->finishCommand(batchCmd);
-    }
-    batchCmd->release();
-  }
-
-  // Handle write buffer (host to device) copies.
-  // This path handles kSrcAccessOrderDuringApiCall and kSrcAccessOrderAny for host sources
-  // that lack a memory object (e.g. malloc'd or stack pointers). The writeBuffer path
-  // handles kSrcAccessOrderDuringApiCall
-  for (size_t idx : writeBufferIndices) {
-    status = ihipMemcpy(dsts[idx], srcs[idx], sizes[idx], hipMemcpyDefault, stream, isAsync, true);
-    if (status != hipSuccess) {
-      return status;
-    }
-  }
-
-  // Handle read buffer (device to host) copies
-  for (size_t idx : readBufferIndices) {
-    status = ihipMemcpy(dsts[idx], srcs[idx], sizes[idx], hipMemcpyDefault, stream, isAsync, true);
-    if (status != hipSuccess) {
-      return status;
+    dependent_marker->enqueue();
+    dependent_marker->release();
+    for (auto* cmd : marker_wait_list) {
+      cmd->release();
     }
   }
 
@@ -3379,6 +3465,10 @@ hipError_t ihipMemset(void* dst, int64_t value, size_t valueSize, size_t sizeByt
   command->enqueue();
   if (!isAsync) {
     hip_stream->finish();
+    if (command->status() == CL_INVALID_OPERATION) {
+      command->release();
+      return hipErrorIllegalState;
+    }
   }
   command->release();
   return hip_error;
@@ -3873,13 +3963,7 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     }
 
     attributes->devicePointer = reinterpret_cast<char*>(devMem->virtualAddress() + offset);
-    constexpr uint32_t kHipMallocManagedFlags =
-        CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR;
-    constexpr uint32_t kManagedVarFlags =
-        CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR;
-    const auto memFlags = memObj->getMemFlags();
-    attributes->isManaged = ((memFlags & kHipMallocManagedFlags) == kHipMallocManagedFlags) ||
-                            ((memFlags & kManagedVarFlags) == kManagedVarFlags);
+    attributes->isManaged = IsManagedMemory(memObj->getMemFlags());
     attributes->allocationFlags = memObj->getUserData().flags;
     attributes->device = memObj->getUserData().deviceId;
     if (attributes->isManaged) {
@@ -3935,10 +4019,6 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
   size_t offset = 0;
   amd::Memory* memObj = getMemoryObject(hip::getCurrentDevice(), ptr, offset);
   amd::Memory* vaddr_mem_obj = amd::MemObjMap::FindVirtualMemObj(ptr);
-  constexpr uint32_t kHipMallocManagedFlags =
-      CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR;
-  constexpr uint32_t kManagedVarFlags =
-      CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR;
 
   hipError_t status = hipSuccess;
 
@@ -4067,10 +4147,7 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
     }
     case HIP_POINTER_ATTRIBUTE_IS_MANAGED: {
       if (memObj) {
-        const auto memFlags = memObj->getMemFlags();
-        *reinterpret_cast<bool*>(data) =
-            ((memFlags & kHipMallocManagedFlags) == kHipMallocManagedFlags) ||
-            ((memFlags & kManagedVarFlags) == kManagedVarFlags);
+        *reinterpret_cast<bool*>(data) = IsManagedMemory(memObj->getMemFlags());
       } else {
         *reinterpret_cast<bool*>(data) = false;
         return hipErrorInvalidValue;
@@ -4092,8 +4169,7 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
         if (getMemoryType(memObj) == hipMemoryTypeHost) {
           // host pointer, pinned or registered memory
           *reinterpret_cast<int*>(data) = 0;
-        } else if (((memObj->getMemFlags() & kHipMallocManagedFlags) == kHipMallocManagedFlags) ||
-                   ((memObj->getMemFlags() & kManagedVarFlags) == kManagedVarFlags)) {
+        } else if (IsManagedMemory(memObj->getMemFlags())) {
           // managed allocation
           *reinterpret_cast<int*>(data) = 0;
         } else if (vaddr_mem_obj) {
@@ -4650,6 +4726,26 @@ hipError_t ihipMipmappedArrayDestroy(hipMipmappedArray_t mipmapped_array_ptr) {
   auto image = as_amd(mem_obj);
   // Wait on the device, associated with the current memory object during allocation
   g_devices[image->getUserData().deviceId]->SyncAllStreams();
+
+  // Release all level array views created by hipGetMipmappedArrayLevel.
+  std::vector<hipArray*> level_arrays;
+  {
+    amd::ScopedLock lock(hipArraySetLock);
+    for (auto* arr : hip::hipArraySet) {
+      cl_mem level_mem = reinterpret_cast<cl_mem>(arr->data);
+      if (is_valid(level_mem) && as_amd(level_mem)->parent() == image) {
+        level_arrays.push_back(arr);
+      }
+    }
+    for (auto* arr : level_arrays) {
+      hip::hipArraySet.erase(arr);
+    }
+  }
+  for (auto* arr : level_arrays) {
+    as_amd(reinterpret_cast<cl_mem>(arr->data))->release();
+    delete arr;
+  }
+
   image->release();
 
   delete mipmapped_array_ptr;
@@ -4831,18 +4927,26 @@ hipError_t hipExternalMemoryGetMappedMipmappedArray(
                                    (size_t)mipmapDesc->offset, buf));
 }
 
+// ================================================================================================
 hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, size_t size,
                                           hipMemRangeHandleType handleType,
                                           unsigned long long flags) {
   HIP_INIT_API(hipMemGetHandleForAddressRange, handle, dptr, size, handleType, flags);
 
-  // We do not support any flags at this time.
-  if (dptr == nullptr || size == 0 || handleType != hipMemRangeHandleTypeDmaBufFd || flags != 0) {
+  if (dptr == nullptr || size == 0 || handleType != hipMemRangeHandleTypeDmaBufFd ||
+      (flags != 0 && flags != hipMemRangeFlagDmaBufMappingTypePcie)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
-  if (!device->GetHandleForAddressRange(dptr, size, handle)) {
+
+  // ensure exported handle is reachable by third party devices via pcie, hence the owning device
+  // must be xgmi or pcie with large BAR enabled.
+  if (flags == hipMemRangeFlagDmaBufMappingTypePcie && !device->isXgmi() &&
+      !device->info().largeBar_) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
+  if (!device->GetHandleForAddressRange(dptr, size, handle, flags)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 

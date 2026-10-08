@@ -195,6 +195,15 @@ Debugging HIP applications using Windows tools can be more informative than on L
 tools provides more visibility into debug codes, which makes it easier to inspect variables, watch
 multiple details, and examine call stacks.
 
+HIP Record & Replay
+===================
+
+HIP Record & Replay (HRR) captures HIP API traces into a binary archive and replays them on a live GPU for bug reproduction, debugging, and validation. During capture, HRR records every HIP API call made by an application into a binary archive (.hrr directory). During replay, it reproduces the original workload on a live GPU, including multi-threaded command submission, graph execution, and GPU memory transfers.
+
+Because the archive contains both the GPU code and the buffers used during execution, a failing workload can be replayed without access to its source code or input data. This enables developers to investigate incorrect results, crashes, or hangs independently of the machine and application that originally produced them.
+
+For how to record a workload and replay an archive, see :doc:`/how-to/hip_record_replay`.
+
 Useful environment variables
 ===================================================
 
@@ -229,8 +238,8 @@ Making device visible
 ---------------------------------------------------------------------------------
 
 For systems with multiple devices, you can choose to make only certain device(s) visible to HIP using
-``HIP_VISIBLE_DEVICES`` (or ``CUDA_VISIBLE_DEVICES`` on an NVIDIA platform). Once enabled, HIP can
-only view devices that have indices present in the sequence. For example:
+``HIP_VISIBLE_DEVICES``. Once enabled, HIP can only view devices that have indices present in the sequence.
+For example:
 
 .. code-block:: console
 

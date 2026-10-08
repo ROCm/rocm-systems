@@ -7,10 +7,9 @@ import os
 import re
 import sys
 
-from common import NON_UNIT_GROUPS, iter_group_configs
+from common import NON_UNIT_GROUPS, iter_group_configs, ERROR, WARNING, RESET
 
 CPP_EXTENSIONS = (".cc", ".cpp", ".cxx", ".c++", ".C", ".cp", ".CPP")
-
 
 def find_source_test_cases(source_root, group, is_unit):
     if is_unit:
@@ -26,7 +25,8 @@ def find_source_test_cases(source_root, group, is_unit):
     # A commented-out HIP_TEST_CASE will still be detected as a source test
     # and flagged as missing if it has no YAML entry.
     pattern = re.compile(
-        r'(?:HIP_TEST_CASE|HIP_TEMPLATE_TEST_CASE)\(\s*(\w+)\s*[,)]'
+        r'\b(?:HIP_TEST_CASE|HIP_TEMPLATE_TEST_CASE|TEST_CASE|TEMPLATE_TEST_CASE)'
+        r'\(\s*(?:"([^"]*)"|(\w+))\s*[,)]'
     )
     for root, _, files in os.walk(source_dir):
         for filename in files:
@@ -36,7 +36,7 @@ def find_source_test_cases(source_root, group, is_unit):
             with open(filepath, errors="replace") as f:
                 content = f.read()
             for match in pattern.finditer(content):
-                test_names.add(match.group(1))
+                test_names.add(match.group(1) or match.group(2))
 
     return test_names
 
@@ -78,13 +78,17 @@ def main():
             missing.append(f"  {group}/{name}")
 
     if missing:
+        strict = os.environ.get("THEROCK_REQUIRE_HIP_YAML_ENTRIES", "").strip().lower() in ("1", "true", "yes", "on")
+        level = "ERROR" if strict else "WARNING"
+        color = ERROR if strict else WARNING
         print(
-            "ERROR: The following Catch2 test cases have no entry in their YAML config:",
+            f"[check_sources] {color}{level}: The following Catch2 test cases have no entry in their YAML config:{RESET}",
             file=sys.stderr,
         )
         for entry in missing:
-            print(entry, file=sys.stderr)
-        sys.exit(1)
+            print(f"[check_sources] {color}{entry}{RESET}", file=sys.stderr)
+        if strict:
+            sys.exit(1)
 
 
 if __name__ == "__main__":

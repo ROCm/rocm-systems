@@ -92,6 +92,7 @@ struct ncclIbResiliency {
   // QPs used for recovery protocol messages (UD — connectionless, survives link failures).
   struct ncclIbQp portRecoveryQps[NCCL_IB_MAX_DEVS_PER_NIC];
   struct ibv_ah* portRecoveryAh[NCCL_IB_MAX_DEVS_PER_NIC];
+  struct ibv_ah_attr portRecoveryAhAttr[NCCL_IB_MAX_DEVS_PER_NIC];
   uint32_t portRecoveryRemoteQpn[NCCL_IB_MAX_DEVS_PER_NIC];
   int nPortRecoveryQps;
 
@@ -184,7 +185,7 @@ struct ncclIbResiliencySend {
 // Data path APIs
 // -----------------------------
 
-ncclResult_t IbCastResiliencyRequestIsComplete(struct ncclIbRequest *request, bool *isComplete);
+ncclResult_t IbCastResiliencyRequestIsComplete(struct ncclIbRequest* request, bool* isComplete);
 
 // First checks if the error is recoverable or not. If yes, performs QPs
 // replacement on the communicator for all QPs that are associated
@@ -222,13 +223,22 @@ ncclResult_t IbCastResiliencyDeviceNumSet(struct ncclIbResiliency* resCtx, int n
 
 // The local info should be populated by the function with the information of
 // the QPs created so it could be passed to the receiver side.
-ncclResult_t IbCastResiliencySenderCreateQps(struct ncclIbResiliency* resCtx, struct ncclIbResiliencyInfo* localResiliencyInfo);
+ncclResult_t IbCastResiliencySenderCreateQps(struct ncclIbResiliency* resCtx,
+                                             struct ncclIbResiliencyInfo* localResiliencyInfo);
 // The remote info should be used for modifying the QPs required for resiliency
 // on the sender side to RTS state.
 ncclResult_t IbCastResiliencySenderQpsToRts(struct ncclIbResiliency* resCtx, struct ncclIbConnectionMetadata* remInfo);
 // The local info should be populated with the information of the QPs created
 // so it could be passed to the sender side.
-ncclResult_t IbCastResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* resCtx, struct ncclIbConnectionMetadata* remInfo, struct ncclIbResiliencyInfo* localResiliencyInfo);
+ncclResult_t IbCastResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* resCtx,
+                                                    struct ncclIbConnectionMetadata* remInfo,
+                                                    struct ncclIbResiliencyInfo* localResiliencyInfo);
+
+ncclResult_t IbCastResiliencyQpsReconfigure(struct ncclIbResiliency* resCtx, int devIndex, bool* success);
+
+// Reconfigure a single QP through RESET -> INIT -> ECE -> RTR -> RTS.
+ncclResult_t IbCastResiliencyQpReconfigure(struct ncclIbResiliency* resCtx, struct ncclIbQp* qp,
+                                           struct ncclIbNetCommDevBase* devBase, int devIndex, bool* success);
 
 ncclResult_t IbCastResiliencyClose(struct ncclIbResiliency* resCtx);
 
@@ -237,6 +247,11 @@ ncclResult_t IbCastResiliencyClose(struct ncclIbResiliency* resCtx);
 // memory info to the sender side. This function should be called on the sender
 // side to allow the resiliency context to access the completion records
 // structure on the receiver side.
-ncclResult_t IbCastResiliencyRemoteCompletionRecordsSet(struct ncclIbResiliency* resCtx, uint32_t cmplsRecordsRkey, uint64_t cmplsRecordsAddr, uint devIndex);
+ncclResult_t IbCastResiliencyRemoteCompletionRecordsSet(struct ncclIbResiliency* resCtx, uint32_t cmplsRecordsRkey,
+                                                        uint64_t cmplsRecordsAddr, uint devIndex);
+
+// Resiliency RCCL params (defined in p2p_resiliency.cc / p2p_resiliency_recovery.cc)
+int64_t ncclParamIbCastResiliencyPortFailover();
+int64_t ncclParamIbCastResiliencyPortRecovery();
 
 #endif // NET_IB_P2P_RESILIENCY_H_

@@ -2,16 +2,15 @@
 // SPDX-License-Identifier: MIT
 
 /// @file mma_exact_test_support.h
-/// @brief Shared fixture for the expensive MFMA/WMMA SIMD-vs-scalar bit-exact
-/// suites (enabled by RJ_ENABLE_EXPENSIVE_CHECKS).
+/// @brief Shared fixture for MFMA/WMMA SIMD-vs-scalar bit-exact tests.
 ///
-/// The fused-FMA SIMD path and the non-fused scalar path can only round apart
-/// when an intermediate K-sum actually rounds, so the random generators seed
-/// integer-valued elements that stay exact through every product and partial
-/// sum (max |prod| 64, max K-sum 8192 < 2^24); boundary modes drive the
-/// rounding-free corners directly (NaN, +/-Inf, +/-0, denormals, max-finite
-/// overflow, +1/-1 cancellation). Under those inputs SIMD and scalar must be
-/// bit-identical, and the suites assert word-for-word EXPECT_EQ on the dst.
+/// SIMD and scalar accumulation can only round apart when an intermediate
+/// K-sum actually rounds, so the random generators seed integer-valued elements
+/// that stay exact through every product and partial sum (max |prod| 64, max
+/// K-sum 8192 < 2^24); boundary modes drive the rounding-free corners directly
+/// (NaN, +/-Inf, +/-0, denormals, max-finite overflow, +1/-1 cancellation).
+/// Under those inputs SIMD and scalar must be bit-identical, and the suites
+/// assert word-for-word EXPECT_EQ on the dst.
 
 #pragma once
 
@@ -243,6 +242,20 @@ struct ExactFixture {
   }
 };
 
+// Restore the process force-scalar gate on every exit from an in-process A/B
+// comparison, including assertion failures and exceptions.
+class ForceScalarGuard {
+public:
+  ForceScalarGuard() : original_(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(original_); }
+
+  ForceScalarGuard(const ForceScalarGuard &) = delete;
+  ForceScalarGuard &operator=(const ForceScalarGuard &) = delete;
+
+private:
+  bool original_;
+};
+
 // Run `kernel` forced-scalar then SIMD over identical pre-seeded state and
 // assert the dst window matches bit-for-bit. `reseed_acc` restores the
 // accumulator window between runs (the kernels write dst == acc in-place for
@@ -251,6 +264,7 @@ inline void expect_bit_exact(const char *label, Mode mode, ExactFixture &fx,
                              const std::function<void()> &reseed_acc,
                              const std::function<void()> &kernel, uint32_t dst_off,
                              uint32_t dst_regs) {
+  ForceScalarGuard force_scalar_guard;
   reseed_acc();
   util::set_force_scalar_for_testing(true);
   kernel();

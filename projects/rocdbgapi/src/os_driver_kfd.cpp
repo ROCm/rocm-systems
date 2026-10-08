@@ -234,13 +234,8 @@ kfd_to_os_exception_mask (__u64 kfd_mask)
 {
   os_exception_mask_t mask{};
 
-  if (kfd_mask == 0)
-    return mask;
-
-  while (kfd_mask != 0)
+  utils::for_each_flag (kfd_mask, [&] (__u64 one_bit)
     {
-      __u64 one_bit = kfd_mask ^ (kfd_mask & (kfd_mask - 1));
-
       auto code = os_exception_code (
         excp_mask_to_excp_code<kfd_dbg_trap_exception_code> (one_bit));
 
@@ -249,9 +244,7 @@ kfd_to_os_exception_mask (__u64 kfd_mask)
       else
         warning ("Unknown KFD exception code %" PRIx64,
                  static_cast<uint64_t> (one_bit));
-
-      kfd_mask ^= one_bit;
-    }
+    });
 
   return mask;
 }
@@ -262,18 +255,13 @@ static constexpr __u64
 kfd_exception_mask (os_exception_mask_t mask)
 {
   __u64 kfd_mask = 0;
-  if (mask == os_exception_mask_t::none)
-    return kfd_mask;
 
-  while (mask != os_exception_mask_t::none)
+  utils::for_each_flag (mask, [&] (os_exception_mask_t one_bit)
     {
-      os_exception_mask_t one_bit = mask ^ (mask & (mask - 1));
-
       kfd_mask |= KFD_EC_MASK (kfd_exception_code (
         excp_mask_to_excp_code<os_exception_code_t, os_exception_mask_t> (
           one_bit)));
-      mask ^= one_bit;
-    }
+    });
 
   return kfd_mask;
 }
@@ -350,14 +338,11 @@ kfd_wave_launch_trap_mask (os_wave_launch_trap_mask_t wave_launch_trap)
     dbgapi_assert_not_reached ();
   };
 
-  while (wave_launch_trap != os_wave_launch_trap_mask_t::none)
+  utils::for_each_flag (wave_launch_trap,
+                        [&] (os_wave_launch_trap_mask_t one_bit)
     {
-      os_wave_launch_trap_mask_t one_bit
-        = wave_launch_trap ^ (wave_launch_trap & (wave_launch_trap - 1));
-
       kfd_wave_launch_trap |= convert_one (one_bit);
-      wave_launch_trap ^= one_bit;
-    }
+    });
 
   return kfd_wave_launch_trap;
 }
@@ -865,7 +850,7 @@ public:
   /* Read up to SIZE bytes into val from the note.  */
   template <typename T> void read (T &val, size_t size)
   {
-    if (!m_error && head + size <= end)
+    if (!m_error && head <= end - size)
       {
         std::memcpy (&val, head, std::min (size, sizeof (T)));
         head += size;
@@ -899,6 +884,13 @@ kfd_core_driver_t::kfd_core_driver_t (
       return;
     }
 
+  if (core_state.size
+      < (sizeof (amdgpu_core_note_version_t) + sizeof (kfd_note_header_t)))
+    {
+      warning ("Corefile note missing its header.");
+      return;
+    }
+
   note_reader reader{ core_state };
   [[maybe_unused]] const auto note_version
     = reader.read<amdgpu_core_note_version_t> ();
@@ -914,6 +906,22 @@ kfd_core_driver_t::kfd_core_driver_t (
       || header.queue_entry_size % 8 != 0)
     {
       warning ("Invalid alignment in corefile note.");
+      return;
+    }
+
+  size_t unparsed = (core_state.size - sizeof (amdgpu_core_note_version_t)
+                     - sizeof (kfd_note_header_t));
+  const size_t agents_size
+    = static_cast<size_t> (header.agent_entry_count) * header.agent_entry_size;
+  const size_t queues_size
+    = static_cast<size_t> (header.queue_entry_count) * header.queue_entry_size;
+
+  if (unparsed < header.runtime_info_size
+      || (unparsed -= header.runtime_info_size) < agents_size
+      || (unparsed -= agents_size) < queues_size
+      || (unparsed -= queues_size) != 0)
+    {
+      warning ("Malformed corefile note.");
       return;
     }
 
@@ -1458,7 +1466,7 @@ kfd_driver_t::kfd_agent_snapshot (kfd_dbg_device_info_entry *agents_infos,
   if (err == -ESRCH)
     return AMD_DBGAPI_STATUS_ERROR_PROCESS_EXITED;
   else if (args.device_snapshot.entry_size
-             != sizeof (kfd_dbg_device_info_entry)
+             > sizeof (kfd_dbg_device_info_entry)
            || err < 0)
     return AMD_DBGAPI_STATUS_ERROR;
 
@@ -1796,7 +1804,7 @@ kfd_driver_t::kfd_queue_snapshot (kfd_queue_snapshot_entry *snapshots,
   int err = kfd_dbg_trap_ioctl (KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT, &args);
   if (err == -ESRCH)
     return AMD_DBGAPI_STATUS_ERROR_PROCESS_EXITED;
-  else if (args.queue_snapshot.entry_size != sizeof (kfd_queue_snapshot_entry)
+  else if (args.queue_snapshot.entry_size > sizeof (kfd_queue_snapshot_entry)
            || err < 0)
     return AMD_DBGAPI_STATUS_ERROR;
 

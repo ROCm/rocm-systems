@@ -22,9 +22,9 @@
 
 #pragma once
 
+#include <atomic>
 #include <mutex>
 #include <thread>
-#include <atomic>
 
 namespace rocprofiler_register
 {
@@ -44,8 +44,8 @@ namespace common
 
 struct checked_mutex
 {
-    std::mutex              mtx    = {};
-    std::atomic<std::thread::id> owner  = {};
+    std::mutex                   mtx   = {};
+    std::atomic<std::thread::id> owner = {};
 };
 
 struct checked_lock
@@ -73,10 +73,10 @@ struct checked_lock
         }
     }
 
-    checked_lock(const checked_lock&)            = delete;
+    checked_lock(const checked_lock&) = delete;
     checked_lock& operator=(const checked_lock&) = delete;
     checked_lock(checked_lock&&)                 = delete;
-    checked_lock& operator=(checked_lock&&)      = delete;
+    checked_lock& operator=(checked_lock&&) = delete;
 
     // true  → the calling thread already held the lock (recursion detected)
     // false → the lock was freshly acquired

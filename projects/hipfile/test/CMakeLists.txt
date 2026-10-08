@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-include(AISAddExecutable)
+include(HipFileAddExecutable)
 
 set(SHARED_SOURCE_FILES
     common/magic-word.cpp
@@ -18,6 +18,7 @@ set(UNIT_TEST_SOURCE_FILES
 # and configured on the system.
 set(SYSTEM_TEST_SOURCE_FILES
     system/async.cpp
+    system/batch.cpp
     system/buffer.cpp
     system/config.cpp
     system/driver.cpp
@@ -31,11 +32,17 @@ set(TEST_SYSINCLS
     ${HIPFILE_THIRD_PARTY_PATH}
 )
 
-if(AIS_BUILD_NVIDIA_DETAIL)
+if(HIPFILE_BUILD_NVIDIA_DETAIL)
     list(APPEND UNIT_TEST_SOURCE_FILES nvidia_detail/cufile-api-compat.cpp)
     list(APPEND TEST_SYSINCLS ${HIPFILE_NVIDIA_SOURCE_PATH})
 else()
-    list(APPEND SYSTEM_TEST_SOURCE_FILES system/amd/io.cpp)
+    list(APPEND SYSTEM_TEST_SOURCE_FILES
+        system/amd/fd-limit.cpp
+        system/amd/io.cpp
+        system/amd/io-data-modification.cpp
+        system/amd/io-data-modification-kernel.hip
+    )
+    list(APPEND SHARED_SOURCE_FILES common/ais-capability.cpp)
     list(APPEND TEST_SYSINCLS ${HIPFILE_AMD_SOURCE_PATH})
 endif()
 
@@ -46,7 +53,7 @@ endif()
 # (rather than the platform) means the target reappears automatically if a
 # portable unit test is later added to UNIT_TEST_SOURCE_FILES.
 if(UNIT_TEST_SOURCE_FILES)
-    ais_add_test_executable(
+    hipfile_add_test_executable(
         NAME hipfile_tests
         DEPS hipfile
         SRCS ${UNIT_TEST_SOURCE_FILES} ${SHARED_SOURCE_FILES}
@@ -59,14 +66,14 @@ if(UNIT_TEST_SOURCE_FILES)
     target_compile_options(hipfile_tests PRIVATE -pthread)
     target_link_options(hipfile_tests PRIVATE -pthread)
 
-    ais_gtest_discover_tests(
+    hipfile_gtest_discover_tests(
         hipfile_tests
         PROPERTIES "LABELS;unit;LABELS;hipfile"
         TEST_LIST hipfile_unit_tests
     )
 endif()
 
-ais_add_test_executable(
+hipfile_add_test_executable(
     NAME hipfile_system_tests
     DEPS hipfile
     SRCS ${SYSTEM_TEST_SOURCE_FILES} ${SHARED_SOURCE_FILES}
@@ -78,22 +85,62 @@ target_link_libraries(hipfile_system_tests PRIVATE GTest::gtest)
 target_compile_options(hipfile_system_tests PRIVATE -pthread)
 target_link_options(hipfile_system_tests PRIVATE -pthread)
 
-ais_gtest_discover_tests(
+set(_allow_skip_arg "")
+if(HIPFILE_ALLOW_SKIP_FASTPATH_TESTS)
+    set(_allow_skip_arg --allow-skip-fastpath)
+endif()
+
+hipfile_gtest_discover_tests(
     hipfile_system_tests
-    EXTRA_ARGS --ais-capable-dir ${AIS_CAPABLE_DIR}
-    PROPERTIES "LABELS;system;LABELS;hipfile"
+    EXTRA_ARGS --ais-capable-dir ${HIPFILE_CAPABLE_DIR} ${_allow_skip_arg}
+    # Keep this marker synchronized with the GTEST_SKIP message in system/amd/io.cpp.
+    PROPERTIES "LABELS;system;LABELS;hipfile;SKIP_REGULAR_EXPRESSION;fastpath not available"
     TEST_LIST hipfile_system_tests
 )
+
+# Deprecated AIS_* CMake options
+#
+# Configures a small project with every deprecated AIS_* option set and checks
+# that each one was mapped to its HIPFILE_* replacement. Remove these tests
+# along with cmake/HipFileDeprecatedAISOptions.cmake.
+# ----------------------------------------
+set(_ais_compat_build_dir "${CMAKE_CURRENT_BINARY_DIR}/ais-compat")
+set(_ais_compat_args)
+foreach(old_name IN LISTS HIPFILE_DEPRECATED_AIS_OPTIONS)
+    list(APPEND _ais_compat_args "-D${old_name}=ais-compat-${old_name}")
+endforeach()
+
+# Start from an empty build directory each time so values left in the cache
+# by an earlier run can't hide a failure
+add_test(NAME hipfile_ais_compat_clean
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${_ais_compat_build_dir}"
+)
+add_test(NAME hipfile_ais_compat
+    COMMAND ${CMAKE_COMMAND}
+        -G "${CMAKE_GENERATOR}"
+        -S "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ais-compat"
+        -B "${_ais_compat_build_dir}"
+        ${_ais_compat_args}
+)
+set_tests_properties(hipfile_ais_compat_clean PROPERTIES
+    FIXTURES_SETUP hipfile_ais_compat
+    LABELS "unit;hipfile"
+)
+set_tests_properties(hipfile_ais_compat PROPERTIES
+    FIXTURES_REQUIRED hipfile_ais_compat
+    LABELS "unit;hipfile"
+)
+# ----------------------------------------
 
 # Temporary Test Files
 # Can be deleted once proper testing added
 # ----------------------------------------
-ais_add_test_executable(
+hipfile_add_test_executable(
     NAME test_hipfile_basic
     SRCS legacy/test-hipfile.cpp
     DEPS hipfile
 )
-ais_add_test_executable(
+hipfile_add_test_executable(
     NAME test_hipfile_batch
     SRCS legacy/test-hipfile-batch.cpp
     DEPS hipfile

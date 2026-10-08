@@ -46,6 +46,8 @@ struct Hash;
 
 namespace Pal
 {
+struct GpuSymbol;
+class ICodeObject;
 
 using Hash128 = Util::MetroHash::Hash;
 
@@ -56,9 +58,14 @@ union LibraryCreateFlags
 {
     struct
     {
-        uint32 clientInternal  : 1;  ///< Internal library not created by the application.
-        uint32 isGraphics      : 1;  ///< Whether it is a graphics library
-        uint32 reserved        : 30; ///< Reserved for future use.
+        uint32 clientInternal               : 1;  ///< Internal library not created by the application.
+        uint32 isGraphics                   : 1;  ///< Whether it is a graphics library
+        uint32 condDebugUser                : 1;  ///< If set, waves launched from this library's shaders have debugging
+                                                  ///  unconditionally enabled: the DebugBreak() shader intrinsic always
+                                                  ///  triggers and code guarded by IsDebuggingEnabled() runs,
+                                                  ///  regardless of whether a debugger is attached (work-graph node
+                                                  ///  compute).
+        uint32 reserved                     : 29; ///< Reserved for future use.
     };
     uint32 u32All;                  ///< Flags packed as 32-bit uint.
 };
@@ -105,6 +112,13 @@ struct ShaderLibraryCreateInfo
 {
     LibraryCreateFlags   flags;          ///< Library creation flags
 
+#if PAL_BUILD_CODE_OBJECT_INTERFACE
+    ICodeObject*         pCodeObj;       ///< Pointer to code-object ELF binary implementing the Pipeline ABI interface,
+                                         ///  obtained via IDevice::LoadCodeObject().
+                                         ///  The code-object ELF contains pre-compiled shaders, register values, and
+                                         ///  additional metadata.
+    Util::Span<ICodeObject*> shaders;    ///< an array of Shader Object Elves
+#endif
     const void*          pCodeObject;    ///< Pointer to code-object ELF binary implementing the Pipeline ABI interface.
                                          ///  The code-object ELF contains pre-compiled shaders, register values, and
                                          ///  additional metadata.
@@ -213,6 +227,11 @@ public:
         uint32*                             pCount,
         Util::Span<Util::Span<const void>>* pCodeObjects) const = 0;
 
+    /// Obtains the ICodeObjects used to create this shader library.
+    ///
+    /// @returns A span of ICodeObject pointers.
+    virtual Util::Span<ICodeObject*> GetCreateInfoCodeObjects() = 0;
+
     /// Returns the value of the associated arbitrary client data pointer.
     /// Can be used to associate arbitrary data with a particular PAL object.
     ///
@@ -256,7 +275,7 @@ public:
     ///                                 size of the disassembly string in ShaderStats::isaSizeInBytes. Else reports 0.
     /// @returns Success if the stats were successfully obtained for this shader, including the shader disassembly size.
     ///          +ErrorUnavailable if a wrong shader stage for this pipeline was specified, or if some internal error
-    ///                           occurred.
+    ///                           occured.
     virtual Result GetShaderFunctionStats(
         Util::StringView<char> shaderExportName,
         ShaderLibStats*        pShaderStats) const = 0;

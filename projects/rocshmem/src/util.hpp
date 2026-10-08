@@ -304,14 +304,13 @@ __device__ __forceinline__ bool is_last_active_lane() {
   __threadfence();
   __syncthreads();
   if (threadIdx.x == 0) {
-    __hip_atomic_fetch_add(&global_counter[0], 1,
-                           __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    atomic::fetch_add<atomic::memory_scope::device,
+                      atomic::memory_order::relaxed>(&global_counter[0], 1);
   }
   __syncthreads();
   if (threadIdx.x == 0) {
-    while (__hip_atomic_load(global_counter,
-                             __ATOMIC_RELAXED,
-                             __HIP_MEMORY_SCOPE_AGENT) != num_blocks);
+    while (atomic::load<atomic::memory_scope::device,
+           atomic::memory_order::relaxed>(global_counter) != num_blocks);
   }
   __syncthreads();
 }
@@ -326,9 +325,10 @@ __device__ __forceinline__ bool is_last_active_lane() {
 [[maybe_unused]] __device__ __forceinline__ bool spin_lock_try_acquire_unique(uint32_t *lock) {
   uint32_t lock_val = SPIN_LOCK_UNLOCKED;
 
-  __hip_atomic_compare_exchange_strong(lock, &lock_val, SPIN_LOCK_LOCKED,
-                                       __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE,
-                                       __HIP_MEMORY_SCOPE_AGENT);
+  atomic::compare_exchange_strong<
+    atomic::memory_scope::device,
+    atomic::memory_order::acquire,
+    atomic::memory_order::acquire>(lock, lock_val, SPIN_LOCK_LOCKED);
 
   return lock_val == SPIN_LOCK_UNLOCKED;
 }
@@ -347,8 +347,8 @@ __device__ __forceinline__ bool is_last_active_lane() {
  * Each thread in wave releases a different lock.
  */
 [[maybe_unused]] __device__ __forceinline__ void spin_lock_release_unique(uint32_t *lock) {
-  __hip_atomic_store(lock, SPIN_LOCK_UNLOCKED, __ATOMIC_RELEASE,
-                     __HIP_MEMORY_SCOPE_AGENT);
+  atomic::store<atomic::memory_scope::device,
+                atomic::memory_order::release>(lock, SPIN_LOCK_UNLOCKED);
 }
 
 /*
@@ -359,9 +359,10 @@ __device__ __forceinline__ bool is_last_active_lane() {
 
   if (is_first_active_lane(activemask)) {
     lock_val = SPIN_LOCK_UNLOCKED;
-    __hip_atomic_compare_exchange_strong(lock, &lock_val, SPIN_LOCK_LOCKED,
-                                         __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE,
-                                         __HIP_MEMORY_SCOPE_AGENT);
+    atomic::compare_exchange_strong<
+      atomic::memory_scope::device,
+      atomic::memory_order::acquire,
+      atomic::memory_order::acquire>(lock, lock_val, SPIN_LOCK_LOCKED);
   }
   lock_val = __shfl(lock_val, get_first_active_lane_id(activemask));
 
@@ -382,8 +383,8 @@ __device__ __forceinline__ bool is_last_active_lane() {
  */
 [[maybe_unused]] __device__ __forceinline__ void spin_lock_release_shared(uint32_t *lock, uint64_t activemask) {
   if (is_first_active_lane(activemask)) {
-    __hip_atomic_store(lock, SPIN_LOCK_UNLOCKED, __ATOMIC_RELEASE,
-                       __HIP_MEMORY_SCOPE_AGENT);
+    atomic::store<atomic::memory_scope::device,
+                  atomic::memory_order::release>(lock, SPIN_LOCK_UNLOCKED);
   }
 }
 
@@ -402,7 +403,7 @@ constexpr bool is_blocking(MemcpyKind k) {
 }
 
 template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll>
-__device__ __forceinline__ void copy_bulk(void* dst, void* src,
+__device__ __noinline__ void copy_bulk(void* dst, void* src,
                                           int n_chunks, int tid, int stride) {
   using Acc = AsmAccess<ChunkSize, LoadPolicy, StorePolicy>;
   using T = typename Acc::type;
@@ -430,9 +431,6 @@ __device__ __forceinline__ void copy_bulk(void* dst, void* src,
   // Tail: remaining chunks that don't fill a full unrolled batch
   for (int i = offset + tid; i < n_chunks; i += stride) {
     T val = Acc::load(static_cast<uint8_t*>(src) + i * ChunkSize);
-    if constexpr (LoadPolicy != CachePolicy::Standard) {
-      wait_on_vmem_and_lds(0);
-    }
     Acc::store(static_cast<uint8_t*>(dst) + i * ChunkSize, val);
   }
 }
@@ -448,9 +446,6 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
 
   if (remainder & 1) {
     auto val = AsmAccess<1, LP, SP>::load(src);
-    if constexpr (LP != CachePolicy::Standard) {
-      wait_on_vmem_and_lds(0);
-    }
     AsmAccess<1, LP, SP>::store(dst, val);
     if (remainder == 1) {
       return;
@@ -460,9 +455,6 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
   }
   if (remainder & 2) {
     auto val = AsmAccess<2, LP, SP>::load(src);
-    if constexpr (LP != CachePolicy::Standard) {
-      wait_on_vmem_and_lds(0);
-    }
     AsmAccess<2, LP, SP>::store(dst, val);
     if (remainder == 2) {
       return;
@@ -472,9 +464,6 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
   }
   if (remainder & 4) {
     auto val = AsmAccess<4, LP, SP>::load(src);
-    if constexpr (LP != CachePolicy::Standard) {
-      wait_on_vmem_and_lds(0);
-    }
     AsmAccess<4, LP, SP>::store(dst, val);
     if (remainder == 4) {
       return;
@@ -484,9 +473,6 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
   }
   if (remainder & 8) {
     auto val = AsmAccess<8, LP, SP>::load(src);
-    if constexpr (LP != CachePolicy::Standard) {
-      wait_on_vmem_and_lds(0);
-    }
     AsmAccess<8, LP, SP>::store(dst, val);
   }
 }
@@ -502,7 +488,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   if (size == 0) return;
 
   constexpr int ChunkSize = 16;
-  constexpr int Unroll    = 16;
+  constexpr int Unroll    = 8;
   // Compile-time bypass policy: cache-bypass in the direction of the remote side.
   constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard    : CachePolicy::SystemScope;
   constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
@@ -514,8 +500,8 @@ template <MemcpyKind Kind = MemcpyKind::Put>
     // Many threads, large transfer: use cached Standard policy.
     // Fences are direction-specific to maintain system-scope coherence.
     if constexpr (!is_put(Kind)) {
-      detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                  detail::atomic::memory_order_acquire>();
+      atomic::threadfence<atomic::memory_scope::system,
+                          atomic::memory_order::acquire>();
     }
 
     if (n_chunks > 0) {
@@ -527,8 +513,8 @@ template <MemcpyKind Kind = MemcpyKind::Put>
         static_cast<uint8_t*>(src) + n_chunks * ChunkSize, remainder);
 
     if constexpr (is_put(Kind)) {
-      detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                  detail::atomic::memory_order_release>();
+      atomic::threadfence<atomic::memory_scope::system,
+                          atomic::memory_order::release>();
     }
   } else {
     // Small transfer or single-lane: cache-bypass policy provides direct
@@ -548,7 +534,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   if (size == 0) return;
 
   constexpr int ChunkSize = 16;
-  constexpr int Unroll    = 16;
+  constexpr int Unroll    = 8;
 
   constexpr CachePolicy LP =
       is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
@@ -567,7 +553,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   // Remainder handled uniquely by the first thread in the wave
   if (wave_tid == 0) {
     copy_remainder<LP, SP>(static_cast<uint8_t*>(dst) + n_chunks * ChunkSize,
-                           static_cast<uint8_t*>(src) + n_chunks * ChunkSize, 
+                           static_cast<uint8_t*>(src) + n_chunks * ChunkSize,
                            remainder);
   }
 }
@@ -578,7 +564,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   if (size == 0) return;
 
   constexpr int ChunkSize = 16;
-  constexpr int Unroll    = 16;
+  constexpr int Unroll    = 8;
 
   constexpr CachePolicy LP =
       is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;

@@ -30,3 +30,5 @@
 /UberTraceService.lib
 /vam.lib
 /zstd.lib
+/ddApi.lib
+/dd_crc32.lib

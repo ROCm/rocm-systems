@@ -29,6 +29,9 @@ on:
       - '!docs/**'
       - '!projects/*/docs/**'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -43,7 +46,8 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
@@ -56,7 +60,5 @@ jobs:
     - name: Lint with flake8
       working-directory: projects/rocprofiler-sdk
       run: |
-        # stop the build if there are Python syntax errors or undefined names
-        flake8 source --count --show-source --statistics --select=E9,F63,F7,F82
         # flake8 options are defined in .flake8
-        flake8 source --count --show-source --statistics
+        flake8 . --count --show-source --statistics

@@ -37,7 +37,6 @@ def pthread_timemory_env(lock_env) -> dict[str, str]:
     env = lock_env
     env["ROCPROFSYS_FLAT_PROFILE"] = "ON"
     env["ROCPROFSYS_PROFILE"] = "ON"
-    env["ROCPROFSYS_TRACE_LEGACY"] = "OFF"
     env["ROCPROFSYS_SAMPLING_KEEP_INTERNAL"] = "OFF"
     return env
 

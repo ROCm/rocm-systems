@@ -30,7 +30,7 @@
 #include <sys/syscall.h>
 #include "libhsakmt.h"
 #include "pmc_table.h"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <errno.h>

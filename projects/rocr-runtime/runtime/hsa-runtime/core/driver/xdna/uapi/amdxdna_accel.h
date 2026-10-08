@@ -11,8 +11,13 @@
 #else
 #include <libdrm/drm.h>
 #endif
+#ifdef __linux__
 #include <linux/const.h>
 #include <linux/stddef.h>
+#elif defined(__FreeBSD__)
+#include <sys/cdefs.h>
+#include <sys/stddef.h>
+#endif
 
 #if defined(__cplusplus)
 extern "C" {

@@ -13,7 +13,7 @@
 
 /*
  * This catch test is meant for FP8 OCP conversions
- * tests only supported on gfx1200 and gfx1201 archs
+ * tests only supported on gfx950, gfx1200 and gfx1201 archs
  */
 
 static_assert(sizeof(unsigned int) == sizeof(float));
@@ -27,19 +27,20 @@ std::string arch_type() {
   return gfxName;
 }
 
-#define ARCH_TYPE_GFX1200(name)                                                                    \
-  (name.find("gfx1200") != std::string::npos) || (name.find("gfx1201") != std::string::npos)
+#define OCP_SUPPORTED_ARCH(name)                                                                   \
+  (name.find("gfx1200") != std::string::npos) || (name.find("gfx1201") != std::string::npos) ||    \
+      (name.find("gfx950") != std::string::npos)
 
 #define FP8_OCP_SKIP_TEST                                                                          \
   std::string gfxName = arch_type();                                                               \
-  if (!(ARCH_TYPE_GFX1200(gfxName))) {                                                             \
-    HIP_SKIP_TEST("this test requires GFX1200.");                                                  \
+  if (!(OCP_SUPPORTED_ARCH(gfxName))) {                                                            \
+    HIP_SKIP_TEST("this test requires gfx950, gfx1200, or gfx1201 architecture.");                   \
   }
 
 #define __FP8_DEVICE__ __device__ static inline
 
 template <typename T> __FP8_DEVICE__ void e4m3_ocp_device(T* val) {
-#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+#if (defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx950__)) && __HIP_DEVICE_COMPILE__
   __hip_fp8_e4m3 tmp(*val);
   *val = tmp;
 #else
@@ -48,7 +49,7 @@ template <typename T> __FP8_DEVICE__ void e4m3_ocp_device(T* val) {
 }
 
 template <typename T> __FP8_DEVICE__ void e5m2_ocp_device(T* val) {
-#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+#if (defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx950__)) && __HIP_DEVICE_COMPILE__
   __hip_fp8_e5m2 tmp(*val);
   *val = tmp;
 #else
@@ -130,7 +131,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_fp8_ocp_compare_host_device, float, double) {
 }
 
 __FP8_DEVICE__ void e4m3_fp8x2_ocp_device(float2* val) {
-#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+#if (defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx950__)) && __HIP_DEVICE_COMPILE__
   __hip_fp8x2_e4m3 tmp(*val);
   *val = tmp;
 #else
@@ -139,7 +140,7 @@ __FP8_DEVICE__ void e4m3_fp8x2_ocp_device(float2* val) {
 }
 
 __FP8_DEVICE__ void e5m2_fp8x2_ocp_device(float2* val) {
-#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+#if (defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx950__)) && __HIP_DEVICE_COMPILE__
   __hip_fp8x2_e5m2 tmp(*val);
   *val = tmp;
 #else
@@ -282,7 +283,7 @@ HIP_TEST_CASE(Unit_fp8x2_ocp_split_compare) {
 }
 
 __FP8_DEVICE__ void e4m3_fp8x4_ocp_device(float4* val) {
-#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+#if (defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx950__)) && __HIP_DEVICE_COMPILE__
   __hip_fp8x4_e4m3 tmp(*val);
   *val = tmp;
 #else
@@ -291,7 +292,7 @@ __FP8_DEVICE__ void e4m3_fp8x4_ocp_device(float4* val) {
 }
 
 __FP8_DEVICE__ void e5m2_fp8x4_ocp_device(float4* val) {
-#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+#if (defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx950__)) && __HIP_DEVICE_COMPILE__
   __hip_fp8x4_e5m2 tmp(*val);
   *val = tmp;
 #else
@@ -384,7 +385,7 @@ HIP_TEST_CASE(Unit_fp8x4_ocp_split_compare) {
 __FP8_DEVICE__ bool e4m3_bool_ocp_device(float val) {
   bool x = false;
   float y = val;
-#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+#if (defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx950__)) && __HIP_DEVICE_COMPILE__
   __hip_fp8_e4m3 tmp(y);
   x = tmp;
 #else
@@ -396,7 +397,7 @@ __FP8_DEVICE__ bool e4m3_bool_ocp_device(float val) {
 __FP8_DEVICE__ bool e5m2_bool_ocp_device(float val) {
   bool x = false;
   float y = val;
-#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+#if (defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx950__)) && __HIP_DEVICE_COMPILE__
   __hip_fp8_e5m2 tmp(y);
   x = tmp;
 #else
@@ -487,7 +488,7 @@ std::vector<__hip_fp8_storage_t> get_all_fp8_nums(bool is_e4m3_ocp) {
 __FP8_DEVICE__ __hip_fp8_storage_t e4m3_ocp_fp8_device(float val) {
   __hip_fp8_storage_t x = 0;
   float y = val;
-#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+#if (defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx950__)) && __HIP_DEVICE_COMPILE__
   __hip_fp8_e4m3 tmp(y);
   x = tmp.__x;
 #else
@@ -499,7 +500,7 @@ __FP8_DEVICE__ __hip_fp8_storage_t e4m3_ocp_fp8_device(float val) {
 __FP8_DEVICE__ __hip_fp8_storage_t e5m2_ocp_fp8_device(float val) {
   __hip_fp8_storage_t x = 0;
   float y = val;
-#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+#if (defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx950__)) && __HIP_DEVICE_COMPILE__
   __hip_fp8_e5m2 tmp(y);
   x = tmp.__x;
 #else
@@ -585,7 +586,7 @@ HIP_TEST_CASE(Unit_all_fp8_ocp_cvt) {
 
   for (size_t i = 0; i < final_res.size(); i++) {
     INFO("Checking: " << f_vals[i] << " for: " << (is_e4m3_ocp ? "e4m3_ocp" : "e5m2_ocp")
-                      << " original: " << (int)all_vals[i]
+                      << " index: " << i << " original: " << (int)all_vals[i]
                       << " convert back: " << (int)final_res[i]);
     float gpu_cvt_res = 0.0f, cpu_cvt_res = 0.0f;
     if (is_e4m3_ocp) {
@@ -614,7 +615,7 @@ HIP_TEST_CASE(Unit_all_fp8_ocp_cvt) {
 
 template <typename T> __FP8_DEVICE__ void e4m3_ocp_fp8_cvt(T val, float* cvt1, float* cvt2) {
   T y = val;
-#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+#if (defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx950__)) && __HIP_DEVICE_COMPILE__
   __hip_fp8_e4m3 tmp(y);
   *cvt1 = tmp;
 
@@ -632,7 +633,7 @@ template <typename T> __FP8_DEVICE__ void e4m3_ocp_fp8_cvt(T val, float* cvt1, f
 
 template <typename T> __FP8_DEVICE__ void e5m2_ocp_fp8_cvt(T val, float* cvt1, float* cvt2) {
   T y = val;
-#if (defined(__gfx1200__) || defined(__gfx1201__)) && __HIP_DEVICE_COMPILE__
+#if (defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx950__)) && __HIP_DEVICE_COMPILE__
   __hip_fp8_e5m2 tmp(y);
   *cvt1 = tmp;
 

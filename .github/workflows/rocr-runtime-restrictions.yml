@@ -23,7 +23,7 @@ jobs:
 
 # rocr-runtime cannot use std::filesystem because of C++ ABI issues when
 # loaded into applications that ship their own C++ standard library (e.g.
-# DaVinci Resolve). See https://github.com/ROCm/rocm-systems/pull/2586 
+# DaVinci Resolve). See https://github.com/ROCm/rocm-systems/pull/2586
 # for details.
 
   no-std-filesystem:

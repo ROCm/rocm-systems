@@ -142,10 +142,10 @@ struct __half {
   }
 #endif
 
-// MANIPULATORS - DEVICE ONLY
+// MANIPULATORS - INTEGRAL
 #if !defined(__HIP_NO_HALF_CONVERSIONS__)
   template <typename T, Enable_if_t<__hip_internal::is_integral<T>{}>* = nullptr>
-  __device__ __half& operator=(T x) {
+  __HOST_DEVICE__ __half& operator=(T x) {
     data = static_cast<_Float16>(x);
     return *this;
   }
@@ -617,7 +617,8 @@ inline __HOST_DEVICE__ bool __heq(__half x, __half y) {
   return static_cast<__half_raw>(x).data == static_cast<__half_raw>(y).data;
 }
 inline __HOST_DEVICE__ bool __hne(__half x, __half y) {
-  return static_cast<__half_raw>(x).data != static_cast<__half_raw>(y).data;
+  return (static_cast<__half_raw>(x).data < static_cast<__half_raw>(y).data) ||
+         (static_cast<__half_raw>(x).data > static_cast<__half_raw>(y).data);
 }
 inline __HOST_DEVICE__ bool __hle(__half x, __half y) {
   return static_cast<__half_raw>(x).data <= static_cast<__half_raw>(y).data;
@@ -656,7 +657,8 @@ inline __HOST_DEVICE__ __half2 __heq2(__half2 x, __half2 y) {
   return __builtin_convertvector(-r, _Float16_2);
 }
 inline __HOST_DEVICE__ __half2 __hne2(__half2 x, __half2 y) {
-  auto r = static_cast<__half2_raw>(x).data != static_cast<__half2_raw>(y).data;
+  auto r = (static_cast<__half2_raw>(x).data < static_cast<__half2_raw>(y).data) |
+           (static_cast<__half2_raw>(x).data > static_cast<__half2_raw>(y).data);
   return __builtin_convertvector(-r, _Float16_2);
 }
 inline __HOST_DEVICE__ __half2 __hle2(__half2 x, __half2 y) {
@@ -725,12 +727,30 @@ inline __HOST_DEVICE__ bool __hbgt2(__half2 x, __half2 y) {
   auto r = static_cast<__half2_raw>(__hgt2(x, y));
   return r.data.x != 0 && r.data.y != 0;
 }
-inline __HOST_DEVICE__ bool __hbequ2(__half2 x, __half2 y) { return __hbeq2(x, y); }
-inline __HOST_DEVICE__ bool __hbneu2(__half2 x, __half2 y) { return __hbne2(x, y); }
-inline __HOST_DEVICE__ bool __hbleu2(__half2 x, __half2 y) { return __hble2(x, y); }
-inline __HOST_DEVICE__ bool __hbgeu2(__half2 x, __half2 y) { return __hbge2(x, y); }
-inline __HOST_DEVICE__ bool __hbltu2(__half2 x, __half2 y) { return __hblt2(x, y); }
-inline __HOST_DEVICE__ bool __hbgtu2(__half2 x, __half2 y) { return __hbgt2(x, y); }
+inline __HOST_DEVICE__ bool __hbequ2(__half2 x, __half2 y) {
+  auto r = static_cast<__half2_raw>(__hequ2(x, y));
+  return r.data.x != 0 && r.data.y != 0;
+}
+inline __HOST_DEVICE__ bool __hbneu2(__half2 x, __half2 y) {
+  auto r = static_cast<__half2_raw>(__hneu2(x, y));
+  return r.data.x != 0 && r.data.y != 0;
+}
+inline __HOST_DEVICE__ bool __hbleu2(__half2 x, __half2 y) {
+  auto r = static_cast<__half2_raw>(__hleu2(x, y));
+  return r.data.x != 0 && r.data.y != 0;
+}
+inline __HOST_DEVICE__ bool __hbgeu2(__half2 x, __half2 y) {
+  auto r = static_cast<__half2_raw>(__hgeu2(x, y));
+  return r.data.x != 0 && r.data.y != 0;
+}
+inline __HOST_DEVICE__ bool __hbltu2(__half2 x, __half2 y) {
+  auto r = static_cast<__half2_raw>(__hltu2(x, y));
+  return r.data.x != 0 && r.data.y != 0;
+}
+inline __HOST_DEVICE__ bool __hbgtu2(__half2 x, __half2 y) {
+  auto r = static_cast<__half2_raw>(__hgtu2(x, y));
+  return r.data.x != 0 && r.data.y != 0;
+}
 inline __HOST_DEVICE__ bool __hisnan(__half x) {
   __half_raw hr = x;
   return (hr.x & 0x7FFFU) > 0x7C00u;
@@ -899,7 +919,8 @@ inline __device__ __half2 unsafeAtomicAdd(__half2* address, __half2 value) {
     __half2_raw h2r;
     vec_fp162 fp16;
   } u{static_cast<__half2_raw>(value)};
-  u.fp16 = __builtin_amdgcn_flat_atomic_fadd_v2f16((vec_fp162*)address, u.fp16);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2f16))
+    u.fp16 = __builtin_amdgcn_flat_atomic_fadd_v2f16((vec_fp162*)address, u.fp16);
   return static_cast<__half2>(u.h2r);
 #else
   static_assert(sizeof(__half2_raw) == sizeof(unsigned int));
@@ -909,12 +930,12 @@ inline __device__ __half2 unsafeAtomicAdd(__half2* address, __half2 value) {
   };
   u_hold old_val, new_val;
   old_val.u32 =
-      __hip_atomic_load((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      __scoped_atomic_load_n((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
   do {
     new_val.h2r = __hadd2(old_val.h2r, value);
-  } while (!__hip_atomic_compare_exchange_strong((unsigned int*)address, &old_val.u32, new_val.u32,
-                                                 __ATOMIC_RELAXED, __ATOMIC_RELAXED,
-                                                 __HIP_MEMORY_SCOPE_AGENT));
+  } while (!__scoped_atomic_compare_exchange_n((unsigned int*)address, &old_val.u32, new_val.u32, 0,
+                                               __ATOMIC_RELAXED, __ATOMIC_RELAXED,
+                                               __MEMORY_SCOPE_DEVICE));
   return old_val.h2r;
 #endif
 }
@@ -940,6 +961,21 @@ inline __device__ __half unsafeAtomicAdd(__half* address, __half value) {
   if (is_lower) return __low2half(out);
   return __high2half(out);
 }
+
+namespace __hip_internal {
+template <>
+struct ExclusiveScanIdentity<__half> {
+  static constexpr __half maximum() {
+    __half_raw raw { .x = 0x7C00U };
+    return __half(raw);
+  }
+  static constexpr __half minimum() {
+    __half_raw raw { .x = 0xFC00U };
+    return __half(raw);
+  }
+};
+}  // namespace __hip_internal
+
 #endif  // defined(__clang__) && defined(__HIP__)
 
 // Math functions
@@ -1163,8 +1199,17 @@ template <typename MaskT> __device__ inline __half __reduce_max_sync(MaskT mask,
 
   return __reduce_op_sync(mask, val, op, wfReduce);
 }
+#endif
 
-#endif  // __HIP_NO_HALF_OPERATORS__
+#if !defined(__HIP_NO_HALF_OPERATORS__)
+namespace cooperative_groups {
+namespace impl {
+HIP_IMPL_GENERATE_SCAN_FUNC(add, f16, __half);
+HIP_IMPL_GENERATE_SCAN_FUNC(min, f16, __half);
+HIP_IMPL_GENERATE_SCAN_FUNC(max, f16, __half);
+}
+}
+#endif
 
 #endif  // defined(__cplusplus)
 #elif defined(__GNUC__) || defined(_MSC_VER)

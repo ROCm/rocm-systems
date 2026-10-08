@@ -70,6 +70,14 @@ upgrading mirage to refresh the bundled set.
 completely stop and purge all mirage processes and state.
 Removes the runtime and state directories; pass `--all`
 to also delete the config directory (profiles + topologies).
+Refuses while any `mirage run` is live.
+
+## mirage cleanup
+
+reclaim what a run that died abruptly could not: its containers
+and network, its stranded workload processes, and its session
+scratch directory. Skips sessions whose run still answers, so it
+is safe to run at any time; `--dry-run` previews it.
 
 ## mirage session
 
@@ -79,7 +87,7 @@ to also delete the config directory (profiles + topologies).
 
 
 ### mirage session boot
---profile 
+--profile
 --name
 
 boots a session
@@ -98,7 +106,7 @@ kill a session
 --session
 --node
 
-start an interactive shell 
+start an interactive shell
 
 ### mirage session exec
 --session
@@ -120,4 +128,3 @@ attach to relevent places
 ```
 mirage run [--profile profile_name] [--image ] [program]
 ```
-

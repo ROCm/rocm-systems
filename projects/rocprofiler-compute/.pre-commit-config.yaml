@@ -70,14 +70,37 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+  # Local hook: membw tree spec metric drift validation
+  - repo: local
+    hooks:
+      - id: membw-tree-spec-check
+        name: Membw tree spec metric validation
+        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/validate_membw_tree_spec.py'
+        language: system
+        files: (_membw_tree_spec\.yaml|_membw_guidance\.yaml|3000_mem_bw.*\.yaml|membw_analysis/models\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
+
   # Local hook: hash consistency check
   - repo: local
     hooks:
       - id: hash-check
         name: Hash consistency check
-        entry: python projects/rocprofiler-compute/src/utils/hash_checker.py
+        entry: python projects/rocprofiler-compute/tools/config_management/hash_checker.py
         language: python
         additional_dependencies: [pyyaml==6.0.3]
         files: ^projects/rocprofiler-compute/
         pass_filenames: false
+        stages: [pre-commit]
+
+  # Local hook: YAML and metric equation formatting
+  - repo: local
+    hooks:
+      - id: yaml-format-fix
+        name: YAML metric equation formatting
+        entry: python projects/rocprofiler-compute/tools/format_yaml.py --fix
+        language: python
+        additional_dependencies: [pyyaml==6.0.3]
+        files: ^projects/rocprofiler-compute/src/(rocprof_compute_soc/analysis_configs|rocprof_compute_tui/utils)/gfx.*\.yaml$
+        pass_filenames: true
         stages: [pre-commit]

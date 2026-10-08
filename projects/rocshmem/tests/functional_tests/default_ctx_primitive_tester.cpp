@@ -31,10 +31,11 @@ using namespace rocshmem;
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
+template <TestType Type>
 __global__ void DefaultCTXPrimitiveTest(int loop, int skip,
                               long long int *start_time,
                               long long int *end_time, char *source,
-                              char *dest, size_t size, TestType type,
+                              char *dest, size_t size,
                               [[maybe_unused]] ShmemContextType ctx_type,
                               int wf_size, int batch, int *grid_psync) {
   int wg_id = get_flat_grid_id();
@@ -80,33 +81,24 @@ __global__ void DefaultCTXPrimitiveTest(int loop, int skip,
       }
     }
 
-    switch (type) {
-      case DefaultCTXGetTestType:
-        rocshmem_getmem(dest + offset, source + offset, size, 1);
-        break;
-      case DefaultCTXGetNBITestType:
-        rocshmem_getmem_nbi(dest + offset, source + offset, size, 1);
-        break;
-      case DefaultCTXPutTestType:
-        rocshmem_putmem(dest + offset, source + offset, size, 1);
-        break;
-      case DefaultCTXPutNBITestType:
-        rocshmem_putmem_nbi(dest + offset, source + offset, size, 1);
-        break;
-      case DefaultCTXPTestType:
-        for (size_t s = 0; s < size; s++) {
-          char val = source[offset + s];
-          rocshmem_char_p(&dest[offset + s], val, 1);
-        }
-        break;
-      case DefaultCTXGTestType:
-        for (size_t s = 0; s < size; s++) {
-          char ret = rocshmem_char_g(&source[offset + s], 1);
-          dest[offset + s] = ret;
-        }
-        break;
-      default:
-        break;
+    if constexpr (Type == DefaultCTXGetTestType) {
+      rocshmem_getmem(dest + offset, source + offset, size, 1);
+    } else if constexpr (Type == DefaultCTXGetNBITestType) {
+      rocshmem_getmem_nbi(dest + offset, source + offset, size, 1);
+    } else if constexpr (Type == DefaultCTXPutTestType) {
+      rocshmem_putmem(dest + offset, source + offset, size, 1);
+    } else if constexpr (Type == DefaultCTXPutNBITestType) {
+      rocshmem_putmem_nbi(dest + offset, source + offset, size, 1);
+    } else if constexpr (Type == DefaultCTXPTestType) {
+      for (size_t s = 0; s < size; s++) {
+        char val = source[offset + s];
+        rocshmem_char_p(&dest[offset + s], val, 1);
+      }
+    } else if constexpr (Type == DefaultCTXGTestType) {
+      for (size_t s = 0; s < size; s++) {
+        char ret = rocshmem_char_g(&source[offset + s], 1);
+        dest[offset + s] = ret;
+      }
     }
   }
 
@@ -147,7 +139,8 @@ DefaultCTXPrimitiveTester::DefaultCTXPrimitiveTester(TesterArguments args)
 
   int max_co_resident_wgs_per_cu = 0;
   CHECK_HIP(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-      &max_co_resident_wgs_per_cu, DefaultCTXPrimitiveTest, args.wg_size, 0));
+      &max_co_resident_wgs_per_cu,
+      DefaultCTXPrimitiveTest<DefaultCTXGetTestType>, args.wg_size, 0));
   const int max_sustainable_wgs =
       max_co_resident_wgs_per_cu * deviceProps.multiProcessorCount;
   if (args.num_wgs > static_cast<unsigned>(max_sustainable_wgs)) {
@@ -213,10 +206,50 @@ void DefaultCTXPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
                                              int loop, size_t size) {
   size_t shared_bytes = 0;
 
-  hipLaunchKernelGGL(DefaultCTXPrimitiveTest, gridSize, blockSize,
-                     shared_bytes, stream, loop, args.skip, start_time,
-                     end_time, source, dest, size, _type, _shmem_context,
-                     wf_size, batch_size, grid_psync);
+  switch (_type) {
+    case DefaultCTXGetTestType:
+      hipLaunchKernelGGL(DefaultCTXPrimitiveTest<DefaultCTXGetTestType>,
+                         gridSize, blockSize, shared_bytes, stream, loop,
+                         args.skip, start_time, end_time, source, dest, size,
+                         _shmem_context, wf_size, batch_size, grid_psync);
+      break;
+    case DefaultCTXGetNBITestType:
+      hipLaunchKernelGGL(
+          DefaultCTXPrimitiveTest<DefaultCTXGetNBITestType>, gridSize,
+          blockSize, shared_bytes, stream, loop, args.skip, start_time,
+          end_time, source, dest, size, _shmem_context, wf_size, batch_size,
+          grid_psync);
+      break;
+    case DefaultCTXPutTestType:
+      hipLaunchKernelGGL(DefaultCTXPrimitiveTest<DefaultCTXPutTestType>,
+                         gridSize, blockSize, shared_bytes, stream, loop,
+                         args.skip, start_time, end_time, source, dest, size,
+                         _shmem_context, wf_size, batch_size, grid_psync);
+      break;
+    case DefaultCTXPutNBITestType:
+      hipLaunchKernelGGL(
+          DefaultCTXPrimitiveTest<DefaultCTXPutNBITestType>, gridSize,
+          blockSize, shared_bytes, stream, loop, args.skip, start_time,
+          end_time, source, dest, size, _shmem_context, wf_size, batch_size,
+          grid_psync);
+      break;
+    case DefaultCTXPTestType:
+      hipLaunchKernelGGL(DefaultCTXPrimitiveTest<DefaultCTXPTestType>,
+                         gridSize, blockSize, shared_bytes, stream, loop,
+                         args.skip, start_time, end_time, source, dest, size,
+                         _shmem_context, wf_size, batch_size, grid_psync);
+      break;
+    case DefaultCTXGTestType:
+      hipLaunchKernelGGL(DefaultCTXPrimitiveTest<DefaultCTXGTestType>,
+                         gridSize, blockSize, shared_bytes, stream, loop,
+                         args.skip, start_time, end_time, source, dest, size,
+                         _shmem_context, wf_size, batch_size, grid_psync);
+      break;
+    default:
+      std::cerr << "Invalid Test: unhandled TestType " << _type
+                << " in DefaultCTXPrimitiveTester::launchKernel" << std::endl;
+      exit(-1);
+  }
 
   num_msgs = (loop + args.skip) * gridSize.x * blockSize.x;
   num_timed_msgs = loop * gridSize.x * blockSize.x;

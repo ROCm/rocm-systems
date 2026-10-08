@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <sstream>
 #include "rocprof_trace_decoder/trace_decoder_types.h"
 
 inline uint64_t get_sa_wgp(uint64_t sa, uint64_t wgp)
@@ -77,7 +78,6 @@ struct wstart_type_common
     uint64_t SACU() const { return get_sa_wgp(sa, wgp); }
     uint64_t getGPULocation() const { return (SACU() << 7) | (simd << 5) | wid; };
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -85,5 +85,4 @@ struct wstart_type_common
         return ss;
     }
     const char* typestr() const { return "WAVE_START"; };
-#endif
 };

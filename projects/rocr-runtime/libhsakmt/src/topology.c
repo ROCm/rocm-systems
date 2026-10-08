@@ -1098,6 +1098,10 @@ static int topology_get_node_props_from_drm(HsaNodeProperties *props)
 	props->Integrated = !!(gpu_info.ids_flags & AMDGPU_IDS_FLAGS_FUSION);
 	props->WallClockKHz = gpu_info.gpu_counter_freq;
 
+	/* FabricHandleSupported means UALink sysfs is present (hardware capability).
+	 * Accelerator readiness (accel_state ready/active) is checked at fabric handle
+	 * export time in ROCr, which may return RESOURCE_NOT_READY.
+	 */
 	snprintf(fabric_handle_supported_path, 256, "/sys/class/drm/renderD%d/device/ualink", props->DrmRenderMinor);
 	FILE *file = fopen(fabric_handle_supported_path, "r");
 	if (file) {
@@ -1675,6 +1679,8 @@ static HSAKMT_STATUS topology_sysfs_get_cache_props(
 			props->CacheLatency = (uint32_t)prop_val;
 		else if (strcmp(prop_name, "type") == 0)
 			props->CacheType.Value = (uint32_t)prop_val;
+        else if(strcmp(prop_name, "persisting_cache_size_max") == 0)
+            props->PersistingCacheSizeMax = (uint32_t)prop_val;
 		else if (strcmp(prop_name, "sibling_map") == 0)
 			break;
 	}

@@ -480,7 +480,7 @@ enum class Result : int32
     /// The returned results were incomplete.
     ErrorIncompleteResults                  = -(0x00000060),
 
-    /// The display mode is incompatible with framebuffer or CRTC.
+    /// The display mode is imcompatible with framebuffer or CRTC.
     ErrorIncompatibleDisplayMode            = -(0x00000061),
 
     /// Implicit fullscreen exclusive mode is not safe because the specified window size doesn't match the
@@ -504,6 +504,36 @@ enum class Result : int32
 
     /// The static VMID acquire/release operation failed.
     ErrorStaticVmidOpFailed                 = -(0x00000068),
+
+    /// Frame pacing is unsupported on this ASIC.
+    ErrorFramePacingUnsupportedAsic          = -(0x00000072),
+
+    /// Frame pacing is disabled.
+    ErrorFramePacingFeatureDisabled          = -(0x00000073),
+
+    /// Frame pacing is unsupported.
+    ErrorFramePacingUnsupportedFeature       = -(0x00000074),
+
+    /// The frame pacing configuration is invalid.
+    ErrorFramePacingInvalidConfig            = -(0x00000075),
+
+    /// The requested maximum generated frame count is unsupported.
+    ErrorFramePacingUnsupportedMaxGenFrames  = -(0x00000076),
+
+    /// The requested frame pacing mode is invalid.
+    ErrorFramePacingInvalidMode              = -(0x00000077),
+
+    /// Frame pacing is unavailable while composition is active.
+    ErrorFramePacingCompositionActive        = -(0x00000078),
+
+    /// The supplied frame pacing private data is invalid.
+    ErrorFramePacingInvalidPrivateData       = -(0x00000079),
+
+    /// No frame pacing sessions are available.
+    ErrorFramePacingNoSessionsAvailable      = -(0x0000007A),
+
+    /// The frame pacing session is invalid.
+    ErrorFramePacingInvalidSession           = -(0x0000007B),
 
 };
 
