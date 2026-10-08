@@ -27,6 +27,26 @@ from utils.parser import build_dfs
 from vendored import yaml
 
 
+def _collect_sum_arch_config() -> schema.ArchConfig:
+    fixture = (
+        Path(__file__).resolve().parents[3]
+        / "fixtures"
+        / "weighted_avg"
+        / "collect_sum_metric_table.yaml"
+    )
+    with open(fixture, encoding="utf-8") as stream:
+        doc = yaml.safe_load(stream)
+    metric_table = doc["Panel Config"]["data source"][0]["metric_table"]
+    panel = {
+        "id": 1700,
+        "title": "Collect sum pilot",
+        "data source": [{"metric_table": metric_table}],
+    }
+    ac = schema.ArchConfig()
+    ac.panel_configs = OrderedDict([(1700, panel)])
+    return ac
+
+
 @pytest.mark.misc
 def test_parse_collect_sum_submetrics():
     assert parse_collect_sum_submetrics("COLLECT_SUM(a, b)") == ["a", "b"]
@@ -58,26 +78,6 @@ def test_build_metric_eval_graph_weighted_and_sum():
     kinds = {c.metric_id: c.kind for c in graph.composites}
     assert kinds["3"] is CompositeKind.WEIGHTED_AVG
     assert kinds["4"] is CompositeKind.COLLECT_SUM
-
-
-def _collect_sum_arch_config() -> schema.ArchConfig:
-    fixture = (
-        Path(__file__).resolve().parents[3]
-        / "fixtures"
-        / "weighted_avg"
-        / "collect_sum_metric_table.yaml"
-    )
-    with open(fixture, encoding="utf-8") as stream:
-        doc = yaml.safe_load(stream)
-    metric_table = doc["Panel Config"]["data source"][0]["metric_table"]
-    panel = {
-        "id": 1700,
-        "title": "Collect sum pilot",
-        "data source": [{"metric_table": metric_table}],
-    }
-    ac = schema.ArchConfig()
-    ac.panel_configs = OrderedDict([(1700, panel)])
-    return ac
 
 
 @pytest.mark.misc

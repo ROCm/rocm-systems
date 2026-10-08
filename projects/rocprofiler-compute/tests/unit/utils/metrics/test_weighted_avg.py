@@ -3,6 +3,8 @@
 
 """Unit tests for WEIGHTED_AVG (Phase 2)."""
 
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -97,8 +99,6 @@ def test_evaluate_weighted_avg_parent_end_to_end():
 
 @pytest.mark.misc
 def test_scan_weighted_avg_parents_reads_pilot_fixture():
-    from pathlib import Path
-
     fixture_dir = Path(__file__).resolve().parents[3] / "fixtures" / "weighted_avg"
     parents = scan_weighted_avg_parents(fixture_dir)
     assert (
