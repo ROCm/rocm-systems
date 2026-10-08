@@ -626,6 +626,16 @@ hsa_status_t MemoryRegion::Unlock(void* host_ptr) const {
     return HSA_STATUS_SUCCESS;
   }
 
+  // Lock leaves a userptr registration or an SVM registration (no thunk
+  // object). Any other object at host_ptr reserved this VA after the lock's
+  // registration was retired as stale; unmapping would tear down its mapping.
+  // The registration is already gone, so there is nothing left to unlock.
+  HsaPointerInfo info = {};
+  if (HSAKMT_CALL(hsaKmtQueryPointerInfo(host_ptr, &info)) == HSAKMT_STATUS_SUCCESS &&
+      info.Type != HSA_POINTER_REGISTERED_USER && info.Type != HSA_POINTER_UNKNOWN) {
+    return HSA_STATUS_SUCCESS;
+  }
+
   if (owner()->driver().MakeMemoryUnresident(host_ptr) != HSA_STATUS_SUCCESS) {
     assert(false && "Failed to unmap host pointer");
   }
