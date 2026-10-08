@@ -2953,16 +2953,6 @@ static bool hrr_stream_capturing(hipStream_t stream) {
            st != hipStreamCaptureStatusNone;
 }
 
-// The device a stream-ordered allocation on `stream` lands on: the stream's,
-// or the current device's for the null stream.
-static int hrr_stream_device(hipStream_t stream) {
-    int dev = 0;
-    hipDevice_t sd = 0;
-    if (stream && hipStreamGetDevice(stream, &sd) == hipSuccess) return static_cast<int>(sd);
-    (void)hipGetDevice(&dev);
-    return dev;
-}
-
 static bool hrr_place_async_alloc(PlaybackContext& ctx, uint64_t rec, size_t size,
                                   const char* api, hipStream_t stream, int device,
                                   void** live) {
@@ -3005,7 +2995,7 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     hipError_t r = hipSuccess;
     const bool capturing = hrr_stream_capturing(stream);
     if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocAsync", stream,
-                              hrr_stream_device(stream), &live))
+                              hrr::hrr_stream_device(stream), &live))
         pad_sz = orig_sz;
     else {
         r = hipMallocAsync(&live, pad_sz, stream);

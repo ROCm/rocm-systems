@@ -635,12 +635,17 @@ hipError_t fake_destroy(hipEvent_t) {
   return hipSuccess;
 }
 hipError_t fake_address_free(void*, size_t) { return hipSuccess; }
+// The current device, which the null stream belongs to; S1 and S2 are on
+// device 0.
+int g_cur_dev = 0;
+int fake_stream_device(hipStream_t s) { return s ? 0 : g_cur_dev; }
 
 void reset_events() {
   reset_vmm_counts();
   g_unmap_bytes = 0;
   g_events = g_destroyed = g_host_waits = 0;
   g_waits.clear();
+  g_cur_dev = 0;
 }
 
 // Counted maps and unmaps, and fake events.
@@ -654,6 +659,7 @@ hrr::VmmOps event_ops() {
   ops.sync_event    = fake_sync;
   ops.destroy_event = fake_destroy;
   ops.address_free  = fake_address_free;
+  ops.stream_device = fake_stream_device;
   return ops;
 }
 }  // namespace
@@ -840,6 +846,37 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedRangeTakenBack) {
   SECTION("teardown unmaps it and releases its event") {
     pl.release_all();
     REQUIRE(g_unmaps == 1);
+    REQUIRE(g_destroyed == 1);
+  }
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_NullStreamsOfTwoDevices) {
+  // Every device's null stream has the same handle. A hipFreeAsync on one
+  // device's null stream is not a free on another's: an allocation there
+  // waits for the free's event like any other stream.
+  reset_events();
+  hrr::VaPlacement pl;
+  pl.set_vmm_ops_for_test(event_ops());
+  pl.adopt_reservation_for_test(B, B + 16 * P, 2);
+  const hipStream_t null_stream = nullptr;
+  void* live = nullptr;
+  g_cur_dev = 1;
+  REQUIRE(pl.map_at(B, 2 * P, 1, "hipMallocAsync", &live, false, &null_stream));
+  SECTION("freed on another device's null stream: waits for the free") {
+    g_cur_dev = 0;
+    REQUIRE(pl.unmap_async(at(B), null_stream, /*capturing=*/false));
+    g_cur_dev = 1;
+    REQUIRE(pl.map_at(B, 2 * P, 1, "hipMallocAsync", &live, false, &null_stream));
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(g_waits.size() == 1);
+    REQUIRE(g_waits[0].first == null_stream);
+    REQUIRE(g_waits[0].second == fake_event(1));
+  }
+  SECTION("freed on the same device's null stream: nothing to wait for") {
+    REQUIRE(pl.unmap_async(at(B), null_stream, /*capturing=*/false));
+    REQUIRE(pl.map_at(B, 2 * P, 1, "hipMallocAsync", &live, false, &null_stream));
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(g_waits.empty());
     REQUIRE(g_destroyed == 1);
   }
 }

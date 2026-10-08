@@ -595,9 +595,10 @@ void hold_free_pieces(uint64_t b, uint64_t e, const std::vector<VaRange>& occupi
 // physical handle and the device it lives on. `unmapping` marks a freed one
 // whose hipMemUnmap is running outside the lock: it still occupies its range.
 // A mapping freed with hipFreeAsync remembers the live stream it was freed on
-// (`on_stream`, `stream`) and, when no capture was open, an event recorded on
-// that stream after the free (`event`): what an allocation taking the mapping
-// back on another stream has to wait for.
+// and that stream's device (`on_stream`, `stream`, `stream_device`: every
+// device's null stream has the same handle) and, when no capture was open, an
+// event recorded on that stream after the free (`event`): what an allocation
+// taking the mapping back on another stream has to wait for.
 struct PlacedMapping {
     uint64_t end;
     uint64_t rec;
@@ -606,6 +607,7 @@ struct PlacedMapping {
     bool unmapping = false;
     bool on_stream = false;
     hipStream_t stream = nullptr;
+    int stream_device  = -1;
     hipEvent_t  event  = nullptr;
 };
 using PlacedMap = std::map<uint64_t, PlacedMapping>;
@@ -630,7 +632,12 @@ inline std::vector<uint64_t> va_mappings_overlapping(const PlacedMap& m, uint64_
     return out;
 }
 
-// Create an event and record it on `stream`. On failure nothing is left.
+// The device of `stream`: the stream's own, or the current device's for the
+// null stream.
+int hrr_stream_device(hipStream_t stream);
+
+// Create an event and record it on `stream`, with the stream's device current
+// around both. On failure nothing is left.
 hipError_t hrr_record_free_event(hipStream_t stream, hipEvent_t* event);
 
 #ifdef HRR_VA_PLACEMENT_TESTING
@@ -647,6 +654,7 @@ struct VmmOps {
     hipError_t (*sync_event)(hipEvent_t e)                    = hipEventSynchronize;
     hipError_t (*destroy_event)(hipEvent_t e)                 = hipEventDestroy;
     hipError_t (*address_free)(void* va, size_t size)         = hipMemAddressFree;
+    int (*stream_device)(hipStream_t s)                       = hrr_stream_device;
 };
 // How many times read_proc_maps() has read /proc/self/maps.
 size_t proc_maps_reads_for_test();
@@ -775,6 +783,8 @@ class VaPlacement {
     bool unmap_one(uint64_t pb, const PlacedMapping& m);
     // Destroy the event a deferred free kept, if any.
     void drop_event(hipEvent_t e);
+    // hrr_stream_device, or its stand-in in tests.
+    int stream_device(hipStream_t stream);
     // Order work after `e`: `stream` waits for it, or the host does when
     // there is no stream. Never under mu_.
     void wait_for_free(hipEvent_t e, const hipStream_t* stream);

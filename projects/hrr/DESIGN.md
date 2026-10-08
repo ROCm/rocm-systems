@@ -1133,9 +1133,12 @@ An allocation over a deferred mapping is handled three ways:
   to the graph. Neither does a deferred `hipFree`. Waiting for an event while a
   capture is open would sync inside it. In those cases the allocation is
   handled as any other overlap. The event is destroyed when the mapping is taken
-  back, unmapped, or released at teardown or the warm-up reset. A free on a stream
-  that is then destroyed no longer counts as made on a new stream that gets the
-  same handle.
+  back, unmapped, or released at teardown or the warm-up reset. The event is
+  created and recorded with the freeing stream's device current, because
+  `hipEventRecord` refuses a stream of another device than the event's. A free on
+  a stream that is then destroyed no longer counts as made on a new stream that
+  gets the same handle, and a free on one device's null stream does not count as
+  made on another device's, although the handle is the same.
 - Any other overlap, with no capture open: the deferred mappings there are
   unmapped first, then the allocation is mapped.
 - Any other overlap while a capture is open: the allocation falls back, named.
