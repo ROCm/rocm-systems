@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from rocprof_compute_soc.counter_grouping_buckets import counters_fit_one_bucket
 from utils import schema
 from utils.metrics.aggregation import (
     merge_dispatch_collect_ratio,
@@ -21,6 +22,7 @@ from utils.metrics.expression import (
     parse_collect_ratio_parts,
     parse_collect_sum_submetrics,
 )
+from utils.mi_gpu_spec import mi_gpu_specs
 from utils.parser import build_dfs
 from vendored import yaml
 
@@ -30,6 +32,13 @@ _GFX942 = (
     / "rocprof_compute_soc"
     / "analysis_configs"
     / "gfx942"
+)
+_GFX950 = (
+    Path(__file__).resolve().parents[4]
+    / "src"
+    / "rocprof_compute_soc"
+    / "analysis_configs"
+    / "gfx950"
 )
 
 
@@ -158,3 +167,35 @@ def test_eval_valu_flops_collect_sum_on_gfx942_sol():
     parent = df[df["Metric"] == "VALU FLOPs"].iloc[0]["Avg"]
     # 64 * (10 + 2*5 + 20) / 1000 = 2.56
     assert parent == pytest.approx(2.56, rel=1e-6)
+
+
+@pytest.mark.misc
+def test_gfx950_hbm_bandwidth_is_collect_sum():
+    doc = yaml.safe_load((_GFX950 / "0400_roofline.yaml").read_text(encoding="utf-8"))
+    metrics = doc["Panel Config"]["data source"][0]["metric_table"]["metric"]
+    hbm = metrics["HBM Bandwidth"]
+    assert is_composite_avg_formula(hbm["value"])
+    assert parse_collect_sum_submetrics(hbm["value"]) == [
+        "_collect.hbm_rd_bw",
+        "_collect.hbm_wr_bw",
+    ]
+    read_bandwidth = metrics["_collect.hbm_rd_bw"]["value"]
+    assert "TCC_EA0_RDREQ_128B_sum" in read_bandwidth
+    assert "TCC_BUBBLE_sum" not in read_bandwidth
+
+
+@pytest.mark.misc
+def test_gfx950_ipc_fits_one_bucket_and_is_not_rewritten():
+    doc = yaml.safe_load(
+        (_GFX950 / "1100_compute_units_compute_pipeline.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    ipc = doc["Panel Config"]["data source"][1]["metric_table"]["metric"]["IPC"]
+    assert ipc["avg"] == "SUM(SQ_INSTS) / SUM(SQ_BUSY_CU_CYCLES)"
+    assert not is_composite_avg_formula(ipc["avg"])
+    perfmon_config = mi_gpu_specs.get_perfmon_config("gfx950")
+    assert counters_fit_one_bucket(
+        frozenset(["SQ_INSTS", "SQ_BUSY_CU_CYCLES"]),
+        perfmon_config,
+    )
