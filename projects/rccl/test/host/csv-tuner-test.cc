@@ -121,6 +121,13 @@ class CsvTunerMicrotest : public ::testing::Test {
 
   static std::string ArchCsvName(const std::string& arch) { return "rccl_tuner_" + arch + ".csv"; }
 
+  static void DisableEmbeddedConfigs() {
+    g_loadParam = [](const char* env, int64_t deftVal) -> int64_t {
+      if (strcmp(env, "RCCL_TUNER_EMBEDDED_CONFIG") == 0) return 0;
+      return deftVal;
+    };
+  }
+
   static bool ReadWholeFile(const std::string& path, std::string* out) {
     FILE* f = fopen(path.c_str(), "r");
     if (!f) return false;
@@ -307,12 +314,25 @@ TEST_F(CsvTunerMicrotest, GenericSharePathCsvOverridesEmbedded) {
 }
 
 TEST_F(CsvTunerMicrotest, EmbeddedDisabledByParam) {
-  g_loadParam = [](const char* env, int64_t deftVal) -> int64_t {
-    if (strcmp(env, "RCCL_TUNER_EMBEDDED_CONFIG") == 0) return 0;
-    return deftVal;
-  };
+  DisableEmbeddedConfigs();
 
   EXPECT_EQ(nullptr, rcclCsvTunerFindConfig("gfx950"));
+}
+
+// The knob turns off the embedded map only. Without a disk CSV present, the
+// case above cannot tell that apart from disabling the tuner outright, which is
+// what hoisting the guard to the top of rcclCsvTunerFindConfig would do.
+TEST_F(CsvTunerMicrotest, EmbeddedDisabledStillHonoursDiskConfig) {
+  DisableEmbeddedConfigs();
+
+  ASSERT_FALSE(emptyDir_.empty());
+  MakeDirsUnder(emptyDir_, "share/rccl/tuner");
+  const std::string path = WriteCsvAt(emptyDir_ + "/share/rccl/tuner/rccl_tuner.csv", kTwoConfigCsv);
+  ASSERT_FALSE(path.empty());
+
+  const char* source = rcclCsvTunerFindConfig("gfx950");
+  ASSERT_NE(nullptr, source);
+  EXPECT_STREQ(path.c_str(), source);
 }
 
 TEST_F(CsvTunerMicrotest, SkipsMalformedLines) {
@@ -404,6 +424,32 @@ TEST_F(CsvTunerMicrotest, IgnoresOversizedConfigFile) {
   EXPECT_EQ(ncclSuccess, loadConfigFromBuffer(&under, underCap.c_str(), "under-cap"));
   EXPECT_GT(under.numConfigs, 0);
   FreeContext(&under);
+}
+
+// csvTunerInit's disk arm: a CSV resolved at steps 2 to 7 must reach loadConfig
+// by the path csvTunerFindConfig stored. Without this, dropping that capture
+// leaves configFile null, falls back to the relative "rccl_tuner.csv", and
+// silently loads nothing; only step 1 is rescued by the getenv fallback.
+TEST_F(CsvTunerMicrotest, InitLoadsSharePathResolvedConfig) {
+  ASSERT_FALSE(emptyDir_.empty());
+  MakeDirsUnder(emptyDir_, "share/rccl/tuner");
+  const std::string path = WriteCsvAt(emptyDir_ + "/share/rccl/tuner/rccl_tuner.csv", kTwoConfigCsv);
+  ASSERT_FALSE(path.empty());
+
+  const char* source = rcclCsvTunerFindConfig("gfx950");
+  ASSERT_NE(nullptr, source);
+  ASSERT_STREQ(path.c_str(), source);
+
+  void* context = nullptr;
+  ASSERT_EQ(ncclSuccess, csvTunerInit(&context, /*commId=*/0, /*nRanks=*/8, /*nNodes=*/1,
+                                      /*logFunction=*/nullptr, /*nvlDomainInfo=*/nullptr,
+                                      /*constants=*/nullptr));
+  ASSERT_NE(nullptr, context);
+
+  CsvTunerContext* ctx = (CsvTunerContext*)context;
+  EXPECT_EQ(2, ctx->numConfigs) << "the disk-resolved config was not loaded";
+
+  EXPECT_EQ(ncclSuccess, csvTunerFinalize(context));
 }
 
 // End to end: resolve the embedded source, init through the tuner entry point,
