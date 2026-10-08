@@ -918,56 +918,54 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_Lifetimes) {
   const LifeCapture& c = hrr_life_capture();
   INFO("capture: doomed=" << hex(c.doomed) << " again=" << hex(c.again) << " va=" << hex(c.va));
 
-  SECTION("a capture that ended badly does not hold the frees made inside it") {
+  SECTION("deferred frees are unmapped at the next device sync, and nowhere else") {
+    // One --verbose replay serves sections (a), (b), (f) and (g) of the
+    // workload.
     auto [rc, out] = hrr_playback_merged(c.archive, "--verbose");
     INFO("Replay:\n" << out);
     CHECK(rc == 0);
     int pass = 0, fail = 0;
     REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
     CHECK(fail == 0);
-    // The capture ends where its stream is destroyed, so the free made
+    int placed = 0, fell = -1;
+    REQUIRE(hrr_place_counts(out, &placed, &fell));
+    CHECK(fell == 0);
+    // Nothing is still mapped where a later allocation goes, so each lands.
+    CHECK(out.find("is still mapped") == std::string::npos);
+
+    // (a) The capture ends where its stream is destroyed, so the free made
     // inside it is unmapped at the next device sync, the first in the replay.
     const std::string want = "[HRR] Placement: unmapped 1 deferred free(s) at hipDeviceSynchronize";
     const size_t first = out.find("[HRR] Placement: unmapped ");
     REQUIRE(first != std::string::npos);
     CHECK(out.compare(first, want.size(), want) == 0);
     CHECK(out.find("deferred free(s) at hipStreamDestroy") == std::string::npos);
-    // Nothing is still mapped where `again` goes, so it lands there.
-    CHECK(out.find("is still mapped") == std::string::npos);
-    int placed = 0, fell = -1;
-    REQUIRE(hrr_place_counts(out, &placed, &fell));
-    CHECK(fell == 0);
     if (c.doomed != c.again)
       WARN("the capture's allocator did not reuse the freed address ("
            << hex(c.doomed) << " then " << hex(c.again) << "), so nothing was placed over it");
-  }
 
-  SECTION("a deferred free is unmapped at the next device sync, not at a stream sync") {
-    auto [rc, out] = hrr_playback_merged(c.archive, "--verbose");
-    INFO("Replay:\n" << out);
-    CHECK(rc == 0);
-    // hipMemUnmap waits for every stream on the device: a stream sync waited
-    // for one, so it unmaps nothing.
+    // (b) hipMemUnmap waits for every stream on the device: a stream sync
+    // waited for one, so it unmaps nothing.
     CHECK(out.find("deferred free(s) at hipStreamSynchronize") == std::string::npos);
     // a2 took a1's mapping back when the pool reused its address, so the
-    // device sync after them unmaps one; otherwise both.
+    // device sync after them unmaps one; otherwise both. This assumes a2
+    // either lands on a1's pages or misses them entirely: one that shared
+    // only some of them would unmap a1 first, and the count would be 1 with
+    // a1 != a2. A 4 KB allocation from a pool block makes that unlikely.
     const std::string b_line = std::string("[HRR] Placement: unmapped ") +
                                (c.a1 == c.a2 ? "1" : "2") +
                                " deferred free(s) at hipDeviceSynchronize";
     CHECK(out.find(b_line) != std::string::npos);
-    // doomed, x, z, and a2 when it took a1's mapping back.
-    CHECK(count_of(out, "[HRR] Placement: unmapped 1 deferred free(s) at hipDeviceSynchronize") ==
-          (c.a1 == c.a2 ? 4 : 3));
-    CHECK(out.find("is still mapped") == std::string::npos);
-    // doomed, a1, a2, x, freed inside the capture hipStreamBeginCaptureToGraph
-    // opened, and z, freed inside the one hipStreamBeginCapture_spt opened.
-    CHECK(hrr_place_deferred(out) == 5);
-    int placed = 0, fell = -1;
-    REQUIRE(hrr_place_counts(out, &placed, &fell));
-    CHECK(fell == 0);
     if (c.a1 != c.a2)
       WARN("the pool did not hand a1's address to a2 (" << hex(c.a1) << " then " << hex(c.a2)
            << "), so no mapping was taken back");
+
+    // doomed, x, z, and a2 when it took a1's mapping back.
+    CHECK(count_of(out, "[HRR] Placement: unmapped 1 deferred free(s) at hipDeviceSynchronize") ==
+          (c.a1 == c.a2 ? 4 : 3));
+    // doomed, a1, a2, x, freed inside the capture hipStreamBeginCaptureToGraph
+    // opened, and z, freed inside the one hipStreamBeginCapture_spt opened.
+    CHECK(hrr_place_deferred(out) == 5);
   }
 
   SECTION("the H2D scan names the first 16 payloads, says why it runs, and counts the rest") {
