@@ -919,6 +919,11 @@
           "test_filter": "DdaAlltoAllThresholdTest.*:DdaAlltoAllThreshold.*"
         },
         {
+          "name": "SymkBlockWidthTest",
+          "description": "Symmetric kernel block-width selection unit tests (host-side, no GPU required)",
+          "test_filter": "SymkBlockWidthTest.*"
+        },
+        {
           "name": "DdaFabricEligibilityTest",
           "description": "Dda Fabric eligibility and block-cap tests",
           "test_filter": "DdaFabricEligibilityTest.*:DdaFabricMaxBlocksTest.*:DdaFabricScratchSizingTest.*"
@@ -1221,6 +1226,8 @@
         {"name": "Recorder.ParseBinary", "description": "Recorder parse binary trace", "test_filter": "Recorder.ParseBinary"},
         {"name": "Recorder.ParseJson", "description": "Recorder parse JSON trace", "test_filter": "Recorder.ParseJson"},
         {"name": "Recorder.VerifyMultithread", "description": "Recorder multithreaded verification", "test_filter": "Recorder.VerifyMultithread"},
+        {"name": "Recorder.RedOpRecordJson", "description": "Recorder RedOp record JSON output", "test_filter": "Recorder.RedOpRecordJson"},
+        {"name": "Recorder.RedOpRecordBinary", "description": "Recorder RedOp record binary output", "test_filter": "Recorder.RedOpRecordBinary"},
         {"name": "IbvSymbolsEnv.DefaultLoadsLibrary", "description": "NCCL_IBVERBS_LIB unset loads default libibverbs", "test_filter": "IbvSymbolsEnv.DefaultLoadsLibrary"},
         {"name": "IbvSymbolsEnv.EnvOverrideValidSoname", "description": "NCCL_IBVERBS_LIB override to a valid soname is honored", "test_filter": "IbvSymbolsEnv.EnvOverrideValidSoname"},
         {"name": "IbvSymbolsEnv.BogusPathFallsBackToDefault", "description": "NCCL_IBVERBS_LIB bogus path falls back to default libibverbs", "test_filter": "IbvSymbolsEnv.BogusPathFallsBackToDefault"},
@@ -2110,6 +2117,11 @@
           "name": "Resiliency_RecoveryUdTimeoutExhaustsAttempts",
           "description": "UD recovery timeout exhausts max attempts, device stays failed",
           "test_filter": "NetIbMPITest.RecoveryUdTimeoutExhaustsAttempts"
+        },
+        {
+          "name": "Resiliency_GidChangeRefresh",
+          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
+          "test_filter": "Transport/NetIbGidChangeTest.*"
         }
       ]
     },
@@ -4332,6 +4344,11 @@
           "name": "DeviceApiMPI_GroupD_CustomRedOp",
           "description": "Group D: ncclLsaReduceLsaCopy with test-local Min/Max functors (OpSum-only in headers)",
           "test_filter": "DeviceApiMPITests.Lsa_ReduceLsaCopy_OpMax:DeviceApiMPITests.Lsa_ReduceLsaCopy_OpMin"
+        },
+        {
+          "name": "SymmetricKernel_ReduceScatterLL_PositionDependentData",
+          "description": "Forced ReduceScatter_LL symmetric kernel with per-(rank, index) unique data; skips when the kernel is ineligible",
+          "test_filter": "SymmetricKernelCorruptionTest.ReduceScatterLL_PositionDependentData"
         }
       ]
     },
@@ -4355,6 +4372,37 @@
           "description": "ncclLsaReduceSumCopy [5.1e]: full LSA-team sources, ncclTeamInnerFactor(lsa,2) destinations; single-node 4 co-located ranks (even count required)",
           "test_filter": "DeviceApiMPITests.Lsa_ReduceSumCopy_DifferentTeams",
           "timeout": 300
+        }
+      ]
+    },
+    "symmetric_kernel_mpi_8rank": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "description": "Symmetric ReduceScatter, AllReduce and AllGather partitioning and kernel selection correctness on 8 co-located ranks. Requires NCCL_CUMEM_ENABLE=1 for symmetric window registration.",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "HSA_NO_SCRATCH_RECLAIM": "1"
+      },
+      "tests": [
+        {
+          "name": "Symk_CountSweep",
+          "description": "ReduceScatter, AllReduce and AllGather across LL and deep-path sizes, including partial final chunk waves",
+          "test_filter": "SymmetricKernelCorruptionTest.CountSweep_PartitioningAndSlots"
+        },
+        {
+          "name": "Symk_MisalignedPacks",
+          "description": "ReduceScatter, AllReduce and AllGather with a 4-byte but not 16-byte aligned relative buffer offset",
+          "test_filter": "SymmetricKernelCorruptionTest.MisalignedBuffers_FourBytePackTier"
+        },
+        {
+          "name": "Symk_AllGatherStoreCrossover",
+          "description": "AllGather switches from LL to the store kernel at 4 MB on gfx950, skipped on other architectures",
+          "test_filter": "SymmetricKernelCorruptionTest.AllGather_StoreKernelFrom4MB"
         }
       ]
     }
@@ -5101,7 +5149,7 @@
     
     {
       "name": "Device API MPI - LSA Reduce/Copy",
-      "description": "DeviceApiMPITests memory/LSA pointer, barrier, reduce/copy, and custom RedOp coverage on 2 co-located ranks (NCCL_CUMEM_ENABLE=1)",
+      "description": "DeviceApiMPITests memory/LSA pointer, barrier, reduce/copy, and custom RedOp coverage, plus the ReduceScatter_LL placement test, on 2 co-located ranks (NCCL_CUMEM_ENABLE=1)",
       "config": "device_api_mpi_lsa",
       "enabled": true
     },
@@ -5109,6 +5157,12 @@
       "name": "Device API MPI - ReduceSumCopy Different Teams [5.1e]",
       "description": "ncclLsaReduceSumCopy with different LSA sub-teams (full LSA src, innerFactor dst) on 4 co-located ranks, single node (NCCL_CUMEM_ENABLE=1)",
       "config": "device_api_mpi_different_teams",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric Kernels (8-rank)",
+      "description": "Symmetric ReduceScatter, AllReduce and AllGather partitioning and buffer-alignment correctness on 8 co-located ranks (NCCL_CUMEM_ENABLE=1)",
+      "config": "symmetric_kernel_mpi_8rank",
       "enabled": true
     },
     {

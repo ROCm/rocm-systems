@@ -2,12 +2,13 @@
 
 Full documentation for rocDecode is available at [https://rocm.docs.amd.com/projects/rocDecode/en/latest/](https://rocm.docs.amd.com/projects/rocDecode/en/latest/)
 
-## (Unreleased) rocDecode 1.10.0
+## (Unreleased) rocDecode 1.11.0
 
 ### Added
 
 * Invalid video size handling for AVC/HEVC.
 * Added support for explicitly loading librocm_sysdeps_va via dlopen, ensuring complete isolation from the system libva library.
+* Initial Windows support: hardware-accelerated video decoding on Windows via the vaon12 backend (Mesa's VA-API on D3D12 translation layer). Requires HIP and the vaon12 VA-API driver from TheRock for Windows.
 
 ### Resolved issues
 
