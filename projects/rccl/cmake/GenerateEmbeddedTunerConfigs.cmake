@@ -14,7 +14,10 @@ endif()
 
 set(RAW_DELIM "RCCLCSV")
 
-file(GLOB CSV_FILES "${TUNER_DIR}/*.csv")
+# Match what the runtime accepts on disk (findTunerFileInDir): a stray
+# tuner/notes.csv would otherwise be embedded and, sorting first, become what
+# the arch-unknown lookup returns.
+file(GLOB CSV_FILES "${TUNER_DIR}/rccl_tuner*.csv")
 list(SORT CSV_FILES)
 
 set(ENTRIES "")
@@ -22,6 +25,10 @@ foreach(CSV_FILE ${CSV_FILES})
   get_filename_component(CSV_NAME ${CSV_FILE} NAME)
   file(READ ${CSV_FILE} CSV_CONTENT)
 
+  # The name is spliced into a C++ string literal, the content into a raw one.
+  if(CSV_NAME MATCHES "[\"\\\\]")
+    message(FATAL_ERROR "${CSV_FILE} has a quote or backslash in its name and cannot be embedded")
+  endif()
   string(FIND "${CSV_CONTENT}" ")${RAW_DELIM}\"" BAD_IDX)
   if(NOT BAD_IDX EQUAL -1)
     message(FATAL_ERROR "${CSV_FILE} contains the raw string terminator )${RAW_DELIM}\" and cannot be embedded")

@@ -46,7 +46,7 @@ The built-in CSV tuner resolves its config in this order:
 5. `<librccl.so dir>/../share/rccl/tuner/rccl_tuner.csv` (relative share path, for installed RCCL)
 6. `${ROCM_PATH}/share/rccl/tuner/rccl_tuner_<arch>.csv` (fallback, GPU-specific)
 7. `${ROCM_PATH}/share/rccl/tuner/rccl_tuner.csv` (fallback, generic)
-8. The embedded `rccl_tuner_<arch>.csv`, then the embedded `rccl_tuner.csv`
+8. The embedded `rccl_tuner_<arch>.csv`, then the embedded `rccl_tuner.csv`; when the architecture is unknown, any embedded config
 
 Steps 1-7 are overrides; step 8 is what ships in the binary.
 

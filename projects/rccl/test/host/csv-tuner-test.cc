@@ -103,6 +103,24 @@ class CsvTunerMicrotest : public ::testing::Test {
     return tmpl;
   }
 
+  // Arch of the first embedded rccl_tuner_<arch>.csv, empty if only a generic
+  // config ships. Derived rather than hardcoded so renaming or re-targeting the
+  // shipped CSV fails the arch cases instead of silently skipping them.
+  static std::string FirstEmbeddedArch() {
+    const std::string prefix = "rccl_tuner_";
+    const std::string suffix = ".csv";
+    for (const auto& entry : rcclCsvTunerEmbeddedConfigs()) {
+      const std::string& name = entry.first;
+      if (name.size() > prefix.size() + suffix.size() && name.compare(0, prefix.size(), prefix) == 0 &&
+          name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0) {
+        return name.substr(prefix.size(), name.size() - prefix.size() - suffix.size());
+      }
+    }
+    return std::string();
+  }
+
+  static std::string ArchCsvName(const std::string& arch) { return "rccl_tuner_" + arch + ".csv"; }
+
   static bool ReadWholeFile(const std::string& path, std::string* out) {
     FILE* f = fopen(path.c_str(), "r");
     if (!f) return false;
@@ -203,12 +221,29 @@ TEST_F(CsvTunerMicrotest, EmbeddedAndFileParseIdentically) {
 }
 
 TEST_F(CsvTunerMicrotest, ResolvesArchSpecificEmbeddedConfig) {
-  const std::map<std::string, std::string>& embedded = rcclCsvTunerEmbeddedConfigs();
-  if (!embedded.count("rccl_tuner_gfx950.csv")) GTEST_SKIP() << "no gfx950 config embedded";
+  const std::string arch = FirstEmbeddedArch();
+  if (arch.empty()) GTEST_SKIP() << "no arch-specific config embedded";
 
-  const char* source = rcclCsvTunerFindConfig("gfx950");
+  const char* source = rcclCsvTunerFindConfig(arch.c_str());
   ASSERT_NE(nullptr, source);
-  EXPECT_STREQ(RCCL_CSV_TUNER_EMBEDDED_PREFIX "rccl_tuner_gfx950.csv", source);
+  EXPECT_EQ(std::string(RCCL_CSV_TUNER_EMBEDDED_PREFIX) + ArchCsvName(arch), std::string(source));
+}
+
+// Arch unknown is the one arm that deliberately hands back another
+// architecture's tuning, so it needs a case of its own.
+TEST_F(CsvTunerMicrotest, UnknownArchUsesFirstEmbeddedConfig) {
+  const std::map<std::string, std::string>& embedded = rcclCsvTunerEmbeddedConfigs();
+  ASSERT_FALSE(embedded.empty());
+  const std::string expected = std::string(RCCL_CSV_TUNER_EMBEDDED_PREFIX) + embedded.begin()->first;
+
+  const char* nullArch = rcclCsvTunerFindConfig(nullptr);
+  ASSERT_NE(nullptr, nullArch);
+  EXPECT_EQ(expected, std::string(nullArch));
+
+  rcclCsvTunerResetConfigPath();
+  const char* emptyArch = rcclCsvTunerFindConfig("");
+  ASSERT_NE(nullptr, emptyArch);
+  EXPECT_EQ(expected, std::string(emptyArch));
 }
 
 // A known arch with no entry must fall through to a generic rccl_tuner.csv or
@@ -240,13 +275,16 @@ TEST_F(CsvTunerMicrotest, ConfigFileEnvOverridesEmbedded) {
 // still wins. Without this only the env-var step, which this PR did not touch,
 // was covered.
 TEST_F(CsvTunerMicrotest, SharePathCsvOverridesEmbedded) {
+  const std::string arch = FirstEmbeddedArch();
+  if (arch.empty()) GTEST_SKIP() << "no arch-specific config embedded";
+
   ASSERT_FALSE(emptyDir_.empty());
   MakeDirsUnder(emptyDir_, "share/rccl/tuner");
   const std::string path =
-      WriteCsvAt(emptyDir_ + "/share/rccl/tuner/rccl_tuner_gfx950.csv", kTwoConfigCsv);
+      WriteCsvAt(emptyDir_ + "/share/rccl/tuner/" + ArchCsvName(arch), kTwoConfigCsv);
   ASSERT_FALSE(path.empty());
 
-  const char* source = rcclCsvTunerFindConfig("gfx950");
+  const char* source = rcclCsvTunerFindConfig(arch.c_str());
   ASSERT_NE(nullptr, source);
   EXPECT_STREQ(path.c_str(), source);
 }
@@ -255,15 +293,15 @@ TEST_F(CsvTunerMicrotest, SharePathCsvOverridesEmbedded) {
 // generic disk CSV still beats an arch-specific embedded entry. Using an arch
 // with no embedded entry would pass even with the embedded map probed first.
 TEST_F(CsvTunerMicrotest, GenericSharePathCsvOverridesEmbedded) {
-  const std::map<std::string, std::string>& embedded = rcclCsvTunerEmbeddedConfigs();
-  if (!embedded.count("rccl_tuner_gfx950.csv")) GTEST_SKIP() << "no gfx950 config embedded";
+  const std::string arch = FirstEmbeddedArch();
+  if (arch.empty()) GTEST_SKIP() << "no arch-specific config embedded";
 
   ASSERT_FALSE(emptyDir_.empty());
   MakeDirsUnder(emptyDir_, "share/rccl/tuner");
   const std::string path = WriteCsvAt(emptyDir_ + "/share/rccl/tuner/rccl_tuner.csv", kTwoConfigCsv);
   ASSERT_FALSE(path.empty());
 
-  const char* source = rcclCsvTunerFindConfig("gfx950");
+  const char* source = rcclCsvTunerFindConfig(arch.c_str());
   ASSERT_NE(nullptr, source);
   EXPECT_STREQ(path.c_str(), source);
 }
@@ -333,16 +371,51 @@ TEST_F(CsvTunerMicrotest, ParsesCrlf) {
   FreeContext(&crlf);
 }
 
+// A buffer whose last line has no newline: the embedded text ends that way if
+// the source CSV does.
+TEST_F(CsvTunerMicrotest, ParsesBufferWithNoTrailingNewline) {
+  CsvTunerContext ctx = MakeContext();
+  ASSERT_EQ(ncclSuccess, loadConfigFromBuffer(&ctx, "allreduce,0,1023,tree,ll,4,1,8,-1,-1", "no-newline"));
+
+  ASSERT_EQ(1, ctx.numConfigs);
+  EXPECT_EQ(4, ctx.configs[0].nChannels);
+  FreeContext(&ctx);
+}
+
+// A config past the size cap is ignored rather than read into memory. Without
+// the cap a non-regular path such as /dev/zero grows the allocation unbounded.
+TEST_F(CsvTunerMicrotest, IgnoresOversizedConfigFile) {
+  const std::string row = "allreduce,0,1023,tree,ll,4,1,8,-1,-1\n";
+  std::string oversized;
+  oversized.reserve(RCCL_CSV_TUNER_MAX_CONFIG_BYTES + row.size());
+  while (oversized.size() <= RCCL_CSV_TUNER_MAX_CONFIG_BYTES) oversized += row;
+
+  const std::string path = WriteTempCsv(oversized);
+  ASSERT_FALSE(path.empty());
+
+  CsvTunerContext ctx = MakeContext();
+  EXPECT_EQ(ncclSuccess, loadConfig(&ctx, path.c_str()));
+  EXPECT_EQ(0, ctx.numConfigs);
+  FreeContext(&ctx);
+
+  // Just under the cap still loads, so the cap is not rejecting everything.
+  const std::string underCap = oversized.substr(0, RCCL_CSV_TUNER_MAX_CONFIG_BYTES - row.size());
+  CsvTunerContext under = MakeContext();
+  EXPECT_EQ(ncclSuccess, loadConfigFromBuffer(&under, underCap.c_str(), "under-cap"));
+  EXPECT_GT(under.numConfigs, 0);
+  FreeContext(&under);
+}
+
 // End to end: resolve the embedded source, init through the tuner entry point,
 // and confirm the config lands in the cost table.
 TEST_F(CsvTunerMicrotest, AppliesEmbeddedConfigToCostTable) {
-  const std::map<std::string, std::string>& embedded = rcclCsvTunerEmbeddedConfigs();
-  if (!embedded.count("rccl_tuner_gfx950.csv")) GTEST_SKIP() << "no gfx950 config embedded";
+  const std::string arch = FirstEmbeddedArch();
+  if (arch.empty()) GTEST_SKIP() << "no arch-specific config embedded";
 
-  ASSERT_NE(nullptr, rcclCsvTunerFindConfig("gfx950"));
+  ASSERT_NE(nullptr, rcclCsvTunerFindConfig(arch.c_str()));
 
   void* context = nullptr;
-  // 1 node / 8 ranks matches the single-node rows of the shipped gfx950 config.
+  // 1 node / 8 ranks matches the single-node rows of the shipped config.
   ASSERT_EQ(ncclSuccess, csvTunerInit(&context, /*commId=*/0, /*nRanks=*/8, /*nNodes=*/1,
                                       /*logFunction=*/nullptr, /*nvlDomainInfo=*/nullptr,
                                       /*constants=*/nullptr));
@@ -351,17 +424,24 @@ TEST_F(CsvTunerMicrotest, AppliesEmbeddedConfigToCostTable) {
   CsvTunerContext* ctx = (CsvTunerContext*)context;
   ASSERT_GT(ctx->numConfigs, 0);
 
-  // Drive the first single-node config rather than hard-coding a size band, so
-  // this stays valid when the shipped CSV is retuned.
+  // Drive the first matching config rather than hard-coding a size band, so this
+  // stays valid when the shipped CSV is retuned. The predicate must mirror every
+  // field csvTunerGetCollInfo gates on, including the numPipeOps and regBuff
+  // passed to the probe below, or a retune leaves target matched here and
+  // nothing matched there.
+  const int kProbePipeOps = 1;
+  const int kProbeRegBuff = 0;
   const CsvTuningConfig* target = nullptr;
   for (int i = 0; i < ctx->numConfigs; i++) {
     const CsvTuningConfig* c = &ctx->configs[i];
-    if ((c->nNodes == -1 || c->nNodes == 1) && (c->nRanks == -1 || c->nRanks == 8)) {
+    if ((c->nNodes == -1 || c->nNodes == 1) && (c->nRanks == -1 || c->nRanks == 8) &&
+        (c->numPipeOps == -1 || c->numPipeOps == kProbePipeOps) &&
+        (c->regBuff == -1 || c->regBuff == kProbeRegBuff)) {
       target = c;
       break;
     }
   }
-  ASSERT_NE(nullptr, target) << "shipped gfx950 config has no 1-node/8-rank row";
+  ASSERT_NE(nullptr, target) << "shipped config has no row matching the probe";
 
   float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
   for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
@@ -369,9 +449,9 @@ TEST_F(CsvTunerMicrotest, AppliesEmbeddedConfigToCostTable) {
   }
 
   int nChannels = -1;
-  ASSERT_EQ(ncclSuccess, csvTunerGetCollInfo(context, target->collType, target->minBytes,
-                                             /*numPipeOps=*/1, (float**)table, NCCL_NUM_ALGORITHMS,
-                                             NCCL_NUM_PROTOCOLS, /*regBuff=*/0, &nChannels));
+  ASSERT_EQ(ncclSuccess, csvTunerGetCollInfo(context, target->collType, target->minBytes, kProbePipeOps,
+                                             (float**)table, NCCL_NUM_ALGORITHMS, NCCL_NUM_PROTOCOLS,
+                                             kProbeRegBuff, &nChannels));
 
   EXPECT_FLOAT_EQ(0.0f, table[target->algorithm][target->protocol]);
   EXPECT_EQ(target->nChannels >= 1 ? target->nChannels : 0, nChannels);
