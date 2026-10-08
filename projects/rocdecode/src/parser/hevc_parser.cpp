@@ -589,6 +589,14 @@ ParserResult HevcVideoParser::ParsePictureData(const uint8_t* p_stream, uint32_t
             // The frame data cannot be walked; GetNalUnit() has logged why. This has to return
             // rather than fall through, because the loop below is while (1) and GetNalUnit()
             // would report the same thing on every pass.
+            //
+            // Returning here also skips the end of packet finalization below, so slices already
+            // accumulated for the current picture would be dropped rather than decoded. Neither
+            // condition that reports this can leave any accumulated: the short packet one tests
+            // pic_data_size_, which is set once per packet, so it only fires on the first pass
+            // when num_slices_ is still 0, and the offset ordering one is not reachable with the
+            // current callers. A third condition that can fire mid packet would have to decide
+            // whether to finalize what was accumulated before returning.
             FunctionExitLog(g_rocdec_logger);
             return ret;
         }
