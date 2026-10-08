@@ -834,6 +834,12 @@ void AieLoadedCodeObjectImpl::Print(std::ostream& out) {
 }
 
 void AieLoadedCodeObjectImpl::Destroy() {
+  // Queues may have this object's PDIs cached by BO handle; tell them before the handles are freed
+  // and can be given to other buffers.
+  const bool has_pdis = std::any_of(descriptors.begin(), descriptors.end(), [](const auto& desc) {
+    return desc->kind == AMD::AieKernelKind::PdiInsts;
+  });
+  if (has_pdis) static_cast<AMD::AieAgent*>(core::Agent::Convert(agent))->ReleasePdis();
   for (auto& b : device_buffers) {
     owner->context()->SegmentFree(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, b.first, b.second);
   }

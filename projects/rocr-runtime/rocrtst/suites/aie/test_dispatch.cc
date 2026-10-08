@@ -3281,6 +3281,74 @@ TEST_F(DispatchTest, InterleavedKernelsSeparateBatches) {
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
 }
 
+// A code object destroyed while its PDI is cached must leave the queue's PDI cache. Its BO handle
+// goes back to the driver, which may give that number to a buffer of the next code object loaded.
+// A cache that kept the number would then either take a new PDI for the destroyed one and run the
+// new kernel against the old design, or configure the next rebuilt hardware context with a freed
+// or unrelated BO. Which of the two happens depends on how the driver reuses handles, so the
+// test checks results rather than counting rebuilds. The add kernel stays cached throughout, so the
+// rebuilds have a live PDI to carry over.
+TEST_F(DispatchTest, PdiCacheDropsDestroyedPdis) {
+  constexpr std::uint32_t num_rounds = 3;
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+
+  if (!hsaco_available() || !mul_hsaco_available()) GTEST_SKIP() << "hsacos were not built";
+  // Owned by the fixture, so it is never destroyed during the test.
+  const std::uint64_t add_kernel = LoadAddKernel();
+  ASSERT_NE(add_kernel, 0u);
+
+  pool_buffer add_in, add_out, add_kernargs, mul_inout, mul_kernargs;
+  ASSERT_EQ(add_in.allocate(data_pool, aie_vector_scalar_kernel::element_bytes),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(add_out.allocate(data_pool, aie_vector_scalar_kernel::element_bytes),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(add_kernargs.allocate(kernarg_pool, aie_vector_scalar_kernel::kernarg_bytes),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(mul_inout.allocate(data_pool, aie_vector_scalar_mul_kernel::element_bytes),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(mul_kernargs.allocate(kernarg_pool, aie_vector_scalar_mul_kernel::kernarg_bytes),
+            HSA_STATUS_SUCCESS);
+  auto* ain = add_in.as<std::uint32_t>();
+  auto* aout = add_out.as<std::uint32_t>();
+  auto* mio = mul_inout.as<std::uint32_t>();
+  std::iota(ain, ain + aie_vector_scalar_kernel::element_count, 0);
+
+  ASSERT_NO_FATAL_FAILURE(
+      DispatchAddAndVerify(queue, add_kernel, ain, aout, add_kernargs.as<std::uint64_t>()));
+
+  // Each kernel below is loaded, dispatched and destroyed before the next is loaded, alternating
+  // designs, so each new PDI may be given handles just freed by a PDI of the other design.
+  for (std::uint32_t round = 0; round < num_rounds; ++round) {
+    SCOPED_TRACE(round);
+    {
+      loaded_hsaco mul;
+      ASSERT_TRUE(mul.load(kMulHsacoPath, aie_agents.front()));
+      const std::uint64_t mul_kernel = mul.kernel_object(kMulHsacoKernelName);
+      ASSERT_NE(mul_kernel, 0u);
+      ASSERT_NO_FATAL_FAILURE(
+          DispatchMulAndVerify(queue, mul_kernel, mio, mul_kernargs.as<std::uint64_t>()));
+    }
+    {
+      loaded_hsaco add;
+      ASSERT_TRUE(add.load(kHsacoPath, aie_agents.front()));
+      const std::uint64_t fresh_add_kernel = add.kernel_object(kHsacoKernelName);
+      ASSERT_NE(fresh_add_kernel, 0u);
+      ASSERT_NO_FATAL_FAILURE(DispatchAddAndVerify(queue, fresh_add_kernel, ain, aout,
+                                                   add_kernargs.as<std::uint64_t>()));
+    }
+  }
+
+  // The PDI cached since the start still runs, against a context rebuilt without the others.
+  ASSERT_NO_FATAL_FAILURE(
+      DispatchAddAndVerify(queue, add_kernel, ain, aout, add_kernargs.as<std::uint64_t>()));
+
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
+
 // Adds the second design's full-ELF kernel on top of FullElfDispatchTest's.
 class FullElfInterleaveTest : public FullElfDispatchTest {
  protected:
