@@ -1663,8 +1663,10 @@ int main(int argc, char** argv) {
 
   // The pass's closing sync covers the current device only. A restore queued
   // on another device's stream may still be pending, and the summary below
-  // would not count it.
-  (void)hrr_wait_host_restores(ctx, nullptr, "the replay summary");
+  // would not count it. If this wait runs out, each teardown wait would run
+  // out again, one bound per allocation, so teardown does not wait.
+  if (!hrr_wait_host_restores(ctx, nullptr, "the replay summary"))
+    ctx.host_restore_no_wait = true;
 
   // ---------------------------------------------------------------------------
   // Summary

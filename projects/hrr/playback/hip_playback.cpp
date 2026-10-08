@@ -1083,7 +1083,9 @@ static void apply_host_snapshots(void* user) {
 }
 
 static unsigned host_restore_wait_ms(const PlaybackContext& ctx) {
-    return ctx.sync_watchdog_ms ? ctx.sync_watchdog_ms : 10000;
+    return ctx.host_restore_no_wait ? 0
+         : ctx.sync_watchdog_ms     ? ctx.sync_watchdog_ms
+                                    : 10000;
 }
 
 bool hrr_wait_host_restores(PlaybackContext& ctx, const void* base, const char* why) {

@@ -711,11 +711,13 @@ otherwise hang a single-threaded replay, which never reaches that event. When
 the time runs out, replay does not free the allocation: it leaks it, drops it
 from its tracking so that no later launch restores into it, prints a warning
 naming it, and goes on. The late restore then writes memory that is still
-allocated. The summary counts the leaked allocations. Before the summary, and
-after the `--kernel-filter` warm-up pass, replay waits the same bounded time
-for every queued restore: the pass's closing sync covers the current device
-only, and a restore still queued on another device would be missing from the
-count. The count and the restored total live in state each host function holds
+allocated. The summary counts the allocations leaked before it; one leaked at
+teardown, which comes after the summary, gets its warning only. Before the
+summary, and after the `--kernel-filter` warm-up pass, replay waits the same
+bounded time for every queued restore: the pass's closing sync covers the
+current device only, and a restore still queued on another device would be
+missing from the count. When the summary's wait runs out, the teardown waits
+do not wait: they would run out again, once per allocation. The count and the restored total live in state each host function holds
 a reference to, so one that runs after replay has exited does not touch a
 destroyed context. `--kernel-filter` resets the counters and the one-time
 notices after its warm-up pass, so the timed pass prints its own. The summary
@@ -758,8 +760,8 @@ only that replay waits before it. Three
 paths are untested by design: the fork handlers, a blob or event that cannot be
 written, and a restore `hipLaunchHostFunc` refuses. Each needs a fault injected
 into the capture or replay process, which no test hook provides. The waits at
-teardown are untested too: the summary's wait drains every restore first, so
-they only matter when a divergence stops replay before the summary. So is the
+teardown are untested too: they matter only when a divergence stops replay
+before the summary's wait, or when that wait runs out. So is the
 ordering of a launch against a `hipStreamBeginCapture` on another thread; the
 case for a free on another thread covers the same ordering.
 

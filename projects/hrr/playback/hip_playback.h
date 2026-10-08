@@ -327,6 +327,9 @@ struct PlaybackContext {
     // for them had still not run when the free came; see
     // hrr_host_release_ready.
     std::atomic<uint64_t> host_allocs_leaked{0};
+    // Set when the summary's wait for every restore ran out: the teardown
+    // waits after it then do not wait, and leak what is still queued.
+    bool host_restore_no_wait = false;
     // The one-time pinned host snapshot notices: a wait for a queued restore,
     // restores not applied under graph capture, and a restore that could not
     // be queued on its stream. Cleared after the --kernel-filter warm-up, so
