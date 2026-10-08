@@ -2159,8 +2159,10 @@ _SCALAR_ATOMIC_OPS = (
 
 
 _IMPLEMENTED_SCALAR_ATOMICS = {
-    'S_ATOMIC_DEC': ('dec', 4, 1),
-    'S_ATOMIC_DEC_X2': ('dec', 8, 2),
+    f'S_ATOMIC_{op}{width}': (op.lower(), elem_size, num_elems)
+    for op in _SCALAR_ATOMIC_OPS
+    if op != 'CMPSWAP'
+    for width, elem_size, num_elems in (('', 4, 1), ('_X2', 8, 2))
 }
 
 
@@ -2186,6 +2188,23 @@ class TestDeriveSmemAtomic:
         ],
     )
     def test_unimplemented_scalar_atomics_stay_nop(self, name):
+        sem = derive_semantics(name, 'ENC_SMEM')
+        assert sem is not None
+        assert sem.semantic_class == 'nop'
+
+    # No CDNA ISA defines these; they pin that operations the flat atomic
+    # tables know, but the scalar pipeline does not execute, stay unimplemented.
+    @pytest.mark.parametrize(
+        'name',
+        [
+            'S_ATOMIC_ADD_F32',
+            'S_ATOMIC_FMIN',
+            'S_ATOMIC_PK_ADD_F16',
+            'S_ATOMIC_CSUB',
+            'S_ATOMIC_COND_SUB_U32',
+        ],
+    )
+    def test_non_integer_scalar_atomic_operations_stay_nop(self, name):
         sem = derive_semantics(name, 'ENC_SMEM')
         assert sem is not None
         assert sem.semantic_class == 'nop'

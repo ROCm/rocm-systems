@@ -1784,6 +1784,24 @@ _SMEM_NARROW_LOAD_MAP = {
     'U16': (2, False),
 }
 
+# Integer operations the scalar memory pipeline executes for S_ATOMIC_*.
+_SMEM_ATOMIC_OPS = frozenset(
+    {
+        'swap',
+        'add',
+        'sub',
+        'smin',
+        'umin',
+        'smax',
+        'umax',
+        'and',
+        'or',
+        'xor',
+        'inc',
+        'dec',
+    }
+)
+
 
 def _derive_smem(name: str) -> InstructionSemantics | None:
     """Derive semantics for an SMEM (Scalar Memory) instruction."""
@@ -1819,7 +1837,7 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
                 if is_x2:
                     suffix = suffix[:-3]
                 info = _derive_flat_atomic_info(suffix, is_x2)
-                if info and upper in ('S_ATOMIC_DEC', 'S_ATOMIC_DEC_X2'):
+                if info and prefix == 'S_ATOMIC_' and info[0] in _SMEM_ATOMIC_OPS:
                     op, elem_size, data_dw_actual = info
                     return InstructionSemantics(
                         name,
@@ -1828,7 +1846,7 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
                         elem_size=elem_size,
                         num_elems=data_dw_actual,
                     )
-        # Other scalar atomics are not currently simulated.
+        # Scalar buffer atomics and compare-swap are not currently simulated.
         return InstructionSemantics(name, 'nop')
 
     is_store = '_STORE_' in upper or '_SCRATCH_STORE_' in upper
