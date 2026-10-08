@@ -65,7 +65,10 @@ RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", -1);
 RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", -1);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
+// -1 = auto (enabled on gfx1250, disabled elsewhere); 0 = disabled; 1 = bypass CTAPolicy check.
 RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", -1);
+// -1 = auto (enabled on gfx1250, disabled elsewhere); 0 = disabled; 1 = bypass CTAPolicy check.
+RCCL_PARAM(ForceCeColl, "FORCE_CE_COLL", -1);
 RCCL_PARAM(CeArMaxMsgBytes,    "CE_AR_2SHOT_MAX_BYTES",   -1);  // -1 = use ceArMax from arch table (2-shot)
 RCCL_PARAM(CeArStagingBytes,   "CE_AR_STAGING_BYTES",   -1);  // -1 = use NCCL_CE_AR_STAGING_BYTES default
 RCCL_PARAM(CeArRegMaxMsgBytes, "CE_AR_REG_MAX_MSG_BYTES", -1); // -1 = use ceArRegMax (registered)
@@ -851,18 +854,17 @@ inline size_t rcclCeNonRegMaxTab(const rcclArchThresholds* table, ncclFunc_t fun
 // everywhere else. Without this gate the arch tables for gfx942/gfx950 (which set
 // ceNonRegMax[AR] = 256 MiB) would let unregistered 2-shot, and -- via force --
 // registered CE, service AllReduce on arches that were never measured for it.
-static inline bool rcclCeAllReduceArchDefault(const ncclComm* comm) {
+static inline bool rcclCeCollArchDefault(const ncclComm* comm) {
   if (comm == nullptr || !IsArchMatch(comm->archName, "gfx1250")) return false;
   return extAlgoArchTable(comm) != nullptr;
 }
-
 inline bool rcclCeAllReduceEnabledDef(bool archDefault) {
   const int64_t param = rcclParamCeAllReduce();
   if (param >= 0) return param != 0;
   return archDefault;
 }
 bool rcclCeAllReduceEnabled(const ncclComm* comm) {
-  return rcclCeAllReduceEnabledDef(rcclCeAllReduceArchDefault(comm));
+  return rcclCeAllReduceEnabledDef(rcclCeCollArchDefault(comm));
 }
 
 inline bool rcclForceCeAllReduceEnabledDef(bool archDefault) {
@@ -871,7 +873,13 @@ inline bool rcclForceCeAllReduceEnabledDef(bool archDefault) {
   return archDefault;
 }
 bool rcclForceCeAllReduceEnabled(const ncclComm* comm) {
-  return rcclForceCeAllReduceEnabledDef(rcclCeAllReduceArchDefault(comm));
+  return rcclForceCeAllReduceEnabledDef(rcclCeCollArchDefault(comm));
+}
+
+inline bool rcclForceCeCollEnabled(const ncclComm* comm) {
+  const int64_t param = rcclParamForceCeColl();
+  if (param >= 0) return param != 0;
+  return rcclCeCollArchDefault(comm);
 }
 
 inline size_t rcclCeNonRegMinTab(const rcclArchThresholds* table, ncclFunc_t func) {
@@ -1416,7 +1424,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // develop's single "will CE AllReduce service this call" gate (collectives.cc
   // ncclAllReduce_impl). force = RCCL_FORCE_CE_ALLREDUCE; symReg probes whether the
   // buffers are CE-registrable symmetric windows (uses ncclDevSum, matching develop).
-  const bool ceArArchDefault = rcclCeAllReduceArchDefault(comm);
+  const bool ceArArchDefault = rcclCeCollArchDefault(comm);
   const bool force = rcclForceCeAllReduceEnabledDef(ceArArchDefault);
   const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType, sendWin, recvWin);
   // 2-shot message-size window: [twoShotMin, twoShotMax], mirroring agCeNonRegWindow
@@ -1739,7 +1747,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       const bool ceAvailable =
         !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType, sendWin, recvWin);
       if (ceAvailable && !hasSysmemSegment &&
-          (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
+          ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || rcclForceCeCollEnabled(comm)) &&
           (!symEligible && rcclAllGatherCeRegisteredWindowTab(archTable, totalBytes, winRegType, ceCapturing))) {
         decision->algo = RCCL_CE_REGISTERED;
         return ncclSuccess;
@@ -2073,7 +2081,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     const size_t a2aCeRegMax = rcclCeRegMaxTab(archTable, ncclFuncAlltoAll);
     const size_t a2aCeRegMin = rcclCeRegMinTab(archTable, ncclFuncAlltoAll);
     const bool a2aCeRegWindow = a2aCeRegMax > 0 && totalBytes >= a2aCeRegMin && totalBytes <= a2aCeRegMax;
-    if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !a2aHasSysmem && a2aCeRegWindow &&
+    if (((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || rcclForceCeCollEnabled(comm)) && !a2aHasSysmem && a2aCeRegWindow &&
         ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin)) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;

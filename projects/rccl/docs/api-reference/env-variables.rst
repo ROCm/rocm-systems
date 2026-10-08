@@ -886,6 +886,17 @@ threshold table introduced for gfx1250.
         | ``0``: Disabled.
         | ``1``: Force-enabled (CTA_POLICY check bypassed).
 
+    * - | ``RCCL_FORCE_CE_COLL``
+        | Bypasses the ``NCCL_CTA_POLICY=2`` (CTA_POLICY_ZERO) requirement for
+          CE AllGather and CE Alltoall registered-window paths.
+          Does not affect AllReduce (use ``RCCL_FORCE_CE_ALLREDUCE`` for that),
+          and does not affect hierarchical CE paths.
+          When ``-1`` (auto), enabled by default on gfx1250 where CE is the
+          preferred collective path; disabled on all other architectures.
+      - | ``-1``: Auto — enabled on gfx1250, disabled elsewhere (default).
+        | ``0``: Disabled.
+        | ``1``: Force-enabled (CTA_POLICY check bypassed for AG and A2A registered CE).
+
     * - | ``RCCL_CE_AR_2SHOT_MAX_BYTES``
         | Overrides the CE 2-shot AllReduce message size cap. When ``-1`` (default),
           the cap is read from ``ceNonRegMax[AllReduce]`` in the per-arch table. A
