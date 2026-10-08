@@ -219,23 +219,16 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # src/rma/rma_proxy.cc; its own binary because rccl-UnitTestsMicro already fakes
-  # three symbols rma_proxy.cc defines (see MICROTEST_README.md).
+  # rccl-UnitTestsMicroRmaProxy -- REAL src/rma/rma_proxy.cc.
   set(TEST_MICRO_RMA_PROXY_SOURCE_FILES
     rma-proxy-test.cc
+    # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
-    fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
-    fakes/os_fakes.cc                    # src/os/linux.cc (ncclOsGetPageSize)
-    fakes/comm_fakes.cc                  # src/init.cc comm globals
-    fakes/rma_fakes.cc                   # src/rma/*.cc (ncclRmaProxyDestroyDesc)
-    fakes/mem_manager_fakes.cc           # src/misc/mem_manager.cc
-    fakes/recorder_fakes.cc              # src/recorder.cc
-    fakes/rocmwrap_fakes.cc              # src/misc/rocmwrap.cc dmabuf export pointer
-    fakes/strongstream_stubs.cc          # src/misc/strongstream.cc
-    fakes/bootstrap_stubs.cc             # src/bootstrap.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real getBusId + memory stack
+    fakes/os_fakes.cc
+    fakes/rma_fakes.cc
+    fakes/rocmwrap_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 

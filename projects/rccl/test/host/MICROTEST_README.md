@@ -218,8 +218,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   duplicate symbol. `ncclGdrCopy` (owned by `init.cc`) is defined in the test TU
   rather than a fakes file: `allocMemCPUAccessible()` is a header-static
   template, so this global is the only seam that steers it, and the suite owns
-  it outright. Compiles the real `archinfo.cc` / `utils.cc` oracle TUs for
-  `IsArchMatch` and `getBusId`. See `test_categories_micro_rma_proxy.yaml`.
+  it outright. Compiles the real `utils.cc` oracle TU for `getBusId` and the
+  memory stack. The suite drives the public lifecycle --
+  `ncclRmaProxyCreateContext` / `ncclRmaProxyDestroyContext` -- so production
+  owns the context and its cleanup. See `test_categories_micro_rma_proxy.yaml`.
 
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`). Its own binary: it fakes the
