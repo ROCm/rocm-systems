@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Fallible host storage for internal owners and buffers.
 //!
 //! Callback state is copied into each allocation owner. No process-global or
@@ -201,9 +204,8 @@ impl Allocator {
     }
 }
 
-// Callback allocations provide at least fundamental alignment even for byte
-// buffers. Sixteen meets that bound on the supported x86, x86_64, and AArch64
-// platforms; larger alignments required by T are preserved.
+// Callback storage has at least 16-byte alignment on supported targets.
+// Larger alignments required by T are preserved.
 fn normalized_layout(layout: Layout) -> Result<Layout, AllocationError> {
     Layout::from_size_align(layout.size().max(1), layout.align().max(16))
         .map_err(|_| AllocationError)
@@ -1052,6 +1054,18 @@ mod tests {
         }
     }
 
+    struct PanicValue<'a> {
+        drops: &'a AtomicUsize,
+        panic: bool,
+    }
+
+    impl Drop for PanicValue<'_> {
+        fn drop(&mut self) {
+            self.drops.fetch_add(1, Ordering::Relaxed);
+            assert!(!self.panic, "intentional destructor panic");
+        }
+    }
+
     #[test]
     fn callback_combinations_are_validated_without_allocation() {
         let context = Context::default();
@@ -1125,6 +1139,50 @@ mod tests {
             crate::Error::from(AllocationError).kind(),
             crate::error::ErrorKind::ResourceExhausted
         );
+    }
+
+    #[test]
+    fn panicking_destructors_release_storage_without_double_drop() {
+        let context = Context::default();
+        let drops = AtomicUsize::new(0);
+        let value = |panic| PanicValue {
+            drops: &drops,
+            panic,
+        };
+
+        let owner = Owned::new(value(true), context.allocator(false)).unwrap();
+        assert!(std::panic::catch_unwind(|| drop(owner)).is_err());
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        assert_eq!(context.live_count(), 0);
+
+        let shared = Shared::new(value(true), context.allocator(false)).unwrap();
+        let clone = shared.clone();
+        drop(clone);
+        assert!(std::panic::catch_unwind(|| drop(shared)).is_err());
+        assert_eq!(drops.load(Ordering::Relaxed), 2);
+        assert_eq!(context.live_count(), 0);
+
+        let mut buffer = Buffer::new(context.allocator(false));
+        buffer.try_push(value(false)).unwrap();
+        buffer.try_push(value(true)).unwrap();
+        buffer.try_push(value(false)).unwrap();
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| buffer.truncate(1))).is_err()
+        );
+        assert_eq!(buffer.len(), 1);
+        drop(buffer);
+        assert_eq!(drops.load(Ordering::Relaxed), 5);
+        assert_eq!(context.live_count(), 0);
+
+        let mut buffer = Buffer::new(context.allocator(false));
+        buffer.try_push(value(false)).unwrap();
+        buffer.try_push(value(true)).unwrap();
+        buffer.try_push(value(false)).unwrap();
+        let mut iter = buffer.into_iter();
+        drop(iter.next());
+        assert!(std::panic::catch_unwind(|| drop(iter)).is_err());
+        assert_eq!(drops.load(Ordering::Relaxed), 8);
+        assert_eq!(context.live_count(), 0);
     }
 
     #[test]
@@ -1227,6 +1285,55 @@ mod tests {
         assert!(Shared::get_mut(&mut shared).is_some());
         drop(shared);
         assert_eq!(drops.load(Ordering::Relaxed), 1);
+        assert_eq!(context.live_count(), 0);
+    }
+
+    #[test]
+    fn shared_callbacks_release_once_after_concurrent_clone_and_drop() {
+        let context = Context::default();
+        let drops = AtomicUsize::new(0);
+        let mut shared = Shared::new(DropValue(&drops), context.allocator(false)).unwrap();
+        let barrier = std::sync::Barrier::new(9);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let worker = shared.clone();
+                let ready = &barrier;
+                scope.spawn(move || {
+                    ready.wait();
+                    for _ in 0..128 {
+                        let transient = worker.clone();
+                        assert!(Shared::ptr_eq(&worker, &transient));
+                        drop(transient);
+                    }
+                });
+            }
+            barrier.wait();
+            for _ in 0..128 {
+                drop(shared.clone());
+            }
+        });
+        assert_eq!(Shared::strong_count(&shared), 1);
+        assert_eq!(drops.load(Ordering::Acquire), 0);
+        assert!(Shared::get_mut(&mut shared).is_some());
+
+        // All workers hold a strong reference before the original owner is
+        // dropped. The final release may now happen on any worker thread.
+        let final_release = std::sync::Barrier::new(9);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let worker = shared.clone();
+                let ready = &final_release;
+                scope.spawn(move || {
+                    ready.wait();
+                    for _ in 0..32 {
+                        drop(worker.clone());
+                    }
+                });
+            }
+            final_release.wait();
+            drop(shared);
+        });
+        assert_eq!(drops.load(Ordering::Acquire), 1);
         assert_eq!(context.live_count(), 0);
     }
 

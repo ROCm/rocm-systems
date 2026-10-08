@@ -328,6 +328,11 @@ void Vopd::init_operands() {
 
   add_slot_sources(x_);
   add_slot_sources(y_);
+  const auto direct_slot = [](uint16_t op) {
+    return op == kVopdFmacF32 || op == kVopdMovB32 || op == kVopdAddNcU32 || op == kVopdLshlrevB32;
+  };
+  if (direct_slot(x_.op) && direct_slot(y_.op))
+    flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 std::string Vopd::format_slot(const Slot &slot) const {
