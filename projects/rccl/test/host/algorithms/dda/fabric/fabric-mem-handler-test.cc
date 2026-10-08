@@ -55,6 +55,9 @@ class FabricMemHandlerTest : public ::testing::Test {
   void SetUp() override {
     SetMicroEnvAbsent("NCCL_CUMEM_SKIP_FREE");  // see HipVmmLedger.h
     ledger_.Install();
+    // Latch alloc.h's once-per-process skip-free decision now, under this
+    // fixture's env and arch, so no later test can find it latched the other way.
+    ASSERT_FALSE(rcclSkipCuMemFree());
     savedHandleType_ = ncclCuMemHandleType;
 
     g_hipMemExportToShareableHandle = [](void* shareable, hipMemGenericAllocationHandle_t,
@@ -83,6 +86,8 @@ class FabricMemHandlerTest : public ::testing::Test {
 
   void TearDown() override {
     handler_.reset();  // first: the destructor frees through the ledger hooks
+    EXPECT_TRUE(ledger_.Clean()) << ledger_.reserved.size() << " reservations live; " << ledger_.rejected.size()
+                                 << " calls refused";
     ncclCuMemHandleType = savedHandleType_;
     ResetBootstrapStubs();
     ResetHipFakes();
@@ -108,6 +113,17 @@ class FabricMemHandlerTest : public ::testing::Test {
     ncclFabricMemHandler* h = MakeRegisteredHandler(nRanks, rank);
     EXPECT_EQ(h->exchangeMemPtrs(), ncclSuccess);
     return h;
+  }
+
+  // An import hook that records every descriptor and fails the given peer's.
+  auto FailImportOfPeer(int peer) {
+    return [this, peer](hipMemGenericAllocationHandle_t* handle, void* shareable, hipMemAllocationHandleType) {
+      const uint64_t desc = static_cast<ncclCuDesc*>(shareable)->data;
+      importedDescs_.push_back(desc);
+      if (desc == PeerDesc(peer)) return hipErrorInvalidValue;
+      *handle = HandleForDesc(desc);
+      return hipSuccess;
+    };
   }
 
   void* PeerPtr(int peer) {
@@ -145,7 +161,7 @@ TEST_F(FabricMemHandlerTest, GetPeerDeviceMemPtr_RankOutOfRange_ReturnsInvalidAr
 }
 
 TEST_F(FabricMemHandlerTest, GetPeerDeviceMemPtr_FirstAndLastRank_Succeed) {
-  ncclFabricMemHandler* h = MakeExchangedHandler();
+  const ncclFabricMemHandler* h = MakeExchangedHandler();
   void* p = nullptr;
 
   EXPECT_EQ(h->getPeerDeviceMemPtr(0, &p), ncclSuccess);
@@ -273,7 +289,7 @@ TEST_F(FabricMemHandlerTest, ExchangeMemPtrs_AlreadyExchanged_ReturnsSuccessWith
 TEST_F(FabricMemHandlerTest, ExchangeMemPtrs_NoSelfMem_ReturnsInvalidUsageWithoutExporting) {
   ncclFabricMemHandler* h = MakeHandler();
   ScopedHook exportHook(g_hipMemExportToShareableHandle, g_hipMemExportToShareableHandle);  // count only
-  ScopedHook gather(g_bootstrapAllGather, g_bootstrapAllGather);                              // count only
+  ScopedHook gather(g_bootstrapAllGather, g_bootstrapAllGather);  // count only
 
   EXPECT_EQ(h->exchangeMemPtrs(), ncclInvalidUsage);
 
@@ -304,14 +320,7 @@ TEST_F(FabricMemHandlerTest, ExchangeMemPtrs_AllGatherFails_PropagatesErrorWitho
 
 TEST_F(FabricMemHandlerTest, ExchangeMemPtrs_ImportFails_ReturnsCudaErrorAndStopsImporting) {
   ncclFabricMemHandler* h = MakeRegisteredHandler();
-  ScopedHook import(g_hipMemImportFromShareableHandle,
-                    [this](hipMemGenericAllocationHandle_t* handle, void* shareable, hipMemAllocationHandleType) {
-                      const uint64_t desc = static_cast<ncclCuDesc*>(shareable)->data;
-                      importedDescs_.push_back(desc);
-                      if (desc == PeerDesc(2)) return hipErrorInvalidValue;
-                      *handle = HandleForDesc(desc);
-                      return hipSuccess;
-                    });
+  ScopedHook import(g_hipMemImportFromShareableHandle, FailImportOfPeer(2));
 
   EXPECT_EQ(h->exchangeMemPtrs(), ncclUnhandledCudaError);
 
@@ -321,12 +330,14 @@ TEST_F(FabricMemHandlerTest, ExchangeMemPtrs_ImportFails_ReturnsCudaErrorAndStop
 TEST_F(FabricMemHandlerTest, ExchangeMemPtrs_PeerMappingFails_ReleasesThatPeersHandleAndStops) {
   ncclFabricMemHandler* h = MakeRegisteredHandler();
   const hipMemGenericAllocationHandle_t failing = HandleForDesc(PeerDesc(2));
-  ScopedHook map(g_hipMemMap, [failing](void*, size_t, size_t, hipMemGenericAllocationHandle_t handle,
-                                        unsigned long long) {
-    return handle == failing ? hipErrorOutOfMemory : hipSuccess;
+  auto recordMap = g_hipMemMap;
+  ScopedHook map(g_hipMemMap, [failing, recordMap](void* ptr, size_t size, size_t offset,
+                                                   hipMemGenericAllocationHandle_t handle, unsigned long long flags) {
+    if (handle == failing) return hipErrorOutOfMemory;
+    return recordMap(ptr, size, offset, handle, flags);
   });
 
-  EXPECT_NE(h->exchangeMemPtrs(), ncclSuccess);
+  EXPECT_EQ(h->exchangeMemPtrs(), ncclUnhandledCudaError);
 
   EXPECT_EQ(ledger_.released, (std::vector<hipMemGenericAllocationHandle_t>{HandleForDesc(PeerDesc(0)), failing}));
   EXPECT_EQ(importedDescs_, (std::vector<uint64_t>{PeerDesc(0), PeerDesc(2)}));
@@ -343,13 +354,7 @@ TEST_F(FabricMemHandlerTest, ExchangeMemPtrs_ReleaseFails_ReturnsCudaErrorAndSto
 
 TEST_F(FabricMemHandlerTest, ExchangeMemPtrs_FailsAfterSomePeersMapped_PeerPointersStayUnavailable) {
   ncclFabricMemHandler* h = MakeRegisteredHandler();
-  ScopedHook import(g_hipMemImportFromShareableHandle,
-                    [](hipMemGenericAllocationHandle_t* handle, void* shareable, hipMemAllocationHandleType) {
-                      const uint64_t desc = static_cast<ncclCuDesc*>(shareable)->data;
-                      if (desc == PeerDesc(2)) return hipErrorInvalidValue;
-                      *handle = HandleForDesc(desc);
-                      return hipSuccess;
-                    });
+  ScopedHook import(g_hipMemImportFromShareableHandle, FailImportOfPeer(2));
   ASSERT_NE(h->exchangeMemPtrs(), ncclSuccess);
   ASSERT_EQ(ledger_.reserved.size(), 1u);  // peer 0 is already mapped
   void* p = nullptr;
@@ -377,13 +382,7 @@ TEST_F(FabricMemHandlerTest, Destructor_AfterExchange_FreesEveryPeerMappingButNo
 
 TEST_F(FabricMemHandlerTest, Destructor_AfterImportFailsPartway_FreesOnlyTheMappedPeers) {
   ncclFabricMemHandler* h = MakeRegisteredHandler();
-  ScopedHook import(g_hipMemImportFromShareableHandle,
-                    [](hipMemGenericAllocationHandle_t* handle, void* shareable, hipMemAllocationHandleType) {
-                      const uint64_t desc = static_cast<ncclCuDesc*>(shareable)->data;
-                      if (desc == PeerDesc(3)) return hipErrorInvalidValue;
-                      *handle = HandleForDesc(desc);
-                      return hipSuccess;
-                    });
+  ScopedHook import(g_hipMemImportFromShareableHandle, FailImportOfPeer(3));
   ASSERT_NE(h->exchangeMemPtrs(), ncclSuccess);
   ASSERT_EQ(ledger_.reserved.size(), 2u);  // peers 0 and 2
 

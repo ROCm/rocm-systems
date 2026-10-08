@@ -370,7 +370,6 @@ symbol.
 | Production TU | Fakes file |
 |---|---|
 | `src/algorithms/dda/*.cc` (`rccl-UnitTestsMicroDda` compiles them for real instead) | `fakes/dda_fakes.cc` |
-| `src/init.cc`'s `alloc.h` data symbols (`allocTracker`), for binaries that don't compile `init.cc` | `fakes/alloc_fakes.cc` |
 | `src/bootstrap.cc` | `fakes/bootstrap_stubs.cc` |
 | `src/ce_coll.cc` | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
@@ -383,6 +382,7 @@ symbol.
 | `src/config/collconfig.cc` (targets that do not compile the real file) | `fakes/collconfig_fakes.cc` |
 | `src/enqueue/enqueue.cc`'s own symbols (targets that do not compile the real file) | `fakes/enqueue_fakes.cc` |
 | `src/init.cc` comm lifecycle + CTA/channel params | `fakes/comm_fakes.cc` |
+| `src/init.cc`'s `alloc.h` data symbols (`allocTracker`), for binaries that don't compile `init.cc` | `fakes/alloc_fakes.cc` |
 | `src/init_nvtx.cc` | `fakes/init_nvtx_fakes.cc` |
 | `src/mem_manager.cc` | `fakes/mem_manager_fakes.cc` |
 | `src/misc/amdsmi_wrap.cc` | `fakes/amdsmi_fakes.cc` |
@@ -452,11 +452,11 @@ Five things do NOT follow the TU-per-file rule, deliberately:
 - `rcclParamIntraGraphGen` stays in `fakes/init_fakes.cc` because its owner
   (`graph/rccl_graph_gen.cc:34`) has no fakes file at all. `rcclEffectiveP2pBatchEnable`
   did have one and moved to `fakes/enqueue_fakes.cc`.
-- `IsArchMatch` is not faked: the real `src/misc/archinfo.cc` is compiled as
-  an oracle TU. The `allocTracker` data symbol, which `src/init.cc` defines in
-  production, comes from `fakes/alloc_fakes.cc` in binaries that don't compile
-  `init.cc`. (The busId helpers have an owner too — `src/misc/utils.cc` — so
-  they live in `fakes/utils_fakes.cc`.)
+- `allocTracker`, which `src/init.cc` defines, has its own
+  `fakes/alloc_fakes.cc` rather than joining `fakes/comm_fakes.cc`, the other
+  `src/init.cc` fakes file: `comm_fakes.cc` pulls in `comm.h` and the
+  comm-lifecycle symbols, which a binary that only inlines the `alloc.h` cuMem
+  helpers would then have to satisfy.
 
 An aggregation header includes the per-TU headers a unit's tests use and
 declares the reset that chains their per-TU resets, and defines no seams itself.
@@ -612,18 +612,18 @@ When the link fails with `undefined symbol: foo`, find `foo` and
 triage it into the right bucket:
 
 - **It's a global variable (`extern int foo;`)** → add a definition
-  to its owning TU's fakes file. If it has no owning TU (e.g. a data
-  symbol declared in a header-only file) and only one test TU
-  references it, define it in that test (the fifth exception above —
-  e.g. the `allocTracker` array in `p2p-test.cc`). Use a sensible
-  default (usually zero).
+  to its owning TU's fakes file (e.g. `allocTracker`, which `src/init.cc`
+  defines, comes from `fakes/alloc_fakes.cc`). If it has no owning TU
+  (e.g. a data symbol declared in a header-only file) and only one test
+  TU references it, define it in that test. Use a sensible default
+  (usually zero).
 - **It's a plain function the module references but doesn't define**
   → add a definition returning a sensible default to its owning TU's
   fakes file (e.g. `busIdToInt64` / `getBusId` go in
   `fakes/utils_fakes.cc`, since `src/misc/utils.cc` owns them). Only
-  when the symbol has no owning TU does it belong in the test itself
-  (the fifth exception above — e.g. `IsArchMatch`, owned by the
-  header-only `archinfo.h`, in `p2p-test.cc`).
+  when the symbol has no owning TU does it belong in the test itself.
+  (`IsArchMatch` has an owner, `src/misc/archinfo.cc`, which the binaries
+  that need it compile for real.)
 - **It's a logging or env-param helper** → already covered by the
   no-op `ncclDebugLog` / `ncclLoadParam`. If a new logging primitive
   appears, follow the same pattern.
