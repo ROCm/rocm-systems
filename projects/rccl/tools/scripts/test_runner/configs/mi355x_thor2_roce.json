@@ -5030,6 +5030,12 @@
       "enabled": true
     },
     {
+      "name": "CE Tests - Hierarchical AlltoAllv (multi-node)",
+      "description": "Hierarchical CE AlltoAllv on 2 nodes (2 ranks/node): MultiNodeHierarchical, ChunkBoundary, and Sparse. Skips when scale-out CE prerequisites are absent.",
+      "config": "ce_hier_alltoallv",
+      "enabled": true
+    },
+    {
       "name": "MPI Tests (8-rank, single-node)",
       "description": "MPI unit tests that need eight ranks on one node, one rank per process",
       "config": "mpi_8rank_single_node",

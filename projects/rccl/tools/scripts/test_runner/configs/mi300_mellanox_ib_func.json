@@ -3394,6 +3394,12 @@
       "enabled": true
     },
     {
+      "name": "CE Tests - Hierarchical AlltoAllv (multi-node)",
+      "description": "Hierarchical CE AlltoAllv on 2 nodes (2 ranks/node): MultiNodeHierarchical, ChunkBoundary, and Sparse. Skips when scale-out CE prerequisites are absent.",
+      "config": "ce_hier_alltoallv",
+      "enabled": true
+    },
+    {
       "name": "CE Internal Tests (white-box, Debug build only)",
       "description": "White-box CE internal function tests (ncclCeInit, ncclPrepUCSync, ncclCeLaunchBatchOps). Requires Debug build for symbol visibility. Skips on unsupported driver version.",
       "config": "ce_internal",
