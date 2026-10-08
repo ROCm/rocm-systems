@@ -14,6 +14,7 @@ from utils.metrics.evaluation_pipeline import (
     compute_pct_of_peak,
     create_sys_vars,
     eval_metric,
+    evaluate_metric_composites,
     validate_dual_issue_metrics,
 )
 from utils.metrics.noise_clamper import (
@@ -519,3 +520,51 @@ class TestEvaluationPipeline:
         sys_info = pd.Series({**self.sys_info_fields, "num_gl1c": 8})
         result = create_sys_vars(sys_info)
         assert result["ammolite__num_gl1c"] == 8
+
+
+@pytest.mark.misc
+def test_evaluate_metric_composites_fills_parent_without_mutating_source():
+    raw = pd.DataFrame({
+        "Dispatch_ID": [1, 2],
+        "SQ_A": [10.0, 30.0],
+        "SQ_B": [2.0, 6.0],
+    })
+    df = pd.DataFrame(
+        [
+            ["1", "_collect.num", "to_sum(raw_pmc_df['SQ_A'])"],
+            ["2", "_collect.den", "to_sum(raw_pmc_df['SQ_B'])"],
+            ["3", "AI HBM", ""],
+        ],
+        columns=["Metric_ID", "Metric", "Value"],
+    ).set_index("Metric_ID")
+    df.attrs["collect_ratio_specs"] = {
+        "3": {"numerator": ["_collect.num"], "denominator": ["_collect.den"]},
+    }
+    df.attrs["collectable_expr_cache"] = {}
+    source_parent = df.at["3", "Value"]
+    sys_info = pd.Series({
+        "gpu_arch": "gfx90a",
+        "se_per_gpu": 1,
+        "pipes_per_gpu": 1,
+        "cu_per_gpu": 1,
+        "simd_per_cu": 1,
+        "sqc_per_gpu": 1,
+        "lds_banks_per_cu": 1,
+        "cur_sclk": 1.0,
+        "cur_mclk": 1.0,
+        "max_mclk": 1.0,
+        "max_sclk": 1.0,
+        "max_waves_per_cu": 1,
+        "wave_size": 64,
+        "total_l2_chan": 1,
+        "num_xcd": 1,
+    })
+    filled = evaluate_metric_composites(
+        {402: df},
+        {402: "metric_table"},
+        raw,
+        sys_info,
+        pd.DataFrame(),
+    )
+    assert filled[("3", "Value")] == pytest.approx((10.0 + 30.0) / (2.0 + 6.0))
+    assert df.at["3", "Value"] == source_parent
