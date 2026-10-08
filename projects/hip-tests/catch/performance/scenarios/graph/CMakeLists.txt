@@ -9,6 +9,8 @@ set(TEST_SRC
     hipGraphTopology.cc
     hipGraphPyFRCouette.cc
     hipGraphCollapseCorrectness.cc
+    test_graph_runtime_benchmark.cc
+    test_pending_event_wait_benchmark.cc
 )
 
 hip_add_exe_to_target(NAME GraphPerformance
