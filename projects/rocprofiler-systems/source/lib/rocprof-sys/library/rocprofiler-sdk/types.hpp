@@ -89,6 +89,7 @@ using callback_tracing_cb_t =
              typename SdkBackend::user_data_t* user_data, void* callback_data);
 
 using configure_cb_t = void (*)();
+using finalize_cb_t  = void (*)();
 
 template <typename SdkBackend>
 struct buffered_domain_definition
@@ -98,7 +99,8 @@ struct buffered_domain_definition
     buffer_properties               buffer       = k_default_buffer_properties;
     configure_cb_t                  on_configure = nullptr;
     std::optional<typename SdkBackend::external_correlation_request_kind_t>
-        correlation_dependency = std::nullopt;
+                  correlation_dependency = std::nullopt;
+    finalize_cb_t on_finalize            = nullptr;
 };
 
 template <typename SdkBackend>
@@ -108,7 +110,8 @@ struct callback_domain_definition
     callback_tracing_cb_t<SdkBackend> on_record;
     configure_cb_t                    on_configure = nullptr;
     std::optional<typename SdkBackend::external_correlation_request_kind_t>
-        correlation_dependency = std::nullopt;
+                  correlation_dependency = std::nullopt;
+    finalize_cb_t on_finalize            = nullptr;
 };
 
 struct domain_configuration
@@ -145,7 +148,8 @@ struct buffered_callback_dispatcher
 
 template <typename SdkBackend>
 using tracing_phase_cb_t = void (*)(typename SdkBackend::callback_tracing_record_t,
-                                    typename SdkBackend::user_data_t*, void*);
+                                    typename SdkBackend::user_data_t*, void*,
+                                    typename SdkBackend::timestamp_t);
 
 // Indirects the null-check through a function parameter so GCC's -Waddress
 // heuristic (which pattern-matches "function-name != nullptr" and assumes a
@@ -178,7 +182,8 @@ struct tracing_callback_dispatcher
             {
                 if(is_callback_set(OnEnter))
                 {
-                    OnEnter(record, user_data, callback_data);
+                    OnEnter(record, user_data, callback_data,
+                            SdkBackend::get_timestamp());
                 }
                 break;
             }
@@ -186,7 +191,7 @@ struct tracing_callback_dispatcher
             {
                 if(is_callback_set(OnExit))
                 {
-                    OnExit(record, user_data, callback_data);
+                    OnExit(record, user_data, callback_data, SdkBackend::get_timestamp());
                 }
                 break;
             }
@@ -194,7 +199,7 @@ struct tracing_callback_dispatcher
             {
                 if(is_callback_set(OnNone))
                 {
-                    OnNone(record, user_data, callback_data);
+                    OnNone(record, user_data, callback_data, SdkBackend::get_timestamp());
                 }
                 break;
             }

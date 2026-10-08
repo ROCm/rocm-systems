@@ -16,8 +16,6 @@ $ make
 ```
 $ ./bit_extract
 
-pch size: 11743288
-__hipGetPCH succeeded!
 info: running on device #0
 info: allocate host mem (  7.63 MB)
 info: allocate device mem (  7.63 MB)

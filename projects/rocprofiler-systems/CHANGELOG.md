@@ -6,6 +6,24 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 
+### Added
+
+- AMD Infinity Storage I/O telemetry. Per-GPU I/O counters are sampled into
+  the profiler output. Enable collection with `ROCPROFSYS_USE_HIPFILE` and select metrics with
+  `ROCPROFSYS_HIPFILE_METRICS`. See
+  [hipFile Infinity Storage I/O telemetry](./docs/how-to/hipfile-telemetry.rst).
+
+### Resolved issues
+
+- Fixed a crash (`SIGSEGV`) in `rocprof-sys-instrument` when instrumenting Fortran+HIP
+  programs compiled with `gfortran -g` or `-g -O0`. gfortran encodes assumed-shape and
+  allocatable array bounds as DWARF location expression blocks rather than integer
+  constants at debug optimization levels; DynInst was treating these block-form
+  attributes as errors and dereferencing a null pointer in `parseSubrange()`.
+  Fixed in [ROCm/dyninst#33](https://github.com/ROCm/dyninst/pull/33).
+
+## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
+
 ### Changed
 
 - Minimum supported GCC raised from 10 to **GCC 11**, the first release with the
@@ -30,6 +48,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   now restricted to its two documented, supported values (realtime,
   cputime), and an invalid value now fails cleanly at startup instead of
   aborting mid-run.
+- Fix a deadlock that may occur in libunwind when call-stack sampling is enabled.
+  Timemory commit: [ROCm/timemory@8fefbca](https://github.com/ROCm/timemory/commit/8fefbca)
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1
 
