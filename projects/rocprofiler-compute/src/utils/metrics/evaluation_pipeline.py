@@ -30,7 +30,6 @@ from utils.metrics.noise_clamper import (
 from utils.metrics.pass_provenance import (
     PassLayout,
     bind_metric_tables_to_passes,
-    legacy_pass_merge_enabled,
     ordered_scoped_builtin_bindings,
     pass_scoped_builtins,
 )
@@ -417,11 +416,7 @@ def eval_metric(
     ]
 
     used_passes: set[str] = set()
-    if (
-        pass_layout is not None
-        and pass_layout.has_duplicates
-        and not legacy_pass_merge_enabled()
-    ):
+    if pass_layout is not None and pass_layout.has_duplicates:
         gpu_series = mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
         used_passes = bind_metric_tables_to_passes(
             dfs,

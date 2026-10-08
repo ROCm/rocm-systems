@@ -1,17 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Shared helpers for perfmon bucket packing (SPP, legacy, inspector tools)."""
+"""Shared helpers for perfmon bucket packing (SPP and inspector tools)."""
 
 from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 from utils.metrics.expression import (
     is_composite_avg_formula,
     reject_counter_bearing_composite_extents,
-)
-from utils.utils_common import (
-    METRIC_ID_RE,
-    convert_metric_id_to_panel_info,
 )
 from utils.utils_counter_defs import extract_counters_and_variables
 from vendored import yaml
@@ -102,22 +98,12 @@ def iter_metric_groups(
     soc: "OmniSoC_Base",
     profile_counters: Set[str],
 ) -> List[_MetricGroup]:
-    """Metric PMC groups in priority-tier order for the profiled counters.
+    """Metric PMC groups for the profiled counters, largest first.
 
     A WEIGHTED_AVG weight counter is added to the sub-ratio collectable so
     Phase 1 can place it in that collectable's bucket. Composite parents are
     not a second PMC pack.
     """
-    priority_keys: Set[Tuple[str, Any, int]] = set()
-    for token in soc._same_bucket_priority_metric_ids():
-        tid = token.strip()
-        if not METRIC_ID_RE.match(tid):
-            continue
-        file_id, panel_id, metric_idx = convert_metric_id_to_panel_info(tid)
-        if metric_idx is None:
-            continue
-        priority_keys.add((file_id, panel_id, metric_idx))
-
     raw_metrics = list(soc._iter_arch_analysis_yaml_metrics())
     weight_extras = _weight_counters_by_submetric(raw_metrics)
 
@@ -145,8 +131,7 @@ def iter_metric_groups(
         counters = frozenset(hw & profile_counters)
         if not counters:
             continue
-        tier = 0 if (stem_id, panel_id, metric_idx) in priority_keys else 1
-        sort_key = (tier, -len(counters), stem_id, panel_key, metric_idx)
+        sort_key = (-len(counters), stem_id, panel_key, metric_idx)
         label = f"{stem_id}.{panel_key}.{metric_idx} ({metric_name})"
         rows.append((sort_key, counters, label))
     rows.sort(key=lambda row: row[0])
