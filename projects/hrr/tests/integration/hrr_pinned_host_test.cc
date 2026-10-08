@@ -2813,29 +2813,46 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_DeviceReset) {
 // kept A in its tracking let the record through and restored archive bytes
 // into the released memory. Replay runs with --continue-on-error, since
 // events after a reset need not replay.
+//
+// With more than one GPU the reset frees no pinned host memory, so capture
+// and replay both see one: the first device this test sees.
 // ---------------------------------------------------------------------------
 HRR_TEST_CASE(Unit_HRR_PinnedHost_RecordAfterReset) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_record_after_reset.hrr");
-  (void)capture_case("Unit_HRR_PinnedHost_Reset_Direct", cap.path);
+  const char* visible = std::getenv("HIP_VISIBLE_DEVICES");
+  std::string first = visible ? std::string(visible) : std::string();
+  first = first.substr(0, first.find(','));
+  const std::vector<std::pair<std::string, std::string>> one_gpu = {
+      {"HIP_VISIBLE_DEVICES", first.empty() ? "0" : first}};
+  const std::string skipped =
+      capture_case("Unit_HRR_PinnedHost_Reset_Direct", cap.path, one_gpu);
+  if (!skipped.empty()) SKIP(skipped);
   const fs::path archive = hrr_single_process_archive(cap.path);
 
   hrr::Archive arc;
   REQUIRE(hrr::load_archive(archive.string(), arc));
   const auto kls = launches_of(arc);
-  REQUIRE(kls.size() >= 2);
+  REQUIRE(kls.size() == 3);
   REQUIRE(kls[0]->snapshots.size() == kResetABytes / kChunk);
   REQUIRE(kls[1]->snapshots.size() == 2);
   REQUIRE(kls[1]->snapshots[0].offset == 0);
   REQUIRE(kls[1]->snapshots[0].length == kChunk);
+  REQUIRE(!kls[2]->args.empty());
+  REQUIRE(kls[2]->args[0].data.size() == sizeof(uint64_t));
 
   // A chunk-sized range inside A that B does not cover, so that the record
-  // can only name A.
+  // can only name A. Launch 2's pointer comes first: Reset_Direct checked
+  // that the runtime knew nothing there after the reset.
   const uint64_t a = kls[0]->snapshots[0].ptr_handle;
   const uint64_t b = kls[1]->snapshots[0].ptr_handle;
+  uint64_t probe = 0;
+  std::memcpy(&probe, kls[2]->args[0].data.data(), sizeof(probe));
   uint64_t stale = 0;
-  for (uint64_t p : {a, a + kResetABytes - kChunk})
-    if (stale == 0 && (p + kChunk <= b || p >= b + kPinnedBytes)) stale = p;
-  INFO("A 0x" << std::hex << a << ", B 0x" << b);
+  for (uint64_t p : {probe, a, a + kResetABytes - kChunk})
+    if (stale == 0 && p >= a && p + kChunk <= a + kResetABytes &&
+        (p + kChunk <= b || p >= b + kPinnedBytes))
+      stale = p;
+  INFO("A 0x" << std::hex << a << ", B 0x" << b << ", probe 0x" << probe);
   REQUIRE(stale != 0);
 
   std::vector<uint8_t> events = read_bytes(archive / "events.bin");
@@ -2844,7 +2861,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_RecordAfterReset) {
   patch_snapshot(events, spans, kls, 1, 0, /*ptr*/ 0, stale);
   write_bytes(archive / "events.bin", events);
 
-  auto [rc, out] = replay(archive, "--continue-on-error");
+  auto [rc, out] = replay(archive, "--continue-on-error", one_gpu);
   INFO("Replay exit: " << rc << "\nReplay:\n" << out);
   CHECK(rc < 128);
   CHECK(count_of(out, "names no live allocation") == 1);
