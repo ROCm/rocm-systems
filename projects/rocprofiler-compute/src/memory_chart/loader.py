@@ -144,6 +144,11 @@ class Layouts:
         return cls._by_arch.get(canonical_config_arch(gpu_arch) or "")
 
 
+def has_layout(arch: str) -> bool:
+    """Whether the loader has a chart; malformed layout errors still propagate."""
+    return Layouts.for_arch(arch) is not None
+
+
 def layout_files() -> list[Path]:
     return sorted(LAYOUTS_DIR.glob("*.json"))
 
