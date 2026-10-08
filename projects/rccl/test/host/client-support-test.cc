@@ -1726,7 +1726,7 @@ TEST_F(RasClientSupportMicrotest, EventLoop_RecvPartialLine_WaitsForMore) {
 
 TEST_F(RasClientSupportMicrotest, EventLoop_ClientProtocol_EchoesServerProtocol) {
   struct rasClient* client = MakeClient();
-  ScriptRecvData("client protocol 2\n");
+  ScriptRecvData("CLIENT PROTOCOL 2\n");
   SetRevents(client, POLLIN);
   rasClientEventLoop(client, client->pfd);
   EXPECT_EQ(DrainSendQueue(client), "SERVER PROTOCOL " STR(NCCL_RAS_CLIENT_PROTOCOL) "\n");
@@ -1735,7 +1735,7 @@ TEST_F(RasClientSupportMicrotest, EventLoop_ClientProtocol_EchoesServerProtocol)
 
 TEST_F(RasClientSupportMicrotest, EventLoop_Timeout_Valid_SetsTimeoutAndOk) {
   struct rasClient* client = MakeClient();
-  ScriptRecvData("timeout 2.5\n");
+  ScriptRecvData("TiMeOuT 2.5\n");
   SetRevents(client, POLLIN);
   rasClientEventLoop(client, client->pfd);
   EXPECT_EQ(DrainSendQueue(client), "OK\n");
@@ -1773,7 +1773,7 @@ TEST_F(RasClientSupportMicrotest, EventLoop_Timeout_NonFinite_ReturnsError) {
 TEST_F(RasClientSupportMicrotest, EventLoop_SetFormatText_Ok) {
   struct rasClient* client = MakeClient();
   client->outputFormat = RAS_OUTPUT_JSON;
-  ScriptRecvData("set format text\n");
+  ScriptRecvData("SET FORMAT TEXT\n");
   SetRevents(client, POLLIN);
   rasClientEventLoop(client, client->pfd);
   EXPECT_EQ(DrainSendQueue(client), "OK\n");
@@ -1783,7 +1783,7 @@ TEST_F(RasClientSupportMicrotest, EventLoop_SetFormatText_Ok) {
 
 TEST_F(RasClientSupportMicrotest, EventLoop_SetFormatJson_Ok) {
   struct rasClient* client = MakeClient();
-  ScriptRecvData("set format json\n");
+  ScriptRecvData("SET FORMAT JSON\n");
   SetRevents(client, POLLIN);
   rasClientEventLoop(client, client->pfd);
   EXPECT_EQ(DrainSendQueue(client), "OK\n");
@@ -1803,7 +1803,7 @@ TEST_F(RasClientSupportMicrotest, EventLoop_SetFormatInvalid_ReturnsError) {
 TEST_F(RasClientSupportMicrotest, EventLoop_Status_SetsInitAndInvokesClientRun) {
   struct rasClient* client = MakeClient();
   g_netSendCollReqAllDone = false;  // stop at RAS_CLIENT_COMMS, avoid needing a full coll fixture
-  ScriptRecvData("status\n");
+  ScriptRecvData("STATUS\n");
   SetRevents(client, POLLIN);
   rasClientEventLoop(client, client->pfd);
   EXPECT_EQ(client->status, RAS_CLIENT_COMMS);
@@ -1825,7 +1825,7 @@ TEST_F(RasClientSupportMicrotest, EventLoop_StatusRunClosesClient_ReturnsImmedia
 TEST_F(RasClientSupportMicrotest, EventLoop_VerboseStatus_SetsInitVerboseAndInvokesClientRun) {
   struct rasClient* client = MakeClient();
   g_netSendCollReqAllDone = false;
-  ScriptRecvData("verbose status\n");
+  ScriptRecvData("VeRbOsE StAtUs\n");
   SetRevents(client, POLLIN);
   rasClientEventLoop(client, client->pfd);
   EXPECT_EQ(client->status, RAS_CLIENT_COMMS);
@@ -1859,7 +1859,7 @@ TEST_F(RasClientSupportMicrotest, EventLoop_Diagnostics_AlreadyInProgress_Reject
 TEST_F(RasClientSupportMicrotest, EventLoop_Diagnostics_Normal_StartsDiagInit) {
   struct rasClient* client = MakeClient();
   g_diagStartResult = ncclInProgress;  // stay at DIAG_INIT, don't fall through to DIAG_FINI
-  ScriptRecvData("diagnostics\n");
+  ScriptRecvData("DiAgNoStIcS\n");
   SetRevents(client, POLLIN);
   rasClientEventLoop(client, client->pfd);
   EXPECT_EQ(client->status, RAS_CLIENT_DIAG_INIT);
@@ -1868,7 +1868,7 @@ TEST_F(RasClientSupportMicrotest, EventLoop_Diagnostics_Normal_StartsDiagInit) {
 
 TEST_F(RasClientSupportMicrotest, EventLoop_MonitorBare_DefaultsToLifecycle) {
   struct rasClient* client = MakeClient();
-  ScriptRecvData("monitor\n");
+  ScriptRecvData("MoNiToR\n");
   SetRevents(client, POLLIN);
   rasClientEventLoop(client, client->pfd);
   EXPECT_EQ(DrainSendQueue(client), "OK\n");
@@ -1878,7 +1878,7 @@ TEST_F(RasClientSupportMicrotest, EventLoop_MonitorBare_DefaultsToLifecycle) {
 
 TEST_F(RasClientSupportMicrotest, EventLoop_MonitorWithGroups_SetsMask) {
   struct rasClient* client = MakeClient();
-  ScriptRecvData("monitor lifecycle,trace\n");
+  ScriptRecvData("MONITOR LIFECYCLE,TRACE\n");
   SetRevents(client, POLLIN);
   rasClientEventLoop(client, client->pfd);
   EXPECT_EQ(DrainSendQueue(client), "OK\n");
@@ -1888,7 +1888,7 @@ TEST_F(RasClientSupportMicrotest, EventLoop_MonitorWithGroups_SetsMask) {
 
 TEST_F(RasClientSupportMicrotest, EventLoop_MonitorAll_SetsAllMask) {
   struct rasClient* client = MakeClient();
-  ScriptRecvData("monitor all\n");
+  ScriptRecvData("MONITOR ALL\n");
   SetRevents(client, POLLIN);
   rasClientEventLoop(client, client->pfd);
   EXPECT_EQ(DrainSendQueue(client), "OK\n");
@@ -1907,7 +1907,7 @@ TEST_F(RasClientSupportMicrotest, EventLoop_MonitorInvalidToken_ReturnsError) {
 
 TEST_F(RasClientSupportMicrotest, EventLoop_ControlProfilerMask_Valid_BroadcastsAndOk) {
   struct rasClient* client = MakeClient();
-  ScriptRecvData("control profiler_mask all\n");
+  ScriptRecvData("CoNtRoL PrOfIlEr_MaSk ALL\n");
   SetRevents(client, POLLIN);
   rasClientEventLoop(client, client->pfd);
   EXPECT_EQ(DrainSendQueue(client), "OK\n");
@@ -2765,6 +2765,25 @@ TEST_F(RasClientSupportMicrotest, RunComms_CollOpCountsMismatch_PrintsBreakdown)
   client->coll = MakeCollective(BuildRasCollComms({MakeCommSpec(2, {r0, r1})}), {MakeAddr(100), MakeAddr(200)});
   std::string out = RunCommsAndDrain(client);
   EXPECT_NE(out.find("Communicator ranks have different Broadcast operation counts"), std::string::npos);
+  EXPECT_NE(out.find("launched up to operation"), std::string::npos);
+  FreeClient(client);
+}
+
+TEST_F(RasClientSupportMicrotest, RunComms_AllReduceCountsMismatch_PrintsBreakdown) {
+  struct rasPeerInfo peers[] = {MakePeer(100), MakePeer(200)};
+  rasPeers = peers;
+  nRasPeers = 2;
+
+  RankSpec r0{0, 0};
+  r0.collOpCounts[4] = 11; // AllReduce; earlier collective counts remain equal
+  RankSpec r1{1, 1};
+  r1.collOpCounts[4] = 13;
+  struct rasClient* client = MakeClient();
+  client->status = RAS_CLIENT_COMMS;
+  client->coll = MakeCollective(BuildRasCollComms({MakeCommSpec(2, {r0, r1})}), {MakeAddr(100), MakeAddr(200)});
+  std::string out = RunCommsAndDrain(client);
+  EXPECT_NE(out.find("Communicator ranks have different AllReduce operation counts"), std::string::npos);
+  EXPECT_EQ(out.find("Communicator ranks have different Broadcast operation counts"), std::string::npos);
   EXPECT_NE(out.find("launched up to operation"), std::string::npos);
   FreeClient(client);
 }
