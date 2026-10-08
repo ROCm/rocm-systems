@@ -50,7 +50,10 @@ namespace intercept_table
 namespace
 {
 template <rocprofiler_intercept_table_t... Idx>
-using library_sequence_t = std::integer_sequence<rocprofiler_intercept_table_t, Idx...>;
+struct library_sequence_t
+{
+    static constexpr size_t size() { return sizeof...(Idx); }
+};
 
 #define ROCPROFILER_INTERCEPT_TABLE_KIND_STRING(TABLE, NAME)                                       \
     template <>                                                                                    \
@@ -169,7 +172,7 @@ execute_intercepts(rocprofiler_intercept_table_t lib,
                    uint64_t                      lib_version,
                    uint64_t                      lib_instance,
                    std::tuple<ApiTableT*...>     tables,
-                   std::integer_sequence<rocprofiler_intercept_table_t, Idx...>)
+                   library_sequence_t<Idx...>)
 {
     auto execute = [lib, lib_version, lib_instance, tables](auto& notifier) {
         if(((lib & notifier.value) == notifier.value))

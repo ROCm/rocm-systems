@@ -28,6 +28,8 @@
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/internal_threading.h>
 
+#include <functional>
+
 namespace rocprofiler
 {
 namespace sdk
@@ -46,9 +48,6 @@ struct handle_hasher
 
 namespace std
 {
-template <typename Tp>
-struct hash;
-
 #define ROCPROFILER_CXX_SPECIALIZE_HANDLE_HASHER(TYPE)                                             \
     template <>                                                                                    \
     struct hash<TYPE> : public rocprofiler::sdk::hash::handle_hasher<TYPE>                         \

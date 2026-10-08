@@ -904,7 +904,11 @@ enable_queue_intercept()
 {
     for(const auto& itr : context::get_registered_contexts())
     {
+#ifdef _LIBCPP_VERSION
+        constexpr auto expected_context_size = 296UL;
+#else
         constexpr auto expected_context_size = 224UL;
+#endif
         static_assert(
             sizeof(context::context) == expected_context_size,
             "If you added a new field to context struct, make sure there is a check here if it "
