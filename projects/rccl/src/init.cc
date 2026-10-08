@@ -2542,6 +2542,56 @@ static ncclResult_t getParentRanks(int parentRanks, int parentRank, int* exclude
   return ncclSuccess;
 }
 
+// Logs XGMI link width/speed from the amdgpu gpu_metrics sysfs table (what "amd-smi xgmi"
+// reports as bit_rate/max_bandwidth). Field offsets depend on the table version (format 1).
+static void rcclLogXgmiSysfsMetrics(struct ncclComm* comm) {
+  if (ncclDebugLevel < NCCL_LOG_INFO || !(ncclDebugMask & NCCL_INIT)) return;
+  char busId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+  if (int64ToBusId(comm->busId, busId) != ncclSuccess) return;
+  char path[PATH_MAX];
+  snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/gpu_metrics", busId);
+
+  uint8_t buf[128];
+  ssize_t len = -1;
+  int fd = open(path, O_RDONLY);
+  if (fd >= 0) {
+    len = read(fd, buf, sizeof(buf));
+    close(fd);
+  }
+  if (len < 4) {
+    INFO(NCCL_INIT, "XGMI: rank %d busId %s cannot read %s", comm->rank, busId, path);
+    return;
+  }
+  uint16_t structSize;
+  memcpy(&structSize, buf, sizeof(structSize));
+  int format = buf[2], content = buf[3];
+  int offset = -1; // of xgmi_link_width; xgmi_link_speed follows
+  if (format == 1) {
+    switch (content) {
+    case 4: offset = 52; break;
+    case 5: offset = 116; break;
+    case 6: offset = 64; break;
+    case 7:
+    case 8: offset = 72; break;
+    }
+  }
+  if (offset < 0 || offset + 4 > len || offset + 4 > structSize) {
+    INFO(NCCL_INIT, "XGMI: rank %d busId %s gpu_metrics v%d.%d has no known XGMI fields", comm->rank, busId, format,
+         content);
+    return;
+  }
+  uint16_t width, speed;
+  memcpy(&width, buf + offset, sizeof(width));
+  memcpy(&speed, buf + offset + 2, sizeof(speed));
+  if (width == UINT16_MAX || speed == UINT16_MAX) {
+    INFO(NCCL_INIT, "XGMI: rank %d busId %s gpu_metrics v%d.%d link width/speed not reported", comm->rank, busId,
+         format, content);
+    return;
+  }
+  INFO(NCCL_INIT, "XGMI: rank %d busId %s gpu_metrics v%d.%d link width %u speed %u Gb/s max bandwidth %u Gb/s",
+       comm->rank, busId, format, content, width, speed, (unsigned)width * speed);
+}
+
 static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   struct ncclCommInitRankAsyncJob* job = (struct ncclCommInitRankAsyncJob*)job_;
   ncclComm_t comm = job->comm;
@@ -2837,6 +2887,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     INFO(NCCL_INIT, "%s comm %p rank %d nranks %d cudaDev %d nvmlDev %d busId %lx commId 0x%llx - Init COMPLETE",
          job->funcName, comm, comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, comm->busId, commIdHash);
   }
+  rcclLogXgmiSysfsMetrics(comm);
   sum_timers = 0.0;
   for (int it = 1; it < TIMERS_INIT_COUNT; ++it) sum_timers += (timers[it] / 1e9);
   INFO(NCCL_INIT | NCCL_PROFILE,
