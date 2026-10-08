@@ -10,6 +10,7 @@ import pytest
 
 from utils.metrics.aggregation import merge_dispatch_weighted_avg
 from utils.metrics.expression import build_eval_string, parse_weighted_avg_submetrics
+from utils.metrics.pass_provenance import METRIC_ROW_PASS_ATTR, PassLayout
 from utils.metrics.weighted_avg import (
     evaluate_weighted_avg_parent,
     scan_weighted_avg_parents,
@@ -40,14 +41,16 @@ def test_merge_dispatch_weighted_avg_two_submetrics_three_dispatches():
         pd.Series({1: 10.0, 2: 20.0, 3: 30.0}),
         pd.Series({1: 5.0, 2: 10.0, 3: 15.0}),
     ]
-    # dispatch 1: (100*10 + 90*5) / 15 = 96.666...
     result = merge_dispatch_weighted_avg(ratios, weights)
-    expected_dispatch = [
+    per_dispatch = [
         (100 * 10 + 90 * 5) / 15,
         (80 * 20 + 70 * 10) / 30,
         (60 * 30 + 50 * 15) / 45,
     ]
-    assert result == pytest.approx(sum(expected_dispatch) / len(expected_dispatch))
+    pooled_num = (100 * 10 + 90 * 5) + (80 * 20 + 70 * 10) + (60 * 30 + 50 * 15)
+    pooled_den = 15 + 30 + 45
+    assert result == pytest.approx(pooled_num / pooled_den)
+    assert result != pytest.approx(sum(per_dispatch) / len(per_dispatch))
 
 
 @pytest.mark.misc
@@ -94,7 +97,8 @@ def test_evaluate_weighted_avg_parent_end_to_end():
         {},
         {},
     )
-    assert result == pytest.approx(83.3333333333, rel=1e-6)
+    # Pooled (M*C) / C across dispatches, not the mean of per-dispatch ratios.
+    assert result == pytest.approx(87.5, rel=1e-6)
 
 
 @pytest.mark.misc
@@ -109,3 +113,45 @@ def test_scan_weighted_avg_parents_reads_pilot_fixture():
             "hbm_write_sub",
         ],
     ) in parents
+
+
+@pytest.mark.misc
+def test_weight_from_another_pass_does_not_change_the_number():
+    """A weight that lives on another pass must not move the composite."""
+    raw_pmc_df = pd.DataFrame({
+        "Dispatch_ID": [1],
+        "SQ_A": [100.0],
+        "SQ_B": [0.0],
+        "TCC_READ": [1.0],
+        "TCC_WRITE": [1.0],
+    })
+    df = pd.DataFrame(
+        [
+            ["1", "read_sub", build_eval_string("SUM(SQ_A)")],
+            ["2", "write_sub", build_eval_string("SUM(SQ_B)")],
+        ],
+        columns=["Metric_ID", "Metric", "Avg"],
+    ).set_index("Metric_ID")
+    df.attrs[METRIC_ROW_PASS_ATTR] = {"1": "pmc_perf_1", "2": "pmc_perf_1"}
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TCC_READ"}),
+            "pmc_perf_1": frozenset({"SQ_A", "SQ_B", "TCC_WRITE"}),
+        },
+        duplicated=frozenset(),
+    )
+    # Reading TCC_READ from the other pass would yield (100*1 + 0*1) / 2 = 50.
+    result = evaluate_weighted_avg_parent(
+        ["read_sub", "write_sub"],
+        {
+            "read_sub": {"weight_counter": "TCC_READ"},
+            "write_sub": {"weight_counter": "TCC_WRITE"},
+        },
+        df,
+        raw_pmc_df,
+        {},
+        {},
+        pass_layout=layout,
+    )
+    assert result == "N/A"

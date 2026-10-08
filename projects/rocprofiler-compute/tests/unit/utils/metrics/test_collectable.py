@@ -12,7 +12,9 @@ import pytest
 from utils import schema
 from utils.metrics.aggregation import merge_dispatch_collect_sum
 from utils.metrics.collectable import (
+    COLLECT_RATIO_SPECS_ATTR,
     COLLECT_SUM_SPECS_ATTR,
+    COLLECTABLE_IDS_ATTR,
     WEIGHTED_AVG_ATTR,
     WEIGHTED_AVG_SUBS_ATTR,
     CompositeKind,
@@ -58,7 +60,8 @@ def test_merge_dispatch_collect_sum_two_parts():
         pd.Series({1: 60.0, 2: 80.0}),
         pd.Series({1: 40.0, 2: 20.0}),
     ]
-    assert merge_dispatch_collect_sum(ratios) == pytest.approx(100.0)
+    # Sum of fragment values, not the mean of the two per-dispatch sums (100).
+    assert merge_dispatch_collect_sum(ratios) == pytest.approx(200.0)
 
 
 @pytest.mark.misc
@@ -125,4 +128,74 @@ def test_collect_sum_pipeline_end_to_end():
     table_id = next(tid for tid, dt in ac.dfs_type.items() if dt == "metric_table")
     parent = ac.dfs[table_id]
     row = parent[parent["Metric"] == "hbm_total_traffic"]
-    assert row.iloc[0]["Avg"] == pytest.approx(165.0)
+    # 100+100+80+50. A mean of the per-dispatch sums would be 165.
+    assert row.iloc[0]["Avg"] == pytest.approx(330.0)
+
+
+@pytest.mark.misc
+def test_composite_order_is_topological_and_id_is_the_lookup_key():
+    df = pd.DataFrame(
+        [
+            ["1", "child"],
+            ["2", "parent"],
+            ["3", "_collect.part"],
+        ],
+        columns=["Metric_ID", "Metric"],
+    ).set_index("Metric_ID")
+    df.attrs[COLLECTABLE_IDS_ATTR] = {"3": "collect.part"}
+    df.attrs[COLLECT_SUM_SPECS_ATTR] = {
+        "1": ["_collect.part"],
+        "2": ["child"],
+    }
+    graph = build_metric_eval_graph(df)
+    assert graph.collectable_ids["collect.part"] == "_collect.part"
+    assert [item.metric_name for item in graph.composite_order()] == [
+        "child",
+        "parent",
+    ]
+
+
+@pytest.mark.misc
+def test_composite_cycle_is_left_unset():
+    df = pd.DataFrame(
+        [["1", "left"], ["2", "right"]],
+        columns=["Metric_ID", "Metric"],
+    ).set_index("Metric_ID")
+    df.attrs[COLLECT_SUM_SPECS_ATTR] = {
+        "1": ["right"],
+        "2": ["left"],
+    }
+    graph = build_metric_eval_graph(df)
+    assert graph.composite_order() == []
+
+
+@pytest.mark.misc
+def test_collect_ratio_minus_negates_the_fragment():
+    from utils.metrics.collectable import apply_composite_metrics
+
+    raw = pd.DataFrame({
+        "Dispatch_ID": [1, 2],
+        "SQ_A": [10.0, 30.0],
+        "SQ_B": [4.0, 6.0],
+        "SQ_C": [2.0, 4.0],
+    })
+    df = pd.DataFrame(
+        [
+            ["1", "num_a", "to_sum(raw_pmc_df['SQ_A'])"],
+            ["2", "num_b", "to_sum(raw_pmc_df['SQ_B'])"],
+            ["3", "den", "to_sum(raw_pmc_df['SQ_C'])"],
+            ["4", "parent", ""],
+        ],
+        columns=["Metric_ID", "Metric", "Avg"],
+    ).set_index("Metric_ID")
+    df.attrs[COLLECT_RATIO_SPECS_ATTR] = {
+        "4": {"numerator": ["num_a", "-num_b"], "denominator": ["den"]},
+    }
+    df.attrs["collectable_expr_cache"] = {
+        "num_a": "to_sum(raw_pmc_df['SQ_A'])",
+        "num_b": "to_sum(raw_pmc_df['SQ_B'])",
+        "den": "to_sum(raw_pmc_df['SQ_C'])",
+    }
+    apply_composite_metrics({1: df}, {1: "metric_table"}, raw, {}, {})
+    # (10-4 + 30-6) / (2+4) = 30/6 = 5. Mean of ratios would be (3 + 6) / 2.
+    assert df.at["4", "Avg"] == pytest.approx(5.0)

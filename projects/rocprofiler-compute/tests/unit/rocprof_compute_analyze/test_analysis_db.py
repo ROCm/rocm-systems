@@ -24,6 +24,7 @@ from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSy
 from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
 from rocprof_compute_analyze.analysis_db import (
     SourceFrameCollector,
+    _visible_metric_rows,
     db_analysis,
     filter_dispatch_frame,
     report_evaluation_diagnostics,
@@ -3662,3 +3663,12 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
         assert (df[col] == 42.0).all()
 
     assert evaluated_row_counts == [2] * (NUM_KERNELS * len(roofline_metrics))
+
+
+def test_visible_metric_rows_drop_collectable_names():
+    frame = pd.DataFrame({
+        "Metric": ["AI HBM", "_collect.flops", "VALU FLOPs"],
+        "Value": ["", "to_sum(raw_pmc_df['SQ_A'])", "1"],
+    })
+    names = [row["Metric"] for _metric_id, row in _visible_metric_rows(frame)]
+    assert names == ["AI HBM", "VALU FLOPs"]
