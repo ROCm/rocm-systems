@@ -5,6 +5,7 @@
  ************************************************************************/
 #include "TestBed.hpp"
 #include "CallCollectiveForked.hpp"
+#include "common/ProcessIsolatedTestRunner.hpp"
 
 namespace RcclUnitTesting
 {
@@ -813,5 +814,25 @@ namespace RcclUnitTesting
     }
     testBed.DestroyComms();
     testBed.Finalize();
+  }
+
+  // A NULL comm must be rejected like ncclAllReduceConfig rejects it, not dereferenced before the comm check.
+  TEST(AllReduce, NullCommReturnsInvalidArgument)
+  {
+    RUN_ISOLATED_TEST("AllReduce_NullCommReturnsInvalidArgument", []()
+    {
+      EXPECT_EQ(ncclInvalidArgument, ncclAllReduce(nullptr, nullptr, 16, ncclFloat32, ncclSum, nullptr, nullptr));
+    });
+  }
+
+  // Inside a group the rejection must also be recorded as the group error, so ncclGroupEnd reports it.
+  TEST(AllReduce, NullCommInsideGroupFailsGroupEnd)
+  {
+    RUN_ISOLATED_TEST("AllReduce_NullCommInsideGroupFailsGroupEnd", []()
+    {
+      ASSERT_EQ(ncclSuccess, ncclGroupStart());
+      EXPECT_EQ(ncclInvalidArgument, ncclAllReduce(nullptr, nullptr, 16, ncclFloat32, ncclSum, nullptr, nullptr));
+      EXPECT_EQ(ncclInvalidArgument, ncclGroupEnd());
+    });
   }
 }

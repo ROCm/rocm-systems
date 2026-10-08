@@ -755,6 +755,9 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   NVTX3_FUNC_WITH_PARAMS(AllReduce, NcclNvtxParamsAllReduce,
                          NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), op, datatype));
 
+  // Slice steps and implementation selection read comm, so reject a NULL or revoked comm first.
+  NCCLCHECK(ncclEnqueueCommCheck(comm, "AllReduce"));
+
   // RCCL update slice steps for AllReduce if single node
   const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
   int chunkSteps = (isGfx950 && comm->rcclUseOneSlice) ? 1 : ALLREDUCE_CHUNKSTEPS;
