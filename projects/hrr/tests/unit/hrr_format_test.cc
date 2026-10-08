@@ -323,7 +323,7 @@ HRR_TEST_CASE(Unit_HRR_TranslatePtr_TightestEnclosing) {
 //
 // The playback teardown loop releases each alloc_map entry with the API that
 // matches its AllocKind (Device -> hipFree, HostMalloc -> hipHostFree, and
-// HostRegister / DevicePtrAlias -> not via hipFree).  Passing a host pointer to
+// HostRegister / DevicePtrAlias / HostUnregistered -> not via hipFree).  Passing a host pointer to
 // hipFree returns errors and can corrupt allocator bookkeeping.  These tests
 // verify the kind tagging the dispatch relies on: record_alloc preserves the
 // kind, and the free-routing decision (mirrored from hrr_playback.cpp) sends a
@@ -339,6 +339,7 @@ bool kind_uses_hipFree(AllocKind k) {
     case AllocKind::HostMalloc:     return false;  // hipHostFree
     case AllocKind::HostRegister:   return false;  // host_reg_bufs path
     case AllocKind::DevicePtrAlias: return false;  // not separately freed
+    case AllocKind::HostUnregistered: return false;  // host_reg_bufs path
   }
   return false;
 }
@@ -350,9 +351,9 @@ bool kind_uses_hipFree(AllocKind k) {
  *   - Record one allocation of each AllocKind into a PlaybackContext.
  *   - Verify record_alloc preserved each entry's kind.
  *   - Verify the free-dispatch decision routes ONLY the Device entry to hipFree;
- *     every host-backed pointer (HostMalloc / HostRegister / DevicePtrAlias) is
- *     routed away from hipFree.  Guards against re-introducing a hipFree call on
- *     a host pointer at teardown.
+ *     every host-backed pointer (HostMalloc / HostRegister / DevicePtrAlias /
+ *     HostUnregistered) is routed away from hipFree.  Guards against
+ *     re-introducing a hipFree call on a host pointer at teardown.
  */
 HRR_TEST_CASE(Unit_HRR_AllocKind_FreeDispatch) {
   PlaybackContext ctx;
@@ -360,17 +361,20 @@ HRR_TEST_CASE(Unit_HRR_AllocKind_FreeDispatch) {
   void* hmal  = reinterpret_cast<void*>(static_cast<uintptr_t>(0x20000000u));
   void* hreg  = reinterpret_cast<void*>(static_cast<uintptr_t>(0x30000000u));
   void* alias = reinterpret_cast<void*>(static_cast<uintptr_t>(0x40000000u));
+  void* hunreg = reinterpret_cast<void*>(static_cast<uintptr_t>(0x50000000u));
 
   ctx.record_alloc(0x1000ULL, dev,   256, AllocKind::Device);
   ctx.record_alloc(0x2000ULL, hmal,  256, AllocKind::HostMalloc);
   ctx.record_alloc(0x3000ULL, hreg,  256, AllocKind::HostRegister);
   ctx.record_alloc(0x4000ULL, alias, 256, AllocKind::DevicePtrAlias);
+  ctx.record_alloc(0x5000ULL, hunreg, 256, AllocKind::HostUnregistered);
 
-  REQUIRE(ctx.alloc_map.size() == 4);
+  REQUIRE(ctx.alloc_map.size() == 5);
   CHECK(ctx.alloc_map.at(0x1000ULL).kind == AllocKind::Device);
   CHECK(ctx.alloc_map.at(0x2000ULL).kind == AllocKind::HostMalloc);
   CHECK(ctx.alloc_map.at(0x3000ULL).kind == AllocKind::HostRegister);
   CHECK(ctx.alloc_map.at(0x4000ULL).kind == AllocKind::DevicePtrAlias);
+  CHECK(ctx.alloc_map.at(0x5000ULL).kind == AllocKind::HostUnregistered);
 
   // Only the Device entry may be released via hipFree.
   for (const auto& [rec, entry] : ctx.alloc_map) {
