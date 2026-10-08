@@ -84,6 +84,8 @@ struct ncclShmemData {
   int workSize;
   uint64_t workCounter;
   bool profilerEnabled;
+  // ncclFunc_t this batch's completions are counted under.
+  uint8_t func;
   struct ncclShmemGroup groups[NCCL_MAX_GROUPS];
 
   alignas(16) char workStorage[ncclMaxDevWorkBatchBytes()];
@@ -337,6 +339,7 @@ __device__ __forceinline__ void loadWorkBatchToShmem(int tid, int tn, struct ncc
         ncclShmem.workType = (enum ncclDevWorkType)batch.workType;
         ncclShmem.nWorks = workCursor;
         ncclShmem.funcId = batch.funcId;
+        ncclShmem.func = batch.func;
       }
       break;
     }
@@ -378,21 +381,16 @@ struct RunWorkBatch<ncclFuncAllGatherV, T, RedOp, NCCL_ALGO_RING, Proto>;
 #define STOP 1
 #define FINI 2
 
+// These kernels record only KernelCh start/stop. KernelPhase instrumentation is
+// symmetric-only: the open/close barriers it measures exist in the symmetric
+// kernels, so stamping them here would report boundaries that carry no meaning.
+// Items are strided by workSize, not sizeof(ncclDevWorkColl), which is smaller for
+// registered collectives. Bcast work carries no profiling bit.
 __device__ __forceinline__ bool profilerEnabled(int workItemIdx) {
-  return (ncclShmem.workType == ncclDevWorkTypeP2p) ?
-           ((struct ncclDevWorkP2p*)ncclShmem.workStorage)[workItemIdx].profilerEnabled :
-           ((struct ncclDevWorkColl*)ncclShmem.workStorage)[workItemIdx].profilerEnabled;
-}
-
-__device__ __forceinline__ void profilerPhase(int phaseId) {
-  uint64_t ts = globaltimer();
-  int idx = 0;
-  uint64_t wc = ncclShmem.channel.workCounter + 1;
-  for (; wc <= ncclShmem.channel.workCounter + ncclShmem.nWorks; wc++) {
-    if (!profilerEnabled(idx++)) continue;
-    int slot = wc % MAX_PROFILER_EVENTS_PER_CHANNEL;
-    ncclShmem.comm.workPhases[ncclShmem.channelId].data[slot].timestamps[phaseId] = ts;
-  }
+  char* work = ncclShmem.workStorage + workItemIdx * ncclShmem.workSize;
+  if (ncclShmem.workType == ncclDevWorkTypeP2p) return ((struct ncclDevWorkP2p*)work)->profilerEnabled;
+  if (ncclShmem.workType == ncclDevWorkTypeBcast) return false;
+  return ((struct ncclDevWorkColl*)work)->profilerEnabled;
 }
 
 // Specialized here for non-P2p (Coll and CollReg)
@@ -416,11 +414,6 @@ struct RunWorkBatch {
       __syncthreads();
     }
 
-    // Block-uniform gate so a profiler-off launch keeps the baseline cost (no extra
-    // sync/stamps). profilerEnabled(0) is uniform; nWorks>0 guards workStorage[0].
-    bool profOn = (ncclShmem.nWorks > 0) && profilerEnabled(0);
-    if (profOn && threadIdx.x == 0) profilerPhase(NCCL_KERNEL_PHASE_AFTER_OPEN); // end of initial sync
-
 #pragma unroll 1
     for (int w = 0; w < ncclShmem.nWorks; w++) {
       struct ncclDevWorkColl* work = (struct ncclDevWorkColl*)(ncclShmem.workStorage + w * ncclShmem.workSize);
@@ -432,9 +425,10 @@ struct RunWorkBatch {
       int subtn = work->nWarps * WARP_SIZE;
 #ifdef ENABLE_WARP_SPEED
       if (tid < subtn) {
+        int ch = ncclShmem.warpChannelId[tid / WARP_SIZE];
         if (ncclShmem.warpComm == 0 || Algo != NCCL_ALGO_RING)
           RunWorkColl<Fn, T, RedOp, Algo, Proto>().run(tid, subtn, work);
-        else if (ncclShmem.warpChannelId[tid / WARP_SIZE] >= 0)
+        else if (ch >= work->channelLo && ch <= work->channelHi)
           RunWorkColl<Fn, T, RedOp, Algo, Proto>().run(tid % WARP_SIZE, WARP_SIZE, work);
       }
 #else
@@ -444,53 +438,88 @@ struct RunWorkBatch {
       if (tid < subtn) RunWorkColl<Fn, T, RedOp, Algo, Proto>().run(tid, subtn, work);
 #endif
     }
-    // End of compute. Sync so thread 0's stamp reflects the last worker finishing.
-    if (profOn) {
-      __syncthreads();
-      if (threadIdx.x == 0) profilerPhase(NCCL_KERNEL_PHASE_BEFORE_CLOSE);
-    }
   }
 };
+
+static_assert(NCCL_NUM_PROGRESS_COUNTERS <= 64, "Progress-counter slots must fit in collOpActive's bitmask");
+
+// Return this batch's progress-counter slot, or -1 for an empty batch.
+// START and STOP see the same batch until loadWorkBatchToShmem runs.
+__device__ __forceinline__ int progressCounterBatchSlot() {
+  if (ncclShmem.nWorks == 0) return -1;
+  return (int)ncclShmem.func;
+}
+
+// Count completed work owned by this channel at STOP/FINI while workStorage is stable.
+__device__ __forceinline__ uint32_t progressCounterScanBatch() {
+  uint32_t count = 0;
+  if (ncclShmem.workType == ncclDevWorkTypeBcast) {
+    // Batched Broadcast completion is owned by channel 0.
+    return ncclShmem.channelId == 0 ? (uint32_t)ncclShmem.nWorks : 0;
+  }
+  if (ncclShmem.workType == ncclDevWorkTypeP2p) {
+    for (int w = 0; w < ncclShmem.nWorks; w++) {
+      struct ncclDevWorkP2p* work = (struct ncclDevWorkP2p*)(ncclShmem.workStorage + w * ncclShmem.workSize);
+      if ((int)ncclShmem.channelId == (int)work->channelBase) count++;
+    }
+  } else {
+    for (int w = 0; w < ncclShmem.nWorks; w++) {
+      struct ncclDevWorkColl* work = (struct ncclDevWorkColl*)(ncclShmem.workStorage + w * ncclShmem.workSize);
+      if ((int)ncclShmem.channelId == (int)work->channelLo) count++;
+    }
+  }
+  return count;
+}
+
+__device__ __forceinline__ void progressCounterPublishCompletedSlot(int slot, uint32_t count) {
+  struct ncclProgressCountersBlock* counters = ncclShmem.comm.progressCounters;
+  if (count == 0 || counters == nullptr) return;
+  counters->completedTimeNs[slot] = globaltimer();
+  // Publish the count after the timestamp. Future consumers that require
+  // stronger snapshot ordering may need a device fence here.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  __scoped_atomic_fetch_add(&counters->completedWorkCount[slot], (uint64_t)count,
+                            __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+#else
+  asm volatile("red.global.add.u64 [%0], %1;" : : "l"(&counters->completedWorkCount[slot]), "l"((uint64_t)count));
+#endif
+}
 
 __device__ __forceinline__ void profiler(int action) {
   if (threadIdx.x == 0) {
     int idx = 0;
     uint64_t wc = ncclShmem.channel.workCounter + 1;
     if (action == START) {
-      // workStarted timestamp+counter share one 16B slot (single cache line), so no
-      // fence is needed; the BEGIN phase stamp is ordered by STOP's fence below.
+      // timestamp+counter share one 16B slot (single cache line), so publishing
+      // them together needs no fence.
+      // Resolve this batch's progress-counter slot and mark the channel active.
+      if (ncclShmem.comm.progressCounters != nullptr) {
+        int slot = progressCounterBatchSlot();
+        if (slot >= 0) ncclShmem.comm.progressCounters->collOpActive[ncclShmem.channelId] = 1ull << slot;
+      }
       for (; wc <= ncclShmem.channel.workCounter + ncclShmem.nWorks; wc++) {
         if (!profilerEnabled(idx++)) continue;
         uint64_t ts = globaltimer();
         int slot = wc % MAX_PROFILER_EVENTS_PER_CHANNEL;
-        ncclShmem.comm.workPhases[ncclShmem.channelId].data[slot].timestamps[NCCL_KERNEL_PHASE_BEGIN] = ts;
         ncclShmem.comm.workStarted[ncclShmem.channelId].data[slot].timestamp = ts;
         ncclShmem.comm.workStarted[ncclShmem.channelId].data[slot].counter = wc;
       }
     } else {
-      bool fenceNeeded = false;
       for (; wc <= ncclShmem.channel.workCounter + ncclShmem.nWorks; wc++) {
         if (!profilerEnabled(idx++)) continue;
         uint64_t ts = globaltimer();
         int slot = wc % MAX_PROFILER_EVENTS_PER_CHANNEL;
         ncclShmem.comm.workCompleted[ncclShmem.channelId].data[slot].timestamp = ts;
-        ncclShmem.comm.workPhases[ncclShmem.channelId].data[slot].timestamps[NCCL_KERNEL_PHASE_END] = ts;
-        fenceNeeded = true;
-      }
-      // workPhases stamps span the kernel and straddle cache lines, so fence once
-      // before publishing the counters to order all phase stamps ahead of them.
-      if (fenceNeeded) {
-        __threadfence_system();
-        idx = 0;
-        for (uint64_t wc2 = ncclShmem.channel.workCounter + 1; wc2 <= ncclShmem.channel.workCounter + ncclShmem.nWorks;
-             wc2++) {
-          if (!profilerEnabled(idx++)) continue;
-          int slot = wc2 % MAX_PROFILER_EVENTS_PER_CHANNEL;
-          ncclShmem.comm.workPhases[ncclShmem.channelId].data[slot].counter = wc2;
-          ncclShmem.comm.workCompleted[ncclShmem.channelId].data[slot].counter = wc2;
-        }
+        ncclShmem.comm.workCompleted[ncclShmem.channelId].data[slot].counter = wc;
       }
       ncclShmem.channel.workCounter += ncclShmem.nWorks;
+      // Do not report aborted work as completed; leave its active mask set.
+      if (ncclShmem.aborted == 0 && ncclShmem.comm.progressCounters != nullptr) {
+        int slot = progressCounterBatchSlot();
+        if (slot >= 0) ncclShmem.comm.progressCounters->collOpActive[ncclShmem.channelId] = 0;
+        progressCounterPublishCompletedSlot(slot, progressCounterScanBatch());
+        // No system fence; counter-monitor snapshots are diagnostic and may be stale.
+      }
       if (action == FINI)
         ((ncclKernelCommAndChannels*)ncclShmem.args.comm)->channels[ncclShmem.channelId].workCounter =
           ncclShmem.channel.workCounter;
@@ -510,6 +539,12 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   int localWarpId = tid / WARP_SIZE;
   int globalWarpId = (warpCount * blockIdx.x) + localWarpId;
   int laneId = tid % WARP_SIZE;
+  // Under WarpSpeed the launch grid is compressed: block b covers logical
+  // channels [b*warpsPerBlock .. (b+1)*warpsPerBlock-1]. Map blockIdx.x to
+  // the lead warp's index among enabled channels for channelId/workCounter.
+  int channelNth = args->warpLevelComm ? (warpCount * blockIdx.x) : blockIdx.x;
+#else
+  int channelNth = blockIdx.x;
 #endif
   // Copy kernel args to shmem and then only read those. Otherwise the compiler
   // will end up putting the args into thread local stack which is very wasteful.
@@ -532,7 +567,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       if (args->channelMask.masks[i] & (1ull << x)) {
         y = __popcll(args->channelMask.masks[i] & ((1ull << x) - 1));
         y = total + y;
-        if (blockIdx.x == y) {
+        if (channelNth == y) {
           // channelId is the absolute bit position in the global mask:
           // i*CHANNELS_PER_MASK_WORD + x. Using `x + total` was only correct
           // when prior mask words were densely packed (which broke for sparse
@@ -547,7 +582,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         if (args->channelMask.masks[i] & (1ull << x)) {
           y = __popcll(args->channelMask.masks[i] & ((1ull << x) - 1));
           y = y + total;
-          if (blockIdx.x == y) {
+          if (channelNth == y) {
             ncclShmem.channelId = x + i * CHANNELS_PER_MASK_WORD;
             break;
           }
@@ -612,7 +647,14 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       // Coverity reports a possible thread divergence due to not all threads participating in the collective.
       // However, the code ensures that the participation is on a per-warp basis.
       // coverity[device_thread_diverged:FALSE]
+#ifdef ENABLE_WARP_SPEED
+      // batchZero is dense in enabled-channel order (finishPlan), not keyed by
+      // absolute channel id. WarpSpeed packs warpCount logical channels per block.
+      int batchIx = args->warpLevelComm ? (warpCount * blockIdx.x) : blockIdx.x;
+      loadWorkBatchToShmem(subtid, subtn, args, batchIx);
+#else
       loadWorkBatchToShmem(subtid, subtn, args, /*batchIx=*/blockIdx.x);
+#endif
     }
     break;
   }
@@ -698,9 +740,13 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       break;
     }
     profiler(STOP);
+    // Keep workStorage stable until thread 0 finishes counting.
+    if (ncclShmem.comm.progressCounters != nullptr) __syncthreads();
     loadWorkBatchToShmem(tid % WARP_SIZE, tn, args, batchIx);
     __syncthreads();
   }
+  // Publish progress-counter completion for the last batch only after every thread has left the work body.
+  if (ncclShmem.comm.progressCounters != nullptr) __syncthreads();
   profiler(FINI);
 }
 

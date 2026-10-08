@@ -89,14 +89,18 @@ using callback_tracing_cb_t =
              typename SdkBackend::user_data_t* user_data, void* callback_data);
 
 using configure_cb_t = void (*)();
+using finalize_cb_t  = void (*)();
 
 template <typename SdkBackend>
 struct buffered_domain_definition
 {
     domain_descriptor               meta;
     buffer_tracing_cb_t<SdkBackend> on_records;
-    buffer_properties               buffer = k_default_buffer_properties;
-    configure_cb_t                  on_configure;
+    buffer_properties               buffer       = k_default_buffer_properties;
+    configure_cb_t                  on_configure = nullptr;
+    std::optional<typename SdkBackend::external_correlation_request_kind_t>
+                  correlation_dependency = std::nullopt;
+    finalize_cb_t on_finalize            = nullptr;
 };
 
 template <typename SdkBackend>
@@ -104,7 +108,10 @@ struct callback_domain_definition
 {
     domain_descriptor                 meta;
     callback_tracing_cb_t<SdkBackend> on_record;
-    configure_cb_t                    on_configure;
+    configure_cb_t                    on_configure = nullptr;
+    std::optional<typename SdkBackend::external_correlation_request_kind_t>
+                  correlation_dependency = std::nullopt;
+    finalize_cb_t on_finalize            = nullptr;
 };
 
 struct domain_configuration
@@ -135,6 +142,68 @@ struct buffered_callback_dispatcher
             }
 
             Callback(static_cast<RecordT*>(headers[i]->payload), data);
+        }
+    }
+};
+
+template <typename SdkBackend>
+using tracing_phase_cb_t = void (*)(typename SdkBackend::callback_tracing_record_t,
+                                    typename SdkBackend::user_data_t*, void*,
+                                    typename SdkBackend::timestamp_t);
+
+// Indirects the null-check through a function parameter so GCC's -Waddress
+// heuristic (which pattern-matches "function-name != nullptr" and assumes a
+// missing call) does not misfire on a non-type template parameter that is
+// legitimately nullptr for other instantiations. Deliberately not constexpr:
+// a function (template)'s address is not guaranteed to be usable in a
+// constant expression until it is instantiated, so evaluating this at
+// compile time (e.g. via "if constexpr") can fail with "not a constant
+// expression" on some toolchains/flags (observed with the sanitizer build).
+// Callers must use a plain runtime "if", not "if constexpr".
+template <typename CallbackT>
+inline bool
+is_callback_set(CallbackT callback)
+{
+    return callback != nullptr;
+}
+
+template <typename SdkBackend, tracing_phase_cb_t<SdkBackend> OnEnter = nullptr,
+          tracing_phase_cb_t<SdkBackend> OnExit = nullptr,
+          tracing_phase_cb_t<SdkBackend> OnNone = nullptr>
+struct tracing_callback_dispatcher
+{
+    // NOLINTNEXTLINE (readability-function-size)
+    static void callback(SdkBackend::callback_tracing_record_t record,
+                         SdkBackend::user_data_t* user_data, void* callback_data)
+    {
+        switch(record.phase)
+        {
+            case SdkBackend::CALLBACK_PHASE_ENTER:
+            {
+                if(is_callback_set(OnEnter))
+                {
+                    OnEnter(record, user_data, callback_data,
+                            SdkBackend::get_timestamp());
+                }
+                break;
+            }
+            case SdkBackend::CALLBACK_PHASE_EXIT:
+            {
+                if(is_callback_set(OnExit))
+                {
+                    OnExit(record, user_data, callback_data, SdkBackend::get_timestamp());
+                }
+                break;
+            }
+            case SdkBackend::CALLBACK_PHASE_NONE:
+            {
+                if(is_callback_set(OnNone))
+                {
+                    OnNone(record, user_data, callback_data, SdkBackend::get_timestamp());
+                }
+                break;
+            }
+            default: break;
         }
     }
 };

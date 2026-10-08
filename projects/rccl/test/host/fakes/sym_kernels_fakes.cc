@@ -15,6 +15,7 @@ ASSERT_HOOK_MATCHES_PROD(g_getSymRegType, ncclGetSymRegType);
 ASSERT_HOOK_MATCHES_PROD(g_symkInitOnce, ncclSymkInitOnce);
 ASSERT_HOOK_MATCHES_PROD(g_symkAvailable, ncclSymkAvailable);
 ASSERT_HOOK_MATCHES_PROD(g_symkKernelIdIsLL, rcclSymkKernelIdIsLL);
+ASSERT_HOOK_MATCHES_PROD(g_symkFinalize, ncclSymkFinalize);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 ncclSymRegType_t g_symRegType = ncclSymSendNonregRecvNonreg;
@@ -47,6 +48,10 @@ static bool DefaultSymkKernelIdIsLL(int) { return false; }
 std::function<bool(int)> g_symkKernelIdIsLL = DefaultSymkKernelIdIsLL;
 bool rcclSymkKernelIdIsLL(int kernelId) { return g_symkKernelIdIsLL(kernelId); }
 
+static ncclResult_t DefaultSymkFinalize(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_symkFinalize = DefaultSymkFinalize;
+ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { return g_symkFinalize(comm); }
+
 void ResetSymKernelsFakes() {
   g_symRegType = ncclSymSendNonregRecvNonreg;
   g_getSymRegTypeResult = ncclSuccess;
@@ -55,4 +60,5 @@ void ResetSymKernelsFakes() {
   g_symkInitOnce = DefaultSymkInitOnce;
   g_symkAvailable = DefaultSymkAvailable;
   g_symkKernelIdIsLL = DefaultSymkKernelIdIsLL;
+  g_symkFinalize = DefaultSymkFinalize;
 }

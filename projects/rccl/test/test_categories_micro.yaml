@@ -14,18 +14,79 @@ test_categories:
     # A trailing '.*' anchors the end of the suite name. Dropping the dot widens instead
     # ("Devcomm*" matches all five Devcomm suites).
     test_patterns:
+      # transport/p2p.cc
       - "P2pMicrotest.*"
+      - "P2pMicrotestIsolated.*"
+      - "P2pCanConnectMicrotest.*"
+      - "P2pCanConnectMicrotestIsolated.*"
+      - "P2pSetupMicrotest.*"
+      - "P2pFreeMicrotest.*"
+      - "P2pShareableBufferMicrotest.*"
+      - "P2pRegisterFamilyMicrotest.*"
+      - "P2pMultiSegmentMicrotest.*"
+      - "P2pProxyRegisterMicrotest.*"
+      - "P2pProxyDeregisterMicrotest.*"
+      - "P2pProxyLifecycleMicrotest.*"
+      - "P2pProxyCeMicrotestIsolated.*"
+      - "GuardOperands/P2pAllocateSkipMarkExport.*"
+      - "MappingStages/P2pImportMapStageFails.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
+      - "ConnStepAcquireMicrotest.*"
+      # ras/ras.cc
+      - "RasMicrotest.*"
+      # ras/diagnostics_checks_common.cc
+      - "RasDiagnosticsCommonMicrotest.*"
+      # ras/collectives.cc
+      - "RasCollectivesMicrotest.*"
+      # ras/diagnostics.cc
+      - "RasDiagnosticsMicrotest.*"
+      # ras/client.cc
       - "RasClientMicrotest.*"
+      # ras/ras_param.cc
+      - "RasParamMicrotest.*"
+      # rma/rma_proxy_launch.cc
+      - "RmaProxyBatchMemOpTest.*"
+      - "RmaProxyDescriptorTest.*"
+      - "RmaProxyLaunchTest.*"
+      - "RmaProxyQueueTest.*"
+      - "RmaProxyParamsTest.*"
+      - "RmaProxyReclaimTest.*"
+      # rma/rma_proxy_progress.cc
       - "RmaProxyProgressTest.*"
+      # rma/rma_ce.cc
+      - "RmaCeLaunchTest.*"
+      - "RmaCeInitTest.*"
+      - "RmaCeFinalizeTest.*"
+      - "RmaCePutLaunchTest.*"
+      - "RmaCeNonPersistTest.*"
+      - "RmaCePersistTest.*"
+      - "RmaCeWaitLaunchTest.*"
+      # rma/rma.cc
+      - "RmaWaitSignalTest.*"
+      - "RmaPutTest.*"
+      - "RmaLaunchTest.*"
+      - "RmaScheduleTest.*"
+      - "RmaDebugLoggingTest.*"
+      - "RmaProxyGatingTest.*"
+      - "RmaProxyReadyTest.*"
+      # tuning/tuning_general.cc
+      - "TuningGeneralMicrotest.*"
+      # tuning/tuning.cc
+      - "TuningMicrotest.*"
+      # group.cc
       - "GroupEndInternalTest.*"
+      - "ReclaimPlannerStateTest.*"
+      - "AsyncLaunchTest.*"
+      - "GroupJobAbortTest.*"
+      - "GroupApiWrapperTest.*"
+      - "ArgsGlobalCheckTest.*"
+      # rccl_wrap.cc
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"
-      # src/dev_runtime.cc (folded in from test_categories_micro_devruntime.yaml).
-      # Prefix globs rather than named suites, so adding a suite to an existing
-      # family does not silently fall out of CI gating. "Dev*" subsumes the
-      # "Devcomm*" entry these replaced.
+      # misc/gdr_probe.cc
+      - "GdrProbeTest.*"
+      # dev_runtime.cc
       - "Alloc*"
       - "Comm*"
       - "Compute*"

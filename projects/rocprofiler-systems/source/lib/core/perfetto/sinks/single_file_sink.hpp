@@ -20,7 +20,7 @@ class output_file_registry;
 
 namespace core
 {
-// Cached-mode sink: concatenates per-pid bytes into one .proto file.
+// Cached-mode sink: concatenates per-pid bytes into one .pftrace file.
 // Each source_id receives a disjoint trusted_packet_sequence_id range before
 // packets are appended, preserving Perfetto interned-data namespaces.
 class single_file_sink : public trace_sink_interface
@@ -48,9 +48,9 @@ private:
     static constexpr std::uint32_t PER_SOURCE_SEQ_ID_BASE_STRIDE = 1u << 16;
 
     std::reference_wrapper<output_file_registry> m_registry;
-    std::string                                  m_output_filename_override{};
-    std::vector<char>                            m_buffer{};
-    std::unordered_map<int, std::uint32_t>       m_source_seq_id_bases{};
+    std::string                                  m_output_filename_override;
+    std::vector<char>                            m_buffer;
+    std::unordered_map<int, std::uint32_t>       m_source_seq_id_bases;
     std::uint64_t                                m_next_source_base{ 1 };
     bool                                         m_append_mode{ false };
     std::uint32_t m_source_stride{ PER_SOURCE_SEQ_ID_BASE_STRIDE };

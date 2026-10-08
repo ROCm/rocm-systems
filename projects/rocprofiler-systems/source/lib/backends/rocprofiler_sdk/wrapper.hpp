@@ -43,10 +43,10 @@
 #    include <rocprofiler-sdk/profile_config.h>
 #endif
 
-#if ROCPROFILER_VERSION >= 600
-#    include <rocprofiler-sdk/rccl/api_args.h>
-#    include <rocprofiler-sdk/rccl/api_id.h>
-#endif
+#include <rocprofiler-sdk/rccl/details/api_trace.h>
+
+#include <rocprofiler-sdk/rccl/api_args.h>
+#include <rocprofiler-sdk/rccl/api_id.h>
 
 #if ROCPROFILER_VERSION >= 700
 #    include <rocprofiler-sdk/hip.h>
@@ -117,6 +117,9 @@ struct wrapper
 
     // ─── Correlation types ────────────────────────────────────────────────────────
     using correlation_id_t = rocprofiler_correlation_id_t;
+#if ROCPROFILER_VERSION >= 700
+    using async_correlation_id_t = rocprofiler_async_correlation_id_t;
+#endif
 
     // ─── Buffer/callback tracing record types ────────────────────────────────────
     using record_header_t         = rocprofiler_record_header_t;
@@ -246,6 +249,9 @@ struct wrapper
         ROCPROFILER_OMPT_ID_callback_functions;
     static constexpr ompt_operation_t OMPT_ID_LAST = ROCPROFILER_OMPT_ID_LAST;
 
+    using memory_alloc_record = rocprofiler_buffer_tracing_memory_allocation_record_t;
+#endif
+
     using rccl_api_data    = rocprofiler_callback_tracing_rccl_api_data_t;
     using rccl_api_id_t    = rocprofiler_rccl_api_id_t;
     using nccl_data_type_t = ncclDataType_t;
@@ -264,10 +270,14 @@ struct wrapper
     static constexpr nccl_data_type_t NCCL_INT64    = ncclInt64;
     static constexpr nccl_data_type_t NCCL_UINT64   = ncclUint64;
     static constexpr nccl_data_type_t NCCL_FLOAT64  = ncclFloat64;
-#    if defined(ncclFp8E4M3) && defined(ncclFp8E5M2)
-    static constexpr nccl_data_type_t NCCL_FP8_E4M3 = ncclFp8E4M3;
-    static constexpr nccl_data_type_t NCCL_FP8_E5M2 = ncclFp8E5M2;
-#    endif
+
+#if defined(ncclFp8E4M3) && defined(ncclFp8E5M2)
+    static constexpr nccl_data_type_t NCCL_FP8_E4M3                  = ncclFp8E4M3;
+    static constexpr nccl_data_type_t NCCL_FP8_E5M2                  = ncclFp8E5M2;
+    static constexpr bool             k_are_nccl_fp8_types_available = true;
+#else
+    static constexpr bool k_are_nccl_fp8_types_available = false;
+#endif
 
     // ─── RCCL API ID constants ─────────────────────────────────────────────────
     static constexpr rccl_api_id_t RCCL_API_ID_ncclAllGather =
@@ -288,7 +298,13 @@ struct wrapper
         ROCPROFILER_RCCL_API_ID_ncclReduceScatter;
     static constexpr rccl_api_id_t RCCL_API_ID_ncclSend =
         ROCPROFILER_RCCL_API_ID_ncclSend;
-    using memory_alloc_record = rocprofiler_buffer_tracing_memory_allocation_record_t;
+
+#if defined(ROCPROFILER_RCCL_API_ID_ncclAlltoAll)
+    // RCCL renamed ncclAllToAll to ncclAlltoAll (note the lowercase 't'). The deprecated
+    // ncclAllToAll now forwards to ncclAlltoAll, so the SDK reports the collective under
+    // this id too on toolchains new enough to define it.
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAlltoAll =
+        ROCPROFILER_RCCL_API_ID_ncclAlltoAll;
 #endif
 
 #if ROCPROFILER_VERSION >= 700
@@ -331,6 +347,8 @@ struct wrapper
         ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
     static constexpr status_t STATUS_ERROR_INVALID_ARGUMENT =
         ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    static constexpr status_t STATUS_ERROR_NOT_IMPLEMENTED =
+        ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 
     // ─── Callback phase constants ────────────────────────────────────────────────
     static constexpr callback_phase_t CALLBACK_PHASE_ENTER =

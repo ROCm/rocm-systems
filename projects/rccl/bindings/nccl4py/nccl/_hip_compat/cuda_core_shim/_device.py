@@ -12,8 +12,9 @@ Surface trimmed to exactly what ``nccl/core/*.py`` touches::
     .set_current()      -> hipSetDevice
     .default_stream     -> Stream wrapping the HIP NULL stream
     .create_stream(obj) -> Stream wrapping a foreign __cuda_stream__ object
+    .create_event()     -> Event with timing disabled (hipEventCreateWithFlags)
 
-``DeviceProperties`` / contexts / events / graphs / kernels / launch are
+``DeviceProperties`` / contexts / graphs / kernels / launch are
 intentionally NOT ported. ``nccl/core`` imports none of them.
 """
 
@@ -23,6 +24,7 @@ import threading
 from typing import Optional
 
 from ._hip import check_hip, hip
+from ._event import Event, EventOptions
 from ._stream import Stream, StreamOptions, default_stream
 
 _tls = threading.local()
@@ -91,6 +93,10 @@ class Device:
         or create a new HIP stream with optional :class:`StreamOptions`.
         """
         return Stream._init(obj=obj, options=options, device_id=self._id)
+
+    def create_event(self, options: Optional[EventOptions] = None) -> Event:
+        """Create a HIP event (timing disabled by default)."""
+        return Event._init(options=options)
 
     def __repr__(self) -> str:
         return f"<Device id={self._id} (HIP shim)>"
