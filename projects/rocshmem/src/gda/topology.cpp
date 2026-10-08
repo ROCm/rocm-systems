@@ -311,7 +311,7 @@ namespace rocshmem
   {
     char const* deviceName = ibv.get_device_name(context->device);
     if (deviceName == nullptr || strchr(deviceName, '/') != nullptr) {
-      LOG_ERROR("Invalid IB device name");
+      LOG_ERROR("Invalid IB device name: %s", deviceName ? deviceName : "(null)");
       return -1;
     }
     char gidRoceVerStr[16]      = {};

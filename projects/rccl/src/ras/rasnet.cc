@@ -1146,8 +1146,8 @@ static ncclResult_t rasLinkConnAdd(struct rasLink* link, struct rasConnection* c
         INFO(NCCL_RAS,
              "RAS link %d: rasLinkConnAdd connection mismatch: linkConn %s, conn %s "
              "(peerIdx %d, pretend %d, insert %d) -- internal error?",
-             link->direction, ncclSocketToString(&linkConn->conn->addr, line, sizeof(line)), ncclSocketToString(&conn->addr, rasLine, sizeof(rasLine)),
-             peerIdx, pretend, insert);
+             link->direction, ncclSocketToString(&linkConn->conn->addr, line, sizeof(line)),
+             ncclSocketToString(&conn->addr, rasLine, sizeof(rasLine)), peerIdx, pretend, insert);
         ret = ncclInternalError;
         goto exit;
       }

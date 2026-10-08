@@ -49,6 +49,9 @@ namespace rocshmem {
  * socket address using getnameinfo()
  *
  * Output: "IPv4/IPv6 address<port>"
+ *
+ * The result is written into buf and truncated to at most bufLen bytes,
+ * including the terminating NUL.
  */
 const char* SocketToString(union SocketAddress* addr, char* buf,
                            size_t bufLen,
