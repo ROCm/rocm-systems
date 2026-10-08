@@ -22,6 +22,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -35,6 +36,7 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -76,22 +78,23 @@ struct Case {
   const char *name;
   uint32_t opcode;
   Kind kind;
+  std::optional<amdgpu::SimdFastPath> expected_simd_path = std::nullopt;
 };
 
 const std::array<Case, 10> kCases = {{
     {"v_fma_f32_vop3", 459, Kind::F32},
-    {"v_fma_f16_vop3", 518, Kind::F16},
+    {"v_fma_f16_vop3", 518, Kind::F16, amdgpu::SimdFastPath::VOP3_FMA_FP16},
     {"v_fma_f64_vop3", 460, Kind::F64},
-    {"v_mad_f16_vop3", 515, Kind::F16},
+    {"v_mad_f16_vop3", 515, Kind::F16, amdgpu::SimdFastPath::VOP3_TERNARY_FP16},
     // min3/max3/med3: fmax/fmin compositions. Inputs are finite non-zero
     // normals, so the fmax/fmin NaN-payload / signed-zero-tie carve-out never
     // triggers — bit-exact vs scalar on every lane.
     {"v_max3_f32_vop3", 467, Kind::F32},
     {"v_min3_f32_vop3", 464, Kind::F32},
     {"v_med3_f32_vop3", 470, Kind::F32},
-    {"v_max3_f16_vop3", 503, Kind::F16},
-    {"v_min3_f16_vop3", 500, Kind::F16},
-    {"v_med3_f16_vop3", 506, Kind::F16},
+    {"v_max3_f16_vop3", 503, Kind::F16, amdgpu::SimdFastPath::VOP3_TERNARY_FP16},
+    {"v_min3_f16_vop3", 500, Kind::F16, amdgpu::SimdFastPath::VOP3_TERNARY_FP16},
+    {"v_med3_f16_vop3", 506, Kind::F16, amdgpu::SimdFastPath::VOP3_TERNARY_FP16},
 }};
 
 // Finite-normal f32 sanitized inputs (avoid NaN/Inf for cleaner FMA bit-equality
@@ -248,7 +251,15 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
                 neg, omod, clamp, words);
     Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
+    amdgpu::ScopedSimdFastPathTracker tracker;
     auto out = fx.run(inst, c.kind, rot, exec);
+    if (c.expected_simd_path.has_value()) {
+      if (force_scalar)
+        EXPECT_TRUE(tracker.none_was_executed()) << c.name << ": forced-scalar execution used SIMD";
+      else
+        EXPECT_TRUE(tracker.only_was_executed(*c.expected_simd_path))
+            << c.name << ": eligible execution did not use its expected SIMD path";
+    }
     delete inst;
     return out;
   };
@@ -435,6 +446,10 @@ std::array<uint32_t, 2> f16_output_words(const F16OutputCase &test, uint8_t opse
 class Vop3F16TernaryOutputOrderTest : public testing::TestWithParam<F16OutputCase> {};
 
 TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabledAndForcedScalar) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
   ForceScalarGuard guard;
   amdgpu::fp_mode::ScopedEnvironment environment(0);
   const auto &test = GetParam();
@@ -465,7 +480,14 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
         }
         fx.wf->set_exec(exec);
         fx.wf->set_mode_raw(test.mode);
+        amdgpu::ScopedSimdFastPathTracker tracker;
         ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+        if (force_scalar)
+          EXPECT_TRUE(tracker.none_was_executed())
+              << test.name << ": forced-scalar execution used SIMD";
+        else
+          EXPECT_TRUE(tracker.only_was_executed(amdgpu::SimdFastPath::VOP3_TERNARY_FP16))
+              << test.name << ": eligible execution did not use the ternary F16 SIMD path";
         for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
           const uint32_t actual = fx.cu->read_vgpr(vb + kDstVgpr32, lane);
           if (!(exec & (1ULL << lane))) {
