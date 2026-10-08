@@ -6,7 +6,7 @@
 
 #include <hip_test_common.hh>
 
-#if !HT_NVIDIA
+#if !HT_NVIDIA || CUDA_VERSION >= CUDA_12000
 
 namespace {
 void LoadLibraryKernel(hipLibrary_t* library, hipKernel_t* kernel) {
@@ -37,16 +37,46 @@ HIP_TEST_CASE(Unit_hipKernelSetCacheConfig_Positive) {
 }
 
 HIP_TEST_CASE(Unit_hipKernelSetCacheConfig_Negative) {
-  hipLibrary_t library = nullptr;
   hipKernel_t kernel = nullptr;
   int currentDevice = -1;
   hipDevice_t device;
+  auto unloadLibrary = [](hipLibrary_t* ptr) {
+          if (ptr) {
+            HIP_CHECK(hipLibraryUnload(*ptr));
+          };
+        };
+  std::unique_ptr<hipLibrary_t, decltype(unloadLibrary)> libraryPtr(nullptr, unloadLibrary);
+  hipLibrary_t library;
 
   LoadLibraryKernel(&library, &kernel);
-  HIP_CHECK(hipLibraryUnload(library));
+  libraryPtr.reset(&library);
   HIP_CHECK(hipGetDevice(&currentDevice));
   HIP_CHECK(hipDeviceGet(&device, currentDevice));
-  HIP_CHECK_ERROR(hipKernelSetCacheConfig(kernel, hipFuncCachePreferEqual, device),
+
+  SECTION("invalid ordinal") {
+    HIP_CHECK_ERROR(hipKernelSetCacheConfig(kernel, static_cast<hipFuncCache_t>(4), device),
+                  hipErrorInvalidValue);
+  }
+
+  SECTION("invalid library") {
+    HIP_CHECK(hipLibraryUnload(library));
+    libraryPtr.release();
+    HIP_CHECK_ERROR(hipKernelSetCacheConfig(kernel, hipFuncCachePreferEqual, device),
                   hipErrorInvalidResourceHandle);
+  }
+
+  SECTION("invalid kernel") {
+    hipKernel_t kernel2 = nullptr;
+
+    HIP_CHECK_ERROR(hipKernelSetCacheConfig(kernel2, hipFuncCachePreferEqual, device),
+                  hipErrorInvalidResourceHandle);
+  }
+
+  SECTION("invalid device") {
+    hipDevice_t device2 = -1;
+
+    HIP_CHECK_ERROR(hipKernelSetCacheConfig(kernel, hipFuncCachePreferEqual, device2),
+                  hipErrorInvalidDevice);
+  }
 }
 #endif
