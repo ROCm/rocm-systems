@@ -3102,6 +3102,11 @@
           "name": "DDA_IpcTreeIndexDependent_8Ranks",
           "description": "DDA IPC two-shot tree AllReduce with rank- and index-dependent fp32/bf16 data, out-of-place and in-place, checked bitwise on every rank",
           "test_filter": "DdaMPI_AllReduceIpc.TreeIndexDependentValues"
+        },
+        {
+          "name": "DDA_IpcReduceScatter_IndexData_8Ranks",
+          "description": "DDA IPC ReduceScatter with index- and rank-dependent data: every rank must receive its own reduced slice",
+          "test_filter": "DdaIpcMPI_ReduceScatter.*"
         }
       ]
     },

@@ -238,6 +238,7 @@ test_categories:
       - "DdaFabricSimple.*"
       - "DdaFabricBlockCap.*"
       - "DdaFabricBarrierStress.*"
+      - "DdaIpcMPI_ReduceScatter.*"
     exclude_windows: *mpi_exclude_windows
     labels:
       - "rccl"
