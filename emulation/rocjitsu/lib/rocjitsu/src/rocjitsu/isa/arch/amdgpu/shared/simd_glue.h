@@ -2253,7 +2253,7 @@ template <typename T, typename Inst, typename BinOp>
 /// VOP3 f16 binary fast path. The generic form matches the ordinary scalar
 /// body's low-half read plus full-dword zero-extending write. The true16 form
 /// selects source halves with op_sel[0:1] and writes the destination half per
-/// the ISA's op_sel[3] policy. The packed-f16 binary functors do not apply
+/// the ISA's op_sel[3] policy. The plain VOP2 F16 binary functors do not apply
 /// ABS/NEG/OMOD/CLAMP, so both forms fall back to scalar when a modifier is
 /// present. Raw F16 operations use WithModifiers to supply those stages and
 /// stay on the SIMD path. This helper still selects source and destination halves.
@@ -2328,9 +2328,10 @@ template <bool True16, typename T, typename Inst, typename BinOp>
 template <fp_mode::Arithmetic operation, bool True16, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop3_f16_arithmetic_simd(Inst &inst, Wavefront &wf) {
-  // This operation implements guest denormal controls, so only host arithmetic
-  // and guest RNE must match the native environment.
-  if (!fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(), 3))
+  // Every finite F16 value and every sum or product of two widened F16 values
+  // is normal (or zero) in F32. Host flush controls therefore cannot affect
+  // this operation; only host and guest rounding must be nearest-even.
+  if (!fp_mode::native_rounding_matches(wf.fp_round_mode_f16_f64()))
     return false;
   const auto raw_operation = [denorm = wf.fp_denorm_mode_f16_f64(), ovfl = wf.fp16_ovfl()](auto a,
                                                                                            auto b) {

@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
@@ -691,7 +693,8 @@ const std::vector<ArithmeticCase> kCases{
 };
 
 // These instruction results were checked independently on gfx1100/gfx1201.
-// Encodings come from llvm-mc; the same rules cover the shared CDNA executors.
+// Encodings come from llvm-mc. Expectations for the other targets are
+// extrapolated through their shared executors and are not hardware measurements.
 std::vector<ArithmeticCase> adjacent_fp_cases() {
   struct Encodings {
     const char *name;
@@ -2619,14 +2622,15 @@ std::vector<ArithmeticCase> rounded_result_modifier_cases() {
   return cases;
 }
 
-// gfx1100 (RDNA3, W7900) and gfx1030 (RDNA2, RX 6800 XT) apply OMOD only with
-// MODE.IEEE clear and F16 output denormals flushed (MODE 0x00 and 0x50 here);
-// with IEEE set they ignore it. When OMOD applies, both scale the result after
-// rounding it to half, as gfx1201 does. Each case is a lane of the VALU probe
-// captures (v_mul_f16_e64 and v_add_f16_e64 with div:2); the two GPUs return
-// the same half for all of them. Both keep the 0xa5a5 high half the capture
-// initialized. The RDNA2 cases start from a zero high half because the RDNA2
-// executor clears it, a separate difference from gfx1030 hardware.
+// The emulator's gfx1100/gfx1030 gate applies OMOD only with MODE.IEEE clear
+// and F16 output denormals flushed. Captures cover MODE 0x00/0x50 and IEEE
+// controls, not the output-keep case. When OMOD applies, both GPUs scale after
+// rounding to half, as gfx1201 does. Each case transcribes a lane from external
+// VALU probe captures (v_mul_f16_e64 and v_add_f16_e64 with div:2); the raw
+// artifacts are not checked into this tree. Both GPUs return the same half and
+// keep the initialized 0xa5a5 high half. RDNA2 cases start from a zero high
+// half because the emulator's RDNA2 executor clears it, a separate difference
+// from gfx1030 hardware.
 std::vector<ArithmeticCase> legacy_rounded_result_modifier_cases() {
   static constexpr uint32_t kIeee = 1u << 9;
   static constexpr uint32_t kFp16Ovfl = 1u << 23;
@@ -2733,14 +2737,37 @@ std::vector<ArithmeticCase> f16_binary_modifier_cases() {
       3);
   add("AddHighSourcesHighDestination", false, 0x34003c00, 0x34003c00, 0x3800a5a5u, 0xc0, 0, 0, 0, 0,
       11);
-  // Unsupported rounding and host flush controls retain the scalar fallback.
+  const auto add_cdna4 = [&](const char *name, bool multiply, uint32_t a, uint32_t b,
+                             uint32_t result, uint8_t opsel) {
+    const auto words = cdna4::build_vop3(multiply ? cdna4::kVMulF16Vop3 : cdna4::kVAddF16Vop3,
+                                         {.vdst = 6, .op_sel = opsel, .src0 = V0, .src1 = V1});
+    cases.push_back({name,
+                     ROCJITSU_CODE_ARCH_CDNA4,
+                     {words[0], words[1], 0},
+                     {{0, a}, {1, b}, {6, 0xa5a5a5a5u}},
+                     {{6, result}},
+                     0xc0,
+                     FE_TONEAREST,
+                     0,
+                     0,
+                     expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)});
+  };
+  // CDNA true16 low-half writes zero the destination's high half; high-half
+  // writes preserve the low half. Exercise both ADD and MUL with high sources.
+  add_cdna4("Gfx950AddHighSourcesLowDestination", false, 0x34003c00, 0x34003c00, 0x00003800u, 3);
+  add_cdna4("Gfx950AddHighSourcesHighDestination", false, 0x34003c00, 0x34003c00, 0x3800a5a5u, 11);
+  add_cdna4("Gfx950MulHighSourcesLowDestination", true, 0x40003c00, 0x38003c00, 0x00003c00u, 3);
+  add_cdna4("Gfx950MulHighSourcesHighDestination", true, 0x40003c00, 0x38003c00, 0x3c00a5a5u, 11);
+  // Unsupported guest or host rounding retains the scalar fallback.
   add("AddGuestRoundUpFallback", false, 0x3c00, 0x1000, 0xa5a53c01u, 0xc4, 0, 0, 0, 0, 0,
       FE_TONEAREST, 0, expect_simd_fallback());
   add("AddHostRoundUpFallback", false, 0x3c00, 0x1000, 0xa5a53c00u, 0xc0, 0, 0, 0, 0, 0, FE_UPWARD,
       0, expect_simd_fallback());
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
-  add("AddHostFlushFallback", false, 1, 0, 0xa5a50001u, 0xc0, 0, 0, 0, 0, 0, FE_TONEAREST,
-      (1u << 6) | (1u << 15), expect_simd_fallback());
+  // Widened F16 ADD/MUL operands and results cannot be F32 subnormals, so host
+  // DAZ/FTZ does not require a fallback.
+  add("AddHostFlushStillUsesSimd", false, 1, 0, 0xa5a50001u, 0xc0, 0, 0, 0, 0, 0, FE_TONEAREST,
+      (1u << 6) | (1u << 15));
 #endif
   return cases;
 }
