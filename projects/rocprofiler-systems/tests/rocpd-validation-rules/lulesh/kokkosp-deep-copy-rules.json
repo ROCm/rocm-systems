@@ -1,0 +1,41 @@
+{
+    "required_tables": [
+        {
+            "min_rows": 0,
+            "name": "rocpd_string",
+            "required_columns": [
+                "id",
+                "guid",
+                "string"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "ROCPROFSYS_KOKKOSP_DEEP_COPY emits one region per Kokkos::deep_copy, named '<prefix> <dst space> <- <src name> [deep_copy]'. Match the ' [deep_copy]' suffix, not the substring 'deep_copy': Kokkos names several of its own fences 'Kokkos::deep_copy: ... [fence]' and those are recorded with the flag off too",
+                    "error_message": "No '[deep_copy]' regions recorded; ROCPROFSYS_KOKKOSP_DEEP_COPY did not enable Kokkos deep-copy tracking",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_string WHERE string LIKE '% [deep_copy]'"
+                }
+            ]
+        },
+        {
+            "min_rows": 0,
+            "name": "regions",
+            "required_columns": [
+                "id",
+                "name",
+                "start",
+                "end"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "The deep-copy names must be attached to real timed regions, not just interned as strings",
+                    "error_message": "'[deep_copy]' strings exist but no region uses them; deep-copy tracking interned the names without recording the copies",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM regions WHERE name LIKE '% [deep_copy]'"
+                }
+            ]
+        }
+    ]
+}
