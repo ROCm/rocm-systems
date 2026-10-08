@@ -199,7 +199,9 @@ __device__ void ginAllGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWi
 
   const int ginContext = 0;
   const unsigned int signalIndex = blockIdx.x;
-  ncclGin gin { devComm, ginContext };
+  // Peer r is owned by exactly one thread (CTA r%gridDim.x, thread r/gridDim.x),
+  // so each QP has a single poster: THREAD mode drops the per-WQE SQ-lock atomics.
+  ncclGin gin { devComm, ginContext, NCCL_GIN_RESOURCE_SHARING_THREAD };
   const uint64_t signalValue = gin.readSignal(signalIndex);
 
   ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };

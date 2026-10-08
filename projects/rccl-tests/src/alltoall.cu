@@ -267,7 +267,9 @@ template <typename T>
 __device__ void ginAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   int ginContext = 0;
   unsigned int signalIndex = blockIdx.x;
-  ncclGin gin { devComm, ginContext };
+  // Each peer's QP is posted to by exactly one thread (grid-strided r=tid), so
+  // the SQ is single-owner: THREAD mode drops the per-WQE SQ-lock atomics.
+  ncclGin gin { devComm, ginContext, NCCL_GIN_RESOURCE_SHARING_THREAD };
   uint64_t signalValue = gin.readSignal(signalIndex);
 
   ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
@@ -320,7 +322,9 @@ __device__ void hybridAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, nccl
     /* CTA 0: remote peers via GIN */
     int ginContext = 0;
     unsigned int signalIndex = 0;
-    ncclGin gin { devComm, ginContext };
+    // One thread per remote peer (grid-strided), so each QP has a single poster:
+    // THREAD mode elides the SQ-lock atomics on the GDA bnxt/mlx5 post path.
+    ncclGin gin { devComm, ginContext, NCCL_GIN_RESOURCE_SHARING_THREAD };
     uint64_t signalValue = gin.readSignal(signalIndex);
 
     ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, 0 };
