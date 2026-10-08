@@ -29,6 +29,7 @@
 #include "functional/gpu/metrics/process_memory_read.h"
 #include "functional/gpu/partition/computepartition_memallocmode_read_write.h"
 #include "functional/gpu/partition/computepartition_read_write.h"
+#include "functional/gpu/partition/memorypartition_read.h"
 #include "functional/gpu/partition/memorypartition_read_write.h"
 #include "functional/gpu/pci/pci_read_write.h"
 #include "functional/gpu/perf/overdrive_read.h"
@@ -264,6 +265,10 @@ TEST(GpuFunctionalReadOnly, TestGpuMetricsRead) {
 }
 TEST(GpuFunctionalReadOnly, TestGpuPartitionMetricsRead) {
   TestGpuPartitionMetricsRead tst;
+  RunGenericTest(&tst);
+}
+TEST(GpuFunctionalReadOnly, TestMemoryPartitionRead) {
+  TestMemoryPartitionRead tst;
   RunGenericTest(&tst);
 }
 TEST(GpuFunctionalReadOnly, TestMetricsCounterRead) {
