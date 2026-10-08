@@ -200,27 +200,66 @@ TEST(AqlPacketProcessorTest, BarrierDependencyMustResolveBeforeAdmission) {
   EXPECT_TRUE(complete.blocks_following);
 }
 
-TEST(AqlPacketProcessorTest, Pm4IbDoesNotBlockFollowingPackets) {
-  AmdExtKernelDispatchPacket packet{};
-  packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
-  packet.amd_format = kAmdAqlFormatPm4Ib;
+TEST(AqlPacketProcessorTest, RevokedDependencySnapshotIsTerminalRatherThanBlocked) {
+  hsa_barrier_and_packet_t packet{};
+  packet.header = HSA_PACKET_TYPE_BARRIER_AND;
+  packet.dep_signal[0].handle = 0x1000;
   const auto bytes = packet_bytes(packet);
-  AqlPreparedPacket admitted{};
+
+  uint32_t admissions = 0;
   AqlPacketProcessor processor({
-      .load_signal = {},
+      .load_signal = [](const AqlPacketProcessRequest &,
+                        uint64_t) { return AtomicLoadResult{.outcome = VmAccessOutcome::Revoked}; },
       .admit =
-          [&](const AqlPacketProcessRequest &, AqlPreparedPacket prepared) {
-            admitted = prepared;
+          [&](const AqlPacketProcessRequest &, AqlPreparedPacket) {
+            ++admissions;
             return AqlAdmissionResult{.status = AqlAdmissionStatus::Complete};
           },
   });
 
   const AqlPacketProcessResult result = processor.process(request_for(bytes));
+  EXPECT_EQ(result.packet.status, PacketProcessStatus::Faulted);
+  EXPECT_EQ(result.packet.retirement, PacketRetirement::Hold);
+  EXPECT_EQ(admissions, 0u);
+}
 
+TEST(AqlPacketProcessorTest, Pm4IbDecodesAndBlocksFollowingPackets) {
+  std::array<uint32_t, 16> packet{HSA_PACKET_TYPE_VENDOR_SPECIFIC |
+                                      (uint32_t{kAmdAqlFormatPm4Ib} << 16),
+                                  0xc0023f00,
+                                  0x8000,
+                                  1,
+                                  (1u << 23) | 32,
+                                  10};
+  const auto bytes = packet_bytes(packet);
+  AqlPreparedPacket admitted{};
+  unsigned admissions = 0;
+  AqlPacketProcessor processor({
+      .load_signal = {},
+      .admit =
+          [&](const AqlPacketProcessRequest &, AqlPreparedPacket prepared) {
+            admitted = prepared;
+            ++admissions;
+            return AqlAdmissionResult{.status = AqlAdmissionStatus::Complete};
+          },
+  });
+  const AqlPacketProcessResult result = processor.process(request_for(bytes));
   EXPECT_EQ(result.packet.status, PacketProcessStatus::Complete);
-  EXPECT_EQ(admitted.kind, AqlPreparedPacketKind::NonKernel);
-  EXPECT_FALSE(admitted.blocks_following);
-  EXPECT_FALSE(result.blocks_following);
+  EXPECT_EQ(admitted.kind, AqlPreparedPacketKind::Pm4Ib);
+  EXPECT_EQ(admitted.pm4_ib_address, 0x100008000ull);
+  EXPECT_EQ(admitted.pm4_ib_dwords, 32u);
+  EXPECT_TRUE(admitted.blocks_following);
+  EXPECT_TRUE(result.blocks_following);
+  // Malformed envelopes must never reach admission or become successful no-ops.
+  for (const auto &[word, value] :
+       {std::pair{1u, 0u}, {2u, 0x8001u}, {3u, 0x10000u}, {4u, 32u}, {4u, 1u << 23}, {5u, 9u}}) {
+    auto bad = packet;
+    bad[word] = value;
+    const auto bad_bytes = packet_bytes(bad);
+    EXPECT_EQ(processor.process(request_for(bad_bytes)).packet.status,
+              PacketProcessStatus::Malformed);
+  }
+  EXPECT_EQ(admissions, 1u);
 }
 
 TEST(AqlPacketProcessorTest, DecodesExtendedDispatchIntoNormalizedKernelPacket) {

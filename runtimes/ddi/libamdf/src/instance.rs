@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Passive endpoint descriptions and explicit native device activation.
 //!
 //! Handles borrow their parent exactly as the AMDF contract requires. A cold
@@ -6,6 +9,7 @@
 
 use crate::generated::amdf::*;
 use crate::memory::Scope;
+use crate::platform;
 use crate::support::*;
 use rocddi::host_storage::{Allocator, Buffer, Owned};
 use rocddi::{device as native_device, memory as native_memory, session, topology};
@@ -101,31 +105,13 @@ fn summary(endpoint: &topology::Endpoint) -> amdf_endpoint_summary_t {
     amdf_endpoint_summary_t {
         id: endpoint_id(endpoint.id),
         engine_kind,
-        type_flags: if endpoint.linux_kfd_drm_info().render_minor.is_some() {
+        type_flags: if platform::render_supported(endpoint) {
             AMDF_ENDPOINT_TYPE_FLAG_RENDER_SUPPORTED
         } else {
             0
         },
         name: name(endpoint),
     }
-}
-
-fn native_identity(endpoint: &topology::Endpoint) -> amdf_endpoint_native_identity_t {
-    endpoint.linux_kfd_drm_info().render_minor.map_or_else(
-        amdf_endpoint_native_identity_t::default,
-        |minor| {
-            amdf_endpoint_native_identity_t {
-                r#type: AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE,
-                value: amdf_endpoint_native_identity_t__value {
-                    linux_device: amdf_endpoint_native_identity_t__value__linux_device {
-                        // Linux reserves character-device major 226 for DRM.
-                        major: 226,
-                        minor,
-                    },
-                },
-            }
-        },
-    )
 }
 
 pub(crate) fn family_count(endpoint: &topology::Endpoint) -> u32 {
@@ -161,7 +147,7 @@ pub(crate) fn sdma_format_features(
     supports_gcr: bool,
 ) -> amdf_queue_format_features_t {
     let mut features = if supports_gcr {
-        AMDF_GPU_SDMA_FORMAT_FEATURE_GCR
+        AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR
     } else {
         0
     };
@@ -320,7 +306,6 @@ pub(crate) fn supported_endpoint(endpoint: &Endpoint) -> Result<(), u64> {
     Ok(())
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn create(
     info: *const amdf_instance_create_info_t,
     out: *mut *mut amdf_instance_t,
@@ -370,7 +355,6 @@ pub(crate) unsafe extern "C" fn create(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_instance_t) -> u64 {
     crate::support::boundary(|| {
         unsafe {
@@ -393,7 +377,6 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_instance_t) -> u64 {
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn enumerate(
     pointer: *mut amdf_instance_t,
     capacity: u32,
@@ -436,7 +419,6 @@ pub(crate) unsafe extern "C" fn enumerate(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn open(
     pointer: *mut amdf_instance_t,
     id: *const amdf_endpoint_id_t,
@@ -486,7 +468,6 @@ pub(crate) unsafe extern "C" fn open(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn close(pointer: *mut amdf_endpoint_t) -> u64 {
     crate::support::boundary(|| unsafe {
         let endpoint = object(pointer.cast::<Endpoint>())?;
@@ -499,7 +480,6 @@ pub(crate) unsafe extern "C" fn close(pointer: *mut amdf_endpoint_t) -> u64 {
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn endpoint_info(
     pointer: *mut amdf_endpoint_t,
     out: *mut amdf_endpoint_info_t,
@@ -522,14 +502,13 @@ pub(crate) unsafe extern "C" fn endpoint_info(
             },
             name: name(&endpoint.native),
             queue_family_count: family_count(&endpoint.native),
-            native_identity: native_identity(&endpoint.native),
+            native_identity: platform::native_identity(&endpoint.native),
             ..Default::default()
         });
         Ok(())
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn queue_family_info(
     pointer: *mut amdf_endpoint_t,
     ordinal: u32,
@@ -543,7 +522,6 @@ pub(crate) unsafe extern "C" fn queue_family_info(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn gpu_endpoint_info(
     pointer: *mut amdf_endpoint_t,
     out: *mut amdf_gpu_endpoint_info_t,
@@ -580,7 +558,6 @@ pub(crate) unsafe extern "C" fn gpu_endpoint_info(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn device_create(
     pointer: *mut amdf_endpoint_t,
     info: *const amdf_gpu_device_create_info_t,
@@ -620,7 +597,6 @@ pub(crate) unsafe extern "C" fn device_create(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn device_info(
     pointer: *mut amdf_device_t,
     out: *mut amdf_gpu_device_info_t,
@@ -643,7 +619,6 @@ pub(crate) unsafe extern "C" fn device_info(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn device_destroy(pointer: *mut amdf_device_t) -> u64 {
     crate::support::boundary(|| unsafe {
         let device = object(pointer.cast::<Device>())?;

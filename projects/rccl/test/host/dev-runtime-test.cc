@@ -2444,6 +2444,33 @@ TEST_F(SymMemoryObtainRollbackTest, RmaRegisterFails_ReturnsSpaceWithoutLinking)
   EXPECT_EQ(comm->devrState.memHead, nullptr);
 }
 
+// Label fail_mem: AICOMRCCL-2428. GIN succeeding then RMA failing is the only way to reach
+// free(mem->ginSegmentInfos) with a live array; the sibling cases never build one that survives.
+// ginDereg is the witness that symMemoryUnregister saw it, since mem is gone before Obtain returns.
+TEST_F(SymMemoryObtainRollbackTest, GinSucceedsThenRmaFails_UnregistersGinAndUnlinks) {
+  PushTeam();
+  comm->devrState.ginEnabled = true;
+  RmaProxyTerms(comm, true);
+  ScopedHook gather(g_devrBootstrapAllGather, agreeing);
+  ScopedHook alloc(g_devrSpaceAlloc, AllocAt(0));
+  ScopedHook spaceFree(g_devrSpaceFree, [](ncclSpace*, int64_t, int64_t) { return ncclSuccess; });
+  ScopedHook ginReg(g_devrGinRegister,
+                    [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) {
+                      return ncclSuccess;
+                    });
+  ScopedHook ginDereg(g_devrGinDeregister, [](ncclComm*, void*[]) { return ncclSuccess; });
+  ScopedHook rmaReg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSystemError; });
+  ScopedHook rmaDereg(g_devrRmaProxyDeregister, [](ncclComm*, void*[]) { return ncclSuccess; });
+
+  EXPECT_NE(Obtain(), ncclSuccess);
+  EXPECT_EQ(ginReg.calls, 1);
+  EXPECT_EQ(rmaReg.calls, 1);
+  EXPECT_EQ(ginDereg.calls, 1);   // symMemoryUnregister GIN arm
+  EXPECT_EQ(rmaDereg.calls, 0);  // rmaHostWins[0] witness never set
+  EXPECT_EQ(spaceFree.calls, 1);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
 // Label fail_mem: a failure before the reservation must not free space that was
 // never taken.
 TEST_F(SymMemoryObtainRollbackTest, EarlyFailure_DoesNotFreeUnreservedSpace) {
@@ -4367,6 +4394,13 @@ TEST_F(DevrGetLsaRankPtrTest, RankPastTeam_ReturnsInvalidArgument) {
   EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0, comm->devrState.lsaSize, &out), ncclInvalidArgument);
 }
 
+// Boundary: a negative rank; a missing check would resolve below the flat base, outside every rank's slot.
+TEST_F(DevrGetLsaRankPtrTest, NegativeRank_ReturnsInvalidArgument) {
+  void* out = nullptr;
+  EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0, -1, &out), ncclInvalidArgument);
+  EXPECT_EQ(out, nullptr);
+}
+
 // Branch: a non-symmetric window targeting ourselves resolves against the local
 // window base, not the flat space -- which does not apply to it.
 TEST_F(DevrGetLsaRankPtrTest, NonSymmetricSelfTarget_UsesLocalBase) {
@@ -4412,6 +4446,19 @@ TEST_F(DevrGetLsaRankPtrTest, IpcWindowRankPastTable_ReturnsInvalidArgument) {
 
   void* out = nullptr;
   EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0, 5, &out), ncclInvalidArgument);
+}
+
+// Boundary: a negative rank must not index the IPC table; a mapped sentinel at [-1] makes a missing check succeed.
+TEST_F(DevrGetLsaRankPtrTest, IpcWindowNegativeRank_ReturnsInvalidArgument) {
+  comm->symmetricSupport = 0;
+  peerPtrs = {reinterpret_cast<void*>(0x5000), reinterpret_cast<void*>(0xA000), reinterpret_cast<void*>(0xB000),
+              reinterpret_cast<void*>(0xC000)};
+  win.ipcPeerPtrs = peerPtrs.data() + 1;
+  win.ipcPeerCount = 3;
+
+  void* out = nullptr;
+  EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0, -1, &out), ncclInvalidArgument);
+  EXPECT_EQ(out, nullptr);
 }
 
 

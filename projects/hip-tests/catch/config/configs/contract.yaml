@@ -1827,6 +1827,27 @@ contract:
   Contract_Library_HipLibraryGetGlobal_Default_MatchesModuleGetGlobal:
     <<: *level_0
     tags: [library, P0]
+  Contract_Library_HipLibraryGetModule_Default_ReturnsNonNullModule:
+    <<: *level_0
+    tags: [library, P0]
+  Contract_Library_HipLibraryGetModule_Default_RepeatedQueryIsStable:
+    <<: *level_0
+    tags: [library, P0]
+  Contract_Library_HipLibraryGetModule_Default_ModuleResolvesAndLaunchesKernel:
+    <<: *level_0
+    tags: [library, P0]
+  Contract_Library_HipLibraryGetModule_Default_ModuleGlobalMatchesLibraryGlobal:
+    <<: *level_0
+    tags: [library, P0]
+  Contract_Library_HipLibraryGetModule_NullModuleOut_IsRejected:
+    <<: *level_0
+    tags: [library, P0]
+  Contract_Library_HipLibraryGetModule_NullLibrary_IsRejected:
+    <<: *level_0
+    tags: [library, P0]
+  Contract_Library_HipLibraryGetModule_ModuleUnload_IsRejected:
+    <<: *level_0
+    tags: [library, P0]
   Contract_Library_HipKernelGetLibrary_Default_RoundTrips:
     <<: *level_0
     tags: [library, P0]
@@ -1834,12 +1855,6 @@ contract:
     <<: *level_0
     tags: [kernel_object_attributes, P0]
   Contract_KernelObjectAttributes_HipKernelSetAttribute_SetMaxDynamicSharedMemory_IsAcceptedOrUnsupported:
-    <<: *level_0
-    tags: [kernel_object_attributes, P0]
-  Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NonCurrentDevice_PreservesCurrentAndReadsBack:
-    <<: *level_0
-    tags: [kernel_object_attributes, P0]
-  Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NvidiaPre128Unsupported_IsSkipped:
     <<: *level_0
     tags: [kernel_object_attributes, P0]
   Contract_KernelObjectAttributes_HipKernelGetParamInfo_Default_ReturnsFirstParamLayout:

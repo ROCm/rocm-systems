@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! A fork-sensitive Linux process marker for native owners.
 //!
 //! The kernel zeroes one private page in a fork child. An inherited owner's
@@ -14,7 +17,6 @@ use std::ptr;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 unsafe extern "C" {
-    fn getpagesize() -> c_int;
     fn mmap(
         address: *mut c_void,
         length: usize,
@@ -49,12 +51,10 @@ fn marker_state() -> usize {
     if state != 0 {
         return state;
     }
-    // SAFETY: getpagesize has no pointer arguments or mutable process state.
-    let page = unsafe { getpagesize() };
-    let Ok(page) = usize::try_from(page) else {
+    let Ok(page) = super::util::page_size() else {
         return install_fallback();
     };
-    if page < size_of::<AtomicU32>() || !page.is_power_of_two() {
+    if page < size_of::<AtomicU32>() {
         return install_fallback();
     }
     // SAFETY: The private anonymous page is owned by this call until the
@@ -152,6 +152,7 @@ mod tests {
     const SYS_FORK: c_long = 57;
 
     #[test]
+    #[allow(clippy::used_underscore_items)]
     fn raw_fork_rejects_inherited_owner_even_after_new_session() {
         let parent = std::process::id();
         prepare_for_hot_checks();
