@@ -18,9 +18,11 @@ import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import hrr_test_config  # noqa: E402
 import run_catch2  # noqa: E402
 
 FAKE = """\
@@ -29,6 +31,9 @@ spec = json.load(open(sys.argv[1]))
 out = [a for a in sys.argv if a.startswith("junit::out=")][0].split("=", 1)[1]
 if spec.get("xml") is not None:
     open(out, "w").write(spec["xml"])
+if "--input-file" in sys.argv:
+    names = open(sys.argv[sys.argv.index("--input-file") + 1]).read().split()
+    print("CASES=" + ",".join(names))
 if spec.get("echo_args"):
     print("ARGS=" + json.dumps(sys.argv[2:]))
 print(spec.get("banner", "BANNER"), flush=True)
@@ -190,6 +195,118 @@ class MainTest(unittest.TestCase):
         rc, out, err = self.run_main({"xml": None, "rc": 0})
         self.assertEqual(rc, 1)
         self.assertIn("Could not read JUnit results", err)
+
+    def _config(self, cases):
+        path = self.dir / "suite.yaml"
+        path.write_text(hrr_test_config.render({
+            "version": 1,
+            "suite": "integration",
+            "binary": "hrr-integration-tests",
+            "select": "[hrr]~[direct]",
+            "targets": {"os": ["linux", "windows"],
+                        "arch": ["gfx90a", "gfx1151"]},
+            "cases": cases,
+        }))
+        return path
+
+    def test_config_skips_a_case_and_records_why(self):
+        path = self._config({
+            "Keep": {},
+            "Drop": {"skip": [{
+                "when": {"os": "linux", "arch": "gfx1151"},
+                "kind": "disabled",
+                "reason": "npu",
+                "issue": "https://github.com/ROCm/rocm-systems/issues/1",
+            }]},
+        })
+        listed = [{"name": "Keep", "tags": ["[hrr]"]}, {"name": "Drop", "tags": ["[hrr]"]}]
+        with mock.patch("hrr_test_config.list_cases", return_value=listed):
+            rc, out, _ = self.run_main(
+                {"xml": junit(record("Keep"))},
+                "--config", str(path), "--os", "linux", "--arch", "gfx1151",
+            )
+        self.assertEqual(rc, 0)
+        self.assertIn("PASS: Keep", out)
+        self.assertIn("SKIP (config): Drop", out)
+        self.assertIn("hrr-config: linux/gfx1151: npu "
+                      "(https://github.com/ROCm/rocm-systems/issues/1)", out)
+        self.assertIn("1 config-skipped", out)
+        root = ET.parse(self.xml).getroot()
+        skipped = root.find(".//testcase[@name='Drop']/skipped")
+        self.assertIsNotNone(skipped)
+        self.assertTrue(skipped.attrib["message"].startswith("hrr-config:"))
+
+    def test_config_runs_nothing_when_every_case_is_skipped(self):
+        path = self._config({"Drop": {"skip": [{
+            "when": {"os": "linux"}, "kind": "unsupported", "reason": "all",
+        }]}})
+        with mock.patch("hrr_test_config.list_cases",
+                        return_value=[{"name": "Drop", "tags": ["[hrr]"]}]) as listed:
+            rc, out, _ = self.run_main(
+                {"xml": junit(record("Drop")), "banner": "SHOULD NOT RUN"},
+                "--config", str(path), "--os", "linux", "--arch", "none",
+            )
+        self.assertEqual(rc, 0)
+        self.assertIn("SKIP (config): Drop", out)
+        self.assertNotIn("SHOULD NOT RUN", out)
+        listed.assert_called_once()
+        self.assertEqual(listed.call_args.args[1], "[hrr]~[direct]")
+
+    def test_ignore_config_runs_the_skipped_case(self):
+        path = self._config({"Drop": {"skip": [{
+            "when": {"os": "linux"}, "kind": "unsupported", "reason": "all",
+        }]}})
+        with mock.patch("hrr_test_config.list_cases",
+                        return_value=[{"name": "Drop", "tags": ["[hrr]"]}]) :
+            rc, out, _ = self.run_main(
+                {"xml": junit(record("Drop")), "rc": 0},
+                "--config", str(path), "--os", "linux", "--arch", "gfx1151",
+                "--ignore-config",
+            )
+        self.assertEqual(rc, 0)
+        self.assertIn("PASS: Drop", out)
+        self.assertNotIn("SKIP (config)", out)
+        self.assertNotIn("hrr-config:", out)
+
+    def test_select_overrides_the_config_and_a_trailing_filter_is_dropped(self):
+        path = self._config({"Keep": {}})
+        spec_path = self.dir / "spec.json"
+        # A non-zero status with no JUnit failure dumps the transcript, which is
+        # the only place the wrapper's argv (and the case file) are visible.
+        spec_path.write_text(json.dumps({
+            "xml": junit(record("Keep")), "echo_args": True, "rc": 139,
+        }))
+        argv = [
+            "--xml", str(self.xml), "--config", str(path), "--os", "linux",
+            "--arch", "none", "--select", "[cpu]",
+            "--", sys.executable, str(self.fake), str(spec_path), "[hrr]~[direct]",
+        ]
+        with mock.patch("hrr_test_config.list_cases",
+                        return_value=[{"name": "Keep", "tags": ["[cpu]"]}]) as listed:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = run_catch2.main(argv)
+        self.assertEqual(rc, 139)
+        self.assertEqual(listed.call_args.args[1], "[cpu]")
+        text = out.getvalue()
+        self.assertIn("CASES=Keep", text)
+        self.assertIn("--input-file", text)
+        self.assertNotIn("[hrr]~[direct]", text)
+
+    def test_auto_arch_with_no_device_fails_closed(self):
+        path = self._config({"Keep": {}})
+        with mock.patch("hrr_test_config.detect_archs", return_value=[]):
+            rc, _, err = self.run_main(
+                {"xml": junit(record("Keep"))},
+                "--config", str(path), "--os", "linux", "--arch", "auto",
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("could not detect a GPU architecture", err)
+
+    def test_config_flags_without_a_config_are_rejected(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                run_catch2.parse_args(["--xml", "r.xml", "--arch", "none", "--", "./bin"])
 
     @unittest.skipUnless(os.name == "posix", "process groups are POSIX only")
     def test_timeout_kills_the_suite_and_reports(self):

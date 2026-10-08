@@ -37,9 +37,24 @@ COLUMNS = (
 MAX_FAILED_NAMES = 8
 
 
+# Same prefix run_catch2.py writes for a skip the YAML asked for. Repeated
+# here because this job checks the script out on its own.
+CONFIG_SKIP_PREFIX = "hrr-config:"
+
+
+def is_config_skip(case: ET.Element) -> bool:
+    skipped = case.find("skipped")
+    if skipped is None:
+        return False
+    message = skipped.attrib.get("message", "") or (skipped.text or "")
+    return message.startswith(CONFIG_SKIP_PREFIX)
+
+
 def case_result(case: ET.Element) -> str:
     if case.find("failure") is not None or case.find("error") is not None:
         return "FAIL"
+    if is_config_skip(case):
+        return "CONFIG"
     if case.find("skipped") is not None:
         return "SKIP"
     return "PASS"
@@ -56,7 +71,7 @@ def group_cases(root: ET.Element) -> dict[str, list[ET.Element]]:
 
 def group_result(records: list[ET.Element]) -> str:
     results = {case_result(record) for record in records}
-    for result in ("FAIL", "SKIP"):
+    for result in ("FAIL", "CONFIG", "SKIP"):
         if result in results:
             return result
     return "PASS"
@@ -64,7 +79,7 @@ def group_result(records: list[ET.Element]) -> str:
 
 def summarize_xml(path: Path) -> dict[str, object]:
     groups = group_cases(ET.parse(path).getroot())
-    counts = {"PASS": 0, "FAIL": 0, "SKIP": 0}
+    counts = {"PASS": 0, "FAIL": 0, "SKIP": 0, "CONFIG": 0}
     failed: list[str] = []
     for name, records in groups.items():
         result = group_result(records)
@@ -119,26 +134,27 @@ def render(directory: Path, errors: list[str]) -> str:
     lines = [
         "## HRR results by platform",
         "",
-        "| Suite | Platform / family | Pass | Fail | Skip | Failed tests |",
-        "| --- | --- | ---: | ---: | ---: | --- |",
+        "| Suite | Platform / family | Pass | Fail | Skip | Config skip | Failed tests |",
+        "| --- | --- | ---: | ---: | ---: | ---: | --- |",
     ]
     for suite, platform, data in rows:
         if data is None:
-            lines.append(f"| {suite} | {platform} | — | — | — | _no results_ |")
+            lines.append(f"| {suite} | {platform} | — | — | — | — | _no results_ |")
             continue
         if "error" in data:
             lines.append(
-                f"| {suite} | {platform} | — | — | — | _unreadable XML: {data['error']}_ |"
+                f"| {suite} | {platform} | — | — | — | — | _unreadable XML: {data['error']}_ |"
             )
             continue
         counts = data["counts"]
         lines.append(
-            "| {suite} | {platform} | {passed} | {failed} | {skipped} | {names} |".format(
+            "| {suite} | {platform} | {passed} | {failed} | {skipped} | {config} | {names} |".format(
                 suite=suite,
                 platform=platform,
                 passed=counts["PASS"],
                 failed=counts["FAIL"],
                 skipped=counts["SKIP"],
+                config=counts["CONFIG"],
                 names=failed_cell(data["failed"]),
             )
         )
@@ -156,7 +172,8 @@ def render(directory: Path, errors: list[str]) -> str:
     headers = ["", *(platform for _, platform, _ in rows)]
     lines.append("| " + " | ".join(headers) + " |")
     lines.append("| --- |" + " ---: |" * (len(headers) - 1))
-    for label, key in (("Pass", "PASS"), ("Fail", "FAIL"), ("Skip", "SKIP")):
+    for label, key in (("Pass", "PASS"), ("Fail", "FAIL"), ("Skip", "SKIP"),
+                        ("Config skip", "CONFIG")):
         values = []
         for _, _, data in rows:
             values.append(

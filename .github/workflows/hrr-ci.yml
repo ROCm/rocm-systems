@@ -22,6 +22,11 @@ on:
       - ".github/workflows/hrr-ci.yml"
       - ".github/actions/rocprofiler-sdk-util/resolve-ci-config/**"
   workflow_dispatch:
+    inputs:
+      ignore_test_config:
+        description: "Run cases the YAML config would skip"
+        type: boolean
+        default: false
 
 concurrency:
   group: hrr-ci-${{ github.event.pull_request.number || github.ref }}
@@ -214,6 +219,7 @@ jobs:
             projects/hip/include
             projects/clr/hipamd/include
             projects/clr/hipamd/src
+            .github/workflows
           set-safe-directory: true
 
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -260,7 +266,8 @@ jobs:
         run: |
           # A case behind an #if leaves the binary with no signal at all -- not
           # failed, not skipped, absent -- so a fully green suite can hide it.
-          # Assert the compiled set before trusting the run below.
+          # Assert the compiled set against the YAML before trusting the run.
+          python3 -m pip install --no-cache-dir PyYAML==6.0.1
           if [ "${RUNNER_OS}" = "Windows" ]; then
             PATH="$(cygpath -u "${ROCM_SDK}")/bin:${PATH}"
             export PATH
@@ -271,12 +278,18 @@ jobs:
             echo "::error::no unit binary under build/tests/unit"
             exit 1
           fi
-          python3 projects/hrr/tests/scripts/check_expected_cases.py \
+          python3 projects/hrr/tests/scripts/hrr_test_config.py lint \
+            projects/hrr/tests/config/unit.yaml \
+            projects/hrr/tests/config/integration.yaml \
+            --workflow .github/workflows/hrr-ci.yml
+          python3 projects/hrr/tests/scripts/hrr_test_config.py check \
             --binary "${bin[0]}" \
-            --manifest projects/hrr/tests/unit/expected_cases.txt
+            --config projects/hrr/tests/config/unit.yaml
 
       - name: Run unit suite
         shell: bash
+        env:
+          HRR_TEST_IGNORE_CONFIG: ${{ inputs.ignore_test_config && '1' || '' }}
         run: |
           # Named hrr-unit-tests.exe on Windows. Resolved with a bash glob
           # rather than find, which on a Windows runner resolves to FIND.EXE.
@@ -297,10 +310,12 @@ jobs:
           ls -l "${bin[0]}"
           python3 projects/hrr/tests/scripts/run_catch2.py \
             --xml unit-${{ matrix.os }}.xml \
+            --config projects/hrr/tests/config/unit.yaml \
+            --arch none \
             -- "${bin[0]}"
 
       # The helpers the suites below rely on (JUnit wrapper, summary table,
-      # expected-case check). They are POSIX-process code; once is enough.
+      # suite config). They are POSIX-process code; once is enough.
       # test_api_matrix.py imports PyYAML, which setup-python does not provide.
       - name: Test the CI helper scripts
         if: ${{ runner.os == 'Linux' }}
@@ -494,9 +509,10 @@ jobs:
           # and --list-tests never calls into HIP. Checked here rather than in
           # the integration jobs so a compiled-out case fails once, straight
           # away, instead of nine times after the fan-out.
-          python3 projects/hrr/tests/scripts/check_expected_cases.py \
+          python3 -m pip install --no-cache-dir PyYAML==6.0.1
+          python3 projects/hrr/tests/scripts/hrr_test_config.py check \
             --binary build/hrr/tests/integration/hrr-integration-tests \
-            --manifest projects/hrr/tests/integration/expected_cases.txt
+            --config projects/hrr/tests/config/integration.yaml
 
       - name: Confirm every architecture is embedded
         run: |
@@ -595,6 +611,8 @@ jobs:
         with:
           sparse-checkout: |
             projects/hrr/tests/scripts/run_catch2.py
+            projects/hrr/tests/scripts/hrr_test_config.py
+            projects/hrr/tests/config/integration.yaml
           sparse-checkout-cone-mode: false
           set-safe-directory: true
 
@@ -653,7 +671,10 @@ jobs:
       # the plain amdhip64 lives. LD_LIBRARY_PATH is searched before RUNPATH, so
       # putting the capture build first here is what selects it.
       - name: Run integration suite
+        env:
+          HRR_TEST_IGNORE_CONFIG: ${{ inputs.ignore_test_config && '1' || '' }}
         run: |
+          python3 -m pip install --no-cache-dir PyYAML==6.0.1
           # hipamd/lib holds the amdhip64 carrying the capture shims and must
           # precede the SDK, which ships a plain build under the same soname.
           # No ROCr preload here: CLR was built against the SDK's ROCr, so the
@@ -689,7 +710,9 @@ jobs:
             echo "::error::GPU runner has no visible ROCm-capable device"
             python3 projects/hrr/tests/scripts/run_catch2.py \
               --xml integration-${{ matrix.family }}.xml \
-              -- ./build/hrr/tests/integration/hrr-integration-tests "[cpu]"
+              --config projects/hrr/tests/config/integration.yaml \
+              --os linux --arch none --select "[cpu]" \
+              -- ./build/hrr/tests/integration/hrr-integration-tests
             exit 1
           fi
           # Keep passing logs to one result line per case. The wrapper captures
@@ -697,17 +720,17 @@ jobs:
           # Time out inside the job's 30 minutes, so a hang prints the cases
           # that finished instead of being cancelled with no output.
           #
-          # The selector matters: Catch2 leaves out hidden "[.]" cases unless a
-          # tag names them. API-matrix tiers T0 through T4, the kernel-argument
-          # regression and the HSA first-touch case are hidden drivers tagged
-          # [hrr]. T5 is explicit-only. "[hrr]~[direct]" runs the tagged drivers
-          # and leaves out the [hrr][direct]
-          # workloads they spawn as subprocesses, and (being an exact tag match)
-          # also leaves out the [hrr-direct] workloads and the disabled
-          # [hrr-repro] cases.
+          # Which cases run is the suite config, not a selector written here.
+          # It lists the hidden [hrr] drivers (T0-T4, the kernel-argument
+          # regression, the HSA first-touch case) and leaves out the direct
+          # workloads they spawn, T5, and [hrr-repro]. --arch auto reads the
+          # GPU this machine actually has, so a rule can name one architecture
+          # of a wildcard pool. HRR_TEST_IGNORE_CONFIG runs the skipped cases.
           python3 projects/hrr/tests/scripts/run_catch2.py \
             --xml integration-${{ matrix.family }}.xml --timeout 1200 \
-            -- ./build/hrr/tests/integration/hrr-integration-tests "[hrr]~[direct]"
+            --config projects/hrr/tests/config/integration.yaml \
+            --os linux --arch auto \
+            -- ./build/hrr/tests/integration/hrr-integration-tests
 
       - name: Upload results
         if: always()

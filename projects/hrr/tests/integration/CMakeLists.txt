@@ -128,7 +128,7 @@ if(NOT WIN32)
   # hsa-runtime64 is REQUIRED and linked just above, so the cases that call HSA
   # directly can compile here. Define the macro they are guarded by next to the
   # dependency so the two cannot drift apart; without it those cases vanish from
-  # the binary with no signal. expected_cases.txt in this directory is the backstop.
+  # the binary with no signal. tests/config/integration.yaml is the backstop.
   target_compile_definitions(hrr-integration-tests PRIVATE HRR_HAVE_HSA)
 
   # hrr_disk_space_test.cc defines these for the HIP runtime to bind to. An

@@ -10,13 +10,15 @@ are the same ones it uses.
 tests/
   unit/          C++ (Catch2). hrr-unit-tests: CPU only, no GPU, no capture runtime.
   integration/   C++ (Catch2). hrr-integration-tests: real capture, then replay, on a GPU.
+  config/        One YAML file per suite: every case, and where it runs.
   include/       Headers both suites include (hrr_test_common.hh, hrr_test_process.hh).
   scripts/       CI helpers that run a suite and report on it, plus the unittest
                  suites for those helpers and for ../tools. Not built.
 ```
 
-`unit/` and `integration/` each keep an `expected_cases.txt`, the list of test cases
-their binary must contain (see [Adding or removing a case](#adding-or-removing-a-case)).
+`config/unit.yaml` and `config/integration.yaml` list every case the corresponding
+binary must contain, and the rules for skipping one on an OS or a GPU architecture
+(see [Configuring where a case runs](#configuring-where-a-case-runs)).
 `integration/hrr_api_matrix_expectations.h` is generated; see
 [`../tools/api-matrix`](../tools/api-matrix/README.md).
 
@@ -94,12 +96,15 @@ as CI does.
    run on; the workloads carry device kernels. Build `build/hrr` from the same commit
    as `build/clr`, or the generated payload layouts may disagree.
 
-3. Put the capture build ahead of the SDK's runtime, then run the drivers with the same
-   selector CI uses:
+3. Put the capture build ahead of the SDK's runtime, then run the drivers the way CI
+   does. The wrapper reads `config/integration.yaml`, detects the GPU, and skips the
+   cases a rule names. The binary on its own ignores the config:
 
    ```bash
    export LD_LIBRARY_PATH="$PWD/build/clr/hipamd/lib:${ROCM_PATH:-/opt/rocm}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-   ./build/hrr/tests/integration/hrr-integration-tests "[hrr]~[direct]"
+   python3 projects/hrr/tests/scripts/run_catch2.py --xml results.xml --timeout 1200 \
+     --config projects/hrr/tests/config/integration.yaml --arch auto \
+     -- ./build/hrr/tests/integration/hrr-integration-tests
    ```
 
    CMake bakes the absolute paths of the integration binary and `hrr-playback` into
@@ -108,12 +113,8 @@ as CI does.
    `./hrr-integration-tests Unit_HRR_GraphRoundtrip`. With no GPU, run only the
    CPU-only checks: `./hrr-integration-tests "[cpu]"`.
 
-To get the JUnit file and per-case summary CI publishes, wrap either binary:
-
-```bash
-python3 projects/hrr/tests/scripts/run_catch2.py --xml results.xml --timeout 1200 \
-  -- ./build/hrr/tests/integration/hrr-integration-tests "[hrr]~[direct]"
-```
+`HRR_TEST_IGNORE_CONFIG=1`, or `--ignore-config`, runs the cases the config would
+skip. `--arch gfx1100` (or several, comma-separated) stands in for detection.
 
 ## Testing the Python helpers
 
@@ -124,21 +125,61 @@ PyYAML (used by the api-matrix tools), not ROCm:
 python3 -m unittest discover -s projects/hrr/tests/scripts -p 'test_*.py' -v
 ```
 
-They cover `run_catch2.py`, `summarize_junit.py`, and `check_expected_cases.py`, plus
+They cover `run_catch2.py`, `summarize_junit.py`, and `hrr_test_config.py`, plus
 the tools in `../tools`: the HRR API ID compatibility check, the playback-handler default
 in the generator, and the [api-matrix](../tools/api-matrix/README.md) scripts.
 
-## Adding or removing a case
+## Configuring where a case runs
 
-CI compares each binary's registered cases against its `expected_cases.txt`, in both
-directions, because a case behind an `#if` or a missing define disappears without any
-failure. When you add or remove a case, regenerate the list from a built binary and say
-so in the commit message:
+The build is one fat binary for every architecture in `HRR_ARCHS`. Nothing about a
+GPU is decided at build time. CI decides at run time, from
+[`config/integration.yaml`](config/integration.yaml) (and
+[`config/unit.yaml`](config/unit.yaml) for the CPU suite).
 
-```bash
-python3 projects/hrr/tests/scripts/check_expected_cases.py \
-  --binary build/hrr/tests/unit/hrr-unit-tests \
-  --manifest projects/hrr/tests/unit/expected_cases.txt --update
+An empty entry runs on every OS and every GPU. A rule skips that case, or with a
+suite-level `skip` every case, when every key under `when` matches. Keys are ANDed,
+a list is ORed, a missing key matches anything, and a value may be a glob
+(`gfx11*` is a family). `kind: disabled` is a temporary regression and requires a
+public `https://` issue URL. `kind: unsupported` is permanent and needs only a
+`reason`. On a machine with several GPUs a rule matches when it matches any of them.
+`--arch none` is a run with no GPU, so an architecture rule does not match it.
+
+One case, on one OS and one architecture:
+
+```yaml
+Unit_HRR_Regions_MemcpyFirstTouchMaterialization:
+  skip:
+    - when: {os: linux, arch: gfx1151}
+      kind: disabled
+      reason: HSA allow_access rejects the NPU agent
+      issue: https://github.com/ROCm/rocm-systems/issues/1
 ```
 
-The same applies to `integration/` with its binary and manifest. Listing needs no GPU.
+Every case on one architecture, until a runner exists:
+
+```yaml
+skip:
+  - when: {arch: gfx1250}
+    kind: unsupported
+    reason: no healthy MI455 runner yet
+```
+
+Direct workloads (`[hrr-direct]`, `[direct]`) are spawned by a driver and must not
+carry rules. `targets.arch` is the same list as `HRR_ARCHS` in
+`.github/workflows/hrr-ci.yml`; `hrr_test_config.py lint --workflow` checks that.
+
+CI compares each binary's registered cases against its YAML, in both directions,
+because a case behind an `#if` or a missing define disappears without any failure.
+When you add or remove a case, regenerate the names from a built binary and say so
+in the commit message. Existing rules are kept:
+
+```bash
+python3 projects/hrr/tests/scripts/hrr_test_config.py check \
+  --binary build/hrr/tests/unit/hrr-unit-tests \
+  --config projects/hrr/tests/config/unit.yaml --update
+```
+
+The same applies to the integration binary and `config/integration.yaml`. Listing
+needs no GPU. A manual run can ignore the rules with
+`workflow_dispatch` input `ignore_test_config`, which sets
+`HRR_TEST_IGNORE_CONFIG`.

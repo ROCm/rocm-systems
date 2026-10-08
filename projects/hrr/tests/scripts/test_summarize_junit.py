@@ -21,10 +21,11 @@ def junit(*records: str) -> str:
     return "<testsuites><testsuite>" + "".join(records) + "</testsuite></testsuites>"
 
 
-def record(name: str, kind: str | None = None) -> str:
+def record(name: str, kind: str | None = None, message: str = "") -> str:
     if kind is None:
         return f'<testcase name="{name}"/>'
-    return f'<testcase name="{name}"><{kind}>text</{kind}></testcase>'
+    attr = f' message="{message}"' if message else ""
+    return f'<testcase name="{name}"><{kind}{attr}>text</{kind}></testcase>'
 
 
 class ScratchDir(unittest.TestCase):
@@ -61,6 +62,7 @@ class CaseTest(unittest.TestCase):
             junit(record("A"), record("A/s", "failure")),
             junit(record("A/s", "skipped"), record("A/t")),
             junit(record("A", "skipped"), record("B"), record("C/x", "error")),
+            junit('<testcase name="D"><skipped message="hrr-config: linux/gfx1151: because"/></testcase>'),
         ]
         for sample in samples:
             root = ET.fromstring(sample)
@@ -97,9 +99,20 @@ class SummarizeTest(ScratchDir):
             ),
         )
         data = summarize_junit.summarize_xml(path)
-        self.assertEqual(data["counts"], {"PASS": 1, "FAIL": 2, "SKIP": 1})
+        self.assertEqual(data["counts"], {"PASS": 1, "FAIL": 2, "SKIP": 1, "CONFIG": 0})
         self.assertEqual(data["failed"], ["PassWithBadSection", "OnlySection"])
         self.assertEqual(data["total"], 4)
+
+    def test_config_skip_is_not_a_code_skip(self):
+        path = self.write(
+            "x.xml",
+            junit(
+                record("Code", "skipped"),
+                record("Ruled", "skipped", "hrr-config: linux/gfx1151: because"),
+            ),
+        )
+        data = summarize_junit.summarize_xml(path)
+        self.assertEqual(data["counts"], {"PASS": 0, "FAIL": 0, "SKIP": 1, "CONFIG": 1})
 
     def test_try_summarize_reports_unreadable_files(self):
         path = self.write("bad.xml", "<testsuites><oops")
@@ -118,10 +131,10 @@ class SummarizeTest(ScratchDir):
         self.write("integration-extra.xml", junit(record("Z")))
         errors: list[str] = []
         text = summarize_junit.render(self.dir, errors)
-        self.assertIn("| Unit | Linux | 1 | 1 | 0 | `B` |", text)
-        self.assertIn("| Unit | Windows | — | — | — | _no results_ |", text)
-        self.assertIn("| Integration | gfx90a | — | — | — | _unreadable XML:", text)
-        self.assertIn("| Other | integration-extra.xml | 1 | 0 | 0 |  |", text)
+        self.assertIn("| Unit | Linux | 1 | 1 | 0 | 0 | `B` |", text)
+        self.assertIn("| Unit | Windows | — | — | — | — | _no results_ |", text)
+        self.assertIn("| Integration | gfx90a | — | — | — | — | _unreadable XML:", text)
+        self.assertIn("| Other | integration-extra.xml | 1 | 0 | 0 | 0 |  |", text)
         self.assertIn("### Counts grid", text)
         self.assertEqual(len(errors), 1)
 
@@ -148,7 +161,7 @@ class MainTest(ScratchDir):
         summary = self.write("summary.md", "existing\n")
         rc, out, _ = self.run_main("--dir", str(self.dir), "--summary", str(summary))
         self.assertEqual(rc, 0)
-        self.assertIn("| Unit | Windows | 1 | 0 | 0 |", out)
+        self.assertIn("| Unit | Windows | 1 | 0 | 0 | 0 |", out)
         written = summary.read_text()
         self.assertTrue(written.startswith("existing\n"))
         self.assertIn("## HRR results by platform", written)
