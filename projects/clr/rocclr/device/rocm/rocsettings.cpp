@@ -156,6 +156,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   if ((gfxipMajor == 9 && gfxipMinor >= 4) ||
       (gfxipMajor == 12 && gfxipMinor >= 5)) {
     sdma_swap_supported_ = true;
+    sdma_swap_alignment_ = (gfxipMajor == 12) ? 32 : 64;
   }
 
   setKernelArgImpl(isa, isXgmi);
@@ -198,6 +199,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   // SDMA indirect copies dereference pointer slots before copying.
   if (gfxipMajor == 12 && gfxipMinor >= 5) {
     sdma_indirect_supported_ = true;
+    sdma_indirect_max_size_ = 0x3fffffff;  // ROCr MaxSingleLinearCopySize
   }
 
 #if defined(_WIN32)
