@@ -53,6 +53,8 @@ ASSERT_HOOK_MATCHES_PROD(g_regLocalIsValid,           ncclRegLocalIsValid);
 ASSERT_HOOK_MATCHES_PROD(g_commGraphRegister,         ncclCommGraphRegister);
 ASSERT_HOOK_MATCHES_PROD(g_commGraphDeregister,       ncclCommGraphDeregister);
 ASSERT_HOOK_MATCHES_PROD(g_memTrackImportFromPeer,    ncclMemTrackImportFromPeer);
+ASSERT_HOOK_MATCHES_PROD(g_memTrack,                  ncclMemTrack);
+ASSERT_HOOK_MATCHES_PROD(g_memUntrackDynamic,         ncclMemUntrackDynamic);
 ASSERT_HOOK_MATCHES_PROD(g_dynMemMarkExportToPeer,    ncclDynMemMarkExportToPeer);
 
 #undef ASSERT_HOOK_MATCHES_PROD
@@ -440,14 +442,23 @@ ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* /*system*/,
 // pure no-ops that satisfy the linker and report success.
 // ---------------------------------------------------------------------------
 
-ncclResult_t ncclMemTrack(struct ncclMemManager* /*manager*/,
-                          void*                            /*ptr*/,
-                          size_t                           /*size*/,
-                          hipMemGenericAllocationHandle_t  /*handle*/,
-                          hipMemAllocationHandleType       /*handleType*/,
-                          ncclMemType_t                    /*memType*/)
+static ncclResult_t DefaultMemTrack(struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,
+                                    hipMemAllocationHandleType, ncclMemType_t)
 {
     return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,
+                           hipMemAllocationHandleType, ncclMemType_t)>
+    g_memTrack = DefaultMemTrack;
+
+ncclResult_t ncclMemTrack(struct ncclMemManager*          manager,
+                          void*                           ptr,
+                          size_t                          size,
+                          hipMemGenericAllocationHandle_t handle,
+                          hipMemAllocationHandleType      handleType,
+                          ncclMemType_t                   memType)
+{
+    return g_memTrack(manager, ptr, size, handle, handleType, memType);
 }
 
 // --- Controllable seam: ncclMemTrackImportFromPeer ----------------------
@@ -488,9 +499,7 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* /*manager*/,
     return ncclSuccess;
 }
 
-ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager* /*manager*/,
-                                   void*                  /*ptr*/,
-                                   struct ncclMemUntrackInfo* info)
+static ncclResult_t DefaultMemUntrackDynamic(struct ncclMemManager*, void*, struct ncclMemUntrackInfo* info)
 {
     if (info) {
         info->memType = ncclMemPersist;
@@ -498,6 +507,13 @@ ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager* /*manager*/,
         info->dynMemSize = 0;
     }
     return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclMemManager*, void*, struct ncclMemUntrackInfo*)> g_memUntrackDynamic =
+    DefaultMemUntrackDynamic;
+
+ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager* manager, void* ptr, struct ncclMemUntrackInfo* info)
+{
+    return g_memUntrackDynamic(manager, ptr, info);
 }
 
 ncclResult_t ncclMemUntrackPersist(struct ncclMemManager* /*manager*/,
@@ -574,6 +590,8 @@ void ResetNcclFakes()
     g_proxyClientQueryFdBlocking   = DefaultProxyClientQueryFdBlocking;
     g_proxyClientBatchQueryFdBlocking = DefaultProxyClientBatchQueryFdBlocking;
     g_memTrackImportFromPeer       = DefaultMemTrackImportFromPeer;
+    g_memTrack                     = DefaultMemTrack;
+    g_memUntrackDynamic            = DefaultMemUntrackDynamic;
     g_dynMemMarkExportToPeer       = DefaultDynMemMarkExportToPeer;
     g_ncclTopoGetLinkType          = DefaultTopoGetLinkType;
     g_ncclTopoGetLinkTypeCalls     = 0;

@@ -300,6 +300,20 @@ function(rccl_define_micro_source_lists)
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # src/algorithms/dda/
+  set(TEST_MICRO_DDA_SOURCE_FILES
+    algorithms/dda/fabric/fabric-gpu-barrier-test.cc
+    algorithms/dda/fabric/fabric-mem-handler-test.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/device/device_buffer.cc  # real DeviceBuffer
+    fakes/alloc_fakes.cc                 # alloc.h data symbols (allocTracker)
+    fakes/bootstrap_stubs.cc             # bootstrapAllGather
+    fakes/env_fakes.cc                   # NCCL_CUMEM_SKIP_FREE
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/utils_fakes.cc                 # getBusId (alloc.h side stream)
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -927,6 +941,21 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDiagnostics
     ${_MICRO_MODE_DEFS}
     DIAG_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/p2p.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_diagnostics.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroDda
+# ---------------------------------------------------------------------------
+set_source_files_properties(
+  ${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/device/device_buffer.cc
+  PROPERTIES GENERATED TRUE)
+rccl_add_micro_binary(rccl-UnitTestsMicroDda
+  SOURCES ${TEST_MICRO_DDA_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    FABRIC_MEM_HANDLER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_mem_handler.cc"
+    # hipify renames .cu to .cu.cpp
+    FABRIC_GPU_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_gpu_barrier.cu.cpp"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda.yaml")
 
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.
