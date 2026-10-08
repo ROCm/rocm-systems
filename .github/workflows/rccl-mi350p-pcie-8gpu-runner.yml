@@ -9,13 +9,22 @@
 #   - workflow_dispatch: manual, plan selected in the Actions UI (func, perf, or both)
 #   - pull_request: the PR is from this repo and carries the "mi350p-test" label
 #     (labeled, and later pushes while the label stays on). A labeled PR runs
-#     the func plan only.
+#     the func plan at --scope smoke (channels 1, 4, 32 plus spot checks).
+#     Manual func/both runs every enabled suite.
 # Do not add this workflow name to branch protection.
+#
+# There is no paths filter. A paths filter suppresses the labeled event,
+# because adding a label does not change files. The mi350p-test label is the
+# gate. A later push on a labeled PR reruns the smoke plan.
 #
 # The runner must be the 8-GPU MI350P itself, registered with the label
 # mi350p-pcie-8gpu. The job refuses to start the suites unless lspci shows
 # exactly eight AMD devices 1002:75a8, so an MI355 or MI300 runner with the
 # wrong label still stops before test_runner.
+#
+# Both plans use a Debug build. When plan=both, perf passes --no-build and
+# reuses the func build, and it passes --emit-results so algbw/busbw are
+# uploaded with the logs.
 
 name: RCCL MI350P PCIe 8-GPU Runner
 
@@ -43,10 +52,6 @@ on:
         type: string
   pull_request:
     types: [labeled, synchronize]
-    paths:
-      - 'projects/rccl/**'
-      - 'projects/rccl-tests/**'
-      - '.github/workflows/rccl-mi350p-pcie-8gpu-runner.yml'
 
 permissions:
   contents: read
@@ -102,29 +107,47 @@ jobs:
           export RCCL_TESTS_DIR="${GITHUB_WORKSPACE}/projects/rccl-tests"
           export ROCM_PATH MPI_PATH
 
+          # Labeled PRs run the short channel set. Manual runs every suite.
+          SCOPE=all
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            SCOPE=smoke
+          fi
+
           run_config() {
             local config="$1"
             local log="$2"
+            shift 2
             echo "================================================================"
-            echo "test_runner --config configs/${config}"
+            echo "test_runner --config configs/${config} $*"
             echo "================================================================"
-            python3 test_runner.py --config "configs/${config}" 2>&1 | tee "${log}"
+            python3 test_runner.py --config "configs/${config}" "$@" 2>&1 | tee "${log}"
           }
 
           rc=0
           case "${PLAN}" in
             func|both)
-              run_config mi350p_pcie_8gpu_func.json "${RUNNER_TEMP}/mi350p_func.log" || rc=$?
+              run_config mi350p_pcie_8gpu_func.json "${RUNNER_TEMP}/mi350p_func.log" --scope "${SCOPE}" || rc=$?
+              ;;
+            perf)
+              ;;
+            *)
+              echo "ERROR: unknown plan '${PLAN}'"
+              exit 1
               ;;
           esac
           if [ "${rc}" -eq 0 ]; then
             case "${PLAN}" in
               perf|both)
-                run_config mi350p_pcie_8gpu_perf.json "${RUNNER_TEMP}/mi350p_perf.log" || rc=$?
+                perf_args=(--emit-results --results-dir "${RUNNER_TEMP}/results")
+                # func already built the shared Debug tree.
+                if [ "${PLAN}" = "both" ]; then
+                  perf_args+=(--no-build)
+                fi
+                run_config mi350p_pcie_8gpu_perf.json "${RUNNER_TEMP}/mi350p_perf.log" "${perf_args[@]}" || rc=$?
                 ;;
             esac
           fi
-          echo "plan=${PLAN} exit code: ${rc}"
+          echo "plan=${PLAN} scope=${SCOPE} exit code: ${rc}"
           exit "${rc}"
 
       - name: Upload logs
@@ -135,6 +158,7 @@ jobs:
           path: |
             ${{ runner.temp }}/mi350p_func.log
             ${{ runner.temp }}/mi350p_perf.log
+            ${{ runner.temp }}/results
           if-no-files-found: warn
 
       - name: Print summary

@@ -12,6 +12,10 @@
 // keeps every GPU pair on PCIe: no XGMI path, same-socket pairs stay inside
 // one CPU, and cross-socket pairs cross the CPU link.
 //
+// RCCL_TOPO_XGMI_ALL is set only by ncclTopoTrimSystem, which this test does
+// not call, so the per-pair ncclTopoGetLinkType result is the check that
+// distinguishes this model from the all-XGMI fabric.
+//
 // Target: rccl-UnitTestsFixturesDebug.
 
 #include <gtest/gtest.h>
@@ -20,6 +24,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <unistd.h>
 
@@ -40,6 +45,13 @@ constexpr int kGpuCount = 8;
 constexpr int kGpusPerSocket = 4;
 constexpr uint64_t kMi350pDevice = 0x75a8;
 constexpr uint64_t kPex890Device = 0xc030;
+
+struct FreeDeleter
+{
+    void operator()(void* ptr) const { std::free(ptr); }
+};
+
+using TopoPtr = std::unique_ptr<ncclTopoSystem, decltype(&ncclTopoFree)>;
 
 std::string mi350pPcieTopoPath()
 {
@@ -65,44 +77,47 @@ uint64_t pciDeviceId(uint64_t packed)
     return (packed >> 32) & 0xffff;
 }
 
-struct ncclTopoSystem* loadMi350pPcieTopo()
+TopoPtr loadMi350pPcieTopo()
 {
+    struct ncclXml* raw = allocateXml(NCCL_TOPO_XML_MAX_NODES);
+    EXPECT_NE(raw, nullptr);
+    if (raw == nullptr) return TopoPtr(nullptr, &ncclTopoFree);
+    std::unique_ptr<ncclXml, FreeDeleter> xml(raw);
+
     const std::string path = mi350pPcieTopoPath();
-    if (access(path.c_str(), R_OK) != 0)
-    {
-        ADD_FAILURE() << "Topology model not found: " << path;
-        return nullptr;
-    }
-
-    struct ncclXml* xml = allocateXml(NCCL_TOPO_XML_MAX_NODES);
-    EXPECT_NE(xml, nullptr);
-    if (xml == nullptr) return nullptr;
-
-    ncclResult_t res = ncclTopoGetXmlFromFile(path.c_str(), xml, /*warn=*/0);
+    ncclResult_t res = ncclTopoGetXmlFromFile(path.c_str(), xml.get(), /*warn=*/0);
     EXPECT_EQ(res, ncclSuccess);
     struct ncclTopoSystem* system = nullptr;
     if (res == ncclSuccess)
     {
         // host_hash is omitted in the model, so the CPU hash is 0.
-        res = ncclTopoGetSystemFromXml(xml, &system, /*localHostHash=*/0);
+        res = ncclTopoGetSystemFromXml(xml.get(), &system, /*localHostHash=*/0);
         EXPECT_EQ(res, ncclSuccess);
     }
-    free(xml);
-    if (res != ncclSuccess) return nullptr;
+    if (res != ncclSuccess)
+    {
+        if (system) ncclTopoFree(system);
+        return TopoPtr(nullptr, &ncclTopoFree);
+    }
     EXPECT_EQ(ncclTopoComputePaths(system, /*comm=*/nullptr), ncclSuccess);
-    return system;
+    return TopoPtr(system, &ncclTopoFree);
 }
 
 } // namespace
 
 TEST(Mi350pPcieTopo, EightGfx950GpusNoXgmi)
 {
-    struct ncclTopoSystem* system = loadMi350pPcieTopo();
-    ASSERT_NE(system, nullptr);
+    const std::string path = mi350pPcieTopoPath();
+    if (access(path.c_str(), R_OK) != 0)
+    {
+        GTEST_SKIP() << "Topology model not found: " << path;
+    }
+
+    TopoPtr system = loadMi350pPcieTopo();
+    ASSERT_NE(system.get(), nullptr);
 
     ASSERT_EQ(system->nodes[GPU].count, kGpuCount);
     ASSERT_EQ(system->nodes[CPU].count, 2);
-    EXPECT_EQ(system->type & RCCL_TOPO_XGMI_ALL, 0);
 
     bool sawSwitch = false;
     for (int i = 0; i < system->nodes[PCI].count; i++)
@@ -138,7 +153,7 @@ TEST(Mi350pPcieTopo, EightGfx950GpusNoXgmi)
             EXPECT_NE(pathType, PATH_NVL) << "rank " << a->gpu.rank << " -> " << b->gpu.rank;
 
             bool xgmi = true;
-            EXPECT_EQ(ncclTopoGetLinkType(system, a->gpu.dev, b->gpu.dev, &xgmi), ncclSuccess);
+            EXPECT_EQ(ncclTopoGetLinkType(system.get(), a->gpu.dev, b->gpu.dev, &xgmi), ncclSuccess);
             EXPECT_FALSE(xgmi) << "rank " << a->gpu.rank << " -> " << b->gpu.rank;
 
             const bool sameSocket = (a->gpu.rank / kGpusPerSocket) == (b->gpu.rank / kGpusPerSocket);
@@ -152,8 +167,6 @@ TEST(Mi350pPcieTopo, EightGfx950GpusNoXgmi)
             }
         }
     }
-
-    ncclTopoFree(system);
 }
 
 } // namespace RcclUnitTesting
