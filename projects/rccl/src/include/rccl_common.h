@@ -301,10 +301,11 @@ bool rcclCollectiveMustUseEnqueuePath(struct ncclComm* comm);
 bool ncclCommIsSuspended(struct ncclComm* comm);
 void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize);
-// Physical segments behind the whole NET registration, not the collective's
-// slice. Returns the cached count once every peer has registered.
+// Segments behind the whole NET registration, not the collective's slice (cached).
 ncclResult_t rcclNetRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments);
-// Records an all-peers NET registration and caches its segment count.
+// Graph variant: no-op for a NULL record; drops the graph reference on failure or when =0 skips a multi-segment record.
+ncclResult_t rcclNetGraphRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments);
+// Records an all-peers NET registration.
 void rcclNetRegCommit(struct ncclComm* comm, struct ncclReg* regRecord, int numSegments);
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount);
 ncclResult_t commSetUnrollFactor(struct ncclComm* comm);

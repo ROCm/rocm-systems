@@ -240,7 +240,7 @@
       "tests": [
         {
           "name": "UBR_MultiSegment_Generic",
-          "description": "Out-of-place AllReduce on an 8-segment VMM buffer; asserts NET cache netNSegments",
+          "description": "Out-of-place AllReduce on an 8-segment VMM buffer; asserts the NET cache rcclNet.nSegments",
           "test_filter": "UBR_MultiSegment.Generic"
         },
         {
@@ -248,6 +248,23 @@
           "description": "Graph-captured AllReduce reusing a wider 8-segment graph record; asserts the NET cache counts the whole record",
           "test_filter": "UBR_MultiSegment.GenericGraph",
           "env_variables": {
+            "NCCL_GRAPH_REGISTER": "1"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_MultiSegmentRegisterOff_SliceSkipsNet",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: a one-segment slice of an 8-segment registration skips NET and the AllReduce is correct",
+          "test_filter": "UBR_MultiSegment.MultiSegmentRegisterOff_SliceSkipsNet",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "0"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_MultiSegmentRegisterOff_GraphSliceSkipsNet",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: graph registration of a one-segment slice reusing an 8-segment record skips NET and drops its reference",
+          "test_filter": "UBR_MultiSegment.MultiSegmentRegisterOff_GraphSliceSkipsNet",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "0",
             "NCCL_GRAPH_REGISTER": "1"
           }
         },
@@ -4911,7 +4928,7 @@
     },
     {
       "name": "Multi-Segment - LSA plus GIN (Multi-Node)",
-      "description": "Two-node UBR multi-segment tests including Generic netNSegments",
+      "description": "Two-node UBR multi-segment tests including Generic rcclNet.nSegments",
       "config": "ubr_multisegment_lsagin_multinode",
       "enabled": true
     },
