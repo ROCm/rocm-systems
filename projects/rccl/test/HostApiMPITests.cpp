@@ -1484,12 +1484,12 @@ uint64_t a2aWord(int nRanks, int src, int dst, int k, size_t i)
     return op << 32 | i;
 }
 
-void a2aFill(void* buf, size_t bytes, int nRanks, int src, int dst, int k)
+bool a2aFill(void* buf, size_t bytes, int nRanks, int src, int dst, int k)
 {
     std::vector<uint64_t> words(bytes / sizeof(uint64_t));
     for(size_t i = 0; i < words.size(); ++i)
         words[i] = a2aWord(nRanks, src, dst, k, i);
-    ASSERT_EQ(hipMemcpy(buf, words.data(), bytes, hipMemcpyHostToDevice), hipSuccess);
+    return hipMemcpy(buf, words.data(), bytes, hipMemcpyHostToDevice) == hipSuccess;
 }
 
 bool a2aVerify(const void* buf, size_t bytes, int nRanks, int src, int dst, int k)
@@ -1562,12 +1562,14 @@ TEST_F(HostApiTest, DenseAllToAllPutSignal)
     {
         SCOPED_TRACE(uneven ? "uneven sizes" : "uniform sizes");
         FillSentinel(base, winSize, kA2aSentinel);
-        for(int peer = 0; peer < nRanks_; ++peer)
+        bool filled = true;
+        for(int peer = 0; peer < nRanks_ && filled; ++peer)
         {
             if(peer == myRank) continue;
-            for(int k = 0; k < kA2aPutsPerPeer; ++k)
-                a2aFill(base + a2aSendOffset(peer, k), a2aPutBytes(uneven, myRank, peer, k), nRanks_, myRank, peer, k);
+            for(int k = 0; k < kA2aPutsPerPeer && filled; ++k)
+                filled = a2aFill(base + a2aSendOffset(peer, k), a2aPutBytes(uneven, myRank, peer, k), nRanks_, myRank, peer, k);
         }
+        ASSERT_MPI_TRUE(filled);
         ASSERT_MPI_EQ(hipSuccess, hipDeviceSynchronize());
         ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
 
