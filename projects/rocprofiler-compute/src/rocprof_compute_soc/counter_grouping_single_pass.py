@@ -13,8 +13,7 @@ row, and which extra copies to keep.
 
 Overlapping single-pass metric sets that cannot share one bucket are handled by
 duplicating counters into an additional bucket (additive passes). That
-differs from the legacy heuristic, which places each counter in at most one
-bucket.
+may duplicate counters into an additional bucket.
 """
 
 from dataclasses import dataclass
@@ -56,7 +55,7 @@ def try_allocate_single_pass_metrics(
 ) -> Optional[Tuple[List[CounterFile], int, "SinglePassMetricStats"]]:
     """Allocate work_set with single-pass metrics forced into one bucket.
 
-    On success, clears work_set. The caller uses this path for every allocation.
+    On success, clears work_set.
 
     Returns:
         (files, file_count, stats) when every single-pass metric set has a
@@ -94,8 +93,7 @@ def try_allocate_single_pass_metrics(
             "profiling",
             "single-pass metric allocation: "
             f"{single_pass_metric_sets_without_pass} single-pass metric set(s) "
-            "still lack a full bucket "
-            "after allocate; falling back to legacy heuristic.",
+            "still lack a full bucket after allocation.",
         )
         return None
 
@@ -119,8 +117,7 @@ def try_allocate_single_pass_metrics(
             "profiling",
             "single-pass metric allocation: "
             f"{single_pass_metric_sets_without_pass} single-pass metric set(s) "
-            "lost coverage after residual "
-            "fill; falling back to legacy heuristic.",
+            "lost coverage after multi-pass metric fill.",
         )
         return None
     file_count = _next_bucket_number(files, file_count_start)
