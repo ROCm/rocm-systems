@@ -4640,6 +4640,82 @@ TEST_F(InitMicrotest, ParseCommConfig_ZeroMinCTAsBelowMaxCTAs_IsRejectedAtTheBou
       },
       warning.c_str());
 }
+
+// --- minCTAs / maxCTAs set one at a time (NVIDIA/nccl#2256): the unset field is
+// NCCL_CONFIG_UNDEF_INT (INT_MIN) and must neither take part in the min > max
+// comparison nor fail the <= 0 check; it falls back to its default instead. ---
+
+namespace {
+// The warning prints the unset field as NCCL_CONFIG_UNDEF_INT.
+std::string ParseCfg_CtaWarning(int minCTAs, int maxCTAs) {
+  return "Invalid config min/max channels attribute value " + std::to_string(minCTAs) + "/" +
+         std::to_string(maxCTAs);
+}
+}  // namespace
+
+TEST_F(InitMicrotest, ParseCommConfig_OnlyMinCTAs_IsAcceptedAndMaxDefaultsToMaxChannels) {
+  for (const int minCTAs : {1, 4, 32, MAXCHANNELS}) {
+    ParseCfg_Scene s;
+    s.config().minCTAs = minCTAs;
+    EXPECT_EQ(ncclSuccess, s.Run()) << "minCTAs=" << minCTAs;
+    EXPECT_EQ(minCTAs, s.result_config().minCTAs);
+    EXPECT_EQ(MAXCHANNELS, s.result_config().maxCTAs);
+  }
+}
+TEST_F(InitMicrotest, ParseCommConfig_OnlyMaxCTAs_IsAcceptedAndMinDefaultsToOne) {
+  for (const int maxCTAs : {1, 2, 16, MAXCHANNELS}) {
+    ParseCfg_Scene s;
+    s.config().maxCTAs = maxCTAs;
+    EXPECT_EQ(ncclSuccess, s.Run()) << "maxCTAs=" << maxCTAs;
+    EXPECT_EQ(1, s.result_config().minCTAs);
+    EXPECT_EQ(maxCTAs, s.result_config().maxCTAs);
+  }
+}
+TEST_F(InitMicrotest, ParseCommConfig_EqualMinAndMaxCTAs_IsAcceptedAndAssigned) {
+  ParseCfg_Scene s;
+  s.config().minCTAs = 8;
+  s.config().maxCTAs = 8;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(8, s.result_config().minCTAs);
+  EXPECT_EQ(8, s.result_config().maxCTAs);
+}
+// The range check does not bound minCTAs by the channel limit; the envConfigOverride
+// call at the end of parseCommConfig caps it instead of rejecting the config.
+TEST_F(InitMicrotest, ParseCommConfig_OnlyMinCTAsAboveChannelLimit_IsAcceptedAndCapped) {
+  ConfigComm c;
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  cfg.minCTAs = MAXCHANNELS + 1;
+  const std::string log = CaptureInfoLog([&] { c.RunParse(&cfg); });
+  ASSERT_EQ(ncclSuccess, c.result()) << "actual log:\n" << log;
+  EXPECT_EQ(MAXCHANNELS, c.config().minCTAs);
+  EXPECT_EQ(MAXCHANNELS, c.config().maxCTAs);
+  const std::string capped = "minCTAs " + std::to_string(MAXCHANNELS + 1) + " is larger than #channels upper limit";
+  EXPECT_TRUE(LogHas(log, capped.c_str())) << "actual log:\n" << log;
+}
+TEST_F(InitMicrotest, ParseCommConfig_OnlyMinCTAsZero_IsRejected) {
+  ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.minCTAs = 0; },
+                          ParseCfg_CtaWarning(0, NCCL_CONFIG_UNDEF_INT).c_str());
+}
+TEST_F(InitMicrotest, ParseCommConfig_OnlyMinCTAsNegative_IsRejected) {
+  ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.minCTAs = -4; },
+                          ParseCfg_CtaWarning(-4, NCCL_CONFIG_UNDEF_INT).c_str());
+}
+TEST_F(InitMicrotest, ParseCommConfig_OnlyMaxCTAsZero_IsRejected) {
+  ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.maxCTAs = 0; },
+                          ParseCfg_CtaWarning(NCCL_CONFIG_UNDEF_INT, 0).c_str());
+}
+TEST_F(InitMicrotest, ParseCommConfig_OnlyMaxCTAsNegative_IsRejected) {
+  ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.maxCTAs = -4; },
+                          ParseCfg_CtaWarning(NCCL_CONFIG_UNDEF_INT, -4).c_str());
+}
+TEST_F(InitMicrotest, ParseCommConfig_ZeroMaxCTAsWithMinCTAsSet_IsRejected) {
+  ParseCfg_ExpectRejected(
+      [](ncclConfig_t& c) {
+        c.minCTAs = 2;
+        c.maxCTAs = 0;
+      },
+      ParseCfg_CtaWarning(2, 0).c_str());
+}
 TEST_F(InitMicrotest, ParseCommConfig_ZeroNvlsCTAs_IsRejectedAtTheBoundary) {
   ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.nvlsCTAs = 0; },
                           "Invalid config nvlsCTAs attribute value 0");
