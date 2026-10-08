@@ -1223,7 +1223,7 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
                 "Thunk pointer info mismatch");
 
   HsaPointerInfo thunkInfo;
-  uint32_t* mappedNodes;
+  uint32_t* mappedNodes = nullptr;
 
   hsa_amd_pointer_info_t retInfo = {0};
 
@@ -1361,11 +1361,13 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
         // KFD memory the two bases are equal (lock memory, the one exception, has type
         // HSA_EXT_POINTER_TYPE_LOCKED and cannot be suballocated), but an XDNA BO has a device
         // address of its own, and that is the one a caller patches into the agent's code.
-        const void* block_base =
-            retInfo.hostBaseAddress ? retInfo.hostBaseAddress : retInfo.agentBaseAddress;
-        const size_t offset = reinterpret_cast<const uint8_t*>(fragment->first) -
-            static_cast<const uint8_t*>(block_base);
-        retInfo.agentBaseAddress = static_cast<uint8_t*>(retInfo.agentBaseAddress) + offset;
+        // Integer arithmetic, not pointer arithmetic: the agent address need not point at any
+        // host object.
+        const uintptr_t block_base = reinterpret_cast<uintptr_t>(
+            retInfo.hostBaseAddress ? retInfo.hostBaseAddress : retInfo.agentBaseAddress);
+        const uintptr_t offset = reinterpret_cast<uintptr_t>(fragment->first) - block_base;
+        retInfo.agentBaseAddress =
+            reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(retInfo.agentBaseAddress) + offset);
         retInfo.hostBaseAddress = const_cast<void*>(fragment->first);
         retInfo.sizeInBytes = fragment->second.size_requested;
         retInfo.userData = fragment->second.user_ptr;
