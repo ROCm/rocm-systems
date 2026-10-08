@@ -76,6 +76,12 @@
 #include <gda/mlx5/provider_gda_mlx5.hpp>
 #endif
 
+#if !defined(GDA_IONIC) && !defined(GDA_BNXT) && !defined(GDA_MLX5)
+#error "gin_rocshmem_gda_factory.cc requires at least one of GDA_IONIC/GDA_BNXT/GDA_MLX5 to be \
+defined (see target_compile_definitions(rccl ...) under ENABLE_ROCSHMEM_GIN in src/CMakeLists.txt) \
+-- without one, gin_detect_provider() silently falls through to GDAProvider::UNSET at runtime."
+#endif
+
 using namespace rocshmem;
 
 // Forward declarations for RCCL's IB verbs wrappers (from ibvwrap.h).
