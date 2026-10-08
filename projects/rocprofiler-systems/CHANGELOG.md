@@ -17,6 +17,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - `rocprof-sys-attach` finds the tool library in the target's own ROCm installation when the
   target cannot see this installation's library (for example, inside a container), so
   `ROCPROF_ATTACH_TOOL_LIBRARY` is no longer needed there.
+- Agent skills for choosing a profiling preset, discovering configuration options, and
+  instrumenting binaries are now installed in `share/rocprofiler-systems/skills`. Run the
+  bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
+  agent's personal skills folder.
 
 ### Resolved issues
 
