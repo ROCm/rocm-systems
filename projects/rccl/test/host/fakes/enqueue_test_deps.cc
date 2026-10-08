@@ -11,11 +11,14 @@
 #include "enqueue_test_deps.h"
 
 #include "nccl_fakes.h"
+#include "tuning_fakes.h"
 
 // init.cc owns NCCL_PARAM(P2pDisable). enqueue.cc's addP2pToPlan calls it via
 // rcclP2pPolicyChannels; wrap_fakes.cc supplies the body for binaries that
-// compile rccl_wrap.cc, which this target does not.
-int64_t ncclParamP2pDisable() { return g_loadParam("P2P_DISABLE", 0); }
+// compile rccl_wrap.cc, which this target does not. This strong definition
+// replaces tuning_fakes.cc's weak one, so it keeps g_tuningParamP2pDisable as
+// the default for tests that drive the param through that seam.
+int64_t ncclParamP2pDisable() { return g_loadParam("P2P_DISABLE", g_tuningParamP2pDisable); }
 
 void ResetEnqueueTestDeps() {
   ResetHipFakes();

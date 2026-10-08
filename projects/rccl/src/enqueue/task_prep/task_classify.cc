@@ -6,6 +6,7 @@
  *************************************************************************/
 
 #include "comm.h"
+#include "collective_execution_policy.h"
 #include "enqueue.h"
 #include "enqueue/task_classify.h"
 #include "register.h"
@@ -56,6 +57,31 @@ static ncclResult_t classifyEnqueueP2pTask(
   return ncclSuccess;
 }
 
+// A lowered collective's send/recv tasks also carry whether its buffers overlap,
+// which the execution policy matches on.
+static ncclResult_t classifyEnqueueCollP2pTask(
+  struct ncclComm* comm, struct ncclIntruQueue<struct ncclTaskTuningInfo, &ncclTaskTuningInfo::next>* p2pTaskQueue,
+  ncclFunc_t func, ncclFunc_t collAPI, void* buff, size_t count, ncclDataType_t datatype, int peer, cudaStream_t stream,
+  cudaEvent_t launchCompletionEvent, bool inPlace) {
+  NCCLCHECK(classifyEnqueueP2pTask(comm, p2pTaskQueue, func, collAPI, buff, count, datatype, peer, stream,
+                                   launchCompletionEvent));
+  ncclIntruQueueTail(p2pTaskQueue)->raw->sendRecv.inPlace = inPlace;
+  return ncclSuccess;
+}
+
+static size_t classifySaturatingMultiply(size_t lhs, size_t rhs) {
+  return rhs != 0 && lhs > SIZE_MAX / rhs ? SIZE_MAX : lhs * rhs;
+}
+
+static size_t classifyAllToAllvBufferSpan(const size_t* counts, const size_t* displacements, int nRanks) {
+  size_t span = 0;
+  for (int rank = 0; rank < nRanks; rank++) {
+    size_t end = counts[rank] > SIZE_MAX - displacements[rank] ? SIZE_MAX : displacements[rank] + counts[rank];
+    span = std::max(span, end);
+  }
+  return span;
+}
+
 static ncclResult_t classifyCollToP2pTasks(
   struct ncclComm* comm, struct ncclTaskTuningInfo* tInfo,
   struct ncclIntruQueue<struct ncclTaskTuningInfo, &ncclTaskTuningInfo::next>* p2pTaskQueue) {
@@ -64,25 +90,69 @@ static ncclResult_t classifyCollToP2pTasks(
   size_t elemSize = ncclTypeSize(coll->datatype);
   cudaStream_t stream = coll->stream;
   cudaEvent_t launchCompletionEvent = ncclCollConfigGetLaunchCompletionEvent(&coll->collConfig);
+  size_t sendCount = coll->count;
+  size_t recvCount = coll->count;
+  const size_t* allToAllvSizes = nullptr;
+  if (coll->func == ncclFuncAlltoAll) {
+    sendCount = recvCount = classifySaturatingMultiply(coll->count, comm->nRanks);
+  } else if (coll->func == ncclFuncAlltoAllv) {
+    size_t localSizeCount = 4 * static_cast<size_t>(comm->nRanks);
+    if (coll->sizes == nullptr) return ncclInvalidArgument;
+    if (coll->sizesCount == localSizeCount) {
+      allToAllvSizes = coll->sizes;
+    } else if (coll->sizesCount == classifySaturatingMultiply(localSizeCount, comm->nRanks)) {
+      allToAllvSizes = coll->sizes + static_cast<size_t>(comm->rank) * localSizeCount;
+    } else {
+      return ncclInvalidArgument;
+    }
+  } else if (coll->func == ncclFuncGather) {
+    recvCount = classifySaturatingMultiply(coll->count, comm->nRanks);
+  } else if (coll->func == ncclFuncScatter) {
+    sendCount = classifySaturatingMultiply(coll->count, comm->nRanks);
+  }
+  size_t sendBytes = classifySaturatingMultiply(sendCount, elemSize);
+  size_t recvBytes = classifySaturatingMultiply(recvCount, elemSize);
+  if (allToAllvSizes != nullptr) {
+    const size_t* sendSizes = allToAllvSizes;
+    const size_t* sendDisplacements = sendSizes + comm->nRanks;
+    const size_t* recvSizes = sendDisplacements + comm->nRanks;
+    const size_t* recvDisplacements = recvSizes + comm->nRanks;
+    sendBytes = classifyAllToAllvBufferSpan(sendSizes, sendDisplacements, comm->nRanks);
+    recvBytes = classifyAllToAllvBufferSpan(recvSizes, recvDisplacements, comm->nRanks);
+  }
+  bool inPlace = rcclBuffersOverlap(coll->sendbuff, sendBytes, coll->recvbuff, recvBytes);
 
   if (coll->func == ncclFuncAlltoAll) {
     for (int r = 0; r < comm->nRanks; r++) {
       void* sendBuff = (void*)((char*)coll->sendbuff + r * coll->count * elemSize);
       void* recvBuff = (void*)((char*)coll->recvbuff + r * coll->count * elemSize);
-      NCCLCHECK(classifyEnqueueP2pTask(comm, p2pTaskQueue, ncclFuncSend, collAPI, sendBuff, coll->count, coll->datatype,
-                                       r, stream, launchCompletionEvent));
-      NCCLCHECK(classifyEnqueueP2pTask(comm, p2pTaskQueue, ncclFuncRecv, collAPI, recvBuff, coll->count, coll->datatype,
-                                       r, stream, launchCompletionEvent));
+      NCCLCHECK(classifyEnqueueCollP2pTask(comm, p2pTaskQueue, ncclFuncSend, collAPI, sendBuff, coll->count,
+                                           coll->datatype, r, stream, launchCompletionEvent, inPlace));
+      NCCLCHECK(classifyEnqueueCollP2pTask(comm, p2pTaskQueue, ncclFuncRecv, collAPI, recvBuff, coll->count,
+                                           coll->datatype, r, stream, launchCompletionEvent, inPlace));
+    }
+  } else if (coll->func == ncclFuncAlltoAllv) {
+    const size_t* sendSizes = allToAllvSizes;
+    const size_t* sendDisplacements = sendSizes + comm->nRanks;
+    const size_t* recvSizes = sendDisplacements + comm->nRanks;
+    const size_t* recvDisplacements = recvSizes + comm->nRanks;
+    for (int r = 0; r < comm->nRanks; r++) {
+      void* sendBuff = (void*)((char*)coll->sendbuff + sendDisplacements[r]);
+      void* recvBuff = (void*)((char*)coll->recvbuff + recvDisplacements[r]);
+      NCCLCHECK(classifyEnqueueCollP2pTask(comm, p2pTaskQueue, ncclFuncSend, collAPI, sendBuff, sendSizes[r], ncclInt8,
+                                           r, stream, launchCompletionEvent, inPlace));
+      NCCLCHECK(classifyEnqueueCollP2pTask(comm, p2pTaskQueue, ncclFuncRecv, collAPI, recvBuff, recvSizes[r], ncclInt8,
+                                           r, stream, launchCompletionEvent, inPlace));
     }
   } else if (coll->func == ncclFuncGather) {
-    NCCLCHECK(classifyEnqueueP2pTask(comm, p2pTaskQueue, ncclFuncSend, collAPI, (void*)coll->sendbuff, coll->count,
-                                     coll->datatype, coll->root, stream, launchCompletionEvent));
+    NCCLCHECK(classifyEnqueueCollP2pTask(comm, p2pTaskQueue, ncclFuncSend, collAPI, (void*)coll->sendbuff, coll->count,
+                                         coll->datatype, coll->root, stream, launchCompletionEvent, inPlace));
     if (comm->rank == coll->root) {
       size_t offset = 0;
       for (int r = 0; r < comm->nRanks; r++) {
         void* buff = (void*)((char*)coll->recvbuff + offset);
-        NCCLCHECK(classifyEnqueueP2pTask(comm, p2pTaskQueue, ncclFuncRecv, collAPI, buff, coll->count, coll->datatype,
-                                         r, stream, launchCompletionEvent));
+        NCCLCHECK(classifyEnqueueCollP2pTask(comm, p2pTaskQueue, ncclFuncRecv, collAPI, buff, coll->count,
+                                             coll->datatype, r, stream, launchCompletionEvent, inPlace));
         offset += coll->count * elemSize;
       }
     }
@@ -91,13 +161,13 @@ static ncclResult_t classifyCollToP2pTasks(
       size_t offset = 0;
       for (int r = 0; r < comm->nRanks; r++) {
         void* buff = (void*)((char*)coll->sendbuff + offset);
-        NCCLCHECK(classifyEnqueueP2pTask(comm, p2pTaskQueue, ncclFuncSend, collAPI, buff, coll->count, coll->datatype,
-                                         r, stream, launchCompletionEvent));
+        NCCLCHECK(classifyEnqueueCollP2pTask(comm, p2pTaskQueue, ncclFuncSend, collAPI, buff, coll->count,
+                                             coll->datatype, r, stream, launchCompletionEvent, inPlace));
         offset += coll->count * elemSize;
       }
     }
-    NCCLCHECK(classifyEnqueueP2pTask(comm, p2pTaskQueue, ncclFuncRecv, collAPI, coll->recvbuff, coll->count,
-                                     coll->datatype, coll->root, stream, launchCompletionEvent));
+    NCCLCHECK(classifyEnqueueCollP2pTask(comm, p2pTaskQueue, ncclFuncRecv, collAPI, coll->recvbuff, coll->count,
+                                         coll->datatype, coll->root, stream, launchCompletionEvent, inPlace));
   } else {
     return ncclInternalError;
   }
@@ -140,7 +210,8 @@ ncclResult_t ncclTaskClassification(struct ncclComm* comm, struct ncclTaskTuning
     if (tInfo->raw == nullptr) return ncclInternalError;
 
     if (tInfo->raw->kind == ncclTaskKindColl &&
-        (tInfo->raw->coll.func == ncclFuncAlltoAll || tInfo->raw->coll.func == ncclFuncScatter ||
+        (tInfo->raw->coll.func == ncclFuncAlltoAll || tInfo->raw->coll.func == ncclFuncAlltoAllv ||
+         tInfo->raw->coll.func == ncclFuncScatter ||
          tInfo->raw->coll.func == ncclFuncGather)) {
       NCCLCHECK(classifyCollToP2pTasks(comm, tInfo, &ctq->p2pTaskQueue));
       continue;

@@ -53,6 +53,7 @@
 #include "fakes/dev_runtime_micro_fakes.h"           // g_devrBootstrapAllGather
 #include "fakes/env_fakes.h"                         // SetMicroEnv/SetMicroEnvAbsent/ClearMicroEnv
 #include "fakes/hip_fakes.h"                         // g_hipGetLastError
+#include "fakes/tuning_fakes.h"                      // g_paramShmDisable
 #include "fakes/wrap_fakes.h"                        // rccl_wrap.cc's dependency seams
 #include "graph/topo.h"                              // ncclTopoSystem/ncclTopoNode (MakeCommWithArch)
 
@@ -182,8 +183,8 @@ TEST(WrapMicrotest, GetProtoForGfx120x_BroadcastCutoffBoundary) {
 }
 
 TEST(WrapMicrotest, GetProtoForGfx120x_AllReduceCutoffBoundary) {
-  EXPECT_EQ(NCCL_PROTO_LL, rcclGetProtoForGfx120x(ncclFuncAllReduce, 16384));
-  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx120x(ncclFuncAllReduce, 16385));
+  EXPECT_EQ(NCCL_PROTO_LL, rcclGetProtoForGfx120x(ncclFuncAllReduce, 32768));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx120x(ncclFuncAllReduce, 32769));
 }
 
 // The three tests around this one probe rows 0 (Broadcast), 4 (AllReduce) and

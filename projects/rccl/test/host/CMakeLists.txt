@@ -186,9 +186,24 @@ function(rccl_define_micro_source_lists)
     ../common/ProcessIsolatedTestRunner.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroConnect -- REAL src/graph/connect.cc (#included via CONNECT_CC_PATH) with the real
+  # ring/tree helpers it calls; connect-test.cc fakes the few remaining symbols itself.
+  set(TEST_MICRO_CONNECT_SOURCE_FILES
+    connect-test.cc
+    fakes/hip_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/graph/rings.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/graph/trees.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/graph/rccl_graph_gen.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroEnqueue(+-devlinker) -- src/enqueue.cc.
   set(TEST_MICRO_ENQUEUE_SOURCE_FILES
     enqueue-test.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy_rules.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/policy_adapter.cc
     fakes/enqueue_test_deps.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
@@ -283,6 +298,9 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_parser.cc   # real alg-selector parsing
     ${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_registry.cc  # real per-func alg validity mask
     ${RCCL_HOST_HIPIFY_DIR}/src/config/collconfig.cc  # real CTA-policy/alg-mask resolution
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy_rules.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/policy_adapter.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc  # real PtrCheck/CommCheck
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real busId/hash helpers
@@ -836,8 +854,29 @@ foreach(_variant "" "-uncached" "-faultinj")
 endforeach()
 
 # ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroConnect -- ncclTopoPreset / ncclTopoPostset unstubbed.
+# ---------------------------------------------------------------------------
+set_source_files_properties(
+  ${RCCL_HOST_HIPIFY_DIR}/src/graph/rings.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/graph/trees.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/graph/rccl_graph_gen.cc
+  PROPERTIES GENERATED TRUE)
+rccl_add_micro_binary(rccl-UnitTestsMicroConnect
+  SOURCES ${TEST_MICRO_CONNECT_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ${_MICRO_AMDSMI_DEF}
+    CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/connect.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_connect.yaml")
+
+# ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroEnqueue (+ shipping -devlinker arm standalone)
 # ---------------------------------------------------------------------------
+set_source_files_properties(
+  ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy_rules.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/tuning/policy_adapter.cc
+  PROPERTIES GENERATED TRUE)
 set(_enq_common_args
   SOURCES ${TEST_MICRO_ENQUEUE_SOURCE_FILES}
   EXTRA_INCLUDES
@@ -893,6 +932,9 @@ set_source_files_properties(
   ${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_parser.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_registry.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/config/collconfig.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy_rules.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/tuning/policy_adapter.cc
   PROPERTIES GENERATED TRUE)
 rccl_add_micro_binary(rccl-UnitTestsMicroTaskPrep
   SOURCES ${TEST_MICRO_TASKPREP_SOURCE_FILES}

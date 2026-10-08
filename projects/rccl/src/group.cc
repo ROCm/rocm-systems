@@ -8,6 +8,8 @@
 
 #include "group.h"
 #include "debug.h"
+#include "rccl_common.h"
+#include "policy_adapter.h"
 #include "enqueue.h"
 #include "enqueue/task_sched.h"
 #include "transport.h"
@@ -236,7 +238,11 @@ ncclResult_t ncclP2PPreconnectFunc(struct ncclAsyncJob* job_) {
   CUDACHECK(cudaSetDevice(comm->cudaDev));
   if (!job_->isThreadMain && ncclOsCpuCount(comm->cpuAffinity)) ncclOsSetAffinity(comm->cpuAffinity);
   NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 1));
-  if (comm->p2pNet) NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET));
+  NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET));
+  if (rcclPolicyCanonicalShmEligible(comm)) {
+    NCCLCHECK(ncclTransportP2pSetupSpecific(
+      comm, NULL, RCCL_CONN_IDX_P2P_SHM, nullptr, TRANSPORT_SHM));
+  }
   if (mode != cudaStreamCaptureModeRelaxed) CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   INFO(
     NCCL_INIT,

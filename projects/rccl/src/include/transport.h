@@ -42,7 +42,7 @@ extern int64_t ncclParamNvlsEnable();
 int ncclPatEnable(struct ncclComm* comm);
 
 #define CHANNEL_MASK_OFFSET(nranks, connIndex) \
-  (nranks * (connIndex == NCCL_CONN_IDX_P2P_NET ? NCCL_CONN_IDX_P2P_NET : 0))
+  (nranks * ((connIndex) >= NCCL_CONN_IDX_P2P_NET ? (connIndex) : 0))
 
 // NOTE: struct ncclPeerInfo lives in comm.h in RCCL (upstream declares it here).
 // It is exchanged before NCCL version validation; preserve its wire ABI by
@@ -134,6 +134,8 @@ ncclResult_t ncclTransportP2pConnect(struct ncclComm* comm, int channelId, int n
                                      int* peerSend, int connIndex);
 ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, int connIndex,
                                    bool* needsProxy = NULL);
+ncclResult_t ncclTransportP2pSetupSpecific(struct ncclComm* comm, struct ncclTopoGraph* graph, int connIndex,
+                                           bool* needsProxy, int requestedTransport);
 ncclResult_t ncclTransportCheckP2pType(struct ncclComm* comm, bool* isAllDirectP2p, bool* directMode,
                                        bool* isAllCudaP2p);
 ncclResult_t ncclTransportIsAllDirectP2p(struct ncclComm* comm, int* isAllDirectP2p);

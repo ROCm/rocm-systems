@@ -72,6 +72,7 @@ struct ncclIpcRegInfo {
   int peerRank;
   void* baseAddr;
   struct ncclProxyConnector* ipcProxyconn;
+  bool direct; // Same-process peer uses the exchanged UVA directly; no import to deregister.
   struct ncclIpcImpInfo impInfo;
 };
 
