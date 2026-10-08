@@ -152,33 +152,6 @@ NCCL_DEVICE_INLINE void* ncclGetLsaPointer(ncclWindow_t w, size_t offset, int pe
 #endif
 
 #ifdef __CUDACC__
-// Window fields are fixed for the life of a kernel. On AMDGPU, reading them through the constant address
-// space says so: the compiler may then hoist the lookups or make them scalar, instead of re-reading them
-// with a flat load after every store, whose wait would drain the stores still in flight.
-template <typename T>
-NCCL_DEVICE_INLINE T ncclWindowLoadConst(T const* p) {
-#if defined(__HIP_PLATFORM_AMD__) && defined(__HIP_DEVICE_COMPILE__)
-  return *(__attribute__((address_space(4))) T const*)p;
-#else
-  return nccl::utility::loadConst(p);
-#endif
-}
-
-NCCL_DEVICE_INLINE void* ncclGetLocalPointerConst(ncclWindow_t w, size_t offset) {
-  char* base = ncclWindowLoadConst(&w->lsaFlatBase);
-  uint32_t stride4G = ncclWindowLoadConst(&w->stride4G);
-  int i = ncclWindowLoadConst(&w->lsaRank);
-  return (void*)(nccl::utility::add4G(base, i * stride4G) + offset);
-}
-
-NCCL_DEVICE_INLINE void* ncclGetLsaPointerConst(ncclWindow_t w, size_t offset, int peer) {
-  char* base = ncclWindowLoadConst(&w->lsaFlatBase);
-  uint32_t stride4G = ncclWindowLoadConst(&w->stride4G);
-  return (void*)(nccl::utility::add4G(base, peer * stride4G) + offset);
-}
-#endif
-
-#ifdef __CUDACC__
 NCCL_DEVICE_INLINE void* ncclGetPeerPointer(ncclWindow_t w, size_t offset, int peer) {
   char* base = nccl::utility::loadConst(&w->lsaFlatBase);
   uint32_t stride4G = nccl::utility::loadConst(&w->stride4G);

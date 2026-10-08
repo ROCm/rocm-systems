@@ -39,10 +39,6 @@ struct ncclSymPtr {
 #ifdef __CUDACC__
   NCCL_DEVICE_INLINE T* localPtr() const;
   NCCL_DEVICE_INLINE T* lsaPtr(int peer) const;
-  // As localPtr()/lsaPtr(), but read the window as constant for the kernel's lifetime, so the compiler
-  // may hoist or scalarize the lookup instead of re-reading it after every store.
-  NCCL_DEVICE_INLINE T* localPtrConst() const;
-  NCCL_DEVICE_INLINE T* lsaPtrConst(int peer) const;
   NCCL_DEVICE_INLINE T* peerPtr(int peer) const;
   NCCL_DEVICE_INLINE T* peerPtr(ncclTeam team, int peer) const;
   NCCL_DEVICE_INLINE T* multimemPtr(ncclMultimemHandle mmHandle) const;
