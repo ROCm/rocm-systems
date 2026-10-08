@@ -2238,6 +2238,21 @@ def _is_integral_rounding(node: SemaNode) -> bool:
     )
 
 
+def _uses_shared_f64_arithmetic_output(node: SemaNode, ctx: LoweringContext) -> bool:
+    """Whether F64 arithmetic uses the migrated destination modifier stage.
+
+    LDEXP retains expression-level div_apply_omod/CLAMP. Its result is already
+    MODE-rounded, but this PR does not migrate that output path; changing it
+    requires validating its modifier policy separately.
+    """
+    return (
+        node.ty == SemaType.F64
+        and ctx.mode_arithmetic
+        and _contains_mode_arithmetic(node)
+        and not any(n.kind == SemaNodeKind.LDEXP for n in node.walk())
+    )
+
+
 def _destination_result(
     node: SemaNode, ctx: LoweringContext
 ) -> tuple[str, str, bool] | None:
@@ -2259,9 +2274,7 @@ def _destination_result(
         if node.kind == SemaNodeKind.CALL and node.call_name == 'std::bit_cast<double>':
             # The conversion helper already returns F64 register bits.
             return 'f64', _lower_expr(node.children[1], ctx), False
-        if mode_arithmetic and not any(
-            n.kind == SemaNodeKind.LDEXP for n in node.walk()
-        ):
+        if _uses_shared_f64_arithmetic_output(node, ctx):
             # The arithmetic helper rounds and flushes in the guest MODE.
             return 'f64', f'std::bit_cast<uint64_t>({_lower_expr(node, ctx)})', False
         return None

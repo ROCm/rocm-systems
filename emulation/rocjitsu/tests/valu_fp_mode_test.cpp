@@ -23,11 +23,13 @@
 #include <array>
 #include <bit>
 #include <cfenv>
+#include <cstdlib>
 #include <gtest/gtest.h>
 #include <memory>
 #include <optional>
 #include <ostream>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -2929,11 +2931,11 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
     EXPECT_TRUE(succeeded);
     if (simd.checked) {
       if (simd.path.has_value())
-        EXPECT_TRUE(tracker.only_was_executed(*simd.path))
+        EXPECT_TRUE(tracker.only_tracked_path_executed(*simd.path))
             << test.name << ": execution did not use its expected SIMD path";
       else
-        EXPECT_TRUE(tracker.none_was_executed())
-            << test.name << ": execution unexpectedly used a SIMD fast path";
+        EXPECT_TRUE(tracker.no_tracked_path_executed())
+            << test.name << ": execution unexpectedly used a tracked SIMD fast path";
     }
     EXPECT_EQ(initial_rounding, test.host_rounding);
     EXPECT_EQ(restored_rounding, test.host_rounding);
@@ -2956,7 +2958,7 @@ class ValuFpModeTest : public testing::TestWithParam<ArithmeticCase> {};
 
 TEST_P(ValuFpModeTest, HonorsModeAndPreservesInactiveLanes) { expect_arithmetic_case(GetParam()); }
 
-// Restores the process force-scalar gate if an assertion leaves the test early.
+// Restores the module-local force-scalar gate if an assertion leaves the test early.
 struct ForceScalarGuard {
   bool original = util::force_scalar();
   ~ForceScalarGuard() { util::set_force_scalar_for_testing(original); }
@@ -3050,6 +3052,76 @@ INSTANTIATE_TEST_SUITE_P(F16BinaryModifiers, ValuF16BinaryModifierTest,
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+void expect_f16_binary_host_environment(uint32_t host_mxcsr) {
+  ForceScalarGuard guard;
+  for (const bool multiply : {false, true}) {
+    const auto words = rdna4::build_vop3(multiply ? rdna4::kVMulF16Vop3 : rdna4::kVAddF16Vop3,
+                                         {.vdst = 6, .src0 = 256, .src1 = 257});
+    const ArithmeticCase test{
+        multiply ? "InvalidMultiply" : "InexactAdd",
+        ROCJITSU_CODE_ARCH_RDNA4,
+        {words[0], words[1], 0},
+        {{0, multiply ? 0x7c00u : 0x7bffu}, {1, multiply ? 0u : 1u}, {6, 0xa5a5a5a5u}},
+        {{6, multiply ? 0xa5a5fe00u : 0xa5a57bffu}},
+        0x40u,
+        FE_TONEAREST,
+        0xffffu,
+        host_mxcsr,
+        expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)};
+    for (const bool scalar : {true, false}) {
+      SCOPED_TRACE(test.name);
+      SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+      util::set_force_scalar_for_testing(scalar);
+      expect_arithmetic_case(test, simd_expectation_for_run(test, scalar));
+    }
+  }
+}
+
+TEST(ValuFpModeHelpers, F16BinaryPreservesHostExceptionFlagsAndMasks) {
+  // Clean flags, pre-existing inexact, and pre-existing flags with DAZ/FTZ.
+  for (const uint32_t mxcsr : {0x1f80u, 0x1fa0u, 0x9fe4u}) {
+    SCOPED_TRACE(mxcsr);
+    expect_f16_binary_host_environment(mxcsr);
+  }
+}
+
+#if GTEST_HAS_DEATH_TEST
+TEST(ValuFpModeHelpers, F16BinaryDoesNotTrapWithHostInvalidUnmasked) {
+  // A leaking SIMD inf * 0 would terminate this subprocess with SIGFPE.
+  ASSERT_EXIT(
+      {
+        expect_f16_binary_host_environment(0x1f00u);
+        expect_f16_binary_host_environment(0x1f20u);
+        std::_Exit(testing::Test::HasFailure() ? 1 : 0);
+      },
+      testing::ExitedWithCode(0), "");
+}
+#endif
+#endif
+
+TEST(ValuFpModeHelpers, SimdTrackerRestoresNestedObserversAndIsolatesThreads) {
+  using amdgpu::SimdFastPath;
+  amdgpu::ScopedSimdFastPathTracker outer;
+  {
+    amdgpu::ScopedSimdFastPathTracker inner;
+    // An observer on this thread must not collect unobserved work on another.
+    std::thread worker([] {
+      amdgpu::detail::record_simd_fast_path(SimdFastPath::VOP_WORDS);
+      amdgpu::ScopedSimdFastPathTracker local;
+      amdgpu::detail::record_simd_fast_path(SimdFastPath::VOP3_UNARY_FP16);
+      EXPECT_TRUE(local.only_tracked_path_executed(SimdFastPath::VOP3_UNARY_FP16));
+    });
+    worker.join();
+    EXPECT_TRUE(inner.no_tracked_path_executed());
+    amdgpu::detail::record_simd_fast_path(SimdFastPath::VOP3_BINARY_MODE_FP16);
+    EXPECT_TRUE(inner.only_tracked_path_executed(SimdFastPath::VOP3_BINARY_MODE_FP16));
+    EXPECT_TRUE(outer.no_tracked_path_executed());
+  }
+  amdgpu::detail::record_simd_fast_path(SimdFastPath::VOP3_TERNARY_FP16);
+  EXPECT_TRUE(outer.only_tracked_path_executed(SimdFastPath::VOP3_TERNARY_FP16));
+}
 
 TEST(ValuFpModeHelpers, F16BinaryRneMatchesScalarAcrossHalfEncodings) {
   if (!util::has_stdx_simd)

@@ -19,7 +19,11 @@ from amdisa.__main__ import (
 from amdisa.codegen import CodeGenerator
 from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen.execute import ExecuteContext
-from amdisa.codegen.execute.floating_policy import FLUSH_NEAREST_F32_OPS
+from amdisa.codegen.execute.floating_policy import (
+    F16_TRANS_OPERATIONS,
+    FLUSH_NEAREST_F32_OPS,
+    INPUT_FLUSHED_ROUNDING,
+)
 from amdisa.codegen.execute.vector_special import (
     gen_cvt_fp8,
     gen_cvt_scalef32,
@@ -3682,6 +3686,54 @@ def test_generated_vector_f16_arithmetic_consumes_fp16_ovfl(
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false,' in vop3
     assert 'sdwa::finish_arithmetic_f16' in vop3
     assert 'wf.fp16_ovfl()' in vop3
+
+
+@pytest.fixture(scope='module', params=['local', 'shared'])
+def generated_f16_sdwa_consumers(request, tmp_path_factory):
+    output = tmp_path_factory.mktemp(f'f16_sdwa_{request.param}')
+    architectures = ['rdna2'] if request.param == 'local' else ['rdna1', 'rdna2']
+    _run(
+        SimpleNamespace(
+            isafiles=[
+                f'{arch}:{_mrisa_dir() / f"amdgpu_isa_{arch}.xml"}'
+                for arch in architectures
+            ],
+            gen_isas=True,
+            gen_dbt=False,
+            isa_output=str(output),
+            dbt_output=None,
+        )
+    )
+    return request.param, output
+
+
+@pytest.mark.parametrize(
+    'instruction,helper',
+    [(op.instruction, 'finish_rounded_f16') for op in F16_TRANS_OPERATIONS]
+    + [
+        (f'V_{op.upper()}_F16', 'round_f16_result')
+        for op in sorted(INPUT_FLUSHED_ROUNDING)
+    ]
+    + [('V_ADD_F16', 'finish_arithmetic_f16')],
+)
+def test_generated_f16_sdwa_preserves_producer_rounding_contract(
+    generated_f16_sdwa_consumers, instruction, helper
+):
+    route, output = generated_f16_sdwa_consumers
+    encoding = 'vop2' if instruction == 'V_ADD_F16' else 'vop1'
+    if route == 'shared':
+        source = (output / 'shared' / 'execute_shared.h').read_text()
+        signature = f'inline void execute_{instruction.lower()}_{encoding}('
+    else:
+        source = (output / 'rdna2' / f'{encoding}_exec.cpp').read_text()
+        class_name = ''.join(word.title() for word in instruction.split('_'))
+        signature = f'void {class_name}{encoding.title()}::execute_modifier_impl('
+    body = _generated_function_body(source, signature)
+    assert f'amdgpu::sdwa::{helper}(' in body
+    for other in {'finish_rounded_f16', 'round_f16_result', 'finish_arithmetic_f16'} - {
+        helper
+    }:
+        assert f'amdgpu::sdwa::{other}(' not in body
 
 
 def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):

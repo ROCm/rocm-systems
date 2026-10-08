@@ -1047,9 +1047,10 @@ class CodeGenerator:
     def _apply_sdwa_f16_omod(
         body: str, instruction: str, *, transcendental: bool = False
     ) -> str:
-        """Apply SDWA OMOD at the F16 producer, before result narrowing.
+        """Apply SDWA OMOD using the producer's F16 rounding contract.
 
-        ``transcendental`` selects the TRANS-unit output helper.
+        TRANS producers already return rounded halves; ordinary producers scale
+        before narrowing. Arithmetic producers retain their MODE-aware helper.
         """
         helper = 'finish_rounded_f16' if transcendental else 'round_f16_result'
         body = body.replace(

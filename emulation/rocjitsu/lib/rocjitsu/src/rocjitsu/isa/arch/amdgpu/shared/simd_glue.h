@@ -14,6 +14,7 @@
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
@@ -36,6 +37,7 @@
 #include "util/simd.h"
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <cassert>
 #include <cmath>
@@ -56,10 +58,8 @@ namespace amdgpu {
 /// in <stdfloat>; rocjitsu is on C++20 so a local alias.
 using float32_t = float;
 
-/// Process-wide, immutable override that disables the SIMD fast path in
-/// kernels that have one. Forwards to util::force_scalar() (read once from
-/// RJ_FORCE_SCALAR); returned by value, so there is no mutable global to
-/// flip at runtime.
+/// Module-local override that disables SIMD fast paths. Initialized from
+/// RJ_FORCE_SCALAR at module load; test hooks may override the local copy.
 inline bool simd_force_scalar() { return util::force_scalar(); }
 
 /// SIMD families exposed to test-only execution-path observation.
@@ -75,13 +75,22 @@ enum class SimdFastPath : uint8_t {
 
 namespace detail {
 
-/// Optional per-thread destination for test-only SIMD path observations.
-/// Production execution leaves this null and only pays the unlikely branch.
+/// Number of live observers in this module. The disabled path performs a relaxed
+/// atomic load and branch, without resolving thread-local storage. Observers on
+/// other threads can enable the TLS check but cannot receive this thread's events.
+inline std::atomic<unsigned> simd_fast_path_observer_count{0};
 inline thread_local uint64_t *active_simd_fast_path_bits = nullptr;
 
-inline void record_simd_fast_path(SimdFastPath path) {
+// Keep TLS resolution out of line: the compiler can otherwise hoist it above
+// the observer-count check even though the source short-circuits the access.
+RJ_NOINLINE inline void record_simd_fast_path_slow(SimdFastPath path) {
   if (active_simd_fast_path_bits != nullptr)
     *active_simd_fast_path_bits |= uint64_t{1} << static_cast<uint8_t>(path);
+}
+
+inline void record_simd_fast_path(SimdFastPath path) {
+  if (simd_fast_path_observer_count.load(std::memory_order_relaxed) != 0) [[unlikely]]
+    record_simd_fast_path_slow(path);
 }
 
 } // namespace detail
@@ -920,12 +929,16 @@ inline util::native<float> binary_f32_simd(util::native<float> a, util::native<f
 /// @details Flush source halves -> widen -> evaluate -> round F16 -> flush output.
 /// The caller supplies source modifiers and applies OMOD/CLAMP to the returned bits.
 /// Finite half products fit exactly in F32; ADD retains enough precision for F16 RNE.
+/// Save and restore host flags/masks as well as rounding: even a finite ADD can
+/// be inexact in F32, and exceptional lanes can trap before result repair.
 template <fp_mode::Arithmetic operation>
 inline util::native<uint32_t> binary_f16_simd(util::native<uint32_t> a, util::native<uint32_t> b,
                                               uint32_t denorm_mode, bool fp16_ovfl) {
   static_assert(operation == fp_mode::Arithmetic::ADD || operation == fp_mode::Arithmetic::MUL);
   using Fmt = fp_format::F16;
   using U = util::native<uint32_t>;
+  // Keep the scope inside the operation so register callbacks see caller state.
+  fp_mode::ScopedEnvironment environment(0);
   const auto input = input_denormal::Policy::make(denorm_mode);
   a = input_denormal::prepare<Fmt>(a, input);
   b = input_denormal::prepare<Fmt>(b, input);
