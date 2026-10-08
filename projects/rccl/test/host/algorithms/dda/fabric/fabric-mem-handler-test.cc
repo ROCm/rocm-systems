@@ -53,12 +53,12 @@ hipMemGenericAllocationHandle_t HandleForDesc(uint64_t desc) {
 class FabricMemHandlerTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    savedHandleType_ = ncclCuMemHandleType;  // first: TearDown restores it even if SetUp bails
     SetMicroEnvAbsent("NCCL_CUMEM_SKIP_FREE");  // see HipVmmLedger.h
     ledger_.Install();
     // Latch alloc.h's once-per-process skip-free decision now, under this
     // fixture's env and arch, so no later test can find it latched the other way.
     ASSERT_FALSE(rcclSkipCuMemFree());
-    savedHandleType_ = ncclCuMemHandleType;
 
     g_hipMemExportToShareableHandle = [](void* shareable, hipMemGenericAllocationHandle_t,
                                          hipMemAllocationHandleType, unsigned long long) {
@@ -86,8 +86,9 @@ class FabricMemHandlerTest : public ::testing::Test {
 
   void TearDown() override {
     handler_.reset();  // first: the destructor frees through the ledger hooks
-    EXPECT_TRUE(ledger_.Clean()) << ledger_.reserved.size() << " reservations live; " << ledger_.rejected.size()
-                                 << " calls refused";
+    EXPECT_TRUE(ledger_.Clean()) << ledger_.reserved.size() << " reservations, " << ledger_.liveHandles.size()
+                                 << " handles, " << ledger_.liveBuffers.size() << " buffers live; "
+                                 << ledger_.rejected.size() << " calls refused";
     ncclCuMemHandleType = savedHandleType_;
     ResetBootstrapStubs();
     ResetHipFakes();
@@ -145,7 +146,7 @@ class FabricMemHandlerTest : public ::testing::Test {
 // ---------------------------------------------------------------------------
 
 TEST_F(FabricMemHandlerTest, GetPeerDeviceMemPtr_BeforeExchange_ReturnsInvalidUsage) {
-  ncclFabricMemHandler* h = MakeRegisteredHandler();
+  const ncclFabricMemHandler* h = MakeRegisteredHandler();
   void* p = nullptr;
 
   // Even the self slot, which is already known, is gated on the exchange.
@@ -153,7 +154,7 @@ TEST_F(FabricMemHandlerTest, GetPeerDeviceMemPtr_BeforeExchange_ReturnsInvalidUs
 }
 
 TEST_F(FabricMemHandlerTest, GetPeerDeviceMemPtr_RankOutOfRange_ReturnsInvalidArgument) {
-  ncclFabricMemHandler* h = MakeExchangedHandler();
+  const ncclFabricMemHandler* h = MakeExchangedHandler();
   void* p = nullptr;
 
   EXPECT_EQ(h->getPeerDeviceMemPtr(-1, &p), ncclInvalidArgument);
@@ -169,7 +170,7 @@ TEST_F(FabricMemHandlerTest, GetPeerDeviceMemPtr_FirstAndLastRank_Succeed) {
 }
 
 TEST_F(FabricMemHandlerTest, GetPeerDeviceMemPtr_NullOutput_ReturnsInvalidArgument) {
-  ncclFabricMemHandler* h = MakeExchangedHandler();
+  const ncclFabricMemHandler* h = MakeExchangedHandler();
 
   EXPECT_EQ(h->getPeerDeviceMemPtr(0, nullptr), ncclInvalidArgument);
 }
@@ -377,7 +378,6 @@ TEST_F(FabricMemHandlerTest, Destructor_AfterExchange_FreesEveryPeerMappingButNo
 
   EXPECT_EQ(std::set<void*>(ledger_.addressFrees.begin(), ledger_.addressFrees.end()), peers);
   EXPECT_EQ(ledger_.addressFrees.size(), peers.size());
-  EXPECT_TRUE(ledger_.Clean());
 }
 
 TEST_F(FabricMemHandlerTest, Destructor_AfterImportFailsPartway_FreesOnlyTheMappedPeers) {
@@ -389,7 +389,6 @@ TEST_F(FabricMemHandlerTest, Destructor_AfterImportFailsPartway_FreesOnlyTheMapp
   handler_.reset();
 
   EXPECT_EQ(ledger_.addressFrees.size(), 2u);
-  EXPECT_TRUE(ledger_.Clean());
 }
 
 TEST_F(FabricMemHandlerTest, Destructor_AfterReleaseFails_StillFreesThatPeersMapping) {
@@ -402,7 +401,6 @@ TEST_F(FabricMemHandlerTest, Destructor_AfterReleaseFails_StillFreesThatPeersMap
   handler_.reset();
 
   EXPECT_EQ(ledger_.addressFrees, std::vector<void*>{peer0});
-  EXPECT_TRUE(ledger_.Clean());
 }
 
 TEST_F(FabricMemHandlerTest, Destructor_NeverExchanged_FreesNothing) {
