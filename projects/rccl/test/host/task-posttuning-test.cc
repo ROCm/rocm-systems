@@ -1151,7 +1151,7 @@ std::vector<int> TaskPostTuning_SingleNodeChannels(int base, int nParts, int nCh
   return ::testing::AssertionSuccess();
 }
 
-constexpr ncclFunc_t kLoweredCollectiveApis[] = {ncclFuncAlltoAll, ncclFuncScatter, ncclFuncGather};
+constexpr ncclFunc_t kLoweredCollectiveApis[] = {ncclFuncAlltoAll, ncclFuncAlltoAllv, ncclFuncScatter, ncclFuncGather};
 
 bool TaskPostTuning_IsLoweredCollectiveApi(int collAPI) {
   for (ncclFunc_t lowered : kLoweredCollectiveApis) {

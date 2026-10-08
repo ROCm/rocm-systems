@@ -245,10 +245,12 @@ static ncclResult_t addProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelP
   return ncclSuccess;
 }
 
-static void addWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int channelId,
-                               enum ncclDevWorkType workType, int devFuncId, int progressSlot, uint32_t workOffset,
-                               int p2pRound = -1, bool batchP2P = false, uint16_t p2pPairId = 0,
-                               uint16_t p2pSiblingPairId = 0) {
+// p2pPairId names the send/recv pair this work belongs to; p2pSiblingPairId, when nonzero, is the
+// pair whose other half this work completes (a split pair's halves share a batch).
+static void addWorkBatchToPlanForPair(struct ncclComm* comm, struct ncclKernelPlan* plan, int channelId,
+                                      enum ncclDevWorkType workType, int devFuncId, int progressSlot,
+                                      uint32_t workOffset, int p2pRound, bool batchP2P, uint16_t p2pPairId,
+                                      uint16_t p2pSiblingPairId) {
   ncclKernelPlanner::WipPlan::Channel* chan = &comm->planner.wipPlan.channels[channelId];
   size_t workSize = ncclDevWorkSize(workType);
   // Conditions causing us to create a new blank batch.
@@ -337,6 +339,13 @@ static void addWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* pla
   if (workType == ncclDevWorkTypeBcast) {
     chan->wipBatch.nBcasts += 1;
   }
+}
+
+static void addWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int channelId,
+                               enum ncclDevWorkType workType, int devFuncId, int progressSlot, uint32_t workOffset,
+                               int p2pRound = -1, bool batchP2P = false) {
+  addWorkBatchToPlanForPair(comm, plan, channelId, workType, devFuncId, progressSlot, workOffset, p2pRound, batchP2P,
+                            /*p2pPairId=*/0, /*p2pSiblingPairId=*/0);
 }
 
 static void finishPlan(struct ncclComm* comm, struct ncclKernelPlan* plan) {
@@ -1374,11 +1383,12 @@ static bool rcclInfoBuffersOverlap(const struct ncclInfo* info, ncclFunc_t collA
 // and sizeof(ncclDevWorkP2p) in work budget. "sendRank" and "recvRank" must
 // match the corresponding values for this round of the p2p schedule (no -1's).
 // No-op's are encoded with a -1 size.
-static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int nChannelsMin, int nChannelsMax,
-                                 int p2pRound, int sendRank, void* sendAddr, ssize_t sendBytes, int recvRank,
-                                 void* recvAddr, ssize_t recvBytes, uint64_t sendOpCount, uint64_t recvOpCount,
-                                 const int planTotalTasks[], struct ncclTaskP2p** p2pTasks,
-                                 uint16_t siblingPairId = 0) {
+// siblingPairId, when nonzero, is the pair id of the other half of a split send/recv pair.
+static ncclResult_t addP2pToPlanForPair(struct ncclComm* comm, struct ncclKernelPlan* plan, int nChannelsMin,
+                                        int nChannelsMax, int p2pRound, int sendRank, void* sendAddr,
+                                        ssize_t sendBytes, int recvRank, void* recvAddr, ssize_t recvBytes,
+                                        uint64_t sendOpCount, uint64_t recvOpCount, const int planTotalTasks[],
+                                        struct ncclTaskP2p** p2pTasks, uint16_t siblingPairId) {
   ncclResult_t ret = ncclSuccess;
   int connIndex[2] = {1, 1};
   bool selfSend = (sendRank == comm->rank);
@@ -1757,8 +1767,8 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       WARN("%s: unsupported collective. Please ensure the collective has been enabled in build.", __func__);
       return ncclInvalidUsage;
     }
-    addWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeP2p, funcIdx, NCCL_PROGRESS_P2P_COUNTER_INDEX, workOffset,
-                       p2pRound, batchP2P, plan->p2pPairCounter, siblingPairId);
+    addWorkBatchToPlanForPair(comm, plan, channelId, ncclDevWorkTypeP2p, funcIdx, NCCL_PROGRESS_P2P_COUNTER_INDEX,
+                              workOffset, p2pRound, batchP2P, plan->p2pPairCounter, siblingPairId);
     // Add proxy ops.
     for (int dir = 0; dir < nProxyOps; dir++) {
       // Partition steps across channels.
@@ -1816,6 +1826,15 @@ cleanup:
   free(handles[0]);
   free(handles[1]);
   return ret;
+}
+
+static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int nChannelsMin, int nChannelsMax,
+                                 int p2pRound, int sendRank, void* sendAddr, ssize_t sendBytes, int recvRank,
+                                 void* recvAddr, ssize_t recvBytes, uint64_t sendOpCount, uint64_t recvOpCount,
+                                 const int planTotalTasks[], struct ncclTaskP2p** p2pTasks) {
+  return addP2pToPlanForPair(comm, plan, nChannelsMin, nChannelsMax, p2pRound, sendRank, sendAddr, sendBytes, recvRank,
+                             recvAddr, recvBytes, sendOpCount, recvOpCount, planTotalTasks, p2pTasks,
+                             /*siblingPairId=*/0);
 }
 
 static int calcP2pChannelCount(size_t totalSize, int minChannels, int maxChannels, size_t minSize, size_t maxSize) {
@@ -1901,9 +1920,9 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
           struct ncclTaskP2p* sendOnly[2] = {nullptr, send};
           NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, *p2pRound, sendRank, nullptr, -1, recvRank,
                                  recvBuff, recvBytes, 0, recv->opCount, planTotalTasks, recvOnly));
-          NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, *p2pRound, sendRank, sendBuff, sendBytes,
-                                 recvRank, nullptr, -1, send->opCount, 0, planTotalTasks, sendOnly,
-                                 /*siblingPairId=*/plan->p2pPairCounter));
+          NCCLCHECK(addP2pToPlanForPair(comm, plan, nChannelsMin, nChannelsMax, *p2pRound, sendRank, sendBuff,
+                                        sendBytes, recvRank, nullptr, -1, send->opCount, 0, planTotalTasks, sendOnly,
+                                        /*siblingPairId=*/plan->p2pPairCounter));
         } else {
           NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, *p2pRound, sendRank, sendBuff, sendBytes,
                                  recvRank, recvBuff, recvBytes, send ? send->opCount : 0, recv ? recv->opCount : 0,

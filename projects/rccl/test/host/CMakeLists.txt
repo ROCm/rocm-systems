@@ -286,6 +286,9 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_parser.cc   # real alg-selector parsing
     ${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_registry.cc  # real per-func alg validity mask
     ${RCCL_HOST_HIPIFY_DIR}/src/config/collconfig.cc  # real CTA-policy/alg-mask resolution
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy_rules.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/policy_adapter.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc  # real PtrCheck/CommCheck
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real busId/hash helpers
@@ -901,6 +904,9 @@ set_source_files_properties(
   ${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_parser.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_registry.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/config/collconfig.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy_rules.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/tuning/policy_adapter.cc
   PROPERTIES GENERATED TRUE)
 rccl_add_micro_binary(rccl-UnitTestsMicroTaskPrep
   SOURCES ${TEST_MICRO_TASKPREP_SOURCE_FILES}

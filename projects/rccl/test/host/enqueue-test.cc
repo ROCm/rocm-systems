@@ -4389,19 +4389,19 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pSplitSiblingJoinsItsHalfOnly) {
   // pair must join the first half's batch so both progress concurrently.
   BatchPlanComm bp(/*nNodes=*/1);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/3, false,
-                     /*p2pPairId=*/5);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws), /*p2pRound=*/3, false,
-                     /*p2pPairId=*/6, /*p2pSiblingPairId=*/5);
+  addWorkBatchToPlanForPair(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/3, false,
+                            /*p2pPairId=*/5, /*p2pSiblingPairId=*/0);
+  addWorkBatchToPlanForPair(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws),
+                            /*p2pRound=*/3, false, /*p2pPairId=*/6, /*p2pSiblingPairId=*/5);
   EXPECT_EQ(1, bp.queueLength()) << "split halves share one batch";
   EXPECT_EQ(2, bp.chan()->wipBatch.nP2ps);
 
   // Any other work, including one naming a stale sibling, keeps the cap.
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(2 * ws), /*p2pRound=*/3, false,
-                     /*p2pPairId=*/7, /*p2pSiblingPairId=*/5);
+  addWorkBatchToPlanForPair(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(2 * ws),
+                            /*p2pRound=*/3, false, /*p2pPairId=*/7, /*p2pSiblingPairId=*/5);
   EXPECT_EQ(2, bp.queueLength());
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(3 * ws), /*p2pRound=*/4, false,
-                     /*p2pPairId=*/8, /*p2pSiblingPairId=*/7);
+  addWorkBatchToPlanForPair(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(3 * ws),
+                            /*p2pRound=*/4, false, /*p2pPairId=*/8, /*p2pSiblingPairId=*/7);
   EXPECT_EQ(3, bp.queueLength()) << "a sibling from another round must not join";
 }
 
