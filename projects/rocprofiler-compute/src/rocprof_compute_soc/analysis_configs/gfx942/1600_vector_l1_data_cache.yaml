@@ -87,7 +87,7 @@ Panel Config:
           unit: Gbps
         Cache Hit Rate:
           avg: COLLECT_SUM(_collect.vl1d_chr_non_rw, _collect.vl1d_hit_atom)
-          min: None
+          min: None  # MIN(a/d)+MIN(b/d) is not MIN((a+b)/d)
           max: None
           unit: Percent
         Cache Accesses:
@@ -97,7 +97,7 @@ Panel Config:
           unit: (Requests + $normUnit)
         Cache Hits:
           avg: COLLECT_SUM(_collect.vl1d_hits_non_rw, _collect.vl1d_hits_atom)
-          min: None
+          min: None  # MIN(a/d)+MIN(b/d) is not MIN((a+b)/d)
           max: None
           unit: (Requests + $normUnit)
         Invalidations:
