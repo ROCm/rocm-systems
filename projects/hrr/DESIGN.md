@@ -1168,8 +1168,9 @@ What deferral costs:
 
 - **Memory.** A deferred mapping keeps its physical memory until it drains. A
   trace that frees with `hipFreeAsync` and only ever synchronizes streams holds
-  every such allocation until the device runs out of memory, which then drains
-  them, or until teardown. The recording's pool reused that memory at once.
+  every such allocation, except those reallocated over the same range, until
+  the device runs out of memory, which then drains them, or until teardown. The
+  recording's pool reused that memory at once.
 - **`--skip-device-sync`.** It skips replayed `hipDeviceSynchronize`, and with it
   the drain there. Deferred frees then wait for an allocation that runs out of
   memory, the warm-up reset, or teardown.

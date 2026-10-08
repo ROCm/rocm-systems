@@ -1730,7 +1730,7 @@ int main(int argc, char** argv) {
            (unsigned long long)ctx.placement->placed(),
            (unsigned long long)ctx.placement->fallbacks());
     if (deferred)
-      printf(", %llu frees deferred to a later sync",
+      printf(", %llu frees deferred to a later device sync",
              (unsigned long long)deferred);
     printf("\n");
   }

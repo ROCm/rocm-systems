@@ -238,7 +238,7 @@ void hrr_place_require_vmm() {
   SKIP(arch << " does not support virtual memory management");
 }
 
-// How many frees the summary says were deferred to a later sync: 0 when the
+// How many frees the summary says were deferred to a later device sync: 0 when the
 // clause is absent, -1 when the summary line is.
 int hrr_place_deferred(const std::string& out) {
   const size_t at = out.find("Placement      :");
@@ -754,7 +754,7 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_Apis) {
 }
 
 // ===========================================================================
-// When placed memory is released: frees deferred to a sync, a capture that
+// When placed memory is released: frees deferred to a device sync, a capture that
 // does not end cleanly, and a reservation still live after the warm-up pass.
 // ===========================================================================
 namespace {

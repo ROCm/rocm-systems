@@ -101,7 +101,7 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `--repair` | Rewrite a crash-truncated archive with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index |
 | `--events` | With `--info`: print the full event log |
 | `--verbose` | Print each event as it is replayed |
-| `--skip-device-sync` | Skip `hipDeviceSynchronize` / `hipStreamSynchronize` events |
+| `--skip-device-sync` | Skip `hipDeviceSynchronize` / `hipStreamSynchronize` events. With placement on, placed memory freed by `hipFreeAsync` or inside a capture is then held until an allocation runs out of memory, the `--kernel-filter` warm-up reset, or teardown |
 | `--multi-thread` | One replay thread per captured thread (default: single-threaded) |
 | `--timing` | Report wall time and GPU kernel/graph time |
 | `--kernel-filter STR` | Only launch kernels whose name contains `STR` (warm-up pass first) |
@@ -156,9 +156,9 @@ does. That pointer reaches the GPU inside an H2D payload, which replay restores
 byte for byte, so translation cannot fix it. Replay therefore maps each device
 allocation at the address it had in the recording, and the stored copy stays
 true. The summary line `Placement      : N placed at capture address, M fell
-back, K frees deferred to a later sync` counts the result; the last clause
-appears only when a free had to wait, for example under a graph capture or for
-a `hipFreeAsync`.
+back, K frees deferred to a later device sync` counts the result; the last
+clause appears only when a free had to wait, for example under a graph capture
+or for a `hipFreeAsync`.
 
 An allocation that cannot be placed replays at a new address, and a line on
 stderr names it: `[HRR] Placement: <api> <address> (<size> bytes) not placed at

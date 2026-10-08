@@ -3293,7 +3293,7 @@ hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
     void* live = ctx.translate_ptr(a->ptr);
     if (!live) return hipSuccess;
     // A placed allocation or a --guard-segments one: a VMM mapping. During a
-    // graph capture the unmap waits for the next synchronization point where
+    // graph capture the unmap waits for the next device synchronization where
     // no capture is open.
     hrr::VaPlacement* placing = hrr_placing(ctx);
     if ((placing && placing->unmap(live, ctx.in_graph_capture.any())) ||
