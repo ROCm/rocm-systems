@@ -45,6 +45,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed tuner plugins receiving uninitialized cost-model constants.
 * Fixed GIN proxy descriptor shared-memory sizing and alignment.
 * Fixed virtual address space exhaustion when symmetric windows backed by the same physical allocation are registered repeatedly.
+* Fixed hangs in small single-node collectives on gfx1200 and gfx1201 by selecting the Simple protocol instead of LL by default. `NCCL_PROTO` still overrides this choice.
 
 ### Known issues
 * The FP8 ReduceSum and ReduceCopy device APIs are not exported in the LLVM bitcode library.
