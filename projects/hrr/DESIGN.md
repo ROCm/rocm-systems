@@ -770,10 +770,12 @@ devices the reset frees no pinned host memory, so the reset case shows only that
 replay waits before it. Another case captures and replays with only the first
 visible GPU, points a record after a reset at the `hipHostMalloc` buffer the
 reset freed, and checks that replay refuses it. Its `hipHostRegister`
-counterpart is untested: a registered range the reset unregistered, kept and
-marked so that pointers into it still translate while records naming it are
-refused. So is a reset with two or more GPUs keeping every pinned allocation,
-since that case never sees two. Three paths are untested by design: the fork
+counterpart does the same with a registered range the reset unregistered, and
+also checks that a pointer into the range still translates. Untested are a
+reset with two or more GPUs keeping every pinned allocation, since those cases
+never see two, and a replayed `hipHostUnregister` of a range the reset
+unregistered, which only a replay that sees fewer GPUs than its capture
+reaches. Three paths are untested by design: the fork
 handlers, a blob or event that cannot be written, and a restore
 `hipLaunchHostFunc` refuses. Each needs a fault injected into the capture or
 replay process, which no test hook provides. Of the leaks, only the one in

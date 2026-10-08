@@ -803,6 +803,68 @@ TEST_CASE("Unit_HRR_PinnedHost_Reset_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostFree(b));
 }
 
+// ===========================================================================
+// A hipHostRegister range across hipDeviceReset.
+//
+//   0  read      registered range R, pattern 32
+//   -  hipDeviceReset, which unregisters R with one GPU
+//   1  read      a new pinned buffer B, pattern 33
+//   2  a launch whose pointer argument points kUnregOffset into R, with
+//      nothing to read
+// R stays allocated throughout, so nothing else can take its addresses. With
+// more than one GPU the reset keeps R registered, and the workload skips.
+// ===========================================================================
+// A whole chunk still fits in R from here.
+constexpr size_t kUnregOffset = kPinnedBytes - kChunk;
+
+TEST_CASE("Unit_HRR_PinnedHost_HostUnregistered_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* r = static_cast<int*>(std::aligned_alloc(4096, kPinnedBytes));
+  REQUIRE(r != nullptr);
+  HRR_HIP_CHECK(hipHostRegister(r, kPinnedBytes, hipHostRegisterDefault));
+  int* out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out, kPinnedBytes));
+
+  // 0
+  fill(r, 32);
+  read_pinned(r, out, 32);
+
+  HRR_HIP_CHECK(hipDeviceReset());
+  HRR_HIP_CHECK(hipSetDevice(0));
+  hipPointerAttribute_t attr{};
+  const hipError_t ar = hipPointerGetAttributes(&attr, r);
+  (void)hipGetLastError();
+  if (ar != hipSuccess || attr.type != hipMemoryTypeUnregistered) {
+    skip_direct("hipDeviceReset left the registered range registered, as it does "
+                "with more than one GPU visible");
+    (void)hipHostUnregister(r);
+    (void)hipGetLastError();
+    std::free(r);
+    return;
+  }
+
+  // 1
+  int* b = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&b), kPinnedBytes,
+                              hipHostMallocDefault));
+  HRR_HIP_CHECK(hipMalloc(&out, kPinnedBytes));
+  fill(b, 33);
+  read_pinned(b, out, 33);
+
+  // 2
+  hipLaunchKernelGGL(hrr_pinned_read, dim3(1), dim3(kThreads), 0, nullptr,
+                     r + kUnregOffset / sizeof(int), out, 0);
+  HRR_HIP_CHECK(hipGetLastError());
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+
+  HRR_HIP_CHECK(hipFree(out));
+  HRR_HIP_CHECK(hipHostFree(b));
+  // Fails, since the reset unregistered R, so capture does not record it.
+  (void)hipHostUnregister(r);
+  (void)hipGetLastError();
+  std::free(r);
+}
+
 namespace {
 // The device pointer makes the argument value_kind 3; the pinned one is at
 // byte offset 8.
@@ -2806,6 +2868,19 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_DeviceReset) {
   CHECK(kls[2]->snapshots.empty());
 }
 
+namespace {
+// The environment that shows a child only the first GPU this process sees.
+// The runtime reads CUDA_VISIBLE_DEVICES when HIP_VISIBLE_DEVICES is unset or
+// empty.
+std::vector<std::pair<std::string, std::string>> first_gpu_only() {
+  const char* visible = std::getenv("HIP_VISIBLE_DEVICES");
+  if (visible == nullptr || *visible == '\0') visible = std::getenv("CUDA_VISIBLE_DEVICES");
+  std::string first = visible ? std::string(visible) : std::string();
+  first = first.substr(0, first.find(','));
+  return {{"HIP_VISIBLE_DEVICES", first.empty() ? "0" : first}};
+}
+}  // namespace
+
 // ---------------------------------------------------------------------------
 // After a replayed hipDeviceReset on one GPU, a record naming a pinned buffer
 // the reset freed is refused. Reset_Direct's launch 1 gets its first record
@@ -2819,11 +2894,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_DeviceReset) {
 // ---------------------------------------------------------------------------
 HRR_TEST_CASE(Unit_HRR_PinnedHost_RecordAfterReset) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_record_after_reset.hrr");
-  const char* visible = std::getenv("HIP_VISIBLE_DEVICES");
-  std::string first = visible ? std::string(visible) : std::string();
-  first = first.substr(0, first.find(','));
-  const std::vector<std::pair<std::string, std::string>> one_gpu = {
-      {"HIP_VISIBLE_DEVICES", first.empty() ? "0" : first}};
+  const auto one_gpu = first_gpu_only();
   const std::string skipped =
       capture_case("Unit_HRR_PinnedHost_Reset_Direct", cap.path, one_gpu);
   if (!skipped.empty()) SKIP(skipped);
@@ -2868,6 +2939,73 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_RecordAfterReset) {
   unsigned long long restored = 0, rejected = 0;
   host_snapshot_summary(out, restored, rejected);
   CHECK(rejected == 1);
+}
+
+// ---------------------------------------------------------------------------
+// After a replayed hipDeviceReset on one GPU, a hipHostRegister range the
+// reset unregistered stays tracked: a pointer into it still translates to
+// replay's buffer, and a record naming it is refused. HostUnregistered_Direct's
+// launch 1 gets its first record pointed into R instead of B. Replay that
+// stopped tracking R passed launch 2 an untranslated pointer; replay that kept
+// R as registered restored archive bytes into it. Both run on the first GPU
+// this test sees, as in RecordAfterReset.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_HostUnregistered) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_host_unregistered.hrr");
+  const auto one_gpu = first_gpu_only();
+  const std::string skipped =
+      capture_case("Unit_HRR_PinnedHost_HostUnregistered_Direct", cap.path, one_gpu);
+  if (!skipped.empty()) SKIP(skipped);
+  const fs::path archive = hrr_single_process_archive(cap.path);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  const auto kls = launches_of(arc);
+  REQUIRE(kls.size() == 3);
+  REQUIRE(!kls[0]->snapshots.empty());
+  REQUIRE(kls[1]->snapshots.size() == 2);
+  REQUIRE(kls[1]->snapshots[0].offset == 0);
+  REQUIRE(kls[1]->snapshots[0].length == kChunk);
+  CHECK(kls[2]->snapshots.empty());
+  REQUIRE(!kls[2]->args.empty());
+  REQUIRE(kls[2]->args[0].data.size() == sizeof(uint64_t));
+
+  const uint64_t r = kls[0]->snapshots[0].ptr_handle;
+  uint64_t stale = 0;
+  std::memcpy(&stale, kls[2]->args[0].data.data(), sizeof(stale));
+  INFO("R 0x" << std::hex << r << ", launch 2 pointer 0x" << stale);
+  REQUIRE(stale == r + kUnregOffset);
+
+  std::vector<uint8_t> events = read_bytes(archive / "events.bin");
+  const auto spans = launch_spans(events);
+  REQUIRE(spans.size() == kls.size());
+  patch_snapshot(events, spans, kls, 1, 0, /*ptr*/ 0, stale);
+  write_bytes(archive / "events.bin", events);
+
+  auto env = one_gpu;
+  env.emplace_back("HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL", std::to_string(kls.size()));
+  auto [rc, out] = replay(archive, "--continue-on-error", env);
+  INFO("Replay exit: " << rc << "\nReplay:\n" << out);
+  CHECK(rc < 128);
+  CHECK(count_of(out, "names no live allocation") == 1);
+  unsigned long long restored = 0, rejected = 0;
+  host_snapshot_summary(out, restored, rejected);
+  CHECK(rejected == 1);
+
+  // The pointer dump names the allocation an argument lands in on the first
+  // line for it, and only if replay translated the argument.
+  char needle[64];
+  std::snprintf(needle, sizeof(needle), "arg[0] recorded=0x%llx -> live=",
+                static_cast<unsigned long long>(stale));
+  const size_t at = out.find(needle);
+  REQUIRE(at != std::string::npos);
+  const std::string line = out.substr(at, out.find('\n', at) - at);
+  INFO("arg 0: " << line);
+  char home[96];
+  std::snprintf(home, sizeof(home), "(unregistered host allocation 0x%llx+",
+                static_cast<unsigned long long>(r));
+  CHECK(line.find(home) != std::string::npos);
+  CHECK(line.find(", +" + std::to_string(kUnregOffset) + ")") != std::string::npos);
 }
 
 // ---------------------------------------------------------------------------
