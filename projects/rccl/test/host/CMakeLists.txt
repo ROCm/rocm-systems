@@ -219,12 +219,8 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroRmaProxy -- host-only microtests for src/rma/rma_proxy.cc.
-  # Its own binary, not rccl-UnitTestsMicro: that target resolves
-  # ncclRmaProxyConnectOnce / ncclRmaProxyRegister / ncclRmaProxyDeregister from
-  # fakes/dev_runtime_micro_fakes.cc, and rma_proxy.cc defines all three, so
-  # linking the unit under test there is a duplicate symbol. The test TU carries
-  # the few externs with no owning fakes file (see its header comment).
+  # src/rma/rma_proxy.cc; its own binary because rccl-UnitTestsMicro already fakes
+  # three symbols rma_proxy.cc defines (see MICROTEST_README.md).
   set(TEST_MICRO_RMA_PROXY_SOURCE_FILES
     rma-proxy-test.cc
     fakes/hip_fakes.cc
@@ -826,13 +822,12 @@ elseif(NOT BUILD_TESTS)
 endif()
 
 # ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroRmaProxy -- src/rma/rma_proxy.cc
+# rccl-UnitTestsMicroRmaProxy
 # ---------------------------------------------------------------------------
 rccl_add_micro_binary(rccl-UnitTestsMicroRmaProxy
   SOURCES ${TEST_MICRO_RMA_PROXY_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    # rma/rma_proxy.cc is the only rma_proxy.cc in SRC_FILES, so hipify keeps the name.
     RMA_PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rma_proxy.yaml")
 
