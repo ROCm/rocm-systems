@@ -169,6 +169,8 @@ class AnvilLib {
   void buildGpuAgentMap();
   hsa_agent_t getHipGpuAgent(int hipDeviceId) const;
   void querySdmaEngineCounts();
+  // Pop `vec` back to `keep` entries, crediting each popped queue to the budget.
+  void releaseQueues(std::vector<std::unique_ptr<SdmaQueue>>& vec, size_t keep);
   int getOamId(int deviceId);
   int getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId);
   // Chooses an engine for the pair and records why, so the caller can hand the same record to

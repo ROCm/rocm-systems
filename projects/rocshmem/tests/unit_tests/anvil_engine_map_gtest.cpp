@@ -85,6 +85,9 @@ TEST(AnvilEngineMap, FoldSeparatesPartitionsOfOneDevice) {
 }
 
 TEST(AnvilEngineMap, FoldTreatsUnreadableFunctionAsZero) {
+  // One unreadable side: without the clamp, (0 + -1 + 0) % 2 would be -1.
+  EXPECT_EQ(foldOamMapEngine(0, -1, 0, kCpxTotal), foldOamMapEngine(0, 0, 0, kCpxTotal));
+  EXPECT_EQ(foldOamMapEngine(0, 0, -1, kCpxTotal), foldOamMapEngine(0, 0, 0, kCpxTotal));
   EXPECT_EQ(foldOamMapEngine(3, -1, -1, kCpxTotal), foldOamMapEngine(3, 0, 0, kCpxTotal));
 }
 
@@ -104,6 +107,23 @@ TEST(AnvilEngineMap, PciFunctionBusAcceptsOnlyThreeBitFunctions) {
     EXPECT_EQ(loc.function, -1) << bad;
     EXPECT_EQ(loc.physBusId, loc.busId) << bad;
   }
+}
+
+TEST(AnvilEngineMap, QueueBudgetRefusesOverSubscription) {
+  // CPX: 2 engines x 8 queues per engine.
+  EXPECT_FALSE(queueBudgetExceeded(9, 7, kCpxTotal, 8));
+  EXPECT_TRUE(queueBudgetExceeded(10, 7, kCpxTotal, 8));
+  EXPECT_TRUE(queueBudgetExceeded(0, 17, kCpxTotal, 8));
+}
+
+TEST(AnvilEngineMap, QueueBudgetUnknownNeverRefuses) {
+  EXPECT_FALSE(queueBudgetExceeded(100, 8, 0, 8));
+  EXPECT_FALSE(queueBudgetExceeded(100, 8, kCpxTotal, 0));
+}
+
+TEST(AnvilEngineMap, QueueBudgetIgnoresEmptyRequest) {
+  EXPECT_FALSE(queueBudgetExceeded(16, 0, kCpxTotal, 8));
+  EXPECT_FALSE(queueBudgetExceeded(16, -1, kCpxTotal, 8));
 }
 
 TEST(AnvilEngineMap, PciFunctionBusHandlesEmptyInput) {
