@@ -45,6 +45,7 @@ AMD SMI is the successor to [ROCm SMI](https://github.com/ROCm/rocm-systems/tree
 * [AI NIC integration](./how-to/amdsmi-nic-integration.md)
 * [Use AMD SMI in a Docker container](./how-to/setup-docker-container.md)
 * [Using AMD SMI under WSL (experimental)](./how-to/amdsmi-wsl-mode.md)
+* [Test a consumer without GPU hardware](./how-to/amdsmi-mock-backend.md)
 :::
 
 :::{grid-item-card} Reference

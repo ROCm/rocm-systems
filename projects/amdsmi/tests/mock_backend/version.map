@@ -1,0 +1,4 @@
+AMDSMI_1 {
+  global: amdsmi_*;
+  local: *;
+};

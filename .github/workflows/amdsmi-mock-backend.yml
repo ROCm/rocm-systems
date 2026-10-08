@@ -1,0 +1,52 @@
+name: AMDSMI CPU-only mock backend
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/tests/mock_backend/**'
+      - 'projects/amdsmi/include/amd_smi/amdsmi.h'
+      - '.github/workflows/amdsmi-mock-backend.yml'
+  push:
+    branches: [develop, 'users/**']
+    paths:
+      - 'projects/amdsmi/tests/mock_backend/**'
+      - 'projects/amdsmi/include/amd_smi/amdsmi.h'
+      - '.github/workflows/amdsmi-mock-backend.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cpu-only:
+    name: CPU-only (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/amdsmi/tests/mock_backend
+            projects/amdsmi/include/amd_smi
+      - name: Configure without ROCm or GPU dependencies
+        run: cmake -S projects/amdsmi/tests/mock_backend -B /tmp/amdsmi-mock -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build /tmp/amdsmi-mock --parallel 2
+      - name: Test API contracts and live fault updates
+        run: ctest --test-dir /tmp/amdsmi-mock --output-on-failure
+      - name: Check ELF library identity and symbol version
+        shell: bash
+        run: |
+          set -euo pipefail
+          library=$(find /tmp/amdsmi-mock -maxdepth 1 -type f -name 'libamd_smi.so.*' -print -quit)
+          test -n "$library"
+          readelf --dynamic "$library" | grep -E 'SONAME.*libamd_smi\.so\.[0-9]+'
+          readelf --dyn-syms --wide "$library" | grep 'amdsmi_init@@AMDSMI_1'

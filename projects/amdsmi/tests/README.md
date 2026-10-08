@@ -5,6 +5,14 @@ the full per-file reference, see
 [../docs/conceptual/test-design.md](../docs/conceptual/test-design.md) and
 [python/README.md](python/README.md).
 
+## CPU-only consumer mock
+
+`mock_backend/` builds an opt-in replacement AMD SMI shared library independently
+of the production build. It tests AMD SMI **consumers**, rather than the production
+library's hardware access. It needs only CMake, C/C++ compilers, and Python; no GPU
+or ROCm dependencies. See [the mock backend guide](../docs/how-to/amdsmi-mock-backend.md)
+for supported APIs, live telemetry/ECC controls, and build/test commands.
+
 ## Three test families
 
 ```text

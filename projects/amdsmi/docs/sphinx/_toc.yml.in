@@ -34,6 +34,8 @@ subtrees:
     title: Use AMD SMI in a Docker container
   - file: how-to/amdsmi-wsl-mode.md
     title: Using AMD SMI under WSL (experimental)
+  - file: how-to/amdsmi-mock-backend.md
+    title: Test a consumer without GPU hardware
 
 - caption: Reference
   entries:
