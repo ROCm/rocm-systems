@@ -2518,12 +2518,21 @@ configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
                      "buffer creation");
 
     bool config_match_found = false;
+    bool hidden_match_found = false;
     auto agent_ptr_vec      = get_gpu_agents();
     for(auto& itr : agent_ptr_vec)
     {
         if(if_pc_sample_config_match(
                itr->id, method, unit, tool::get_config().pc_sampling_interval))
         {
+            if(!itr->runtime_visibility.hsa || !itr->runtime_visibility.hip)
+            {
+                ROCP_INFO << "Skipping PC sampling on GPU " << itr->logical_node_type_id
+                          << " (node " << itr->node_id << "): hidden by *_VISIBLE_DEVICES";
+                hidden_match_found = true;
+                continue;
+            }
+
             config_match_found = true;
             int flags          = 0;
             ROCPROFILER_CALL(
@@ -2536,6 +2545,13 @@ configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
                                                           flags),
                 "configure PC sampling");
         }
+    }
+    if(!config_match_found && hidden_match_found)
+    {
+        ROCP_WARNING << "PC sampling disabled: every GPU supporting the given PC sampling "
+                     << "configuration is hidden from this process by ROCR_VISIBLE_DEVICES / "
+                     << "HIP_VISIBLE_DEVICES / CUDA_VISIBLE_DEVICES";
+        return;
     }
     if(!config_match_found)
     {
