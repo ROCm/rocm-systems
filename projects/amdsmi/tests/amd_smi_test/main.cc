@@ -357,7 +357,6 @@ TEST(SystemFunctionalReadOnly, TestCrossProcessSerialization) {
   tst.Run();
   RunCustomTestEpilog(&tst);
 }
-/*
 TEST(SystemFunctionalReadOnly, TestConcurrentInit) {
   TestConcurrentInit tst;
   SetFlags(&tst);
@@ -367,7 +366,6 @@ TEST(SystemFunctionalReadOnly, TestConcurrentInit) {
   // RunCustomTestEpilog(&tst);  // Avoid extra amdsmi_shut_down
   tst.DisplayResults();
 }
-*/
 
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
