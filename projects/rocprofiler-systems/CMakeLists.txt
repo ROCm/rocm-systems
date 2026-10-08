@@ -584,6 +584,14 @@ install(
     COMPONENT setup
 )
 
+# Agent skills (see skills/)
+install(
+    DIRECTORY skills/
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/skills
+    COMPONENT setup
+    USE_SOURCE_PERMISSIONS
+)
+
 # ------------------------------------------------------------------------------#
 #
 # install
