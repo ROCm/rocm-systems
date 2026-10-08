@@ -1,0 +1,293 @@
+/* Copyright (c) Advanced Micro Devices, Inc. */
+/* SPDX-License-Identifier:  MIT */
+
+:root {
+  --mem-read: #087da3;
+  --mem-write: #a36505;
+  --mem-atomic: #a34498;
+  --mem-util: #287e48;
+  --mem-hit: #816904;
+  --mem-stall: #b44444;
+  --mem-bw: #087da3;
+  --mem-gpu-bg: #eee8f7;
+  --mem-memory-bg: #f7f0e3;
+}
+
+:root.report-theme-dark {
+  --mem-read: #5dc7e9;
+  --mem-write: #f3bf62;
+  --mem-atomic: #e890dc;
+  --mem-util: #7fdda2;
+  --mem-hit: #e9d477;
+  --mem-stall: #f09595;
+  --mem-bw: #5dc7e9;
+  --mem-gpu-bg: #292139;
+  --mem-memory-bg: #2b2418;
+}
+
+.mem-chart-cat-read { --mem-category: var(--mem-read); }
+.mem-chart-cat-write { --mem-category: var(--mem-write); }
+.mem-chart-cat-atomic { --mem-category: var(--mem-atomic); }
+.mem-chart-cat-util { --mem-category: var(--mem-util); }
+.mem-chart-cat-hit { --mem-category: var(--mem-hit); }
+.mem-chart-cat-stall { --mem-category: var(--mem-stall); }
+.mem-chart-cat-bw { --mem-category: var(--mem-bw); }
+
+.mem-chart-title { flex: 1 1 auto; min-width: 0; }
+.mem-chart-title-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
+.mem-chart-title h1 { margin: 0; font-size: 19px; line-height: 1.3; }
+.mem-chart-normalization { color: var(--report-muted); font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+.mem-chart-title p { margin: 2px 0 0; color: var(--report-muted); font-size: 12px; overflow-wrap: anywhere; }
+.mem-chart-toolbar { align-items: flex-start; }
+.mem-chart-toolbar .report-btn { flex: 0 0 auto; }
+.mem-chart-export-status { width: 100%; color: var(--mem-stall); font-size: 12px; }
+
+.mem-chart-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding: 0 3px 20px 0;
+}
+
+.mem-chart-section {
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--report-border);
+  border-radius: 8px;
+  background: var(--report-surface);
+}
+
+.mem-chart-section h2 { margin: 0 0 10px; font-size: 15px; }
+.mem-chart-section-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+.mem-chart-section-heading span { color: var(--report-muted); font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+.mem-chart-panel-wrap { flex: 0 0 var(--report-panel-basis); flex-direction: row; gap: 4px; }
+.mem-chart-sidebar-toggle { align-self: flex-start; width: 24px; padding: 6px 0; font-size: 16px; }
+.mem-chart-panel-wrap.collapsed { flex-basis: 24px; width: 24px; }
+.mem-chart-kernel-panel { flex: 1 1 auto; min-width: 0; width: auto; }
+.mem-chart-kernel-panel[hidden] { display: none; }
+.mem-chart-kernel-panel .report-panel-title { flex-wrap: wrap; }
+.mem-chart-kernel-panel .report-panel-item { margin-bottom: 2px; }
+
+.mem-chart-diagram {
+  position: relative;
+  overflow: hidden;
+  height: clamp(420px, 78vh, 1200px);
+  height: clamp(420px, 78dvh, 1200px);
+  touch-action: none;
+  cursor: grab;
+  border-radius: 5px;
+  background: var(--report-bg-soft);
+}
+.mem-chart-diagram:active { cursor: grabbing; }
+.mem-chart-canvas { position: absolute; transform-origin: 0 0; width: max-content; isolation: isolate; }
+.mem-chart-connectors { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: visible; }
+.mem-chart-connector { fill: none; stroke: var(--mem-category, var(--report-accent)); stroke-width: 1.5; }
+
+.mem-chart-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  align-items: stretch;
+  column-gap: 30px;
+  row-gap: 12px;
+  width: max-content;
+  padding: 13px;
+}
+
+.mem-chart-block-column,
+.mem-chart-block-stack,
+.mem-chart-io-zone,
+.mem-chart-children { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.mem-chart-io-zone { position: relative; padding-bottom: 16px; }
+.mem-chart-io-above { justify-content: flex-end; }
+.mem-chart-io-below { padding-top: 16px; padding-bottom: 0; }
+.mem-chart-io-zone > .mem-chart-block {
+  width: max-content;
+  max-width: none;
+  box-sizing: border-box;
+  align-self: flex-start;
+}
+.mem-chart-io-zone .mem-chart-block-title { white-space: nowrap; }
+.mem-chart-block-column { grid-row: 3; }
+
+.mem-chart-scope-heading-space {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  height: 24px;
+}
+.mem-chart-scope-box {
+  position: absolute;
+  z-index: 0;
+  padding: 12px;
+  border: 1px solid var(--report-border);
+  border-radius: 8px;
+  background: var(--mem-gpu-bg);
+  pointer-events: none;
+}
+.mem-chart-scope-memory { background: var(--mem-memory-bg); }
+.mem-chart-scope-title {
+  margin: 0;
+  color: var(--report-muted);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+}
+
+.mem-chart-block {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--report-border);
+  border-left: 4px solid var(--report-accent);
+  border-radius: 6px;
+  background: var(--report-surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+}
+.mem-chart-block.nested { border-left-width: 3px; box-shadow: none; }
+.mem-chart-block[data-block-id="cu"] { border-left-color: var(--mem-util); }
+.mem-chart-block-empty { width: max-content; max-width: none; box-sizing: border-box; align-self: center; }
+.mem-chart-block-empty > .mem-chart-block-title { margin-bottom: 0; white-space: nowrap; }
+.mem-chart-block-title {
+  margin: 0 0 7px;
+  font-size: 13px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.mem-chart-block-note { margin: 0 0 7px; color: var(--report-muted); font-size: 11px; }
+.mem-chart-children { gap: 7px; margin-top: 8px; }
+
+.mem-chart-metric {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 7px;
+  align-items: baseline;
+  padding: 2px 0;
+  border-top: 1px solid var(--report-border);
+  font-size: 11px;
+  line-height: 1.3;
+}
+.mem-chart-metric-label { min-width: 0; overflow-wrap: anywhere; }
+.mem-chart-value {
+  color: var(--mem-category, var(--report-text));
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.mem-chart-bar-track {
+  grid-column: 1 / -1;
+  display: block;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 9px;
+  background: var(--report-border);
+}
+.mem-chart-bar-track.unavailable { opacity: .5; }
+.mem-chart-bar-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: var(--mem-category, var(--report-accent));
+  transition: width .2s ease;
+}
+
+.mem-chart-annotations:empty { display: none; }
+.mem-chart-annotation {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 5px;
+  border-radius: 4px;
+  color: var(--mem-stall);
+  background: var(--report-bg-soft);
+  font-size: 11px;
+}
+
+.mem-chart-edge-column { position: relative; min-width: 0; grid-row: 3; }
+.mem-chart-arrow-group {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding: 5px 4px;
+  font-size: 10px;
+}
+.mem-chart-lane-group {
+  margin: 5px 0 2px;
+  color: var(--report-muted);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  width: max-content;
+}
+.mem-chart-lane-group:first-child { margin-top: 0; }
+.mem-chart-lane {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px;
+  align-items: baseline;
+  min-width: 0;
+  padding: 1px 0 9px;
+  color: var(--mem-category, var(--report-text));
+}
+.mem-chart-lane-label { width: max-content; white-space: nowrap; }
+.mem-chart-lane-value { font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.mem-chart-io-connector {
+  position: absolute;
+  width: max-content;
+}
+.mem-chart-io-connector .mem-chart-lane { grid-template-columns: max-content max-content; column-gap: 6px; }
+.mem-chart-io-connector .mem-chart-arrow-group {
+  position: static;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+}
+
+.mem-chart-legend { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 9px; }
+.mem-chart-legend-item { font-size: 11px; color: var(--report-muted); }
+.mem-chart-legend-mark { color: var(--mem-category); margin-right: 4px; }
+
+.mem-chart-table-wrap { margin-bottom: 14px; }
+.mem-chart-table-wrap:last-child { margin-bottom: 0; }
+.mem-chart-table-wrap h3 { margin: 0 0 6px; font-size: 13px; }
+.mem-chart-table-scroll { max-width: 100%; overflow: auto; }
+.mem-chart-section summary { cursor: pointer; font-size: 15px; font-weight: 650; }
+.mem-chart-section[open] summary { margin-bottom: 10px; }
+.mem-chart-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.mem-chart-table th,
+.mem-chart-table td { padding: 5px 8px; border: 1px solid var(--report-border); text-align: left; overflow-wrap: anywhere; }
+.mem-chart-table th { background: var(--report-bg-soft); }
+.mem-chart-table td:not(:first-child) { font-variant-numeric: tabular-nums; }
+.mem-chart-table tbody tr:nth-child(even) { background: var(--report-bg-soft); }
+.mem-chart-guidance p {
+  margin: 0 0 9px;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-line;
+}
+.mem-chart-guidance p:last-child { margin-bottom: 0; }
+.mem-chart-empty { color: var(--report-muted); font-size: 12px; }
+.mem-chart-app noscript { padding: 8px; }
+
+@media (max-width: 900px) {
+  .mem-chart-body { flex-direction: row; gap: 8px; }
+  .mem-chart-panel-wrap { flex: 0 0 min(280px, 40vw); width: min(280px, 40vw); height: auto; }
+  .mem-chart-panel-wrap.collapsed { flex-basis: 24px; width: 24px; }
+  .mem-chart-main { min-height: 0; }
+}
