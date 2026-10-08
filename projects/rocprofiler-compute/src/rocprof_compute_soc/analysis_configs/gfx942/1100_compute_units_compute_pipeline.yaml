@@ -75,7 +75,7 @@ Panel Config:
           unit: Instructions per Cycle
         IPC (Issued):
           avg: COLLECT_SUM(_collect.ipc_issued_a, _collect.ipc_issued_b)
-          min: None
+          min: None  # MIN(a/d)+MIN(b/d) is not MIN((a+b)/d)
           max: None
           unit: Instructions per Cycle
         SALU Utilization:
@@ -142,7 +142,7 @@ Panel Config:
       metric:
         FLOPs (Total):
           avg: COLLECT_SUM(_collect.flops_total_a, _collect.flops_total_b, _collect.flops_total_c)
-          min: None
+          min: None  # MIN(a/d)+MIN(b/d) is not MIN((a+b)/d)
           max: None
           unit: (FLOPs + $normUnit)
         IOPs (Total):
