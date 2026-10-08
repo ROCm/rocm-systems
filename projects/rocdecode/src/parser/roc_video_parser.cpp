@@ -307,9 +307,13 @@ ParserResult RocVideoParser::ParseSeiMessage(uint8_t *nalu, size_t size) {
                 // packet size, so that is quadratic in the packet size.
                 size_t needed = sei_payload_size_ + payload_size;
                 size_t new_size = sei_payload_buf_size_ ? sei_payload_buf_size_ : INIT_SEI_PAYLOAD_BUF_SIZE;
-                while (new_size < needed) {
+                // Stop doubling before the 32 bit limit. Past it the doubled value would exceed
+                // what sei_payload_buf_size_ can hold and the check below would reject the growth
+                // even where the requirement itself still fits, dropping the remaining messages.
+                while (new_size < needed && new_size <= 0xFFFFFFFFULL / 2) {
                     new_size *= 2;
                 }
+                // Falls back to the exact requirement when the doubling was capped above.
                 size_t capacity = new_size >= needed ? new_size : needed;
                 // sei_payload_buf_size_ is uint32_t, and it is what the allocation below is sized
                 // from and what the two copies are bounded by. Narrowing a capacity past 4 GB
