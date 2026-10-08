@@ -132,10 +132,13 @@ struct hsakmtRuntime {
   uint64_t handle_aperture_size_;
   std::unique_ptr<wsl::thunk::VaMgr> handle_aperture_mgr_;
 
-  /* AQL-to-PM4 dispatch watchdog, in ms. 0 disables it. The default follows KFD's 9s queue
-     preemption timeout and stays clear of the 2s TDR. When TDR is disabled the fence never
-     becomes UINT64_MAX, so a ring that stops moving takes the device-lost exit. */
-  uint32_t dispatch_timeout_ms_ = 10000;
+  /* AQL-to-PM4 dispatch watchdog, in ms. Tunable through ROCDXG_DISPATCH_TIMEOUT_MS; 0 disables
+     it. Armed by default because nothing below us detects a wedged dispatch: the device stays
+     active, no error is raised and the fence simply stops, so a device-side assert otherwise
+     hangs the process forever. The cost is that a kernel running longer than this is
+     indistinguishable from a wedge, which is why the timeout exit never releases waiters; the
+     default is an order of magnitude above the platform's own 2 s TDR threshold. */
+  uint32_t dispatch_timeout_ms_ = 20000;
 
   union {
     struct {

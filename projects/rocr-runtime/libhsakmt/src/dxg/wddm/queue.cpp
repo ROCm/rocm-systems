@@ -255,13 +255,15 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
   constexpr std::chrono::microseconds kPollMin(50);
   constexpr std::chrono::microseconds kPollMax(2000);
   auto poll_interval = kPollMin;
-  // No trap handler and no exception interrupt exist on WSL/DXG, so a wedged dispatch can only
-  // be detected as a ring that stops moving. 0 disables the watchdog.
+  // No trap handler and no exception interrupt exist on WSL/DXG, so a wedged dispatch can only be
+  // detected as a ring that stops moving, which a long kernel and a GPU-side wait look exactly
+  // like. Hence the timeout exit never releases waiters. 0 disables it.
   const std::chrono::milliseconds kDispatchTimeout(dxg_runtime->dispatch_timeout_ms_);
   auto stall_since = std::chrono::steady_clock::now();
   uint64_t current_position = queue->GetAqlWriteIndex();
   bool sleep = false;
   bool retry = false;
+  bool dispatch_stalled = false;
   // Last reported {wptr, rptr, gpu fence} so the idle log only fires on real progress.
   uint64_t last_wait_state[3] = {~0ull, ~0ull, ~0ull};
   // Device lost, scratch allocation failure, and a packet the translator rejects
@@ -275,6 +277,7 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
     // keep polling forever after a GPU reset; check here too. sync_addr is NULL until Init(),
     // which runs after this thread is spawned.
     if (queue->sync_addr && queue->IsDeviceLost()) {
+      pr_err("queue %p device lost, fence=%" PRIx64 "\n", queue->ring, *queue->sync_addr);
       status = HSA_STATUS_ERROR_EXCEPTION;
       break;
     }
@@ -312,7 +315,7 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
         (sleep && queue->IsInvalidPacket()) || retry) {
       if (queue->thread_stop_) break;
       const uint64_t state[3] = {queue->GetRingWptr()->load(), queue->GetRingRptr()->load(),
-                                 *queue->sync_addr};
+                                 queue->sync_addr ? *queue->sync_addr : 0};
       if (memcmp(state, last_wait_state, sizeof(state))) {
         pr_debug("wait %p wptr=%" PRIx64 " rptr=%" PRIx64 " fence=%" PRIx64 "\n", queue->ring,
                  state[0], state[1], state[2]);
@@ -321,15 +324,18 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
         stall_since = std::chrono::steady_clock::now();
       } else {
         poll_interval = std::min(poll_interval * 2, kPollMax);
-        // state[0] > state[1]: packets are on the GPU and have not retired. TDR may be
-        // disabled, so IsDeviceLost() never fires. Leave through the same exit as device lost.
+        const auto now = std::chrono::steady_clock::now();
+        // state[0] > state[1]: packets are on the GPU and have not retired. The device stays
+        // active and raises no error, so report the queue error but leave the in-flight
+        // waiters alone: the GPU may still be running.
         if (kDispatchTimeout.count() && state[0] > state[1] &&
-            std::chrono::steady_clock::now() - stall_since > kDispatchTimeout) {
+            now - stall_since > kDispatchTimeout) {
           pr_err("queue %p dispatch stalled for %" PRId64 " ms, wptr=%" PRIx64 " rptr=%" PRIx64
                  " fence=%" PRIx64 "\n",
                  queue->ring, static_cast<int64_t>(kDispatchTimeout.count()), state[0], state[1],
                  state[2]);
           status = HSA_STATUS_ERROR_EXCEPTION;
+          dispatch_stalled = true;
           break;
         }
       }
@@ -341,9 +347,11 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
     pr_err("aql to pm4 queue %p failed, status %08x\n", queue->ring, status);
     // Read before HandleError. A rejected packet matches AQL: report the error
     // and leave the ring where it stopped. Device lost and scratch allocation
-    // failure will not be retired by the GPU, so release those waiters.
+    // failure will not be retired by the GPU, so release those waiters. The
+    // watchdog cannot prove that, so releasing there would let the application
+    // read buffers a still-running kernel is writing.
     const bool release_waiters =
-        status == HSA_STATUS_ERROR_EXCEPTION || queue->scratch_alloc_failed_;
+        !dispatch_stalled && (status == HSA_STATUS_ERROR_EXCEPTION || queue->scratch_alloc_failed_);
     queue->HandleError(status);
     if (release_waiters) queue->AbandonInflightPackets();
   }
