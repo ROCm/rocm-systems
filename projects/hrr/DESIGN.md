@@ -800,13 +800,27 @@ synthetic inputs when the archive has to be shared.
   adds a blob per changed chunk per launch. The writer's disk-space guard still
   applies.
 
-**Replaying an untrusted archive.** Archive contents are untrusted. A record can
-only write into a pinned host allocation replay made, inside its bounds, and only
-the bytes of a blob of exactly the recorded length. A record that names device
-memory, no allocation, a range outside its allocation, an unknown direction or a
-blob of another size is refused. This does not make an untrusted archive safe to
-replay: the archive also supplies the kernels and their arguments, and a snapshot
-exists to put chosen bytes in front of those kernels.
+**Replaying an untrusted archive.** Archive contents are untrusted. Replay
+checks each record when it queues the restore, not when the restore runs. At
+that point the record must name a pinned host allocation replay made, lie
+inside its bounds, and come with a blob of exactly the recorded length. A record
+that names device memory, no allocation, a range outside its allocation, an
+unknown direction or a blob of another size is refused. Replay then keeps the
+allocation alive until the restore has run: a free, an unregister or teardown
+waits for it, and leaks the allocation rather than free it when the wait runs
+out. Two paths release the allocation anyway, so a restore queued before them
+can write archive-chosen bytes into memory that has been released and may have
+been reused:
+
+- a replayed `hipDeviceReset` whose bounded wait runs out. An archive can
+  arrange this on purpose: hold the launch stream with a stream wait, reset
+  the allocating device, allocate again, then release the stream;
+- an exit after a fatal HIP error, which does not drain queued restores while
+  the process tears its memory down.
+
+This does not make an untrusted archive safe to replay: the archive also
+supplies the kernels and their arguments, and a snapshot exists to put chosen
+bytes in front of those kernels.
 
 **Residual risks.**
 
