@@ -460,6 +460,38 @@ HRR_TEST_CASE(Unit_HRR_AllocMap_PaddingDropsNothing) {
   CHECK(ctx.translate_ptr(0x10800ULL) == expected);
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   - Register a host range, mark it unregistered, and record an allocation at
+ *     the same base, which drops the range.
+ *   - Remove the entry at that base as the range's unregister does, naming the
+ *     range's buffer, then as the allocation's own release does.
+ *   - Verify the first removal leaves the allocation's entry and the second
+ *     erases it.
+ */
+HRR_TEST_CASE(Unit_HRR_AllocMap_RemoveBackedByKeepsReplacement) {
+  PlaybackContext ctx;
+  void* range = reinterpret_cast<void*>(static_cast<uintptr_t>(0xA0000000u));
+  void* fresh = reinterpret_cast<void*>(static_cast<uintptr_t>(0xC0000000u));
+
+  ctx.record_alloc(0x10000ULL, range, 0x1000, AllocKind::HostRegister);
+  {
+    std::unique_lock lk(ctx.map_mutex);
+    ctx.mark_host_unregistered(0x10000ULL);
+  }
+  ctx.record_alloc(0x10000ULL, fresh, 0x1000, AllocKind::HostMalloc);
+
+  ctx.remove_alloc_backed_by(0x10000ULL, range);
+  REQUIRE(ctx.alloc_map.count(0x10000ULL) == 1);
+  CHECK(ctx.alloc_map.at(0x10000ULL).live_ptr == fresh);
+  CHECK(ctx.translate_ptr(0x10800ULL) ==
+        reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(fresh) + 0x800));
+
+  ctx.remove_alloc_backed_by(0x10000ULL, fresh);
+  CHECK(ctx.alloc_map.count(0x10000ULL) == 0);
+}
+
 // ---------------------------------------------------------------------------
 // Archive reader SIZE_OK guard tests (CPU-only, no GPU required)
 //

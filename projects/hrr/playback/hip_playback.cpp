@@ -3375,14 +3375,23 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
     void* live = buf ? buf : ctx.translate_ptr(a->hostPtr);
     if (!live) return hipSuccess;
 
+    // With a buffer of its own, the range's entry is erased only while it still
+    // points at that buffer: an allocation recorded later at the same base
+    // replaced it, and that entry belongs to the allocation.
+    auto drop_entry = [&] {
+        if (buf)
+            ctx.remove_alloc_backed_by(a->hostPtr, buf);
+        else
+            ctx.remove_alloc(a->hostPtr);
+    };
     if (!hrr_host_release_ready(ctx, live)) {  // leaked: stays registered and allocated
-        ctx.remove_alloc(a->hostPtr);
+        drop_entry();
         return hipSuccess;
     }
     hipError_t r = hipHostUnregister(live);
     // The buffer is freed below even when the unregister fails, so nothing may
     // translate into it afterwards.
-    if (r == hipSuccess || buf) ctx.remove_alloc(a->hostPtr);
+    if (r == hipSuccess || buf) drop_entry();
     // It fails for a range a replayed hipDeviceReset already unregistered.
     // Capture records an unregister only when it succeeded, so this happens
     // only when replay sees fewer GPUs than capture did: capture's reset kept

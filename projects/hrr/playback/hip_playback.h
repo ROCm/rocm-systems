@@ -745,6 +745,13 @@ struct PlaybackContext {
         std::unique_lock lk(map_mutex);
         alloc_map.erase(rec);
     }
+    // Erases the entry at rec only while it still points at live. An entry an
+    // allocation recorded later at the same base belongs to that allocation.
+    void remove_alloc_backed_by(uint64_t rec, void* live) {
+        std::unique_lock lk(map_mutex);
+        auto it = alloc_map.find(rec);
+        if (it != alloc_map.end() && it->second.live_ptr == live) alloc_map.erase(it);
+    }
     // True if an allocation is already tracked under this recorded address.
     bool has_alloc(uint64_t rec) const {
         std::shared_lock lk(map_mutex);
