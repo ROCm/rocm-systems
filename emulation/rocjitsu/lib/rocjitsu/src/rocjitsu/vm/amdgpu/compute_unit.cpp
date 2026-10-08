@@ -709,11 +709,14 @@ bool ComputeUnitCore::gws_has_active_peer(uint32_t dispatch_id, uint32_t wg_id,
 // rendezvous can be proven deadlock-free.
 //
 //  * Barrier: hardware/LLVM program the resource with (participants - 1); the
-//    MI200 pseudocode queues an arrival while the counter is positive and
-//    releases every queued arrival once an arrival observes zero. We follow that
-//    convention exactly (see gws_barrier_arrive) and only park when the whole
-//    participant set (count + 1) is provably resident; larger sets fall back to
-//    a non-blocking structural no-op.
+//    MI200 pseudocode queues an arrival while the counter is positive and, on
+//    the arrival that observes zero, releases every queued arrival and reloads
+//    the counter from that arrival's own value (so consecutive phases may differ
+//    in size). We follow that convention exactly (see gws_barrier_arrive). A
+//    blocking arrival is gated on the outstanding counter: the still-required
+//    participant set is (counter + 1), and we only park when that whole set is
+//    provably resident; larger sets fall back to a non-blocking structural
+//    no-op.
 //  * Semaphore: V/BR add credits and wake queued P waiters; P consumes a credit
 //    or parks -- but only when a co-resident peer could still signal. A P whose
 //    producer lives outside this workgroup cannot rendezvous in this model, so
@@ -730,8 +733,7 @@ void ComputeUnitCore::gws_init(Wavefront &wf, uint32_t rid, uint32_t count) {
   if (rid >= kGwsResourcesPerWg)
     return;
   auto &res = gws_resources_[wg_key(wf.dispatch_id(), wf.wg_id())][rid];
-  // Barrier: (participants - 1) is the programmed reload/counter value.
-  res.reload = count;
+  // Barrier: (participants - 1) is the programmed counter value.
   res.counter = count;
   res.armed = true;
   // Semaphore reuses the same init to seed the initial credit count.
@@ -745,24 +747,27 @@ void ComputeUnitCore::gws_barrier_arrive(Wavefront &wf, uint32_t rid, uint32_t c
   uint32_t resident = 0;
   if (auto it = active_wgs_.find(key); it != active_wgs_.end())
     resident = it->second;
-  // GWS programs the barrier value as (participants - 1), so the participant set
-  // size is count + 1. Park only when that whole set is provably resident in this
-  // workgroup's scope; a larger set would reference waves that may never be
-  // admitted, so fall back to a non-blocking structural no-op.
-  const uint32_t participants = count + 1;
-  if (participants > resident)
-    return;
   auto &res = gws_resources_[key][rid];
+  // The still-outstanding arrivals that must occur to release this wave are the
+  // current counter (a fresh resource seeds that counter from this arrival's own
+  // value). A blocking arrival therefore needs (outstanding + 1) co-resident
+  // participants to be provable; if that set is larger than the resident waves it
+  // would reference arrivals that may never happen, so fall back to a
+  // non-blocking structural no-op. A releasing arrival (outstanding == 0) never
+  // blocks, so it is exempt from the gate.
+  const uint32_t outstanding = res.armed ? res.counter : count;
+  if (outstanding != 0 && outstanding + 1 > resident)
+    return;
   if (!res.armed) {
-    res.reload = count;
     res.counter = count;
     res.armed = true;
   }
   if (res.counter == 0) {
     // This arrival observes zero: it is the releasing arrival. Wake the queued
-    // peers, re-arm for the next phase, and proceed without parking.
+    // peers and reload the counter from this arrival's own value so the next
+    // phase may use a different participant count.
     release_gws_waiters(wf.dispatch_id(), wf.wg_id(), rid, std::numeric_limits<uint32_t>::max());
-    res.counter = res.reload;
+    res.counter = count;
     return;
   }
   // Positive counter: queue this arrival and park.

@@ -1419,8 +1419,8 @@ protected:
   /// ordinary s_barrier.
   static constexpr uint32_t kGwsResourcesPerWg = 64;
   struct GwsResource {
-    uint32_t reload = 0;  ///< Barrier reload value (participants - 1); see gws_barrier_arrive.
-    uint32_t counter = 0; ///< Live barrier counter: decremented per arrival, releases at zero.
+    uint32_t counter = 0; ///< Live barrier counter: decremented per arrival, reloaded from the
+                          ///< releasing arrival's value at zero (see gws_barrier_arrive).
     uint32_t credits = 0; ///< Semaphore credits (V/BR add, P consumes).
     bool armed = false;   ///< Whether the barrier counter has been seeded (init or first arrival).
   };

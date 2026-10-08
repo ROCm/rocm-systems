@@ -10588,6 +10588,22 @@ class CodeGenerator:
                             )
                         elif opnd.name in inst_field_names:
                             opr_type = self._constructor_operand_type(inst_sem, opnd)
+                            # GWS carries its count in a DS data operand that, on
+                            # CDNA2/3, honors the acc bank bit (the execute path
+                            # already reads the AGPR). Promote the decoded operand
+                            # to VGPR-or-AGPR so disassembly and the source
+                            # register reference name the same register as
+                            # execution; _fold_acc_bank_selector then adds the
+                            # bank offset. Gated on the DS acc field so VGPR-only
+                            # ISAs keep the plain OPR_VGPR operand.
+                            if (
+                                inst_sem is not None
+                                and inst_sem.semantic_class == 'ds_gws'
+                                and opr_type == 'OPR_VGPR'
+                                and 'acc' in inst_field_names
+                                and 'OPR_VGPR_OR_ACCVGPR' in self.isa_spec.operand_types
+                            ):
+                                opr_type = 'OPR_VGPR_OR_ACCVGPR'
                             packed_16bit_source = (
                                 self._operand_uses_packed_16bit_source(
                                     enc.enc_name, opnd, reads_dst=reads_dst
