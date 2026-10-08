@@ -185,7 +185,7 @@ ParserResult RocVideoParser::GetNalUnit() {
     }
 }
 
-ParserResult RocVideoParser::EbspToRbsp(uint8_t *streamBuffer,size_t begin_bytepos, size_t end_bytepos, size_t *p_rbsp_size) {
+ParserResult RocVideoParser::EbspToRbsp(uint8_t *stream_buffer, size_t begin_bytepos, size_t end_bytepos, size_t *p_rbsp_size) {
     int count = 0;  // length of the current run of zero bytes, 0 to ZEROBYTES_SHORTSTARTCODE
     *p_rbsp_size = 0;
     // An end before the start describes no range at all. Reporting end_bytepos as the length and
@@ -194,8 +194,8 @@ ParserResult RocVideoParser::EbspToRbsp(uint8_t *streamBuffer,size_t begin_bytep
     if (end_bytepos < begin_bytepos) {
         return PARSER_INVALID_ARG;
     }
-    uint8_t *streamBuffer_i = streamBuffer + begin_bytepos;
-    uint8_t *streamBuffer_end = streamBuffer + end_bytepos;
+    uint8_t *streamBuffer_i = stream_buffer + begin_bytepos;
+    uint8_t *streamBuffer_end = stream_buffer + end_bytepos;
     size_t reduce_count = 0;  // bytes discarded, subtracted from a size_t span below
     for (; streamBuffer_i != streamBuffer_end; ) { 
         //starting from begin_bytepos to avoid header information

@@ -231,7 +231,8 @@ protected:
      *             emulation prevention bytes that were discarded. Set to 0 on failure, so it can
      *             never be mistaken for a length.
      * \return <tt>ParserResult</tt>. PARSER_INVALID_ARG when an emulation prevention sequence is
-     *         malformed, in which case the caller should skip the NAL unit.
+     *         malformed, in which case the caller should skip the NAL unit, and also when
+     *         end_bytepos is before begin_bytepos, which describes no range to convert.
      */
     ParserResult EbspToRbsp(uint8_t *stream_buffer, size_t begin_bytepos, size_t end_bytepos, size_t *p_rbsp_size);
 
