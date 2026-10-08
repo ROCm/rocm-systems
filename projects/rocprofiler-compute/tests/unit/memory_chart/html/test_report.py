@@ -3,13 +3,27 @@
 
 """Architecture-independent unit tests for the HTML memory chart report."""
 
+import hashlib
 import json
+import logging
 import re
+from argparse import Namespace
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import List
 
+import pandas as pd
+import pytest
+
+from memory_chart import loader
+from memory_chart.html import report
 from memory_chart.html.diagram import diagram_payload
-from memory_chart.html.report import MODEL_ID, build_mem_chart_document
+from memory_chart.html.report import (
+    MODEL_ID,
+    build_mem_chart_document,
+    mem_chart_html_path,
+    write_mem_chart_report,
+)
 from memory_chart.html.views import (
     ChartView,
     ChartViewSet,
@@ -21,6 +35,7 @@ from memory_chart.html.views import (
 )
 from memory_chart.loader import LayoutItem
 from tests.unit.memory_chart.html.common import make_block, make_layout
+from utils import schema
 
 
 def make_views(kernel_name: str) -> ChartViewSet:
@@ -234,3 +249,133 @@ def test_metrics_disclosure_starts_collapsed() -> None:
     assert disclosure is not None
     assert "open" not in disclosure.group()
     assert "<summary>Metrics</summary>" in document
+
+
+@pytest.mark.parametrize(
+    ("gpu_ids", "dispatch_ids", "filename"),
+    [
+        ([], [], "mem_chart.html"),
+        ("0", [], "mem_chart_gpu-0.html"),
+        (0, [], "mem_chart_gpu-0.html"),
+        (["1", "0", "1"], [], "mem_chart_gpu-0_1.html"),
+        ([], ["> 5"], "mem_chart_d-gt5.html"),
+        (["2", "0"], ["10", "3", "3"], "mem_chart_gpu-0_2_d-3_10.html"),
+    ],
+)
+def test_mem_chart_html_path_normalizes_filters(
+    tmp_path: Path, gpu_ids: object, dispatch_ids: object, filename: str
+) -> None:
+    assert mem_chart_html_path(tmp_path, gpu_ids, dispatch_ids) == tmp_path / filename
+
+
+def test_mem_chart_html_path_hashes_long_dispatch_group(tmp_path: Path) -> None:
+    ids = [str(index) for index in range(300)]
+    path = mem_chart_html_path(tmp_path, ["0"], ids)
+    joined = "_".join(ids)
+    digest = hashlib.sha1(joined.encode("utf-8")).hexdigest()[:8]
+
+    assert path.name == f"mem_chart_gpu-0_d-300ids-{digest}.html"
+    assert len(path.name.encode("utf-8")) < 255
+    assert path == mem_chart_html_path(tmp_path, ["0"], list(reversed(ids)))
+
+
+def test_write_mem_chart_report_gates_and_overwrites(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    workload = schema.Workload(sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]))
+    args = Namespace(normal_unit="per_kernel")
+    build_calls: List[bool] = []
+
+    def build_views(*_args: object) -> ChartViewSet:
+        build_calls.append(True)
+        return make_views("kernel zero")
+
+    monkeypatch.setattr(report, "build_chart_views", build_views)
+
+    assert write_mem_chart_report(workload, schema.ArchConfig(), args, tmp_path) is None
+    assert build_calls == []
+    assert not list(tmp_path.glob("mem_chart*.html"))
+
+    workload.dfs[301] = pd.DataFrame()
+    monkeypatch.setattr(loader, "has_layout", lambda _arch: False)
+    caplog.set_level(logging.INFO)
+    assert write_mem_chart_report(workload, schema.ArchConfig(), args, tmp_path) is None
+    assert "no layout for gfx950" in caplog.text
+    assert len(caplog.records) == 1
+    assert build_calls == []
+
+    monkeypatch.setattr(loader, "has_layout", lambda _arch: True)
+    path = write_mem_chart_report(workload, schema.ArchConfig(), args, tmp_path)
+    assert path == tmp_path / "mem_chart.html"
+    assert path is not None
+    model = embedded_model(path.read_text(encoding="utf-8"))
+    assert model["scopeNote"] == ""
+    assert model["heading"] == "3. Memory Chart"
+    assert model["normalization"] == "per_kernel"
+    path.write_text("stale", encoding="utf-8")
+    assert write_mem_chart_report(workload, schema.ArchConfig(), args, tmp_path) == path
+    assert path.read_text(encoding="utf-8").startswith("<!DOCTYPE html>")
+
+    workload.filter_gpu_ids = ["1", "0"]
+    workload.filter_dispatch_ids = ["> 5"]
+    filtered_path = write_mem_chart_report(
+        workload, schema.ArchConfig(), args, tmp_path
+    )
+    assert filtered_path == tmp_path / "mem_chart_gpu-0_1_d-gt5.html"
+    assert filtered_path is not None
+    assert embedded_model(filtered_path.read_text(encoding="utf-8"))["scopeNote"] == (
+        "GPU 0, 1 · dispatches > 5"
+    )
+
+
+def test_write_mem_chart_report_logs_write_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    workload = schema.Workload(
+        sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
+        dfs={301: pd.DataFrame()},
+    )
+    monkeypatch.setattr(report, "build_chart_views", lambda *_: make_views("kernel"))
+    monkeypatch.setattr(loader, "has_layout", lambda _arch: True)
+
+    def fail_write(_path: Path, _text: str, encoding: str) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "write_text", fail_write)
+    assert (
+        write_mem_chart_report(
+            workload,
+            schema.ArchConfig(),
+            Namespace(normal_unit="per_kernel"),
+            tmp_path,
+        )
+        is None
+    )
+    assert str(tmp_path / "mem_chart.html") in caplog.text
+    assert "disk full" in caplog.text
+
+
+def test_write_mem_chart_report_propagates_evaluation_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workload = schema.Workload(
+        sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
+        dfs={301: pd.DataFrame()},
+    )
+
+    def fail_evaluation(*_args: object) -> ChartViewSet:
+        raise OSError("evaluation failed")
+
+    monkeypatch.setattr(report, "build_chart_views", fail_evaluation)
+    monkeypatch.setattr(loader, "has_layout", lambda _arch: True)
+    with pytest.raises(OSError, match="evaluation failed"):
+        write_mem_chart_report(
+            workload,
+            schema.ArchConfig(),
+            Namespace(normal_unit="per_kernel"),
+            tmp_path,
+        )

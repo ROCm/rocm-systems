@@ -9,6 +9,7 @@ from typing import Optional
 import pandas as pd
 
 from membw_analysis.engine import run_membw_analysis
+from memory_chart.html.report import write_mem_chart_report
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
@@ -428,6 +429,14 @@ class cli_analysis(OmniAnalyze_Base):
                 self._output,
                 self._profiling_config,
             )
+            if not self.pc_sampling_only():
+                for path_info in args.path:
+                    path = path_info[0]
+                    run = self._runs[path]
+                    run_arch = str(run.sys_info.iloc[0]["gpu_arch"])
+                    write_mem_chart_report(
+                        run, self._arch_configs[run_arch], args, Path(path)
+                    )
 
     def list_operators(
         self,
