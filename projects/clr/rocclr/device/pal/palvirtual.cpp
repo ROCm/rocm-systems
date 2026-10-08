@@ -3547,6 +3547,7 @@ bool VirtualGPU::allocConstantBuffers() {
 }
 
 void VirtualGPU::profilingBegin(amd::Command& command) {
+  profileTs_ = nullptr;
   // Is profiling enabled?
   if (command.profilingInfo().enabled_) {
     // Allocate a timestamp object from the cache
@@ -3626,6 +3627,7 @@ bool VirtualGPU::profilingCollectResults(CommandBatch* cb, const amd::Event* wai
 
     if (ts != nullptr) {
       ts->value(&startTimeStamp, &endTimeStamp);
+      first->setGpuEndTimestamp(endTimeStamp);
       endTimeStamp -= readjustTimeGPU_;
       startTimeStamp -= readjustTimeGPU_;
       // Destroy the TimeStamp object

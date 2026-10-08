@@ -162,6 +162,8 @@ class Event {
   virtual bool awaitEventCompletion();
   virtual bool ready();
   virtual int64_t time(bool getStartTs) const;
+  //! Returns the end time in the GPU clock domain, or 0 if the event has none.
+  virtual int64_t gpuTime() const;
 
  protected:
   uint32_t flags_;             //!< Flags associated with the event
@@ -192,6 +194,8 @@ class EventDD : public Event {
   bool awaitEventCompletion() override;
   bool ready() override;
   int64_t time(bool getStartTs) const override;
+  //! Direct dispatch reports its own HW event timestamps through time().
+  int64_t gpuTime() const override { return 0; }
 };
 
 /// Emulated IPC event using POSIX shared memory + stream write/wait value.
