@@ -39,7 +39,7 @@ jobs:
           apt-get install -y --no-install-recommends git ca-certificates
           git --version
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/
@@ -293,7 +293,7 @@ jobs:
 
       - name: Upload JUnit test results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: junit-sanitizer-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}
           path: projects/rocprofiler-systems/build/test-results.xml
@@ -308,7 +308,7 @@ jobs:
 
       - name: Upload sanitizer summary status
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: sanitizer-summary-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}
           path: sanitizer-summary/${{ matrix.sanitizer-type }}.json
@@ -327,7 +327,7 @@ jobs:
       - name: CTest Artifacts
         if: failure()
         continue-on-error: True
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: ctest-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}-log
           path: |
@@ -336,7 +336,7 @@ jobs:
       - name: Data Artifacts
         if: failure()
         continue-on-error: True
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: data-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}-files
           path: |

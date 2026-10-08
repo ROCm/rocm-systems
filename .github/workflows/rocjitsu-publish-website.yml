@@ -29,7 +29,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # A delayed run must publish current develop, not roll back to its event SHA.
           ref: develop
@@ -61,7 +61,7 @@ jobs:
       - name: Detect dashboard changes since publication
         id: dashboard
         if: github.event_name == 'push' && steps.published.outputs.dashboard != ''
-        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           base: ${{ steps.published.outputs.dashboard }}
           ref: ${{ steps.published.outputs.head }}
@@ -73,7 +73,7 @@ jobs:
       - name: Detect handbook changes since publication
         id: handbook
         if: github.event_name == 'push' && steps.published.outputs.handbook != ''
-        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           base: ${{ steps.published.outputs.handbook }}
           ref: ${{ steps.published.outputs.head }}
@@ -94,7 +94,7 @@ jobs:
 
       - name: Set up Node.js
         if: steps.changes.outputs.dashboard == 'true' || steps.changes.outputs.handbook == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22.13.0"
           cache: ${{ (steps.changes.outputs.dashboard == 'true') && 'npm' || '' }}
@@ -111,7 +111,7 @@ jobs:
 
       - name: Set up Python
         if: steps.changes.outputs.handbook == 'true'
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
@@ -131,7 +131,7 @@ jobs:
       - name: Generate publishing token
         if: steps.changes.outputs.dashboard == 'true' || steps.changes.outputs.handbook == 'true'
         id: app-token
-        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}

@@ -44,7 +44,7 @@ jobs:
         build-type: [Debug, Release]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: |
             profilers/profiler-hub
@@ -97,7 +97,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: test-results-${{ matrix.os }}-${{ matrix.compiler.name }}-${{ matrix.build-type }}
           path: profilers/profiler-hub/build/test-results.xml

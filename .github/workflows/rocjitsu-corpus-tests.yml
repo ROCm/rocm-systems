@@ -188,7 +188,7 @@ jobs:
             clang
 
       - name: Checkout rocm-systems
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: rocm-systems
           sparse-checkout: |
@@ -199,14 +199,14 @@ jobs:
 
       - name: Checkout corpus
         if: matrix.run_simulator_corpus
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
           ref: ${{ github.event.inputs.corpus_ref || env.ROCJITSU_DBT_CORPUS_REF }}
           path: rocjitsu-test-corpus
 
       - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
@@ -510,7 +510,7 @@ jobs:
 
       - name: Upload simulator corpus diagnostics
         if: ${{ always() && matrix.run_simulator_corpus }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: rocjitsu-corpus-diagnostics-${{ matrix.name }}
           path: ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts
@@ -569,7 +569,7 @@ jobs:
 
       - name: Upload gfx1250 semantic qualification logs
         if: ${{ always() && matrix.name == 'release' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: gfx1250-semantic-qualification-${{ matrix.name }}
           path: |
@@ -698,7 +698,7 @@ jobs:
           matrix.name == 'release' &&
           steps.finalize_dbt_sha_pairs.outcome == 'success' &&
           github.event_name != 'pull_request'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: gfx1250-b0-a0-sha-pairs
           path: ${{ env.ROCJITSU_DBT_SHA_MANIFEST }}
@@ -712,7 +712,7 @@ jobs:
           matrix.name == 'release' &&
           steps.finalize_dbt_sha_pairs.outcome == 'success' &&
           github.event_name == 'pull_request'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: gfx1250-b0-a0-sha-pairs-candidate
           path: ${{ env.ROCJITSU_DBT_SHA_MANIFEST }}
@@ -723,7 +723,7 @@ jobs:
       # translator logs but never upload the extracted HSACOs.
       - name: Upload gfx1250 DBT diagnostic logs
         if: always() && matrix.run_simulator_corpus
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: gfx1250-dbt-logs-${{ matrix.name }}
           path: ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts/gfx1250-dbt
@@ -752,7 +752,7 @@ jobs:
       - name: Checkout Vulkan corpus
         id: checkout_vulkan_corpus
         if: ${{ !cancelled() && matrix.name == 'release' && steps.install_vulkan_dependencies.outcome == 'success' }}
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
           ref: ${{ github.event.inputs.vulkan_corpus_ref || env.ROCJITSU_VULKAN_CORPUS_REF }}
@@ -789,7 +789,7 @@ jobs:
 
       - name: Upload Vulkan CTS diagnostics
         if: ${{ always() && matrix.name == 'release' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: rocjitsu-vulkan-cts-release
           path: ${{ env.ROCJITSU_VULKAN_CORPUS_DIR }}/.pytest-artifacts/vulkan-*
