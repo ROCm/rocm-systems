@@ -213,8 +213,9 @@ inline ncclResult_t RecordCudaFree(T* ptr, struct ncclMemManager* mgr,
 // Defined here (not in a shared fakes/ .cc) because they have no owning fakes
 // file. The ncclCudaCallocAsync / ncclCudaMemcpyAsync emulators back the macro
 // shims above. They must land after #include P2P_CC_PATH so the production
-// types they mention (the alloc.h templates, etc.) are already in scope. busIdToInt64 / getBusId are owned by src/misc/utils.cc, so they
-// live in fakes/utils_fakes.cc, not here.
+// types they mention (the alloc.h templates, etc.) are already in scope.
+// busIdToInt64 / getBusId are owned by src/misc/utils.cc, so they live in
+// fakes/utils_fakes.cc, not here.
 // ---------------------------------------------------------------------------
 
 // Controllable seams: ncclCudaCallocAsync / ncclCudaMemcpyAsync. Substitutes
