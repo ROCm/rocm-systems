@@ -32,6 +32,7 @@
 #include "core/node_info.hpp"
 #include "core/output_file_registry.hpp"
 #include "core/perfetto_fwd.hpp"
+#include "core/process_environment_info.hpp"
 #include "core/progress/bar.hpp"
 #include "core/progress/callback.hpp"
 #include "core/timemory.hpp"
@@ -421,7 +422,7 @@ rocprofsys_preinit_cache()
         { .pid         = getpid(),
           .ppid        = getppid(),
           .command     = _command,
-          .environment = "",
+          .environment = process_environment_info().to_json(),
           .extdata     = escape_quotes(_extdata_stream.str()),
           .start       = 0,
           .end         = 0 });
@@ -751,11 +752,10 @@ rocprofsys_init_tooling_hidden(void)
     (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
 
         component::mpi_gotcha::subscribe_to_init_event([](int rank, int size) {
-            nlohmann::json _environment_json;
-            _environment_json["MPI_COMM_WORLD_SIZE"] = size;
-            _environment_json["MPI_COMM_WORLD_RANK"] = rank;
+            auto environment = process_environment_info();
+            environment.add_mpi_identity(rank, size);
 
-            set_metadata_environment_json(escape_quotes(_environment_json.dump()));
+            set_metadata_environment_json(environment.to_json());
         });
 #endif
 
