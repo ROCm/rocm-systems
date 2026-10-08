@@ -14,6 +14,7 @@ import common
 import yaml
 
 from memory_chart.loader import layout_files, load_layout
+from utils.utils_common import panel_tables
 
 ANALYSIS_CONFIGS_DIR = Path(common.SRC) / "rocprof_compute_soc" / "analysis_configs"
 MEMORY_CHART_YAML = "0300_memory_chart.yaml"
@@ -41,7 +42,6 @@ def panel_metric_names(arch: str) -> list[str]:
     """Panel 300 metric names of an arch, in config order, duplicates kept."""
     return [
         name
-        for source in panel_config(arch)["data source"]
-        for table in source.values()
+        for _, table in panel_tables(panel_config(arch))
         for name in table.get("metric") or {}
     ]

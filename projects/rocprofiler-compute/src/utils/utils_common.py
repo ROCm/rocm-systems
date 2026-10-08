@@ -18,7 +18,7 @@ import threading
 import time
 import uuid
 from collections import OrderedDict
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -70,14 +70,16 @@ def format_metric_id(table_id: int, position: int) -> str:
     return f"{table_index(table_id)}.{position}"
 
 
+def panel_tables(panel_config: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Each table of a panel config, with its type, e.g. "metric_table"."""
+    for source in panel_config.get("data source") or []:
+        yield from source.items()
+
+
 def is_mem_chart_panel(panel_config: dict[str, Any]) -> bool:
     """True when every table of a panel is drawn as the memory chart."""
-    sources = panel_config.get("data source") or []
-    return bool(sources) and all(
-        table.get("cli_style") == "mem_chart"
-        for source in sources
-        for table in source.values()
-    )
+    tables = [table for _, table in panel_tables(panel_config)]
+    return bool(tables) and all(t.get("cli_style") == "mem_chart" for t in tables)
 
 
 def panel_metric_ids(panel_config: dict[str, Any]) -> dict[str, str]:
@@ -87,9 +89,11 @@ def panel_metric_ids(panel_config: dict[str, Any]) -> dict[str, str]:
     """
     ids: dict[str, str] = {}
     repeated: set[str] = set()
-    for source in panel_config["data source"]:
-        table = source.get("metric_table")
-        for position, name in enumerate((table or {}).get("metric") or {}):
+    metric_tables = [
+        t for kind, t in panel_tables(panel_config) if kind == "metric_table"
+    ]
+    for table in metric_tables:
+        for position, name in enumerate(table.get("metric") or {}):
             if name in ids:
                 repeated.add(name)
             ids[name] = format_metric_id(table["id"], position)
