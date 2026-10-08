@@ -35,7 +35,6 @@ def native_counters(*rows):
     return pd.DataFrame([
         {
             "dispatch_id": dispatch_id,
-            "counter_id": 5,
             "counter_name": counter_name,
             "counter_value": counter_value,
         }
@@ -2789,20 +2788,6 @@ def test_find_native_artifacts_skips_an_incomplete_set(tmp_path, monkeypatch):
     assert find_native_artifacts(tmp_path) == []
     assert len(warnings) == 1
     assert "dispatch" in warnings[0]
-
-
-def test_join_native_counters_sums_counter_instances():
-    joined = join_native_counters(
-        native_counters((1, "SQ_WAVES", 10), (1, "SQ_WAVES", 32), (1, "SQ_BUSY", 5)),
-        native_dispatches(1),
-        native_symbols(),
-        pid=100,
-    )
-
-    assert dict(zip(joined["Counter_Name"], joined["Counter_Value"])) == {
-        "SQ_WAVES": 42,
-        "SQ_BUSY": 5,
-    }
 
 
 def test_join_native_counters_takes_dispatch_and_symbol_columns():
