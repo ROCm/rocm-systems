@@ -632,54 +632,11 @@ hsa_status_t KfdDriver::GetDeviceHandle(uint32_t node_id, void** device_handle) 
   return HSA_STATUS_SUCCESS;
 }
 
-namespace
-{
-#define CLOCKFD 3
-#define FD_TO_CLOCKID(fd) ((~(clockid_t)(fd) << 3) | CLOCKFD)
-
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
-#include <sys/time.h>
-#include <fcntl.h>
-#include <unistd.h>
-
-static hsa_status_t get_clockdev_ns(std::string dev, HSAuint64* clk_ns)
-{
-  // replace system clock counter with a read of the rocm_timesync clockdevice
-  static int fd = 0;
-  if (fd == 0)
-  {
-    fd = open(dev.c_str(), O_RDONLY);
-    if (fd < 0) return HSA_STATUS_ERROR;
-  }
-
-  clockid_t clkid = FD_TO_CLOCKID(fd);
-  struct timespec ts;
-  if (clock_gettime(clkid, &ts)) return HSA_STATUS_ERROR;
-
-  *clk_ns = (HSAuint64)ts.tv_sec * 1000000000ULL + (HSAuint64)ts.tv_nsec;
-  return HSA_STATUS_SUCCESS;
-}
-
-}
-
 hsa_status_t KfdDriver::GetClockCounters(uint32_t node_id, HsaClockCounters* clock_counter) const {
   assert(clock_counter);
 
   if (HSAKMT_CALL(hsaKmtGetClockCounters(node_id, clock_counter)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
-
-
-  if (core::Runtime::runtime_singleton_->flag().rocm_timesync_enable())
-  {
-      auto dev = core::Runtime::runtime_singleton_->flag().rocm_timesync_clockdev();
-      if (!dev.empty())
-      {
-          return get_clockdev_ns(dev, &clock_counter->SystemClockCounter);
-      }
-  }
 
   return HSA_STATUS_SUCCESS;
 }

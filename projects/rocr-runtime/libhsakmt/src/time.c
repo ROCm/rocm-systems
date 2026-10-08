@@ -26,6 +26,46 @@
 #include "libhsakmt.h"
 #include "hsakmt/linux/kfd_ioctl.h"
 
+
+#define CLOCKFD 3
+#define FD_TO_CLOCKID(fd) ((~(clockid_t)(fd) << 3) | CLOCKFD)
+
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
+#include <sys/time.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <stdlib.h>
+
+static HSAKMT_STATUS get_clockdev_ns(const char* dev, HSAuint64* clk_ns)
+{
+  static int fd = 0;
+  if (fd == 0)
+  {
+    fd = open(dev, O_RDONLY);
+    if (fd < 0) return HSAKMT_STATUS_ERROR;
+  }
+
+  clockid_t clkid = FD_TO_CLOCKID(fd);
+  struct timespec ts;
+  if (clock_gettime(clkid, &ts)) return HSAKMT_STATUS_ERROR;
+
+  *clk_ns = (HSAuint64)ts.tv_sec * 1000000000ULL + (HSAuint64)ts.tv_nsec;
+  return HSAKMT_STATUS_SUCCESS;
+}
+
+static HSAKMT_STATUS check_clockdev(HsaClockCounters *Counters)
+{
+    char* clockdev = getenv("HSA_ROCM_TIMESYNC_CLOCKDEV");
+    if (clockdev == NULL)
+        return HSAKMT_STATUS_SUCCESS;
+
+    // replace system clock counter with a read of the rocm_timesync clockdevice
+    return get_clockdev_ns(clockdev, &(Counters->SystemClockCounter));
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId,
 					       HsaClockCounters *Counters)
 {
@@ -53,5 +93,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId,
 		Counters->SystemClockFrequencyHz = args.system_clock_freq;
 	}
 
-	return result;
+    if (result == HSAKMT_STATUS_ERROR)
+        return result;
+
+    return check_clockdev(Counters);
 }
