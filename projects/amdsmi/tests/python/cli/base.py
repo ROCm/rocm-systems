@@ -542,6 +542,14 @@ class TestCliBase(unittest.TestCase):
                                     f"{self.tab}Untested (no sweep values for {sub_arg}): "
                                     f"amd-smi {cmd.split()[1]} {items[item_index]}"
                                 )
+                        elif "Device" in match_str and sub_arg.isupper():
+                            # A selector with no sweep IDs, bare, only reaches the missing-value
+                            # error; --nic is listed once a NIC driver loads, even with no NIC.
+                            sub_found = True
+                            self.common.print(
+                                f"{self.tab}Untested (no sweep values for {sub_arg}): "
+                                f"amd-smi {cmd.split()[1]} {items[item_index]}"
+                            )
                     if not sub_found:
                         # Put in sub_arg if it was not found
                         if "Set" in match_str:
