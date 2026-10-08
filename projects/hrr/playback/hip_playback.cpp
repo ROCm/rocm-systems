@@ -53,6 +53,13 @@
 // Kernel-launch handlers use this to wait for their submission turn and then
 // immediately unblock the next thread before doing timing/sync.
 thread_local uint64_t hrr_dispatch_seq = 0;
+thread_local uint64_t hrr_dispatch_release_seq = 0;
+
+void hrr_release_dispatch_order(PlaybackContext& ctx) {
+    if (!hrr_dispatch_release_seq) return;
+    ctx.next_seq.store(hrr_dispatch_release_seq, std::memory_order_release);
+    hrr_dispatch_release_seq = 0;
+}
 
 void hrr_note_unreplayable(PlaybackContext& ctx, const char* api,
                            const char* reason) {
@@ -1248,6 +1255,39 @@ static const uint8_t* skip_kernel_args(const uint8_t* p, const uint8_t* end,
     return p;
 }
 
+bool hrr_launch_has_host_snapshots(uint16_t etype, const uint8_t* pl, size_t size) {
+    switch (etype) {
+        case HRR_API_HIPMODULELAUNCHKERNEL:
+        case HRR_API_HIPEXTMODULELAUNCHKERNEL:
+        case HRR_API_HIPLAUNCHKERNEL:
+        case HRR_API_HIPLAUNCHBYPTR:
+        case HRR_API_HIPLAUNCHKERNEL_SPT:
+        case HRR_API_HIPLAUNCHCOOPERATIVEKERNEL:
+        case HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT:
+        case HRR_API_HIPDRVLAUNCHKERNELEX:
+        case HRR_API_HIPLAUNCHKERNELEXC:
+        case HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNEL:
+            break;
+        default:
+            return false;
+    }
+    // The fixed part of the payload as replay_kernel_launch reads it, up to
+    // the snapshot record count.
+    if (size < sizeof(hrr_event_header)) return false;
+    const auto* hdr = reinterpret_cast<const hrr_event_header*>(pl);
+    const uint8_t* p   = pl + sizeof(hrr_event_header);
+    const uint8_t* end = pl + std::min<size_t>(size, hdr->payload_length);
+    if (end - p < 10) return false;
+    uint16_t name_len; memcpy(&name_len, p + 8, 2);
+    p += 10;
+    if (end - p < name_len) return false;
+    p += name_len;
+    if (end - p >= 16) p += 16;  // code object hash
+    if (end - p < 32) return false;
+    uint16_t num_snapshots; memcpy(&num_snapshots, p + 30, 2);
+    return num_snapshots != 0;
+}
+
 static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                                        bool ext_global_worksize = false,
                                        bool launch_ex = false,
@@ -1675,6 +1715,10 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
             }
         }
     }
+
+    // The restore and the kernel are queued: the other replay threads may go
+    // on while this one times or syncs the launch.
+    hrr_release_dispatch_order(ctx);
 
     if (timing_ok)
         timing_ok = (HRR_HIP_CHECK(hipEventRecord(tl_stop, stream)) == hipSuccess);

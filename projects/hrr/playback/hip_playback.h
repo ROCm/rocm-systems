@@ -833,6 +833,14 @@ bool hrr_wait_host_restores(PlaybackContext& ctx, const void* base, const char* 
 // into it.
 bool hrr_host_release_ready(PlaybackContext& ctx, const void* live);
 
+// Whether the event is a kernel launch whose payload carries pinned host
+// snapshot records. A multi-threaded replay orders such a launch against the
+// other threads' events, like an allocation or a free: the launch checks that
+// each record names a live allocation, counts the restore against it and
+// queues it, and a free or a hipStreamBeginCapture replayed by another thread
+// in between would undo one of those steps.
+bool hrr_launch_has_host_snapshots(uint16_t etype, const uint8_t* payload, size_t size);
+
 // ---------------------------------------------------------------------------
 // hrr_note_unreplayable — this API cannot be reproduced, and here is why.
 //
@@ -887,6 +895,14 @@ hipCtx_t hrr_live_ctx(uint64_t recorded);
 // Kernel-launch handlers read this to wait for their submission turn at the
 // exact point of the HIP call, allowing preparation work to run in parallel.
 extern thread_local uint64_t hrr_dispatch_seq;
+
+// The sequence id the current event hands on to the next one, when it is a
+// kernel launch that dispatch_event ordered because it restores pinned host
+// memory; 0 otherwise, or once handed on. replay_kernel_launch hands it on as
+// soon as the kernel is queued, behind its restore, so that the debug syncs and
+// timing after the launch do not hold the other replay threads.
+extern thread_local uint64_t hrr_dispatch_release_seq;
+void hrr_release_dispatch_order(PlaybackContext& ctx);
 
 // Device synchronize with an optional watchdog. When ctx.sync_watchdog_ms == 0
 // this is a plain hipDeviceSynchronize(). Otherwise the (potentially blocking)

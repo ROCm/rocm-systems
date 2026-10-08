@@ -719,6 +719,18 @@ count. The count and the restored total live in state each host function holds
 a reference to, so one that runs after replay has exited does not touch a
 destroyed context. `--kernel-filter` resets the counters after its warm-up
 pass. The summary prints the chunks restored and the records rejected.
+
+A multi-threaded replay lets an event start before the one recorded ahead of
+it has finished, except allocations, frees, stream and graph capture calls and
+the like, which it orders. A launch with snapshot records is ordered too: it
+checks that each record names a live allocation, counts the restore against
+that allocation, and queues it on the launch stream. A free replayed on another
+thread between those steps found nothing to wait for and released the buffer
+under the restore, and a `hipStreamBeginCapture` on the launch stream turned the
+host function into a graph node. The next event therefore starts only once the
+launch has queued its restore and its kernel. The launch hands the turn on at
+that point, before the timing or the sync a debug option adds after it.
+Launches without records stay unordered.
 Snapshot blobs are
 held in a cache of at most 256 MiB, oldest out first, rather than the unbounded
 blob cache.

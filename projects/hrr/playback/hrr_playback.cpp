@@ -622,7 +622,14 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   // Give kernel-launch handlers the sequence ID so they can wait and advance
   // next_seq at the exact point of the HIP call.
   hrr_dispatch_seq = ev.header().sequence_id;
-  auto order = needs_ordering(etype);
+  // A launch that restores pinned host memory is ordered too, so that the
+  // next event, a free of that memory or a capture begun on the launch
+  // stream, cannot run on another thread while the restore is being queued.
+  // The launch hands the turn on itself once the kernel is queued.
+  const bool order_launch =
+      !needs_ordering(etype) &&
+      hrr_launch_has_host_snapshots(etype, ev.raw_payload.data(), ev.raw_payload.size());
+  const bool order = needs_ordering(etype) || order_launch;
 
   // Spin-wait for our turn in global capture order.
   // Also check fatal_error: if another thread failed and advanced next_seq
@@ -652,19 +659,26 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   // RAII guard: non-ordering events advance immediately (constructor) so the
   // next thread can proceed while this call is still in-flight; ordered events
   // advance on scope exit so the next thread is unblocked on every return path.
+  // An ordered launch may have advanced already (hrr_release_dispatch_order),
+  // and must not move next_seq back once another thread moved it on.
   struct SeqAdvance {
     PlaybackContext& ctx;
     uint64_t next;
     bool order;
-    SeqAdvance(PlaybackContext& c, uint64_t n, bool o) : ctx(c), next(n), order(o) {
+    bool launch;
+    SeqAdvance(PlaybackContext& c, uint64_t n, bool o, bool l)
+        : ctx(c), next(n), order(o), launch(l) {
+      hrr_dispatch_release_seq = launch ? next : 0;
       if (!order)
         ctx.next_seq.store(next, std::memory_order_release);
     }
     ~SeqAdvance() {
-      if (order)
+      if (launch)
+        hrr_release_dispatch_order(ctx);
+      else if (order)
         ctx.next_seq.store(next, std::memory_order_release);
     }
-  } seq_guard{ctx, ev.header().sequence_id + 1, order};
+  } seq_guard{ctx, ev.header().sequence_id + 1, order, order_launch};
 
   // Advance the external region annotations to this event's capture timestamp,
   // so a handler that translates a pointer sees the regions that were live at

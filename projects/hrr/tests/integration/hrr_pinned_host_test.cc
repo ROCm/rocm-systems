@@ -1499,6 +1499,46 @@ TEST_CASE("Unit_HRR_PinnedHost_CrossDeviceFree_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(scratch));
 }
 
+// ===========================================================================
+// A launch, then a free of its pinned buffer on another thread.
+//
+//   -  hipHostMalloc of kThreadFreeBytes, host filled pattern 1
+//   0  read      on the null stream, all of it
+//   -  a second thread frees the buffer once the launch is queued; the host
+//      waits for that thread, then checks the tail of the output
+// The buffer spans many snapshot chunks, so replay of launch 0 spends a while
+// loading blobs between checking that the buffer is live and queueing the
+// restore.
+// ===========================================================================
+namespace {
+constexpr size_t kThreadFreeBytes = 32u << 20;
+constexpr int    kThreadFreeInts  = static_cast<int>(kThreadFreeBytes / sizeof(int));
+}  // namespace
+
+TEST_CASE("Unit_HRR_PinnedHost_ThreadFree_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* h = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), kThreadFreeBytes,
+                              hipHostMallocDefault));
+  int* out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out, kThreadFreeBytes));
+  fill(h, 1, kThreadFreeInts);
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+
+  // 0
+  hipLaunchKernelGGL(hrr_pinned_read, dim3((kThreadFreeInts + kThreads - 1) / kThreads),
+                     dim3(kThreads), 0, nullptr, h, out, kThreadFreeInts);
+  HRR_HIP_CHECK(hipGetLastError());
+  hipError_t free_err = hipErrorUnknown;
+  std::thread([&] { free_err = hipHostFree(h); }).join();
+  HRR_HIP_CHECK(free_err);
+  // The last kPinnedInts ints, restored from the last records of the launch.
+  const int tail = kThreadFreeInts - kPinnedInts;
+  check_out(out + tail, [tail](int i) { return pattern(1, tail + i) * 3 + 1; });
+
+  HRR_HIP_CHECK(hipFree(out));
+}
+
 namespace {
 constexpr const char* kDirect = "Unit_HRR_PinnedHost_Direct";
 // A capture or replay that takes longer than this has hung.
@@ -2832,6 +2872,43 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceFreeHeld) {
                     "is not freed: a snapshot restore queued for it has not run after "
                     "3000 ms",
                     "--sync-watchdog-ms 3000");
+}
+
+// ---------------------------------------------------------------------------
+// A multi-threaded replay runs the free recorded on the second thread only
+// after the launch before it has queued its restore. Launches were not
+// ordered, so the free could run while the launch was still loading blobs:
+// the remaining records then named no live allocation and were rejected, or
+// the restore and the kernel wrote and read freed memory.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_FreeOnOtherThread) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_thread_free.hrr");
+  capture_case("Unit_HRR_PinnedHost_ThreadFree_Direct", cap.path);
+  const fs::path archive = hrr_single_process_archive(cap.path);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  REQUIRE(arc.threads.size() >= 2);
+  const auto kls = launches_of(arc);
+  REQUIRE(kls.size() == 1);
+  REQUIRE(kls[0]->snapshots.size() == kThreadFreeBytes / kChunk);
+
+  auto [rc, out] = replay(archive, "--multi-thread");
+  INFO("Replay exit: " << rc
+       << (rc == hrr::test::SpawnProc::kKilledOnTimeout ? " (hung, killed)" : "")
+       << "\nReplay:\n" << out);
+  CHECK(out.find("Mode    : multi-threaded") != std::string::npos);
+  REQUIRE(rc == 0);
+  unsigned long long restored = 0, rejected = 0;
+  host_snapshot_summary(out, restored, rejected);
+  CHECK(restored == kThreadFreeBytes / kChunk);
+  CHECK(rejected == 0);
+#ifndef _WIN32
+  int d2h_pass = 0, d2h_fail = 0;
+  REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
+  CHECK(d2h_pass >= 1);
+  CHECK(d2h_fail == 0);
+#endif
 }
 
 #endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE
