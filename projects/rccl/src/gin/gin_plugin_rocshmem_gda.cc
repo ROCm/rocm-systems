@@ -10,9 +10,10 @@
  * Built-in GIN plugin for the rocshmem GDA (QueuePair) backend.
  *
  * Follows upstream vtable pattern like GDAKI:
- * - connect() creates QPs and stores qpSet in collComm
+ * - connect() creates the QP set and the first GIN context's QPs, stored in collComm
  * - regMrSym(collComm) uses qpSet for IB MR registration
- * - createContext(collComm) sets up signals, counters, GPU context
+ * - createContext(collComm) adds QPs so every GIN context has its own, and sets up
+ *   signals, counters and one GPU context per GIN context
  */
 
 #include "gin/gin_host_rocshmem_gda.h"  // ginRocshmemInitCtx, SetInitContext
@@ -21,6 +22,8 @@
 #include "nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h"
 #include "gin/gin_rocshmem_gda_factory.h"
 #include <hip/hip_runtime.h>
+#include <algorithm>
+#include <vector>
 
 // collComm: per-connection state, returned by connect()
 struct ginRocshmemGdaCollCtx {
@@ -28,14 +31,14 @@ struct ginRocshmemGdaCollCtx {
   int rank;
   struct ncclComm* comm;
   rocshmem_gin_qp_set_t qpSet;
-  void** gpu_qp_ptrs;
+  std::vector<void**> gpu_qp_ptrs;  // per GIN context: GPU array of nranks QueuePair pointers
 };
 
 // ginCtx: per-context state, returned by createContext()
 struct ginRocshmemGdaGinCtx {
   ncclNetDeviceHandle_v11_t* devHandle;
-  ncclGinRocshmemGdaGPUContext* gpuCtxDev;
-  ncclGinRocshmemGdaGPUContext gpuCtxHost;
+  ncclGinRocshmemGdaGPUContext* gpuCtxDev;  // one per GIN context
+  ncclGinRocshmemGdaGPUContext gpuCtxHost;  // fields shared by all GIN contexts
   int nRanks;
   int rank;
   int nSignals;
@@ -121,16 +124,26 @@ static ncclResult_t ginRocshmemGdaConnect(void* ctx, void* handles[], int nranks
   cctx->comm = ictx->comm;
 
   // Create QPs during connect (like GDAKI creates IB connections in connect)
+  void** gpu_qp_ptrs = nullptr;
   int rc = rocshmem_gin_create_qps(nranks, rank, ginGdaBootstrapAllgather, cctx->comm->bootstrap, &cctx->qpSet,
-                                   &cctx->gpu_qp_ptrs);
+                                   &gpu_qp_ptrs);
   if (rc != 0) {
     WARN("GIN rocshmem-gda: failed to create QPs");
     delete cctx;
     return ncclSystemError;
   }
+  cctx->gpu_qp_ptrs.push_back(gpu_qp_ptrs);
 
-  // Initialize rocshmem __constant__ device memory
-  rocshmem_gin_init_constmem(rocshmem_gin_get_provider(cctx->qpSet), rank);
+  // Initialize rocshmem __constant__ device memory: librccl's GIN kernels each
+  // hold their own copy; rocshmem_gin_init_constmem covers the executable's.
+  int provider = rocshmem_gin_get_provider(cctx->qpSet);
+  if (rocshmem_gin_init_registered_constmem(provider) != 0) {
+    WARN("GIN rocshmem-gda: failed to initialize device constant memory");
+    rocshmem_gin_destroy_qps(cctx->qpSet);
+    delete cctx;
+    return ncclSystemError;
+  }
+  rocshmem_gin_init_constmem(provider, rank);
 
   INFO(NCCL_INIT, "GIN rocshmem-gda: QPs created (%d ranks)", nranks);
   *collComm = cctx;
@@ -240,13 +253,25 @@ static ncclResult_t ginRocshmemGdaDeregMrSym(void* collComm, void* mhandle) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// createContext: lightweight setup (signals, counters, GPU context)
+// createContext: per-context QPs, signals, counters, GPU contexts
 ///////////////////////////////////////////////////////////////////////////////
 
 static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_t* config, void** outGinCtx,
                                                 ncclNetDeviceHandle_v11_t** outDevHandle) {
   struct ginRocshmemGdaCollCtx* cctx = (struct ginRocshmemGdaCollCtx*)collComm;
   ncclResult_t ret = ncclSuccess;
+  int nContexts = std::max(config->nContexts, 1);  // the device handle must not be null
+
+  // Give each GIN context its own QPs: kernels spread blocks across contexts, and
+  // blocks sharing a QP serialize on it. The QPs stay in collComm for later devComms.
+  while ((int)cctx->gpu_qp_ptrs.size() < nContexts) {
+    void** gpu_qp_ptrs = nullptr;
+    if (rocshmem_gin_add_qps(cctx->qpSet, ginGdaBootstrapAllgather, cctx->comm->bootstrap, &gpu_qp_ptrs) != 0) {
+      WARN("GIN rocshmem-gda: failed to create QPs for context %zu", cctx->gpu_qp_ptrs.size());
+      return ncclSystemError;
+    }
+    cctx->gpu_qp_ptrs.push_back(gpu_qp_ptrs);
+  }
 
   auto* ctx = new ginRocshmemGdaGinCtx{};
   ctx->nRanks = cctx->nranks;
@@ -263,7 +288,7 @@ static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_t*
   ctx->devHandle->netDeviceVersion = NCCL_GIN_ROCSHMEM_VERSION;
   ctx->devHandle->needsProxyProgress = 0;
 
-  if (hipMalloc(&ctx->gpuCtxDev, sizeof(ncclGinRocshmemGdaGPUContext)) != hipSuccess) {
+  if (hipMalloc(&ctx->gpuCtxDev, sizeof(ncclGinRocshmemGdaGPUContext) * nContexts) != hipSuccess) {
     ret = ncclSystemError;
     goto fail;
   }
@@ -273,9 +298,6 @@ static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_t*
   ctx->gpuCtxHost.rank = ctx->rank;
   ctx->gpuCtxHost.nSignals = config->nSignals;
   ctx->gpuCtxHost.nCounters = config->nCounters;
-
-  // QP pointers were created in connect and saved in collComm
-  ctx->gpuCtxHost.qps = (rocshmem::QueuePair**)cctx->gpu_qp_ptrs;
 
   // Allocate signals
   if (config->nSignals > 0) {
@@ -323,15 +345,20 @@ static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_t*
     (void)hipMemset(ctx->gpuCtxHost.counters, 0, sizeof(uint64_t) * config->nCounters);
   }
 
-  // Copy GPU context
-  (void)hipMemcpy(ctx->gpuCtxDev, &ctx->gpuCtxHost, sizeof(ncclGinRocshmemGdaGPUContext), hipMemcpyHostToDevice);
+  // Copy the GPU contexts, which differ only in their QPs
+  for (int c = 0; c < nContexts; c++) {
+    ncclGinRocshmemGdaGPUContext gpuCtx = ctx->gpuCtxHost;
+    gpuCtx.qps = (rocshmem::QueuePair**)cctx->gpu_qp_ptrs[c];
+    (void)hipMemcpy(ctx->gpuCtxDev + c, &gpuCtx, sizeof(gpuCtx), hipMemcpyHostToDevice);
+  }
 
   ctx->devHandle->handle = ctx->gpuCtxDev;
-  ctx->devHandle->size = sizeof(ncclGinRocshmemGdaGPUContext);
+  ctx->devHandle->size = sizeof(ncclGinRocshmemGdaGPUContext) * nContexts;
 
   *outGinCtx = ctx;
   *outDevHandle = ctx->devHandle;
-  INFO(NCCL_INIT, "GIN rocshmem-gda: context created (%d signals, %d counters)", config->nSignals, config->nCounters);
+  INFO(NCCL_INIT, "GIN rocshmem-gda: context created (%d contexts, %d signals, %d counters)", nContexts,
+       config->nSignals, config->nCounters);
   return ncclSuccess;
 
 fail:

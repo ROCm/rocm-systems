@@ -38,6 +38,7 @@
  *
  * Lifecycle:
  *   1. rocshmem_gin_create_qps()  — discover NIC, create + connect QPs
+ *      rocshmem_gin_add_qps()     — optionally, more QPs per peer on the same PD
  *   2. rocshmem_gin_reg_mr()      — register buffers for RDMA
  *   3. (use QPs from device code)
  *   4. rocshmem_gin_dereg_mr()    — deregister buffers
@@ -80,7 +81,25 @@ GIN_QP_API int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(
                                        void* allgather_ctx, rocshmem_gin_qp_set_t* out_qp_set, void*** out_gpu_qps);
 
 /**
- * @brief Destroy a set of GIN QPs and release all IB resources.
+ * @brief Create another nRanks QPs (one per peer) on an existing QP set.
+ *
+ * The new QPs share the set's protection domain, so buffers already registered
+ * with rocshmem_gin_reg_mr()/rocshmem_gin_reg_mr_vmm() can be used with them.
+ * Collective: every rank must call it.
+ *
+ * @param[in]  qp_set        Handle returned by rocshmem_gin_create_qps.
+ * @param[in]  allgather     Bootstrap allgather function, as for rocshmem_gin_create_qps.
+ * @param[in]  allgather_ctx Opaque context passed to allgather.
+ * @param[out] out_gpu_qps   GPU-accessible array of nRanks QueuePair pointers for the new QPs.
+ *
+ * @return 0 on success, non-zero on failure.
+ */
+GIN_QP_API int rocshmem_gin_add_qps(rocshmem_gin_qp_set_t qp_set, int (*allgather)(void* ctx, void* buf, size_t size),
+                                    void* allgather_ctx, void*** out_gpu_qps);
+
+/**
+ * @brief Destroy a set of GIN QPs and release all IB resources, including the
+ *        GPU arrays returned by rocshmem_gin_create_qps() and rocshmem_gin_add_qps().
  *
  * @param[in] qp_set Handle returned by rocshmem_gin_create_qps.
  */
@@ -148,6 +167,26 @@ GIN_QP_API int rocshmem_gin_probe_devices(void);
  * @param[in] rank     This rank's index (for device-side log messages).
  */
 GIN_QP_API void rocshmem_gin_init_constmem(int provider, int rank);
+
+/**
+ * @brief Register an initializer for one of librccl's copies of rocshmem::constmem.
+ *
+ * rocshmem_gin_init_constmem() only reaches the copy linked into the executable.
+ * Each GIN symmetric kernel TU in librccl is a separate code object with its own
+ * copy (src/gin/gin_rocshmem_constmem.h) and registers it here at load time.
+ *
+ * @param[in] init Writes the GDA provider into that TU's constmem; returns 0 on success.
+ */
+void rocshmem_gin_register_constmem_init(int (*init)(int provider));
+
+/**
+ * @brief Run every initializer registered with rocshmem_gin_register_constmem_init().
+ *
+ * @param[in] provider GDAProvider enum value from rocshmem_gin_get_provider().
+ *
+ * @return 0 on success, non-zero if any initializer failed.
+ */
+int rocshmem_gin_init_registered_constmem(int provider);
 
 #ifdef __cplusplus
 }

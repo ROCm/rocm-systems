@@ -1048,9 +1048,9 @@ endif()
 # ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so
 #   via -fgpu-rdc --hip-link.  Does not enable GIN plugins.
 # ENABLE_ROCSHMEM_GIN: GIN plugins (GDA, SDMA).  Device symbols (QueuePair)
-#   resolved via per-arch bitcode in the device linker pipeline +
-#   -mlink-builtin-bitcode for symmetric kernels.  Host symbols left unresolved
-#   (--allow-shlib-undefined), resolved at runtime from the executable.
+#   resolved via per-arch bitcode in the device linker pipeline; symmetric
+#   kernels force-include their own rocshmem::constmem.  Host symbols left
+#   unresolved (--allow-shlib-undefined), resolved at runtime from the executable.
 #   Does not enable alltoall_wg offload.
 if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   add_rocshmem_targets()

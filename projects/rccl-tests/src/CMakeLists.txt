@@ -198,6 +198,14 @@ endif()
 add_rccl_test(gather)
 add_rccl_test(hypercube)
 add_rccl_test(reduce_scatter)
+if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem)
+    # Multi-node symmetric ReduceScatter runs librccl's GIN kernels; with the
+    # rocshmem-gda backend, librccl resolves its rocshmem host symbols from here.
+    target_compile_options(reduce_scatter_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
+    target_link_libraries(reduce_scatter_perf PRIVATE
+        -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive)
+    target_link_options(reduce_scatter_perf PRIVATE -fgpu-rdc --hip-link -rdynamic)
+endif()
 add_rccl_test(reduce)
 add_rccl_test(scatter)
 add_rccl_test(sendrecv)

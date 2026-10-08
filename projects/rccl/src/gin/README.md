@@ -19,10 +19,9 @@ Building with `--rocshmem-gin` requires the
 [rocm-systems](https://github.com/ROCm/rocm-systems) mono-repo, which
 provides both `projects/rccl` and `projects/rocshmem` in a single tree.
 `install.sh` auto-detects the sibling rocshmem project and builds it from
-source via ExternalProject.  The device linker pipeline needs access to
-intermediate build artifacts (per-arch `.bc` files under
-`projects/rocshmem/build/bitcode/`) that are not part of the installed
-package, so a pre-built rocSHMEM install is not sufficient.
+source via ExternalProject.  RCCL copies rocSHMEM's QueuePair device headers
+from the source tree (they are not part of the installed package), so a
+pre-built rocSHMEM install is not sufficient.
 
 RCCL provides two rocSHMEM integration modes (mutually exclusive):
 
@@ -111,12 +110,10 @@ Scripts and jobs that still set `NCCL_GIN_TYPE=6` now select rocSHMEM GDA, not A
 
 ## Known limitations
 
-- **GDA on symmetric kernels**: the `__constant__` device memory
-  (`constmem`, `logd_constants`) used by QueuePair is zero-initialized via
-  stub definitions in `gin_rocshmem_constmem.hip`.  This is sufficient for
-  SDMA (which does not read constmem) but GDA dispatch on symmetric kernels
-  (e.g. `reduce_scatter_gin_*`) is not functional until a proper
-  `hipMemcpyToSymbol` init path is added to librccl.so.
+- **GDA flush granularity**: QueuePair reports completion only through
+  `quiet()`, so `flushAsync`/`wait` on the GDA backend drain the whole QP to
+  that peer.  Each GIN context has its own QPs, but blocks on the same context
+  (e.g. in `reduce_scatter_gin_*`) can wait on each other's sends.
 - **GDA on AlltoAllPivot**: works via the specialized kernel path (per-arch
   bitcode injection via `--rocshmem-bitcode`).
 
@@ -138,6 +135,6 @@ GIN plugin functions from the executable at runtime.
 | `gin_plugin_rocshmem_gda.cc` | rocSHMEM GDA plugin vtable (`NCCL_GIN_TYPE=6`) |
 | `gin_plugin_anvil_sdma.cc` | Anvil SDMA plugin vtable (`NCCL_GIN_TYPE=7`) |
 | `gin_rocshmem_gda_factory.cc` | QueuePair creation, MR registration, topology discovery |
-| `gin_rocshmem_constmem.hip` | Stub `__constant__` definitions for device bitcode linking |
+| `gin_rocshmem_constmem.h` | Per-TU `rocshmem::constmem` force-included into GIN symmetric kernels; filled in by the GDA plugin |
 | `gin_anvil_ipc_table_host.cc` | IPC table management for SDMA |
 | `gin_anvil_conn_check_device.cc` | LSA signal connectivity self-test kernels (device-linked) |

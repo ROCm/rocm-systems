@@ -13,6 +13,7 @@
 
 #define NCCL_GIN_ROCSHMEM_VERSION 100
 
+// The device handle is an array of these, one per GIN context (indexed by contextId).
 struct ncclGinRocshmemGdaGPUContext {
   rocshmem::QueuePair** qps;        // Array of nRanks QP pointers (GPU-accessible)
   uint64_t* signals;                // GPU-allocated signal array

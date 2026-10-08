@@ -148,9 +148,10 @@ struct rocshmem_gin_qp_set {
   std::vector<struct ibv_qp*> ibv_qps;
   std::vector<struct ibv_cq*> ibv_cqs;
 
-  // QueuePair objects
-  QueuePair* host_qps = nullptr;
-  QueuePair* gpu_qps = nullptr;
+  // One entry per nRanks QPs created (see rocshmem_gin_add_qps): their QueuePair
+  // objects on the GPU, and the GPU array of pointers to them
+  std::vector<QueuePair*> gpu_qps;
+  std::vector<void**> gpu_qp_ptrs;
 
   // Dummy atomic fetch location
   uint64_t fetch_atomic_dummy;
@@ -525,9 +526,8 @@ static int gin_create_parent_domain(rocshmem_gin_qp_set* set) {
 // CQ creation (per provider)
 ///////////////////////////////////////////////////////////////////////////////
 
-static int gin_create_cqs(rocshmem_gin_qp_set* set) {
-  int n = set->nRanks;
-  set->ibv_cqs.resize(n, nullptr);
+static int gin_create_cqs(rocshmem_gin_qp_set* set, int first, int last) {
+  set->ibv_cqs.resize(last, nullptr);
 
   switch (set->provider) {
 #if defined(GDA_IONIC)
@@ -545,7 +545,7 @@ static int gin_create_cqs(rocshmem_gin_qp_set* set) {
         ionic_cq_attr.flags = IONIC_CQ_INIT_ATTR_CCQE;
       }
 
-      for (int i = 0; i < n; i++) {
+      for (int i = first; i < last; i++) {
         cq_attr.parent_domain = set->nic.pd_uxdma[i & 1];
         struct ibv_cq_ex* cq_ex = nullptr;
         if (set->ionic_dv.create_cq_ex) cq_ex = set->ionic_dv.create_cq_ex(set->nic.context, &cq_attr, &ionic_cq_attr);
@@ -560,14 +560,14 @@ static int gin_create_cqs(rocshmem_gin_qp_set* set) {
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
     {
-      set->bnxt_scqs.resize(n);
-      set->bnxt_rcqs.resize(n);
+      set->bnxt_scqs.resize(last);
+      set->bnxt_rcqs.resize(last);
       if (!set->qp_allocator) set->qp_allocator = new HIPAllocatorFinegrained();
 
       int cqe = 1;  // CQE compression: only need length 1
       int dmabuf_enabled = ibv.is_dmabuf_supported();
 
-      for (int i = 0; i < n; i++) {
+      for (int i = first; i < last; i++) {
         auto* ctx = set->nic.context;
 
       // SCQ
@@ -659,9 +659,8 @@ static int gin_create_cqs(rocshmem_gin_qp_set* set) {
 // QP creation (per provider)
 ///////////////////////////////////////////////////////////////////////////////
 
-static int gin_create_qps(rocshmem_gin_qp_set* set) {
-  int n = set->nRanks;
-  set->ibv_qps.resize(n, nullptr);
+static int gin_create_qps(rocshmem_gin_qp_set* set, int first, int last) {
+  set->ibv_qps.resize(last, nullptr);
 
   switch (set->provider) {
 #if defined(GDA_IONIC)
@@ -677,7 +676,7 @@ static int gin_create_qps(rocshmem_gin_qp_set* set) {
       attr.qp_type = IBV_QPT_RC;
       attr.comp_mask = IBV_QP_INIT_ATTR_PD;
 
-      for (int i = 0; i < n; i++) {
+      for (int i = first; i < last; i++) {
         attr.pd = set->nic.pd_uxdma[i & 1];
         attr.send_cq = set->ibv_cqs[i];
         attr.recv_cq = set->ibv_cqs[i];
@@ -690,10 +689,10 @@ static int gin_create_qps(rocshmem_gin_qp_set* set) {
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
     {
-      set->bnxt_qps.resize(n);
+      set->bnxt_qps.resize(last);
       if (!set->qp_allocator) set->qp_allocator = new HIPAllocatorFinegrained();
 
-      for (int i = 0; i < n; i++) {
+      for (int i = first; i < last; i++) {
         auto* ctx = set->nic.context;
         auto* pd = set->nic.pd_orig;
 
@@ -798,9 +797,9 @@ static int gin_create_qps(rocshmem_gin_qp_set* set) {
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
     {
-      set->mlx5_qps.resize(n);
+      set->mlx5_qps.resize(last);
 
-      for (int i = 0; i < n; i++) {
+      for (int i = first; i < last; i++) {
         int err = set->mlx5dv.create_qp(set->mlx5_qps[i], set->nic.context, set->nic.pd_orig, set->sq_size);
         if (err) return -1;
       }
@@ -816,7 +815,7 @@ static int gin_create_qps(rocshmem_gin_qp_set* set) {
 // QP state transitions (adapted from GDABackend::modify_qps_*)
 ///////////////////////////////////////////////////////////////////////////////
 
-static int gin_modify_qps_rst_to_init(rocshmem_gin_qp_set* set) {
+static int gin_modify_qps_rst_to_init(rocshmem_gin_qp_set* set, int first) {
   struct ibv_qp_attr attr;
   memset(&attr, 0, sizeof(attr));
   attr.qp_state = IBV_QPS_INIT;
@@ -827,7 +826,7 @@ static int gin_modify_qps_rst_to_init(rocshmem_gin_qp_set* set) {
 
   int mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
 
-  for (int i = 0; i < set->nRanks; i++) {
+  for (int i = first; i < first + set->nRanks; i++) {
     int err;
 #if defined(GDA_BNXT)
     if (set->provider == GDAProvider::BNXT) err = set->bnxt_re_dv.modify_qp(set->ibv_qps[i], &attr, mask, 0, 0);
@@ -844,7 +843,7 @@ static int gin_modify_qps_rst_to_init(rocshmem_gin_qp_set* set) {
   return 0;
 }
 
-static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_info* remote_info) {
+static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, int first, struct gin_dest_info* remote_info) {
   struct ibv_qp_attr attr;
   memset(&attr, 0, sizeof(attr));
   attr.qp_state = IBV_QPS_RTR;
@@ -861,20 +860,20 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_
   int mask = IBV_QP_STATE | IBV_QP_PATH_MTU | IBV_QP_RQ_PSN | IBV_QP_DEST_QPN | IBV_QP_AV | IBV_QP_MAX_DEST_RD_ATOMIC |
              IBV_QP_MIN_RNR_TIMER;
 
-  for (int i = 0; i < set->nRanks; i++) {
+  for (int i = first; i < first + set->nRanks; i++) {
     if (set->nic.portinfo.link_layer == IBV_LINK_LAYER_ETHERNET) {
       attr.ah_attr.grh.sgid_index = set->nic.gid_index;
       attr.ah_attr.is_global = 1;
       attr.ah_attr.grh.hop_limit = 255;
       attr.ah_attr.sl = 1;
       attr.ah_attr.grh.traffic_class = envvar::gda::traffic_class;
-      memcpy(&attr.ah_attr.grh.dgid, &remote_info[i].gid, 16);
+      memcpy(&attr.ah_attr.grh.dgid, &remote_info[i - first].gid, 16);
     } else {
       attr.ah_attr.is_global = 0;
-      attr.ah_attr.dlid = remote_info[i].lid;
+      attr.ah_attr.dlid = remote_info[i - first].lid;
     }
-    attr.rq_psn = remote_info[i].psn;
-    attr.dest_qp_num = remote_info[i].qpn;
+    attr.rq_psn = remote_info[i - first].psn;
+    attr.dest_qp_num = remote_info[i - first].qpn;
 
     int err;
 #if defined(GDA_BNXT)
@@ -892,7 +891,7 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_
   return 0;
 }
 
-static int gin_modify_qps_rtr_to_rts(rocshmem_gin_qp_set* set, struct gin_dest_info* remote_info) {
+static int gin_modify_qps_rtr_to_rts(rocshmem_gin_qp_set* set, int first, struct gin_dest_info* remote_info) {
   struct ibv_qp_attr attr;
   memset(&attr, 0, sizeof(attr));
   attr.qp_state = IBV_QPS_RTS;
@@ -909,8 +908,8 @@ static int gin_modify_qps_rtr_to_rts(rocshmem_gin_qp_set* set, struct gin_dest_i
   int mask =
     IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY;
 
-  for (int i = 0; i < set->nRanks; i++) {
-    attr.sq_psn = remote_info[i].psn;
+  for (int i = first; i < first + set->nRanks; i++) {
+    attr.sq_psn = remote_info[i - first].psn;
 
     int err;
 #if defined(GDA_BNXT)
@@ -1113,16 +1112,40 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
     goto fail;
   }
 
+  // Register dummy fetch atomic location to return atomic fetch values (never read)
+  set->fetch_atomic_dummy_mr = ibv.reg_mr(set->nic.pd_orig, &set->fetch_atomic_dummy,
+                                          sizeof(uint64_t), IBV_ACCESS_LOCAL_WRITE);
+  if (!set->fetch_atomic_dummy_mr) goto fail;
+
+  if (rocshmem_gin_add_qps(set, allgather, allgather_ctx, out_gpu_qps) != 0) goto fail;
+
+  LOG_TRACE("GIN QP factory: %d QPs ready on %s (rank %d/%d)", nRanks, set->nic.nic_name.c_str(), myRank, nRanks);
+  *out_qp_set = set;
+  return 0;
+
+fail:
+  LOG_ERROR("GIN QP factory: rocshmem_gin_create_qps failed (rank %d/%d)", myRank, nRanks);
+  rocshmem_gin_destroy_qps(set);
+  return -1;
+}
+
+int rocshmem_gin_add_qps(rocshmem_gin_qp_set_t set, int (*allgather)(void* ctx, void* buf, size_t size),
+                         void* allgather_ctx, void*** out_gpu_qps) {
+  if (!set) return -1;
+  int nRanks = set->nRanks;
+  int myRank = set->myRank;
+  int first = static_cast<int>(set->ibv_qps.size());
+
   // 4. Create CQs
-  if (gin_create_cqs(set) != 0) {
+  if (gin_create_cqs(set, first, first + nRanks) != 0) {
     LOG_ERROR("GIN QP factory: failed to create CQs");
-    goto fail;
+    return -1;
   }
 
   // 5. Create QPs
-  if (gin_create_qps(set) != 0) {
+  if (gin_create_qps(set, first, first + nRanks) != 0) {
     LOG_ERROR("GIN QP factory: failed to create QPs");
-    goto fail;
+    return -1;
   }
 
   {
@@ -1151,17 +1174,17 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
       local_infos[i].psn = 0;
       local_infos[i].gid = set->nic.gid;
 #if defined(GDA_MLX5)
-      if (set->provider == GDAProvider::MLX5) local_infos[i].qpn = set->mlx5_qps[i].qpn;
+      if (set->provider == GDAProvider::MLX5) local_infos[i].qpn = set->mlx5_qps[first + i].qpn;
       else
 #endif
-        local_infos[i].qpn = set->ibv_qps[i]->qp_num;
+        local_infos[i].qpn = set->ibv_qps[first + i]->qp_num;
     }
 
     // Place my info in the allgather buffer
     memcpy(&all_infos[myRank * nRanks], local_infos.data(), nRanks * sizeof(gin_dest_info));
 
     // Allgather: each rank contributes nRanks entries
-    if (allgather(allgather_ctx, all_infos.data(), nRanks * sizeof(gin_dest_info)) != 0) goto fail;
+    if (allgather(allgather_ctx, all_infos.data(), nRanks * sizeof(gin_dest_info)) != 0) return -1;
 
     // Extract remote info: for my QP[i], the remote end is rank i's QP[myRank]
     std::vector<gin_dest_info> remote_info(nRanks);
@@ -1170,17 +1193,17 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
     }
 
     // 7. State transitions
-    if (gin_modify_qps_rst_to_init(set) != 0) {
+    if (gin_modify_qps_rst_to_init(set, first) != 0) {
       LOG_ERROR("GIN QP factory: QP state RST->INIT failed (check IB permissions/MTU)");
-      goto fail;
+      return -1;
     }
-    if (gin_modify_qps_init_to_rtr(set, remote_info.data()) != 0) {
+    if (gin_modify_qps_init_to_rtr(set, first, remote_info.data()) != 0) {
       LOG_ERROR("GIN QP factory: QP state INIT->RTR failed (check remote dest_info / GID)");
-      goto fail;
+      return -1;
     }
-    if (gin_modify_qps_rtr_to_rts(set, remote_info.data()) != 0) {
+    if (gin_modify_qps_rtr_to_rts(set, first, remote_info.data()) != 0) {
       LOG_ERROR("GIN QP factory: QP state RTR->RTS failed");
-      goto fail;
+      return -1;
     }
 
     // Dump QP state for comparison with GDABackend
@@ -1188,7 +1211,7 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
     dump_ibv_device(set->nic.context->device);
     dump_ibv_pd(set->nic.pd_orig);
     dump_ibv_port_attr(&set->nic.portinfo);
-    for (int i = 0; i < nRanks; i++) {
+    for (int i = first; i < first + nRanks; i++) {
       if (set->ibv_qps[i]) dump_ibv_qp(set->ibv_qps[i], i);
 #if defined(GDA_MLX5)
       if (set->provider == GDAProvider::MLX5) set->mlx5_qps[i].dump(i);
@@ -1200,58 +1223,51 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
     // 8. Construct QueuePair objects and copy to GPU
     size_t qp_size = sizeof(QueuePair) * nRanks;
 
-    if (hipMalloc(&set->gpu_qps, qp_size) != hipSuccess) goto fail;
-    set->host_qps = (QueuePair*)malloc(qp_size);
-    if (!set->host_qps) goto fail;
-
-    // Register dummy fetch atomic location to return atomic fetch values (never read)
-    set->fetch_atomic_dummy_mr = ibv.reg_mr(set->nic.pd_orig, &set->fetch_atomic_dummy,
-                                            sizeof(uint64_t), IBV_ACCESS_LOCAL_WRITE);
-    if (!set->fetch_atomic_dummy_mr) goto fail;
+    QueuePair* gpu_qps = nullptr;
+    if (hipMalloc(&gpu_qps, qp_size) != hipSuccess) return -1;
+    set->gpu_qps.push_back(gpu_qps);
+    QueuePair* host_qps = (QueuePair*)malloc(qp_size);
+    if (!host_qps) return -1;
 
     for (int i = 0; i < nRanks; i++) {
       // 9. Initialize GPU-specific state (doorbells, CQ/SQ buffers)
-      if (set->initialize_host_gpu_qp(&set->host_qps[i], i) != 0) goto fail;
+      if (set->initialize_host_gpu_qp(&host_qps[i], first + i) != 0) {
+        free(host_qps);
+        return -1;
+      }
     }
 
-    if (hipMemcpy(set->gpu_qps, set->host_qps, qp_size, hipMemcpyHostToDevice) != hipSuccess)
-      goto fail;
+    hipError_t copied = hipMemcpy(gpu_qps, host_qps, qp_size, hipMemcpyHostToDevice);
+    free(host_qps);
+    if (copied != hipSuccess) return -1;
 
     // Build array of QueuePair pointers for the GPU context
     QueuePair** host_ptrs = (QueuePair**)malloc(nRanks * sizeof(QueuePair*));
-    for (int i = 0; i < nRanks; i++) host_ptrs[i] = &set->gpu_qps[i];
+    for (int i = 0; i < nRanks; i++) host_ptrs[i] = &gpu_qps[i];
 
     void** gpu_ptr_array = nullptr;
     if (hipMalloc(&gpu_ptr_array, nRanks * sizeof(void*)) != hipSuccess) {
       free(host_ptrs);
-      goto fail;
+      return -1;
     }
+    set->gpu_qp_ptrs.push_back(gpu_ptr_array);
     if (hipMemcpy(gpu_ptr_array, host_ptrs, nRanks * sizeof(void*), hipMemcpyHostToDevice) != hipSuccess) {
       free(host_ptrs);
-      (void)hipFree(gpu_ptr_array);
-      goto fail;
+      return -1;
     }
     free(host_ptrs);
 
     *out_gpu_qps = gpu_ptr_array;
   }
-
-  LOG_TRACE("GIN QP factory: %d QPs ready on %s (rank %d/%d)", nRanks, set->nic.nic_name.c_str(), myRank, nRanks);
-  *out_qp_set = set;
   return 0;
-
-fail:
-  LOG_ERROR("GIN QP factory: rocshmem_gin_create_qps failed (rank %d/%d)", myRank, nRanks);
-  rocshmem_gin_destroy_qps(set);
-  return -1;
 }
 
 void rocshmem_gin_destroy_qps(rocshmem_gin_qp_set_t qp_set) {
   if (!qp_set) return;
 
-  // Destroy QueuePair objects
-  if (qp_set->host_qps) free(qp_set->host_qps);
-  if (qp_set->gpu_qps) (void)hipFree(qp_set->gpu_qps);
+  // Destroy QueuePair objects and the GPU arrays of pointers to them
+  for (void** gpu_ptr_array : qp_set->gpu_qp_ptrs) (void)hipFree(gpu_ptr_array);
+  for (QueuePair* qps : qp_set->gpu_qps) (void)hipFree(qps);
 
   // Unregister dummy fetch atomic location
   if (qp_set->fetch_atomic_dummy_mr) wrap_ibv_dereg_mr(qp_set->fetch_atomic_dummy_mr);
@@ -1410,6 +1426,23 @@ void rocshmem_gin_dereg_mr(void* mr) {
 int rocshmem_gin_get_provider(rocshmem_gin_qp_set_t qp_set) {
   if (!qp_set) return -1;
   return static_cast<int>(qp_set->provider);
+}
+
+// Function-local so registrations from other TUs' static initializers are safe.
+static std::vector<int (*)(int)>& gin_constmem_inits() {
+  static std::vector<int (*)(int)> inits;
+  return inits;
+}
+
+void rocshmem_gin_register_constmem_init(int (*init)(int provider)) {
+  gin_constmem_inits().push_back(init);
+}
+
+int rocshmem_gin_init_registered_constmem(int provider) {
+  for (auto init : gin_constmem_inits()) {
+    if (init(provider) != 0) return -1;
+  }
+  return 0;
 }
 
 static bool gin_validate_device(GDAProvider provider, struct ibv_device_attr* dev_attr) {
