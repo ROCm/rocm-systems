@@ -198,9 +198,7 @@ concept externals =
                                                std::uint64_t{}, std::uint32_t{},
                                                std::uint32_t{}, std::string{} }
         };
-        {
-            typename Externals::track_t{ std::string{}, std::uint64_t{}, std::string{} }
-        };
+        { typename Externals::track_t{ std::string{}, std::uint64_t{}, std::string{} } };
         {
             typename Externals::kfd_sample_t{ std::uint64_t{},
                                               std::string{},

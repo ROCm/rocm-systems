@@ -108,7 +108,7 @@ using buffer_tracing_kind_t   = std::size_t;
 using callback_tracing_kind_t = std::size_t;
 using buffer_policy_t         = int;
 using on_records_cb_t         = void (*)(context_id_t, buffer_id_t, record_header_t**,
-                                         std::size_t, void*, std::uint64_t);
+                                 std::size_t, void*, std::uint64_t);
 using on_record_cb_t          = void (*)(callback_tracing_record_t, user_data_t*, void*);
 using external_correlation_request_kind_t  = std::size_t;
 using external_correlation_id_request_cb_t = int (*)(std::uint64_t, context_id_t,
@@ -1558,8 +1558,8 @@ struct externals
         [[nodiscard]] std::vector<std::uint64_t>    get_stream_list() const { return {}; }
         [[nodiscard]] std::vector<std::string_view> get_string_list() const { return {}; }
         [[nodiscard]] bool                          save_to_file(
-            const std::string& /*filepath*/,
-            const std::vector<std::shared_ptr<agent_t>>& /*agents*/) const
+                                     const std::string& /*filepath*/,
+                                     const std::vector<std::shared_ptr<agent_t>>& /*agents*/) const
         {
             return true;
         }
