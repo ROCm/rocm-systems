@@ -3463,12 +3463,12 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricEligibleChoosesSymmetric) {
       });
 }
 
-// CE registered wins over symmetric when both are eligible, per the
-// production comment's documented precedence -- distinct from the test
-// above, which only proves symmetric wins when CE ISN'T eligible.
-TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricBeatesCeRegisteredWhenBothEligible) {
+// NCCL taskAppend takes CE when CTA_POLICY_ZERO is set, even if the symmetric
+// kernel is also eligible. The test above still proves symmetric wins when CE
+// is not eligible.
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredBeatsSymmetricWhenPolicyZero) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectAllReduce_SymmetricBeatesCeRegisteredWhenBothEligible",
+      "Wrap_SelectAllReduce_CeRegisteredBeatsSymmetricWhenPolicyZero",
       []() {
         g_loadParam = [](const char* env, int64_t def) -> int64_t {
           if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
@@ -3492,7 +3492,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricBeatesCeRegisteredWhenBothE
         EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
                                                     /*stream=*/nullptr, /*query=*/true,
                                                     /*graphCapturingHint=*/false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
@@ -4220,6 +4220,27 @@ TEST(WrapMicrotestIsolated, SelectAllGather_HierarchicalChosenLiveMode) {
                   rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32, /*stream=*/nullptr,
                                       /*query=*/false, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Same 8-node AllGather, but CTA_POLICY_ZERO plus hierarchical CE reports CE
+// and does not take the kernel hierarchical path.
+TEST(WrapMicrotestIsolated, SelectAllGather_PolicyZeroPrefersHierCeOverKernelHierarchical) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_PolicyZeroPrefersHierCeOverKernelHierarchical",
+      []() {
+        g_hierCeAvailableValue = true;
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 8;
+        comm->nRanks = 8;
+        comm->hierarchicalCommsInitialized = true;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32, /*stream=*/nullptr,
+                                      /*query=*/false, /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         DeleteCommWithArch(comm);
       });
 }

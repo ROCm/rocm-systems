@@ -1453,7 +1453,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // Independent of the 2-shot selector (ceNonRegMax/env, 0 = off) and ceARTmpBuf sizing.
   const size_t ceArRegMax = rcclCeRegMaxTab(archTable, ncclFuncAllReduce);
   const bool ceRegInWindow = ceArRegMax == kThreshUnlimited || msgBytes <= ceArRegMax;
-  if (!symEligible && ceRegInWindow && ceAvailable && !hasSysmemSegment &&
+  if (ceRegInWindow && ceAvailable && !hasSysmemSegment &&
       ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
     decision->algo = RCCL_CE_REGISTERED;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
@@ -1591,6 +1591,25 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     }
 
     if (!query && symEligible) INFO(NCCL_TUNING, "AG DDA disqualified: symk eligible");
+    // Hierarchical CE before the kernel hierarchical AllGather. NCCL taskAppend
+    // takes CE when CTA_POLICY_ZERO is set, CE is available, and the window has
+    // no host segment. This uses none of the kernel path's sub-communicators.
+    {
+      const bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+      const bool hierCeAvailable =
+        !ceCapturing && ncclHierCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType, sendWin, recvWin);
+      if (hierCeAvailable && !hasSysmemSegment &&
+          (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
+        decision->algo = RCCL_CE_REGISTERED;
+        if (query) {
+          int a, p, ch;
+          NCCLCHECK(rcclHierarchicalAlgoInfo(comm, ncclFuncAllGather, sendcount, datatype, &a, &p, &ch));
+          decision->protocol = p;
+          decision->nMaxChannels = ch;
+        }
+        return ncclSuccess;
+      }
+    }
     // (2) Hierarchical AllGather. Live dispatch requires being outside a group
     // (rcclSelectAllGatherAlgo); the reporting query always runs outside a group, so
     // the same gate reproduces rcclGetAlgoInfo's group-agnostic reporting.
@@ -1673,22 +1692,6 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       if (!query) INFO(NCCL_TUNING, "AG CE-registered disqualified: ceAvailable=%d hasSysmem=%d symEligible=%d ceRegWindow=%d",
            (int)ceAvailable, (int)hasSysmemSegment, (int)symEligible,
            (int)rcclAllGatherCeRegisteredWindowTab(archTable, totalBytes, winRegType, ceCapturing));
-      // Branch #3.5: Hierarchical CE (multi-node, both buffers registered).
-      // ceCollTaskAppend routes to ncclHierCeAllGather via ncclHierCeDispatch(comm),
-      // so RCCL_CE_REGISTERED is correct here — same as rcclSelectAlltoAll Branch #5.
-      const bool hierCeAvailable =
-        !ceCapturing && ncclHierCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType, sendWin, recvWin);
-      if (hierCeAvailable && !hasSysmemSegment &&
-          (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
-        decision->algo = RCCL_CE_REGISTERED;
-        if (query) {
-          int a, p, ch;
-          NCCLCHECK(rcclHierarchicalAlgoInfo(comm, ncclFuncAllGather, sendcount, datatype, &a, &p, &ch));
-          decision->protocol = p;
-          decision->nMaxChannels = ch;
-        }
-        return ncclSuccess;
-      }
       // taskAppend's SYM_CE_THRESHOLD fallback is gated on !allGatherDecided.
       // User AllGather always sets decisionValid before enqueue, so that arm
       // never runs. Copying it here would take a symk-eligible AllGather and

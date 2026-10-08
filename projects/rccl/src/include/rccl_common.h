@@ -170,8 +170,8 @@ NCCL_API(ncclResult_t, rcclGetCollImplInfo, struct ncclComm* comm, ncclFunc_t co
          ncclDataType_t dataType, ncclRedOp_t op, const void* sendbuff, void* recvbuff, int graphCapturing, int* algo,
          int* protocol, int* maxChannels);
 // Single source of truth for AllReduce implementation selection. Runs the exact
-// priority chain (GIN-SDMA -> symmetric -> CE 2-shot -> DDA LL/LL128/VMM/IPC -> CE registered
-// -> kernel) and returns the decision.
+// priority chain (GIN-SDMA -> CE 2-shot -> DDA LL/LL128/VMM/IPC -> CE registered
+// when CTA_POLICY_ZERO -> symmetric kernel -> kernel) and returns the decision.
 //   query=false : live dispatch path (ncclAllReduce_impl). ceCapturing is probed
 //                 from `stream`; the CE graph latch is ticked; graphCapturingHint
 //                 is ignored.
@@ -181,7 +181,8 @@ NCCL_API(ncclResult_t, rcclGetCollImplInfo, struct ncclComm* comm, ncclFunc_t co
 ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                  ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream, bool query,
                                  bool graphCapturingHint, struct rcclCollDecision* decision);
-// Single source of truth for AllGather selection: DDA -> hierarchical -> CE ->
+// Single source of truth for AllGather selection: DDA -> hierarchical CE (when
+// CTA_POLICY_ZERO) -> kernel hierarchical -> CE ->
 // direct -> symmetric -> ring. CE dispatch lives in taskAppend(); live returns
 // RCCL_CE_REGISTERED / RCCL_CE_SCRATCH and enqueues with that decision.
 //   query=false : live dispatch (ncclAllGather_impl). ceCapturing is probed from
