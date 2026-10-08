@@ -40,7 +40,7 @@ struct base_thread_data
 {
     base_thread_data()
     {
-        auto _func = [](std::int64_t _sz) -> std::int64_t {
+        auto const _func = [](std::int64_t _sz) -> std::int64_t {
             decltype(auto) _v = Tp::private_instance();
             if(_v && _v->capacity() < static_cast<size_t>(_sz + 1))
             {
@@ -510,8 +510,8 @@ unique_ptr_t<thread_data<identity<Tp>, Tag, MaxThreads>>&
 thread_data<identity<Tp>, Tag, MaxThreads>::construct(construct_on_init, Args&&... _args)
 {
     // construct outside of lambda to prevent data-race
-    static auto& _ref = instance(construct_on_init{});
-    static auto  _v   = [&]() {
+    static auto&      _ref = instance(construct_on_init{});
+    static auto const _v   = [&]() {
         if(_ref)
         {
             for(auto& itr : *_ref)
@@ -535,7 +535,7 @@ thread_data<identity<Tp>, Tag, MaxThreads>::construct(construct_on_thread&& _t,
     static auto& _instance = instance(construct_on_init{});
     static auto  _constructed =
         container::stable_vector<bool, MaxThreads, container::k_cacheline_align>{};
-    static auto _grow = []() {
+    static auto const _grow = []() {
         container::resize(_constructed, MaxThreads, false);
         grow_functors().emplace_back([](std::int64_t _n) -> std::int64_t {
             if(static_cast<size_t>(_n) >= _constructed.size())

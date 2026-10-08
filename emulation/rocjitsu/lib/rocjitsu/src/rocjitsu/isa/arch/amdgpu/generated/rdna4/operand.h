@@ -31,6 +31,7 @@ public:
   std::string name() const override;
   std::optional<uint64_t> literal64_value() const override;
   std::optional<uint64_t> const_value() const override;
+  bool has_register_selector() const override;
   std::optional<RegisterRef> to_register_ref() const override;
   std::optional<RegClass> to_special_reg_class() const override;
   /// @brief Return the immutable full-simulator operand table.
@@ -139,6 +140,7 @@ private:
   std::optional<Literal32Widening> literal32_widening_;
   bool packed_16bit_source_ = false;
   bool packed_16bit_dst_ = false;
+  std::optional<uint32_t> resolved_vgpr_offset_exec(const amdgpu::Wavefront &wf) const;
 };
 
 } // namespace rdna4

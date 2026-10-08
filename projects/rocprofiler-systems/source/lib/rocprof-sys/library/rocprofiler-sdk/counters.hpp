@@ -49,26 +49,25 @@ struct counter_event
     : record{ _v }
     {}
 
-    void operator()(const client_data* tool_data, counter_track_type*,
-                    const std::string& track_name, timing_interval _timing,
-                    scope::config _scope) const;
+    void operator()(counter_track_type*, const std::string& track_name,
+                    timing_interval _timing, scope::config _scope) const;
 
     counter_dispatch_record record = {};
 };
 
 struct counter_storage
 {
-    const client_data*                    tool_data          = nullptr;
-    std::uint64_t                         device_id          = 0;
-    std::uint32_t                         device_type_index  = 0;
-    std::int64_t                          index              = 0;
-    std::string                           metric_name        = {};
-    std::string                           metric_description = {};
-    std::string                           storage_name       = {};
-    std::string                           track_name         = {};
-    tim::manager::pointer_t               manager            = {};
-    std::unique_ptr<counter_storage_type> storage            = {};
-    std::unique_ptr<counter_track_type>   track              = {};
+    const client_data*                    tool_data         = nullptr;
+    std::uint64_t                         device_id         = 0;
+    std::uint32_t                         device_type_index = 0;
+    std::int64_t                          index             = 0;
+    std::string                           metric_name;
+    std::string                           metric_description;
+    std::string                           storage_name;
+    std::string                           track_name;
+    tim::manager::pointer_t               manager;
+    std::unique_ptr<counter_storage_type> storage;
+    std::unique_ptr<counter_track_type>   track;
 
     counter_storage(const client_data* _tool_data, std::uint64_t _devid,
                     std::uint32_t _device_type_index, size_t _idx,

@@ -147,7 +147,7 @@ Analyze mode
    application or a subset identified through the ROCm Compute Profiler CLI analysis filters.
 
    To generate a lightweight GUI interface, you can add the ``--experimental --gui`` flags to your
-   analysis command.
+   analysis command. ``--gui`` is deprecated and will be removed in a future release.
 
    .. code-block:: shell
 
@@ -155,7 +155,8 @@ Analyze mode
 
    Analyze mode now supports a lightweight Text-based User Interface (TUI) that
    provides an interactive terminal experience for enhanced usability. To enable TUI mode,
-   use the ``--experimental --tui`` flags when running the analyze command:
+   use the ``--experimental --tui`` flags when running the analyze command. ``--tui`` is
+   deprecated and will be removed in a future release.
 
    .. code-block:: shell
 

@@ -19,13 +19,32 @@ message(STATUS "Device Linker: assembly-extract pipeline enabled (RCCLDEV langua
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 enable_language(RCCLDEV)
 
-# Tell the driver where to find the real compiler.
+# Device coverage requires the same ROCm 7.15+ compiler selected for the
+# main build, including its packaged device profile runtime.
 get_filename_component(_dl_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-find_program(DL_CLANG NAMES amdclang++ clang++
-  HINTS "${_dl_compiler_dir}" "${ROCM_PATH}/bin" REQUIRED)
+if(ENABLE_FULL_COVERAGE)
+  set(DL_CLANG "${CMAKE_CXX_COMPILER}")
+  message(STATUS "Device Linker: DL_CLANG pinned to CMAKE_CXX_COMPILER for device coverage = ${DL_CLANG}")
+else()
+  find_program(DL_CLANG NAMES amdclang++ clang++
+    HINTS "${_dl_compiler_dir}" "${ROCM_PATH}/bin" REQUIRED)
+endif()
+# Pick clang-offload-bundler from the SAME toolchain as DL_CLANG: a bundler from a
+# different LLVM build can load a foreign libclang-cpp.so and crash at startup.
+get_filename_component(_dl_clang_dir "${DL_CLANG}" REALPATH)
+get_filename_component(_dl_clang_dir "${_dl_clang_dir}" DIRECTORY)
+unset(DL_BUNDLER CACHE)
+unset(DL_BUNDLER)
 find_program(DL_BUNDLER NAMES clang-offload-bundler
-  HINTS "${_dl_compiler_dir}" "${_dl_compiler_dir}/../lib/llvm/bin"
-        "${ROCM_PATH}/llvm/bin" REQUIRED)
+  HINTS "${_dl_clang_dir}" "${_dl_compiler_dir}/../lib/llvm/bin"
+        "${ROCM_PATH}/llvm/bin")
+if(NOT DL_BUNDLER)
+  message(FATAL_ERROR
+    "Device Linker: clang-offload-bundler was not found next to the selected "
+    "compiler '${DL_CLANG}' (searched '${_dl_clang_dir}', "
+    "'${_dl_compiler_dir}/../lib/llvm/bin', '${ROCM_PATH}/llvm/bin').")
+endif()
+message(STATUS "Device Linker: clang-offload-bundler = ${DL_BUNDLER}")
 
 # Extract --hip-path and --hip-device-lib-path from CMAKE_CXX_FLAGS.
 # TheRock's amd-hip toolchain injects these so amdclang++ can locate HIP
@@ -111,10 +130,139 @@ message(STATUS "Device Linker: GPU targets = ${DL_GPU_TARGETS}")
 # ---------------------------------------------------------------------------
 # Optimization flags (passed to both compile and link modes of the driver)
 # ---------------------------------------------------------------------------
-if(CMAKE_BUILD_TYPE MATCHES "Debug")
+if(ENABLE_FULL_COVERAGE)
+  # Drop DWARF (-g0) even under --debug. LLVM source-based coverage lives in
+  # __llvm_covfun/__llvm_covmap + __llvm_prf_*, not DWARF, so llvm-cov needs
+  # only device.elf + .profdata. With thousands of specialized kernels, keeping
+  # debug info pushes the per-arch device.elf past the ~2 GB (INT32_MAX) HIP
+  # fat-binary unbundling limit, after which every kernel launch fails.
+  set(DL_OPT_FLAGS -O1 -g0)
+elseif(CMAKE_BUILD_TYPE MATCHES "Debug")
   set(DL_OPT_FLAGS -O1 -g)
 else()
   set(DL_OPT_FLAGS -O3)
+endif()
+
+# ---------------------------------------------------------------------------
+# Device-side coverage instrumentation (ENABLE_FULL_COVERAGE).
+#
+# We thread -fprofile-instr-generate / -fcoverage-mapping through every
+# device compile in this pipeline (per-kernel RCCLDEV compiles, dispatcher
+# compile inside --link, and the standalone fat-object compiles below).
+# The assembly-extract pass passes them through to the underlying clang
+# invocation; the LLVM profile metadata sections (__llvm_prf_*, __llvm_cov*)
+# survive extraction because the extractor only strips the amdhsa_kernel /
+# amdgpu_metadata ranges.
+#
+# For the per-arch device.elf to link cleanly we must also resolve the
+# `__llvm_profile_runtime` reference emitted by each instrumented TU. We
+# locate the per-arch device profile runtime archive (libclang_rt.profile.a
+# under the amdgcn-amd-amdhsa resource sub-directory) and pass it to the
+# rccl-device-compile driver, which forwards it to ld.lld.
+# ---------------------------------------------------------------------------
+set(DL_COVERAGE_FLAGS "")
+set(DL_DEVICE_PROFILE_RT "")
+if(ENABLE_FULL_COVERAGE)
+  set(DL_COVERAGE_FLAGS -fprofile-instr-generate -fcoverage-mapping)
+  set(DL_DEVICE_PROFILE_RT "${RCCL_DEVICE_PROFILE_RT}")
+  if(NOT EXISTS "${DL_DEVICE_PROFILE_RT}")
+    message(FATAL_ERROR
+      "Device Linker: the preflighted device profile runtime is missing: "
+      "'${DL_DEVICE_PROFILE_RT}'. Reconfigure the build.")
+  endif()
+  message(STATUS
+    "Device Linker: coverage enabled, device profile RT = ${DL_DEVICE_PROFILE_RT}")
+endif()
+
+# Profile section anchor (ENABLE_FULL_COVERAGE).
+#
+# A coverage-instrumented device TU that emits no counters (e.g. a fat object
+# with no device kernels, like sym_reduce_scatter.o) still emits an
+# __llvm_profile_sections descriptor referencing __start/__stop___llvm_prf_{cnts,data}.
+# With no __llvm_prf_cnts/__llvm_prf_data input section, the linker cannot synthesize
+# those boundary symbols and the device link fails with "undefined hidden symbol:
+# __start___llvm_prf_cnts". We link a tiny anchor that defines empty, retained
+# __llvm_prf_{cnts,data} sections so the boundary symbols are always defined; when a
+# TU does emit counters the empty sections merge in as a zero-byte no-op. The anchor
+# is generic amdgcn bitcode (no mcpu) so every per-arch device link LTO-compiles it.
+set(DL_DEVICE_PROFILE_ANCHOR "")
+if(DL_DEVICE_PROFILE_RT)
+  file(MAKE_DIRECTORY "${DEVICE_BUILD_DIR}")
+  set(_dl_anchor_src "${DEVICE_BUILD_DIR}/prf_section_anchor.c")
+  set(_dl_anchor_bc  "${DEVICE_BUILD_DIR}/prf_section_anchor.bc")
+  file(WRITE "${_dl_anchor_src}"
+"/* Auto-generated by cmake/DeviceLinker.cmake for ENABLE_FULL_COVERAGE.\n"
+"   Empty, retained profile counter/data sections so the device linker always\n"
+"   defines __start/__stop___llvm_prf_{cnts,data}, even for instrumented TUs that\n"
+"   reference those boundaries but emit no counters (e.g. no device kernels). */\n"
+"__attribute__((used, retain, section(\"__llvm_prf_cnts\")))\n"
+"static char __rccl_prf_cnts_anchor[0];\n"
+"__attribute__((used, retain, section(\"__llvm_prf_data\")))\n"
+"static char __rccl_prf_data_anchor[0];\n")
+  execute_process(
+    COMMAND ${DL_CLANG} --target=amdgcn-amd-amdhsa -c -emit-llvm -O1
+            -o "${_dl_anchor_bc}" "${_dl_anchor_src}"
+    RESULT_VARIABLE _dl_anchor_rc
+    ERROR_VARIABLE _dl_anchor_err)
+  if(NOT _dl_anchor_rc EQUAL 0 OR NOT EXISTS "${_dl_anchor_bc}")
+    message(FATAL_ERROR
+      "Device Linker: failed to build profile section anchor bitcode.\n${_dl_anchor_err}")
+  endif()
+  set(DL_DEVICE_PROFILE_ANCHOR "${_dl_anchor_bc}")
+  message(STATUS "Device Linker: profile section anchor = ${DL_DEVICE_PROFILE_ANCHOR}")
+endif()
+
+# Standalone fat-object compiles (onerank.o, collectives.o, dda_all_reduce_ipc.o,
+# sym_*.o) are built as full `-x hip` objects, so each -c step performs its own
+# embedded device link (clang-linker-wrapper -> ld.lld). That link must resolve
+# __llvm_profile_instrument_gpu from the device profile RT. The rccl-device-compile
+# --link path passes the archive to ld.lld directly; here we forward it to the
+# clang driver's offload linker via -Xoffload-linker.
+#
+# The profile RT is a separate bitcode LTO module, so clang's auto-injected
+# -amdgpu-internalize-symbols dead-strips the hidden __llvm_profile_instrument_gpu; disable it.
+# The anchor supplies the __llvm_prf_{cnts,data} boundary sections (see above).
+set(DL_DEVICE_PROFILE_RT_LINK_FLAGS "")
+if(DL_DEVICE_PROFILE_RT)
+  set(DL_DEVICE_PROFILE_RT_LINK_FLAGS
+    -Xoffload-linker -plugin-opt=-amdgpu-internalize-symbols=false
+    -Xoffload-linker "${DL_DEVICE_PROFILE_ANCHOR}"
+    -Xoffload-linker "${DL_DEVICE_PROFILE_RT}")
+endif()
+
+# Instrumentation plus the profile-runtime link flags for the standalone `-x hip`
+# fat-object compiles below. Both expand to nothing unless ENABLE_FULL_COVERAGE.
+set(DL_DEVICE_COVERAGE_FLAGS ${DL_COVERAGE_FLAGS} ${DL_DEVICE_PROFILE_RT_LINK_FLAGS})
+
+# ---------------------------------------------------------------------------
+# Main-module coverage drain: deterministic compilation-unit ID (-cuid).
+#
+# The device profile runtime drains a per-arch device.elf by looking up a host
+# "shadow" variable __llvm_profile_sections_<CUIDHash> (registered from the host
+# TU via __hipRegisterVar) and resolving it to the identically-named device
+# global with hipGetSymbolAddress. The device global points at the module-wide
+# __start/__stop___llvm_prf_{cnts,data,names} boundaries, so draining through
+# ANY ONE descriptor drains the entire linked device.elf.
+#
+# The main RDC module is compiled in two separate steps: the device side
+# (dispatcher common.cu.cpp inside --link, plus the per-kernel TUs) and the host
+# side (common.cu.cpp --offload-host-only). With the default -fuse-cuid=hash each
+# step derives a different CUID from its own file path + command line, so the
+# host shadow name (e.g. a2f3...) never matches any of the device descriptors and
+# hipGetSymbolAddress fails -> device counters read back as zero.
+#
+# Pin BOTH the dispatcher device compile and the host common.cu.cpp compile to
+# the same explicit -cuid so their __llvm_profile_sections_<CUIDHash> names match
+# (CUIDHash = MD5(cuid), identical across separate invocations). This is the
+# compiler's intended lever for split host/device compilation (see the codegen
+# test clang/test/CodeGenHIP/offload-pgo-sections.hip, which passes -cuid=abc to
+# both cc1 jobs). It must NOT be applied to the per-kernel device TUs: they are
+# distinct compilation units and a shared CUID would collide on the (non-weak)
+# __llvm_profile_sections_<CUIDHash> device global at link time.
+set(DL_MAIN_MODULE_CUID_FLAGS "")
+if(ENABLE_FULL_COVERAGE)
+  set(DL_MAIN_MODULE_CUID_FLAGS -cuid=rccl_main_module)
+  message(STATUS "Device Linker: main-module coverage CUID pinned = rccl_main_module")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -195,14 +343,15 @@ function(dl_evaluate_guard GUARD GPU_TARGET RESULT_VAR)
     set(${RESULT_VAR} FALSE PARENT_SCOPE)
     return()
   endif()
-  string(REGEX MATCHALL "__gfx[0-9a-z]+__" _guard_archs "${GUARD}")
+  string(REGEX MATCHALL "__gfx[0-9a-z_]+__" _guard_archs "${GUARD}")
+  string(REPLACE "-" "_" _gpu_macro "${GPU_TARGET}")
   if(NOT _guard_archs)
     set(${RESULT_VAR} TRUE PARENT_SCOPE)
     return()
   endif()
   foreach(_ga ${_guard_archs})
     string(REGEX REPLACE "^__(.+)__$" "\\1" _arch "${_ga}")
-    if("${_arch}" STREQUAL "${GPU_TARGET}")
+    if("${_arch}" STREQUAL "${_gpu_macro}")
       set(${RESULT_VAR} TRUE PARENT_SCOPE)
       return()
     endif()
@@ -278,6 +427,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     --arch=${DL_GPU_TARGET}
     --clang=${DL_CLANG}
     ${DL_OPT_FLAGS}
+    ${DL_COVERAGE_FLAGS}
     -std=c++17
     ${DL_HIP_COMPILER_FLAGS}
     # -fPIC is required so amdclang++ emits GOT-relative relocations for
@@ -368,6 +518,11 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     endif()
   endif()
 
+  set(_dl_profile_rt_arg "")
+  if(DL_DEVICE_PROFILE_RT)
+    set(_dl_profile_rt_arg "--profile-rt=${DL_DEVICE_PROFILE_RT}")
+  endif()
+
   add_custom_command(
     OUTPUT  ${ARCH_DEVICE_ELF}
     COMMAND ${CMAKE_RCCLDEV_COMPILER}
@@ -377,10 +532,13 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       ${DL_HIP_COMPILER_FLAGS}
       --dispatcher=${HIPIFY_DIR}/src/device/common.cu.cpp
       ${_rocshmem_bitcode_arg}
+      ${_dl_profile_rt_arg}
       ${_link_def_flags}
       ${_link_inc_flags}
       ${DL_OPT_FLAGS}
       ${DL_LINK_INHERITED_FLAGS}
+      ${DL_COVERAGE_FLAGS}
+      ${DL_MAIN_MODULE_CUID_FLAGS}
       -std=c++17
       -o ${ARCH_DEVICE_ELF}
       @${_link_rsp}
@@ -393,6 +551,21 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   list(APPEND ALL_DEVICE_ELFS "${ARCH_DEVICE_ELF}")
   list(APPEND DL_BUNDLER_TARGETS "hip-amdgcn-amd-amdhsa--${DL_GPU_TARGET}")
   list(APPEND DL_BUNDLER_INPUTS "--input=${ARCH_DEVICE_ELF}")
+
+  # Friendly symlink next to librccl.so: device-${arch}.elf -> device_build/<dir>/device.elf
+  # Lets coverage workflows (and inspection in general) reference the per-arch
+  # device ELF without the leading-hyphen directory wart we use for CDNA build
+  # scheduling. Same byte content that ends up packed into .hip_fatbin; llvm-cov
+  # only needs this file + the merged .profdata for device-side reports.
+  set(_dev_elf_link "${PROJECT_BINARY_DIR}/device-${DL_GPU_TARGET}.elf")
+  add_custom_command(
+    OUTPUT  ${_dev_elf_link}
+    COMMAND ${CMAKE_COMMAND} -E create_symlink ${ARCH_DEVICE_ELF} ${_dev_elf_link}
+    DEPENDS ${ARCH_DEVICE_ELF}
+    COMMENT "DL [${DL_GPU_TARGET}] symlink: device-${DL_GPU_TARGET}.elf -> device_build/.../device.elf"
+    VERBATIM
+  )
+  list(APPEND DEVICE_ELF_SYMLINKS "${_dev_elf_link}")
 
   # =========================================================================
   # Optional: emit LLVM IR for specialized kernels (ninja device_ir)
@@ -499,6 +672,8 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
+    ${DL_COVERAGE_FLAGS}
+    ${DL_MAIN_MODULE_CUID_FLAGS}
     -std=c++17
     -fPIC
     ${DL_HOST_COMPRESS}
@@ -524,6 +699,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -c -o ${ONERANK_FAT_OBJ}
@@ -558,6 +734,7 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.20")
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
       ${DL_INHERITED_FLAGS}
+      ${DL_DEVICE_COVERAGE_FLAGS}
       -std=c++17
       -fPIC
       -MD -MF ${COLLECTIVES_DEPFILE}
@@ -579,6 +756,7 @@ else()
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
       ${DL_INHERITED_FLAGS}
+      ${DL_DEVICE_COVERAGE_FLAGS}
       -std=c++17
       -fPIC
       -c -o ${COLLECTIVES_FAT_OBJ}
@@ -608,6 +786,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -c -o ${DIAG_P2P_FAT_OBJ}
@@ -632,6 +811,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -c -o ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
@@ -651,6 +831,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -c -o ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
@@ -670,6 +851,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -c -o ${DDA_ALL_GATHER_IPC_FAT_OBJ}
@@ -689,6 +871,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -c -o ${DDA_ALLTOALL_IPC_FAT_OBJ}
@@ -721,6 +904,7 @@ if(ENABLE_ROCSHMEM_GIN)
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
       ${DL_INHERITED_FLAGS}
+      ${DL_DEVICE_COVERAGE_FLAGS}
       -std=c++17
       -fPIC
       -c -o ${GIN_ALLTOALL_SDMA_FAT_OBJ}
@@ -754,6 +938,7 @@ if(ENABLE_ROCSHMEM_GIN)
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
       ${DL_INHERITED_FLAGS}
+      ${DL_DEVICE_COVERAGE_FLAGS}
       -std=c++17
       -fPIC
       -c -o ${GIN_ALLREDUCE_SDMA_FAT_OBJ}
@@ -782,6 +967,7 @@ if(ENABLE_ROCSHMEM_GIN)
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
       ${DL_INHERITED_FLAGS}
+      ${DL_DEVICE_COVERAGE_FLAGS}
       -std=c++17
       -fPIC
       -c -o ${GIN_ANVIL_CONN_CHECK_FAT_OBJ}
@@ -807,6 +993,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -w
@@ -829,9 +1016,10 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll.cu.cpp
@@ -849,9 +1037,10 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll128.cu.cpp
@@ -880,6 +1069,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -w
@@ -900,6 +1090,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -w
@@ -919,9 +1110,10 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll.cu.cpp
@@ -939,9 +1131,10 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu.cpp
@@ -960,6 +1153,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -w
@@ -979,9 +1173,10 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu.cpp
@@ -999,9 +1194,10 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu.cpp
@@ -1019,9 +1215,10 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu.cpp
@@ -1039,9 +1236,10 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu.cpp
@@ -1078,9 +1276,10 @@ foreach(_ce_reduce_src IN LISTS _ce_reduce_srcs)
       ${_link_def_flags}
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
+      ${DL_INHERITED_FLAGS}
+      ${DL_DEVICE_COVERAGE_FLAGS}
       -std=c++17
       -fPIC
-      ${DL_INHERITED_FLAGS}
       -w
       -c -o ${_ce_reduce_obj}
       ${_ce_reduce_src}
@@ -1182,6 +1381,7 @@ if(GENERATE_SYM_KERNELS)
         ${_host_inc_flags}
         ${DL_OPT_FLAGS}
         ${DL_INHERITED_FLAGS}
+        ${DL_DEVICE_COVERAGE_FLAGS}
         -std=c++17
         -fPIC
         ${_this_bc_flag}

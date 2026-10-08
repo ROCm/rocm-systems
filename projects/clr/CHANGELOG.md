@@ -2,18 +2,21 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
-## HIP 10.2.0 for ROCm 10.2.0
+## HIP 7.17.0 for ROCm 10.2.0
 
 ### Added
 * New HIP APIs
     - Module Management: support for API parity with corresponding CUDA API.
       * `hipModuleEnumerateFunctions` returns the function handles defined in a loaded module.
+    - Library Management: support for API parity with corresponding CUDA API.
+      * `hipLibraryGetModule` returns the module handle associated with a library.
 * Disable HRR capture feature
 
 ### Resolved issues
 * A registered `__device__` global that is absent from the loaded code object no longer aborts the process. Symbol lookup now returns `hipErrorInvalidSymbol` from the runtime's variable materialization path (`hipGetSymbolAddress`, `hipLibraryGetGlobal`, and related entry points). `hipModuleGetGlobal` still reports `hipErrorNotFound` for a missing name.
+* Fixed `__hip_bfloat162` comparisons that ignored or misread the high lane. `__hbneu2` now returns true only when both lanes are unordered-not-equal, `__hgt2` and `__hisnan2` now return the per-lane result in `.y` instead of always 1.0, and the `<`, `<=`, `>`, `>=` operators now compare `.y` with `.y`. Code that relied on the previous results may see different values.
 
-## HIP 10.1.0 for ROCm 10.1.0
+## HIP 7.16.0 for ROCm 10.1.0
 
 ### Added
 * New HIP APIs
@@ -35,10 +38,12 @@ The HIP/HSA runtime now correctly releases allocated signal objects during strea
 
 * Under WSL2 (Windows Subsystem for Linux 2), GPU device-side memory faults may not be reported correctly and can result in the process hanging.
 
-## HIP 10.0.0 for ROCm 10.0.0
+## HIP 7.15.0 for ROCm 10.0.0
 
 ### Added
 * New HIP APIs
+    - GPUDirect RDMA: support for API parity with the corresponding CUDA API.
+      * `hipDeviceFlushGPUDirectRDMAWrites` blocks until GPUDirect RDMA writes issued by a third-party device, such as an RDMA-capable NIC, are visible to the requested scope. Capability is reported by the new device attributes `hipDeviceAttributeGPUDirectRDMASupported`, `hipDeviceAttributeGPUDirectRDMAFlushWritesOptions` and `hipDeviceAttributeGPUDirectRDMAWritesOrdering`, which are also mirrored in `hipDeviceProp_t`.
     - Stream Ordered Memory Allocator: support for API parity with corresponding CUDA API.
       * `hipMemGetDefaultMemPool` returns the default memory pool for the specified location and allocation type
     - Cooperative Groups scan functions are now supported, providing feature parity with CUDA.

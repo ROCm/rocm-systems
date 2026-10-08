@@ -38,7 +38,7 @@ class AMDSmiDrm {
   std::string find_file_in_folder(const std::string& folder, const std::string& regex);
   std::vector<std::string> drm_paths_;  // drm path (renderD128 for example)
   std::vector<amdsmi_bdf_t> drm_bdfs_;  // bdf
-  uint32_t vendor_id;
+  uint32_t vendor_id = 0;
 
   AMDSmiLibraryLoader lib_loader_;  // lazy load libdrm
 

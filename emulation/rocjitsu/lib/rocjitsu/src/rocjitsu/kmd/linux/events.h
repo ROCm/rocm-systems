@@ -12,10 +12,9 @@
 /// per-event waiter list matching the kernel's wait_queue model — when an event
 /// fires, only threads registered on that specific event are woken.
 ///
-/// Event age semantics follow the real ROCR ↔ KFD protocol: ROCR passes
-/// last_event_age=1 on every WAIT_EVENTS call. set_event/interrupt sets
-/// event_age to 1; auto-reset clears it to 0. The wait predicate checks
-/// event_age >= last_event_age for signal events only.
+/// Signal events maintain an age counter starting at 1. Nonzero caller ages
+/// detect a changed counter; age zero uses the legacy signaled flag. Each
+/// registered waiter latches activation independently of the auto-reset flag.
 
 #include <atomic>
 #include <condition_variable>
@@ -69,22 +68,22 @@ public:
 
   /// @brief Handle KFD SET_EVENT ioctl.
   /// @param arg Pointer to kfd_ioctl_set_event_args.
-  /// @details Sets event_age to 1, writes to the event page slot, and wakes
+  /// @details Increments event_age, writes to the event page slot, and activates
   ///          all registered waiters.
   /// @returns 0 on success, -EINVAL if event_id not found.
   int set_event(void *arg);
 
   /// @brief Handle KFD RESET_EVENT ioctl.
   /// @param arg Pointer to kfd_ioctl_reset_event_args.
-  /// @details Clears event_age to 0.
+  /// @details Clears signaled without changing the age or registered activations.
   /// @returns 0 on success, -EINVAL if event_id not found.
   int reset_event(void *arg);
 
   /// @brief Handle KFD WAIT_EVENTS ioctl.
   /// @param arg Pointer to kfd_ioctl_wait_events_args.
   /// @details Blocks the caller until waited-on signal events satisfy the
-  ///          age predicate, respecting wait_for_all (AND vs OR semantics).
-  ///          Creates a thread-local CV and registers it with each waited event.
+  ///          legacy/age predicate, respecting wait_for_all (AND vs OR semantics).
+  ///          Registers per-event activation records sharing a call-local CV.
   /// @returns 0 on success, -EBADF if the driver is closing.
   int wait_events(void *arg, uint32_t process_id = 0);
 
@@ -107,7 +106,7 @@ public:
   /// @brief Deliver a memory violation to this process's memory-exception event.
   /// @details Finds the process's KFD_IOC_EVENT_MEMORY event -- the runtime
   /// creates exactly one and parks a handler thread on it -- records @p fault as
-  /// its payload for the next WAIT_EVENTS to collect, and wakes its waiters.
+  /// its payload for the next WAIT_EVENTS to collect, and activates its waiters.
   /// @returns false when the process registered no such event, in which case the
   ///          violation has nowhere to go and the caller should say so itself.
   bool signal_memory_fault(const MemoryFault &fault);
@@ -169,17 +168,32 @@ private:
   void *page_ = nullptr; ///< Mapped signal page (libhsakmt polls slots here).
   size_t page_size_ = 0; ///< Size of the mapped event page in bytes.
 
+  /// One WAIT_EVENTS entry. All fields are protected by mutex_; storage belongs
+  /// to the wait call and outlives its registration in the event's waiter list.
+  struct EventWaiter {
+    std::condition_variable *cv = nullptr; ///< Shared by the entries of one wait call.
+    bool activated = false;                ///< Latched independently of the shared signaled flag.
+    // Initially satisfied entries only need destruction notifications. Keeping
+    // them in the list must not consume a later signal intended for a new wait.
+    bool listen_for_signals = false;
+    bool event_age_enabled = false; ///< Caller opted in to signal-event age copyback.
+  };
+
   /// @brief Internal event representation.
   struct GpuEvent {
     uint32_t event_id = 0;   ///< KFD event ID (1-based, matches slot index).
     uint32_t event_type = 0; ///< HSA event type (0 = signal, others = system).
-    bool auto_reset = false; ///< If true, signaled clears after wakeup.
-    bool signaled = false;   ///< True when the event has been signaled.
+    bool auto_reset = false; ///< Consume pending state when delivered to a waiter.
+    bool signaled = false;   ///< Pending state for new waits, separate from waiter activation.
     uint64_t event_age = 1;  ///< Monotonic age counter (starts at 1, matching real KFD).
     /// Payload for the most recent violation on a memory-exception event.
     MemoryFault fault;
-    std::vector<std::condition_variable *> waiters; ///< Per-event waiter list (kernel wait_queue).
+    std::vector<EventWaiter *> waiters; ///< Per-event waiter list (kernel wait_queue).
   };
+
+  /// Latch activation before notification, with mutex_ held by the caller.
+  static void activate_waiters(GpuEvent &event);
+  static bool has_signal_waiters(const GpuEvent &event);
 
   mutable std::mutex mutex_;                      ///< Protects all mutable event state.
   std::unordered_map<uint32_t, GpuEvent> events_; ///< Event table keyed by event_id.
