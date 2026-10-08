@@ -3240,8 +3240,10 @@ def _tensor_method_builder(method_name: str) -> StructuralBuilder:
         setup = [f"_t_{safe_var} = torch.randn(4, 4, device=device)"]
         call = f"_t_{safe_var}.{method_name}"
         args = ""
-        if method_name in ("item", "numpy", "tolist"):
+        if method_name in ("item", "tolist"):
             setup = [f"_t_{safe_var} = torch.tensor(1.0, device=device)"]
+        elif method_name == "numpy":
+            setup = [f'_t_{safe_var} = torch.tensor(1.0, device="cpu")']
         elif method_name == "to":
             args = "device"
         elif method_name == "cpu":
