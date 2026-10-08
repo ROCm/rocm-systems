@@ -60,7 +60,7 @@ static void HIPRT_CB Callback1(hipStream_t stream, hipError_t status, void* user
   }
 
   // Hold the callback mid-execution until the host releases it, so the host can
-  // observe the stream as not-idle while the callback is blocked.
+  // observe the stream as not-idle while the callback is blocked
   while (!release) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
@@ -100,7 +100,7 @@ HIP_TEST_CASE(Unit_hipStreamAddCallback_StrmSyncTiming) {
   HIPCHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, mystream));
   HIPCHECK(hipStreamAddCallback(mystream, Callback1, NULL, 0));
 
-  // Wait for callback to start; have deadline so we observe failure instead of hang.
+  // Wait for callback to start; have deadline so we observe failure instead of hang
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
   while (!cbStarted && std::chrono::steady_clock::now() < deadline) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
