@@ -1,115 +1,18 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "core/agent.hpp"
-#include "core/agent_manager.hpp"
-#include "core/common_types.hpp"
-#include "core/config.hpp"
-#include "core/node_info.hpp"
-#include "core/output_file_registry.hpp"
-#include "core/trace_cache/metadata_registry.hpp"
-#include "core/trace_cache/rocpd_processor.hpp"
-#include "core/trace_cache/sample_type.hpp"
-#include "library/pmc/collectors/cpu/sample.hpp"
-#include "library/pmc/collectors/cpu/types.hpp"
-#include "library/pmc/collectors/gpu/sample.hpp"
-#include "library/pmc/collectors/gpu/types.hpp"
-#include "library/pmc/collectors/gpu_perf_counter/sample.hpp"
-#include "library/pmc/collectors/gpu_perf_counter/types.hpp"
-#include "library/pmc/collectors/nic/sample.hpp"
-#include "library/pmc/collectors/nic/types.hpp"
+// prepare_for_processing / finalize_processing of rocpd_processor_t against a StrictMock
+// profiler-hub writer.
+
 #include "library/thread_info.hpp"
+#include "rocpd_processor_mock_fixture.hpp"
 
-#include <profiler-hub/reader.hpp>
-#include <profiler-hub/reader_types.hpp>
-#include <profiler-hub/storage.hpp>
-#include <rocprofiler-sdk/callback_tracing.h>
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/version.h>
-
-#include <gtest/gtest.h>
-#include <timemory/settings/settings.hpp>
-
-#include <algorithm>
 #include <array>
-#include <cctype>
-#include <cstddef>
 #include <cstdint>
-#include <filesystem>
-#include <fstream>
-#include <functional>
-#include <ios>
-#include <iterator>
-#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <sys/types.h>
-#include <unistd.h>
-#include <unordered_map>
-#include <unordered_set>
-#include <utility>
-#include <vector>
-
-using rocprofsys::agent;
-using rocprofsys::agent_manager;
-using rocprofsys::agent_type;
-using rocprofsys::function_args_t;
-using rocprofsys::get_args_string;
-using rocprofsys::output_file_registry;
-using rocprofsys::trace_cache::ainic_pmc_sample;
-using rocprofsys::trace_cache::backtrace_region_sample;
-using rocprofsys::trace_cache::gpu_perf_counter_sample;
-using rocprofsys::trace_cache::in_time_sample;
-using rocprofsys::trace_cache::kernel_dispatch_sample;
-using rocprofsys::trace_cache::kfd_sample;
-using rocprofsys::trace_cache::memory_copy_sample;
-using rocprofsys::trace_cache::metadata_registry;
-using rocprofsys::trace_cache::pmc_event_with_sample;
-using rocprofsys::trace_cache::region_sample;
-using rocprofsys::trace_cache::rocpd_processor_t;
-using rocprofsys::trace_cache::scratch_memory_sample;
-using rocprofsys::trace_cache::info::gpu_perf_counter_name_entry;
-using rocprofsys::trace_cache::info::pmc;
-using rocprofsys::trace_cache::info::track;
-using cpu_pmc_sample = rocprofsys::pmc::collectors::cpu::sample;
-using gpu_pmc_sample = rocprofsys::pmc::collectors::gpu::sample;
-using gpu_perf_counter_value =
-    rocprofsys::pmc::collectors::gpu_perf_counter::counter_value;
-#if(ROCPROFILER_VERSION >= 600)
-using rocprofsys::trace_cache::memory_allocate_sample;
-#endif
-
-namespace rocprofsys::trace_cache::detail
-{
-void
-set_force_rocpd_metadata_registration_for_tests(bool enabled);
-}
-
-struct scoped_force_rocpd_metadata_registration
-{
-    scoped_force_rocpd_metadata_registration()
-    {
-        rocprofsys::trace_cache::detail::set_force_rocpd_metadata_registration_for_tests(
-            true);
-    }
-    ~scoped_force_rocpd_metadata_registration()
-    {
-        rocprofsys::trace_cache::detail::set_force_rocpd_metadata_registration_for_tests(
-            false);
-    }
-};
-
-struct scoped_restore_output_path
-{
-    explicit scoped_restore_output_path(std::string previous)
-    : m_previous{ std::move(previous) }
-    {}
-    ~scoped_restore_output_path() { tim::settings::output_path() = m_previous; }
-
-    std::string m_previous;
-};
 
 // rocprof-sys-unit-tests does not link library/thread_info.cpp (see
 // source/tests/CMakeLists.txt). post_process_metadata() calls thread_info::get when
@@ -137,48 +40,20 @@ thread_info::get_stop() const
 }
 }  // namespace rocprofsys
 
+namespace rocprofsys::trace_cache::test
+{
 namespace
 {
-// Unwrap std::optional for tests. Prefer this over ASSERT_TRUE(opt.has_value())
-// followed by *opt — clang-tidy's bugprone-unchecked-optional-access does not
-// treat GTest ASSERT macros as a proven guard.
-template <typename T>
-[[nodiscard]] T
-require_optional(std::optional<T> value, const char* message)
-{
-    if(!value.has_value())
-    {
-        throw std::runtime_error(message);
-    }
-    return *std::move(value);
-}
+
+using ::testing::A;
+using ::testing::Eq;
+using ::testing::Throw;
 
 struct nic_pmc_spec
 {
-    const char* name;
-    const char* units;
+    std::string_view name;
+    std::string_view units;
 };
-
-pmc
-make_nic_metadata_pmc(const nic_pmc_spec& spec)
-{
-    pmc row{};
-    row.type             = agent_type::nic;
-    row.agent_type_index = 0;
-    row.target_arch      = "NIC";
-    row.event_code       = 0;
-    row.instance_id      = 0;
-    row.name             = spec.name;
-    row.symbol           = spec.name;
-    row.description      = spec.name;
-    row.units            = spec.units;
-    row.value_type       = "ABS";
-    row.extdata          = "{}";
-    return row;
-}
-
-constexpr size_t k_nic_pmc_rx_ucast_bytes_idx = 4;
-constexpr size_t k_nic_pmc_tx_ucast_bytes_idx = 5;
 
 constexpr std::array k_nic_pmcs{
     nic_pmc_spec{ .name = "nic_rx_ucast_pkts", .units = "packets" },
@@ -193,196 +68,85 @@ constexpr std::array k_nic_pmcs{
     nic_pmc_spec{ .name = "nic_req_rx_impl_nak_seq_err", .units = "errors" },
 };
 
-template <typename PmcRow>
-void
-expect_nic_pmc_row(const PmcRow& pmc_row)
+MATCHER(IsExpectedNode, "node registered with the node_info id")
 {
-    EXPECT_EQ(pmc_row->target_arch, "NIC") << pmc_row->name;
-    ASSERT_NE(pmc_row->agent_info, nullptr) << pmc_row->name;
-    EXPECT_EQ(pmc_row->agent_info->agent_type, "NIC") << pmc_row->name;
+    return arg.node_id == node_id();
 }
 
-template <typename PmcList>
-void
-expect_nic_pmc_rows(const PmcList& pmc_infos)
+MATCHER(IsExpectedProcess, "process registered from metadata")
 {
-    for(const auto& pmc_row : pmc_infos)
-    {
-        expect_nic_pmc_row(pmc_row);
-    }
+    return arg.pid == static_cast<std::size_t>(k_pid) &&
+           arg.ppid == static_cast<std::size_t>(k_ppid) && arg.node_id == node_id() &&
+           arg.command == "test_binary" && arg.start == k_process_start &&
+           arg.end == k_process_end;
 }
 
-[[nodiscard]] const nic_pmc_spec*
-find_nic_pmc_spec(std::string_view name)
+struct expected_agent
 {
-    for(const auto& entry : k_nic_pmcs)
-    {
-        if(entry.name == name)
-        {
-            return &entry;
-        }
-    }
-    return nullptr;
-}
-
-template <typename PmcRow>
-void
-expect_nic_pmc_matches_catalog_entry(const PmcRow& pmc_row)
-{
-    expect_nic_pmc_row(pmc_row);
-    const nic_pmc_spec* spec = find_nic_pmc_spec(pmc_row->name);
-    ASSERT_NE(spec, nullptr) << pmc_row->name;
-    EXPECT_EQ(pmc_row->symbol, spec->name);
-    EXPECT_EQ(pmc_row->units, spec->units);
-}
-
-void
-expect_all_nic_pmc_names_present(const std::unordered_set<std::string>& seen)
-{
-    for(const auto& spec : k_nic_pmcs)
-    {
-        EXPECT_TRUE(seen.count(spec.name)) << "missing PMC " << spec.name;
-    }
-}
-
-template <typename PmcList>
-void
-expect_nic_pmc_catalog(const PmcList& pmc_infos)
-{
-    ASSERT_EQ(pmc_infos.size(), k_nic_pmcs.size());
-
-    std::unordered_set<std::string> seen;
-    for(const auto& pmc_row : pmc_infos)
-    {
-        expect_nic_pmc_matches_catalog_entry(pmc_row);
-        seen.insert(pmc_row->name);
-    }
-    expect_all_nic_pmc_names_present(seen);
-}
-
-struct named_pmc_expect
-{
-    const char* name;
-    const char* expected_arch;
-    const char* expected_agent_type;
-    const char* expected_symbol      = nullptr;
-    const char* expected_units       = nullptr;
-    const char* expected_description = nullptr;
+    std::string_view type;
+    std::size_t      absolute_index;
+    std::string_view name;
+    std::string_view model_name;
+    std::string_view vendor_name;
+    std::string_view product_name;
 };
 
-template <typename PmcRow>
-void
-expect_pmc_row_required_arch_fields(const PmcRow&           pmc_row,
-                                    const named_pmc_expect& expected)
+MATCHER_P(IsAgentInfo, expected, "agent registered with its unique id and names")
 {
-    EXPECT_EQ(pmc_row->target_arch, expected.expected_arch) << pmc_row->name;
-    ASSERT_NE(pmc_row->agent_info, nullptr) << pmc_row->name;
-    EXPECT_EQ(pmc_row->agent_info->agent_type, expected.expected_agent_type)
-        << pmc_row->name;
+    return arg.unique_id == make_uid(expected.type, 0) &&
+           arg.absolute_index == expected.absolute_index && arg.name == expected.name &&
+           arg.model_name == expected.model_name &&
+           arg.vendor_name == expected.vendor_name &&
+           arg.product_name == expected.product_name && arg.node_id == node_id() &&
+           arg.process_id == static_cast<std::size_t>(k_pid);
 }
 
-template <typename PmcRow>
-void
-expect_pmc_row_optional_fields(const PmcRow& pmc_row, const named_pmc_expect& expected)
+struct expected_pmc_info
 {
-    if(expected.expected_symbol != nullptr)
-    {
-        EXPECT_EQ(pmc_row->symbol, expected.expected_symbol) << pmc_row->name;
-    }
-    if(expected.expected_units != nullptr)
-    {
-        EXPECT_EQ(pmc_row->units, expected.expected_units) << pmc_row->name;
-    }
-    if(expected.expected_description != nullptr)
-    {
-        EXPECT_EQ(pmc_row->description, expected.expected_description) << pmc_row->name;
-    }
-}
-
-template <typename PmcRow>
-void
-expect_pmc_row_named_fields(const PmcRow& pmc_row, const named_pmc_expect& expected)
-{
-    expect_pmc_row_required_arch_fields(pmc_row, expected);
-    expect_pmc_row_optional_fields(pmc_row, expected);
-}
-
-template <typename PmcList>
-void
-expect_named_pmc_arch(const PmcList& pmc_infos, const named_pmc_expect& expected)
-{
-    bool found = false;
-    for(const auto& pmc_row : pmc_infos)
-    {
-        if(pmc_row->name != expected.name)
-        {
-            continue;
-        }
-        found = true;
-        expect_pmc_row_named_fields(pmc_row, expected);
-    }
-    EXPECT_TRUE(found) << "missing PMC " << expected.name;
-}
-
-struct agent_fields_expect
-{
-    const char* agent_type;
-    const char* name;
-    const char* model_name;
-    const char* vendor_name;
-    const char* product_name;
+    std::string_view                               name;
+    std::string_view                               target_arch;
+    std::optional<writer_types::agent_unique_id_t> agent_id;
+    std::string_view                               description;
+    std::string_view                               units;
 };
 
-struct agent_pmc_spec
+MATCHER_P(IsPmcInfo, expected, "pmc info registered with its agent")
 {
-    agent_type  type;
-    size_t      agent_type_index = 0;
-    const char* name;
-    const char* target_arch;
-    const char* description = nullptr;
-};
-}  // namespace
+    return arg.unique_id.name == expected.name &&
+           arg.unique_id.agent_id == expected.agent_id && arg.symbol == expected.name &&
+           arg.target_arch == expected.target_arch &&
+           arg.description == expected.description && arg.units == expected.units &&
+           arg.node_id == node_id() && arg.process_id == static_cast<std::size_t>(k_pid);
+}
 
-// ═══════════════════════════════════════════════════════════════════════════
-// rocpd_processor.cpp — integration: processor → flush → reader read-back
-//
-// Each TEST_F below is split into two parts:
-//   Prepare — build metadata, call rocpd_processor_t::handle(), finalize, open reader
-//   Validate — assert via profiler_hub::reader_t (no direct SQLite access)
-// ═══════════════════════════════════════════════════════════════════════════
+MATCHER_P(IsTrack, expected_name, "track registered for the process")
+{
+    return arg.name == expected_name && arg.node_id == node_id() &&
+           arg.process_id == static_cast<std::size_t>(k_pid);
+}
 
-class rocpd_write_read_test_interface : public ::testing::Test
+class rocpd_processor_metadata_test : public rocpd_processor_mock_test
 {
 protected:
-    static constexpr size_t k_node_id       = 1;
-    static constexpr size_t k_pid           = 200;
-    static constexpr size_t k_ppid          = 100;
-    static constexpr size_t k_thread_id     = 300;
-    static constexpr size_t k_queue_id      = 10;
-    static constexpr size_t k_stream_id     = 20;
-    static constexpr size_t k_process_start = 1000;
-    static constexpr size_t k_process_end   = 9000;
-
-    void SetUp() override
+    void expect_node_and_process_registered()
     {
-        m_temp_dir = std::filesystem::temp_directory_path() /
-                     ("rocpd_test_" + std::to_string(::getpid()) + "_" +
-                      std::to_string(m_test_counter++));
-        std::filesystem::create_directories(m_temp_dir);
+        EXPECT_CALL(*g_mock_profiler_hub_writer, register_node_info(IsExpectedNode()))
+            .Times(1);
+        EXPECT_CALL(*g_mock_profiler_hub_writer,
+                    register_process_info(IsExpectedProcess()))
+            .Times(1);
     }
 
-    void TearDown() override
+    void expect_sdk_name_strings_registered()
     {
-        m_reader.reset();
-        std::filesystem::remove_all(m_temp_dir);
+        EXPECT_CALL(*g_mock_profiler_hub_writer, register_string(A<std::string_view>()))
+            .Times(count_sdk_name_strings());
     }
 
-    static void add_process_scoped_track(
-        const std::shared_ptr<metadata_registry>& metadata, const std::string& track_name)
+    void expect_baseline_registered()
     {
-        metadata->add_track(track{ .track_name = track_name,
-                                   .thread_id  = std::nullopt,
-                                   .extdata    = std::string{} });
+        expect_node_and_process_registered();
+        expect_sdk_name_strings_registered();
     }
 
     static void seed_gpu_smi_pmc_row(const std::shared_ptr<metadata_registry>& metadata,
@@ -1051,7 +815,7 @@ protected:
 
         output_file_registry registry;
         rocpd_processor_t    processor{ metadata, mgr, static_cast<int>(k_pid),
-                                     static_cast<int>(k_ppid), registry };
+                                        static_cast<int>(k_ppid), registry };
 
         expect_throws_with_message<Exception>([&] { processor.prepare_for_processing(); },
                                               expected_substring);
@@ -1172,7 +936,7 @@ protected:
         rocprofiler_callback_tracing_code_object_load_data_t code_object{};
         code_object.code_object_id = code_object_id;
         code_object.uri            = k_uri.c_str();
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
         code_object.agent_id.handle = agent_handle;
 #else
         code_object.rocp_agent.handle = agent_handle;
@@ -1199,153 +963,153 @@ protected:
     static agent gpu_agent()
     {
         agent result{};
-        result.type              = agent_type::gpu;
+        result.type              = type;
         result.device_type_index = 0;
-        result.name              = "gfx90a";
-        result.model_name        = "MI210";
-        result.vendor_name       = "AMD";
-        result.product_name      = "Instinct MI210";
+        result.name              = name;
+        result.model_name        = model;
+        result.vendor_name       = vendor;
+        result.product_name      = product;
         return result;
     }
-
-    static agent cpu_agent()
-    {
-        agent result{};
-        result.type              = agent_type::cpu;
-        result.device_type_index = 0;
-        result.name              = "CPU0";
-        result.model_name        = "EPYC";
-        result.vendor_name       = "AMD";
-        result.product_name      = "EPYC 7763";
-        return result;
-    }
-
-    static agent nic_agent()
-    {
-        agent result{};
-        result.type              = agent_type::nic;
-        result.device_type_index = 0;
-        result.name              = "NIC0";
-        result.model_name        = "CX7";
-        result.vendor_name       = "AI NIC";
-        result.product_name      = "AI NIC";
-        return result;
-    }
-
-    std::filesystem::path                   m_temp_dir;
-    std::string                             m_db_path;
-    std::string                             m_uuid;
-    std::unique_ptr<profiler_hub::reader_t> m_reader;
-
-    static int m_test_counter;
 };
 
-int rocpd_write_read_test_interface::m_test_counter = 0;
-
-TEST_F(rocpd_write_read_test_interface, agents_round_trip_all_types)
+TEST_F(rocpd_processor_metadata_test, finalize_processing_flushes_writer_exactly_once)
 {
-    // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
-    run_processor_and_open_reader({ gpu_agent(), cpu_agent(), nic_agent() });
-    // Validate: profiler_hub::reader_t read-back matches inserted values.
-    ASSERT_EQ(m_reader->get_all_agents().size(), 3U);
-    expect_readback_agent_fields({ .agent_type   = "GPU",
-                                   .name         = "gfx90a",
-                                   .model_name   = "MI210",
-                                   .vendor_name  = "AMD",
-                                   .product_name = "Instinct MI210" });
-    expect_readback_agent_fields({ .agent_type   = "CPU",
-                                   .name         = "CPU0",
-                                   .model_name   = "EPYC",
-                                   .vendor_name  = "AMD",
-                                   .product_name = "EPYC 7763" });
-    expect_readback_agent_fields({ .agent_type   = "NIC",
-                                   .name         = "NIC0",
-                                   .model_name   = "CX7",
-                                   .vendor_name  = "AI NIC",
-                                   .product_name = "AI NIC" });
+    EXPECT_CALL(*g_mock_profiler_hub_writer, flush_in_memory_data_to_disk()).Times(1);
+
+    make_processor()->finalize_processing();
 }
 
-TEST_F(rocpd_write_read_test_interface, handle_ainic_pmc_sample_pathway)
+TEST_F(rocpd_processor_metadata_test, prepare_registers_gpu_cpu_and_nic_agents_in_order)
 {
-    // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
-    static constexpr double k_rx_ucast_bytes   = 1048576.0;
-    static constexpr double k_tx_ucast_bytes   = 524288.0;
-    static constexpr size_t k_sample_timestamp = 12000;
+    add_agent(make_agent(agent_type::gpu, "gfx90a", "MI210", "AMD", "Instinct MI210"));
+    add_agent(make_agent(agent_type::cpu, "CPU0", "EPYC", "AMD", "EPYC 7763"));
+    add_agent(make_agent(agent_type::nic, "NIC0", "CX7", "AI NIC", "AI NIC"));
 
-    run_processor_and_open_reader(
-        { nic_agent() },
-        [](const std::shared_ptr<metadata_registry>& metadata) {
-            metadata->add_pmc_info(
-                make_nic_metadata_pmc(k_nic_pmcs[k_nic_pmc_rx_ucast_bytes_idx]));
-            metadata->add_pmc_info(
-                make_nic_metadata_pmc(k_nic_pmcs[k_nic_pmc_tx_ucast_bytes_idx]));
-            add_process_scoped_track(metadata, "ainic_rx_rdma_ucast_bytes");
-            add_process_scoped_track(metadata, "ainic_tx_rdma_ucast_bytes");
-        },
-        [](rocpd_processor_t& processor) {
-            rocprofsys::pmc::collectors::nic::enabled_metrics enabled{};
-            enabled.bits.rx_rdma_ucast_bytes = 1;
-            enabled.bits.tx_rdma_ucast_bytes = 1;
-            rocprofsys::pmc::collectors::nic::metrics metrics{};
-            metrics.rx_rdma_ucast_bytes = static_cast<std::uint64_t>(k_rx_ucast_bytes);
-            metrics.tx_rdma_ucast_bytes = static_cast<std::uint64_t>(k_tx_ucast_bytes);
-            const ainic_pmc_sample sample{ enabled, 0, "NIC0", k_sample_timestamp,
-                                           metrics };
-            processor.handle(sample);
-        });
+    expect_baseline_registered();
+    EXPECT_CALL(*g_mock_profiler_hub_writer,
+                register_agent_info(IsAgentInfo(expected_agent{
+                    "GPU", 0, "gfx90a", "MI210", "AMD", "Instinct MI210" })))
+        .Times(1);
+    EXPECT_CALL(*g_mock_profiler_hub_writer,
+                register_agent_info(IsAgentInfo(
+                    expected_agent{ "CPU", 1, "CPU0", "EPYC", "AMD", "EPYC 7763" })))
+        .Times(1);
+    EXPECT_CALL(*g_mock_profiler_hub_writer,
+                register_agent_info(IsAgentInfo(
+                    expected_agent{ "NIC", 2, "NIC0", "CX7", "AI NIC", "AI NIC" })))
+        .Times(1);
 
-    // Validate: profiler_hub::reader_t read-back matches inserted values.
-    ASSERT_EQ(m_reader->get_all_agents().size(), 1U);
-    expect_readback_agent_fields({ .agent_type   = "NIC",
-                                   .name         = "NIC0",
-                                   .model_name   = "CX7",
-                                   .vendor_name  = "AI NIC",
-                                   .product_name = "AI NIC" });
-
-    const auto pmc_infos = m_reader->get_all_pmc_info();
-    ASSERT_EQ(pmc_infos.size(), 2U);
-    expect_named_pmc_arch(
-        pmc_infos, { .name                = "nic_rx_ucast_bytes",
-                     .expected_arch       = "NIC",
-                     .expected_agent_type = "NIC",
-                     .expected_symbol     = "nic_rx_ucast_bytes",
-                     .expected_units = k_nic_pmcs[k_nic_pmc_rx_ucast_bytes_idx].units });
-    expect_named_pmc_arch(
-        pmc_infos, { .name                = "nic_tx_ucast_bytes",
-                     .expected_arch       = "NIC",
-                     .expected_agent_type = "NIC",
-                     .expected_symbol     = "nic_tx_ucast_bytes",
-                     .expected_units = k_nic_pmcs[k_nic_pmc_tx_ucast_bytes_idx].units });
-
-    expect_reader_has_tracks(
-        { "ainic_rx_rdma_ucast_bytes", "ainic_tx_rdma_ucast_bytes" });
+    make_processor()->prepare_for_processing();
 }
 
-// Mirrors tests/rocpd-validation-rules/ainic/ainic-rdma-rules.json: every
-// cache_policy.hpp NIC PMC name is registered with target_arch NIC.
-TEST_F(rocpd_write_read_test_interface, nic_rdma_pmc_catalog_target_arch)
+TEST_F(rocpd_processor_metadata_test, prepare_registers_thread_queue_stream_and_tracks)
 {
-    // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
-    run_processor_and_open_reader({ nic_agent() },
-                                  [](const std::shared_ptr<metadata_registry>& metadata) {
-                                      seed_nic_pmc_catalog(metadata);
-                                  });
-    // Validate: profiler_hub::reader_t read-back matches inserted values.
-    expect_nic_pmc_catalog(m_reader->get_all_pmc_info());
+    info::thread thread{};
+    thread.parent_process_id = k_ppid;
+    thread.process_id        = k_pid;
+    thread.thread_id         = k_thread_id;
+    thread.start             = k_process_start;
+    thread.end               = k_process_end;
+    m_metadata->add_thread_info(thread);
+    m_metadata->add_queue(k_queue_id);
+    m_metadata->add_stream(k_stream_id);
+    m_metadata->add_track(info::track{
+        .track_name = "Sampling [CPU 0]", .thread_id = k_thread_id, .extdata = {} });
+    m_metadata->add_track(info::track{
+        .track_name = "process_track", .thread_id = std::nullopt, .extdata = {} });
+
+    expect_baseline_registered();
+    EXPECT_CALL(
+        *g_mock_profiler_hub_writer,
+        register_thread_info(::testing::AllOf(
+            ::testing::Field(&writer_types::thread_info_t::thread_id, Eq(k_thread_id)),
+            ::testing::Field(&writer_types::thread_info_t::parent_process_id,
+                             Eq(static_cast<std::size_t>(k_ppid))),
+            ::testing::Field(&writer_types::thread_info_t::name,
+                             Eq(std::optional<std::string_view>{ "Thread 300" })),
+            ::testing::Field(&writer_types::thread_info_t::start, Eq(k_process_start)),
+            ::testing::Field(&writer_types::thread_info_t::end, Eq(k_process_end)),
+            ::testing::Field(&writer_types::thread_info_t::node_id, Eq(node_id())),
+            ::testing::Field(&writer_types::thread_info_t::process_id,
+                             Eq(static_cast<std::size_t>(k_pid))))))
+        .Times(1);
+    EXPECT_CALL(
+        *g_mock_profiler_hub_writer,
+        register_queue_info(::testing::AllOf(
+            ::testing::Field(&writer_types::queue_info_t::queue_id, Eq(k_queue_id)),
+            ::testing::Field(&writer_types::queue_info_t::name,
+                             Eq(std::optional<std::string_view>{ "Queue 10" })),
+            ::testing::Field(&writer_types::queue_info_t::node_id, Eq(node_id())),
+            ::testing::Field(&writer_types::queue_info_t::process_id,
+                             Eq(static_cast<std::size_t>(k_pid))))))
+        .Times(1);
+    EXPECT_CALL(
+        *g_mock_profiler_hub_writer,
+        register_stream_info(::testing::AllOf(
+            ::testing::Field(&writer_types::stream_info_t::stream_id, Eq(k_stream_id)),
+            ::testing::Field(&writer_types::stream_info_t::name,
+                             Eq(std::optional<std::string_view>{ "Stream 20" })),
+            ::testing::Field(&writer_types::stream_info_t::node_id, Eq(node_id())),
+            ::testing::Field(&writer_types::stream_info_t::process_id,
+                             Eq(static_cast<std::size_t>(k_pid))))))
+        .Times(1);
+    EXPECT_CALL(*g_mock_profiler_hub_writer,
+                register_track_info(IsTrack(std::string_view{ "Sampling [CPU 0]" })))
+        .Times(1);
+    EXPECT_CALL(*g_mock_profiler_hub_writer,
+                register_track_info(IsTrack(std::string_view{ "process_track" })))
+        .Times(1);
+
+    make_processor()->prepare_for_processing();
 }
 
-TEST_F(rocpd_write_read_test_interface, nic_pmc_info_invalid_target_arch_rejected)
+TEST_F(rocpd_processor_metadata_test, prepare_registers_code_object_and_kernel_symbol)
 {
-    auto metadata       = make_seeded_metadata({});
-    auto bad_pmc        = make_nic_metadata_pmc(k_nic_pmcs[0]);
-    bad_pmc.target_arch = "AINIC";
-    metadata->add_pmc_info(bad_pmc);
+    add_agent(agent_type::gpu, 0, k_gpu_handle);
+    seed_kernel_symbol(9, "my_test_kernel");
 
-    expect_prepare_for_processing_throws<std::invalid_argument>(
-        metadata, { nic_agent() }, "Invalid PMC target_arch: AINIC");
+    expect_baseline_registered();
+    EXPECT_CALL(*g_mock_profiler_hub_writer,
+                register_agent_info(::testing::Field(
+                    &writer_types::agent_info_t::unique_id, Eq(make_uid("GPU", 0)))))
+        .Times(1);
+    EXPECT_CALL(*g_mock_profiler_hub_writer, register_string(Eq("my_test_kernel")))
+        .Times(1);
+    EXPECT_CALL(
+        *g_mock_profiler_hub_writer,
+        register_code_object_info(::testing::AllOf(
+            ::testing::Field(&writer_types::code_object_info_t::id, Eq(1U)),
+            ::testing::Field(
+                &writer_types::code_object_info_t::uri,
+                Eq(std::optional<std::string_view>{ "file:///test_code_object.co" })),
+            ::testing::Field(&writer_types::code_object_info_t::storage_type,
+                             Eq(std::optional<std::string_view>{ "MEMORY" })),
+            ::testing::Field(
+                &writer_types::code_object_info_t::agent_id,
+                Eq(std::optional<writer_types::agent_unique_id_t>{ make_uid("GPU", 0) })),
+            ::testing::Field(&writer_types::code_object_info_t::node_id, Eq(node_id())),
+            ::testing::Field(&writer_types::code_object_info_t::process_id,
+                             Eq(static_cast<std::size_t>(k_pid))))))
+        .Times(1);
+    EXPECT_CALL(
+        *g_mock_profiler_hub_writer,
+        register_kernel_symbol_info(::testing::AllOf(
+            ::testing::Field(&writer_types::kernel_symbol_info_t::id, Eq(9U)),
+            ::testing::Field(&writer_types::kernel_symbol_info_t::name,
+                             Eq(std::optional<std::string_view>{ "my_test_kernel" })),
+            ::testing::Field(&writer_types::kernel_symbol_info_t::display_name,
+                             Eq(std::optional<std::string_view>{ "my_test_kernel" })),
+            ::testing::Field(&writer_types::kernel_symbol_info_t::code_obj_id, Eq(1U)),
+            ::testing::Field(&writer_types::kernel_symbol_info_t::node_id, Eq(node_id())),
+            ::testing::Field(&writer_types::kernel_symbol_info_t::process_id,
+                             Eq(static_cast<std::size_t>(k_pid))))))
+        .Times(1);
+
+    make_processor()->prepare_for_processing();
 }
 
-TEST_F(rocpd_write_read_test_interface, prepare_with_empty_metadata_string_throws)
+TEST_F(rocpd_processor_metadata_test, prepare_registers_every_nic_pmc_on_the_nic_agent)
 {
     auto metadata = make_seeded_metadata({});
     metadata->add_string("");
@@ -1863,7 +1627,7 @@ TEST_F(rocpd_write_read_test_interface, handle_scratch_memory_pathway)
 TEST_F(rocpd_write_read_test_interface, handle_memory_allocate_pathway)
 {
     // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
-#if(ROCPROFILER_VERSION < 600)
+#if (ROCPROFILER_VERSION < 600)
     GTEST_SKIP() << "memory_allocate_sample requires ROCPROFILER_VERSION >= 600";
 #else
     static constexpr std::uint64_t k_start_ts   = 7000;
@@ -2351,18 +2115,18 @@ TEST_F(rocpd_write_read_test_interface, handle_kfd_sample_unknown_agent_throws)
         [](rocpd_processor_t& processor) {
             constexpr std::uint32_t k_unknown_device_id = 999;
             const kfd_sample        sample{ k_thread_id,
-                                     "KFD_PAGE_FAULT",
-                                     14000,
-                                     14500,
-                                     "",
-                                     "kfd",
-                                     "KFD Events [GPU 0]",
-                                     "{}",
-                                     k_unknown_device_id,
-                                     static_cast<std::uint8_t>(agent_type::gpu),
-                                     "kfd_page_fault",
-                                     1.0,
-                                     static_cast<std::int64_t>(k_thread_id) };
+                                            "KFD_PAGE_FAULT",
+                                            14000,
+                                            14500,
+                                            "",
+                                            "kfd",
+                                            "KFD Events [GPU 0]",
+                                            "{}",
+                                            k_unknown_device_id,
+                                            static_cast<std::uint8_t>(agent_type::gpu),
+                                            "kfd_page_fault",
+                                            1.0,
+                                            static_cast<std::int64_t>(k_thread_id) };
             expect_throws_with_message<std::out_of_range>(
                 [&] { processor.handle(sample); }, "Agent not found for type index");
         });
@@ -2516,87 +2280,109 @@ expect_multi_db_hip_region(profiler_hub::reader_t&                             r
                                          "region detail not readable");
     if(detail.name != "hipLaunchKernel")
     {
-        return;
+        add_pmc(agent_type::nic, spec.name, "NIC", {}, spec.units);
     }
-    saw.hip_region = true;
-    EXPECT_EQ(detail.start_timestamp, timestamps.hip_start_ts);
-    EXPECT_EQ(detail.end_timestamp, timestamps.hip_end_ts);
-    ASSERT_NE(detail.event, nullptr);
-    EXPECT_EQ(detail.event->event_category, "HIP_API");
-}
 
-void
-expect_multi_db_bt_region(profiler_hub::reader_t&                             reader,
-                          const profiler_hub::reader_types::timeline_event_t& tl_event,
-                          const multi_event_timestamps&                       timestamps,
-                          multi_event_saw_flags&                              saw)
-{
-    const auto detail = require_optional(reader.get_region_details(tl_event),
-                                         "region detail not readable");
-    if(detail.name != "bt_func")
+    expect_baseline_registered();
+    EXPECT_CALL(*g_mock_profiler_hub_writer,
+                register_agent_info(::testing::Field(
+                    &writer_types::agent_info_t::unique_id, Eq(make_uid("NIC", 0)))))
+        .Times(1);
+    for(const auto& spec : k_nic_pmcs)
     {
-        return;
+        EXPECT_CALL(*g_mock_profiler_hub_writer,
+                    register_pmc_info(IsPmcInfo(expected_pmc_info{
+                        spec.name, "NIC", make_uid("NIC", 0), spec.name, spec.units })))
+            .Times(1);
     }
-    saw.bt_region = true;
-    EXPECT_EQ(detail.start_timestamp, timestamps.bt_start_ts);
-    EXPECT_EQ(detail.end_timestamp, timestamps.bt_end_ts);
+
+    make_processor()->prepare_for_processing();
 }
 
-void
-expect_multi_db_region_details(
-    profiler_hub::reader_t&                             reader,
-    const profiler_hub::reader_types::timeline_event_t& tl_event,
-    const multi_event_timestamps& timestamps, multi_event_saw_flags& saw)
+TEST_F(rocpd_processor_metadata_test, prepare_keeps_distinct_target_arch_per_agent_type)
 {
-    expect_multi_db_hip_region(reader, tl_event, timestamps, saw);
-    expect_multi_db_bt_region(reader, tl_event, timestamps, saw);
+    add_agent(agent_type::gpu, 0, k_gpu_handle);
+    add_agent(agent_type::nic, 0, 0);
+    add_pmc(agent_type::gpu, "gfx_busy", "GPU");
+    add_pmc(agent_type::nic, "nic_rx_ucast_bytes", "NIC", {}, "bytes");
+
+    expect_baseline_registered();
+    EXPECT_CALL(*g_mock_profiler_hub_writer,
+                register_agent_info(::testing::Field(
+                    &writer_types::agent_info_t::unique_id, Eq(make_uid("GPU", 0)))))
+        .Times(1);
+    EXPECT_CALL(*g_mock_profiler_hub_writer,
+                register_agent_info(::testing::Field(
+                    &writer_types::agent_info_t::unique_id, Eq(make_uid("NIC", 0)))))
+        .Times(1);
+    EXPECT_CALL(*g_mock_profiler_hub_writer,
+                register_pmc_info(IsPmcInfo(expected_pmc_info{
+                    "gfx_busy", "GPU", make_uid("GPU", 0), "gfx_busy", "" })))
+        .Times(1);
+    EXPECT_CALL(*g_mock_profiler_hub_writer,
+                register_pmc_info(IsPmcInfo(
+                    expected_pmc_info{ "nic_rx_ucast_bytes", "NIC", make_uid("NIC", 0),
+                                       "nic_rx_ucast_bytes", "bytes" })))
+        .Times(1);
+
+    make_processor()->prepare_for_processing();
 }
 
-void
-expect_multi_db_kernel_details(
-    profiler_hub::reader_t&                             reader,
-    const profiler_hub::reader_types::timeline_event_t& tl_event,
-    const multi_event_timestamps& timestamps, multi_event_saw_flags& saw)
+TEST_F(rocpd_processor_metadata_test,
+       prepare_registers_pmc_without_agent_when_lookup_fails)
 {
-    saw.kernel        = true;
-    const auto detail = require_optional(reader.get_kernel_dispatch_details(tl_event),
-                                         "kernel dispatch detail not readable");
-    EXPECT_EQ(detail.name, "test_kernel");
-    EXPECT_EQ(detail.start_timestamp, timestamps.kd_start_ts);
-    EXPECT_EQ(detail.end_timestamp, timestamps.kd_end_ts);
-    EXPECT_EQ(detail.workgroup_size_x, timestamps.wg_size_x);
-    EXPECT_EQ(detail.grid_size_x, timestamps.grid_size_x);
+    constexpr std::size_t k_unregistered_agent_index = 999;
+    add_agent(agent_type::gpu, 0, k_gpu_handle);
+    add_pmc(agent_type::gpu, "my_track", "GPU", "IN_TIME", {},
+            k_unregistered_agent_index);
+
+    expect_baseline_registered();
+    EXPECT_CALL(*g_mock_profiler_hub_writer,
+                register_agent_info(::testing::Field(
+                    &writer_types::agent_info_t::unique_id, Eq(make_uid("GPU", 0)))))
+        .Times(1);
+    EXPECT_CALL(*g_mock_profiler_hub_writer,
+                register_pmc_info(IsPmcInfo(
+                    expected_pmc_info{ "my_track", "GPU", std::nullopt, "IN_TIME", "" })))
+        .Times(1);
+
+    make_processor()->prepare_for_processing();
 }
 
-void
-expect_multi_db_memory_copy_details(
-    profiler_hub::reader_t&                             reader,
-    const profiler_hub::reader_types::timeline_event_t& tl_event,
-    const multi_event_timestamps& timestamps, multi_event_saw_flags& saw)
+TEST_F(rocpd_processor_metadata_test, prepare_propagates_writer_rejecting_a_pmc_info)
 {
-    saw.memory_copy   = true;
-    const auto detail = require_optional(reader.get_memory_copy_details(tl_event),
-                                         "memory_copy detail not readable");
-    EXPECT_EQ(detail.size, timestamps.mc_size);
-    EXPECT_EQ(detail.start_timestamp, timestamps.mc_start_ts);
-    EXPECT_EQ(detail.end_timestamp, timestamps.mc_end_ts);
-    EXPECT_EQ(detail.name, "MEMORY_COPY_HOST_TO_DEVICE");
+    add_agent(agent_type::nic, 0, 0);
+    add_pmc(agent_type::nic, "nic_rx_ucast_bytes", "AINIC", {}, "bytes");
+
+    expect_baseline_registered();
+    EXPECT_CALL(*g_mock_profiler_hub_writer,
+                register_agent_info(::testing::Field(
+                    &writer_types::agent_info_t::unique_id, Eq(make_uid("NIC", 0)))))
+        .Times(1);
+    EXPECT_CALL(*g_mock_profiler_hub_writer,
+                register_pmc_info(
+                    ::testing::Field(&writer_types::pmc_info_t::target_arch,
+                                     Eq(std::optional<std::string_view>{ "AINIC" }))))
+        .WillOnce(Throw(std::invalid_argument{ "Invalid PMC target_arch: AINIC" }));
+
+    auto processor = make_processor();
+    EXPECT_THAT([&] { processor->prepare_for_processing(); },
+                ::testing::ThrowsMessage<std::invalid_argument>(
+                    ::testing::HasSubstr("Invalid PMC target_arch: AINIC")));
 }
 
-void
-expect_multi_db_scratch_details(
-    profiler_hub::reader_t&                             reader,
-    const profiler_hub::reader_types::timeline_event_t& tl_event,
-    const multi_event_timestamps& timestamps, multi_event_saw_flags& saw)
+TEST_F(rocpd_processor_metadata_test, prepare_propagates_writer_rejecting_an_empty_string)
 {
-    saw.scratch_alloc = true;
-    const auto detail = require_optional(reader.get_memory_alloc_details(tl_event),
-                                         "memory_allocate detail not readable");
-    EXPECT_EQ(detail.size, timestamps.sms_size);
-    EXPECT_EQ(detail.type, "ALLOC");
-    EXPECT_EQ(detail.level, "SCRATCH");
-    EXPECT_EQ(detail.start_timestamp, timestamps.sms_start_ts);
-    EXPECT_EQ(detail.end_timestamp, timestamps.sms_end_ts);
+    m_metadata->add_string("");
+
+    expect_node_and_process_registered();
+    EXPECT_CALL(*g_mock_profiler_hub_writer, register_string(Eq("")))
+        .WillOnce(Throw(std::runtime_error{ "Trying to register empty string" }));
+
+    auto processor = make_processor();
+    EXPECT_THAT([&] { processor->prepare_for_processing(); },
+                ::testing::ThrowsMessage<std::runtime_error>(
+                    ::testing::HasSubstr("Trying to register empty string")));
 }
 
 void

@@ -9,6 +9,7 @@
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/perfetto_processor.hpp"
+#include "core/trace_cache/profiler_hub_writer.hpp"
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 #include "core/trace_cache/storage_parser_alias.hpp"
@@ -67,9 +68,10 @@ configure_processors(
     data::processor_storage_t storage;
     if(_formats.is_rocpd_enabled())
     {
-        storage.rocpd_processor = std::make_shared<rocpd_processor_t>(
-            _config->_metadata_registry, _config->_agent_manager, _config->_pid,
-            _config->_ppid, _registry);
+        storage.rocpd_processor =
+            std::make_shared<rocpd_processor_t<profiler_hub_writer>>(
+                _config->_metadata_registry, _config->_agent_manager, _config->_pid,
+                _config->_ppid, _registry);
         _coordinator->add_handler(storage.rocpd_processor);
     }
     if(_formats.is_perfetto_enabled() && _engine.has_value() && _tracks.has_value())
