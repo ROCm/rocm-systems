@@ -5,29 +5,27 @@
 
 """Generate metric health HTML report from rocprof-compute analyze logs.
 
-Analyze logs must be produced with ``--view table`` so chart-only panels (roofline,
+Analyze logs must be produced with `--view table` so chart-only panels (roofline,
 memory charts, etc.) are emitted as plain metric tables. Default TTY output omits
 metrics and yields incomplete coverage.
 
 Primary statistic is **Median** (not Avg):
 
-* Prefer the Median column when present in ``--view table`` output.
-* Else recompute Median from per-dispatch data via ``--workload-dir`` (same
-  ``MEDIAN(<min-inner>)`` path as ``tools/compare_spp_legacy_medians.py``).
+* Prefer the Median column when present in `--view table` output.
+* Else recompute Median from per-dispatch data via `--workload-dir` (same
+  `MEDIAN(<min-inner>)` path as `tools/compare_spp_legacy_medians.py`).
 * Else, if Min==Max, treat that value as the Median.
 * Value-only panels (no Avg/Min/Max/Median) use the single Value column.
 
-Workloads are passed as ``name:path`` pairs. Optional ``--baseline`` logs enable
+Workloads are passed as `name:path` pairs. Optional `--baseline` logs enable
 SPP-vs-legacy overflow improvements and value-delta tables.
 
-Arch → analysis_configs mapping (``--arch``):
+Arch → analysis_configs mapping (`--arch`):
 
 * gfx942 / gfx950 / gfx90a / gfx908 → same-named config dir
-* gfx1150 / gfx1151 / gfx1152 / gfx1153 → ``gfx115x``
-* gfx1250 → ``gfx1250``
+* gfx1150 / gfx1151 / gfx1152 / gfx1153 → `gfx115x`
+* gfx1250 → `gfx1250`
 """
-
-from __future__ import annotations
 
 import argparse
 import html
@@ -37,6 +35,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+from typing import Dict, List, Optional, Set, Tuple
 
 import yaml
 
@@ -44,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 
 # CLI arch → analysis_configs/<dir>
-ARCH_CONFIG_DIR: dict[str, str] = {
+ARCH_CONFIG_DIR: Dict[str, str] = {
     "gfx908": "gfx908",
     "gfx90a": "gfx90a",
     "gfx940": "gfx940",
@@ -59,7 +58,7 @@ ARCH_CONFIG_DIR: dict[str, str] = {
     "gfx1250": "gfx1250",
 }
 
-ARCH_TITLE: dict[str, str] = {
+ARCH_TITLE: Dict[str, str] = {
     "gfx908": "MI100 / gfx908",
     "gfx90a": "MI250 / gfx90a",
     "gfx942": "MI300 / gfx942",
@@ -101,14 +100,14 @@ COUNTER_SEMANTIC_OVERFLOW_NAMES = frozenset({
     "SPI Utilization",
 })
 
-ZERO_SUB_BUCKETS: tuple[str, ...] = (
+ZERO_SUB_BUCKETS: Tuple[str, ...] = (
     "zero_healthy",
     "zero_optional",
     "zero_sdk_bug",
     "zero_other",
 )
 
-HEALTHY_ZERO_NAME_FRAGMENTS: tuple[str, ...] = (
+HEALTHY_ZERO_NAME_FRAGMENTS: Tuple[str, ...] = (
     "Alloc Failure",
     "FIFO Full",
     "Context Save",
@@ -125,7 +124,7 @@ HEALTHY_ZERO_NAME_FRAGMENTS: tuple[str, ...] = (
     "Stall Rate",
 )
 
-OPTIONAL_ZERO_NAME_FRAGMENTS: tuple[str, ...] = (
+OPTIONAL_ZERO_NAME_FRAGMENTS: Tuple[str, ...] = (
     "FP64",
     "FP8",
     "FP6",
@@ -136,7 +135,7 @@ OPTIONAL_ZERO_NAME_FRAGMENTS: tuple[str, ...] = (
     "Double Precision",
 )
 
-SDK_BUG_ZERO_NAME_FRAGMENTS: tuple[str, ...] = (
+SDK_BUG_ZERO_NAME_FRAGMENTS: Tuple[str, ...] = (
     "VALU FLOPs",
     "VALU IOPs",
     "VALU Trans FLOPs",
@@ -147,14 +146,14 @@ SDK_BUG_ZERO_NAME_FRAGMENTS: tuple[str, ...] = (
     "Buffer Atomics Instructions",
 )
 
-ZERO_BUCKET_LABELS: dict[str, str] = {
+ZERO_BUCKET_LABELS: Dict[str, str] = {
     "zero_healthy": "Healthy zero (0% stall/failure)",
     "zero_optional": "Optional path (not exercised)",
     "zero_sdk_bug": "SDK / counter bug suspect",
     "zero_other": "Other all-workload zero",
 }
 
-ZERO_BUCKET_CARD_STYLES: dict[str, tuple[str, str]] = {
+ZERO_BUCKET_CARD_STYLES: Dict[str, Tuple[str, str]] = {
     "zero_healthy": ("#e8f5e9", "#2e7d32"),
     "zero_optional": ("#e3f2fd", "#1565c0"),
     "zero_sdk_bug": ("#ffcdd2", "#c62828"),
@@ -176,26 +175,26 @@ class MetricDef:
 class MetricValue:
     """Primary health value is Median (never Avg)."""
 
-    value: float | None
+    value: Optional[float]
     raw: str
     source: str = ""  # median | recomputed | minmax_eq | value
-    min_v: float | None = None
-    max_v: float | None = None
+    min_v: Optional[float] = None
+    max_v: Optional[float] = None
     cls: str = ""
 
 
 @dataclass
 class ParsedLog:
-    metrics: dict[str, MetricValue] = field(default_factory=dict)
-    suppressed: list[str] = field(default_factory=list)
-    dispatch_count: int | None = None
+    metrics: Dict[str, MetricValue] = field(default_factory=dict)
+    suppressed: List[str] = field(default_factory=list)
+    dispatch_count: Optional[int] = None
 
 
 def strip_ansi(text: str) -> str:
     return ANSI.sub("", text)
 
 
-def to_float(value: str) -> float | None:
+def to_float(value: str) -> Optional[float]:
     cleaned = value.strip().replace(",", "")
     if not cleaned or cleaned.upper() in {"N/A", "NAN", "-", ""}:
         return None
@@ -205,7 +204,7 @@ def to_float(value: str) -> float | None:
         return None
 
 
-def relative_abs_delta(old: float, new: float) -> float | None:
+def relative_abs_delta(old: float, new: float) -> Optional[float]:
     """Return |new-old|/|old|, or None when the baseline is ~0 (undefined).
 
     Health deltas compare Median values. A near-zero baseline must not be
@@ -236,14 +235,14 @@ def classify_all_workload_zero(name: str, formula: str) -> str:
     return "zero_other"
 
 
-def _header_col_index(cols: list[str], name: str) -> int | None:
+def _header_col_index(cols: List[str], name: str) -> Optional[int]:
     for i, col in enumerate(cols):
         if col == name:
             return i
     return None
 
 
-def _cell_at(cols: list[str], header_idx: int | None) -> tuple[str, float | None]:
+def _cell_at(cols: List[str], header_idx: Optional[int]) -> Tuple[str, Optional[float]]:
     if header_idx is None:
         return "", None
     data_idx = max(0, header_idx - 2)
@@ -257,15 +256,15 @@ def parse_log(path: Path) -> ParsedLog:
     """Parse analyze --view table log; prefer Median over Value-only panels.
 
     Avg is never used as the primary value. Avg-only / Avg-Min-Max rows are
-    kept with ``value=None`` until Median recompute or Min==Max fill.
+    kept with `value=None` until Median recompute or Min==Max fill.
     """
-    text = strip_ansi(path.read_text(errors="replace"))
+    text = strip_ansi(path.read_text(encoding="utf-8", errors="replace"))
     result = ParsedLog()
-    median_col: int | None = None
-    min_col: int | None = None
-    max_col: int | None = None
-    value_col: int | None = None
-    avg_col: int | None = None
+    median_col: Optional[int] = None
+    min_col: Optional[int] = None
+    max_col: Optional[int] = None
+    value_col: Optional[int] = None
+    avg_col: Optional[int] = None
     in_metric_table = False
     in_top_kernels = False
 
@@ -323,7 +322,7 @@ def parse_log(path: Path) -> ParsedLog:
         raw_val, val_v = _cell_at(cols, value_col)
         raw_avg, avg_v = _cell_at(cols, avg_col)
 
-        value: float | None = None
+        value: Optional[float] = None
         raw = ""
         source = ""
         if med_v is not None:
@@ -396,13 +395,13 @@ def _load_median_helpers():  # noqa: ANN202
 
 
 def apply_recomputed_medians(
-    parsed: dict[str, ParsedLog],
-    workload_dirs: dict[str, Path],
+    parsed: Dict[str, ParsedLog],
+    workload_dirs: Dict[str, Path],
 ) -> None:
     """Fill missing Medians from per-dispatch re-eval when dirs are provided.
 
-    ``workload_dirs`` keys are ``{name}_spp`` / ``{name}_legacy`` or plain
-    ``name`` (applied to the matching parsed SPP log only).
+    `workload_dirs` keys are `{name}_spp` / `{name}_legacy` or plain
+    `name` (applied to the matching parsed SPP log only).
     """
     if not workload_dirs:
         return
@@ -412,7 +411,10 @@ def apply_recomputed_medians(
     for dir_key, wl_dir in workload_dirs.items():
         if dir_key.endswith("_legacy"):
             continue  # baseline filled separately in build_report
-        wl_name = dir_key.removesuffix("_spp")
+        if dir_key.endswith("_spp"):
+            wl_name = dir_key[: -len("_spp")]
+        else:
+            wl_name = dir_key
         log = parsed.get(wl_name)
         if log is None:
             continue
@@ -449,8 +451,8 @@ def apply_recomputed_medians(
 
 
 def apply_recomputed_medians_for_map(
-    metrics_by_wl: dict[str, dict[str, MetricValue]],
-    workload_dirs: dict[str, Path],
+    metrics_by_wl: Dict[str, Dict[str, MetricValue]],
+    workload_dirs: Dict[str, Path],
     mode_suffix: str,
 ) -> None:
     """Recompute medians into a flat wl→metrics map (for baseline)."""
@@ -483,9 +485,9 @@ def apply_recomputed_medians_for_map(
 
 
 def classify_metrics(
-    workload_metrics: dict[str, dict[str, MetricValue]],
-    metric_units: dict[str, str],
-    metric_formulas: dict[str, str],
+    workload_metrics: Dict[str, Dict[str, MetricValue]],
+    metric_units: Dict[str, str],
+    metric_formulas: Dict[str, str],
 ) -> None:
     mega = workload_metrics.get("mega_kernel", {})
     for wl_name, wl_metrics in workload_metrics.items():
@@ -533,7 +535,7 @@ def classify_metrics(
             mv.cls = "good"
 
 
-def fmt_value(mv: MetricValue | None, unit: str = "") -> str:
+def fmt_value(mv: Optional[MetricValue], unit: str = "") -> str:
     if mv is None or mv.value is None:
         return "N/A"
     if "percent" in unit.lower():
@@ -559,7 +561,7 @@ def cell_style(cls: str) -> str:
     return styles.get(cls, "")
 
 
-def render_zero_sub_bucket_lines(summary: dict[str, int]) -> str:
+def render_zero_sub_bucket_lines(summary: Dict[str, int]) -> str:
     zero_total = sum(summary.get(b, 0) for b in ZERO_SUB_BUCKETS)
     if zero_total == 0:
         return "<div style='color:#555'>⬜ Zero (all workloads): <b>0</b></div>"
@@ -583,15 +585,15 @@ def render_zero_sub_bucket_lines(summary: dict[str, int]) -> str:
 _CDNA3_L2_CHAN_ARCHES = frozenset({"gfx940", "gfx941", "gfx942"})
 
 
-def count_yaml_metric_entries(config_arch: str) -> tuple[int, int]:
+def count_yaml_metric_entries(config_arch: str) -> Tuple[int, int]:
     """Return (metric table entries, unique metric names) for analysis_configs."""
     config_dir = SRC / "rocprof_compute_soc" / "analysis_configs" / config_arch
     entries = 0
-    names: set[str] = set()
+    names: Set[str] = set()
     if not config_dir.is_dir():
         return 0, 0
     for yaml_path in sorted(config_dir.glob("*.yaml")):
-        data = yaml.safe_load(yaml_path.read_text())
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
         panel = data.get("Panel Config", data)
         for entry in panel.get("data source", []):
             if not isinstance(entry, dict):
@@ -608,7 +610,7 @@ def count_yaml_metric_entries(config_arch: str) -> tuple[int, int]:
 def build_total_note(
     arch: str,
     config_arch: str,
-    summary: dict[str, dict[str, int]],
+    summary: Dict[str, Dict[str, int]],
     all_keys_count: int,
     stat_label: str,
 ) -> str:
@@ -671,8 +673,8 @@ def build_total_note(
 
 
 def _iteration_banner(
-    iterations: int | None,
-    dispatch_counts: dict[str, int | None],
+    iterations: Optional[int],
+    dispatch_counts: Dict[str, Optional[int]],
     stat_label: str,
 ) -> str:
     """Build the Statistic / iterations header strip.
@@ -720,35 +722,35 @@ def _iteration_banner(
 
 
 def build_report(
-    workloads: dict[str, Path],
-    formulas: dict[str, tuple[str, str, bool]],
-    baseline_logs: dict[str, Path] | None,
+    workloads: Dict[str, Path],
+    formulas: Dict[str, Tuple[str, str, bool]],
+    baseline_logs: Optional[Dict[str, Path]],
     out_path: Path,
     report_date: str,
     baseline_label: str,
     host_label: str,
-    branch_label: str,
+    branch_label: Optional[str],
     arch: str,
     config_arch: str,
-    iterations: int | None,
+    iterations: Optional[int],
     stat_label: str,
-    workload_dirs: dict[str, Path] | None,
+    workload_dirs: Optional[Dict[str, Path]],
 ) -> None:
     wl_names = list(workloads.keys())
-    parsed_logs: dict[str, ParsedLog] = {}
+    parsed_logs: Dict[str, ParsedLog] = {}
     for wl, log_path in workloads.items():
         parsed_logs[wl] = parse_log(log_path)
 
     if workload_dirs:
         apply_recomputed_medians(parsed_logs, workload_dirs)
 
-    parsed: dict[str, dict[str, MetricValue]] = {
+    parsed: Dict[str, Dict[str, MetricValue]] = {
         wl: log.metrics for wl, log in parsed_logs.items()
     }
-    suppressed: dict[str, list[str]] = {
+    suppressed: Dict[str, List[str]] = {
         wl: log.suppressed for wl, log in parsed_logs.items()
     }
-    dispatch_counts: dict[str, int | None] = {
+    dispatch_counts: Dict[str, Optional[int]] = {
         wl: log.dispatch_count for wl, log in parsed_logs.items()
     }
 
@@ -756,8 +758,8 @@ def build_report(
     metric_formulas = {k: formulas.get(k, ("", "", False))[0] for k in formulas}
     classify_metrics(parsed, metric_units, metric_formulas)
 
-    all_keys: list[str] = []
-    seen: set[str] = set()
+    all_keys: List[str] = []
+    seen: Set[str] = set()
     for wl in wl_names:
         for key in sorted(
             parsed[wl], key=lambda k: [int(p) for p in k.split("|")[0].split(".")]
@@ -766,7 +768,7 @@ def build_report(
                 seen.add(key)
                 all_keys.append(key)
 
-    summary: dict[str, dict[str, int]] = {
+    summary: Dict[str, Dict[str, int]] = {
         wl: {
             "total": 0,
             "good": 0,
@@ -826,10 +828,10 @@ def build_report(
 
     total_note = build_total_note(arch, config_arch, summary, len(all_keys), stat_label)
 
-    improve_rows: list[str] = []
-    delta_rows: list[str] = []
+    improve_rows: List[str] = []
+    delta_rows: List[str] = []
     if baseline_logs:
-        base_parsed: dict[str, dict[str, MetricValue]] = {
+        base_parsed: Dict[str, Dict[str, MetricValue]] = {
             wl: parse_log(path).metrics for wl, path in baseline_logs.items()
         }
         if workload_dirs:
@@ -893,7 +895,7 @@ def build_report(
     for key in all_keys:
         mid, name = key.split("|", 1)
         formula, unit, level = formulas.get(key, ("", "", False))
-        row_cats: set[str] = set()
+        row_cats: Set[str] = set()
         wl_cells = []
         for wl in wl_names:
             mv = parsed[wl].get(key)
@@ -994,6 +996,11 @@ def build_report(
             "</tr></thead><tbody>" + "".join(delta_rows) + "</tbody></table>"
         )
 
+    if branch_label:
+        branch_html = f" | <b>Branch:</b> {html.escape(branch_label)}"
+    else:
+        branch_html = ""
+
     doc = f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <title>{html.escape(arch_title)} — Metric Health {html.escape(report_date)}</title>
 <style>
@@ -1032,7 +1039,7 @@ tr.row-overflow{{box-shadow:inset 0 0 0 2px #c62828}}
 <h1>{html.escape(arch_title)} — Metric Health Report</h1>
 <p style="margin:2px 0;color:#607d8b;font-size:12px"><b>Date:</b> {html.escape(report_date)}
  | <b>Host:</b> {html.escape(host_label)}
- | <b>Branch:</b> {html.escape(branch_label)}
+{branch_html}
  | <b>Arch:</b> {html.escape(arch)}
  | <b>Workloads:</b> {html.escape(", ".join(wl_names))}</p>
 {iter_banner}
@@ -1134,18 +1141,18 @@ document.querySelectorAll('table.sortable-table').forEach(table=>{{
 
 
 def merge_formulas_from_logs(
-    workloads: dict[str, Path],
+    workloads: Dict[str, Path],
     config_arch: str,
-) -> dict[str, tuple[str, str, bool]]:
-    formulas: dict[str, tuple[str, str, bool]] = {}
+) -> Dict[str, Tuple[str, str, bool]]:
+    formulas: Dict[str, Tuple[str, str, bool]] = {}
     config_dir = SRC / "rocprof_compute_soc" / "analysis_configs" / config_arch
     if not config_dir.is_dir():
         raise SystemExit(f"analysis config dir missing: {config_dir}")
-    yaml_formulas: dict[str, str] = {}
-    yaml_units: dict[str, str] = {}
+    yaml_formulas: Dict[str, str] = {}
+    yaml_units: Dict[str, str] = {}
 
     for yaml_path in sorted(config_dir.glob("*.yaml")):
-        data = yaml.safe_load(yaml_path.read_text())
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
         panel = data.get("Panel Config", data)
         for entry in panel.get("data source", []):
             if not isinstance(entry, dict):
@@ -1172,8 +1179,8 @@ def merge_formulas_from_logs(
     return formulas
 
 
-def _parse_name_path_pairs(specs: list[str]) -> dict[str, Path]:
-    result: dict[str, Path] = {}
+def _parse_name_path_pairs(specs: List[str]) -> Dict[str, Path]:
+    result: Dict[str, Path] = {}
     for spec in specs:
         name, path = spec.split(":", 1)
         result[name] = Path(path)
@@ -1194,7 +1201,8 @@ def main() -> None:
     parser.add_argument("--host", default="unknown")
     parser.add_argument(
         "--branch",
-        default="users/feizheng10/aiprofcomp-865-cp-sat-local",
+        default=None,
+        help="Branch label shown in the report header",
     )
     parser.add_argument(
         "--iterations",
