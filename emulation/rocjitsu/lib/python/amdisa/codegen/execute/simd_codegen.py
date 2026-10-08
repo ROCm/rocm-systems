@@ -38,6 +38,12 @@ def _binary_f32_op(
     )
 
 
+# F16 VOP3 arithmetic with explicit MODE flushing and post-rounding modifiers.
+SIMD_VOP3_BINARY_MODE_FP16 = {
+    'v_add_f16_vop3': 'ADD',
+    'v_mul_f16_vop3': 'MUL',
+}
+
 # template_name -> (cpp_element_type, cpp_binary_op_functor)
 #
 # template_name matches the symbol emitted by _generator.gen_shared_execute:
@@ -2093,9 +2099,9 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     ),
 }
 
-# Non-fused f16 ternary operations widen each source to f32, operate in f32,
-# then narrow back. Fused FMA uses the MODE-aware native<double> route selected
-# by SIMD_VOP3_FMA_MODE_FP16 below.
+# Non-fused F16 ternaries: widen -> ABS/NEG -> evaluate -> round F16 -> OMOD/CLAMP.
+# DIV_FIXUP explicitly retains modifiers before narrowing. Fused FMA uses the
+# MODE-aware native<double> route selected by SIMD_VOP3_FMA_MODE_FP16 below.
 SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
     'v_mad_f16_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
     'v_mad_legacy_f16_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
@@ -2107,10 +2113,16 @@ SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
     'v_minmax_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); }',
     'v_maxmin_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); }',
     'v_div_fixup_f16_vop3': (
-        '[&wf](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f16_promoted_simd(p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()); }, true'
+        '[&wf](auto p, auto b, auto c) { return '
+        '::rocjitsu::amdgpu::div_fixup_f16_promoted_simd('
+        'p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()); '
+        '}, amdgpu::F16TernaryOutputOrder::MODIFY_THEN_ROUND, true'
     ),
     'v_div_fixup_legacy_f16_vop3': (
-        '[&wf](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f16_promoted_simd(p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()); }, true'
+        '[&wf](auto p, auto b, auto c) { return '
+        '::rocjitsu::amdgpu::div_fixup_f16_promoted_simd('
+        'p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()); '
+        '}, amdgpu::F16TernaryOutputOrder::MODIFY_THEN_ROUND, true'
     ),
 }
 
@@ -2576,6 +2588,9 @@ def simd_probe_line(
 
 def _guard_mode_arithmetic_probe(template_name: str, probe: str | None) -> str | None:
     """Retain native arithmetic only when it implements the guest FP policy."""
+    if template_name in SIMD_VOP3_BINARY_MODE_FP16:
+        # The helper checks host/guest rounding and handles denormal MODE itself.
+        return probe
     if template_name == 'v_fma_mix_f32_vop3p':
         # The fused MIX helper establishes MODE and applies denormal controls.
         return probe
@@ -2656,6 +2671,12 @@ def _simd_probe_line(
     result_writer: str | None = None,
 ) -> str | None:
     """Return the SIMD fast-path probe block for a kernel, or None."""
+    f16_arithmetic = SIMD_VOP3_BINARY_MODE_FP16.get(template_name)
+    if f16_arithmetic is not None:
+        return (
+            '  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16('
+            f'{str(true16_vop3).lower()}, amdgpu::fp_mode::Arithmetic::{f16_arithmetic});'
+        )
     minmax_probe = float_minmax.simd_probe(template_name, true16_vop3)
     if minmax_probe is not None:
         return minmax_probe
@@ -3033,18 +3054,9 @@ def _simd_probe_line(
                         operation, modifiers=True, reverse=base == 'v_subrev_f32'
                     )
                 return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP({cpp_t}, {cpp_op});'
-            # f16 float binaries (v_add/sub/subrev/mul/max/min/ldexp_f16) are
-            # uint32-typed (the functor widens f16->f32 by hand), but their VOP3
-            # twin applies abs/neg/omod/clamp around the f16<->f32 round trip (see
-            # the generated scalar body). The plain integer VOP3 glue
-            # (ROCJITSU_TRY_SIMD_VOP3_BINARY_INT) does NOT apply those, so it would
-            # silently drop the modifiers and return the VOP2-style result. No fp16
-            # VOP3 binary modifier glue exists yet, so route them through the f16
-            # variant that bails to the (modifier-applying) scalar body whenever a
-            # modifier field is set, and takes the fast path only for the common
-            # unmodified case. (Keeping a probe present — rather than returning None
-            # — also avoids perturbing the cross-ISA shared plan via the
-            # simd_probe_arch_portable gate.)
+            # Remaining F16 binaries reuse unmodified VOP2 functors and reject
+            # modifiers. ADD/MUL use the MODE-aware route above; min/max has its
+            # own route. Keep a probe for the shared cross-ISA plan.
             if base.endswith('_f16'):
                 macro = (
                     'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16'

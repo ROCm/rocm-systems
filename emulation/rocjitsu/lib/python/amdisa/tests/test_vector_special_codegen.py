@@ -238,12 +238,10 @@ def test_vop3_f16_simd_probes_split_true16_from_generic():
     rcp_generic = simd_probe_line('v_rcp_f16_vop3')
     rcp_true16 = simd_probe_line('v_rcp_f16_vop3', true16_vop3=True)
 
-    assert 'if (wf.fp16_ovfl())' in add_generic
-    assert 'util::f32_to_f16_ovfl_simd' in add_generic
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_F16' in add_generic
-    assert 'if (wf.fp16_ovfl())' in add_true16
-    assert 'util::f32_to_f16_ovfl_simd' in add_true16
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16' in add_true16
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false,' in add_generic
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true,' in add_true16
+    assert 'amdgpu::fp_mode::Arithmetic::ADD' in add_generic
+    assert 'amdgpu::fp_mode::Arithmetic::ADD' in add_true16
     assert 'if (!wf.fp16_ovfl())' not in rcp_generic
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16' in rcp_generic
     assert 'if (!wf.fp16_ovfl())' not in rcp_true16
@@ -258,6 +256,8 @@ def test_vop3_f16_simd_probes_split_true16_from_generic():
     div_fixup_true16 = simd_probe_line('v_div_fixup_f16_vop3', true16_vop3=True)
     assert 'if (!wf.fp16_ovfl())' not in div_fixup_true16
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in div_fixup_true16
+    assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup
+    assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup_true16
     fmac_generic = simd_probe_line('v_fmac_f16_vop3')
     fmac_true16 = simd_probe_line('v_fmac_f16_vop3', true16_vop3=True)
     assert fmac_generic == '  ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_FP16();'

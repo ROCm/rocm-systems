@@ -20,9 +20,6 @@
 ///     including before F16 narrowing in DIV_FIXUP.
 ///   - SDWA F16 (dpp_sdwa_ops.h): separate arithmetic and rounded-TRANS
 ///     helpers; no captures.
-/// - Scalar/SIMD ordering mismatch:
-///   - F16 MAD/older min/max SIMD: modifiers precede narrowing, unlike scalar.
-///     See try_execute_ternary_vop3_fp16_simd.
 /// - Intentional exception:
 ///   - Pseudo-scalar F32 transcendentals: scale the exact value before one F32
 ///     rounding; match gfx1201 captures.

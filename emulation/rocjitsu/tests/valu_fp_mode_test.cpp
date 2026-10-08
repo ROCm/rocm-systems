@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -2605,6 +2606,67 @@ std::vector<ArithmeticCase> legacy_rounded_result_modifier_cases() {
   return cases;
 }
 
+// Exact binary values distinguish source/output flushing and modifier order.
+// These expectations follow the arithmetic policy, rather than new GPU captures.
+std::vector<ArithmeticCase> f16_binary_modifier_cases() {
+  constexpr uint16_t V0 = 256, V1 = 257;
+  std::vector<ArithmeticCase> cases;
+  const auto add = [&](const char *name, bool multiply, uint32_t a, uint32_t b, uint32_t result,
+                       uint32_t mode, uint8_t omod = 0, uint8_t clamp = 0, uint8_t abs = 0,
+                       uint8_t neg = 0, uint8_t opsel = 0, int host_rounding = FE_TONEAREST,
+                       uint32_t mxcsr_bits = 0) {
+    const auto words =
+        rdna4::build_vop3(multiply ? rdna4::kVMulF16Vop3 : rdna4::kVAddF16Vop3, {.vdst = 6,
+                                                                                 .abs = abs,
+                                                                                 .opsel = opsel,
+                                                                                 .clamp = clamp,
+                                                                                 .src0 = V0,
+                                                                                 .src1 = V1,
+                                                                                 .omod = omod,
+                                                                                 .neg = neg});
+    cases.push_back({name,
+                     ROCJITSU_CODE_ARCH_RDNA4,
+                     {words[0], words[1], 0},
+                     {{0, a}, {1, b}, {6, 0xa5a5a5a5u}},
+                     {{6, result}},
+                     mode,
+                     host_rounding,
+                     mxcsr_bits,
+                     mxcsr_bits});
+  };
+  add("AddFlushInputsAndOutputs", false, 1, 0, 0xa5a50000u, 0x30);
+  add("AddKeepInputsAndOutputs", false, 1, 0, 0xa5a50001u, 0xc0);
+  add("AddKeepInputsFlushOutputs", false, 1, 0, 0xa5a50000u, 0x40);
+  add("AddFlushInputsKeepOutputs", false, 1, 0, 0xa5a50000u, 0x80);
+  add("MulFlushInputBeforeWidening", true, 1, 0x7bff, 0xa5a50000u, 0x30);
+  add("MulKeepInputBeforeWidening", true, 1, 0x7bff, 0xa5a51bffu, 0xc0);
+  add("MulKeepNegativeSubnormal", true, 0x8400, 0x3800, 0xa5a58200u, 0xc0);
+  add("MulFlushNegativeSubnormal", true, 0x8400, 0x3800, 0xa5a58000u, 0x40);
+  add("MulOmodCannotRecoverSubnormal", true, 0x8400, 0x3800, 0xa5a50000u, 0xc0, 1);
+  for (uint8_t omod = 0; omod != 4; ++omod) {
+    static constexpr std::array<uint32_t, 4> expected = {0xa5a53800u, 0xa5a53c00u, 0xa5a54000u,
+                                                         0xa5a53400u};
+    const auto name = std::string("AddOmod") + std::to_string(omod);
+    add(name.c_str(), false, 0x3400, 0x3400, expected[omod], 0xc0, omod);
+  }
+  add("AddClampAfterOmod", false, 0x3400, 0x3400, 0xa5a53c00u, 0xc0, 2, 1);
+  add("AddAbs", false, 0xb400, 0x3a00, 0xa5a53c00u, 0xc0, 0, 0, 1);
+  add("AddNeg", false, 0xb400, 0x3a00, 0xa5a53c00u, 0xc0, 0, 0, 0, 1);
+  add("AddAbsThenNeg", false, 0xb400, 0x3a00, 0xa5a53800u, 0xc0, 0, 0, 1, 1);
+  add("AddHighSourcesLowDestination", false, 0x34003c00, 0x34003c00, 0xa5a53800u, 0xc0, 0, 0, 0, 0,
+      3);
+  add("AddHighSourcesHighDestination", false, 0x34003c00, 0x34003c00, 0x3800a5a5u, 0xc0, 0, 0, 0, 0,
+      11);
+  // Unsupported rounding and host flush controls retain the scalar fallback.
+  add("AddGuestRoundUpFallback", false, 0x3c00, 0x1000, 0xa5a53c01u, 0xc4);
+  add("AddHostRoundUpFallback", false, 0x3c00, 0x1000, 0xa5a53c00u, 0xc0, 0, 0, 0, 0, 0, FE_UPWARD);
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+  add("AddHostFlushFallback", false, 1, 0, 0xa5a50001u, 0xc0, 0, 0, 0, 0, 0, FE_TONEAREST,
+      (1u << 6) | (1u << 15));
+#endif
+  return cases;
+}
+
 // CEIL and FLOOR flush a subnormal source to a signed zero when MODE disables
 // input denormals, so ceil(+tiny) = +0 and floor(-tiny) = -0. Results are
 // gfx1201 captures. MODE 0x30 keeps F32 input denormals and flushes F16/F64;
@@ -2811,8 +2873,8 @@ INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuRoundedResultModifierTest,
 
 class ValuLegacyRoundedResultModifierTest : public testing::TestWithParam<ArithmeticCase> {};
 
-// Both passes use scalar fallback. This F16 ADD/MUL SIMD path rejects OMOD=3
-// and requires preserving input/output denormals; these cases flush outputs.
+// The MODE-aware F16 ADD/MUL SIMD path supports these output modifiers and
+// denormal settings. Unsupported host rounding still selects scalar fallback.
 TEST_P(ValuLegacyRoundedResultModifierTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   ForceScalarGuard guard;
   for (const bool scalar : {true, false}) {
@@ -2827,6 +2889,53 @@ INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuLegacyRoundedResultModifierTest,
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
+
+class ValuF16BinaryModifierTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuF16BinaryModifierTest, MatchesPolicyWithSimdEnabledAndForcedScalar) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam());
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(F16BinaryModifiers, ValuF16BinaryModifierTest,
+                         testing::ValuesIn(f16_binary_modifier_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+TEST(ValuFpModeHelpers, F16BinaryRneMatchesScalarAcrossHalfEncodings) {
+  if (!util::has_stdx_simd)
+    GTEST_SKIP() << "std::experimental::simd unavailable";
+  using U = util::native<uint32_t>;
+  using Fmt = amdgpu::fp_format::F16;
+  amdgpu::fp_mode::ScopedEnvironment environment(0);
+  const auto check = [&]<amdgpu::fp_mode::Arithmetic operation>() {
+    for (uint32_t denorm : {0u, 1u, 2u, 3u})
+      for (bool ovfl : {false, true})
+        for (uint32_t base = 0; base < 0x10000u; base += U::size()) {
+          U a([&](auto i) { return (base + uint32_t(i)) | 0xdead0000u; });
+          U b([&](auto i) { return ((base + uint32_t(i)) * 40503u + 17u) & 0xffffu; });
+          const auto actual = amdgpu::binary_f16_simd<operation>(a, b, denorm, ovfl);
+          for (std::size_t i = 0; i < U::size(); ++i) {
+            const auto input = amdgpu::input_denormal::Policy::make(denorm);
+            const float lhs = util::f16_to_f32(
+                static_cast<uint16_t>(amdgpu::input_denormal::prepare<Fmt>(uint32_t(a[i]), input)));
+            const float rhs = util::f16_to_f32(
+                static_cast<uint16_t>(amdgpu::input_denormal::prepare<Fmt>(uint32_t(b[i]), input)));
+            const uint32_t expected = amdgpu::fp_mode::finish_arithmetic_f16(
+                amdgpu::fp_mode::arithmetic_f16<operation>(lhs, rhs, 0.0f, 0), 0, denorm, ovfl);
+            ASSERT_EQ(actual[i], expected)
+                << "a=" << a[i] << " b=" << b[i] << " denorm=" << denorm << " ovfl=" << ovfl;
+          }
+        }
+  };
+  check.template operator()<amdgpu::fp_mode::Arithmetic::ADD>();
+  check.template operator()<amdgpu::fp_mode::Arithmetic::MUL>();
+}
 
 INSTANTIATE_TEST_SUITE_P(TranscendentalPolicy, ValuFpModeTest,
                          testing::ValuesIn(transcendental_policy_cases()),

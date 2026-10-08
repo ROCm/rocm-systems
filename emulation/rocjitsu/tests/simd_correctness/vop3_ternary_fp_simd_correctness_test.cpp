@@ -2,24 +2,25 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3_ternary_fp_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs scalar body) for F16/F32/F64
-/// ternary VOP3 operations on CDNA4, including MODE-aware fused F16/F64 FMA.
-/// NaN-result lanes are an accepted divergence for the older generic packed
-/// paths. Each (case, mods, rot) runs TWICE in the same process -- once
-/// forcing the scalar body, once the SIMD fast path, with identical inputs/EXEC
-/// -- and the dst results are asserted equal per active, non-skipped lane
-/// (util::set_force_scalar_for_testing flips the gate in-process). NaN-result
-/// lanes are excluded from the comparison — NaN-ness is deterministic from the
-/// inputs, so both runs skip the same lanes.
-///
-/// F32 and F64 dst-accumulate FMAC are covered by the separate
-/// vop3_fmac_simd_correctness_test.cpp suite. F16 FMAC is exercised by the
-/// GFX1250 execution-policy tests because CDNA4 exposes V_MAC_F16 instead.
+/// @brief Compare ternary VOP3 results with SIMD enabled and forced scalar.
+/// @details General F16/F32/F64 cases use CDNA4. F16 output-order boundaries
+/// also cover RDNA2/3, including signed underflow and MODE-dependent overflow.
+/// These are execution-path regressions, not hardware captures.
+/// Each pass uses identical inputs/EXEC; inactive lanes retain the sentinel.
+/// General cases skip NaN results because older paths may select different payloads.
+/// SIMD-enabled execution may fall back to scalar when a fast-path gate rejects it.
+/// Accumulate forms have separate FMAC and GFX1250 execution-policy coverage.
 
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -35,6 +36,8 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -157,15 +160,16 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  Fixture() : gpu_mem("vop3_tern_fp_mem"), l2("vop3_tern_fp_l2") {
+  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+      : gpu_mem("vop3_tern_fp_mem"), l2("vop3_tern_fp_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = arch;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     cu = amdgpu::ComputeUnitCore::create("cu_vop3_tern_fp", cfg, &gpu_mem, &l2);
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
 
@@ -305,5 +309,188 @@ TEST(Vop3TernaryFpSimdCorrectness, PartialExec) {
   for (const auto &c : kCases)
     check_case(c, /*abs=*/0, /*neg=*/0, /*omod=*/0, /*clamp=*/0, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
+
+struct F16OutputCase {
+  std::string name;
+  rj_code_arch_t arch;
+  uint16_t opcode;
+  std::array<uint16_t, 3> sources;
+  uint32_t mode;
+  uint8_t omod;
+  uint16_t expected;
+  uint8_t clamp = 0;
+};
+
+// Expectations describe the scalar output-stage contract. The reviewer probes
+// establish path disagreement on these targets, without validating GPU behavior.
+std::vector<F16OutputCase> f16_output_cases() {
+  std::vector<F16OutputCase> cases;
+  for (const auto &[name, opcode] :
+       {std::pair{"Mad", cdna4::kVMadF16Vop3}, std::pair{"MadLegacy", cdna4::kVMadLegacyF16Vop3}}) {
+    cases.push_back({std::string("Gfx950") + name + "Div2SignedUnderflow",
+                     ROCJITSU_CODE_ARCH_CDNA4,
+                     opcode,
+                     {0x8400, 0x3c00, 0},
+                     0,
+                     3,
+                     0x8000});
+    cases.push_back({std::string("Gfx950") + name + "Mul2RtzOverflow",
+                     ROCJITSU_CODE_ARCH_CDNA4,
+                     opcode,
+                     {0x7bff, 0x3c00, 0},
+                     0x0c,
+                     1,
+                     0x7bff});
+    cases.push_back({std::string("Gfx950") + name + "RoundsBeforeDiv2",
+                     ROCJITSU_CODE_ARCH_CDNA4,
+                     opcode,
+                     {0x7bff, 0x4000, 0},
+                     0,
+                     3,
+                     0x7c00});
+  }
+  const auto add_selections = [&](const char *target, rj_code_arch_t arch, auto operations) {
+    for (const auto &[name, opcode] : operations) {
+      const auto prefix = std::string(target) + name;
+      cases.push_back(
+          {prefix + "Div2SignedUnderflow", arch, opcode, {0x8400, 0x8400, 0x8400}, 0, 3, 0x8000});
+      cases.push_back(
+          {prefix + "Mul2RtzOverflow", arch, opcode, {0x7bff, 0x7bff, 0x7bff}, 0x0c, 1, 0x7bff});
+      cases.push_back(
+          {prefix + "Mul4RneOverflow", arch, opcode, {0x7bff, 0x7bff, 0x7bff}, 0, 2, 0x7c00});
+      cases.push_back(
+          {prefix + "Mul2Saturates", arch, opcode, {0x7bff, 0x7bff, 0x7bff}, 1u << 23, 1, 0x7bff});
+      cases.push_back(
+          {prefix + "ClampAfterOmod", arch, opcode, {0x7bff, 0x7bff, 0x7bff}, 0x0c, 1, 0x3c00, 1});
+      cases.push_back(
+          {prefix + "IeeeIgnoresOmod", arch, opcode, {0x8400, 0x8400, 0x8400}, 1u << 9, 3, 0x8400});
+      cases.push_back({prefix + "KeepOutputsIgnoresOmod",
+                       arch,
+                       opcode,
+                       {0x8400, 0x8400, 0x8400},
+                       0x80,
+                       3,
+                       0x8400});
+    }
+  };
+  add_selections("Gfx950", ROCJITSU_CODE_ARCH_CDNA4,
+                 std::array{std::pair{"Min3", cdna4::kVMin3F16Vop3},
+                            std::pair{"Max3", cdna4::kVMax3F16Vop3},
+                            std::pair{"Med3", cdna4::kVMed3F16Vop3}});
+  add_selections("Gfx1030", ROCJITSU_CODE_ARCH_RDNA2,
+                 std::array{std::pair{"Min3", rdna2::kVMin3F16Vop3},
+                            std::pair{"Max3", rdna2::kVMax3F16Vop3},
+                            std::pair{"Med3", rdna2::kVMed3F16Vop3}});
+  add_selections("Gfx1100", ROCJITSU_CODE_ARCH_RDNA3,
+                 std::array{std::pair{"Min3", rdna3::kVMin3F16Vop3},
+                            std::pair{"Max3", rdna3::kVMax3F16Vop3},
+                            std::pair{"Med3", rdna3::kVMed3F16Vop3},
+                            std::pair{"Minmax", rdna3::kVMinmaxF16Vop3},
+                            std::pair{"Maxmin", rdna3::kVMaxminF16Vop3}});
+  // DIV_FIXUP intentionally retains its current scalar ordering and finalizer.
+  // These distinguish that contract from the destination-format output stage.
+  for (const auto &[name, opcode] : {std::pair{"DivFixup", cdna4::kVDivFixupF16Vop3},
+                                     std::pair{"DivFixupLegacy", cdna4::kVDivFixupLegacyF16Vop3}}) {
+    cases.push_back({std::string("Gfx950") + name + "Div2ClearsUnderflowSign",
+                     ROCJITSU_CODE_ARCH_CDNA4,
+                     opcode,
+                     {0x8400, 0x3c00, 0xbc00},
+                     0,
+                     3,
+                     0});
+    cases.push_back({std::string("Gfx950") + name + "Mul2RtzOverflow",
+                     ROCJITSU_CODE_ARCH_CDNA4,
+                     opcode,
+                     {0x7bff, 0x3c00, 0x3c00},
+                     0x0c,
+                     1,
+                     0x7c00});
+  }
+  return cases;
+}
+
+std::array<uint32_t, 2> f16_output_words(const F16OutputCase &test, uint8_t opsel) {
+  const auto build = [&](auto builder) {
+    return builder(test.opcode, {.vdst = kDstVgpr32,
+                                 .op_sel = opsel,
+                                 .clamp = test.clamp,
+                                 .src0 = 256,
+                                 .src1 = 257,
+                                 .src2 = 258,
+                                 .omod = test.omod});
+  };
+  switch (test.arch) {
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return build(cdna4::build_vop3);
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return build(rdna2::build_vop3);
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return build(rdna3::build_vop3);
+  default:
+    ADD_FAILURE() << "unexpected ternary boundary target";
+    return {};
+  }
+}
+
+class Vop3F16TernaryOutputOrderTest : public testing::TestWithParam<F16OutputCase> {};
+
+TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabledAndForcedScalar) {
+  ForceScalarGuard guard;
+  amdgpu::fp_mode::ScopedEnvironment environment(0);
+  const auto &test = GetParam();
+  // RDNA2 uses the generic low-half executor; CDNA4/RDNA3 use true16 selection.
+  const uint8_t selection_count = test.arch == ROCJITSU_CODE_ARCH_RDNA2 ? 1 : 2;
+  for (uint8_t selection = 0; selection < selection_count; ++selection)
+    for (const uint64_t exec : {~0ULL, 0xA5A5'F0F0'1234'8001ULL}) {
+      const uint8_t opsel = selection ? 15 : 0;
+      std::array<uint32_t, WF_SIZE> scalar_out{};
+      for (const bool force_scalar : {true, false}) {
+        SCOPED_TRACE(test.name + " opsel=" + std::to_string(opsel) +
+                     (force_scalar ? " forced scalar" : " SIMD enabled"));
+        util::set_force_scalar_for_testing(force_scalar);
+        Fixture fx(test.arch);
+        ASSERT_NE(fx.cu, nullptr);
+        ASSERT_NE(fx.wf, nullptr);
+        auto words = f16_output_words(test, opsel);
+        std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        const uint32_t vb = fx.wf->vgpr_alloc().base;
+        const bool high = (opsel & 8u) != 0;
+        for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
+          for (uint32_t src = 0; src < test.sources.size(); ++src) {
+            const uint32_t half = test.sources[src];
+            fx.cu->write_vgpr(vb + src, lane, high ? (half << 16) | 0x3555u : 0x35550000u | half);
+          }
+          fx.cu->write_vgpr(vb + kDstVgpr32, lane, DST_SENTINEL32);
+        }
+        fx.wf->set_exec(exec);
+        fx.wf->set_mode_raw(test.mode);
+        ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+        for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
+          const uint32_t actual = fx.cu->read_vgpr(vb + kDstVgpr32, lane);
+          if (!(exec & (1ULL << lane))) {
+            EXPECT_EQ(actual, DST_SENTINEL32) << "inactive lane " << lane;
+          } else {
+            EXPECT_EQ(static_cast<uint16_t>(actual >> (high ? 16 : 0)), test.expected)
+                << "active lane " << lane;
+            if (high)
+              EXPECT_EQ(static_cast<uint16_t>(actual), static_cast<uint16_t>(DST_SENTINEL32));
+            else if (test.arch == ROCJITSU_CODE_ARCH_RDNA3)
+              EXPECT_EQ(actual >> 16, DST_SENTINEL32 >> 16);
+          }
+          if (force_scalar)
+            scalar_out[lane] = actual;
+          else
+            EXPECT_EQ(actual, scalar_out[lane]) << "path disagreement in lane " << lane;
+        }
+      }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(OutputOrderBoundaries, Vop3F16TernaryOutputOrderTest,
+                         testing::ValuesIn(f16_output_cases()),
+                         [](const testing::TestParamInfo<F16OutputCase> &info) {
+                           return info.param.name;
+                         });
 
 } // namespace
