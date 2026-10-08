@@ -411,6 +411,16 @@ jobs:
           # Prototype failures observed in run 37670663604. Match complete names
           # so new cases in these suites remain covered. Manual dispatch can
           # include them when investigating or validating a fix.
+          # TODO(#13068): Re-enable all listed leak tests once the intended ROCr
+          # runtime passes LSan checks without hiding real signal leaks.
+          # TODO(#13069): Re-enable the cache test once ASan validation preserves
+          # lock-free scalar/vector cache reuse and backing-lifetime checks.
+          # TODO(#13071): Re-enable the original late-HIP load/unload test once
+          # it passes under ASan without an early-HSA preload workaround.
+          # TODO(#13072): Re-enable the Waitcheck test once its CI crash is fixed
+          # and repeated original-path HSA-tools runs pass under concurrency.
+          # TODO(#13073): Re-enable the four teardown cases once they finish
+          # within the existing timeout and pass LSan under CI concurrency.
           if [[ "${{ matrix.name }}" == "asan-ubsan" && "${{ inputs.include_quarantined_tests }}" != "true" ]]; then
             QUARANTINE_REGEX="$(python3 - "${ROCJITSU_SOURCE_DIR}/tests/corpus/ci-quarantine.json" <<'PY'
           import json
@@ -424,10 +434,17 @@ jobs:
           assert len(names) == len(set(names)), "Duplicate CTest quarantine entries"
           if names:
               print("^(" + "|".join(re.escape(name) for name in names) + ")$")
-              message = f"Temporarily excluded {len(names)} known ASan/UBSan CTest failures; see emulation/rocjitsu/tests/corpus/ci-quarantine.json."
+              issues = ", ".join(issue for issue, cases in groups.items() if cases)
+              message = f"Temporarily excluded {len(names)} known ASan/UBSan CTest failures ({issues}); see emulation/rocjitsu/tests/corpus/ci-quarantine.json."
               print(f"::warning::{message}", file=sys.stderr)
               with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
                   print(message, file=summary)
+                  print(file=summary)
+                  for issue, cases in groups.items():
+                      if cases:
+                          url = f"https://github.com/ROCm/rocm-systems/issues/{issue[1:]}"
+                          unit = "case" if len(cases) == 1 else "cases"
+                          print(f"- [{issue}]({url}): {len(cases)} {unit}", file=summary)
           PY
             )"
             if [[ -n "${QUARANTINE_REGEX}" ]]; then
@@ -679,6 +696,8 @@ jobs:
             DBT_WORKERS=16
           fi
           DBT_SELECTION=()
+          # TODO(#13070): Re-enable the listed objects once idempotence and
+          # rewrite-discharge checks pass with branch/SGPR/clause safety intact.
           if [[ "${{ matrix.verify_dbt_idempotence }}" == "1" && "${{ inputs.include_quarantined_tests }}" != "true" ]]; then
             QUARANTINE_EXPRESSION="$(python3 - "${ROCJITSU_SOURCE_DIR}/tests/corpus/ci-quarantine.json" <<'PY'
           import json
@@ -693,10 +712,17 @@ jobs:
           assert all(re.fullmatch(r"[0-9a-f]{64}", sha) for sha in hashes), "Invalid DBT SHA256"
           if hashes:
               print("not (" + " or ".join(hashes) + ")")
-              message = f"Temporarily deselected {len(hashes)} known DBT idempotence failures (RJ-CI-003); idempotence checks remain enabled for other objects."
+              issues = ", ".join(issue for issue, cases in groups.items() if cases)
+              message = f"Temporarily deselected {len(hashes)} known DBT idempotence failures ({issues}); idempotence checks remain enabled for other objects."
               print(f"::warning::{message}", file=sys.stderr)
               with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
                   print(message, file=summary)
+                  print(file=summary)
+                  for issue, cases in groups.items():
+                      if cases:
+                          url = f"https://github.com/ROCm/rocm-systems/issues/{issue[1:]}"
+                          unit = "object" if len(cases) == 1 else "objects"
+                          print(f"- [{issue}]({url}): {len(cases)} {unit}", file=summary)
           PY
             )"
             if [[ -n "${QUARANTINE_EXPRESSION}" ]]; then

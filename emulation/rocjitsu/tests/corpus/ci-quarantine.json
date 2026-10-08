@@ -2,7 +2,7 @@
   "source_run": "https://github.com/ROCm/rocm-systems/actions/runs/37670663604",
   "source_commit": "728ce9d0651456beb7894c67002698aa8644fe2a",
   "asan-ubsan": {
-    "RJ-CI-001": [
+    "#13068": [
       "ConSanDeviceGfx1100Sim.BaselineAccessHeavyStreamK.Correct",
       "ConSanDeviceGfx1100Sim.BaselineAccessHeavyStreamK.Incorrect",
       "ConSanDeviceGfx1100Sim.BaselineAdjacentSubwordWriters.Correct",
@@ -653,16 +653,16 @@
       "ConSanSpillGfx950Sim.Gfx950VgprScratchRoundTrip",
       "HsaTest.LiveSignalsRemainReachableForLeakSanitizer"
     ],
-    "RJ-CI-002": [
+    "#13069": [
       "L1CacheMtypeTest.NewRequestsReusePolicyWithoutPageTableLocks"
     ],
-    "RJ-CI-004": [
+    "#13071": [
       "ConSanHook.DynamicHipRuntimeUnload"
     ],
-    "RJ-CI-005": [
+    "#13072": [
       "WaitcheckHsaToolsHipTest.FailClosedRejectsHazard"
     ],
-    "RJ-CI-006": [
+    "#13073": [
       "ConSanDeviceGfx1100Sim.BaselineIndexedLdsAlias.Correct",
       "ConSanDeviceGfx1100Sim.BaselineIndexedLdsAlias.Incorrect",
       "ConSanDeviceGfx1100Sim.BaselineSegmentedTopK.Correct",
@@ -670,7 +670,7 @@
     ]
   },
   "dbt-idempotence": {
-    "RJ-CI-003": [
+    "#13070": [
       "006c330d51f2de44c9899f3586934349fc9ed3d0786b065d9f1b0a2c8d9f61c5",
       "033b18aa263f6ca9c18a748d4677762a159ee8470d63000e34f60981ec8a4bcf",
       "03e1a89daab89ad4474f6986425048e706840cd21927ebf99656c0b759227535",
@@ -824,11 +824,11 @@
     ]
   },
   "categories": {
-    "RJ-CI-001": "ROCr signal-pool LeakSanitizer reports with the pinned SDK",
-    "RJ-CI-002": "ASan cache validation violates page-table lock-free cache reuse",
-    "RJ-CI-003": "DBT branch islands break byte idempotence",
-    "RJ-CI-004": "Late HIP initialization calls an unresolved ASan callback",
-    "RJ-CI-005": "Intermittent Waitcheck HSA-tools process segfault; cause unresolved",
-    "RJ-CI-006": "ConSan process-exit timeouts; cause unresolved"
+    "#13068": "ROCr signal-pool LeakSanitizer reports with the pinned SDK",
+    "#13069": "ASan cache validation violates page-table lock-free cache reuse",
+    "#13070": "DBT branch islands break byte idempotence",
+    "#13071": "Late HIP initialization calls an unresolved ASan callback",
+    "#13072": "Intermittent Waitcheck HSA-tools process segfault; cause unresolved",
+    "#13073": "ConSan process-exit timeouts; cause unresolved"
   }
 }
