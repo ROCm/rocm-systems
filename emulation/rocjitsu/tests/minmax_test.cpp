@@ -4,9 +4,10 @@
 /// @file minmax_test.cpp
 /// @brief Min/max selection rules, gfx1201 regression cases, and scalar/SIMD agreement.
 
+#include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
+
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
 #include "util/simd.h"
 
 #include <gtest/gtest.h>

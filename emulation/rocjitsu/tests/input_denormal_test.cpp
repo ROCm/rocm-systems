@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
+
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 
 #include <gtest/gtest.h>
 
