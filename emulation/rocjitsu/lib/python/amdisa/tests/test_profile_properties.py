@@ -479,7 +479,7 @@ def test_non_split_generation_leaves_exec_named_sources_untouched(tmp_path):
     ('profile', 'enc_name', 'expected'),
     [
         (CdnaProfile(), 'ENC_FLAT', '0x7F'),
-        (Rdna3Profile(), 'ENC_FLAT', '0x7F'),
+        (Rdna3Profile(), 'ENC_FLAT', '0x7C'),
         (Rdna4Profile(), 'ENC_VFLAT', 'OPR_SREG_NULL'),
         (Rdna4Profile(), 'ENC_VGLOBAL', 'OPR_SREG_NULL'),
         (Cdna5Profile(), 'ENC_VFLAT', 'OPR_SREG_NULL'),
