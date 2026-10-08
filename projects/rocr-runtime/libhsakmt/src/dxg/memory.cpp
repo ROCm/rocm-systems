@@ -1304,10 +1304,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetAmdGPUDeviceFd(HsaAMDGPUDeviceHandle DeviceHand
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
-/* WDDM exposes no GL2 residency control, so there is nothing to set here.
- * The entry point still has to exist: ROCr's thunk loader resolves it
- * unconditionally and fails the whole dispatch table when it is absent,
- * which takes down agent enumeration on WSL. */
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetPersistingCacheSize(HSAuint32 Node, HSAuint64 CacheSize)
 {
   return HSAKMT_STATUS_NOT_SUPPORTED;
