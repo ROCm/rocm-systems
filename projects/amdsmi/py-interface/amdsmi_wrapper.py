@@ -1506,6 +1506,10 @@ struct_amdsmi_driver_info_t._fields_ = [
     ('driver_version', ctypes.c_char * 256),
     ('driver_date', ctypes.c_char * 256),
     ('driver_name', ctypes.c_char * 256),
+    ('driver_kernel_version', ctypes.c_char * 256),
+    ('amdgpu_driver_version', ctypes.c_char * 256),
+    ('driver_build_version', ctypes.c_char * 256),
+    ('driver_full_version', ctypes.c_char * 256),
 ]
 
 amdsmi_driver_info_t = struct_amdsmi_driver_info_t

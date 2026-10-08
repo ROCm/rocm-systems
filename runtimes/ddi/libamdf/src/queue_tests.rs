@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Queue lifecycle and publication contracts exercised without a native GPU.
 
 #![allow(clippy::unwrap_used)]
@@ -179,7 +182,7 @@ fn family(command: u32) -> amdf_queue_family_info_t {
         format_features: if pm4 {
             AMDF_GPU_PM4_FORMAT_FEATURE_ACQUIRE_MEM_GCR
         } else if command == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA {
-            AMDF_GPU_SDMA_FORMAT_FEATURE_GCR | AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM
+            AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR | AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM
         } else {
             0
         },
@@ -300,6 +303,7 @@ fn native_transport() -> queue::QueueTransport {
         ring_host_address: 0x1000,
         ring_device_address: 0x1000,
         ring_size_bytes: 4096,
+        sdma_engine_id: None,
         read_index_host_address: 0x2000,
         read_index_device_address: 0x4000,
         write_index_host_address: 0x2008,
@@ -621,7 +625,7 @@ fn unconsumed_queue_teardown_is_retryable_and_keeps_the_parent_borrow() {
 }
 
 #[test]
-fn partial_native_teardown_revokes_cached_addresses_and_preserves_cleanup_retry() {
+fn partial_native_teardown_consumes_handle_without_replaying_cleanup() {
     let environment = Environment::new();
     // SAFETY: These static callbacks reject all allocation and own no state.
     let allocator = unsafe {
@@ -641,60 +645,26 @@ fn partial_native_teardown_revokes_cached_addresses_and_preserves_cleanup_retry(
     unsafe { assert_eq!(destroy(pointer), INTERNAL) };
     assert!(!fixture.backing_live.load(Ordering::Acquire));
     assert_eq!(fixture.destroy_calls.load(Ordering::Relaxed), 1);
-    assert_eq!(environment.queues.load(Ordering::Relaxed), 1);
-
-    let sentinel = ptr::NonNull::<amdf_user_queue_mapping_t>::dangling().as_ptr();
-    let mut mapping = sentinel;
-    let mut queue_info = amdf_user_queue_info_t {
-        r#type: AMDF_STRUCTURE_TYPE_USER_QUEUE_INFO,
-        structure_size: structure_size::<amdf_user_queue_info_t>(),
-        ring_byte_length: 0xcafe,
-        ..Default::default()
-    };
-    let mut queue_status = status_output();
-    // SAFETY: Failed destruction retains this live cleanup owner. Public use
-    // must fail before metadata allocation, cached publication, or native reads.
-    unsafe {
-        assert_eq!(
-            map(pointer, ptr::null_mut(), &raw mut mapping),
-            PRECONDITION
-        );
-        assert_eq!(mapping, sentinel);
-        assert_eq!(info(pointer, &raw mut queue_info), PRECONDITION);
-        assert_eq!(queue_info.ring_byte_length, 0xcafe);
-        assert_eq!(status(pointer, &raw mut queue_status), PRECONDITION);
-        assert_eq!(queue_status.consumed_index, 0xface);
-        assert_eq!(queue_status.producer_index, 0xbeef);
-        assert_eq!(wait(pointer, 0, 0, 0), PRECONDITION);
-        assert_eq!(fixture.progress_calls.load(Ordering::Relaxed), 1);
-        assert_eq!(destroy(pointer), 0);
-    }
-    assert_eq!(fixture.destroy_calls.load(Ordering::Relaxed), 2);
+    // The consumed pointer must never be queried or retried. Unreleased native
+    // backing is retained, while the device no longer has a public child.
+    assert_eq!(fixture.progress_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(fixture.destroy_calls.load(Ordering::Relaxed), 1);
     assert_eq!(environment.queues.load(Ordering::Relaxed), 0);
 }
 
 #[test]
-fn native_busy_after_teardown_begins_does_not_restore_mapping_access() {
+fn native_busy_after_teardown_begins_consumes_handle() {
     let environment = Environment::new();
     let (queue, fixture) = fixture_queue(&environment, Allocator::system());
     fixture.fail_destroy_once.store(true, Ordering::Release);
     fixture.destroy_errno.store(16, Ordering::Release);
     let pointer = queue.into_raw().cast();
     let native_busy = (u64::from(AMDF_STATUS_DOMAIN_ERRNO) << 32) | 16;
-    let sentinel = ptr::NonNull::<amdf_user_queue_mapping_t>::dangling().as_ptr();
-    let mut mapping = sentinel;
-    // SAFETY: The native failure preserves this owner for cleanup only; it is
-    // distinct from the earlier, mutation-free unconsumed-publication check.
+    // SAFETY: The native failure occurs after the mutation-free preflight.
     unsafe {
         assert_eq!(destroy(pointer), native_busy);
-        assert_eq!(
-            map(pointer, ptr::null_mut(), &raw mut mapping),
-            PRECONDITION
-        );
-        assert_eq!(mapping, sentinel);
-        assert_eq!(wait(pointer, 0, 0, 0), PRECONDITION);
-        assert_eq!(destroy(pointer), 0);
     }
     assert_eq!(fixture.progress_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(fixture.destroy_calls.load(Ordering::Relaxed), 1);
     assert_eq!(environment.queues.load(Ordering::Relaxed), 0);
 }
