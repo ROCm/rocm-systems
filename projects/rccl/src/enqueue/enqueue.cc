@@ -4771,7 +4771,6 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
                                      opDev));
         } else {
-          INFO(NCCL_INIT, "Taking kernel-based collective path");
           NCCLCHECK(collTaskAppend(comm, info, opDev));
         }
         // hierCeAvailable covers AllGather / AlltoAll / AlltoAllv (ncclHierCeAvailable rejects
@@ -4795,7 +4794,6 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         // ReduceScatter has no CE; the selector already chose symmetric vs ring.
         // Honor it here so NCCL_ALGO / !symEligible cannot be overridden by
         // ncclMakeSymmetricTaskList (collTaskAppend sets symkExtract from decision).
-        INFO(NCCL_INIT, "Taking kernel-based collective path for ReduceScatter");
         NCCLCHECK(collTaskAppend(comm, info, opDev));
       } else if ((!allGatherDecided && !alltoAllDecided &&
                   (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
@@ -4817,7 +4815,6 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
                                    opDev));
       } else {
-        INFO(NCCL_INIT, "Taking kernel-based collective path");
         // currently legacy sendrecv needs src and dst buffers to be registered
         // we cannot allow UB if alltoall/scatter/gather fallback to legacy sendrecv
         // when src or dst buffers are not registered
