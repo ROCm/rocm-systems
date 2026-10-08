@@ -1,3 +1,4 @@
+import { isOfficialHistoryRun } from './runClassification.js';
 import { compareRunsByCommit } from './runOrdering';
 
 export const PLUGIN_NOISE_TOLERANCE = 3;
@@ -17,7 +18,7 @@ function durationTotal(tests) {
 export function selectPluginComparisonGroups(data) {
   const groups = new Map();
   for (const run of data.pluginRuns ?? []) {
-    if (run.trigger !== 'auto' || run.branch !== 'develop') continue;
+    if (!isOfficialHistoryRun(run)) continue;
     const group = groups.get(run.comparisonId) ?? [];
     group.push(run);
     groups.set(run.comparisonId, group);

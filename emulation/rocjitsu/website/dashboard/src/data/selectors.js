@@ -64,11 +64,17 @@ export function selectComparisonRuns(data, selectedCandidateId, selectedBaseline
   const comparisonRuns = data.comparisonRuns;
   const selectedCandidate = comparisonRuns.find((run) => run.runId === selectedCandidateId);
   const candidate = selectedCandidate ?? comparisonRuns.at(-1) ?? null;
-  const defaultBaseline = candidate?.trigger === 'manual'
-    ? data.runs.filter((run) => isRunCompletedForFilters(run, filters)).at(-1) ?? null
-    : selectedCandidate
-      ? previousCompletedRunForFilters(data.runs, candidate, filters)
-      : data.runs.at(-2) ?? null;
+  let defaultBaseline;
+  if (candidate?.trigger === 'manual') {
+    // Manual candidates compare against the latest completed official run.
+    defaultBaseline = data.runs.filter((run) => isRunCompletedForFilters(run, filters)).at(-1) ?? null;
+  } else if (selectedCandidate) {
+    // An explicitly selected official candidate compares against its predecessor.
+    defaultBaseline = previousCompletedRunForFilters(data.runs, candidate, filters);
+  } else {
+    // The default official candidate compares against the preceding run.
+    defaultBaseline = data.runs.at(-2) ?? null;
+  }
   const baseline = comparisonRuns.find((run) => run.runId === selectedBaselineId) ?? defaultBaseline;
   return { candidate, baseline };
 }

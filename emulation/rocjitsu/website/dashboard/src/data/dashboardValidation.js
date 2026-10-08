@@ -1,3 +1,4 @@
+import { isOfficialHistoryRun } from './runClassification.js';
 import { backfillRunIds, compareRunExecution, sortRunsByCommit } from './runOrdering.js';
 
 const CURRENT_SCHEMA_VERSION = 1;
@@ -314,7 +315,7 @@ function buildDashboardData(raw) {
 
   const pluginRuns = [...allRuns].sort(compareRunExecution);
   const comparisonRuns = pluginRuns.filter((run) => run.plugin.id === 'vanilla');
-  const runs = comparisonRuns.filter((run) => run.trigger === 'auto' && run.branch === 'develop');
+  const runs = comparisonRuns.filter(isOfficialHistoryRun);
   const officialTestIds = new Set(runs.flatMap((run) => run.tests.map((test) => test.logicalTestId)));
   const testCatalog = raw.testCatalog.filter((test) => officialTestIds.has(test.id));
   const latestCommitRun = sortRunsByCommit(runs).at(-1) ?? null;

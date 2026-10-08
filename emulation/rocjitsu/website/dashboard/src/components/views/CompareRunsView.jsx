@@ -134,7 +134,7 @@ function RunInformation({ label, run, otherRun, filters, accentColor }) {
       </Stack>
       <DetailGrid>
         <DetailItem label="Branch">{run.branch}</DetailItem>
-        <DetailItem label="Trigger">{run.trigger === 'manual' ? 'Manual' : 'Auto'}</DetailItem>
+        <DetailItem label="Run type">{run.trigger === 'manual' ? 'Manual' : 'Auto'}</DetailItem>
         <DetailItem label="Coverage">
           <HighlightedValue different={coverage !== otherCoverage}>{coverage}</HighlightedValue>
         </DetailItem>

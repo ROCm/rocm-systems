@@ -124,7 +124,7 @@ test('manual-only publication loads with empty official views and usable compari
   await expect(page.getByRole('img', { name: 'Performance change by benchmark comparison chart' })).toBeVisible();
 });
 
-test('leaving Run Comparison reconciles manual-only filters to official defaults', async ({ page }) => {
+test('Run Comparison restores manual-exclusive filters after visiting official views', async ({ page }) => {
   const catalog = JSON.parse(readFileSync(
     new URL('../fixtures/data/test-catalogs/rocjitsu-core-v2.json', import.meta.url), 'utf8',
   ));
@@ -181,5 +181,8 @@ test('leaving Run Comparison reconciles manual-only filters to official defaults
     await expect(page.getByRole('option', { name: option, exact: true })).toBeVisible();
     await page.keyboard.press('Escape');
   }
+  await expect(page.getByTestId('targets-filter').locator('[data-responsive-tag]')).toHaveText('gfx9999');
+  await expect(page.getByTestId('suites-filter').locator('[data-responsive-tag]')).toHaveText('ManualSuite');
+  await expect(page.getByRole('row', { name: /Manual benchmark.*Completed/ })).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Candidate run' })).toHaveValue(/aaaaaaaa.*Manual/);
 });

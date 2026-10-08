@@ -15,23 +15,29 @@ export function useDashboardState(data) {
   const [suites, setSuites] = useState(data.suites);
   const [historyRange, setHistoryRange] = useState('ALL');
   const [tab, setActiveTab] = useState('overview');
-  const manualOnlyComparisonFilters = useRef(null);
-  const setTab = (nextTab) => {
-    if (tab === 'compare' && nextTab !== 'compare') {
-      if (data.runs.length === 0) manualOnlyComparisonFilters.current = { targets, suites };
-      setTargets(reconcileSelection(targets, data.targets, defaultTargetSelection(data.targets)));
-      setSuites(reconcileSelection(suites, data.suites, data.suites));
-    } else if (tab !== 'compare' && nextTab === 'compare' && data.runs.length === 0) {
-      setTargets(manualOnlyComparisonFilters.current?.targets ?? defaultTargetSelection(data.comparisonTargets));
-      setSuites(manualOnlyComparisonFilters.current?.suites ?? data.comparisonSuites);
-    }
-    setActiveTab(nextTab);
-  };
   const [benchmarkMode, setBenchmarkMode] = useState('single');
   const [search, setSearch] = useState('');
   const [comparisonBaselineId, setComparisonBaselineId] = useState(null);
   const [comparisonCandidateId, setComparisonCandidateId] = useState(null);
   const [explorerRunIds, setExplorerRunIds] = useState([]);
+
+  const comparisonFilters = useRef(null);
+  const setTab = (nextTab) => {
+    if (tab === 'compare' && nextTab !== 'compare') {
+      comparisonFilters.current = { targets, suites };
+      setTargets(reconcileSelection(targets, data.targets, defaultTargetSelection(data.targets)));
+      setSuites(reconcileSelection(suites, data.suites, data.suites));
+    } else if (tab !== 'compare' && nextTab === 'compare') {
+      if (comparisonFilters.current) {
+        setTargets(comparisonFilters.current.targets);
+        setSuites(comparisonFilters.current.suites);
+      } else if (data.runs.length === 0) {
+        setTargets(defaultTargetSelection(data.comparisonTargets));
+        setSuites(data.comparisonSuites);
+      }
+    }
+    setActiveTab(nextTab);
+  };
 
   const filters = useMemo(() => ({ targets, suites }), [targets, suites]);
 
