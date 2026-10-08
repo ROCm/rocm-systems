@@ -746,13 +746,20 @@ leaves alone are not reported.
 **Tests.** `hrr_pinned_host_test.cc` covers the behaviour above, including a
 failed launch, every launch entry point, a free that fails and `hipDeviceReset`.
 Most cases capture a workload and replay it; the ones that check only what
-capture records or trusts do not replay. Two cases can skip. The
+capture records or trusts do not replay. Some cases can skip. The
 `hipDeviceReset` case skips its last check when the reset leaves no address in
-the old buffer that the runtime does not know. The cross-device free needs two
-devices. Three paths are untested by design: the fork handlers, a blob or event
-that cannot be written, and a restore `hipLaunchHostFunc` refuses. Each needs a
-fault injected into the capture or replay process, which no test hook
-provides.
+the old buffer that the runtime does not know. The six cross-device cases need
+two devices and skip with fewer, which is every runner that pins one GPU: a
+free, an unregister, a `hipFree`, a `hipDeviceReset` of the allocating device,
+no free at all (the summary and the `--kernel-filter` warm-up wait), and a free
+whose restore waits for a later event (the bounded wait and the leak). Three
+paths are untested by design: the fork handlers, a blob or event that cannot be
+written, and a restore `hipLaunchHostFunc` refuses. Each needs a fault injected
+into the capture or replay process, which no test hook provides. The waits at
+teardown are untested too: the summary's wait drains every restore first, so
+they only matter when a divergence stops replay before the summary. So is the
+ordering of a launch against a `hipStreamBeginCapture` on another thread; the
+case for a free on another thread covers the same ordering.
 
 ### Threat Model: Pinned Host Snapshots
 

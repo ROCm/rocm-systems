@@ -2635,6 +2635,57 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_GraphCapture) {
 }
 
 // ---------------------------------------------------------------------------
+// A launch into the null stream while a blocking stream captures. Asked about
+// the null stream, hipStreamIsCapturing then fails with
+// hipErrorStreamCaptureImplicit, and replay skips the restore as it does under
+// graph capture. Graph_Direct's captured launch is moved onto the null stream
+// in the archive and given launch 0's first record; the blocking stream still
+// captures when it replays. Treating the error like any other let the restore
+// go ahead on the null stream. Replay runs with --continue-on-error, since the
+// moved launch need not succeed.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_NullLaunchDuringCapture) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_null_during_capture.hrr");
+  capture_case("Unit_HRR_PinnedHost_Graph_Direct", cap.path);
+  const fs::path archive = hrr_single_process_archive(cap.path);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  const auto kls = launches_of(arc);
+  REQUIRE(kls.size() == 2);
+  REQUIRE(kls[0]->snapshots.size() == 2);
+  REQUIRE(kls[1]->snapshots.empty());
+
+  std::vector<uint8_t> events = read_bytes(archive / "events.bin");
+  const auto spans = launch_spans(events);
+  REQUIRE(spans.size() == 2);
+  const size_t rec = record_at(events, spans, kls, 0, 0);
+  std::vector<uint8_t> record(events.begin() + rec, events.begin() + rec + 41);
+  const size_t n_at = num_snapshots_at(events, spans[1]);
+  const uint16_t n = 1;
+  std::memcpy(events.data() + n_at, &n, 2);
+  const uint64_t null_stream = 0;
+  std::memcpy(events.data() + spans[1].first + sizeof(hrr_event_header), &null_stream, 8);
+  hrr_event_header hdr;
+  std::memcpy(&hdr, events.data() + spans[1].first, sizeof(hdr));
+  hdr.payload_length += record.size();
+  std::memcpy(events.data() + spans[1].first, &hdr, sizeof(hdr));
+  events.insert(events.begin() + spans[1].second, record.begin(), record.end());
+  write_bytes(archive / "events.bin", events);
+
+  auto [rc, out] = replay(archive, "--continue-on-error");
+  INFO("Replay exit: " << rc << "\nReplay:\n" << out);
+  CHECK(rc < 128);
+  CHECK(out.find("pinned host snapshots are not applied to kernels replayed into a "
+                 "graph capture") != std::string::npos);
+  CHECK(out.find("could not queue the pinned host snapshot restore") == std::string::npos);
+  CHECK(host_snapshots_in_graph(out) == 1);
+  unsigned long long restored = 0, rejected = 0;
+  host_snapshot_summary(out, restored, rejected);
+  CHECK(rejected == 0);
+}
+
+// ---------------------------------------------------------------------------
 // A launch that fails after capture snapshotted it leaves nothing behind. The
 // next launch, on a busy stream, finds the bytes changed since launch 0 and
 // records both chunks to restore. Replay runs it on pattern 2.
@@ -2781,7 +2832,8 @@ namespace {
 // variant; `wait` is the line replay must print, `extra_args` its options.
 // Skips on fewer than two devices.
 void cross_device_free(const char* variant, const std::string& wait,
-                       const std::string& extra_args = "") {
+                       const std::string& extra_args = "",
+                       const std::string& warm_up_wait = "") {
   INFO("HRR_PINNED_VARIANT=" << variant);
   ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_cross_device_free.hrr");
   const std::string skipped = capture_case("Unit_HRR_PinnedHost_CrossDeviceFree_Direct",
@@ -2825,6 +2877,20 @@ void cross_device_free(const char* variant, const std::string& wait,
     CHECK(d2h_fail == 0);
   }
 #endif
+  if (warm_up_wait.empty()) return;
+
+  // The same restore queued in the --kernel-filter warm-up pass, which ends
+  // the same way. The timed pass runs without the slow write, so its restore
+  // runs at once, and it alone is counted.
+  auto [frc, fout] = replay(archive, "--kernel-filter hrr_pinned_read");
+  INFO("Filtered replay exit: " << frc
+       << (frc == hrr::test::SpawnProc::kKilledOnTimeout ? " (hung, killed)" : "")
+       << "\nFiltered replay:\n" << fout);
+  REQUIRE(frc == 0);
+  CHECK(fout.find(warm_up_wait) != std::string::npos);
+  host_snapshot_summary(fout, restored, rejected);
+  CHECK(restored == 2);
+  CHECK(rejected == 0);
 }
 
 constexpr const char* kFreeWaits =
@@ -2849,10 +2915,12 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceHipFree) { cross_device_free("2", k
 // ---------------------------------------------------------------------------
 // A restore still queued on another device when the pass ends is counted in
 // the summary. The pass's closing sync covers the current device only, so the
-// summary read the count before the restore ran.
+// summary read the count before the restore ran. The --kernel-filter warm-up
+// pass waits for it the same way before it resets the counters.
 // ---------------------------------------------------------------------------
 HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceRestoreAtExit) {
-  cross_device_free("3", "the replay summary waits for a pinned host snapshot restore");
+  cross_device_free("3", "the replay summary waits for a pinned host snapshot restore", "",
+                    "the warm-up pass waits for a pinned host snapshot restore");
 }
 
 // ---------------------------------------------------------------------------
