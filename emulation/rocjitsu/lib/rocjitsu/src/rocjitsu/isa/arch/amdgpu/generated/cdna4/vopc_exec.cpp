@@ -34,8 +34,6 @@ void VCmpClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpClassF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -136,8 +134,6 @@ void VCmpxClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxClassF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -318,8 +314,6 @@ void VCmpClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpClassF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -427,8 +421,6 @@ void VCmpxClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxClassF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -538,8 +530,6 @@ void VCmpFF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpFF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -574,8 +564,6 @@ void VCmpLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -610,8 +598,6 @@ void VCmpEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpEqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -646,8 +632,6 @@ void VCmpLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -682,8 +666,6 @@ void VCmpGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -718,8 +700,6 @@ void VCmpLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -754,8 +734,6 @@ void VCmpGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -790,8 +768,6 @@ void VCmpOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpOF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -826,8 +802,6 @@ void VCmpUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpUF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -862,8 +836,6 @@ void VCmpNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNgeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -898,8 +870,6 @@ void VCmpNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNlgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -934,8 +904,6 @@ void VCmpNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNgtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -970,8 +938,6 @@ void VCmpNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNleF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1006,8 +972,6 @@ void VCmpNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNeqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1042,8 +1006,6 @@ void VCmpNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNltF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1078,8 +1040,6 @@ void VCmpTruF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpTruF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1133,8 +1093,6 @@ void VCmpxFF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxFF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1216,8 +1174,6 @@ void VCmpxLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1306,8 +1262,6 @@ void VCmpxEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxEqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1396,8 +1350,6 @@ void VCmpxLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1486,8 +1438,6 @@ void VCmpxGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1576,8 +1526,6 @@ void VCmpxLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1666,8 +1614,6 @@ void VCmpxGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1756,8 +1702,6 @@ void VCmpxOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxOF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1846,8 +1790,6 @@ void VCmpxUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxUF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1936,8 +1878,6 @@ void VCmpxNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNgeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2026,8 +1966,6 @@ void VCmpxNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNlgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2116,8 +2054,6 @@ void VCmpxNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNgtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2206,8 +2142,6 @@ void VCmpxNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNleF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2296,8 +2230,6 @@ void VCmpxNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNeqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2386,8 +2318,6 @@ void VCmpxNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNltF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2469,8 +2399,6 @@ void VCmpxTruF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxTruF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2526,8 +2454,6 @@ void VCmpFF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpFF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2562,8 +2488,6 @@ void VCmpLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2598,8 +2522,6 @@ void VCmpEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpEqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2634,8 +2556,6 @@ void VCmpLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2670,8 +2590,6 @@ void VCmpGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2706,8 +2624,6 @@ void VCmpLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2742,8 +2658,6 @@ void VCmpGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2778,8 +2692,6 @@ void VCmpOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpOF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2814,8 +2726,6 @@ void VCmpUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpUF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2850,8 +2760,6 @@ void VCmpNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNgeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2886,8 +2794,6 @@ void VCmpNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNlgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2922,8 +2828,6 @@ void VCmpNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNgtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2958,8 +2862,6 @@ void VCmpNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNleF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2994,8 +2896,6 @@ void VCmpNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNeqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3030,8 +2930,6 @@ void VCmpNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNltF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3066,8 +2964,6 @@ void VCmpTruF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpTruF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3118,8 +3014,6 @@ void VCmpxFF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxFF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3198,8 +3092,6 @@ void VCmpxLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3288,8 +3180,6 @@ void VCmpxEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxEqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3378,8 +3268,6 @@ void VCmpxLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3468,8 +3356,6 @@ void VCmpxGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3558,8 +3444,6 @@ void VCmpxLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3648,8 +3532,6 @@ void VCmpxGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3738,8 +3620,6 @@ void VCmpxOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxOF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3828,8 +3708,6 @@ void VCmpxUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxUF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3918,8 +3796,6 @@ void VCmpxNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNgeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4008,8 +3884,6 @@ void VCmpxNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNlgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4098,8 +3972,6 @@ void VCmpxNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNgtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4188,8 +4060,6 @@ void VCmpxNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNleF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4278,8 +4148,6 @@ void VCmpxNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNeqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4368,8 +4236,6 @@ void VCmpxNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNltF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4448,8 +4314,6 @@ void VCmpxTruF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxTruF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5026,8 +4890,6 @@ void VCmpFI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpFI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5062,8 +4924,6 @@ void VCmpLtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLtI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5098,8 +4958,6 @@ void VCmpEqI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpEqI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5134,8 +4992,6 @@ void VCmpLeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLeI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5170,8 +5026,6 @@ void VCmpGtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGtI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5206,8 +5060,6 @@ void VCmpNeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNeI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5242,8 +5094,6 @@ void VCmpGeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGeI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5278,8 +5128,6 @@ void VCmpTI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpTI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5314,8 +5162,6 @@ void VCmpFU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpFU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5350,8 +5196,6 @@ void VCmpLtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLtU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5386,8 +5230,6 @@ void VCmpEqU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpEqU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5422,8 +5264,6 @@ void VCmpLeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLeU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5458,8 +5298,6 @@ void VCmpGtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGtU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5494,8 +5332,6 @@ void VCmpNeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNeU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5530,8 +5366,6 @@ void VCmpGeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGeU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5566,8 +5400,6 @@ void VCmpTU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpTU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5624,8 +5456,6 @@ void VCmpxFI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxFI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5707,8 +5537,6 @@ void VCmpxLtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLtI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5791,8 +5619,6 @@ void VCmpxEqI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxEqI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5875,8 +5701,6 @@ void VCmpxLeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLeI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5959,8 +5783,6 @@ void VCmpxGtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGtI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6043,8 +5865,6 @@ void VCmpxNeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNeI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6127,8 +5947,6 @@ void VCmpxGeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGeI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6210,8 +6028,6 @@ void VCmpxTI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxTI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6286,8 +6102,6 @@ void VCmpxFU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxFU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6360,8 +6174,6 @@ void VCmpxLtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLtU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6436,8 +6248,6 @@ void VCmpxEqU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxEqU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6512,8 +6322,6 @@ void VCmpxLeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLeU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6588,8 +6396,6 @@ void VCmpxGtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGtU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6664,8 +6470,6 @@ void VCmpxNeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNeU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6740,8 +6544,6 @@ void VCmpxGeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGeU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6813,8 +6615,6 @@ void VCmpxTU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxTU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6867,8 +6667,6 @@ void VCmpFI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpFI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6903,8 +6701,6 @@ void VCmpLtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLtI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6939,8 +6735,6 @@ void VCmpEqI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpEqI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6975,8 +6769,6 @@ void VCmpLeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLeI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7011,8 +6803,6 @@ void VCmpGtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGtI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7047,8 +6837,6 @@ void VCmpNeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNeI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7083,8 +6871,6 @@ void VCmpGeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGeI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7119,8 +6905,6 @@ void VCmpTI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpTI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7155,8 +6939,6 @@ void VCmpFU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpFU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7191,8 +6973,6 @@ void VCmpLtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLtU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7227,8 +7007,6 @@ void VCmpEqU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpEqU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7263,8 +7041,6 @@ void VCmpLeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLeU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7299,8 +7075,6 @@ void VCmpGtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGtU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7335,8 +7109,6 @@ void VCmpNeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNeU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7371,8 +7143,6 @@ void VCmpGeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGeU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7407,8 +7177,6 @@ void VCmpTU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpTU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7459,8 +7227,6 @@ void VCmpxFI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxFI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7532,8 +7298,6 @@ void VCmpxLtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLtI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7608,8 +7372,6 @@ void VCmpxEqI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxEqI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7684,8 +7446,6 @@ void VCmpxLeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLeI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7760,8 +7520,6 @@ void VCmpxGtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGtI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7836,8 +7594,6 @@ void VCmpxNeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNeI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7912,8 +7668,6 @@ void VCmpxGeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGeI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -7985,8 +7739,6 @@ void VCmpxTI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxTI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -8055,8 +7807,6 @@ void VCmpxFU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxFU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -8128,8 +7878,6 @@ void VCmpxLtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLtU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -8204,8 +7952,6 @@ void VCmpxEqU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxEqU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -8280,8 +8026,6 @@ void VCmpxLeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLeU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -8356,8 +8100,6 @@ void VCmpxGtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGtU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -8432,8 +8174,6 @@ void VCmpxNeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNeU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -8508,8 +8248,6 @@ void VCmpxGeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGeU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -8581,8 +8319,6 @@ void VCmpxTU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxTU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());

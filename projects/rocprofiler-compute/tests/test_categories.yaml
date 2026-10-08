@@ -55,6 +55,7 @@ test_categories:
       - test_memory_chart_units
       - test_memory_chart_mem_chart
       - test_membw_engine
+      - test_membw_summary
       - test_membw_guidance
       - test_membw_metric_extract
       - test_membw_pipeline
@@ -147,6 +148,7 @@ test_categories:
       - test_memory_chart_units
       - test_memory_chart_mem_chart
       - test_membw_engine
+      - test_membw_summary
       - test_membw_guidance
       - test_membw_metric_extract
       - test_membw_pipeline
@@ -243,6 +245,7 @@ test_categories:
       - test_memory_chart_units
       - test_memory_chart_mem_chart
       - test_membw_engine
+      - test_membw_summary
       - test_membw_guidance
       - test_membw_metric_extract
       - test_membw_pipeline
@@ -339,6 +342,7 @@ test_categories:
       - test_memory_chart_units
       - test_memory_chart_mem_chart
       - test_membw_engine
+      - test_membw_summary
       - test_membw_guidance
       - test_membw_metric_extract
       - test_membw_pipeline

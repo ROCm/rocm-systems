@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Cross-module AMDF negotiation, allocator, and release-callback tests.
@@ -30,11 +31,11 @@ fn sdma_format_features_follow_native_encoding_rules() {
     assert_eq!(instance::sdma_format_features(11, 5, false), 0);
     assert_eq!(
         instance::sdma_format_features(11, 5, true),
-        AMDF_GPU_SDMA_FORMAT_FEATURE_GCR
+        AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR
     );
     assert_eq!(
         instance::sdma_format_features(12, 0, true),
-        AMDF_GPU_SDMA_FORMAT_FEATURE_GCR | AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM
+        AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR | AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM
     );
     assert_eq!(
         instance::sdma_format_features(12, 5, false),
@@ -58,9 +59,11 @@ fn negotiation_and_short_records_preserve_outputs() {
         assert_eq!(api, sentinel);
         assert_eq!(amdf_query_api(2, 2, &raw mut api), VERSION);
         assert_eq!(api, sentinel);
-        assert_eq!(amdf_query_api(1, 3, &raw mut api), 0);
+        assert_eq!(amdf_query_api(1, 4, &raw mut api), VERSION);
+        assert_eq!(api, sentinel);
+        assert_eq!(amdf_query_api(1, 5, &raw mut api), 0);
         assert_eq!(api, &raw const API);
-        assert_eq!((*api).abi_version, AMDF_ABI_VERSION_3);
+        assert_eq!((*api).abi_version, AMDF_ABI_VERSION_5);
         let mut extension = sentinel.cast::<c_void>();
         assert_eq!(
             query_extension(AMDF_EXTENSION_XDNA, 1, 1, &raw mut extension),

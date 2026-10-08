@@ -2,7 +2,9 @@
 numpy==1.26.4; python_version < "3.13"
 # numpy 1.26.4 publishes no cp313 wheel; 2.x is required from Python 3.13 on.
 numpy==2.5.2; python_version >= "3.13"
-pandas==2.2.3
+pandas==2.2.3; python_version < "3.14"
+# pandas 2.2.3 publishes no cp314 wheel; 2.3.3 is the first with one.
+pandas==2.3.3; python_version >= "3.14"
 plotext==5.3.2
 plotly==6.9.0
 pyyaml==6.0.3

@@ -7,7 +7,7 @@ import math
 import shutil
 import textwrap
 from io import StringIO
-from typing import Any, Optional, TextIO
+from typing import Any, List, Optional, TextIO
 
 import pandas as pd
 from rich.console import Console as RichConsole
@@ -17,7 +17,12 @@ from rich.text import Text as RichText
 from tabulate import tabulate
 
 import config
-from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
+from membw_analysis.models import MemBwAnalysisResult
+from membw_analysis.summary import (
+    ACTIVE_FALLBACK_TEXT,
+    has_active_nodes,
+    status_text,
+)
 from memory_chart.loader import Layouts
 from memory_chart.mem_chart import format_mem_chart_heading, strip_ansi
 from memory_chart.mem_chart import plot_mem_chart as _plot_mem_chart
@@ -804,7 +809,7 @@ def _render_membw_guidance(
     chart_width: int = 0,
 ) -> str:
     """Render membw guidance text to append below the memory chart."""
-    if not _has_active_nodes(membw_result.nodes):
+    if not has_active_nodes(membw_result.nodes):
         return _render_membw_status_line(membw_result)
     panel_output = _render_membw_guidance_panel(
         membw_result.guidance_blocks,
@@ -812,43 +817,14 @@ def _render_membw_guidance(
     )
     if panel_output:
         return panel_output
-    return "Memory Bandwidth Analysis: Bottlenecks detected (see chart annotations).\n"
-
-
-def _has_active_nodes(nodes: tuple[BottleneckNode, ...]) -> bool:
-    """True when any node in the tree is active."""
-    for node in nodes:
-        if node.state == "active":
-            return True
-        if _has_active_nodes(node.children):
-            return True
-    return False
-
-
-def _all_nodes_indeterminate(
-    nodes: tuple[BottleneckNode, ...],
-) -> bool:
-    """True when every root node is indeterminate."""
-    return bool(nodes) and all(n.state == "indeterminate" for n in nodes)
+    return f"{ACTIVE_FALLBACK_TEXT}\n"
 
 
 def _render_membw_status_line(
     membw_result: MemBwAnalysisResult,
 ) -> str:
     """Render a single status line when no bottlenecks are active."""
-    if membw_result.availability == "unavailable":
-        return (
-            "Memory Bandwidth Analysis: Unavailable "
-            f"({membw_result.availability_reason or 'no data'}).\n"
-        )
-    if membw_result.availability == "partial":
-        return (
-            "Memory Bandwidth Analysis: Partial data "
-            f"({membw_result.availability_reason}).\n"
-        )
-    if _all_nodes_indeterminate(membw_result.nodes):
-        return "Memory Bandwidth Analysis: Inconclusive (insufficient counter data).\n"
-    return "Memory Bandwidth Analysis: No bottlenecks detected (GL1 / GL2 / EA).\n"
+    return f"{status_text(membw_result)}\n"
 
 
 def _style_guidance_block(block: str) -> RichText:
@@ -905,6 +881,15 @@ def _render_membw_guidance_panel(
     return buf.getvalue()
 
 
+def resolve_hidden_columns(args: argparse.Namespace) -> List[str]:
+    """Resolve terminal columns hidden by default and user overrides."""
+    return [
+        column
+        for column in config.HIDDEN_COLUMNS_CLI
+        if column not in (args.include_cols or [])
+    ]
+
+
 def show_all(
     args: argparse.Namespace,
     runs: dict[str, Any],
@@ -928,10 +913,7 @@ def show_all(
         profiling_config.get("filter_blocks", []), gpu_arch
     )
 
-    if args.include_cols:
-        hidden_cols = list(set(config.HIDDEN_COLUMNS_CLI) - set(args.include_cols))
-    else:
-        hidden_cols = config.HIDDEN_COLUMNS_CLI
+    hidden_cols = resolve_hidden_columns(args)
 
     # Check for valid roofline data once (used to skip roofline tables in the loop)
     has_valid_roofline = any(

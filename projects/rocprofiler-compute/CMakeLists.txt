@@ -792,6 +792,14 @@ add_test(
 )
 
 add_test(
+    NAME test_membw_summary
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_membw_summary.xml
+        ${COV_OPTION} tests/unit/membw_analysis/test_membw_summary.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_membw_guidance
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_membw_guidance.xml
@@ -1077,6 +1085,7 @@ if(${ENABLE_COVERAGE})
         test_memory_chart_units
         test_memory_chart_mem_chart
         test_membw_engine
+        test_membw_summary
         test_membw_guidance
         test_membw_metric_extract
         test_membw_pipeline

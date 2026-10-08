@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Private Linux memory-interop contract implemented by the selected backend.
@@ -12,7 +13,9 @@ use crate::Error;
 use crate::event::GpuMemoryFault;
 use crate::host_storage::Owned;
 use crate::memory::DeviceAccess;
-use crate::memory::interop::linux::{DmaBuf, KfdIpcMemoryHandle, KfdSvmAttribute};
+use crate::memory::interop::linux::{
+    AisFileOperation, AisFileResult, DmaBuf, KfdIpcMemoryHandle, KfdSvmAttribute,
+};
 
 use super::{
     AllocationDriver, DeviceDriver, DeviceState, NativeAllocation, NativeSignalEvent,
@@ -32,6 +35,14 @@ pub(crate) trait LinuxMemoryInteropDriver: AllocationDriver + VirtualMemoryDrive
     ) -> io::Result<()>;
     fn read_descriptor_at(descriptor: RawFd, buffer: &mut [u8], offset: i64) -> io::Result<usize>;
     fn write_descriptor_at(descriptor: RawFd, buffer: &[u8], offset: i64) -> io::Result<usize>;
+    fn ais_transfer(
+        allocation: &Self::Allocation,
+        descriptor: RawFd,
+        allocation_offset: u64,
+        size: u64,
+        file_offset: i64,
+        operation: AisFileOperation,
+    ) -> Result<AisFileResult, Error>;
     fn supports_system_dma_buf_import(device: &Self::DeviceState) -> bool;
 
     fn import_virtual_memory(
