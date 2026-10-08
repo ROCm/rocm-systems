@@ -994,10 +994,65 @@ TEST(InterposerDrmTest, PrimeImportSharesTheBufferAndItsMetadata) {
   EXPECT_EQ(close(kfd), 0);
 }
 
+TEST(InterposerDrmTest, PrimeImportKeepsTheBoStateAfterTheHandleCloses) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  int exporter = open_drm_render();
+  ASSERT_GE(exporter, 0);
+  int importer = open_drm_render();
+  ASSERT_GE(importer, 0);
+  drm_amdgpu_gem_create create{};
+  create.in.bo_size = 4096;
+  create.in.alignment = 65536;
+  create.in.domains = AMDGPU_GEM_DOMAIN_CPU;
+  create.in.domain_flags = AMDGPU_GEM_CREATE_EXT_COHERENT;
+  ASSERT_EQ(ioctl(exporter, DRM_IOCTL_AMDGPU_GEM_CREATE, &create), 0);
+
+  drm_amdgpu_gem_metadata store{};
+  store.handle = create.out.handle;
+  store.op = AMDGPU_GEM_METADATA_OP_SET_METADATA;
+  store.data.tiling_info = 0x11;
+  store.data.data_size_bytes = sizeof(uint32_t);
+  store.data.data[0] = 0xA1B2C3D4u;
+  ASSERT_EQ(ioctl(exporter, DRM_IOCTL_AMDGPU_GEM_METADATA, &store), 0);
+
+  drm_prime_handle prime{};
+  prime.handle = create.out.handle;
+  prime.flags = DRM_CLOEXEC;
+  ASSERT_EQ(ioctl(exporter, DRM_IOCTL_PRIME_HANDLE_TO_FD, &prime), 0);
+  ASSERT_EQ(gem_close(exporter, create.out.handle), 0);
+  uint32_t imported = 0;
+  ASSERT_TRUE(prime_import(importer, prime.fd, &imported));
+  EXPECT_EQ(close(prime.fd), 0);
+
+  drm_amdgpu_gem_metadata query{};
+  query.handle = imported;
+  query.op = AMDGPU_GEM_METADATA_OP_GET_METADATA;
+  ASSERT_EQ(ioctl(importer, DRM_IOCTL_AMDGPU_GEM_METADATA, &query), 0);
+  EXPECT_EQ(query.data.tiling_info, 0x11u);
+  EXPECT_EQ(query.data.data_size_bytes, sizeof(uint32_t));
+  EXPECT_EQ(query.data.data[0], 0xA1B2C3D4u);
+
+  drm_amdgpu_gem_create_in info{};
+  drm_amdgpu_gem_op op{};
+  op.handle = imported;
+  op.op = AMDGPU_GEM_OP_GET_GEM_CREATE_INFO;
+  op.value = reinterpret_cast<uint64_t>(&info);
+  ASSERT_EQ(ioctl(importer, DRM_IOCTL_AMDGPU_GEM_OP, &op), 0);
+  EXPECT_EQ(info.bo_size, 4096u);
+  EXPECT_EQ(info.alignment, 65536u);
+  EXPECT_EQ(info.domains, static_cast<uint64_t>(AMDGPU_GEM_DOMAIN_CPU));
+  EXPECT_EQ(info.domain_flags, static_cast<uint64_t>(AMDGPU_GEM_CREATE_EXT_COHERENT));
+
+  EXPECT_EQ(close(importer), 0);
+  EXPECT_EQ(close(exporter), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
 namespace {
 
-// hipMalloc in local mode allocates at a caller VA without a memfd. Exporting it
-// must keep the caller's CPU mapping on the bytes the dmabuf exposes.
+// hipMalloc in local mode allocates at a caller VA. Exporting it must keep the
+// caller's CPU mapping on the bytes the dmabuf exposes.
 void check_dmabuf_export_keeps_cpu_mapping(bool reserve_va) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
@@ -1054,6 +1109,124 @@ TEST(InterposerDrmTest, DmabufExportKeepsAReservedCpuMapping) {
 
 TEST(InterposerDrmTest, DmabufExportKeepsADriverCpuMapping) {
   check_dmabuf_export_keeps_cpu_mapping(false);
+}
+
+TEST(InterposerDrmTest, DmabufExportLeavesPagesPastAPartialMapping) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  uint32_t gpu_id = 0;
+  {
+    std::ifstream gpu_id_file("/sys/class/kfd/kfd/topology/nodes/1/gpu_id");
+    ASSERT_TRUE(gpu_id_file >> gpu_id);
+  }
+  constexpr size_t kPage = 4096;
+  auto *reserved = static_cast<uint8_t *>(
+      mmap(nullptr, 2 * kPage, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0));
+  ASSERT_NE(reserved, MAP_FAILED);
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = reinterpret_cast<uint64_t>(reserved);
+  allocation.size = 2 * kPage;
+  allocation.gpu_id = gpu_id;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+                     KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  // The caller maps only the first page. The second page of the allocation's
+  // VA holds an unrelated read-only mapping.
+  ASSERT_EQ(mmap(reserved, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, kfd,
+                 static_cast<off_t>(allocation.mmap_offset)),
+            reserved);
+  uint8_t *unrelated = reserved + kPage;
+  ASSERT_EQ(mmap(unrelated, kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
+                 -1, 0),
+            unrelated);
+  std::memset(unrelated, 0x5a, kPage);
+  ASSERT_EQ(mprotect(unrelated, kPage, PROT_READ), 0);
+  reinterpret_cast<volatile uint32_t *>(reserved)[0] = 0x1111u;
+
+  kfd_ioctl_export_dmabuf_args exported{};
+  exported.handle = allocation.handle;
+  exported.flags = O_CLOEXEC;
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_EXPORT_DMABUF, &exported), 0);
+  const int dmabuf = static_cast<int>(exported.dmabuf_fd);
+  EXPECT_EQ(unrelated[0], 0x5a);
+  EXPECT_EQ(unrelated[kPage - 1], 0x5a);
+  void *view = mmap(nullptr, 2 * kPage, PROT_READ, MAP_SHARED, dmabuf, 0);
+  ASSERT_NE(view, MAP_FAILED);
+  EXPECT_EQ(static_cast<const uint32_t *>(view)[0], 0x1111u);
+
+  EXPECT_EQ(munmap(view, 2 * kPage), 0);
+  EXPECT_EQ(close(dmabuf), 0);
+  EXPECT_EQ(munmap(reserved, 2 * kPage), 0);
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = allocation.handle;
+  EXPECT_EQ(ioctl(kfd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDrmTest, DmabufExportKeepsStoresMadeDuringTheExport) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  uint32_t gpu_id = 0;
+  {
+    std::ifstream gpu_id_file("/sys/class/kfd/kfd/topology/nodes/1/gpu_id");
+    ASSERT_TRUE(gpu_id_file >> gpu_id);
+  }
+  constexpr size_t kBytes = size_t{64} << 20;
+  constexpr size_t kWords = kBytes / sizeof(uint32_t);
+  void *reserved =
+      mmap(nullptr, kBytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  ASSERT_NE(reserved, MAP_FAILED);
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = reinterpret_cast<uint64_t>(reserved);
+  allocation.size = kBytes;
+  allocation.gpu_id = gpu_id;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+                     KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_EQ(mmap(reserved, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, kfd,
+                 static_cast<off_t>(allocation.mmap_offset)),
+            reserved);
+  auto *words = static_cast<volatile uint32_t *>(reserved);
+  const auto expected = [](size_t i) { return static_cast<uint32_t>(i) + 1u; };
+
+  // The writer stores each word once, so a store lost during the export is
+  // never rewritten.
+  std::atomic<bool> writing{false};
+  std::thread writer([&] {
+    for (size_t i = 0; i < kWords; ++i) {
+      words[i] = expected(i);
+      if (i == kWords / 8)
+        writing.store(true, std::memory_order_release);
+    }
+  });
+  while (!writing.load(std::memory_order_acquire))
+    std::this_thread::yield();
+  kfd_ioctl_export_dmabuf_args exported{};
+  exported.handle = allocation.handle;
+  exported.flags = O_CLOEXEC;
+  const int export_rc = ioctl(kfd, AMDKFD_IOC_EXPORT_DMABUF, &exported);
+  writer.join();
+  ASSERT_EQ(export_rc, 0);
+  const int dmabuf = static_cast<int>(exported.dmabuf_fd);
+  void *view = mmap(nullptr, kBytes, PROT_READ, MAP_SHARED, dmabuf, 0);
+  ASSERT_NE(view, MAP_FAILED);
+  const auto *exported_words = static_cast<const uint32_t *>(view);
+  size_t stale_cpu = 0;
+  size_t stale_dmabuf = 0;
+  for (size_t i = 0; i < kWords; ++i) {
+    stale_cpu += words[i] != expected(i);
+    stale_dmabuf += exported_words[i] != expected(i);
+  }
+  EXPECT_EQ(stale_cpu, 0u);
+  EXPECT_EQ(stale_dmabuf, 0u);
+
+  EXPECT_EQ(munmap(view, kBytes), 0);
+  EXPECT_EQ(close(dmabuf), 0);
+  EXPECT_EQ(munmap(reserved, kBytes), 0);
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = allocation.handle;
+  EXPECT_EQ(ioctl(kfd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+  EXPECT_EQ(close(kfd), 0);
 }
 
 TEST(InterposerDrmTest, PrimeHandleToFdReturnsTheBuffer) {

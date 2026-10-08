@@ -2457,7 +2457,12 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   if (is_userptr && !daemon_mode_) {
     alloc.host_ptr = reinterpret_cast<void *>(va);
     map_to_gpu(proc, va, reinterpret_cast<void *>(va), alloc.size, alloc_mtype);
-  } else if (daemon_mode_ || !user_provided_va) {
+  } else if (daemon_mode_ || !user_provided_va || !is_doorbell) {
+    // A caller-reserved VA is backed by a memfd from the start, so a later
+    // dmabuf or IPC export shares the pages the caller already maps instead
+    // of copying them while writers are live. That backing is left sparse,
+    // the way the anonymous mapping it replaces filled on first touch.
+    const bool sparse_backing = !daemon_mode_ && user_provided_va;
     auto raw_fd = memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (raw_fd >= 0) {
       alloc.memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
@@ -2471,7 +2476,8 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
       }
       if (alloc.memfd >= 0) {
         [[maybe_unused]] auto ft_rc = ftruncate(alloc.memfd, static_cast<off_t>(alloc.size));
-        fallocate(alloc.memfd, 0, 0, static_cast<off_t>(alloc.size));
+        if (!sparse_backing)
+          fallocate(alloc.memfd, 0, 0, static_cast<off_t>(alloc.size));
         safe_fcntl(alloc.memfd, F_ADD_SEALS, F_SEAL_SHRINK);
 
         if (daemon_mode_ && !is_doorbell) {
@@ -3187,6 +3193,11 @@ int SimulatedKfd::share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAlloc
     // A USERPTR range is the caller's own memory; amdgpu refuses to export it.
     if (alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
       return -EPERM;
+    // Allocations that can be exported are created with a memfd. A mapped one
+    // without it has live writers, so moving its bytes would lose stores.
+    if (alloc.host_ptr)
+      return -EINVAL;
+    // Unmapped: the first mmap of the allocation maps this memfd.
     int fd = memfd_create(name, MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (fd < 0)
       return -errno;
@@ -3194,24 +3205,6 @@ int SimulatedKfd::share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAlloc
       const int error = errno;
       libc_passthrough().close(fd);
       return -error;
-    }
-    // hipMalloc in local mode leaves the bytes in the mapping at the caller's
-    // VA. Copy them in, then map the memfd over that VA, so the caller's
-    // pointer, the GPU pages, and every importer reach one copy. Without a host
-    // pointer, the first mmap of the allocation maps the memfd.
-    if (alloc.host_ptr) {
-      void *staging = safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-      if (staging == MAP_FAILED) {
-        libc_passthrough().close(fd);
-        return -ENOMEM;
-      }
-      std::memcpy(staging, alloc.host_ptr, alloc.size);
-      safe_munmap(staging, alloc.size);
-      if (safe_mmap(alloc.host_ptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd,
-                    0) != alloc.host_ptr) {
-        libc_passthrough().close(fd);
-        return -ENOMEM;
-      }
     }
     alloc.memfd = fd;
     std::lock_guard<std::mutex> flk(owned_fds_mutex_);

@@ -2937,9 +2937,11 @@ public:
   /// @details Called from the close() hook for every fd. Cheap no-op when @p fd is
   /// not a pending dmabuf export. Prevents a closed-without-PRIME export fd from
   /// leaving a stale flag that a later PRIME on the recycled fd number would apply.
+  /// Also releases the BO state a PRIME export retained for @p fd.
   void drop_pending_gem_flags(int fd) {
     std::lock_guard lock(fd_mutex_);
     pending_gem_flags_.erase(fd);
+    exported_gem_objects_.erase(fd);
   }
 
   /// @brief Mint a stable GEM handle for a prime-imported dmabuf (PRIME_FD_TO_HANDLE).
@@ -3012,14 +3014,20 @@ public:
     return handle;
   }
 
-  /// @brief Find the BO state of a live handle backed by the file @p st describes.
-  /// @returns The shared state, or null when no handle uses that file.
+  /// @brief Find the BO state of a live handle or open PRIME export backed by
+  /// the file @p st describes.
+  /// @returns The shared state, or null when neither uses that file.
   std::shared_ptr<GemObject> shared_gem_object_locked(const struct stat &st) const {
-    for (const auto &[handle, entry] : gem_entries_) {
-      const auto &object = entry.object;
-      if (object && object->inode != 0 && object->device == st.st_dev && object->inode == st.st_ino)
+    const auto matches = [&st](const std::shared_ptr<GemObject> &object) {
+      return object && object->inode != 0 && object->device == st.st_dev &&
+             object->inode == st.st_ino;
+    };
+    for (const auto &[handle, entry] : gem_entries_)
+      if (matches(entry.object))
+        return entry.object;
+    for (const auto &[fd, object] : exported_gem_objects_)
+      if (matches(object))
         return object;
-    }
     return {};
   }
 
@@ -3030,6 +3038,7 @@ public:
     if (flags & ~(DRM_CLOEXEC | DRM_RDWR))
       return -EINVAL;
     std::shared_ptr<PrivateDrmFd> backing;
+    std::shared_ptr<GemObject> object;
     uint32_t alloc_flags = 0;
     {
       std::lock_guard lock(fd_mutex_);
@@ -3038,6 +3047,7 @@ public:
           it->second.drm_file_id != file->id || !it->second.dmabuf_fd)
         return -ENOENT;
       backing = it->second.dmabuf_fd;
+      object = it->second.object;
       alloc_flags = it->second.alloc_flags;
     }
     int exported = -1;
@@ -3051,6 +3061,10 @@ public:
     if (exported < 0)
       return error ? -error : -EBADF;
     track_gem_flags(exported, alloc_flags);
+    {
+      std::lock_guard lock(fd_mutex_);
+      exported_gem_objects_[exported] = std::move(object);
+    }
     return exported;
   }
 
@@ -3623,6 +3637,12 @@ private:
   /// PRIME_FD_TO_HANDLE on the same fd, which folds the flags into a GemEntry and
   /// erases the pending record. Short-lived, so keying by (recyclable) fd is safe.
   std::unordered_map<int, uint32_t> pending_gem_flags_;
+
+  /// @brief BO state retained by each open PRIME_HANDLE_TO_FD fd.
+  /// @details The kernel BO outlives its last GEM handle while a dmabuf fd is
+  /// open, so a later import still sees its create info and metadata. Dropped
+  /// at close(fd) with pending_gem_flags_.
+  std::unordered_map<int, std::shared_ptr<GemObject>> exported_gem_objects_;
 
   /// @brief Tear down a GEM entry's GPU PTEs and host mapping. Caller holds
   /// fd_mutex_. Removes page-table ranges through the driver that installed them
@@ -4327,7 +4347,8 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   // Drop any transient EXPORT_DMABUF flags for this fd: a dmabuf export fd closed
   // before a PRIME_FD_TO_HANDLE would otherwise leave a stale fd→flags record that a
   // later PRIME on the recycled fd number could misapply as the wrong PTE MTYPE.
-  // No-op for non-dmabuf fds.
+  // A PRIME export fd also releases the BO state it retained. No-op for
+  // non-dmabuf fds.
   InterposerContext::ctx.drop_pending_gem_flags(fd);
   // NOTE: a GEM/dmabuf mapping is NOT torn down when a transient dmabuf EXPORT fd
   // closes. ROCr closes that fd immediately after VMemorySetAccessPerHandle()
