@@ -185,4 +185,15 @@ test('Run Comparison restores manual-exclusive filters after visiting official v
   await expect(page.getByTestId('suites-filter').locator('[data-responsive-tag]')).toHaveText('ManualSuite');
   await expect(page.getByRole('row', { name: /Manual benchmark.*Completed/ })).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Candidate run' })).toHaveValue(/aaaaaaaa.*Manual/);
+
+  // Explicitly comparing official runs uses the scope shown in Overview.
+  await page.getByRole('tab', { name: 'Overview' }).click();
+  const runSelectors = page.getByRole('button', { name: /^Compare [a-f0-9]+$/ });
+  await runSelectors.first().click();
+  await runSelectors.nth(1).click();
+  await expect(page.getByRole('tab', { name: 'Run Comparison' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('targets-filter').locator('[data-responsive-tag]')).toHaveText('gfx1250');
+  await expect(page.getByTestId('suites-filter').locator('[data-responsive-tag]')).toHaveText(['DeepSeek', 'TensileLite', 'Triton']);
+  await expect(page.getByRole('img', { name: 'Performance change by benchmark comparison chart' })).toBeVisible();
+  await expect(page.getByText('Every selected benchmark has completed data in both runs.')).toBeVisible();
 });

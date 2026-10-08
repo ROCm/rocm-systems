@@ -22,12 +22,12 @@ export function useDashboardState(data) {
   const [explorerRunIds, setExplorerRunIds] = useState([]);
 
   const comparisonFilters = useRef(null);
-  const setTab = (nextTab) => {
+  const setTab = (nextTab, { restoreComparisonFilters = true } = {}) => {
     if (tab === 'compare' && nextTab !== 'compare') {
       comparisonFilters.current = { targets, suites };
       setTargets(reconcileSelection(targets, data.targets, defaultTargetSelection(data.targets)));
       setSuites(reconcileSelection(suites, data.suites, data.suites));
-    } else if (tab !== 'compare' && nextTab === 'compare') {
+    } else if (tab !== 'compare' && nextTab === 'compare' && restoreComparisonFilters) {
       if (comparisonFilters.current) {
         setTargets(comparisonFilters.current.targets);
         setSuites(comparisonFilters.current.suites);

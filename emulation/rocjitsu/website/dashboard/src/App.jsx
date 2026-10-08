@@ -210,7 +210,7 @@ function Dashboard({ data, dataError = null, onRetry = null }) {
     if (selectedRuns.length !== 2) return;
     state.setComparisonCandidateId(selectedRuns[0].runId);
     state.setComparisonBaselineId(selectedRuns[1].runId);
-    state.setTab('compare');
+    state.setTab('compare', { restoreComparisonFilters: false });
   };
   const openRunInExplorer = (runId) => {
     state.setExplorerRunIds([runId]);
