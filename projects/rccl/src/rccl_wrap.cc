@@ -181,7 +181,9 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
     info->protocol = NCCL_PROTO_LL;
   } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120" /*match gfx120x*/)) {
     if (comm->nNodes == 1) {
-      info->protocol = rcclGetProtoForGfx120x(info->func, sizePerRank);
+      // LL can deadlock single-node gfx120x collectives: its FIFO polls in prims_ll.h lack the
+      // gfx120x acquire ordering that Simple uses. Keep Simple until LL is fixed for gfx120x.
+      info->protocol = NCCL_PROTO_SIMPLE;
     }
     /**
      * We prefer simple protocol when p2p_disabled = 1,
