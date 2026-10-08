@@ -236,8 +236,6 @@ hsa_status_t MemoryRegion::GetInfo(hsa_region_info_t attribute,
           *((size_t*)value) = max_sysmem_alloc_size_;
           break;
         case HSA_HEAPTYPE_DEVICE_SVM:
-          *((size_t*)value) = max_single_alloc_size_;
-          break;
         case HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE:
         case HSA_HEAPTYPE_FRAME_BUFFER_PUBLIC:
         case HSA_HEAPTYPE_GPU_SCRATCH:

@@ -325,8 +325,8 @@ void AieAgent::InitRegionList() {
   // We use HSA_HEAPTYPE_DEVICE_SVM so that the recommended
   // HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE is 0. We can use that to determine if a pool
   // is regular pool or dev heap.
-  // The system will report the max allocatable size as MemoryRegion::max_sysmem_alloc_size_, but
-  // this is incorrect. The pool is exactly XdnaDriver::GetDevHeapByteSize() bytes.
+  // The pool reports its max allocatable size as MemoryRegion::max_single_alloc_size_, which is
+  // exactly XdnaDriver::GetDevHeapByteSize() bytes.
   HsaMemoryProperties dev_mem_props = {};
   dev_mem_props.HeapType = HSA_HEAPTYPE_DEVICE_SVM;
   dev_mem_props.SizeInBytes = XdnaDriver::GetDevHeapByteSize();

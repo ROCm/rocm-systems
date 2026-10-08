@@ -701,9 +701,9 @@ hsa_status_t XdnaDriver::AllocateMemory(const core::MemoryRegion& mem_region,
   if (use_bo_share) {
     create_bo_args.type = AMDXDNA_BO_SHARE;
   } else {
-    // While this is already checked in MemoryRegion::AllocateImpl, the max size is
-    // MemoryRegion::max_sysmem_alloc_size_ for HSA_HEAPTYPE_DEVICE_SVM which is incorrect
-    // for dev heap.
+    // MemoryRegion::AllocateImpl already caps this at MemoryRegion::max_single_alloc_size_, which
+    // is dev_heap_size for HSA_HEAPTYPE_DEVICE_SVM. Keep this defensive duplicate so an oversized
+    // CREATE_BO cannot reach the driver if that cap ever regresses.
     if (size > dev_heap_size) {
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
