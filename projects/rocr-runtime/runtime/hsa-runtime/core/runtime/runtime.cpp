@@ -1237,16 +1237,18 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
 
   bool allocation_map_entry_found = false;
 
-  // The driver that answered for ptr. Node ids are per driver -- XDNA's node 0 and KFD's share
-  // agents_by_node_[0] -- so the nodes it reports are resolved against its agents only.
+  // Driver that described ptr. Node ids are unique only within a driver, so a node id is matched
+  // only against agents of that driver's type.
   const Driver* ptr_driver = nullptr;
-  auto node_agents = [&](uint32_t node) {
-    std::vector<Agent*> agents;
+  auto same_driver = [&](const Agent* agent) {
+    return agent->driver().kernel_driver_type_ == ptr_driver->kernel_driver_type_;
+  };
+  auto first_agent = [&](uint32_t node, bool enabled_only) -> Agent* {
     auto it = agents_by_node_.find(node);
-    if (it == agents_by_node_.end()) return agents;
+    if (it == agents_by_node_.end()) return nullptr;
     for (auto agent : it->second)
-      if (&agent->driver() == ptr_driver) agents.push_back(agent);
-    return agents;
+      if (same_driver(agent) && (!enabled_only || agent->Enabled())) return agent;
+    return nullptr;
   };
 
   {  // memory_lock protects access to the NMappedNodes array and fragment user data since these may
@@ -1267,13 +1269,33 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       }
     }
 
-    // Each driver knows only its own allocations -- the thunk has never heard of an XDNA buffer
-    // object -- so ask them in turn. None answering means the type is UNKNOWN.
-    for (const auto& driver : agent_drivers_) {
-      if (driver->QueryPointerInfo(ptr, &thunkInfo) == HSA_STATUS_SUCCESS) {
-        ptr_driver = driver.get();
-        break;
+    // Ask the driver of the agent that owns the allocation. Memory the runtime has no record of
+    // is KFD's.
+    const AllocationRegion* record = nullptr;
+    auto entry = allocation_map_.upper_bound(ptr);
+    if (entry != allocation_map_.begin()) {
+      --entry;
+      if (ptr < reinterpret_cast<const uint8_t*>(entry->first) + entry->second.size)
+        record = &entry->second;
+    }
+    const Driver* driver = nullptr;
+    if (record != nullptr && record->region != nullptr) {
+      driver = &record->region->owner()->driver();
+    } else {
+      for (const auto& d : agent_drivers_) {
+        if (d->kernel_driver_type_ == DriverType::KFD) {
+          driver = d.get();
+          break;
+        }
       }
+    }
+    if (driver != nullptr) {
+      const bool described =
+          driver->QueryPointerInfo(ptr, record ? record->region : nullptr,
+                                   record ? record->alloc_flags : MemoryRegion::AllocateNoFlags,
+                                   (record && record->region) ? &record->driver_handle : nullptr,
+                                   &thunkInfo) == HSA_STATUS_SUCCESS;
+      if (described) ptr_driver = driver;
     }
     if (ptr_driver == nullptr) {
       if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
@@ -1285,7 +1307,6 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
         memcpy(info, &retInfo, retInfo.size);
         return HSA_STATUS_SUCCESS;
       }
-
       retInfo.type = HSA_EXT_POINTER_TYPE_UNKNOWN;
       memcpy(info, &retInfo, retInfo.size);
       return HSA_STATUS_SUCCESS;
@@ -1347,9 +1368,8 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       block_info->length = retInfo.sizeInBytes;
 
       // Report the owning agent, even if such an agent is not usable in the process.
-      auto nodeAgents = node_agents(thunkInfo.Node);
-      assert(!nodeAgents.empty() && "Node id not found!");
-      block_info->agentOwner = nodeAgents[0];
+      block_info->agentOwner = first_agent(thunkInfo.Node, false);
+      assert(block_info->agentOwner != nullptr && "Node id not found!");
     }
     auto fragment = allocation_map_.upper_bound(ptr);
     if (fragment != allocation_map_.begin()) {
@@ -1357,12 +1377,8 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       if ((fragment->first <= ptr) &&
           (ptr <
            reinterpret_cast<const uint8_t*>(fragment->first) + fragment->second.size_requested)) {
-        // The fragment sits at the same offset into the block for the agent as for the host. For
-        // KFD memory the two bases are equal (lock memory, the one exception, has type
-        // HSA_EXT_POINTER_TYPE_LOCKED and cannot be suballocated), but an XDNA BO has a device
-        // address of its own, and that is the one a caller patches into the agent's code.
-        // Integer arithmetic, not pointer arithmetic: the agent address need not point at any
-        // host object.
+        // The agent address of a block can differ from its host address, so offset it by the
+        // fragment's position in the block. It need not point to host memory, hence uintptr_t.
         const uintptr_t block_base = reinterpret_cast<uintptr_t>(
             retInfo.hostBaseAddress ? retInfo.hostBaseAddress : retInfo.agentBaseAddress);
         const uintptr_t offset = reinterpret_cast<uintptr_t>(fragment->first) - block_base;
@@ -1385,19 +1401,14 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
   // IPC and Graphics memory may come from a node that does not have an agent in this process.
   // Ex. ROCR_VISIBLE_DEVICES or peer GPU is not supported by ROCm.
   retInfo.agentOwner.handle = 0;
-  auto nodeAgents = node_agents(thunkInfo.Node);
-  assert(!nodeAgents.empty() && "Node id not found!");
-  for (auto agent : nodeAgents) {
-    if (agent->Enabled()) {
-      retInfo.agentOwner = agent->public_handle();
-      break;
-    }
-  }
+  Agent* node_agent = first_agent(thunkInfo.Node, false);
+  assert(node_agent != nullptr && "Node id not found!");
+  if (Agent* owner = first_agent(thunkInfo.Node, true)) retInfo.agentOwner = owner->public_handle();
 
   // Correct agentOwner for locked memory.  Thunk reports the GPU that owns the
   // alias but users are expecting to see a CPU when the memory is system.
   if (retInfo.type == HSA_EXT_POINTER_TYPE_LOCKED) {
-    if (nodeAgents.empty() || (nodeAgents[0]->device_type() != core::Agent::kAmdCpuDevice)) {
+    if ((node_agent == nullptr) || (node_agent->device_type() != core::Agent::kAmdCpuDevice)) {
       retInfo.agentOwner = cpu_agents_[0]->public_handle();
     }
   }
@@ -1409,7 +1420,8 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
     for (HSAuint32 i = 0; i < thunkInfo.NMappedNodes; i++) {
       assert(mappedNodes[i] <= max_node_id() &&
              "PointerInfo: Invalid node ID returned from thunk.");
-      count += node_agents(mappedNodes[i]).size();
+      for (auto agent : agents_by_node_[mappedNodes[i]])
+        if (same_driver(agent)) count++;
     }
 
     *num_agents_accessible = count;
@@ -1423,7 +1435,8 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
 
       uint32_t index = 0;
       for (HSAuint32 i = 0; i < thunkInfo.NMappedNodes; i++) {
-        for (auto agent : node_agents(mappedNodes[i])) {
+        for (auto agent : agents_by_node_[mappedNodes[i]]) {
+          if (!same_driver(agent)) continue;
           (*accessible)[index] = agent->public_handle();
           index++;
         }

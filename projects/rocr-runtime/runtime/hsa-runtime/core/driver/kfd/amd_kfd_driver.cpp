@@ -461,7 +461,10 @@ hsa_status_t KfdDriver::FreeMemory(const core::DriverMemoryHandle& handle) {
       : HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdDriver::QueryPointerInfo(const void* ptr, HsaPointerInfo* info) const {
+hsa_status_t KfdDriver::QueryPointerInfo(const void* ptr, const core::MemoryRegion* /*region*/,
+                                         core::MemoryRegion::AllocateFlags /*alloc_flags*/,
+                                         const core::DriverMemoryHandle* /*handle*/,
+                                         HsaPointerInfo* info) const {
   if (HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, info)) != HSAKMT_STATUS_SUCCESS ||
       info->Type == HSA_POINTER_UNKNOWN) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;

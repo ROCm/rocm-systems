@@ -1250,34 +1250,6 @@ hsa_status_t XdnaDriver::AllocateMemory(const core::MemoryRegion& mem_region,
 
   bo_guard.Dismiss();
 
-  if (bo_handle.vaddr != nullptr) {
-    // The KFD thunk has never heard of this BO, so it is recorded here for QueryPointerInfo, in
-    // the thunk's own terms. The flags are what the thunk would hold for the same request: the
-    // region's, plus the per-allocation bits pointer info reports.
-    HsaMemFlags mem_flags = m_region.mem_flags();
-    mem_flags.ui32.ExecuteAccess = !!(alloc_flags & core::MemoryRegion::AllocateExecutable);
-    mem_flags.ui32.Contiguous = !!(alloc_flags & core::MemoryRegion::AllocateContiguous);
-    mem_flags.ui32.NonPaged = !!(alloc_flags & core::MemoryRegion::AllocateNonPaged);
-
-    HsaPointerInfo info = {};
-    info.Type = HSA_POINTER_ALLOCATED;
-    info.Node = node_id;
-    info.MemFlags = mem_flags;
-    info.CPUAddress = bo_handle.vaddr;
-    // A SHARE BO has no address of its own on the device: the NPU walks the same page tables as
-    // the host, so it is reached at its host VA.
-    info.GPUAddress = (get_bo_info_args.xdna_addr != AMDXDNA_INVALID_ADDR)
-        ? get_bo_info_args.xdna_addr
-        : reinterpret_cast<uint64_t>(bo_handle.vaddr);
-    info.SizeInBytes = size;
-
-    std::lock_guard<std::mutex> lock(mapped_bos_lock);
-    // The owning agent is the only one that can reach the BO.
-    info.NMappedNodes = 1;
-    info.MappedNodes = &*bo_nodes.insert(node_id).first;
-    mapped_bos[bo_handle.vaddr] = info;
-  }
-
   // The handle word is the driver-native BO id. vaddr is the allocation's real VA (the VA for dev
   // heap BOs, the mmap'd VA for share BOs). It is nullptr only for AllocateMemoryOnly SHARE BOs.
   // FreeMemory decides whether to unmap by the VA itself (dev heap range vs. an owned mmap), so no
@@ -1296,11 +1268,6 @@ hsa_status_t XdnaDriver::FreeMemory(const core::DriverMemoryHandle& handle) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
-  if (handle.vaddr != nullptr) {
-    std::lock_guard<std::mutex> lock(mapped_bos_lock);
-    mapped_bos.erase(handle.vaddr);
-  }
-
   BOHandle bo_handle;
   bo_handle.handle = static_cast<uint32_t>(handle.handle);
   bo_handle.size = handle.size;
@@ -1309,17 +1276,38 @@ hsa_status_t XdnaDriver::FreeMemory(const core::DriverMemoryHandle& handle) {
   return DestroyBOHandle(fd_, dev_heap_vaddr, bo_handle);
 }
 
-hsa_status_t XdnaDriver::QueryPointerInfo(const void* ptr, HsaPointerInfo* info) const {
-  std::lock_guard<std::mutex> lock(mapped_bos_lock);
+hsa_status_t XdnaDriver::QueryPointerInfo(const void* /*ptr*/, const core::MemoryRegion* region,
+                                          core::MemoryRegion::AllocateFlags alloc_flags,
+                                          const core::DriverMemoryHandle* handle,
+                                          HsaPointerInfo* info) const {
+  if (region == nullptr || handle == nullptr || handle->vaddr == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
 
-  auto it = mapped_bos.upper_bound(ptr);
-  if (it == mapped_bos.begin()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-  --it;
+  amdxdna_drm_get_bo_info bo_info;
+  const hsa_status_t err = GetBOInfo(fd_, static_cast<uint32_t>(handle->handle), &bo_info);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
+  }
 
-  const auto* base = static_cast<const uint8_t*>(it->first);
-  if (ptr >= base + it->second.SizeInBytes) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  HsaMemFlags mem_flags = static_cast<const MemoryRegion*>(region)->mem_flags();
+  mem_flags.ui32.ExecuteAccess = !!(alloc_flags & core::MemoryRegion::AllocateExecutable);
+  mem_flags.ui32.Contiguous = !!(alloc_flags & core::MemoryRegion::AllocateContiguous);
+  mem_flags.ui32.NonPaged = !!(alloc_flags & core::MemoryRegion::AllocateNonPaged);
 
-  *info = it->second;
+  *info = {};
+  info->Type = HSA_POINTER_ALLOCATED;
+  info->Node = region->owner()->node_id();
+  info->MemFlags = mem_flags;
+  info->CPUAddress = handle->vaddr;
+  // A BO with no device address is reached through the host page tables, at its host address.
+  info->GPUAddress = (bo_info.xdna_addr != AMDXDNA_INVALID_ADDR)
+      ? bo_info.xdna_addr
+      : reinterpret_cast<uint64_t>(handle->vaddr);
+  info->SizeInBytes = handle->size;
+  // Only the owning agent can access the BO.
+  info->NMappedNodes = 1;
+  info->MappedNodes = &info->Node;
   return HSA_STATUS_SUCCESS;
 }
 

@@ -856,10 +856,8 @@ TEST_F(MemoryTest, VMemExportImportShareableHandle) {
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
 }
 
-// hsa_amd_pointer_info asks the driver that owns an allocation, so an AIE allocation is reported
-// like any other: as an HSA allocation of its size, owned by the AIE agent, with the address the
-// agent reaches it at. Whether that address differs from the host one depends on the pool, so it
-// is only required to be there; test_dispatch.cc checks the dev pool's in detail.
+// Whether the agent address differs from the host address depends on the pool, so only its
+// presence is checked.
 TEST_F(MemoryTest, PointerInfo) {
   hsa_amd_memory_pool_t global_memory_pool = {};
   ASSERT_EQ(
