@@ -3,7 +3,6 @@
 
 #include "process_list_churn_read.h"
 
-#include <dirent.h>
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <poll.h>
@@ -14,14 +13,11 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <atomic>
-#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <fstream>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -32,41 +28,41 @@
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
+#include "kfd_helper_test_util.h"
 #include "rocm_smi/kfd_ioctl.h"
 #include "test_common.h"
 
 namespace {
 
+using amdsmi_test::FindHelperKfdPids;
+using amdsmi_test::HelperReport;
+using amdsmi_test::HelperStopper;
+using amdsmi_test::IsEnvironmentFailure;
+using amdsmi_test::kIocAcquireVm;
+using amdsmi_test::kIocAllocMemoryOfGpu;
 using Clock = std::chrono::steady_clock;
 
-// Kernel UAPI numbers of two ioctls missing from rocm_smi's kfd_ioctl.h.
-constexpr unsigned long kIocAcquireVm = AMDKFD_IOW(0x15, struct kfd_ioctl_acquire_vm_args);
-constexpr unsigned long kIocAllocMemoryOfGpu =
-    AMDKFD_IOWR(0x16, struct kfd_ioctl_alloc_memory_of_gpu_args);
-static_assert(sizeof(kfd_ioctl_acquire_vm_args) == 8 &&
-                  sizeof(kfd_ioctl_alloc_memory_of_gpu_args) == 40,
-              "KFD UAPI layout changed");
-
-const char kKfdProcRoot[] = "/sys/class/kfd/kfd/proc/";
 constexpr size_t kMaxProcs = 512;
 constexpr uint64_t kPageSize = 4096;
 constexpr int kChurnThreads = 3;
 constexpr auto kChurnTime = std::chrono::seconds(8);
+// Fewest churn processes that must bind for a run to count; AMDSMI CI runs bound 285 to 486.
+constexpr int kMinChurnProcesses = 100;
 
 // Makes the calling process a GPU process: opens /dev/kfd, binds the render node
 // and, given a size, allocates that much VRAM, which the GPU's process list needs
-// to count the process as using it. System calls only, so a forked child may run
-// it. Returns errno, or 0.
-int BindKfd(uint32_t kfd_gpu_id, const char* render_node, uint64_t vram) {
+// to count the process as using it, and reports the step that failed, with errno.
+// System calls only, so a forked child may run it.
+HelperReport BindKfd(uint32_t kfd_gpu_id, const char* render_node, uint64_t vram) {
   const int kfd = open("/dev/kfd", O_RDWR | O_CLOEXEC);
-  if (kfd < 0) return errno;
+  if (kfd < 0) return {HelperReport::kOpenKfd, errno};
   const int drm = open(render_node, O_RDWR | O_CLOEXEC);
-  if (drm < 0) return errno;
+  if (drm < 0) return {HelperReport::kOpenRenderNode, errno};
   kfd_ioctl_acquire_vm_args vm{};
   vm.drm_fd = static_cast<uint32_t>(drm);
   vm.gpu_id = kfd_gpu_id;
-  if (ioctl(kfd, kIocAcquireVm, &vm) != 0) return errno;
-  if (vram == 0) return 0;
+  if (ioctl(kfd, kIocAcquireVm, &vm) != 0) return {HelperReport::kAcquireVm, errno};
+  if (vram == 0) return {HelperReport::kReady, 0};
   kfd_ioctl_alloc_memory_of_gpu_args mem{};
   mem.va_addr = 1ULL << 40;
   mem.size = vram;
@@ -74,7 +70,8 @@ int BindKfd(uint32_t kfd_gpu_id, const char* render_node, uint64_t vram) {
   mem.flags =
       static_cast<uint32_t>(KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
                             KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE);
-  return ioctl(kfd, kIocAllocMemoryOfGpu, &mem) == 0 ? 0 : errno;
+  if (ioctl(kfd, kIocAllocMemoryOfGpu, &mem) != 0) return {HelperReport::kAllocVram, errno};
+  return {HelperReport::kReady, 0};
 }
 
 // One short-lived GPU process: it binds, holds for 2 ms, then exits. Returns
@@ -83,55 +80,15 @@ bool RunChurnProcess(uint32_t kfd_gpu_id, const char* render_node) {
   const pid_t child = fork();
   if (child == 0) {
     prctl(PR_SET_PDEATHSIG, SIGKILL);
-    const int err = BindKfd(kfd_gpu_id, render_node, 0);
+    const bool bound = BindKfd(kfd_gpu_id, render_node, 0).step == HelperReport::kReady;
     const timespec hold{0, 2000000};
     nanosleep(&hold, nullptr);
-    _exit(err == 0 ? 0 : 1);
+    _exit(bound ? 0 : 1);
   }
   int wstatus = 0;
   return child > 0 && waitpid(child, &wstatus, 0) == child && WIFEXITED(wstatus) &&
          WEXITSTATUS(wstatus) == 0;
 }
-
-uint64_t KfdVram(const std::string& pid, uint32_t kfd_gpu_id) {
-  std::ifstream file(kKfdProcRoot + pid + "/vram_" + std::to_string(kfd_gpu_id));
-  uint64_t vram = 0;
-  return (file >> vram) ? vram : 0;
-}
-
-// KFD names processes by host PID, which differs from fork()'s result inside a
-// container's PID namespace, so find the entries holding exactly the helper's
-// VRAM.
-std::vector<pid_t> FindHelperKfdPids(pid_t helper, uint32_t kfd_gpu_id, uint64_t vram) {
-  if (KfdVram(std::to_string(helper), kfd_gpu_id) == vram) return {helper};
-  std::vector<pid_t> found;
-  if (DIR* dir = opendir(kKfdProcRoot)) {
-    while (const dirent* entry = readdir(dir)) {
-      const std::string name = entry->d_name;
-      const bool is_pid =
-          !name.empty() && std::all_of(name.begin(), name.end(),
-                                       [](unsigned char c) { return std::isdigit(c) != 0; });
-      if (is_pid && KfdVram(name, kfd_gpu_id) == vram) {
-        found.push_back(static_cast<pid_t>(std::stol(name)));
-      }
-    }
-    closedir(dir);
-  }
-  return found;
-}
-
-struct HelperStopper {
-  pid_t pid;
-  pid_t kfd_pid;
-  ~HelperStopper() {
-    kill(pid, SIGKILL);
-    const std::string path = kKfdProcRoot + std::to_string(kfd_pid);
-    for (int i = 0; i < 500; ++i) {
-      if (waitpid(pid, nullptr, WNOHANG) != 0 && access(path.c_str(), F_OK) != 0) break;
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-  }
-};
 
 }  // namespace
 
@@ -197,24 +154,29 @@ void TestProcessListChurnRead::Run(void) {
   if (helper == 0) {
     close(fds[0]);
     if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0 || getppid() != parent) _exit(1);
-    const int err = BindKfd(kfd_gpu_id, render_node.c_str(), helper_vram);
-    if (write(fds[1], &err, sizeof(err)) != sizeof(err) || err != 0) _exit(1);
+    const HelperReport report = BindKfd(kfd_gpu_id, render_node.c_str(), helper_vram);
+    if (write(fds[1], &report, sizeof(report)) != sizeof(report) ||
+        report.step != HelperReport::kReady) {
+      _exit(1);
+    }
     for (;;) pause();
   }
   close(fds[1]);
   HelperStopper stopper{helper, helper};
-  int err = -1;  // stays -1 without a report
+  HelperReport report;
   pollfd ready{fds[0], POLLIN, 0};
   if (poll(&ready, 1, 30000) == 1) {
-    if (read(fds[0], &err, sizeof(err)) != sizeof(err)) err = -1;
+    if (read(fds[0], &report, sizeof(report)) != sizeof(report)) report.step = -1;
   }
   close(fds[0]);
-  if (err == -1) FAIL() << "The helper exited or did not report within 30 s";
-  if (err == EACCES || err == EPERM || err == ENOENT || err == ENODEV || err == ENXIO ||
-      err == ENOMEM) {
-    GTEST_SKIP() << "Cannot use the GPU through KFD: errno " << err;
+  if (report.step == -1) FAIL() << "The helper exited or did not report within 30 s";
+  if (report.step != HelperReport::kReady) {
+    if (IsEnvironmentFailure(report)) {
+      GTEST_SKIP() << "Cannot use the GPU through KFD: step " << report.step << ", errno "
+                   << report.err;
+    }
+    FAIL() << "Helper setup failed: step " << report.step << ", errno " << report.err;
   }
-  ASSERT_EQ(err, 0) << "The helper could not bind to the GPU";
   const std::vector<pid_t> kfd_pids = FindHelperKfdPids(helper, kfd_gpu_id, helper_vram);
   // A second match is another run of this test that drew the same tag.
   if (kfd_pids.size() > 1) GTEST_SKIP() << "Another process holds the helper's exact VRAM";
@@ -292,11 +254,12 @@ void TestProcessListChurnRead::Run(void) {
     failed_calls << " status " << st << " x" << n;
     failed += n;
   }
-  // A read can still fail after the library's retries while processes start
-  // and exit, so allow one failed call; without the retries, runs have several.
-  EXPECT_LE(failed, 1) << "Failed calls:" << failed_calls.str() << " of " << calls;
+  // Processes that start or exit while the list is read never fail the call.
+  EXPECT_EQ(failed, 0) << "Failed calls:" << failed_calls.str() << " of " << calls;
   EXPECT_EQ(unlisted, 0) << "Lists without the helper, of " << calls << " calls";
   // Without GPU processes coming and going the test proves nothing.
+  EXPECT_GE(churned, kMinChurnProcesses)
+      << churned << " churn processes bound to the GPU, " << churn_failed << " did not";
   EXPECT_GT(churned, churn_failed)
       << churned << " churn processes bound to the GPU, " << churn_failed << " did not";
   IF_VERB(STANDARD) {

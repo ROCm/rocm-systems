@@ -3,7 +3,6 @@
 
 #include "process_list_concurrent_read.h"
 
-#include <dirent.h>
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <poll.h>
@@ -15,12 +14,10 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <fstream>
 #include <iostream>
 #include <limits>
 #include <random>
@@ -30,26 +27,28 @@
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
+#include "kfd_helper_test_util.h"
 #include "rocm_smi/kfd_ioctl.h"
 #include "test_common.h"
 
 namespace {
 
+using amdsmi_test::FindHelperKfdPids;
+using amdsmi_test::HelperReport;
+using amdsmi_test::HelperStopper;
+using amdsmi_test::IsEnvironmentFailure;
+using amdsmi_test::KfdVram;
+using amdsmi_test::kIocAcquireVm;
+using amdsmi_test::kIocAllocMemoryOfGpu;
 using Clock = std::chrono::steady_clock;
 
-// Kernel UAPI numbers of two ioctls missing from rocm_smi's kfd_ioctl.h. The
-// system <linux/kfd_ioctl.h> is not used: on some distributions it includes
-// <drm/drm.h>, which is not installed.
-constexpr unsigned long kIocAcquireVm = AMDKFD_IOW(0x15, struct kfd_ioctl_acquire_vm_args);
-constexpr unsigned long kIocAllocMemoryOfGpu =
-    AMDKFD_IOWR(0x16, struct kfd_ioctl_alloc_memory_of_gpu_args);
-static_assert(sizeof(kfd_ioctl_acquire_vm_args) == 8 &&
-                  sizeof(kfd_ioctl_alloc_memory_of_gpu_args) == 40,
-              "KFD UAPI layout changed");
-
-const char kKfdProcRoot[] = "/sys/class/kfd/kfd/proc/";
 constexpr size_t kMaxProcs = 512;
 constexpr auto kPhaseBudget = std::chrono::seconds(20);
+// Fewest queries each phase must finish within kPhaseBudget, so a library that
+// slows to a few queries cannot pass: rounds that query every GPU in turn, and
+// calls per reader in the concurrent phase. Each is that phase's smallest plan.
+constexpr int kMinRounds = 5;
+constexpr int kMinCallsPerReader = 20;
 const uint64_t kPageSize = static_cast<uint64_t>(sysconf(_SC_PAGESIZE));
 
 // VRAM the helper holds on GPU `gpu`: 2 MiB steps tell the GPUs apart, and
@@ -61,9 +60,6 @@ struct HelperGpu {
   std::string render_node;
 };
 
-// The helper's setup steps; it reports the one that failed, with errno.
-enum HelperStep { kReady, kOpenKfd, kOpenRenderNode, kAcquireVm, kAllocVram };
-
 // Runs in the forked helper, system calls only: allocates HelperVram(i, tag)
 // on GPU i through KFD, writes {step, errno} to `fd`, then waits to be killed.
 [[noreturn]] void RunHelper(const std::vector<HelperGpu>& gpus, uint32_t tag, pid_t parent,
@@ -71,10 +67,11 @@ enum HelperStep { kReady, kOpenKfd, kOpenRenderNode, kAcquireVm, kAllocVram };
   // Never outlive the test, even if it crashes. The signal follows the forking
   // thread, which is gtest's main thread.
   if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0 || getppid() != parent) _exit(1);
-  int report[2] = {kReady, 0};
+  HelperReport report;
+  report.step = HelperReport::kReady;
   const int kfd = open("/dev/kfd", O_RDWR | O_CLOEXEC);
-  if (kfd < 0) report[0] = kOpenKfd;
-  for (size_t i = 0; report[0] == kReady && i < gpus.size(); ++i) {
+  if (kfd < 0) report.step = HelperReport::kOpenKfd;
+  for (size_t i = 0; report.step == HelperReport::kReady && i < gpus.size(); ++i) {
     const int drm = open(gpus[i].render_node.c_str(), O_RDWR | O_CLOEXEC);
     kfd_ioctl_acquire_vm_args vm{};
     vm.drm_fd = static_cast<uint32_t>(drm);
@@ -87,82 +84,19 @@ enum HelperStep { kReady, kOpenKfd, kOpenRenderNode, kAcquireVm, kAllocVram };
         static_cast<uint32_t>(KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
                               KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE);
     if (drm < 0) {
-      report[0] = kOpenRenderNode;
+      report.step = HelperReport::kOpenRenderNode;
     } else if (ioctl(kfd, kIocAcquireVm, &vm) != 0) {
-      report[0] = kAcquireVm;
+      report.step = HelperReport::kAcquireVm;
     } else if (ioctl(kfd, kIocAllocMemoryOfGpu, &mem) != 0) {
-      report[0] = kAllocVram;
+      report.step = HelperReport::kAllocVram;
     }
   }
-  if (report[0] != kReady) report[1] = errno;
-  if (write(fd, report, sizeof(report)) != sizeof(report) || report[0] != kReady) _exit(1);
+  if (report.step != HelperReport::kReady) report.err = errno;
+  if (write(fd, &report, sizeof(report)) != sizeof(report) || report.step != HelperReport::kReady) {
+    _exit(1);
+  }
   for (;;) pause();
 }
-
-// Only these mean the machine cannot run the test: no access to the device
-// files, or not enough memory.
-bool IsEnvironmentFailure(const int report[2]) {
-  const int step = report[0];
-  const int err = report[1];
-  if (err == ENOMEM) return true;
-  return (step == kOpenKfd || step == kOpenRenderNode) &&
-         (err == EACCES || err == EPERM || err == ENOENT || err == ENODEV || err == ENXIO);
-}
-
-// Names of the processes KFD tracks, sorted.
-std::vector<std::string> KfdProcesses() {
-  std::vector<std::string> names;
-  if (DIR* dir = opendir(kKfdProcRoot)) {
-    while (const dirent* entry = readdir(dir)) {
-      if (entry->d_name[0] != '.') names.emplace_back(entry->d_name);
-    }
-    closedir(dir);
-  }
-  std::sort(names.begin(), names.end());
-  return names;
-}
-
-uint64_t KfdVram(const std::string& pid, uint32_t kfd_gpu_id) {
-  std::ifstream file(kKfdProcRoot + pid + "/vram_" + std::to_string(kfd_gpu_id));
-  uint64_t vram = 0;
-  return (file >> vram) ? vram : 0;
-}
-
-// KFD names processes by host PID, which differs from fork()'s result inside a
-// container's PID namespace, so find the entries holding exactly the helper's
-// VRAM.
-std::vector<pid_t> FindHelperKfdPids(const std::vector<HelperGpu>& gpus, uint32_t tag,
-                                     pid_t helper) {
-  auto holds_helper_vram = [&](const std::string& pid) {
-    for (size_t i = 0; i < gpus.size(); ++i) {
-      if (KfdVram(pid, gpus[i].kfd_gpu_id) != HelperVram(i, tag)) return false;
-    }
-    return true;
-  };
-  if (holds_helper_vram(std::to_string(helper))) return {helper};
-  std::vector<pid_t> found;
-  for (const std::string& name : KfdProcesses()) {
-    const bool is_pid =
-        std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
-    if (is_pid && holds_helper_vram(name)) found.push_back(static_cast<pid_t>(std::stol(name)));
-  }
-  return found;
-}
-
-// Kills the helper on scope exit and waits until KFD has released it, so the
-// tests that follow (partition changes, for example) do not find it.
-struct HelperStopper {
-  pid_t pid;
-  pid_t kfd_pid;
-  ~HelperStopper() {
-    kill(pid, SIGKILL);
-    const std::string path = kKfdProcRoot + std::to_string(kfd_pid);
-    for (int i = 0; i < 500; ++i) {
-      if (waitpid(pid, nullptr, WNOHANG) != 0 && access(path.c_str(), F_OK) != 0) break;
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-  }
-};
 
 enum Outcome { kRight, kWrongVram, kMissing, kEmpty, kError, kNumOutcomes };
 
@@ -191,11 +125,12 @@ struct Tally {
   int failures() const {
     return count[kWrongVram] + count[kMissing] + count[kEmpty] + count[kError];
   }
+  int total() const { return failures() + count[kRight]; }
   std::string str() const {
     std::ostringstream ss;
     ss << count[kWrongVram] << " with another VRAM value, " << count[kMissing]
        << " without the helper, " << count[kEmpty] << " empty, " << count[kError]
-       << " failed calls, of " << failures() + count[kRight];
+       << " failed calls, of " << total();
     return ss.str();
   }
 };
@@ -272,21 +207,27 @@ void TestProcessListConcurrentRead::Run(void) {
   }
   close(fds[1]);
   HelperStopper stopper{helper, helper};
-  int report[2] = {-1, 0};  // stays -1 without a complete report
+  HelperReport report;
   pollfd ready{fds[0], POLLIN, 0};
   if (poll(&ready, 1, 30000) == 1) {
-    if (read(fds[0], report, sizeof(report)) != sizeof(report)) report[0] = -1;
+    if (read(fds[0], &report, sizeof(report)) != sizeof(report)) report.step = -1;
   }
   close(fds[0]);
-  if (report[0] == -1) FAIL() << "The helper exited or did not report within 30 s";
-  if (report[0] != kReady) {
+  if (report.step == -1) FAIL() << "The helper exited or did not report within 30 s";
+  if (report.step != HelperReport::kReady) {
     if (IsEnvironmentFailure(report)) {
-      GTEST_SKIP() << "Cannot use the GPU through KFD: step " << report[0] << ", errno "
-                   << report[1];
+      GTEST_SKIP() << "Cannot use the GPU through KFD: step " << report.step << ", errno "
+                   << report.err;
     }
-    FAIL() << "Helper setup failed: step " << report[0] << ", errno " << report[1];
+    FAIL() << "Helper setup failed: step " << report.step << ", errno " << report.err;
   }
-  const std::vector<pid_t> kfd_pids = FindHelperKfdPids(gpus, tag, helper);
+  // The helper holds HelperVram(i, tag) on every GPU i.
+  const std::vector<pid_t> kfd_pids = FindHelperKfdPids(helper, [&](const std::string& pid) {
+    for (size_t i = 0; i < gpus.size(); ++i) {
+      if (KfdVram(pid, gpus[i].kfd_gpu_id) != HelperVram(i, tag)) return false;
+    }
+    return true;
+  });
   // A second match is another run of this test that drew the same tag.
   if (kfd_pids.size() > 1) GTEST_SKIP() << "Another process holds the helper's exact VRAM";
   ASSERT_EQ(kfd_pids.size(), 1u) << "KFD does not report exactly the helper's VRAM";
@@ -320,19 +261,21 @@ void TestProcessListConcurrentRead::Run(void) {
   // default cache period this mostly checks attribution; a cross-GPU mix-up of
   // cached data also shows here with AMDSMI_PROCESS_INFO_CACHE_MS=100.
   Tally in_turn;
-  const int rounds = std::max(5, 400 / static_cast<int>(num_gpus));
+  const int rounds = std::max(kMinRounds, 400 / static_cast<int>(num_gpus));
   const auto in_turn_end = Clock::now() + kPhaseBudget;
-  for (int round = 0; round < rounds && Clock::now() < in_turn_end; ++round) {
-    for (size_t i = 0; i < num_gpus && Clock::now() < in_turn_end; ++i) {
+  int rounds_done = 0;
+  for (; rounds_done < rounds && Clock::now() < in_turn_end; ++rounds_done) {
+    for (size_t i = 0; i < num_gpus; ++i) {
       ++in_turn.count[QueryOnce(processor_handles_[i], kfd_pid, HelperVram(i, tag), &procs)];
     }
   }
   EXPECT_EQ(in_turn.failures(), 0) << "Queries in turn: " << in_turn.str();
+  EXPECT_GE(rounds_done, kMinRounds) << "Rounds of queries in turn finished in the time allowed";
 
   // Two unsynchronized readers per GPU.
   Tally concurrent;
   const size_t num_readers = 2 * num_gpus;
-  const int calls = std::max(20, 4000 / static_cast<int>(num_readers));
+  const int calls = std::max(kMinCallsPerReader, 4000 / static_cast<int>(num_readers));
   const auto concurrent_end = Clock::now() + kPhaseBudget;
   std::vector<std::thread> readers;
   for (size_t r = 0; r < num_readers; ++r) {
@@ -346,6 +289,8 @@ void TestProcessListConcurrentRead::Run(void) {
   }
   for (auto& reader : readers) reader.join();
   EXPECT_EQ(concurrent.failures(), 0) << "Concurrent queries: " << concurrent.str();
+  EXPECT_GE(concurrent.total(), kMinCallsPerReader * static_cast<int>(num_readers))
+      << "Concurrent queries finished in the time allowed";
   IF_VERB(STANDARD) {
     std::cout << "\t**Queries in turn: " << in_turn.str()
               << "\n\t**Concurrent queries: " << concurrent.str() << std::endl;
