@@ -13,6 +13,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Resolved issues
 * A registered `__device__` global that is absent from the loaded code object no longer aborts the process. Symbol lookup now returns `hipErrorInvalidSymbol` from the runtime's variable materialization path (`hipGetSymbolAddress`, `hipLibraryGetGlobal`, and related entry points). `hipModuleGetGlobal` still reports `hipErrorNotFound` for a missing name.
 * Fixed `__hip_bfloat162` comparisons that ignored or misread the high lane. `__hbneu2` now returns true only when both lanes are unordered-not-equal, `__hgt2` and `__hisnan2` now return the per-lane result in `.y` instead of always 1.0, and the `<`, `<=`, `>`, `>=` operators now compare `.y` with `.y`. Code that relied on the previous results may see different values.
+* Fixed `hipEventElapsedTime` reporting unstable or impossibly small durations on the PAL backend. An event marker's timestamp is no longer overwritten by intervening kernel launches, and the GPU to CPU timestamp adjustment is now calibrated once instead of on every command batch collection, so a reported interval no longer depends on when the runtime happened to collect each of its two events.
 
 ## HIP 10.1.0 for ROCm 10.1.0
 
