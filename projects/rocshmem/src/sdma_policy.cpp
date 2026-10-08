@@ -64,22 +64,17 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank) {
   int deviceId;
   CHECK_HIP(hipGetDevice(&deviceId));
 
-  // Create SDMA connections to all local PEs including self. A false return leaves a partially
-  // wired mesh whose null handles would silently skip puts above the SDMA threshold, so release the
-  // peers this call wired and fall back to IPC memcpy instead. connect() already rolled back the
-  // failed peer, and disconnect() is not used because the channel map is process-global. The
-  // handle array below is still allocated because USE_SDMA testers index it without checking
-  // sdmaEnabled; it is filled with nulls once sdmaEnabled is false.
+  // Create SDMA connections to all local PEs including self. A failed connect aborts rather than
+  // clearing sdmaEnabled on this rank alone: sdmaEnabled also selects the alltoall algorithm, and
+  // ranks that disagree on it run incompatible synchronization and hang.
   for (int i = 0; i < shm_size; i++) {
     if (i != deviceId) {
       sdma_anvil::EnablePeerAccess(deviceId, i);
     }
     if (!sdma_anvil::anvil.connect(deviceId, i, numChannels)) {
-      LOG_ERROR("SDMA: connect failed from device %d to %d with %d channel(s); disabling SDMA",
-                deviceId, i, numChannels);
-      for (int j = 0; j < i; j++) sdma_anvil::anvil.disconnectDevice(j);
-      sdmaEnabled = false;
-      break;
+      LOG_ERROR_ABORT("SDMA: connect failed from device %d to %d with %d channel(s); set "
+                      "ROCSHMEM_SDMA_ENABLED=0 or lower ROCSHMEM_SDMA_NUM_CHANNELS",
+                      deviceId, i, numChannels);
     }
   }
 
@@ -97,8 +92,7 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank) {
   for (int i = 0; i < shm_size; i++) {
     for (int ch = 0; ch < numChannels; ch++) {
       int idx = i * numChannels + ch;
-      sdma_anvil::SdmaQueue* queue =
-          sdmaEnabled ? sdma_anvil::anvil.getSdmaQueue(deviceId, i, ch) : nullptr;
+      sdma_anvil::SdmaQueue* queue = sdma_anvil::anvil.getSdmaQueue(deviceId, i, ch);
       handles_h[idx] = queue ? queue->deviceHandle() : nullptr;
     }
   }
@@ -116,7 +110,7 @@ __host__ void SdmaImpl::sdmaHostStop() {
     deviceHandles_d = nullptr;
   }
   // Release only the peers sdmaHostInit wired: the channel map is process-global, so disconnect()
-  // would also destroy queues another user still holds. A disabled or failed init left none.
+  // would also destroy queues another user still holds. A disabled init wired none.
   if (sdmaEnabled) {
     for (int i = 0; i < shm_size; i++) sdma_anvil::anvil.disconnectDevice(i);
   }
