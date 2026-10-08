@@ -24,7 +24,7 @@ metadata. Running the recommended command requires an installed or built
 | `trace-gpu` | gpu | GPU device activity + kernel dispatch tracing |
 | `trace-hw-counters` | gpu | GPU hardware counters (Occupancy, VALUUtilization) |
 | `workload-trace` | gpu | AI/ML training, long-running GPU/HPC workloads (MPI+RCCL+rocPD, 2GB trace buffer) |
-| `trace-hpc` | hpc | MPI/OpenMP/Kokkos/RCCL + PAPI counters, compute-intensive HPC apps |
+| `trace-hpc` | hpc | MPI/OpenMP/Kokkos/RCCL tracing with PAPI counter events set, compute-intensive HPC apps |
 | `trace-openmp` | hpc | OpenMP GPU target-offload apps (kernel/memcpy trace, HSA API excluded) |
 | `profile-mpi` | hpc | MPI communication latency: flat profile with wall-clock per rank, no tracing |
 | `sys-trace` | tracing | Full system API trace (HIP + HSA + ROCTx + RCCL) for debugging runtime-layer interactions |
@@ -43,8 +43,9 @@ Resolve these in order; the first question that narrows to a single preset wins.
    - MPI communication latency is the *only* concern, no tracing needed →
      `profile-mpi`.
    - OpenMP GPU target-offload kernels → `trace-openmp`.
-   - Mixed MPI/OpenMP/Kokkos/RCCL, compute-intensive, and hardware counters are
-     wanted → `trace-hpc`.
+   - MPI/OpenMP/Kokkos/RCCL HPC application, compute-intensive → `trace-hpc`.
+     It enables tracing and sets CPU hardware-counter events (PAPI); if you want
+     neither, `profile-mpi` or `balanced` run without tracing.
    - AI/ML training or a long-running GPU-accelerated HPC job needing MPI+RCCL
      and durable trace capacity → `workload-trace`.
 
