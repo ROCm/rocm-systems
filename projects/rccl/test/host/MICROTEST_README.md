@@ -54,6 +54,202 @@ A new binary is named in four places: `rccl_add_micro_binary()` in
 `test_configurations` + `test_suites` pair in `configs/ci-precheckin.json`, and
 the microtest list in `lib/test_executor.py` that llvm-cov reads as `--object`.
 
+## Units under test
+
+Units sharing a binary must be `#include`d from *different* test TUs and must not
+export colliding non-`static` symbols; otherwise a unit needs its own binary:
+
+- **`rccl-UnitTestsMicro`** — one unit per test TU:
+  - `p2p.cc` (`P2P_CC_PATH`, from `p2p-test.cc`); suites `P2pMicrotest.*`,
+    `FreshRegistration*`.
+  - `rma/rma_proxy_progress.cc` (`RMA_PROXY_PROGRESS_CC_PATH`, from
+    `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
+  - `plugin/gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suite
+    `GinPluginInitTest.*`. NVIDIA/nccl#2179 GIN init-context leak.
+  - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suites
+    `GroupEndInternalTest.*`, `ReclaimPlannerStateTest.*`, `AsyncLaunchTest.*`,
+    `GroupJobAbortTest.*`, `GroupApiWrapperTest.*`, `ArgsGlobalCheckTest.*`.
+  - `devcomm/devcomm_v22902.cc` + `devcomm/devcomm_v22907.cc`
+    (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
+    `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
+    covered yet.
+  - `dev_runtime.cc` (`DEV_RUNTIME_CC_PATH`, from `dev-runtime-test.cc`);
+    suites `Alloc*`, `Comm*`, `Compute*`, `DeepCopy*`, `Dev*`, `Gin*`, `Nccl*`,
+    `Sym*`, and `Win*`.
+  - the generated `sym_kernels_host.cc` (`SYM_KERNELS_HOST_CC_PATH`, from
+    `sym-kernels-index-test.cc`); suites `SymKernelIndex*`,
+    `SymAllEmittedCombinations/*`, `SymUnhandledCombinations/*` (covered by the
+    `Sym*` CTest pattern). Each kernel `__global__` is neutered to an ordinary
+    host stub (see the file's own header comment) so the 84 generated function
+    pointers link without the HIP runtime.
+  - `rccl_wrap.cc` (`WRAP_CC_PATH`, from `wrap-test.cc`); suites
+    `WrapMicrotest.*`, `WrapMicrotestIsolated.*`. Shared dependency seams live
+    in their production-TU owners (`ce_fakes.cc`, `sym_kernels_fakes.cc`,
+    etc.); `dev_runtime.cc`'s real window lookup and predicates are supplied by
+    `dev-runtime-test.cc`, and `wrap_fakes.cc` contains only link-closure seams
+    without an existing shared owner. Real
+    `archinfo.cc` is compiled alongside it for `IsArchMatch`
+    (`rcclIsArchSupportedForFunc` et al. need the real prefix-match
+    behaviour) -- the same real-oracle-TU technique
+    `rccl-UnitTestsMicroInit` uses, with `--gc-sections` dropping the deep
+    deps it pulls in. **Do not add an `IsArchMatch` fake to this binary**:
+    it is a duplicate-symbol error against that TU. `p2p_fakes.cc`'s
+    former hardcoded-false stub was removed for exactly this reason.
+    Every function is now covered; see `wrap-test.cc`'s header comment for
+    the per-function breakdown. One deliberate, permanent exclusion: the
+    `#ifdef ENABLE_WARP_SPEED` cluster (~10 functions) is compiled out of
+    this binary entirely, so no seam can reach it without changing the
+    binary's own build configuration.
+  - `ras/ras.cc` (`RAS_CC_PATH`, from `ras-test.cc`); suite
+    `RasMicrotest.*`. The suite covers every executable line and function in
+    `ras.cc`: communicator setup and cleanup, local notifications, message
+    allocation and transfer, connection handshakes, message dispatch, the poll
+    loop, timeout handling, and poll-slot management. External socket, network,
+    and neighboring subsystem calls use test-controlled replacements in
+    `ras-test.cc`, their sole consumer. Real multi-process behavior remains
+    integration-test territory. Since this binary uses section GC, validate
+    completeness by checking that the linked coverage report still contains
+    the same `ras.cc` function inventory as the compiled source.
+  - `ras/diagnostics_checks_common.cc` (`RAS_DIAGNOSTICS_COMMON_CC_PATH`, from
+    `ras-diagnostics-common-test.cc`); suite
+    `RasDiagnosticsCommonMicrotest.*`. Covers communicator snapshots and
+    filtering, aligned local-record collection, allocation and callback
+    failures, rank ordering and formatting, and reporter output.
+  - `ras/collectives.cc` (`COLLECTIVES_CC_PATH`, from
+    `ras-collectives-test.cc`); suite `RasCollectivesMicrotest.*`. Covers
+    request initialization, collective forwarding and responses, completion,
+    timeout handling, history, connection cleanup, diagnostics-init failure
+    absorption, and dependency-error propagation.
+    `DISABLED_NetSendCollReq_CommsPayloadAllocationFailureKeepsRequestForwardable`
+    tracks [AICOMRCCL-2740](https://amd-hub.atlassian.net/browse/AICOMRCCL-2740).
+    This deferred production regression currently crashes when communicator-data
+    allocation fails after request rewriting. Enable it with the production fix;
+    it is excluded from normal host-test runs. To reproduce explicitly, run
+    `rccl-UnitTestsMicro --gtest_also_run_disabled_tests --gtest_filter=RasCollectivesMicrotest.DISABLED_NetSendCollReq_CommsPayloadAllocationFailureKeepsRequestForwardable`.
+  - `ras/diagnostics.cc` (`RAS_DIAGNOSTICS_CC_PATH`, from
+    `ras-diagnostics-test.cc`); suite `RasDiagnosticsMicrotest.*`. Covers
+    context initialization, request lifecycle, local-data collection,
+    peer-payload aggregation, summaries, timeout propagation, and reporter
+    errors. `DISABLED_Resume_UnknownWireCheckIdReturnsError` tracks
+    AICOMRCCL-2741: production reads an out-of-range peer check ID as an enum
+    before validation. Its raw-byte fixture reproduces the enum UBSan failure;
+    enable it after the production fix. The defined `RAS_DIAG_CHECK_COUNT`
+    sentinel remains covered by enabled dispatch and peer-payload tests.
+  - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
+    `RasClientMicrotest.*`. With
+    `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this
+    unit's whole dependency surface is libc, not HIP/nccl; it seams that
+    surface through `fakes/libc_fakes.{h,cc}` plus the `fakes/libc_seam.h` /
+    `fakes/libc_seam_undef.h` positional rename pair (guard-less by design, so
+    every header declaring a renamed name must precede it and the undef half
+    must immediately follow the unit -- see `fakes/libc_seam.h:9-19`) instead
+    of the shared `fakes/nccl_fakes.cc` the other units in this binary use.
+  - `ras/ras_param.cc` (`RAS_PARAM_CC_PATH`, from `ras-param-test.cc`); suite
+    `RasParamMicrotest.*`. Covers environment parsing, invalid-value fallback,
+    cached parameter reads, and nanosecond/second scaling. The test includes the
+    production file under renamed `ncclParamRasTimeoutFactor`,
+    `rasTimeoutFactorNs`, and `rasTimeoutFactorSec` symbols so it can link beside
+    `fakes/ras_param_fakes.cc` and the `ras-test.cc` timeout fake in the shared
+    microtest binary.
+  - `tuning/tuning_general.cc` (`TUNING_GENERAL_CC_PATH`, from
+    `tuning-general-test.cc`); suite `TuningGeneralMicrotest.*`. Covers the
+    shared step-count, hardware-index, time-estimation, thread-threshold,
+    channel/warp-selection, and tuning-ID helpers without a GPU. This TU
+    defines `ncclParamNthreads` and `ncclParamLl128Nthreads`; do not duplicate
+    them in `fakes/tuning_fakes.cc`.
+  - `tuning/tuning.cc` (`TUNING_CC_PATH`, from `tuning-test.cc`); suite
+    `TuningMicrotest.*`. Covers tuning lifecycle, candidate selection, tuner
+    overrides, NVLS efficiency policy, and symmetric-kernel fallback. Its
+    `ncclParamSingleProcMemRegEnable` resolves from `group.cc` via
+    `group-test.cc`; do not add `fakes/group_fakes.cc` to this binary.
+  - `misc/gdr_probe.cc` (`GDR_PROBE_CC_PATH`, from `gdr-probe-test.cc`); suite
+    `GdrProbeTest.*`. Covers `ncclIbProbeGdrSupport`, the runtime GPU
+    memory-registration fallback behind the sysfs peer-memory scan: the result
+    for every failure point, the registration entry point and access flags per
+    relaxed-ordering setting, and that only acquired resources are released
+    (MR before its PD and buffer). `hipMalloc`/`hipFree` go through
+    `fakes/hip_fakes.cc`; the verbs PD/MR wrappers through
+    `fakes/ibvwrap_fakes.cc`. The expected flags are pinned to both
+    `transport/net_ib*/reg.cc` copies by configure-time `rccl_assert_source_line`
+    checks in `CMakeLists.txt`, so a flag change in `reg.cc` fails the configure
+    until the probe and the test are updated to match.
+- **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
+  `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
+  test; several fixtures are reused by later groups, so the order within the file
+  matters. `enqueue.cc:28` pulls in the device header `src/device/common.h`,
+  which cannot compile host-only; the TU pre-sets that header's include guard and
+  supplies the six `ncclDevKernel_Generic_N` kernels as host surrogates (their
+  addresses are stored in a table, never launched). Two shared `nccl_stubs.cc`
+  entries are omitted for this target via `RCCL_STUBS_OMIT_<symbol>` macros
+  because `enqueue.cc` defines them itself. See
+  `test_categories_micro_enqueue.yaml`.
+- **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
+  `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
+  GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
+  `SymKernelMaskTest.*`, `SymAllChunkEltsCases/*` (covered by the `Sym*` CTest
+  pattern). Its own binary, not shared with `rccl-UnitTestsMicro`:
+  `fakes/sym_kernels_fakes.cc` (needed there by other units) fakes the exact
+  symbols the real file also defines, which would duplicate-symbol together;
+  this binary simply does not link that file, so no guard is needed.
+  `getRequirements_gin`'s large tuning/GIN dependency surface is never called
+  by these tests, so `-ffunction-sections`/`--gc-sections` drop it before any
+  fake would be needed.
+- **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**, **`-faultinj`**) — `init.cc` (via
+  `INIT_CC_PATH`);
+  suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. The `-uncached` variant adds
+  `HIP_HOST_UNCACHED_MEMORY`/`HIP_UNCACHED_MEMORY` to cover the alternate host-alloc
+  arm; the `-faultinj` variant adds `ENABLE_FAULT_INJECTION` to cover the fault-mask
+  arm of `commAlloc`/`devCommSetup` (the arm that ships, since `FAULT_INJECTION`
+  defaults ON). The two macro pairs are lexically disjoint in `init.cc`, so three
+  binaries cover both arms of both without a 2x2 cross product. init.cc compiles the *real* `argcheck.cc`/`archinfo.cc`/`utils.cc` ("oracle"
+  TUs) from the hipify tree rather than stubbing them; `--gc-sections` drops the
+  deep-path symbols the tests never reach. See `test_categories_micro_init.yaml`.
+- **`rccl-UnitTestsMicroWarpSpeed`** — `allgatherv_sched.cc` +
+  `symmetric_sched.cc` (via `ALLGATHERV_SCHED_CC_PATH`/`SYMMETRIC_SCHED_CC_PATH`,
+  both from `scheduler-test.cc`); suite `SchedulerMicrotest.*`. Its own binary,
+  not sharing `rccl-UnitTestsMicro`: some of its test scenarios need
+  `ENABLE_WARP_SPEED`, which must be binary-wide (every TU compiled in has to
+  agree on `struct ncclComm`'s layout), and giving the macro its own small,
+  dedicated binary keeps it from silently reaching the ~8 unrelated TUs that
+  used to share a binary with it. `ncclDevrInitOnce`/`ncclDevrFindWindow` are
+  faked here (`fakes/dev_runtime_fakes.cc`) rather than compiling the real
+  `dev_runtime.cc` in, unlike `dev-runtime-test.cc`: `ncclDevrFindWindow` can
+  only ever return success against a fresh comm, and `ncclDevrInitOnce`'s real
+  error path is already covered directly by `dev-runtime-test.cc`'s own suite,
+  so a fake tests this binary's own error-propagation logic just as well
+  without pulling in that file's dependency floor. See
+  `test_categories_micro_scheduler.yaml`.
+
+- **`rccl-UnitTestsMicroTaskPrep`** — `src/enqueue/task_prep/task_prep.cc` (via
+  `TASK_PREP_CC_PATH`, suite `TaskPrepMicrotest.*`),
+  `src/enqueue/task_prep/task_classify.cc` (via `TASK_CLASSIFY_CC_PATH`, suite
+  `TaskClassifyMicrotest.*`), `src/enqueue/task_prep/task_pretuning.cc` (via
+  `TASK_PRETUNING_CC_PATH`, suite `TaskPreTuningMicrotest.*`),
+  `src/enqueue/task_prep/task_posttuning.cc` (via `TASK_POSTTUNING_CC_PATH`, suite
+  `TaskPostTuningMicrotest.*`), and the seven `src/enqueue/task_sched/*.cc` files
+  (`task_sched.cc`, `sym_sched.cc`, `legacy_sched.cc`, `allgatherv_sched.cc`,
+  `p2p_sched.cc`, `rma_sched.cc`, `ce_sched.cc`, one `TASK_SCHED_*_CC_PATH` macro
+  each, all in one test TU, suite `TaskSchedMicrotest.*`). Its own binary, not
+  sharing `rccl-UnitTestsMicro`: that target links `collective_stubs.cc`, whose
+  fail-loud `ncclTaskPrepare` would be a duplicate symbol against the real one,
+  and `group-test.cc` drives the path that stub stands in for. The four
+  `task_prep/` files are separate test TUs, one per file, so `task_prep.cc`'s
+  sibling externs resolve to real code and no file is listed twice; the seven
+  `task_sched/` files share one TU instead, since none of them reference each
+  other and each defines exactly one distinct extern-linkage function. Shared
+  scene, vocabulary and fake-reset fixture live in `TaskPrepScene.h`.
+  `ENABLE_WARP_SPEED` is deliberately absent: all eleven files are free of it.
+  See `test_categories_micro_taskprep.yaml`.
+
+- **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
+  `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`). Its own binary: it fakes the
+  `transport/p2p.cc` shareable-buffer entry points that `rccl-UnitTestsMicro`
+  compiles for real. See `test_categories_micro_diagnostics.yaml`.
+
+Everything below (seams, fakes, coverage) applies to both; the concrete examples
+use `p2p.cc`.
+
+
 ## Why a separate test binary
 
 The existing `rccl-UnitTests` binary links against `librccl.so`. That
@@ -109,10 +305,12 @@ The unit-under-test is the production `.cc` that the test TU `#include`s via a
 build-time path macro (e.g. `P2P_CC_PATH` → the hipified `p2p.cc`). To add a
 test:
 
-1. **Pick the unit.** If it lives in a `.cc` that is already `#include`d, skip to step 3. Otherwise add a new path
+1. **Pick the unit.** If it lives in a `.cc` that is already `#include`d (see
+   [Units under test](#units-under-test)), skip to step 3. Otherwise add a new path
    macro in `CMakeLists.txt` (mirror `P2P_CC_PATH`/`INIT_CC_PATH`) pointing at the
    hipified copy, and `#include` it from the test TU *after* the fakes/macro shims
-   are in scope. A new unit generally warrants its own binary so its file-scope state stays isolated.
+   are in scope. A new unit generally warrants its own binary (see
+   [Units under test](#units-under-test)) so its file-scope state stays isolated.
    The unit's path fixes the test file, binary, suite and yaml names — see
    [Naming a new microtest](#naming-a-new-microtest).
 2. **Register the source.** Add the test `.cc` to the target's source list in
@@ -553,13 +751,15 @@ make -j $(nproc) rccl-UnitTestsMicro
 
 `test/host/CMakeLists.txt` is dual-mode. Alongside the in-RCCL-build target
 above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
-can be configured **directly** to build every host binary **without configuring/building all of
+can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
+`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
+`rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
+`rccl-UnitTestsMicroDiagnostics`,
+`rccl-UnitTestsMicroSymKernels` and `rccl-UnitTestsMicroTaskPrep` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
 
-Three of the binaries it builds are preprocessor variants of another, not
-duplicates: `rccl-UnitTestsMicroInit-uncached`, `rccl-UnitTestsMicroInit-faultinj`
-and `rccl-UnitTestsMicroEnqueue-devlinker`. `init.cc` gates
+Three of those names are preprocessor variants, not duplicates. `init.cc` gates
 part of its allocation path on `HIP_*_UNCACHED_MEMORY` and its fault-mask blocks
 on `ENABLE_FAULT_INJECTION`, and `enqueue.cc` gates `rcclShmemDynamicSize` on
 `RCCL_DEVICE_LINKER`, all at the **preprocessor**, so one compile can only ever
@@ -581,5 +781,21 @@ every HIP symbol the tests reach is provided by `fakes/`.
 
 ```bash
 cd projects/rccl/test/host
-./run_host_tests.sh all
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+      -DRCCL_BUILD_DIR=/path/to/projects/rccl/build/release
+cmake --build build -j"$(nproc)"
+./build/rccl-UnitTestsMicro          # p2p tests, ldd shows no HIP/ROCm/HSA/RCCL
+./build/rccl-UnitTestsMicroWarpSpeed  # src/scheduler/*.cc tests
+./build/rccl-UnitTestsMicroInit      # init.cc tests
+./build/rccl-UnitTestsMicroInit-uncached
+./build/rccl-UnitTestsMicroInit-faultinj      # same, ENABLE_FAULT_INJECTION arm
+./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
+./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
+./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
+./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
+./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
+./build/rccl-HostUnitTests
 ```
+
+Disable coverage instrumentation for the standalone host-only test binaries
+with `-DHOST_TEST_COVERAGE=OFF`.
