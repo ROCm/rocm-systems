@@ -427,7 +427,19 @@ TEST_F(UBR_AllGather, OutOfPlace_MultiNode)
 // ("invalid request local work queue error") and the collective hangs. The fix
 // removes the WRITE and keeps the RO=0 READ fence, so it completes cleanly.
 // Requires NCCL_CUMEM_ENABLE=1 cross-node; if GDR is absent the flush is a no-op.
-class GdrFlush_CuMem : public RegistrationTestBase {};
+//
+// coco UnitTestsMPI defaults NCCL_CUMEM_ENABLE=0 and splits this suite with
+// --gtest_filter=GdrFlush_CuMem.* without the gdr_flush_cumem_multinode env.
+// Opt the suite in itself so the regression guard actually runs.
+class GdrFlush_CuMem : public RegistrationTestBase {
+protected:
+    void SetUp() override
+    {
+        setenv("NCCL_CUMEM_ENABLE", "1", 1);
+        setenv("NCCL_DMABUF_ENABLE", "1", 1);
+        RegistrationTestBase::SetUp();
+    }
+};
 
 TEST_F(GdrFlush_CuMem, AllGatherUnregistered_MultiNode)
 {
