@@ -861,6 +861,7 @@ def _wrap_tensor_method_allowing_uninitialized(
 ) -> Callable[..., Any]:
     """Wrap original so uninitialized parameters can still call to/cpu/cuda."""
 
+    @wraps(original)
     def wrapper(*args: Any, **kwargs: Any) -> object:
         return _call_tensor_method_allowing_uninitialized(original, *args, **kwargs)
 
