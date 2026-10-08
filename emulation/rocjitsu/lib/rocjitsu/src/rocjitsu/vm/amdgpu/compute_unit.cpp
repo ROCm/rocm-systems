@@ -1175,8 +1175,7 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   // map X to a position issued below for this instruction: zero-EXEC operations
   // may be skipped by an empty completion queue while older X entries remain.
   const bool flat_local_route =
-      flat && flat_requests &&
-      (flat_shared_lanes & (uint64_t{1} << std::countr_zero(flat_requests)));
+      flat && flat_requests != 0 && (flat_requests & ~flat_shared_lanes) == 0;
   const auto xcnt_completion_counter =
       flat_local_route ? WaitCounterKind::Ds : classified.front().counter;
   std::optional<WaitCounterKind> xcnt_completion;
