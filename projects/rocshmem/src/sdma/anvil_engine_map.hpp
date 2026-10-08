@@ -24,8 +24,8 @@
 #ifndef LIBRARY_SRC_SDMA_ANVIL_ENGINE_MAP_HPP_
 #define LIBRARY_SRC_SDMA_ANVIL_ENGINE_MAP_HPP_
 
-// Pure engine-selection helpers for AnvilLib. Kept free of HSA/KFD headers so the unit tests can
-// build them without USE_SDMA.
+// Pure engine-selection and queue-budget helpers for AnvilLib. Kept free of HSA/KFD headers so the
+// unit tests can build them without USE_SDMA.
 
 #include <cstdint>
 #include <string>
@@ -86,6 +86,15 @@ inline PciFunctionBus pciFunctionBus(const std::string& busId) {
     loc.physBusId.back() = '0';
   }
   return loc;
+}
+
+// True when taking `requested` more queues would exceed the queue budget, counted across all
+// engines as numEnginesTotal * queuesPerEngine. Either count being 0 means the budget is unknown,
+// which is never reported as exhausted.
+inline bool queueBudgetExceeded(uint32_t used, int requested, uint32_t numEnginesTotal,
+                                uint32_t queuesPerEngine) {
+  const uint32_t budget = numEnginesTotal * queuesPerEngine;
+  return requested > 0 && budget > 0 && used + static_cast<uint32_t>(requested) > budget;
 }
 
 }  // namespace sdma_anvil

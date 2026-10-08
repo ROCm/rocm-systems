@@ -96,6 +96,19 @@ std::vector<hsa_agent_t> gpuAgents_;
 
 static bool hsaAgentIsValid(const hsa_agent_t& agent) { return agent.handle != 0; }
 
+// The engine-choice fields shared by every failure log that reports an EngineSelection.
+static std::string describeSelection(const EngineSelection& s) {
+  const int preferredEngine = s.preferredMask == 0 ? -1 : __builtin_ctz(s.preferredMask);
+  char buf[256];
+  snprintf(buf, sizeof(buf),
+           "pair=%d->%d preferredQueried=%d preferredStatus=%#x preferredMask=0x%x "
+           "preferredEngine=%d usedPreferred=%d hostEng=%u xgmiEng=%u total=%u",
+           s.srcDeviceId, s.dstDeviceId, s.preferredQueried ? 1 : 0,
+           static_cast<unsigned>(s.preferredStatus), s.preferredMask, preferredEngine,
+           s.usedPreferred ? 1 : 0, s.numSdmaEngines, s.numSdmaXgmiEngines, s.numSdmaEnginesTotal);
+  return buf;
+}
+
 static std::string hsaAgentBusId(const hsa_agent_t& agent) {
   uint32_t domain = 0;
   uint32_t bdfid = 0;
@@ -233,14 +246,11 @@ SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& l
     const std::string dstBus = getBusId(remoteDeviceId);
     LOG_ERROR(
         "anvil: hsaKmtCreateQueueExt failed hsakmt=%d (%s) genericRetry=%d (%s) node=%u "
-        "engineId=%u srcDev=%d (%s) dstDev=%d (%s) usedPreferred=%d preferredStatus=%#x "
-        "preferredMask=0x%x hostEng=%u xgmiEng=%u total=%u",
+        "engineId=%u srcDev=%d (%s) dstDev=%d (%s) %s",
         static_cast<int>(createStatus_), hsakmtStatusName(createStatus_),
         static_cast<int>(queueStatus), hsakmtStatusName(queueStatus), localNodeId, engineId,
         localDeviceId, srcBus.c_str(), remoteDeviceId, dstBus.c_str(),
-        selection.usedPreferred ? 1 : 0, static_cast<unsigned>(selection.preferredStatus),
-        selection.preferredMask, selection.numSdmaEngines, selection.numSdmaXgmiEngines,
-        selection.numSdmaEnginesTotal);
+        describeSelection(selection).c_str());
     // Leave valid_ false so the caller can drop the Anvil backend instead of killing the job.
     hsaKmtUnmapMemoryToGPU(queueBuffer_);
     hsaKmtFreeMemory(queueBuffer_, SDMA_QUEUE_SIZE);
@@ -564,15 +574,8 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
   LOG_TRACE("SDMA: Connect from %d to %d with %d channels using engine %d",
             srcDeviceId, dstDeviceId, numChannels, engineId);
 
-  // The queue budget is a property of the partition mode rather than of this peer: a CPX partition
-  // owns one XCD's engines, so the mesh a whole MI300X supports does not fit. KFD also does not
-  // report how many queues ROCr already holds, so an exhausted budget can only be predicted for
-  // gross over-subscription and must additionally be recognised when queue creation fails.
-  // The budget is counted across all engines, not per engine. A rejected engine-pinned create
-  // retries as a generic queue and reports engine 0, so on a partition every queue charges the
-  // same key; a per-engine cap would then refuse at numSdmaQueuesPerEngine_ while the partition
-  // really offers numSdmaEnginesTotal_ times that, which is the figure this message quotes. The
-  // total is an upper bound, so an uneven distribution is still caught by KFD's own NO_MEMORY.
+  // KFD does not report how many queues ROCr already holds, so this only predicts gross
+  // over-subscription; a NO_MEMORY from queue creation below is reported against the same budget.
   const uint32_t queueBudget = numSdmaEnginesTotal_ * numSdmaQueuesPerEngine_;
   auto reportBudget = [&](uint32_t used) {
     LOG_ERROR(
@@ -586,34 +589,34 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
 
   // The whole request is known up front. Refusing here avoids creating a queue
   // that rollback would destroy immediately.
-  const uint32_t used = queuesUsedTotal_;
-  if (numChannels > 0 && queueBudget > 0 &&
-      used + static_cast<uint32_t>(numChannels) > queueBudget) {
-    reportBudget(used);
+  if (queueBudgetExceeded(queuesUsedTotal_, numChannels, numSdmaEnginesTotal_,
+                          numSdmaQueuesPerEngine_)) {
+    reportBudget(queuesUsedTotal_);
     return false;
   }
 
   auto& vec = sdma_channels_[dstDeviceId];
   const size_t already = vec.size();
-  auto rollback = [&]() {
-    while (vec.size() > already) {
-      SdmaQueue* q = vec.back().get();
-      if (q != nullptr && q->valid() && queuesUsedTotal_ > 0) queuesUsedTotal_ -= 1;
-      vec.pop_back();
-    }
-  };
-
   for (int c = 0; c < numChannels; ++c) {
     SdmaQueue* queue = createSdmaQueue(srcDeviceId, dstDeviceId, engineId, selection);
     if (queue == nullptr) {
       if (lastQueueStatus_ == HSAKMT_STATUS_NO_MEMORY) {
         reportBudget(queuesUsedTotal_);
       }
-      rollback();
+      releaseQueues(vec, already);
       return false;
     }
   }
   return true;
+}
+
+void AnvilLib::releaseQueues(std::vector<std::unique_ptr<SdmaQueue>>& vec, size_t keep) {
+  // createSdmaQueue stores only valid queues and charges each one, so every popped entry is
+  // credited back.
+  while (vec.size() > keep) {
+    if (queuesUsedTotal_ > 0) queuesUsedTotal_ -= 1;
+    vec.pop_back();
+  }
 }
 
 void AnvilLib::disconnect() {
@@ -626,10 +629,7 @@ void AnvilLib::disconnect() {
 void AnvilLib::disconnectDevice(int dstDeviceId) {
   auto it = sdma_channels_.find(dstDeviceId);
   if (it == sdma_channels_.end()) return;
-  // Only valid queues were charged to the budget in createSdmaQueue().
-  for (const auto& q : it->second) {
-    if (q != nullptr && q->valid() && queuesUsedTotal_ > 0) queuesUsedTotal_ -= 1;
-  }
+  releaseQueues(it->second, 0);
   sdma_channels_.erase(it);
   LOG_TRACE("SDMA: Disconnected queues for device %d", dstDeviceId);
 }
@@ -669,17 +669,10 @@ int AnvilLib::getOamId(int deviceId) {
     if (file.is_open() && (file >> xgmi_physical_id)) return xgmi_physical_id;
   }
 
-  const int preferredEngine =
-      selection_.preferredMask == 0 ? -1 : __builtin_ctz(selection_.preferredMask);
   // LOG_ERROR so a default ROCSHMEM_DEBUG_LEVEL=ERROR banff repro still shows the preferred-engine
   // values that explain why the OAM map was needed.
-  LOG_ERROR(
-      "anvil: no xGMI physical id for %s or %s device=%d pair=%d->%d preferredQueried=%d "
-      "preferredStatus=%#x preferredMask=0x%x preferredEngine=%d hostEng=%u xgmiEng=%u total=%u",
-      loc.busId.c_str(), loc.physBusId.c_str(), deviceId, selection_.srcDeviceId,
-      selection_.dstDeviceId, selection_.preferredQueried ? 1 : 0,
-      static_cast<unsigned>(selection_.preferredStatus), selection_.preferredMask, preferredEngine,
-      selection_.numSdmaEngines, selection_.numSdmaXgmiEngines, selection_.numSdmaEnginesTotal);
+  LOG_ERROR("anvil: no xGMI physical id for %s or %s device=%d %s", loc.busId.c_str(),
+            loc.physBusId.c_str(), deviceId, describeSelection(selection_).c_str());
   return -1;
 }
 
@@ -713,7 +706,8 @@ int AnvilLib::getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId) {
     // BDF so that case is not silent. The info line reports the values the fold actually added.
     const int srcFn = srcPci.function < 0 ? 0 : srcPci.function;
     const int dstFn = dstPci.function < 0 ? 0 : dstPci.function;
-    const int folded = foldOamMapEngine(oamEngine, srcFn, dstFn, numSdmaEnginesTotal_);
+    const int folded =
+        foldOamMapEngine(oamEngine, srcPci.function, dstPci.function, numSdmaEnginesTotal_);
     if (srcPci.function < 0 || dstPci.function < 0) {
       LOG_WARN("anvil: PCI function unreadable src=%s dst=%s, using engine %d (oam=%d total=%u)",
                srcPci.busId.c_str(), dstPci.busId.c_str(), folded, oamEngine, numSdmaEnginesTotal_);

@@ -65,9 +65,11 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank) {
   CHECK_HIP(hipGetDevice(&deviceId));
 
   // Create SDMA connections to all local PEs including self. A false return leaves a partially
-  // wired mesh whose null handles would silently skip puts above the SDMA threshold, so tear
-  // everything down and fall back to IPC memcpy instead. The handle array below is still allocated
-  // (all null after disconnect) because USE_SDMA testers index it without checking sdmaEnabled.
+  // wired mesh whose null handles would silently skip puts above the SDMA threshold, so release the
+  // peers this call wired and fall back to IPC memcpy instead. connect() already rolled back the
+  // failed peer, and disconnect() is not used because the channel map is process-global. The
+  // handle array below is still allocated because USE_SDMA testers index it without checking
+  // sdmaEnabled; it is filled with nulls once sdmaEnabled is false.
   for (int i = 0; i < shm_size; i++) {
     if (i != deviceId) {
       sdma_anvil::EnablePeerAccess(deviceId, i);
@@ -75,7 +77,7 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank) {
     if (!sdma_anvil::anvil.connect(deviceId, i, numChannels)) {
       LOG_ERROR("SDMA: connect failed from device %d to %d with %d channel(s); disabling SDMA",
                 deviceId, i, numChannels);
-      sdma_anvil::anvil.disconnect();
+      for (int j = 0; j < i; j++) sdma_anvil::anvil.disconnectDevice(j);
       sdmaEnabled = false;
       break;
     }
@@ -95,7 +97,8 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank) {
   for (int i = 0; i < shm_size; i++) {
     for (int ch = 0; ch < numChannels; ch++) {
       int idx = i * numChannels + ch;
-      sdma_anvil::SdmaQueue* queue = sdma_anvil::anvil.getSdmaQueue(deviceId, i, ch);
+      sdma_anvil::SdmaQueue* queue =
+          sdmaEnabled ? sdma_anvil::anvil.getSdmaQueue(deviceId, i, ch) : nullptr;
       handles_h[idx] = queue ? queue->deviceHandle() : nullptr;
     }
   }
