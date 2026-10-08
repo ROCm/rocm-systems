@@ -12,19 +12,25 @@
 /// - Shared scalar/SIMD stage for migrated VOP3 results on every target.
 /// - Older targets enable OMOD only with IEEE=0 and output denormals flushed.
 ///
-/// Other emitted paths:
-/// - Host-result scalar lowering and SIMD destination helpers: separate
-///   OMOD/CLAMP implementations for remaining F32/F64 operations.
-/// - Specialized generators using vop3_dst_mod: F32 intermediate modifiers,
-///   including before F16 narrowing in DIV_FIXUP.
-/// - SDWA F16 (dpp_sdwa_ops.h): separate arithmetic and rounded-TRANS helpers;
-///   no captures.
-/// - F16 ternary SIMD: OMOD/CLAMP still precede narrowing.
-/// - Pseudo-scalar F32 transcendentals: scale the exact value before one F32
-///   rounding; match gfx1201 captures.
+/// Paths outside the shared stage:
+/// - Not yet migrated:
+///   - Host-result scalar lowering and SIMD destination helpers: separate
+///     OMOD/CLAMP implementations for remaining F32/F64 operations.
+///   - Specialized generators using vop3_dst_mod: F32 intermediate modifiers,
+///     including before F16 narrowing in DIV_FIXUP.
+///   - SDWA F16 (dpp_sdwa_ops.h): separate arithmetic and rounded-TRANS
+///     helpers; no captures.
+/// - Scalar/SIMD ordering mismatch:
+///   - F16 MAD/older min/max SIMD: modifiers precede narrowing, unlike scalar.
+///     See try_execute_ternary_vop3_fp16_simd.
+/// - Intentional exception:
+///   - Pseudo-scalar F32 transcendentals: scale the exact value before one F32
+///     rounding; match gfx1201 captures.
 ///
-/// Migration must preserve operation-specific rounding and flushing. In F32
-/// arithmetic, effective OMOD also selects output flushing before scaling.
+/// Note: Migration must preserve each operation's rounding and flushing:
+/// - SDWA F16 arithmetic and F16 TRANS flush outputs via output_denormal.h.
+/// - FMA tininess and OMOD zero/subnormal rules keep their own handling.
+/// - F32 arithmetic with effective OMOD flushes output denormals before scaling.
 ///
 /// Hardware evidence:
 /// - gfx1201 (RDNA4): every F16/F32/F64 min/max matches under all probed MODEs.
