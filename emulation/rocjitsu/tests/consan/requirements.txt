@@ -1,0 +1,7 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+--extra-index-url https://download.pytorch.org/whl/cpu
+PyYAML
+# Pin the CPU build so both pip and uv select CPU wheels across the indexes.
+torch==2.14.1+cpu
