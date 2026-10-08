@@ -1248,7 +1248,8 @@ which devices can reach a mapping the recording made itself with `hipMemMap`, so
 after those it flushes every device. `hipMalloc` and `hipFree` invalidate an open
 graph capture. A `hipMemUnmap` replayed while one is open therefore leaves its
 flush pending, and the end of the last open capture runs it, before the graph
-can be launched. A `hipMemMap` replayed inside the capture, at the address just
+can be launched, unless another capture is still open: a graph launched before
+that one ends can still reach the old pages. A `hipMemMap` replayed inside the capture, at the address just
 unmapped, is covered too: flushing after the new mapping is in place still
 drops the stale translation. Like every capture check
 placement makes, the check for an open capture and the flush that follows are

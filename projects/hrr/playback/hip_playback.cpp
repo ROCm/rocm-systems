@@ -2492,7 +2492,7 @@ void hrr_placement_at_sync(PlaybackContext& ctx, const char* api) {
         fprintf(stderr, "[HRR] Placement: unmapped %zu deferred free(s) at %s\n", n, api);
 }
 
-// Call after a capture ends. A hipMemUnmap replayed while one was open left
+// Call after a capture ends, or may have ended. A hipMemUnmap replayed while one was open left
 // its TLB flush pending, and a hipMemMap after it may have mapped the same
 // address again; the graph can be launched before anything else runs the
 // flush, so run it once the last capture is closed.

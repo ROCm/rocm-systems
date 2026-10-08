@@ -653,7 +653,8 @@ hipError_t hrr_record_free_event(hipStream_t stream, hipEvent_t* event);
 // KFD, with `device` current around both and the old one restored. The
 // hipFree waits for every stream on `device`. hipMalloc and hipFree
 // invalidate an open graph capture, so never call this while one is open.
-// When the current device cannot be read, the current one is flushed. Each
+// When the current device cannot be read, the device that is current is
+// flushed instead of `device`. Each
 // kind of failure is reported once, and its error cleared.
 void hrr_flush_gpu_tlb(int device);
 
