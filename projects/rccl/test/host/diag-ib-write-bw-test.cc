@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Host-only microtests for src/diagnostics/ib_write_bw.cc, #include-d via DIAG_IB_WRITE_BW_CC_PATH to reach its
- * file-static helpers: discovery, pairing, command build, output parse and stats. No test spawns ib_write_bw.
+ * file-static helpers. Peers are simulated through the bootstrap seams; no test spawns ib_write_bw.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -13,9 +13,14 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <functional>
+#include <iomanip>
+#include <map>
 #include <memory>
+#include <ostream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -23,6 +28,8 @@
 #include <unistd.h>
 
 #include "../common/LogCapture.hpp"
+#include "ScopedHook.h"
+#include "alloc.h"
 #include "bootstrap.h"
 #include "comm.h"
 #include "debug.h"
@@ -43,10 +50,48 @@
 
 using RcclUnitTesting::CaptureStdout;
 
+static uint64_t DefaultIbClockNano() {
+  return clockNano();
+}
+static std::function<uint64_t()> g_ibClockNano = DefaultIbClockNano;
+
+static int g_ibCallocFailAt = 0;
+static int g_ibCallocCalls = 0;
+static std::vector<void*> g_ibHostLive;
+template <typename T>
+static ncclResult_t IbCalloc(T** ptr, std::size_t nelem) {
+  if (++g_ibCallocCalls == g_ibCallocFailAt) {
+    return ncclSystemError;
+  }
+  const ncclResult_t ret = ncclCallocDebug(ptr, nelem, __FILE__, __LINE__, __func__, true);
+  if (ret == ncclSuccess) {
+    g_ibHostLive.push_back(*ptr);
+  }
+  return ret;
+}
+
+static void IbFree(void* ptr) {
+  auto it = std::find(g_ibHostLive.begin(), g_ibHostLive.end(), ptr);
+  if (it != g_ibHostLive.end()) {
+    g_ibHostLive.erase(it);
+  } else if (ptr != nullptr) {
+    ADD_FAILURE() << "free of untracked host pointer " << ptr;
+    return;
+  }
+  std::free(ptr);
+}
+
 #include "fakes/libc_seam.h"
+#undef ncclCalloc
+#define ncclCalloc(...) IbCalloc(__VA_ARGS__)
+#define clockNano() g_ibClockNano()
+#define free(ptr) IbFree(ptr)
 
 #include DIAG_IB_WRITE_BW_CC_PATH
 
+#undef free
+#undef clockNano
+#undef ncclCalloc
 #include "fakes/libc_seam_undef.h"
 
 namespace {
@@ -67,6 +112,7 @@ constexpr char kClientOutput[] =
     " #bytes     #iterations    BW peak[Gb/sec]    BW average[Gb/sec]   MsgRate[Mpps]\n"
     " 65536      1000             97.52              97.44  \t\t   0.185852\n"
     "---------------------------------------------------------------------------------------\n";
+constexpr char kServerOutput[] = "****\n* Waiting for client to connect... *\n****\n";
 
 std::string DiagLine(const std::string& body) {
   diagLogInit();
@@ -81,6 +127,11 @@ std::string SysPath(const char* name) {
   return std::string("/sys/class/infiniband/") + name;
 }
 
+template <typename T>
+std::string Bytes(const T& value) {
+  return std::string(reinterpret_cast<const char*>(&value), sizeof(value));
+}
+
 LocalInfo Info(const char* host, const char* device, bool cuda = true, bool dmabuf = true) {
   LocalInfo info{};
   info.deviceCount = 1;
@@ -92,6 +143,21 @@ LocalInfo Info(const char* host, const char* device, bool cuda = true, bool dmab
   return info;
 }
 
+int Port(int serverRank) {
+  return IB_BW_PORT_BASE + static_cast<unsigned int>(kCommHash + kNvmlBase + serverRank) % IB_BW_PORT_SPAN;
+}
+
+std::string Command(const char* device, int port, const char* cuda, const char* serverHost, int ibPort = 1,
+                    int qps = 1) {
+  std::string command = "ib_write_bw -d " + std::string(device) + " -i " + std::to_string(ibPort) +
+                        " -s 65536 --report_gbits -q " + std::to_string(qps) + " -p " + std::to_string(port) +
+                        " -n 1000" + cuda;
+  if (serverHost != nullptr) {
+    command += std::string(" ") + serverHost;
+  }
+  return command;
+}
+
 std::function<ncclResult_t(int*)> g_ibNetDevices;
 std::function<ncclResult_t(int, ncclNetProperties_t*)> g_ibNetGetProperties;
 ncclResult_t IbNetDevices(int* count) {
@@ -99,6 +165,30 @@ ncclResult_t IbNetDevices(int* count) {
 }
 ncclResult_t IbNetGetProperties(int dev, ncclNetProperties_t* props) {
   return g_ibNetGetProperties(dev, props);
+}
+
+// One bootstrap point-to-point call, in issue order: 'S' send or 'R' recv, with the bytes that crossed.
+struct IbMsg {
+  char kind;
+  int peer;
+  int tag;
+  std::string bytes;
+};
+
+constexpr int kSync = IB_BW_PAIR_SYNC_TAG;
+constexpr int kReady = IB_BW_SERVER_READY_TAG;
+constexpr char kCudaFlags[] = " --use_cuda=3 --use_cuda_dmabuf";
+
+bool operator==(const IbMsg& a, const IbMsg& b) {
+  return a.kind == b.kind && a.peer == b.peer && a.tag == b.tag && a.bytes == b.bytes;
+}
+
+std::ostream& operator<<(std::ostream& os, const IbMsg& m) {
+  os << m.kind << " peer=" << m.peer << " tag=" << std::hex << m.tag << " bytes=";
+  for (unsigned char byte : m.bytes) {
+    os << std::setw(2) << std::setfill('0') << static_cast<int>(byte);
+  }
+  return os << std::setfill(' ') << std::dec;
 }
 
 class DiagIbWriteBwMicrotest : public ::testing::Test {
@@ -145,16 +235,59 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
       return scene_.localNetResult;
     };
     g_ncclDiagChildRun = [this](const char* command, int timeoutSec, char* output, int outputSize, bool* truncated) {
-      EXPECT_STREQ(command, "ib_write_bw --help");
       EXPECT_EQ(timeoutSec, IB_BW_TIMEOUT_SEC);
       EXPECT_EQ(outputSize, IB_BW_TOOL_OUTPUT_BYTES);
       EXPECT_EQ(truncated, nullptr);
-      DeliverChildOutput(help_, output, outputSize, nullptr, nullptr, truncated);
-      return scene_.probeExit;
+      const bool probe = std::string(command) == "ib_write_bw --help";
+      if (!probe) {
+        clientCommands_.push_back(command);
+      }
+      DeliverChildOutput(probe ? help_ : clientOutput_, output, outputSize, nullptr, nullptr, truncated);
+      return probe ? scene_.probeExit : clientExit_;
+    };
+    g_ncclDiagChildRunStream = [this](const char* command, int timeoutSec, char* output, int outputSize,
+                                      ncclDiagChildLineFn onLine, void* ctx, bool* truncated) {
+      EXPECT_EQ(timeoutSec, IB_BW_TIMEOUT_SEC);
+      EXPECT_EQ(output, nullptr);
+      EXPECT_EQ(outputSize, 0);
+      serverCommands_.push_back(command);
+      DeliverChildOutput(serverOutput_, output, outputSize, onLine, ctx, truncated);
+      return serverExit_;
+    };
+    g_devrBootstrapSend = [this](void* bs, int peer, int tag, void* data, int size) {
+      EXPECT_EQ(bs, comm_->bootstrap);
+      log_.push_back({'S', peer, tag, std::string(static_cast<const char*>(data), size)});
+      return sendFailTag_ == tag ? ncclRemoteError : ncclSuccess;
+    };
+    g_devrBootstrapRecv = [this](void* bs, int peer, int tag, void* data, int size) {
+      EXPECT_EQ(bs, comm_->bootstrap);
+      std::deque<std::string>& queue = inbox_[tag];
+      if (queue.empty()) {
+        log_.push_back({'R', peer, tag, ""});
+        return ncclRemoteError;
+      }
+      EXPECT_EQ(queue.front().size(), static_cast<std::size_t>(size));
+      std::memcpy(data, queue.front().data(), std::min<std::size_t>(size, queue.front().size()));
+      log_.push_back({'R', peer, tag, queue.front()});
+      queue.pop_front();
+      return ncclSuccess;
+    };
+    g_devrBootstrapAllGather = [this](void* bs, void* buf, int size) { return AllGather(bs, buf, size); };
+    g_loadParam = [this](const char* env, int64_t deftVal) {
+      auto it = params_.find(env);
+      return it == params_.end() ? deftVal : it->second;
     };
   }
 
   void TearDown() override {
+    EXPECT_TRUE(g_ibHostLive.empty()) << "host buffers leaked: " << g_ibHostLive.size();
+    for (void* p : g_ibHostLive) {
+      std::free(p);
+    }
+    g_ibHostLive.clear();
+    g_ibCallocFailAt = 0;
+    g_ibCallocCalls = 0;
+    g_ibClockNano = DefaultIbClockNano;
     g_ibNetDevices = nullptr;
     g_ibNetGetProperties = nullptr;
     ResetDevRuntimeMicroFakes();
@@ -163,6 +296,43 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
     ResetDiagnosticsFakes();
     ResetLibcFakes();
     ResetTopoStubs();
+  }
+
+  // Gathers the scripted peers around this rank's slot, which is recorded rather than overwritten.
+  ncclResult_t AllGather(void* bs, void* buf, int size) {
+    EXPECT_EQ(bs, comm_->bootstrap);
+    if (++gathers_ == gatherFailAt_) {
+      return ncclRemoteError;
+    }
+    const int self = comm_->rank;
+    if (size == static_cast<int>(sizeof(LocalInfo))) {
+      LocalInfo* slots = static_cast<LocalInfo*>(buf);
+      selfInfo_ = slots[self];
+      for (int r = 0; r < comm_->nRanks; r++) {
+        if (r != self) {
+          slots[r] = info_[r];
+        }
+      }
+    } else if (size == static_cast<int>(sizeof(bool))) {
+      bool* slots = static_cast<bool*>(buf);
+      myVotes_.push_back(slots[self]);
+      for (int r = 0; r < comm_->nRanks; r++) {
+        if (r != self) {
+          slots[r] = r != peerVetoRank_;
+        }
+      }
+    } else if (size == static_cast<int>(sizeof(RankBandwidth))) {
+      RankBandwidth* slots = static_cast<RankBandwidth*>(buf);
+      selfBw_ = slots[self];
+      for (int r = 0; r < comm_->nRanks; r++) {
+        if (r != self) {
+          slots[r] = bw_[r];
+        }
+      }
+    } else {
+      ADD_FAILURE() << "unexpected allgather size " << size;
+    }
+    return ncclSuccess;
   }
 
   // nodes[n] lists node n's ranks in local-rank order; rank r has nvmlDev kNvmlBase + r.
@@ -186,6 +356,7 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
       }
     }
     info_.assign(nRanks, LocalInfo{});
+    bw_.assign(nRanks, RankBandwidth{-1, -1});
     comm_->rank = rank;
     comm_->nRanks = nRanks;
     comm_->nNodes = static_cast<int>(nodes_.size());
@@ -205,6 +376,64 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
     for (std::size_t r = 0; r < devices.size(); r++) {
       info_[r] = Info(("host" + std::to_string(r)).c_str(), devices[r]);
     }
+  }
+
+  // Rank 0 on node A pairs with rank 2 on node B over mlx5_0 in both phases.
+  void BuildTwoNodePair(int rank) {
+    BuildComm(rank, {{0, 1}, {2, 3}});
+    info_[0] = Info(kSelfHost, "mlx5_0");
+    info_[1] = Info("nodeA1", "mlx5_1");
+    info_[2] = Info("nodeB0", "mlx5_0");
+    info_[3] = Info("nodeB1", "mlx5_1");
+  }
+
+  void ResetPairScene(int rank) {
+    InstallHooks();
+    BuildTwoNodePair(rank);
+    inbox_.clear();
+    log_.clear();
+    clientCommands_.clear();
+    serverCommands_.clear();
+    clientOutput_ = kClientOutput;
+    clientExit_ = 0;
+    myVotes_.clear();
+    gathers_ = 0;
+    gatherFailAt_ = 0;
+    params_.clear();
+    g_ibCallocCalls = 0;
+    serverOutput_ = kServerOutput;
+    serverExit_ = 0;
+    sendFailTag_ = 0;
+    peerVetoRank_ = -1;
+    g_ibCallocFailAt = 0;
+  }
+
+  bool RunSchedule(bool useCrossNic, bool allPairsRanPoison) {
+    std::unique_ptr<bool[]> votes = std::make_unique<bool[]>(comm_->nRanks);
+    result_ = {7, 7};
+    allPairsRan_ = allPairsRanPoison;
+    return runSchedule(comm_.get(), info_.data(), votes.get(), useCrossNic, result_, allPairsRan_);
+  }
+
+  std::string Report(const RankBandwidth* bandwidth, bool cross, bool complete) {
+    std::vector<double> sorted(comm_->nRanks);
+    return CaptureStdout(
+        [&] { reportBandwidthStats(comm_.get(), info_.data(), bandwidth, sorted.data(), cross, complete); });
+  }
+
+  double RunPair(int serverRank, int clientRank, bool cross, std::string* out) {
+    double sample = -9;
+    *out = CaptureStdout([&] { sample = runPair(comm_.get(), info_.data(), serverRank, clientRank, cross); });
+    return sample;
+  }
+
+  std::string PairLine(const char* mode, int serverRank, int clientRank, const std::string& tail) {
+    const LocalInfo& server = info_[serverRank];
+    const LocalInfo& client = info_[clientRank];
+    return NetInfo(std::string("mode=") + mode + " server_rank=" + std::to_string(serverRank) +
+                   " server_host=" + server.hostname + " server_device=" + server.device +
+                   " client_rank=" + std::to_string(clientRank) + " client_host=" + client.hostname +
+                   " client_device=" + client.device + " " + tail);
   }
 
   bool FindPair(int phase, bool cross, int* serverRank, int* clientRank) {
@@ -230,11 +459,16 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
     return local;
   }
 
+  void Run() {
+    ncclDiagRunIbWriteBw(comm_.get());
+  }
+
   std::unique_ptr<ncclComm> comm_;
   std::vector<std::vector<int>> nodes_;
   std::vector<ncclPeerInfo> peers_;
   std::vector<ncclNodeRanks> nodeRanks_;
   std::vector<LocalInfo> info_;
+  std::vector<RankBandwidth> bw_;
   int topoStorage_ = 0;
   ncclNet_t net_{};
   std::size_t hostnameLen_ = 0;
@@ -251,6 +485,25 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
   std::vector<std::string> sysfs_ = {SysPath(""), SysPath("mlx5_0"), SysPath("mlx5_1")};
   std::vector<std::string> accessed_;
   std::string help_ = kHelp;
+  std::string clientOutput_ = kClientOutput;
+  int clientExit_ = 0;
+  std::string serverOutput_ = kServerOutput;
+  int serverExit_ = 0;
+  std::vector<std::string> clientCommands_;
+  std::vector<std::string> serverCommands_;
+  std::vector<IbMsg> log_;
+  std::map<int, std::deque<std::string>> inbox_;
+  int sendFailTag_ = 0;
+  // Allgathers per Run(), in order: 1 rankInfo, 2-3 the per-phase votes, 4 the closing vote, 5 the summary.
+  int gathers_ = 0;
+  int gatherFailAt_ = 0;
+  int peerVetoRank_ = -1;
+  LocalInfo selfInfo_{};
+  std::vector<bool> myVotes_;
+  RankBandwidth selfBw_{-9, -9};
+  std::map<std::string, int64_t> params_;
+  RankBandwidth result_{7, 7};
+  bool allPairsRan_ = false;
 };
 
 TEST_F(DiagIbWriteBwMicrotest, NodeInventory_GroupsByFirstAppearanceInLocalRankOrder) {
@@ -683,6 +936,460 @@ TEST_F(DiagIbWriteBwMicrotest, CommUsesCrossNic_NeedsCrossNicGraphWithChannels) 
   EXPECT_FALSE(commUsesCrossNic(comm_.get()));
   comm_->graphs[0].crossNic = 1;
   EXPECT_TRUE(commUsesCrossNic(comm_.get()));
+}
+
+TEST_F(DiagIbWriteBwMicrotest, ReportBandwidthStats_SummaryOnRankZeroWithCappedOutlierLines) {
+  BuildComm(0, {{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, {10, 11, 12, 13, 14, 15, 16, 17, 18, 19}});
+  SetDevices(std::vector<const char*>(20, "A"));
+  std::vector<RankBandwidth> bandwidth(20, RankBandwidth{100, 100});
+  const double outliers[] = {10, 20, 30, 40, 50, 60, 69, 131, 200, 300};
+  for (int i = 0; i < 10; i++) {
+    bandwidth[i + 4].direct = outliers[i];
+  }
+  bandwidth[3].direct = -1;
+  std::string shownLines;
+  const char* const shown[] = {"10.0", "20.0", "30.0", "40.0", "50.0", "60.0", "69.0", "131.0"};
+  for (int i = 0; i < 8; i++) {
+    shownLines += NetInfo("same-nic rank " + std::to_string(i + 4) + " (host" + std::to_string(i + 4) + "): " +
+                          shown[i] + " Gbit/s, >30% off median 100.0 Gbit/s");
+  }
+  EXPECT_EQ(Report(bandwidth.data(), false, true),
+            NetInfo("10.0/100.0/300.0 Gbit/s min/median/max same-nic bw (across 19 ranks)") + shownLines +
+                NetInfo("same-nic: 2 more ranks >30% off median"));
+  bandwidth[12].direct = 100;
+  bandwidth[13].direct = 100;
+  EXPECT_EQ(Report(bandwidth.data(), false, true),
+            NetInfo("10.0/100.0/131.0 Gbit/s min/median/max same-nic bw (across 19 ranks)") + shownLines);
+  PlaceRank(1);
+  EXPECT_EQ(Report(bandwidth.data(), false, true), "");
+}
+
+TEST_F(DiagIbWriteBwMicrotest, ReportBandwidthStats_OkOnlyWhenCompleteAndInBand) {
+  BuildComm(0, {{0, 1}, {2, 3}});
+  SetDevices({"A", "A", "A", "A"});
+  const RankBandwidth bandwidth[4] = {{90, 75}, {100, 100}, {110, 120}, {-1, 100}};
+  EXPECT_EQ(Report(bandwidth, false, true),
+            DiagLine("NCCL DIAG [OK] net bw: 90.0/100.0/110.0 Gbit/s min/median/max same-nic bw (across 3 ranks) in "
+                     "comm 0x1234abcd"));
+  EXPECT_EQ(Report(bandwidth, false, false),
+            NetInfo("90.0/100.0/110.0 Gbit/s min/median/max same-nic bw (across 3 ranks)"));
+  EXPECT_EQ(Report(bandwidth, true, true),
+            DiagLine("NCCL DIAG [OK] net bw: 75.0/100.0/120.0 Gbit/s min/median/max cross-nic bw (across 4 ranks) in "
+                     "comm 0x1234abcd"));
+  const RankBandwidth high[3] = {{100, -1}, {100, -1}, {150, -1}};
+  const RankBandwidth low[3] = {{100, -1}, {60, -1}, {100, -1}};
+  const RankBandwidth crossLow[3] = {{100, 100}, {40, 100}, {100, 40}};
+  comm_->nRanks = 3;
+  EXPECT_EQ(Report(high, false, true),
+            NetInfo("100.0/100.0/150.0 Gbit/s min/median/max same-nic bw (across 3 ranks)") +
+                NetInfo("same-nic rank 2 (host2): 150.0 Gbit/s, >30% off median 100.0 Gbit/s"));
+  EXPECT_EQ(Report(low, false, true),
+            NetInfo("60.0/100.0/100.0 Gbit/s min/median/max same-nic bw (across 3 ranks)") +
+                NetInfo("same-nic rank 1 (host1): 60.0 Gbit/s, >30% off median 100.0 Gbit/s"));
+  EXPECT_EQ(Report(high, true, true), "");
+  EXPECT_EQ(Report(crossLow, true, true),
+            NetInfo("40.0/100.0/100.0 Gbit/s min/median/max cross-nic bw (across 3 ranks)") +
+                NetInfo("cross-nic rank 2 (host2): 40.0 Gbit/s, >30% off median 100.0 Gbit/s"));
+}
+
+TEST_F(DiagIbWriteBwMicrotest, AllRanksOk_TrueOnlyWhenEveryRankVotesTrue) {
+  BuildComm(2, {{0, 1}, {2, 3}});
+  bool votes[4] = {};
+  bool transportOk = false;
+  EXPECT_TRUE(allRanksOk(comm_.get(), votes, true, transportOk));
+  EXPECT_TRUE(transportOk);
+  for (int veto : {0, 3}) {
+    peerVetoRank_ = veto;
+    transportOk = false;
+    EXPECT_FALSE(allRanksOk(comm_.get(), votes, true, transportOk)) << veto;
+    EXPECT_TRUE(transportOk);
+  }
+  peerVetoRank_ = -1;
+  EXPECT_FALSE(allRanksOk(comm_.get(), votes, false, transportOk));
+  EXPECT_TRUE(transportOk);
+  EXPECT_EQ(myVotes_, (std::vector<bool>{true, true, true, false}));
+  gatherFailAt_ = gathers_ + 1;
+  EXPECT_FALSE(allRanksOk(comm_.get(), votes, true, transportOk));
+  EXPECT_FALSE(transportOk);
+}
+
+TEST_F(DiagIbWriteBwMicrotest, SyncPair_ClientSendsThenAdoptsEchoServerReceivesThenEchoes) {
+  BuildComm(2, {{0, 1}, {2, 3}});
+  double bandwidth = 7.25;
+  inbox_[kSync] = {Bytes(42.5)};
+  EXPECT_TRUE(syncPair(comm_.get(), false, 1, bandwidth));
+  EXPECT_DOUBLE_EQ(bandwidth, 42.5);
+  EXPECT_EQ(log_, (std::vector<IbMsg>{{'S', 1, kSync, Bytes(7.25)}, {'R', 1, kSync, Bytes(42.5)}}));
+  log_.clear();
+  bandwidth = 7.25;
+  inbox_[kSync] = {Bytes(42.5)};
+  EXPECT_TRUE(syncPair(comm_.get(), true, 3, bandwidth));
+  EXPECT_DOUBLE_EQ(bandwidth, 42.5);
+  EXPECT_EQ(log_, (std::vector<IbMsg>{{'R', 3, kSync, Bytes(42.5)}, {'S', 3, kSync, Bytes(42.5)}}));
+  log_.clear();
+  EXPECT_FALSE(syncPair(comm_.get(), true, 3, bandwidth));
+  EXPECT_EQ(log_, (std::vector<IbMsg>{{'R', 3, kSync, ""}}));
+  log_.clear();
+  inbox_[kSync] = {Bytes(1.0)};
+  sendFailTag_ = kSync;
+  EXPECT_FALSE(syncPair(comm_.get(), false, 1, bandwidth));
+  ASSERT_EQ(log_.size(), 1u);
+  EXPECT_FALSE(syncPair(comm_.get(), true, 1, bandwidth));
+  sendFailTag_ = 0;
+  EXPECT_FALSE(syncPair(comm_.get(), false, 1, bandwidth));
+  EXPECT_EQ(log_.back(), (IbMsg{'R', 1, kSync, ""}));
+}
+
+TEST_F(DiagIbWriteBwMicrotest, RunPair_ServerAnnouncesThenReturnsClientMeasurement) {
+  BuildTwoNodePair(0);
+  params_["IB_QPS_PER_CONNECTION"] = 3;
+  info_[2].dmabuf = false;
+  inbox_[kSync] = {Bytes(88.5)};
+  std::string out;
+  EXPECT_DOUBLE_EQ(RunPair(0, 2, false, &out), 88.5);
+  EXPECT_EQ(out, "");
+  EXPECT_EQ(serverCommands_, (std::vector<std::string>{Command("mlx5_0", Port(0), " --use_cuda=3", nullptr, 1, 3)}));
+  EXPECT_TRUE(clientCommands_.empty());
+  EXPECT_EQ(log_, (std::vector<IbMsg>{{'S', 2, kReady, Bytes(true)}, {'R', 2, kSync, Bytes(88.5)},
+                                      {'S', 2, kSync, Bytes(88.5)}}));
+}
+
+TEST_F(DiagIbWriteBwMicrotest, RunPair_ServerWithoutBannerSendsNotReady) {
+  BuildTwoNodePair(0);
+  serverOutput_ = "listening on port\n";
+  inbox_[kSync] = {Bytes(-1.0)};
+  std::string out;
+  EXPECT_DOUBLE_EQ(RunPair(0, 2, true, &out), -1);
+  EXPECT_EQ(out, "");
+  EXPECT_EQ(log_, (std::vector<IbMsg>{{'S', 2, kReady, Bytes(false)}, {'R', 2, kSync, Bytes(-1.0)},
+                                      {'S', 2, kSync, Bytes(-1.0)}}));
+}
+
+TEST_F(DiagIbWriteBwMicrotest, RunPair_ServerToolFailureReportsAfterReady) {
+  BuildTwoNodePair(0);
+  serverExit_ = 124;
+  inbox_[kSync] = {Bytes(12.0)};
+  std::string out;
+  EXPECT_DOUBLE_EQ(RunPair(0, 2, true, &out), 12.0);
+  EXPECT_EQ(out, PairLine("cross", 0, 2, "tool run timed out"));
+  ASSERT_FALSE(log_.empty());
+  EXPECT_EQ(log_.front(), (IbMsg{'S', 2, kReady, Bytes(true)}));
+  EXPECT_EQ(log_.size(), 3u);
+  ResetPairScene(1);
+  serverExit_ = 1;
+  serverOutput_ = "";
+  inbox_[kSync] = {Bytes(-1.0)};
+  EXPECT_DOUBLE_EQ(RunPair(1, 2, false, &out), -1);
+  EXPECT_EQ(out, PairLine("same", 1, 2, "tool run failed"));
+  ASSERT_FALSE(log_.empty());
+  EXPECT_EQ(log_.front(), (IbMsg{'S', 2, kReady, Bytes(false)}));
+}
+
+TEST_F(DiagIbWriteBwMicrotest, RunPair_ClientMeasuresAfterReadyAndAdoptsEcho) {
+  BuildTwoNodePair(2);
+  inbox_[kReady] = {Bytes(true)};
+  inbox_[kSync] = {Bytes(55.5)};
+  std::string out;
+  EXPECT_DOUBLE_EQ(RunPair(0, 2, false, &out), 55.5);
+  EXPECT_EQ(out, "");
+  EXPECT_EQ(clientCommands_, (std::vector<std::string>{Command("mlx5_0", Port(0), kCudaFlags, kSelfHost)}));
+  EXPECT_TRUE(serverCommands_.empty());
+  EXPECT_EQ(log_, (std::vector<IbMsg>{{'R', 0, kReady, Bytes(true)}, {'S', 0, kSync, Bytes(kAverage)},
+                                      {'R', 0, kSync, Bytes(55.5)}}));
+}
+
+TEST_F(DiagIbWriteBwMicrotest, RunPair_CrossClientRunsItsOwnDeviceAndPortAgainstServerHost) {
+  BuildTwoNodePair(3);
+  info_[3].port = 2;
+  inbox_[kReady] = {Bytes(true), Bytes(true)};
+  inbox_[kSync] = {Bytes(61.0), Bytes(-1.0)};
+  std::string out;
+  EXPECT_DOUBLE_EQ(RunPair(0, 3, true, &out), 61.0);
+  EXPECT_EQ(out, "");
+  EXPECT_EQ(clientCommands_, (std::vector<std::string>{Command("mlx5_1", Port(0), kCudaFlags, kSelfHost, 2)}));
+  clientExit_ = 1;
+  EXPECT_DOUBLE_EQ(RunPair(0, 3, true, &out), -1);
+  EXPECT_EQ(out, PairLine("cross", 0, 3, "memory=cuda+dmabuf tool run failed"));
+}
+
+TEST_F(DiagIbWriteBwMicrotest, RunPair_ClientFailuresReportWithMemoryKind) {
+  struct Case {
+    std::function<void()> arm;
+    std::string line;
+    bool reached;
+  };
+  const std::vector<Case> cases = {
+      {[] {}, "memory=cuda+dmabuf cannot receive the server status", false},
+      {[this] { inbox_[kReady] = {Bytes(false)}; }, "memory=cuda+dmabuf server did not start", false},
+      {[this] {
+         inbox_[kReady] = {Bytes(true)};
+         clientExit_ = 127;
+       },
+       "memory=cuda+dmabuf tool missing", true},
+      {[this] {
+         inbox_[kReady] = {Bytes(true)};
+         clientExit_ = 127;
+         clientOutput_ = "no rows\n";
+       },
+       "memory=cuda+dmabuf tool missing", true},
+      {[this] {
+         inbox_[kReady] = {Bytes(true)};
+         clientOutput_ = "no rows\n";
+         info_[0].dmabuf = false;
+       },
+       "memory=cuda no bandwidth data", true},
+      {[this] {
+         inbox_[kReady] = {Bytes(false)};
+         info_[2].cuda = false;
+         std::memset(info_[0].hostname, 'h', IB_BW_HOSTNAME_SIZE - 1);
+       },
+       "memory=host cannot build command", false},
+      {[this] {
+         info_[0].cuda = false;
+         std::memset(info_[0].hostname, 'h', IB_BW_HOSTNAME_SIZE - 1);
+       },
+       "memory=host cannot build command", false},
+  };
+  for (std::size_t i = 0; i < cases.size(); i++) {
+    SCOPED_TRACE(i);
+    ResetPairScene(2);
+    cases[i].arm();
+    inbox_[kSync] = {Bytes(-1.0)};
+    std::string out;
+    EXPECT_DOUBLE_EQ(RunPair(0, 2, false, &out), -1);
+    EXPECT_EQ(clientCommands_.size(), cases[i].reached ? 1u : 0u);
+    ASSERT_EQ(log_.size(), 3u);
+    EXPECT_EQ(log_.front().kind, 'R');
+    EXPECT_EQ(log_.front().tag, kReady);
+    EXPECT_EQ(log_[1], (IbMsg{'S', 0, kSync, Bytes(-1.0)}));
+    EXPECT_EQ(log_.back(), (IbMsg{'R', 0, kSync, Bytes(-1.0)}));
+    EXPECT_EQ(out, PairLine("same", 0, 2, cases[i].line));
+  }
+}
+
+TEST_F(DiagIbWriteBwMicrotest, RunPair_FailedExchangeReportsPeer) {
+  for (const auto& [rank, peer] : {std::pair<int, int>{2, 0}, {0, 2}}) {
+    SCOPED_TRACE(rank);
+    ResetPairScene(rank);
+    inbox_[kReady] = {Bytes(true)};
+    std::string out;
+    EXPECT_DOUBLE_EQ(RunPair(0, 2, false, &out), -1);
+    EXPECT_EQ(out, NetInfo("cannot exchange the measurement with rank " + std::to_string(peer)));
+    ASSERT_FALSE(log_.empty());
+    EXPECT_EQ(log_.back(), (IbMsg{'R', peer, kSync, ""}));
+  }
+}
+
+TEST_F(DiagIbWriteBwMicrotest, RunPair_InvalidQpsReturnsBeforeAnyPeerExchange) {
+  for (int rank : {2, 0}) {
+    SCOPED_TRACE(rank);
+    ResetPairScene(rank);
+    params_["IB_QPS_PER_CONNECTION"] = 0;
+    inbox_[kReady] = {Bytes(true)};
+    std::string out;
+    EXPECT_DOUBLE_EQ(RunPair(0, 2, false, &out), -1);
+    EXPECT_EQ(out, NetInfo("invalid qps parameter=0"));
+    // A peer whose own qps is valid then blocks on the skipped status byte and pair sync; a fix flips this pin.
+    EXPECT_TRUE(log_.empty());
+    EXPECT_TRUE(serverCommands_.empty());
+    EXPECT_TRUE(clientCommands_.empty());
+  }
+}
+
+TEST_F(DiagIbWriteBwMicrotest, RunSchedule_ServesThenMeasuresAndAveragesBothPhases) {
+  BuildTwoNodePair(0);
+  inbox_[kReady] = {Bytes(true)};
+  inbox_[kSync] = {Bytes(97.25), Bytes(0.0)};
+  EXPECT_TRUE(RunSchedule(false, false));
+  EXPECT_DOUBLE_EQ(result_.direct, (97.25 + 0.0) / 2);
+  EXPECT_DOUBLE_EQ(result_.cross, -1);
+  EXPECT_TRUE(allPairsRan_);
+  EXPECT_EQ(myVotes_, (std::vector<bool>{true, true, true}));
+  EXPECT_EQ(serverCommands_.size(), 1u);
+  EXPECT_EQ(clientCommands_, (std::vector<std::string>{Command("mlx5_0", Port(2), kCudaFlags, "nodeB0")}));
+}
+
+TEST_F(DiagIbWriteBwMicrotest, RunSchedule_CrossPhaseFeedsCrossAndFailedPairClearsComplete) {
+  BuildTwoNodePair(0);
+  inbox_[kReady] = {Bytes(true)};
+  inbox_[kSync] = {Bytes(42.5), Bytes(-1.0)};
+  EXPECT_TRUE(RunSchedule(true, true));
+  EXPECT_DOUBLE_EQ(result_.cross, 42.5);
+  EXPECT_DOUBLE_EQ(result_.direct, -1);
+  EXPECT_FALSE(allPairsRan_);
+  EXPECT_EQ(myVotes_, (std::vector<bool>{true, true, false}));
+  ASSERT_FALSE(log_.empty());
+  EXPECT_EQ(log_.front(), (IbMsg{'S', 3, kReady, Bytes(true)}));
+}
+
+TEST_F(DiagIbWriteBwMicrotest, RunSchedule_DeadlineStopsBeforeNextPhase) {
+  for (const auto& [param, seconds] : {std::pair<int64_t, uint64_t>{0, 5}, {1, 1}, {2, 2}}) {
+    SCOPED_TRACE(param);
+    ResetPairScene(0);
+    params_["DIAGNOSTICS_IB_BW_TIMEOUT"] = param;
+    inbox_[kSync] = {Bytes(90.0)};
+    const uint64_t start = 1000;
+    const uint64_t deadline = start + seconds * 1000000000ULL;
+    std::deque<uint64_t> clock = {start, deadline - 1, deadline};
+    ScopedHook ticks(g_ibClockNano, [&] {
+      if (clock.empty()) {
+        ADD_FAILURE() << "clock read past the script";
+        return deadline;
+      }
+      const uint64_t now = clock.front();
+      clock.pop_front();
+      return now;
+    });
+    const std::string out = CaptureStdout([&] { EXPECT_TRUE(RunSchedule(false, true)); });
+    EXPECT_EQ(out, NetInfo("test unable to complete in allocated time; ran 1 of 2 test phases"));
+    EXPECT_EQ(ticks.calls, 3);
+    EXPECT_DOUBLE_EQ(result_.direct, 90.0);
+    EXPECT_FALSE(allPairsRan_);
+    EXPECT_EQ(myVotes_, (std::vector<bool>{true, false, false}));
+  }
+}
+
+TEST_F(DiagIbWriteBwMicrotest, RunSchedule_PeerVetoStopsSilentlyOffRankZero) {
+  BuildTwoNodePair(2);
+  peerVetoRank_ = 0;
+  EXPECT_EQ(CaptureStdout([&] { EXPECT_TRUE(RunSchedule(false, true)); }), "");
+  EXPECT_DOUBLE_EQ(result_.direct, -1);
+  EXPECT_FALSE(allPairsRan_);
+  EXPECT_TRUE(log_.empty());
+}
+
+TEST_F(DiagIbWriteBwMicrotest, RunSchedule_UnpairedRankStillVotesEachPhase) {
+  BuildTwoNodePair(0);
+  info_[0] = Info(kSelfHost, "mlx5_9");
+  EXPECT_TRUE(RunSchedule(false, false));
+  EXPECT_DOUBLE_EQ(result_.direct, -1);
+  EXPECT_DOUBLE_EQ(result_.cross, -1);
+  EXPECT_TRUE(allPairsRan_);
+  EXPECT_EQ(gathers_, 3);
+  EXPECT_TRUE(log_.empty());
+}
+
+TEST_F(DiagIbWriteBwMicrotest, RunSchedule_TransportFailureOnAnyVoteFails) {
+  for (int failAt : {1, 3}) {
+    SCOPED_TRACE(failAt);
+    ResetPairScene(0);
+    gatherFailAt_ = failAt;
+    inbox_[kReady] = {Bytes(true)};
+    inbox_[kSync] = {Bytes(90.0), Bytes(97.25)};
+    EXPECT_FALSE(RunSchedule(false, true));
+    EXPECT_EQ(gathers_, failAt);
+  }
+}
+
+TEST_F(DiagIbWriteBwMicrotest, Run_ReportsCoverageGapsThenSummaryWithOutlier) {
+  BuildTwoNodePair(0);
+  info_[3] = Info("nodeB1", "mlx5_0");
+  info_[1].deviceCount = 2;
+  info_[3].deviceCount = 2;
+  bw_[1].direct = 93.0;
+  bw_[2].direct = 94.0;
+  bw_[3].direct = 50.0;
+  inbox_[kReady] = {Bytes(true)};
+  inbox_[kSync] = {Bytes(90.0), Bytes(97.44)};
+  const std::string out = CaptureStdout([&] { Run(); });
+  EXPECT_EQ(out, NetInfo("multiple net devices per rank detected, only the first device is tested") +
+                     NetInfo("net devices are shared across ranks, concurrent use can lower the bandwidth") +
+                     NetInfo("50.0/93.4/94.0 Gbit/s min/median/max same-nic bw (across 4 ranks)") +
+                     NetInfo("same-nic rank 3 (nodeB1): 50.0 Gbit/s, >30% off median 93.4 Gbit/s"));
+  EXPECT_STREQ(selfInfo_.hostname, kSelfHost);
+  EXPECT_STREQ(selfInfo_.device, "mlx5_0");
+  EXPECT_FALSE(selfInfo_.setupFailed);
+  EXPECT_DOUBLE_EQ(selfBw_.direct, (90.0 + 97.44) / 2);
+  EXPECT_DOUBLE_EQ(selfBw_.cross, -1);
+  EXPECT_EQ(serverCommands_, (std::vector<std::string>{Command("mlx5_0", Port(0), kCudaFlags, nullptr)}));
+  EXPECT_EQ(clientCommands_, (std::vector<std::string>{Command("mlx5_0", Port(2), kCudaFlags, "nodeB0")}));
+  EXPECT_EQ(gathers_, 5);
+  EXPECT_EQ(myVotes_, (std::vector<bool>{true, true, true}));
+}
+
+TEST_F(DiagIbWriteBwMicrotest, Run_NonZeroRankMeasuresWithoutReporting) {
+  BuildTwoNodePair(2);
+  info_[3].deviceCount = 2;
+  inbox_[kReady] = {Bytes(true)};
+  inbox_[kSync] = {Bytes(97.44), Bytes(90.0)};
+  EXPECT_EQ(CaptureStdout([&] { Run(); }), "");
+  EXPECT_STREQ(selfInfo_.hostname, kSelfHost);
+  EXPECT_DOUBLE_EQ(selfBw_.direct, (97.44 + 90.0) / 2);
+  EXPECT_EQ(clientCommands_, (std::vector<std::string>{Command("mlx5_0", Port(0), kCudaFlags, kSelfHost)}));
+  EXPECT_EQ(serverCommands_, (std::vector<std::string>{Command("mlx5_0", Port(2), kCudaFlags, nullptr)}));
+  EXPECT_EQ(gathers_, 5);
+}
+
+TEST_F(DiagIbWriteBwMicrotest, Run_CrossNicAddsCrossSummaryAndIncompleteIsInfo) {
+  BuildTwoNodePair(0);
+  comm_->graphs[1].nChannels = 2;
+  comm_->graphs[1].crossNic = 1;
+  for (int r = 1; r < 4; r++) {
+    bw_[r] = {100.0, 80.0};
+  }
+  inbox_[kReady] = {Bytes(true)};
+  inbox_[kSync] = {Bytes(-1.0), Bytes(100.0)};
+  const std::string out = CaptureStdout([&] { Run(); });
+  EXPECT_EQ(out, NetInfo("100.0/100.0/100.0 Gbit/s min/median/max same-nic bw (across 4 ranks)") +
+                     NetInfo("80.0/80.0/80.0 Gbit/s min/median/max cross-nic bw (across 3 ranks)"));
+  ASSERT_FALSE(log_.empty());
+  EXPECT_EQ(log_.front(), (IbMsg{'S', 3, kReady, Bytes(true)}));
+  EXPECT_EQ(myVotes_, (std::vector<bool>{true, true, false}));
+}
+
+TEST_F(DiagIbWriteBwMicrotest, Run_SetupFailureOnAnyRankEndsBeforeSchedule) {
+  BuildTwoNodePair(0);
+  info_[1].setupFailed = true;
+  info_[3].setupFailed = true;
+  EXPECT_EQ(CaptureStdout([&] { Run(); }), NetInfo("setup failed on rank 1"));
+  scene_.probeExit = 127;
+  gathers_ = 0;  // drop the first Run()'s gather; the count below covers only the next two
+  EXPECT_EQ(CaptureStdout([&] { Run(); }),
+            NetInfo("required external tool missing") + NetInfo("setup failed on rank 0"));
+  EXPECT_TRUE(selfInfo_.setupFailed);
+  scene_.probeExit = 0;
+  PlaceRank(2);
+  EXPECT_EQ(CaptureStdout([&] { Run(); }), "");
+  EXPECT_EQ(gathers_, 2);
+  EXPECT_TRUE(serverCommands_.empty());
+  EXPECT_TRUE(clientCommands_.empty());
+}
+
+TEST_F(DiagIbWriteBwMicrotest, Run_BootstrapFailuresAbortWithoutSummary) {
+  for (int failAt : {1, 2, 5}) {
+    SCOPED_TRACE(failAt);
+    ResetPairScene(0);
+    gatherFailAt_ = failAt;
+    inbox_[kReady] = {Bytes(true)};
+    inbox_[kSync] = {Bytes(90.0), Bytes(97.44)};
+    const std::string out = CaptureStdout([&] { Run(); });
+    EXPECT_EQ(out, NetInfo(failAt == 1 ? "cannot share local configuration" : "bootstrap failure, aborting check"));
+    EXPECT_EQ(gathers_, failAt);
+  }
+}
+
+TEST_F(DiagIbWriteBwMicrotest, Run_AllocationFailureJoinsNoCollective) {
+  for (int failAt = 1; failAt <= 4; failAt++) {
+    SCOPED_TRACE(failAt);
+    ResetPairScene(0);
+    g_ibCallocFailAt = failAt;
+    EXPECT_EQ(CaptureStdout([&] { Run(); }), NetInfo("cannot allocate diagnostic state"));
+    EXPECT_EQ(gathers_, 0);
+  }
+}
+
+TEST_F(DiagIbWriteBwMicrotest, Run_IncompleteCommIsANoOp) {
+  BuildTwoNodePair(0);
+  ncclDiagRunIbWriteBw(nullptr);
+  comm_->nRanks = 0;
+  Run();
+  comm_->nRanks = 4;
+  comm_->nodeRanks = nullptr;
+  Run();
+  comm_->nodeRanks = nodeRanks_.data();
+  comm_->peerInfo = nullptr;
+  EXPECT_EQ(CaptureStdout([&] { Run(); }), "");
+  EXPECT_EQ(g_ibCallocCalls, 0);
 }
 
 }  // namespace

@@ -55,7 +55,7 @@ extern std::function<ncclResult_t(void*, int*, int, int, int)> g_devrBootstrapIn
 extern std::function<ncclResult_t(void*, int*, int, int, void*, int)> g_devrBootstrapIntraNodeAllGather;
 // (commState, peer, tag, data, size) of bootstrapSend / bootstrapRecv.
 extern std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapSend;
-extern std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapRecv;  // UNDRIVEN
+extern std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapRecv;
 
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
                                   ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int)>
