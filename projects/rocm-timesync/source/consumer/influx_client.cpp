@@ -69,11 +69,11 @@ influx_client::influx_client(
     std::string client_id)
 : host_(std::move(host))
 , port_(port)
-, database_(std::move(database)),
+, database_(std::move(database))
 , client_id_(std::move(client_id))
 {
     if (client_id_.empty())
-        client_id_ - local_hostname();
+        client_id_ = local_hostname();
 
     // test that host is reachable
     if (!ping())
