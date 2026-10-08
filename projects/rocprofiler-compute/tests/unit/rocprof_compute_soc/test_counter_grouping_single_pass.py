@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from rocprof_compute_soc.counter_file import flat_counters_in_perfmon_file
 from rocprof_compute_soc.counter_grouping_buckets import (
     iter_metric_groups,
     rebuild_counter_file,
@@ -20,7 +21,6 @@ from rocprof_compute_soc.counter_grouping_single_pass import (
     fill_slot_limit_into_existing_passes,
     try_allocate_single_pass_packable,
 )
-from rocprof_compute_soc.soc_base import flat_counters_in_perfmon_file
 from vendored import yaml
 
 ITER_METRIC_GROUPS = (
@@ -31,9 +31,6 @@ TCC_BUDGET_CONFIG = {"TCC": 4, "SQ": 8}
 
 class MinimalSoC:
     """Minimum interface required by the single-pass-packable allocator."""
-
-    def _same_bucket_priority_metric_ids(self):
-        return ()
 
     def _iter_arch_analysis_yaml_metrics(self):
         return []
