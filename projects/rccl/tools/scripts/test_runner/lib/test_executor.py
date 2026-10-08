@@ -1806,13 +1806,18 @@ class TestExecutor:
             print(f"  Binary resolved via default build_dir/test: {resolved}")
         return resolved
 
-    def _terminate_process_group(self, proc):
+    def _terminate_process_group(self, proc, post_kill_grace_s=10):
         """Tear down the entire process group of ``proc`` (SIGTERM, then SIGKILL).
 
         Tests are launched with ``start_new_session=True`` so the shell, mpirun,
         orted and all spawned ranks share one process group (pgid == proc.pid).
         Signalling the group -- rather than just ``proc`` -- guarantees a timed-out
         or interrupted MPI job does not leave orphaned ranks holding the GPUs.
+
+        After sending SIGKILL, the method waits up to ``post_kill_grace_s`` seconds
+        for the process to actually exit.  If it does not (e.g. a GPU kernel is stuck
+        in a hardware fence and the process is unkillable), a warning is printed and
+        the runner continues so that remaining tests are not blocked.
         """
         try:
             pgid = os.getpgid(proc.pid)
@@ -1831,11 +1836,18 @@ class TestExecutor:
                 return
             except subprocess.TimeoutExpired:
                 continue
-        # Reap to avoid a zombie even if it ignored SIGKILL (should not happen).
+
+        # Post-SIGKILL grace period: wait for the process to actually disappear.
+        # A GPU kernel stuck in a hardware fence may render the process unkillable;
+        # in that case we log a warning and move on rather than blocking forever.
         try:
-            proc.wait(timeout=5)
+            proc.wait(timeout=post_kill_grace_s)
         except subprocess.TimeoutExpired:
-            pass
+            print(
+                f"  WARNING: process (pid={proc.pid}) did not exit within "
+                f"{post_kill_grace_s}s after SIGKILL -- possible GPU kernel hang. "
+                "Continuing with remaining tests; orphan ranks may still hold the GPU."
+            )
 
     @staticmethod
     def _normalize_mpi_args(value):
@@ -2280,10 +2292,18 @@ class TestExecutor:
                 p for p in (base_args, suite_args, test_args, cli_extra_args, env_extra_args) if p
             )
 
+            # Inject mpirun's own --timeout so that orted daemons on remote nodes
+            # kill their children cleanly when a test hangs. This is more reliable
+            # than an OS-level process-group kill from the head node, which cannot
+            # reach orted processes on other hosts. Only injected when the config
+            # specifies a finite timeout; unlimited tests are left unrestricted.
+            mpirun_timeout_arg = f"--timeout {timeout} " if timeout and timeout > 0 else ""
+
             mpi_args = (
                 f"-np {num_ranks} "
                 f"{host_arg}"
                 f"{map_by_arg}"
+                f"{mpirun_timeout_arg}"
                 f"{mca_params}"
             )
 
