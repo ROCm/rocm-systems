@@ -8,6 +8,7 @@
 #include <hip/texture_types.h>
 #include "hip_platform.hpp"
 #include "hip_internal.hpp"
+#include "hip_launch_validation.hpp"
 #include "platform/command.hpp"
 #include "platform/program.hpp"
 #include "platform/runtime.hpp"
@@ -156,14 +157,12 @@ struct __CudaFatBinaryWrapper {
 
 // Forward declarations
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
-hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_params,
-                                  hipStream_t hStream, void** kernelParams, void** extra,
-                                  hipEvent_t startEvent, hipEvent_t stopEvent,
-                                  uint32_t flags = 0, uint32_t params = 0,
-                                  uint32_t gridId = 0, uint32_t numGrids = 0,
-                                  uint64_t prevGridSum = 0, uint64_t allGridSum = 0,
-                                  uint32_t firstDevice = 0,
-                                  const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr);
+hipError_t ihipModuleLaunchKernel(
+    hipFunction_t f, LaunchConfig& config, hipStream_t hStream, void** kernelParams,
+    void* const* extra, hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags = 0,
+    uint32_t params = 0, uint32_t gridId = 0, uint32_t numGrids = 0, uint64_t prevGridSum = 0,
+    uint64_t allGridSum = 0, uint32_t firstDevice = 0,
+    const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr);
 
 // ================================================================================================
 static bool isCompatibleCodeObject(const std::string& codeobj_target_id, const char* device_name) {
@@ -427,16 +426,11 @@ hipError_t hipLaunchByPtr(const void* hostFunction) {
                  exec.sharedMem_, extra);
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
-  amd::HIPLaunchParams launch_params(exec.gridDim_.x, exec.gridDim_.y, exec.gridDim_.z,
-                                           exec.blockDim_.x, exec.blockDim_.y, exec.blockDim_.z,
-                                           exec.sharedMem_, *device, 0, 0, 0, 1, 1, 1);
-  if (!launch_params.IsValidConfig() ||
-      launch_params.local_.product() > device->info().maxWorkGroupSize_) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
+  LaunchConfig config =
+      MakeLaunchConfigFromGrid(exec.gridDim_, exec.blockDim_, exec.sharedMem_, *device);
+  HIP_RETURN_ONFAIL(config.Status(kLaunchByPtrRules));
 
-  HIP_RETURN(ihipModuleLaunchKernel(
-      func, launch_params, exec.hStream_, nullptr, extra, nullptr, nullptr));
+  HIP_RETURN(ihipModuleLaunchKernel(func, config, exec.hStream_, nullptr, extra, nullptr, nullptr));
 }
 
 // ================================================================================================
@@ -771,15 +765,12 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
     return hipErrorInvalidConfiguration;
   }
 
-  amd::HIPLaunchParams launch_params(gridDim.x, gridDim.y, gridDim.z, blockDim.x, blockDim.y,
-                                     blockDim.z, sharedMemBytes, *device, 0, 0, 0,
-                                     clusterDim.x, clusterDim.y, clusterDim.z);
-  if (!launch_params.IsValidConfig()) {
-    return hipErrorInvalidConfiguration;
-  }
+  LaunchConfig config =
+      MakeLaunchConfigFromGrid(gridDim, blockDim, sharedMemBytes, *device, clusterDim);
+  IHIP_RETURN_ONFAIL(config.Status(kUnlaunchableConfigRules));
 
-  return ihipModuleLaunchKernel(func, launch_params, stream, args, nullptr, startEvent, stopEvent,
-                                flags, 0, 0, 0, 0, 0, 0, dynDataPrefetchConfig);
+  return ihipModuleLaunchKernel(func, config, stream, args, nullptr, startEvent, stopEvent, flags,
+                                0, 0, 0, 0, 0, 0, dynDataPrefetchConfig);
 }
 
 // ================================================================================================

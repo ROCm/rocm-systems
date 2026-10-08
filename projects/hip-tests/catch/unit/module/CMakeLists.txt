@@ -22,6 +22,7 @@ set(TEST_SRC
     hipModuleEnumerateFunctions.cc
     hipModuleLoadFatBinary.cc
     test_fatbin_mixed_arch.cc
+    hipLaunchErrorCodeMatrix.cc
 )
 
 if (HIP_PLATFORM MATCHES "amd")
@@ -462,9 +463,9 @@ if(HIP_PLATFORM MATCHES "amd")
     add_dependencies(ModuleTest addKernel-bundle_spv)
   endif()
   add_dependencies(ModuleTest copyKernelCompressed_code)
+  add_dependencies(ModuleTest anyOrderLaunch_code)
   add_dependencies(ModuleTest copyKernelGenericTarget_code)
   add_dependencies(ModuleTest copyKernelGenericTargetCompressed_code)
-  add_dependencies(ModuleTest anyOrderLaunch_code)
 
   if(UNIX)
     add_dependencies(ModuleTest copiousArgKernel_code copiousArgKernel0_code copiousArgKernel1_code copiousArgKernel2_code

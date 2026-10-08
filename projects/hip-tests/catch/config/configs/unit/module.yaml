@@ -30,7 +30,11 @@ module:
     tags: [launch]
   Unit_hipModuleLaunchKernel_Negative_Parameters:
     <<: *level_2
-    # Below tests are failing PSDB
+    disabled: [amd_windows, amd_wsl]
+    tags: [launch]
+  Unit_hipModuleLaunchKernel_Negative_MaxGridDim:
+    <<: *level_2
+    # Disabled as - AIRUNTIME-2631: runtime does not enforce the maxGridSize it advertises
     disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [launch]
   Unit_hipModuleLaunchKernel_Fntl:
@@ -312,7 +316,11 @@ module:
     tags: [launch]
   Unit_hipExtModuleLaunchKernel_Negative_Parameters:
     <<: *level_2
-    # Below tests are failing PSDB
+    disabled: [amd_windows, amd_wsl]
+    tags: [launch]
+  Unit_hipExtModuleLaunchKernel_Negative_MaxGridDim:
+    <<: *level_2
+    # Disabled as - AIRUNTIME-2631: runtime does not enforce the maxGridSize it advertises
     disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [launch]
   Unit_hipExtModuleLaunchKernel_Functional:
@@ -336,3 +344,6 @@ module:
     # Compiled-in kernel path; fixture/build support is amd-only.
     disabled: [nvidia_linux, nvidia_windows]
     tags: [load]
+  Unit_hipLaunchErrorCodeMatrix_Golden:
+    <<: *level_2
+    tags: [launch, P0]
