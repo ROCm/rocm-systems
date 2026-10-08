@@ -270,6 +270,8 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
       } else {
         poll_interval = std::min(poll_interval * 2, kPollMax);
       }
+      // Submission still wakes us through notify_one; only thread_stop_ can be delayed by up
+      // to one interval, which the destructor absorbs.
       queue->thread_cond_.wait_for(lock, poll_interval);
     }
   }
@@ -311,8 +313,9 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
   bool ret = device->CreateQueue(this, !native_aql_ ? reinterpret_cast<uint64_t>(_ring_rptr) : 0);
   assert(ret);
 
-  // Device-side enqueue rings this doorbell straight from the shader, so it must be GPU
-  // visible; the host path goes through hsaKmtQueueRingDoorbell and never reads it.
+  // Device-side enqueue rings this doorbell with a plain store from the shader, so the address
+  // must be GPU mapped or the store faults. Nothing ever reads the value back: the host rings
+  // through hsaKmtQueueRingDoorbell and submission tracks amd_queue_rocr_->write_dispatch_id.
   GpuMemoryCreateInfo create_info{};
   create_info.size = dxg_runtime->page_size;
   create_info.domain = Wkmi::kSystem;
