@@ -169,7 +169,7 @@ EOF
 
   echo "// Automatically generated script for HIP RTC." > $mcinFile
   if [[ $isWindows -eq 0 ]]; then
-    echo "  .section .note.GNU-stack,"",@progbits" >> $mcinFile
+    echo '  .section .note.GNU-stack,"",@progbits' >> $mcinFile
     echo "  .type __hipRTC_header,@object" >> $mcinFile
     echo "  .type __hipRTC_header_size,@object" >> $mcinFile
   fi
