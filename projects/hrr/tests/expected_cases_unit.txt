@@ -6,6 +6,7 @@
 # that vanishing is otherwise completely silent. Regenerate only when you
 # intended to add or remove a case, and say so in the commit message.
 Unit_HRR_AllocKind_FreeDispatch
+Unit_HRR_AllocMap_OverlapDropsHostUnregistered
 Unit_HRR_Format_BadMagic
 Unit_HRR_Format_EventTypeName
 Unit_HRR_Format_HashHex
