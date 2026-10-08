@@ -42,6 +42,10 @@ GFX12 block transfers use their issue-time M0 DWORD mask for register dependenci
 Disabled load destinations and store-data words do not require completion or replay
 waits. Address registers remain replay sources even when they overlap disabled data
 words. An empty M0 mask still occupies the instruction's counter positions.
+Block data operands also check VGPR ownership per DWORD. Loads write and track
+their owned, enabled destinations; stores consume their owned words and use the
+wave's VGPR0 for enabled words outside the allocation. Replay dependencies and
+incoming register checks cover those actual sources, including the VGPR0 fallback.
 
 Legacy VMEM writeback can avoid an overwrite warning only when the pending result
 and the incoming producer share an ordered completion class. On legacy RDNA,

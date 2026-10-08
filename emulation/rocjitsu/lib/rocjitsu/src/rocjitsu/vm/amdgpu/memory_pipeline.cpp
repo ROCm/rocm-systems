@@ -303,8 +303,12 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   bool is_atomic = (d.atomic_op != AtomicOp::NONE);
   uint32_t stride = is_atomic ? d.elem_size : d.num_elems * d.elem_size;
   uint32_t vgpr_count = d.destination_vgpr_count();
-  if (!cu.owns_vgpr_range(wf, d.dst_reg_base, vgpr_count))
+  if (!d.is_block_transfer && !cu.owns_vgpr_range(wf, d.dst_reg_base, vgpr_count))
     return MemoryAccessCompletion::Complete;
+  const auto writes_dword = [&](uint32_t word) {
+    return d.block_dword_enabled(word) &&
+           (!d.is_block_transfer || cu.owns_vgpr_range(wf, d.dst_reg_base + word, 1));
+  };
 
   // Zero destination VGPRs for OOB lanes. Per AMD ISA spec, out-of-bounds
   // buffer loads return 0. exec_mask is the effective issue mask; ordinary OOB
@@ -325,7 +329,7 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       if (!(oob_mask & (1ULL << lane)))
         continue;
       for (uint32_t i = 0; i < vgpr_count; ++i) {
-        if (!d.block_dword_enabled(i))
+        if (!writes_dword(i))
           continue;
         uint32_t val = 0;
         if (!cu.sram_ecc() && d.elem_size <= 2 && (d.d16_hi || d.d16_lo)) {
@@ -338,12 +342,12 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   }
   // Performance-only fast path for ordinary dword loads. The general completion
   // path below remains authoritative for atomics, conversions, and partial-register
-  // writes. Whole-range ownership was validated above, so this special case can write
-  // through one raw pointer per destination register. Memory completion is VM
+  // writes. Ownership is validated above for ordinary loads and per DWORD for
+  // blocks, so this path can use one raw pointer per written register. Memory completion is VM
   // bookkeeping and deliberately has no instruction-side observation to preserve.
   if (!is_atomic && d.elem_size == sizeof(uint32_t) && !d.sign_extend && !d.d16_hi && !d.d16_lo) {
     for (uint32_t i = 0; i < vgpr_count; ++i) {
-      if (!d.block_dword_enabled(i))
+      if (!writes_dword(i))
         continue;
       auto *destination = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(d.dst_reg_base + i));
       uint64_t lanes = d.lane_mask;
@@ -360,6 +364,8 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
     if (!(d.lane_mask & (1ULL << lane)))
       continue;
     for (uint32_t i = 0; i < vgpr_count; ++i) {
+      if (!writes_dword(i))
+        continue;
       uint32_t val = 0;
       uint32_t data_offset = lane * stride + i * 4;
       uint32_t copy_size =
