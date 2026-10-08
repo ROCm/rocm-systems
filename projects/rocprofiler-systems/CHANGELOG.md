@@ -21,6 +21,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   constants at debug optimization levels; DynInst was treating these block-form
   attributes as errors and dereferencing a null pointer in `parseSubrange()`.
   Fixed in [ROCm/dyninst#33](https://github.com/ROCm/dyninst/pull/33).
+
 ### Removed
 
 - Legacy direct Perfetto tracing mode. Perfetto traces are now always generated from the
