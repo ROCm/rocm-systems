@@ -17,7 +17,9 @@ class agent_manager;
 namespace rocprofsys::trace_cache
 {
 class metadata_registry;
+template <typename Writer>
 class rocpd_processor_t;
+class profiler_hub_writer;
 class perfetto_processor_t;
 class unified_memory_processor_t;
 }  // namespace rocprofsys::trace_cache
@@ -84,9 +86,9 @@ struct processor_config_t
 
 struct processor_storage_t
 {
-    std::shared_ptr<rocpd_processor_t>          rocpd_processor;
-    std::shared_ptr<perfetto_processor_t>       perfetto_processor;
-    std::shared_ptr<unified_memory_processor_t> unified_memory_processor;
+    std::shared_ptr<rocpd_processor_t<profiler_hub_writer>> rocpd_processor;
+    std::shared_ptr<perfetto_processor_t>                   perfetto_processor;
+    std::shared_ptr<unified_memory_processor_t>             unified_memory_processor;
 };
 
 using directory_files_t    = std::vector<std::string>;

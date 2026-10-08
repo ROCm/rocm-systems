@@ -225,7 +225,7 @@ encode(std::uint8_t output[], const std::uint32_t input[], size_type len)
 }  // namespace
 
 // apply md5sum algo on a block
-void
+inline void
 md5sum::transform(const std::uint8_t block[blocksize])
 {
     std::uint32_t a = state[0], b = state[1], c = state[2], d = state[3], x[16];
@@ -312,7 +312,7 @@ md5sum::transform(const std::uint8_t block[blocksize])
     memset(x, 0, sizeof x);
 }
 
-md5sum&
+inline md5sum&
 md5sum::update(std::string_view inp)
 {
     return update(inp.data(), inp.length());
@@ -320,7 +320,7 @@ md5sum::update(std::string_view inp)
 
 // md5sum block update operation. Continues an md5sum message-digest
 // operation, processing another message block
-md5sum&
+inline md5sum&
 md5sum::update(const unsigned char input[], size_type length)
 {
     // compute number of bytes mod 64
@@ -360,7 +360,7 @@ md5sum::update(const unsigned char input[], size_type length)
 }
 
 // for convenience provide a verson with signed char
-md5sum&
+inline md5sum&
 md5sum::update(const char input[], size_type length)
 {
     return update(reinterpret_cast<const unsigned char*>(input), length);
@@ -368,7 +368,7 @@ md5sum::update(const char input[], size_type length)
 
 // md5sum finalization. Ends an md5sum message-digest operation, writing the
 // the message digest and zeroizing the context.
-md5sum&
+inline md5sum&
 md5sum::finalize()
 {
     static unsigned char padding[64] = { 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -405,7 +405,7 @@ md5sum::finalize()
 }
 
 // return hex representation of digest as string
-std::string
+inline std::string
 md5sum::hexdigest() const
 {
     if(!finalized)

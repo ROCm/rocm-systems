@@ -8,7 +8,6 @@ set(trace_cache_sources
     ${CMAKE_CURRENT_LIST_DIR}/discovery.cpp
     ${CMAKE_CURRENT_LIST_DIR}/metadata_registry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/post_processor.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/rocpd_processor.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto_processor.cpp
     ${CMAKE_CURRENT_LIST_DIR}/unified_memory_processor.cpp
 )
@@ -25,6 +24,7 @@ set(trace_cache_headers
     ${CMAKE_CURRENT_LIST_DIR}/metadata_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocpd_helpers.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocpd_processor.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/profiler_hub_writer.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto_processor.hpp
     ${CMAKE_CURRENT_LIST_DIR}/unified_memory_processor.hpp
     ${CMAKE_CURRENT_LIST_DIR}/post_processor.hpp

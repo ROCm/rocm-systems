@@ -12,6 +12,8 @@ set(trace_cache_tests_sources
     test_kfd_args.cpp
     test_rocpd_pmc_name_contract.cpp
     test_rocpd_processor.cpp
+    test_rocpd_processor_mock.cpp
+    test_rocpd_processor_pmc.cpp
     test_rocpd_xcp_output.cpp
     test_sample_type.cpp
     test_storage_parser.cpp
