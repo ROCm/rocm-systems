@@ -1739,7 +1739,7 @@ TEST_F(SymMemoryRegisterGinTest, NoSysmemSegment_RegistersOneDeviceWindow) {
   size_t registeredSize = 0;
   int registeredType = -1;
   bool registeredMultiSegment = true;
-  ScopedHook reg(g_devrGinRegister, [&](ncclComm*, void* addr, size_t size, void*[], ncclGinWindow_t[], int, bool multi,
+  ScopedHook reg(g_devrGinRegister, [&](ncclComm*, void* addr, size_t size, void*[], ncclGinWindow_t[], uint32_t[], int, bool multi,
                                     int memType) {
     EXPECT_EQ(addr, mem.primaryAddr);
     registeredSize = size;
@@ -1765,7 +1765,7 @@ TEST_F(SymMemoryRegisterGinTest, MultipleGlobalSegments_FlagsRegistrationMultiSe
   mem.maxGlobalNumSegments = 2;
   bool registeredMultiSegment = false;
   ScopedHook reg(g_devrGinRegister,
-                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool multi, int) {
+                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool multi, int) {
                    registeredMultiSegment = multi;
                    return ncclSuccess;
                  });
@@ -1779,7 +1779,7 @@ TEST_F(SymMemoryRegisterGinTest, MultipleGlobalSegments_FlagsRegistrationMultiSe
 // built from stays behind -- only the array is given back.
 TEST_F(SymMemoryRegisterGinTest, RegisterFails_ReturnsErrorWithoutSegmentInfo) {
   ScopedHook reg(g_devrGinRegister,
-                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) {
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
                    return ncclSystemError;
                  });
 
@@ -1792,7 +1792,7 @@ TEST_F(SymMemoryRegisterGinTest, RegisterFails_ReturnsErrorWithoutSegmentInfo) {
 // registration rather than after it -- so nothing is registered at all.
 TEST_F(SymMemoryRegisterGinTest, SegmentInfoAllocFails_ReturnsError) {
   ScopedHook reg(g_devrGinRegister,
-                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) { return ncclSuccess; });
   ScopedCallocFailure callocFail;  // fail the next ncclCalloc
 
   EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
@@ -1865,7 +1865,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, AgreeingRanks_RegistersOneWindowPerSegme
   std::vector<size_t> sizes;
   std::vector<int> types;
   ScopedHook reg(g_devrGinRegister,
-                 [&](ncclComm*, void* addr, size_t size, void*[], ncclGinWindow_t[], int, bool, int memType) {
+                 [&](ncclComm*, void* addr, size_t size, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int memType) {
                    addrs.push_back(reinterpret_cast<uintptr_t>(addr));
                    sizes.push_back(size);
                    types.push_back(memType);
@@ -1890,7 +1890,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, DeviceSegment_RegistersAsCudaPointer) {
   ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
   std::vector<int> types;
   ScopedHook reg(g_devrGinRegister,
-                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int memType) {
+                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int memType) {
                    types.push_back(memType);
                    return ncclSuccess;
                  });
@@ -1914,7 +1914,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, SizeMismatchAcrossRanks_ReturnsInvalidUs
     return ncclSuccess;
   });
   ScopedHook reg(g_devrGinRegister,
-                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) { return ncclSuccess; });
 
   EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
   EXPECT_EQ(reg.calls, 0);
@@ -1928,7 +1928,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, PropertiesFail_ReturnsErrorAfterGatherin
                    [](hipMemAllocationProp*, hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
   ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
   ScopedHook reg(g_devrGinRegister,
-                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) { return ncclSuccess; });
 
   EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
   EXPECT_EQ(gather.calls, 1);
@@ -1939,7 +1939,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, PropertiesFail_ReturnsErrorAfterGatherin
 TEST_F(SymMemoryRegisterGinElasticTest, AllGatherFails_ReturnsError) {
   ScopedHook gather(g_devrBootstrapAllGather, [](void*, void*, int) { return ncclSystemError; });
   ScopedHook reg(g_devrGinRegister,
-                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) { return ncclSuccess; });
 
   EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
   EXPECT_EQ(reg.calls, 0);
@@ -1951,15 +1951,37 @@ TEST_F(SymMemoryRegisterGinElasticTest, SecondSegmentFails_DeregistersTheFirst) 
   ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
   int registered = 0;
   ScopedHook reg(g_devrGinRegister,
-                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) {
+                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
                    return ++registered == 2 ? ncclSystemError : ncclSuccess;
                  });
-  ScopedHook dereg(g_devrGinDeregister, [](ncclComm*, void*[]) { return ncclSuccess; });
+  ScopedHook dereg(g_devrGinDeregister, [](ncclComm*, void*[], uint32_t const[]) { return ncclSuccess; });
 
   EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
   EXPECT_EQ(reg.calls, 2);
   EXPECT_EQ(dereg.calls, 2);  // first segment plus the part-way failing one
   EXPECT_EQ(mem.ginSegmentInfos, nullptr);
+}
+
+// The rollback must hand each segment's deregister the generation stamps its
+// register wrote, or ncclGinDeregister skips (or wrongly releases) the window.
+TEST_F(SymMemoryRegisterGinElasticTest, SecondSegmentFails_DeregisterSeesRegisterStamps) {
+  ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
+  uint32_t nextStamp = 7;
+  ScopedHook reg(g_devrGinRegister,
+                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t gens[], int, bool, int) {
+                   gens[0] = nextStamp++;
+                   return nextStamp == 9 ? ncclSystemError : ncclSuccess;  // the second segment fails
+                 });
+  std::vector<uint32_t> deregStamps;
+  ScopedHook dereg(g_devrGinDeregister, [&](ncclComm*, void*[], uint32_t const gens[]) {
+    deregStamps.push_back(gens[0]);
+    return ncclSuccess;
+  });
+
+  EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  ASSERT_EQ(deregStamps.size(), 2u);
+  EXPECT_EQ(deregStamps[0], 7u);
+  EXPECT_EQ(deregStamps[1], 8u);
 }
 
 
@@ -2273,7 +2295,7 @@ TEST_F(SymMemoryObtainRegisterTest, GinEnabled_RegistersWithGin) {
   comm->devrState.ginEnabled = true;
   ScopedHook gather(g_devrBootstrapAllGather, agreeing);
   ScopedHook reg(g_devrGinRegister,
-                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) { return ncclSuccess; });
 
   ASSERT_EQ(Obtain(), ncclSuccess);
   EXPECT_EQ(reg.calls, 1);
@@ -2284,7 +2306,7 @@ TEST_F(SymMemoryObtainRegisterTest, GinEnabled_RegistersWithGin) {
 TEST_F(SymMemoryObtainRegisterTest, GinDisabled_DefaultsToOneSegment) {
   ScopedHook gather(g_devrBootstrapAllGather, agreeing);
   ScopedHook reg(g_devrGinRegister,
-                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) { return ncclSuccess; });
 
   ASSERT_EQ(Obtain(), ncclSuccess);
   EXPECT_EQ(reg.calls, 0);
@@ -2421,7 +2443,7 @@ TEST_F(SymMemoryObtainRollbackTest, GinRegisterFails_UnbindsTeamsAndReturnsSpace
   ScopedHook alloc(g_devrSpaceAlloc, AllocAt(4096));
   ScopedHook spaceFree(g_devrSpaceFree, [](ncclSpace*, int64_t, int64_t) { return ncclSuccess; });
   ScopedHook reg(g_devrGinRegister,
-                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSystemError; });
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) { return ncclSystemError; });
 
   EXPECT_NE(Obtain(), ncclSuccess);
   EXPECT_EQ(reg.calls, 1);
@@ -5111,6 +5133,33 @@ TEST_F(CommQueryPropertiesTest, SingleClique_ReportsMultimemSupport) {
 
   ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
   EXPECT_NE(props.multimemSupport, 0);
+}
+
+// ginSupport[] lists the backends this communicator can create a devComm on.
+TEST_F(CommQueryPropertiesTest, LiveGinBackend_ReportsGinSupport) {
+  auto sharedRes = std::make_unique<ncclSharedResources>();
+  comm->sharedRes = sharedRes.get();
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  sharedRes->ginState.numActiveBackends = 1;
+  sharedRes->ginState.backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+
+  ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+  EXPECT_TRUE(props.ginSupport[NCCL_GIN_TYPE_PROXY]);
+}
+
+// AICOMRCCL-2739: after a splitShare sibling's host finalize, the surviving
+// comm keeps globalGinSupport and the backend records, but every GIN devComm
+// create on it fails, so it must not advertise them.
+TEST_F(CommQueryPropertiesTest, FinalizedGinBackend_ReportsNoGinSupport) {
+  auto sharedRes = std::make_unique<ncclSharedResources>();
+  comm->sharedRes = sharedRes.get();
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  sharedRes->ginState.numActiveBackends = 1;
+  sharedRes->ginState.backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  sharedRes->ginState.finalized = true;
+
+  ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+  EXPECT_FALSE(props.ginSupport[NCCL_GIN_TYPE_PROXY]);
 }
 
 // Branch: an uninitialised properties struct is rejected, since its version and

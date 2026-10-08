@@ -215,12 +215,16 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirement
 }
 ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
-                             ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int) {
+                             ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS],
+                             uint32_t[NCCL_GIN_MAX_ACTIVE_BACKENDS], int, bool, int) {
   ginRegisterMemHeadAtCall = comm ? comm->devrState.memHead : nullptr;
   if (devRuntimeTestGinRegisterFail) return ncclInternalError;
   return ncclSuccess;
 }
-ncclResult_t ncclGinDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) { return ncclSuccess; }
+ncclResult_t ncclGinDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS],
+                               uint32_t const[NCCL_GIN_MAX_ACTIVE_BACKENDS]) {
+  return ncclSuccess;
+}
 #ifdef ENABLE_ROCSHMEM_GIN
 ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm*, void*, size_t, int, int) {
   return ncclSuccess;
