@@ -107,6 +107,9 @@ class ScopedAmdSmiInit {
 
 TEST(GpuUnit, GetNpmBalancingModeNullHandleIsInval) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   amdsmi_npm_balancing_mode_t mode;
@@ -115,6 +118,9 @@ TEST(GpuUnit, GetNpmBalancingModeNullHandleIsInval) {
 
 TEST(GpuUnit, GetNpmBalancingModeNullModeIsInval) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   std::string board_path = "/tmp/amdsmi_npm_balancing_mode_test_null_mode_probe";
@@ -126,6 +132,9 @@ TEST(GpuUnit, GetNpmBalancingModeNullModeIsInval) {
 
 TEST(GpuUnit, GetNpmBalancingModeDisabledStillReportsLastSelectedMode) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   TempBoardDir board;
@@ -144,6 +153,9 @@ TEST(GpuUnit, GetNpmBalancingModeDisabledStillReportsLastSelectedMode) {
 
 TEST(GpuUnit, GetNpmBalancingModeEnabledDefaultsToPowerBalancing) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   TempBoardDir board;
@@ -164,6 +176,9 @@ TEST(GpuUnit, GetNpmBalancingModeEnabledDefaultsToPowerBalancing) {
 
 TEST(GpuUnit, GetNpmBalancingModeEnabledMissingModeFileIsInvalidMode) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   TempBoardDir board;
@@ -183,6 +198,9 @@ TEST(GpuUnit, GetNpmBalancingModeEnabledMissingModeFileIsInvalidMode) {
 
 TEST(GpuUnit, GetNpmBalancingModeGarbageValueIsUnexpectedData) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   TempBoardDir board;
@@ -200,6 +218,9 @@ TEST(GpuUnit, GetNpmBalancingModeGarbageValueIsUnexpectedData) {
 
 TEST(GpuUnit, GetNpmBalancingModeEnabledReadsFrequencyBalancing) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   TempBoardDir board;
@@ -220,6 +241,9 @@ TEST(GpuUnit, GetNpmBalancingModeEnabledReadsFrequencyBalancing) {
 
 TEST(GpuUnit, SetNpmBalancingModeNullHandleIsInval) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   EXPECT_EQ(amdsmi_set_npm_balancing_mode(nullptr, AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING),
@@ -228,6 +252,9 @@ TEST(GpuUnit, SetNpmBalancingModeNullHandleIsInval) {
 
 TEST(GpuUnit, SetNpmBalancingModeInvalidModeIsInval) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   std::string board_path = "/tmp/amdsmi_npm_balancing_mode_test_invalid_mode_probe";
@@ -241,6 +268,9 @@ TEST(GpuUnit, SetNpmBalancingModeInvalidModeIsInval) {
 
 TEST(GpuUnit, SetNpmBalancingModeNonRootIsNoPerm) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   if (amd::smi::is_sudo_user()) {
@@ -262,6 +292,9 @@ TEST(GpuUnit, SetNpmBalancingModeNonRootIsNoPerm) {
 
 TEST(GpuUnit, SetNpmBalancingModeRootRejectsWhenNpmDisabled) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   if (!amd::smi::is_sudo_user()) {
@@ -286,6 +319,9 @@ TEST(GpuUnit, SetNpmBalancingModeRootRejectsWhenNpmDisabled) {
 
 TEST(GpuUnit, SetNpmBalancingModeRootRoundTrip) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   if (!amd::smi::is_sudo_user()) {
@@ -318,6 +354,9 @@ TEST(GpuUnit, SetNpmBalancingModeRootRoundTrip) {
 
 TEST(GpuUnit, SetNpmBalancingModeRootMissingModeFileIsNotSupported) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   if (!amd::smi::is_sudo_user()) {
@@ -339,6 +378,9 @@ TEST(GpuUnit, SetNpmBalancingModeRootMissingModeFileIsNotSupported) {
 
 TEST(GpuUnit, SetNpmBalancingModeRootMissingBoardDirIsNotSupported) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   if (!amd::smi::is_sudo_user()) {
@@ -364,6 +406,9 @@ TEST(GpuUnit, SetNpmBalancingModeRootMissingBoardDirIsNotSupported) {
 
 TEST(GpuUnit, SetNpmBalancingModeRootRejectsModeAbsentFromSupportedBitmask) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   if (!amd::smi::is_sudo_user()) {
@@ -387,6 +432,9 @@ TEST(GpuUnit, SetNpmBalancingModeRootRejectsModeAbsentFromSupportedBitmask) {
 
 TEST(GpuUnit, SetNpmBalancingModeRootAllowsModePresentInSupportedBitmask) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   if (!amd::smi::is_sudo_user()) {
@@ -412,6 +460,9 @@ TEST(GpuUnit, SetNpmBalancingModeRootRejectsCorruptSupportedModesFile) {
   // content) must fail closed and reject the write, matching the
   // npm_status gate's policy -- it must not be treated like a missing file.
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   if (!amd::smi::is_sudo_user()) {
@@ -436,6 +487,9 @@ TEST(GpuUnit, SetNpmBalancingModeRootToleratesMissingSupportedModesFile) {
   // The supported_mode sysfs file is not yet implemented on all driver
   // versions; its absence must not block an otherwise-valid set.
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   if (!amd::smi::is_sudo_user()) {
@@ -461,6 +515,9 @@ TEST(GpuUnit, SetNpmBalancingModeRootToleratesMissingSupportedModesFile) {
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesNullHandleIsInval) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   amdsmi_bit_field_t supported_modes;
@@ -470,6 +527,9 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesNullHandleIsInval) {
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesNullOutputIsInval) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   std::string board_path = "/tmp/amdsmi_npm_supported_balancing_modes_test_null_out_probe";
@@ -481,6 +541,9 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesNullOutputIsInval) {
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesMissingFileIsNotSupported) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   TempBoardDir board;
@@ -497,6 +560,9 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesMissingFileIsNotSupported) {
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesNotGatedOnNpmEnablement) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   TempBoardDir board;
@@ -514,6 +580,9 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesNotGatedOnNpmEnablement) {
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesDecodesHexBitmask) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   TempBoardDir board;
@@ -530,6 +599,9 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesDecodesHexBitmask) {
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesGarbageValueIsUnexpectedData) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   TempBoardDir board;
@@ -556,6 +628,9 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesGarbageValueIsUnexpectedData) {
 
 TEST(GpuUnit, GetNpmBalancingModeRejectsUnregisteredHandle) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   // Heap-allocated so this address cannot alias a stack slot some other test
@@ -572,6 +647,9 @@ TEST(GpuUnit, GetNpmBalancingModeRejectsUnregisteredHandle) {
 
 TEST(GpuUnit, SetNpmBalancingModeRejectsUnregisteredHandle) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   auto unregistered_board_path =
@@ -586,6 +664,9 @@ TEST(GpuUnit, SetNpmBalancingModeRejectsUnregisteredHandle) {
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesRejectsUnregisteredHandle) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   auto unregistered_board_path =
@@ -599,6 +680,9 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesRejectsUnregisteredHandle) {
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesNegativeValueIsUnexpectedData) {
   ScopedAmdSmiInit init;
+  if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    GTEST_SKIP_("No GPU driver loaded");
+  }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   TempBoardDir board;
