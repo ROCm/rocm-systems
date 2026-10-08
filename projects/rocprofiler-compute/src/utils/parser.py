@@ -381,6 +381,14 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
     return df
 
 
+def apply_non_kernel_filters(workload: schema.Workload) -> pd.DataFrame:
+    """Apply GPU and dispatch filters without limiting the kernel list."""
+    filtered_df = _apply_gpu_filter(workload)
+    if workload.filter_dispatch_ids:
+        filtered_df = apply_dispatch_filter(filtered_df, workload)
+    return filtered_df
+
+
 def _apply_gpu_filter(workload: schema.Workload) -> pd.DataFrame:
     """Apply the requested GPU IDs before other row filters."""
     # TODO: error out properly if filters out of bound

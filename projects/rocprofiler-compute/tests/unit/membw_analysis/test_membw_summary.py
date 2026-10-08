@@ -7,6 +7,7 @@ import pytest
 
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 from membw_analysis.summary import (
+    active_stall_leaves,
     has_active_nodes,
     status_text,
 )
@@ -87,3 +88,21 @@ def test_indeterminate_roots_are_inconclusive() -> None:
 )
 def test_has_active_nodes(nodes, expected) -> None:
     assert has_active_nodes(nodes) is expected
+
+
+def test_active_stall_leaves_select_terminal_nodes_by_block() -> None:
+    """Select active terminal bottlenecks for known blocks only."""
+    child = make_node("active")
+    parent = make_node("active", (child, make_node("inactive")))
+    l2 = BottleneckNode(
+        id="l2",
+        label="L2",
+        level="GL2",
+        state="active",
+        supporting=(),
+        children=(),
+    )
+    result = make_result(nodes=(parent, l2, make_node("inactive")))
+    assert active_stall_leaves(result, "GL1") == (child,)
+    assert active_stall_leaves(result, "GL2") == (l2,)
+    assert active_stall_leaves(result, "unknown") == ()
