@@ -1463,6 +1463,29 @@ Memory* Device::getGpuMemory(amd::Memory* mem) const {
 
 const device::BlitManager& Device::xferMgr() const { return xferQueue_->blitMgr(); }
 
+// ================================================================================================
+amd::Device::GlobalWriteResult Device::writeDeviceGlobal(amd::Memory& dst, size_t offset,
+                                                         size_t size, const void* src) const {
+  if (src == nullptr) {
+    return GlobalWriteResult::kFailure;
+  }
+  // The write lands as a CP CmdUpdateMemory packet, which transfers whole DWORDs to a
+  // DWORD-aligned destination. Anything else goes back to the caller's queued copy.
+  constexpr size_t kDwordMask = sizeof(uint32_t) - 1;
+  if (((offset | size) & kDwordMask) != 0) {
+    return GlobalWriteResult::kUnsupported;
+  }
+  pal::Memory* devMem = getGpuMemory(&dst);
+  if (devMem == nullptr) {
+    return GlobalWriteResult::kFailure;
+  }
+  // Same mechanism pal::Kernel uses for a kernel's runtime-handle global: a packet on the
+  // transfer queue, which no application stream feeds. That queue is created with
+  // enableSyncedBlit(), so the write has retired when writeRawData returns.
+  static_cast<const KernelBlitManager&>(xferMgr()).writeRawData(*devMem, offset, size, src);
+  return GlobalWriteResult::kSuccess;
+}
+
 Pal::ChNumFormat Device::getPalFormat(const amd::Image::Format& format,
                                       Pal::ChannelMapping* channel) const {
   // Find PAL format
@@ -1665,8 +1688,8 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
         // Pipe initialize in order read_idx, write_idx, end_idx. Refer clk_pipe_t structure.
         // Init with 3 DWORDS for 32bit addressing and 6 DWORDS for 64bit
         size_t pipeInit[3] = {0, 0, owner.asPipe()->getMaxNumPackets()};
-        static_cast<const KernelBlitManager&>(xferMgr()).writeRawData(*gpuMemory, sizeof(pipeInit),
-                                                                      pipeInit);
+        static_cast<const KernelBlitManager&>(xferMgr()).writeRawData(*gpuMemory, 0,
+                                                                      sizeof(pipeInit), pipeInit);
       }
       // If memory has direct access from host, then get CPU address
       if (gpuMemory->isHostMemDirectAccess() && (type != Resource::ExternalPhysical) &&

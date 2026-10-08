@@ -3,7 +3,6 @@
  *
  * SPDX-License-Identifier: MIT
  */
-
 /**
 Testcase Scenarios :
  1) Validates parameter list of hipStreamAddCallback.
@@ -13,6 +12,7 @@ Testcase Scenarios :
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
+#include <resource_guards.hh>
 #include <chrono>
 #include <thread>
 

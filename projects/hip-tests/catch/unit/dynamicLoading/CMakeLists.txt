@@ -5,9 +5,11 @@
 if(UNIX AND BUILD_SHARED_LIBS)
   set(TEST_SRC ${TEST_SRC}
       complex_loading_behavior.cc
+      concurrentDynamicLoad.cc
       hipApiDynamicLoad.cc
       hipGetProcAddress.cc
-      hipGetProcAddressCompilerOption.cc)
+      hipGetProcAddressCompilerOption.cc
+      lateManagedVariable.cc)
 
   hip_add_exe_to_target(NAME dynamicLoading
                       TEST_SRC ${TEST_SRC}
@@ -22,6 +24,12 @@ if(UNIX AND BUILD_SHARED_LIBS)
       -o ${CMAKE_CURRENT_BINARY_DIR}/libLazyLoad.so
       DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/liblazyLoad.cc
       COMMENT "Compiling libLazyLoad.so")
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/libLateManagedVariable.so
+      COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} -fPIC -shared
+      -x hip ${CMAKE_CURRENT_SOURCE_DIR}/lateManagedVariableLibrary.cc ${HIP_PATH_OPT}
+      -o ${CMAKE_CURRENT_BINARY_DIR}/libLateManagedVariable.so
+      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/lateManagedVariableLibrary.cc
+      COMMENT "Compiling libLateManagedVariable.so")
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/bit_extract_kernel.code
       COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
       -x hip ${CMAKE_CURRENT_SOURCE_DIR}/bit_extract_kernel.cpp ${HIP_PATH_OPT}
@@ -37,6 +45,12 @@ if(UNIX AND BUILD_SHARED_LIBS)
       -o ${CMAKE_CURRENT_BINARY_DIR}/libLazyLoad.so
       DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/liblazyLoad.cc
       COMMENT "Compiling libLazyLoad.so")
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/libLateManagedVariable.so
+      COMMAND ${CMAKE_CUDA_COMPILER} -Xcompiler -fPIC -shared
+      -x cu ${CMAKE_CURRENT_SOURCE_DIR}/lateManagedVariableLibrary.cc -I${HIP_PATH}/include/
+      -o ${CMAKE_CURRENT_BINARY_DIR}/libLateManagedVariable.so
+      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/lateManagedVariableLibrary.cc
+      COMMENT "Compiling libLateManagedVariable.so")
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/bit_extract_kernel.code
       COMMAND ${CMAKE_HIP_COMPILER} --fatbin
       -x cu ${CMAKE_CURRENT_SOURCE_DIR}/bit_extract_kernel.cpp -I${HIP_PATH}/include/
@@ -46,6 +60,7 @@ if(UNIX AND BUILD_SHARED_LIBS)
       COMMENT "Compiling bit_extract_kernel.code")
   endif()
   add_custom_target(libLazyLoad_so DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libLazyLoad.so)
+  add_custom_target(libLateManagedVariable_so DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libLateManagedVariable.so)
   add_custom_target(bit_extract_kernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/bit_extract_kernel.code)
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/vecadd.cc
@@ -57,6 +72,7 @@ if(UNIX AND BUILD_SHARED_LIBS)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
     ${CMAKE_CURRENT_BINARY_DIR}/vecadd.cc
     ${CMAKE_CURRENT_BINARY_DIR}/libLazyLoad.so
+    ${CMAKE_CURRENT_BINARY_DIR}/libLateManagedVariable.so
     ${CMAKE_CURRENT_BINARY_DIR}/bit_extract_kernel.code
   )
 
@@ -65,5 +81,6 @@ if(UNIX AND BUILD_SHARED_LIBS)
   endif()
 
   # Wire artifacts to the consuming exe so `make dynamicLoading` builds them.
-  add_dependencies(dynamicLoading bit_extract_kernel_code libLazyLoad_so vecadd_cc)
+  add_dependencies(dynamicLoading bit_extract_kernel_code libLateManagedVariable_so
+                   libLazyLoad_so vecadd_cc)
 endif()

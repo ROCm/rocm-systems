@@ -11,12 +11,14 @@
 #include <catch2/catch_all.hpp>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <cstdlib>
 #include <iostream>
 #include <iomanip>
 #include <sstream>
 #include <string>
+#include <memory>
 #include <mutex>
 #include <cstdlib>
 #include <thread>
@@ -287,17 +289,18 @@ inline std::string& threadInfoMessageBuffer() {
   }
 
 #if HT_NVIDIA
-#define CTX_CREATE()                                                                               \
+#define CTX_CREATE_DEV(deviceId)                                                                   \
   hipCtx_t context;                                                                                \
-  initHipCtx(&context);
+  initHipCtx(&context, deviceId);
+#define CTX_CREATE() CTX_CREATE_DEV(0)
 #define CTX_DESTROY() HIPCHECK(hipCtxDestroy(context));
 #define ARRAY_DESTROY(array) HIPCHECK(hipArrayDestroy(array));
 #define HIP_TEX_REFERENCE hipTexRef
 #define HIP_ARRAY hipArray_t
-static void initHipCtx(hipCtx_t* pcontext) {
+static void initHipCtx(hipCtx_t* pcontext, int deviceId = 0) {
   HIPCHECK(hipInit(0));
   hipDevice_t device;
-  HIPCHECK(hipDeviceGet(&device, 0));
+  HIPCHECK(hipDeviceGet(&device, deviceId));
   HIPCHECK(hipCtxCreate(pcontext, 0, device));
 }
 
@@ -308,6 +311,7 @@ static void initHipCtx(hipCtx_t* pcontext) {
 #define HIP_TEST_DRIVER_INIT() HIP_CHECK(hipInit(0))
 #else
 #define CTX_CREATE()
+#define CTX_CREATE_DEV(deviceId)
 #define CTX_DESTROY()
 #define ARRAY_DESTROY(array) HIPCHECK(hipFreeArray(array));
 #define HIP_TEX_REFERENCE textureReference*
@@ -739,52 +743,224 @@ template <> struct MemTraits<MemcpyAsync> {
   }
 };
 
-class BlockingContext {
-  std::atomic_bool blocked{true};
-  hipStream_t stream;
+// Heap ownership keeps callback state alive if an assertion unwinds the test.
+class StreamCallbackLatch {
+  struct State {
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool complete = false;
+  };
 
  public:
-  BlockingContext(hipStream_t s) : blocked(true), stream(s) {}
+  explicit StreamCallbackLatch(hipStream_t stream) : stream_(stream) {}
 
-  BlockingContext(const BlockingContext& in) {
-    blocked = in.blocked_val();
-    stream = in.stream_val();
+  StreamCallbackLatch(const StreamCallbackLatch&) = delete;
+  StreamCallbackLatch& operator=(const StreamCallbackLatch&) = delete;
+  StreamCallbackLatch(StreamCallbackLatch&&) = delete;
+  StreamCallbackLatch& operator=(StreamCallbackLatch&&) = delete;
+
+  hipError_t enqueue() {
+    if (enqueued_) {
+      return hipErrorInvalidValue;
+    }
+    auto* holder = new std::shared_ptr<State>(state_);
+    const hipError_t status = hipStreamAddCallback(
+        stream_,
+        [](hipStream_t, hipError_t, void* data) {
+          std::unique_ptr<std::shared_ptr<State>> holder(
+              static_cast<std::shared_ptr<State>*>(data));
+          const std::shared_ptr<State>& state = *holder;
+          {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            state->complete = true;
+          }
+          state->condition.notify_all();
+        },
+        holder, 0);
+    if (status != hipSuccess) {
+      delete holder;
+      return status;
+    }
+    enqueued_ = true;
+    return hipSuccess;
   }
 
-  BlockingContext(const BlockingContext&& in) {
-    blocked = in.blocked_val();
-    stream = in.stream_val();
+  bool wait_for(std::chrono::milliseconds timeout) const {
+    std::unique_lock<std::mutex> lock(state_->mutex);
+    return state_->condition.wait_for(lock, timeout, [this]() { return state_->complete; });
   }
 
-  void reset() { blocked = true; }
-
-  BlockingContext& operator=(const BlockingContext& in) {
-    blocked = in.blocked_val();
-    stream = in.stream_val();
-    return *this;
+  bool complete() const {
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    return state_->complete;
   }
 
-  void block_stream() {
-    blocked = true;
-    auto blocking_callback = [](hipStream_t, hipError_t, void* data) {
-      auto blocked = reinterpret_cast<std::atomic_bool*>(data);
-      while (blocked->load()) {
-        // Yield this thread till we are waiting
-        std::this_thread::yield();
+ private:
+  hipStream_t stream_;
+  std::shared_ptr<State> state_ = std::make_shared<State>();
+  bool enqueued_ = false;
+};
+
+// Heap ownership keeps callback state alive if an assertion unwinds the test.
+class BlockingContext {
+  struct State {
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool blocked = true;
+    bool finished = false;
+  };
+
+ public:
+  explicit BlockingContext(hipStream_t stream) : stream_(stream) {}
+
+  ~BlockingContext() {
+    unblock_stream();
+    if (callback_enqueued_) {
+      std::unique_lock<std::mutex> lock(state_->mutex);
+      if (!state_->condition.wait_for(lock, std::chrono::seconds(5),
+                                      [this]() { return state_->finished; })) {
+        WARN("BlockingContext callback did not finish; the stream may be faulted");
       }
+    }
+  }
+
+  BlockingContext(const BlockingContext&) = delete;
+  BlockingContext& operator=(const BlockingContext&) = delete;
+  BlockingContext(BlockingContext&&) = delete;
+  BlockingContext& operator=(BlockingContext&&) = delete;
+
+  hipError_t block_stream() {
+    if (callback_enqueued_) {
+      return hipErrorInvalidValue;
+    }
+    auto* holder = new std::shared_ptr<State>(state_);
+    auto blocking_callback = [](hipStream_t, hipError_t, void* data) {
+      std::unique_ptr<std::shared_ptr<State>> holder(
+          static_cast<std::shared_ptr<State>*>(data));
+      const std::shared_ptr<State>& state = *holder;
+      {
+        std::unique_lock<std::mutex> lock(state->mutex);
+        state->condition.wait(lock, [&state]() { return !state->blocked; });
+        state->finished = true;
+      }
+      state->condition.notify_all();
     };
-    HIP_CHECK(hipStreamAddCallback(stream, blocking_callback, (void*)&blocked, 0));
+    const hipError_t status = hipStreamAddCallback(stream_, blocking_callback, holder, 0);
+    if (status != hipSuccess) {
+      delete holder;
+    } else {
+      callback_enqueued_ = true;
+    }
+    return status;
   }
 
   void unblock_stream() {
-    blocked = false;
+    {
+      std::lock_guard<std::mutex> lock(state_->mutex);
+      state_->blocked = false;
+    }
+    state_->condition.notify_all();
   }
 
-  bool is_blocked() const { return hipStreamQuery(stream) == hipErrorNotReady; }
+  bool is_blocked() const {
+    const hipError_t status = hipStreamQuery(stream_);
+    if (status != hipSuccess && status != hipErrorNotReady) {
+      WARN("hipStreamQuery failed while checking BlockingContext");
+    }
+    return status == hipErrorNotReady;
+  }
 
-  bool blocked_val() const { return blocked.load(); }
-  hipStream_t stream_val() const { return stream; }
+ private:
+  hipStream_t stream_;
+  std::shared_ptr<State> state_ = std::make_shared<State>();
+  bool callback_enqueued_ = false;
 };
+
+#if HT_AMD
+/**
+ * Holds a stream un-drained until the host releases it, without parking a host thread.
+ *
+ * Prefer this over BlockingContext when the gated window contains a HIP call. A
+ * hipStreamAddCallback callback runs on the runtime's async-signal thread, which is
+ * also the thread that grants a queue its dynamic scratch; a test that only releases
+ * the callback after the call under test returns therefore deadlocks whenever that
+ * call waits on the GPU, as it does in a device-sanitizer build.
+ *
+ * The gate is a dispatch of the runtime's streamOpsWait blit kernel, so it does occupy
+ * one work-item for the gated window. What matters is that it does not route through
+ * ihipModuleLaunchKernel, the only caller of StatCO::InitManagedVarDevicePtr, so
+ * __managed__ symbols stay uninitialized. Tests observing deferred managed
+ * initialization need that; gating with an ordinary kernel launch would initialize
+ * every managed variable on the device first and make them vacuous.
+ *
+ * Releasing before freeing is required, not tidiness: hipFree of still-watched signal
+ * memory synchronizes every stream on the owning device and would wait on a kernel
+ * that can never retire.
+ *
+ * Hangs rather than fails if the call under test turns out to be host-synchronous,
+ * because the release cannot be reached. Deliberate: a timed release would make the
+ * result depend on how long the call takes relative to the gate.
+ */
+class StreamGate {
+ public:
+  explicit StreamGate(hipStream_t stream) : stream_(stream) {}
+
+  ~StreamGate() {
+    release();
+    if (signal_ != nullptr) {
+      static_cast<void>(hipFree(signal_));
+    }
+  }
+
+  StreamGate(const StreamGate&) = delete;
+  StreamGate& operator=(const StreamGate&) = delete;
+  StreamGate(StreamGate&&) = delete;
+  StreamGate& operator=(StreamGate&&) = delete;
+
+  //! Must be called with the gated stream's device current.
+  hipError_t gate() {
+    if (signal_ != nullptr) {
+      return hipErrorInvalidValue;
+    }
+    uint64_t* signal = nullptr;
+    // hipStreamWaitValue64 polls signal memory, which is 8 bytes by contract.
+    hipError_t status = hipExtMallocWithFlags(reinterpret_cast<void**>(&signal),
+                                              sizeof(uint64_t), hipMallocSignalMemory);
+    if (status != hipSuccess) {
+      return status;
+    }
+    __atomic_store_n(signal, kBlocked, __ATOMIC_RELEASE);
+    status = hipStreamWaitValue64(stream_, signal, kReleased, hipStreamWaitValueEq);
+    if (status != hipSuccess) {
+      static_cast<void>(hipFree(signal));
+      return status;
+    }
+    signal_ = signal;
+    return hipSuccess;
+  }
+
+  void release() {
+    if (signal_ != nullptr) {
+      __atomic_store_n(signal_, kReleased, __ATOMIC_RELEASE);
+    }
+  }
+
+  bool is_blocked() const {
+    const hipError_t status = hipStreamQuery(stream_);
+    if (status != hipSuccess && status != hipErrorNotReady) {
+      WARN("hipStreamQuery failed while checking StreamGate");
+    }
+    return status == hipErrorNotReady;
+  }
+
+ private:
+  static constexpr uint64_t kBlocked = 0;
+  static constexpr uint64_t kReleased = 1;
+
+  hipStream_t stream_;
+  uint64_t* signal_ = nullptr;
+};
+#endif  // HT_AMD
 }  // namespace HipTest
 
 // Call at the start of tests that require image/texture support to indicate whether it

@@ -2569,6 +2569,25 @@ void Device::updateFreeMemory(size_t size, bool free) {
 }
 
 // ================================================================================================
+amd::Device::GlobalWriteResult Device::writeDeviceGlobal(amd::Memory& dst, size_t offset,
+                                                         size_t size, const void* src) const {
+  address target = reinterpret_cast<address>(dst.getSvmPtr());
+  if (target == nullptr || src == nullptr) {
+    return GlobalWriteResult::kFailure;
+  }
+  // Same mechanism roc::Kernel uses to fill a kernel's runtime-handle global after
+  // load: a blocking ROCr copy that touches no HSA queue this runtime manages.
+  hsa_status_t status = Hsa::memory_copy(target + offset, src, size);
+  if (status != HSA_STATUS_SUCCESS) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_MEM,
+            "hsa_memory_copy into device global %p failed with hsa_status: %d", target + offset,
+            status);
+    return GlobalWriteResult::kFailure;
+  }
+  return GlobalWriteResult::kSuccess;
+}
+
+// ================================================================================================
 void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_svm_mem_flags flags,
                        void* svmPtr) const {
   amd::Memory* mem = nullptr;

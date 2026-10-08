@@ -291,29 +291,36 @@ void __hipRegisterManagedVar(
 
   hip::Var* var_ptr = new hip::Var(std::string(name), hip::Var::DeviceVarKind::DVK_Managed, pointer,
                                    size, align, reinterpret_cast<hip::FatBinaryInfo**>(hipModule));
-  hipError_t status = PlatformState::Instance().StatCO().RegisterManagedVar(var_ptr);
-  guarantee(status == hipSuccess, "Cannot register Static Managed Var, error: %d", status);
 
+  // Host storage must be reserved and initialized before the Var is published.
+  // RegisterManagedVar can promote and hand the pointer to concurrent HIP APIs the
+  // moment it returns, and a dlopen on another thread reaches it immediately.
   if (enable_deferred_loading) {
-    // Allocate temporary var on host and initialize
+    // This range is the variable's final storage, not a staging copy:
+    // EnsureManagedStorageMapped registers it as a fine-grain SVM buffer in place.
     *pointer = amd::Os::reserveMemory(0, size, align, amd::Os::MEM_PROT_RW);
+    guarantee(*pointer != nullptr, "Cannot reserve host memory for Static Managed Var");
     ::memcpy(*pointer, init_value, size);
   } else {
     HIP_INIT_VOID();
-    status = ihipMallocManaged(pointer, size, align, 0);
-    var_ptr->SetAllocFlag(true);
-    if (status == hipSuccess) {
+    hipError_t alloc_status = ihipMallocManaged(pointer, size, align, 0);
+    var_ptr->SetSvmOwned(true);
+    if (alloc_status == hipSuccess) {
       hip::Stream* stream = hip::getNullStream();
       if (stream != nullptr) {
-        status = ihipMemcpy(*pointer, init_value, size, hipMemcpyHostToDevice, *stream);
-        guarantee(status == hipSuccess, "Error during memcpy to managed memory, error: %d", status);
+        alloc_status = ihipMemcpy(*pointer, init_value, size, hipMemcpyHostToDevice, *stream);
+        guarantee(alloc_status == hipSuccess, "Error during memcpy to managed memory, error: %d",
+                  alloc_status);
       } else {
         ClPrint(amd::LOG_ERROR, amd::LOG_API, "Host Queue is NULL");
       }
     } else {
-      guarantee(false, "Error during allocation of managed memory!, error: %d", status);
+      guarantee(false, "Error during allocation of managed memory!, error: %d", alloc_status);
     }
   }
+
+  hipError_t status = PlatformState::Instance().StatCO().RegisterManagedVar(var_ptr);
+  guarantee(status == hipSuccess, "Cannot register Static Managed Var, error: %d", status);
 }
 
 // ================================================================================================
@@ -1062,16 +1069,21 @@ hipError_t hipOccupancyMaxActiveClusters(int* numClusters, const void* f,
 }
 
 // ================================================================================================
-void PlatformState::Init() {
+hipError_t PlatformState::Init() {
   std::scoped_lock lock(lock_);
   if (initialized_ || g_devices.empty()) {
-    return;
+    return hipSuccess;
   }
   initialized_ = true;
   statCO_.ResizeForDevices(g_devices.size());
+  // Back every managed variable registered before this point with a tracked
+  // allocation, so the memory APIs resolve its host pointer through MemObjMap
+  // without needing a deferred-pointer lookup.
+  IHIP_RETURN_ONFAIL(statCO_.PromoteManagedVars());
   amd::RuntimeTearDown::RegisterTearDownCallback("PlatformState static fatbin cleanup", [this]() {
     statCO_.RemoveAllFatBinaries();
   });
+  return hipSuccess;
 }
 
 // ================================================================================================
