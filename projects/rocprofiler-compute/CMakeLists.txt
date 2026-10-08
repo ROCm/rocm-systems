@@ -697,6 +697,13 @@ add_test(
 )
 
 add_test(
+    NAME test_html_views
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_html_views.xml
+        ${COV_OPTION} tests/unit/memory_chart/test_html_views.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_mem_chart_html_report
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_html_report.xml
@@ -1180,6 +1187,7 @@ if(${ENABLE_COVERAGE})
         test_report_shell
         test_html_report
         test_html_diagram
+        test_html_views
         test_mem_chart_html_report
         test_rocpd_data
         test_profile_torch_trace
