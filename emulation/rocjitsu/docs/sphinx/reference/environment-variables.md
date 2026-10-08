@@ -89,7 +89,7 @@ Path to the AMD ROCm installation.
 |---|---|
 | **Default** | System-dependent |
 | **Allowed values** | Any valid directory path pointing to a ROCm installation |
-| **Effect** | Used to locate ROCm libraries and tools when rocJITsu needs to resolve ROCm components. |
+| **Effect** | Used to locate ROCm libraries and tools for optional ROCm-dependent tests when `BUILD_TESTING=ON`. An explicitly empty CMake `ROCM_PATH` disables environment and `/opt/rocm` fallbacks. It does not select the host compiler or install destination. |
 
 ### `ROCJITSU_RUNTIME_DIR`
 

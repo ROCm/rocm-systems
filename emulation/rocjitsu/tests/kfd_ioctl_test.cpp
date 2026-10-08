@@ -807,6 +807,38 @@ TEST(KfdIoctlHelpersTest, ClassifiesEveryPreGfx12TrapInterruptEncodingFamily) {
             rocjitsu::kmd::detail::TrapInterruptAbi::Unsupported);
 }
 
+TEST_F(KfdIoctlTest, CreateQueueAcceptsOlderAndNewerPayloadSizes) {
+  alignas(4096) std::array<std::byte, 8192> ring{};
+  alignas(64) std::array<uint64_t, 8> ptrs{};
+  for (size_t bytes : {size_t{88}, sizeof(kfd_ioctl_create_queue_args) + 8}) {
+    SCOPED_TRACE(bytes);
+    kfd_ioctl_create_queue_args args{};
+    args.gpu_id = kGpuId;
+    args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+    args.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+    args.ring_size = static_cast<uint32_t>(ring.size());
+    args.read_pointer_address = reinterpret_cast<uint64_t>(&ptrs[0]);
+    args.write_pointer_address = reinterpret_cast<uint64_t>(&ptrs[1]);
+    args.queue_percentage = 100;
+    std::array<std::byte, sizeof(args) + 16> buffer;
+    buffer.fill(std::byte{0xa5});
+    const size_t copied = std::min(bytes, sizeof(args));
+    std::memcpy(buffer.data(), &args, copied);
+    ASSERT_EQ(
+        driver_->ioctl(rocjitsu::ioctl_with_size(AMDKFD_IOC_CREATE_QUEUE, bytes), buffer.data()),
+        0);
+    std::memcpy(&args, buffer.data(), copied);
+    EXPECT_NE(args.queue_id, 0u);
+    EXPECT_EQ(args.doorbell_offset & rocjitsu::KFD_MMAP_TYPE_MASK,
+              rocjitsu::KFD_MMAP_TYPE_DOORBELL);
+    for (size_t index = copied; index < buffer.size(); ++index)
+      EXPECT_EQ(buffer[index], std::byte{0xa5}) << index;
+    kfd_ioctl_destroy_queue_args destroy{};
+    destroy.queue_id = args.queue_id;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  }
+}
+
 // A compute queue created through KFD is replicated onto every XCD so its
 // dispatches can be spread across the whole device; the XCD that owns the queue
 // still reads the ring alone. An SDMA queue is per-engine and is not replicated.

@@ -1436,6 +1436,8 @@ inline static CUresult hipErrorToCUResult(hipError_t hError) {
       return CUDA_ERROR_LAUNCH_FAILED;
     case hipErrorCooperativeLaunchTooLarge:
       return CUDA_ERROR_COOPERATIVE_LAUNCH_TOO_LARGE;
+    case hipErrorNotPermitted:
+      return CUDA_ERROR_NOT_PERMITTED;
     case hipErrorNotSupported:
       return CUDA_ERROR_NOT_SUPPORTED;
     case hipErrorStreamCaptureUnsupported:
@@ -1644,6 +1646,8 @@ inline static cudaError_t hipErrorToCudaError(hipError_t hError) {
       return cudaErrorStreamCaptureWrongThread;
     case hipErrorGraphExecUpdateFailure:
       return cudaErrorGraphExecUpdateFailure;
+    case hipErrorNotPermitted:
+      return cudaErrorNotPermitted;
     case hipErrorNotSupported:
       return cudaErrorNotSupported;
     case hipErrorInvalidChannelDescriptor:
@@ -3931,7 +3935,13 @@ inline static hipError_t hipModuleLoadFatBinary(hipModule_t* module, const void*
 }
 
 inline static hipError_t hipModuleUnload(hipModule_t hmod) {
-  return hipCUResultTohipError(cuModuleUnload(hmod));
+  CUresult err = cuModuleUnload(hmod);
+  // A module obtained from hipLibraryGetModule() is owned by its library, and
+  // CUDA reports CUDA_ERROR_NOT_PERMITTED for releasing it here.
+  if (err == CUDA_ERROR_NOT_PERMITTED) {
+    return hipErrorNotPermitted;
+  }
+  return hipCUResultTohipError(err);
 }
 
 inline static hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module,
@@ -4026,6 +4036,10 @@ inline static hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes,
                                               hipLibrary_t library, const char* name) {
   return hipCUDAErrorTohipError(
       cudaLibraryGetManaged(dptr, bytes, reinterpret_cast<cudaLibrary_t>(library), name));
+}
+
+inline static hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library) {
+  return hipCUResultTohipError(cuLibraryGetModule(pMod, library));
 }
 
 inline static hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary_t library) {

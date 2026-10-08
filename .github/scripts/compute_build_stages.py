@@ -63,10 +63,8 @@ FULL_BUILD_PROJECTS = {
     # Legacy profiler bucket used THEROCK_ENABLE_ALL=ON.
     "aqlprofile",
     "rocprofiler",
-    "rocprofiler-compute",
     "rocprofiler-register",
     "rocprofiler-sdk",
-    "rocprofiler-systems",
     "roctracer",
 }
 
