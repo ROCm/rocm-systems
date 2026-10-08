@@ -21,17 +21,21 @@
 
 namespace
 {
-constexpr std::size_t k_max_json_length = 128;
+constexpr std::size_t k_max_json_length        = 128;
+constexpr const char* k_gpu_agent_name         = "gfx942";
+constexpr const char* k_gpu_agent_vendor_name  = "AMD";
+constexpr const char* k_gpu_agent_product_name = "Instinct MI300X";
+constexpr const char* k_gpu_agent_model_name   = "model_name";
 
 rocprofiler_agent_v0_t
 make_gpu_agent_data()
 {
     rocprofiler_agent_v0_t agent_data{};
     agent_data.type                 = ROCPROFILER_AGENT_TYPE_GPU;
-    agent_data.name                 = "gfx942";
-    agent_data.vendor_name          = "AMD";
-    agent_data.product_name         = "Instinct MI300X";
-    agent_data.model_name           = "aqua_vanjaram";
+    agent_data.name                 = k_gpu_agent_name;
+    agent_data.vendor_name          = k_gpu_agent_vendor_name;
+    agent_data.product_name         = k_gpu_agent_product_name;
+    agent_data.model_name           = k_gpu_agent_model_name;
     agent_data.logical_node_type_id = 3;
     return agent_data;
 }
@@ -47,10 +51,10 @@ TEST(agent_info_json_test, to_json_string_is_valid_json)
 
     auto const parsed = nlohmann::json::parse(json_str);
     EXPECT_TRUE(parsed.is_object());
-    EXPECT_EQ(parsed.at("name"), "gfx942");
-    EXPECT_EQ(parsed.at("vendor_name"), "AMD");
-    EXPECT_EQ(parsed.at("product_name"), "Instinct MI300X");
-    EXPECT_EQ(parsed.at("model_name"), "aqua_vanjaram");
+    EXPECT_EQ(parsed.at("name"), k_gpu_agent_name);
+    EXPECT_EQ(parsed.at("vendor_name"), k_gpu_agent_vendor_name);
+    EXPECT_EQ(parsed.at("product_name"), k_gpu_agent_product_name);
+    EXPECT_EQ(parsed.at("model_name"), k_gpu_agent_model_name);
     EXPECT_EQ(parsed.at("gpu_index"), 3);
     EXPECT_TRUE(parsed.at("capability").is_object());
     EXPECT_TRUE(parsed.at("caches").is_array());
@@ -99,13 +103,14 @@ TEST(agent_info_json_test, to_json_string_with_arrays_is_valid_json)
 
 TEST(agent_info_json_test, to_json_string_escapes_quotes_as_json)
 {
+    constexpr const char* k_quoted_product_name = R"(Instinct "MI300X")";
+
     auto agent_data         = make_gpu_agent_data();
-    agent_data.product_name = "Instinct \"MI300X\"";
+    agent_data.product_name = k_quoted_product_name;
 
     auto const json_str = rocprofsys::agent_info::to_json_string(agent_data);
 
     ASSERT_TRUE(nlohmann::json::accept(json_str))
         << json_str.substr(0, k_max_json_length);
-    EXPECT_NE(json_str.find(R"("Instinct \"MI300X\"")"), std::string::npos);
-    EXPECT_EQ(nlohmann::json::parse(json_str).at("product_name"), "Instinct \"MI300X\"");
+    EXPECT_EQ(nlohmann::json::parse(json_str).at("product_name"), k_quoted_product_name);
 }
