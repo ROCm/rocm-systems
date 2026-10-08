@@ -8,21 +8,4 @@ updates:
     github-actions:
       patterns:
       - '*'
-- package-ecosystem: pip
-  directory: projects/rocr-runtime/runtime/docs/sphinx
-  open-pull-requests-limit: 5
-  schedule:
-    interval: weekly
-  groups:
-    rocr-runtime-docs-dependencies:
-      patterns:
-      - '*'
-- package-ecosystem: pip
-  directory: projects/rocprofiler-sdk/source/docs/sphinx
-  open-pull-requests-limit: 5
-  schedule:
-    interval: weekly
-  groups:
-    rocprofiler-sdk-docs-dependencies:
-      patterns:
-      - '*'
+
