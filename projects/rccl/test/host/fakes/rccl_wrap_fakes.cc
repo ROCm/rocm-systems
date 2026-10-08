@@ -9,6 +9,8 @@
 
 #include "rccl_wrap_fakes.h"
 
+#include <algorithm>
+
 #include "comm.h"
 #include "fail_loud.h"
 #include "info.h"
@@ -147,7 +149,36 @@ int64_t rcclParamHierarchicalAllGather() { return g_rcclParamHierarchicalAllGath
 int64_t g_rcclParamHierarchicalReduceScatter = 0;  // RCCL_PARAM(HierarchicalReduceScatter) default
 int64_t rcclParamHierarchicalReduceScatter() { return g_rcclParamHierarchicalReduceScatter; }
 
+int64_t g_rcclParamDdaEnable = 1;                 // rccl_wrap.cc RCCL_PARAM(DdaEnable) default
+int64_t rcclParamDdaEnable() { return g_rcclParamDdaEnable; }
+int64_t g_rcclParamDdaLL = 1;                     // RCCL_PARAM(DdaLL) default
+int64_t rcclParamDdaLL() { return g_rcclParamDdaLL; }
+int64_t g_rcclParamDdaLL128 = kDdaThresholdUnset;  // RCCL_PARAM(DdaLL128) default
+int64_t rcclParamDdaLL128() { return g_rcclParamDdaLL128; }
+
+static size_t DefaultDdaLLThreshold(const struct ncclComm*, ncclFunc_t) { return kDdaLLBaseDefault; }
+static size_t DefaultDdaLL128Threshold(const struct ncclComm*, ncclFunc_t) { return kDdaLL128BaseDefault; }
+static size_t DefaultDdaVmmThreshold(const struct ncclComm*, ncclFunc_t) { return kDdaVmmBaseDefault; }
+static size_t DefaultDdaScratchPayloadCap(const struct ncclComm*) {
+  return std::max({kDdaLLBaseDefault, kDdaLL128BaseDefault, kDdaVmmBaseDefault});
+}
+std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLLThreshold = DefaultDdaLLThreshold;
+std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold = DefaultDdaLL128Threshold;
+std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaVmmThreshold = DefaultDdaVmmThreshold;
+std::function<size_t(const struct ncclComm*)> g_rcclDdaScratchPayloadCap = DefaultDdaScratchPayloadCap;
+size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaLLThreshold(comm, func); }
+size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaLL128Threshold(comm, func); }
+size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaVmmThreshold(comm, func); }
+size_t rcclDdaScratchPayloadCap(const ncclComm* comm) { return g_rcclDdaScratchPayloadCap(comm); }
+
 void ResetRcclWrapFakes() {
+  g_rcclParamDdaEnable = 1;
+  g_rcclParamDdaLL = 1;
+  g_rcclParamDdaLL128 = kDdaThresholdUnset;
+  g_rcclDdaLLThreshold = DefaultDdaLLThreshold;
+  g_rcclDdaLL128Threshold = DefaultDdaLL128Threshold;
+  g_rcclDdaVmmThreshold = DefaultDdaVmmThreshold;
+  g_rcclDdaScratchPayloadCap = DefaultDdaScratchPayloadCap;
   g_rcclUpdateCollectiveProtocol = DefaultNoOpTune;
   g_rcclSetPipelining = DefaultNoOpTune;
   g_rcclOverrideChannels = DefaultOverrideChannels;

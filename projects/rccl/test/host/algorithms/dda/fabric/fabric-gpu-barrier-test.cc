@@ -18,7 +18,6 @@
 #include <memory>
 #include <set>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 #include "HipVmmLedger.h"
@@ -28,6 +27,7 @@
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 
+#include "algorithms/dda/fabric/FabricGpuBarrierState.h"
 #include "mem_manager.h"
 
 #include FABRIC_GPU_BARRIER_CC_PATH
@@ -45,24 +45,6 @@ constexpr int kNBlocks = 3;
 void* const kBootstrap = reinterpret_cast<void*>(0xB007);
 
 size_t FlagBytes(int nRanks, int nBlocks) { return static_cast<size_t>(nRanks) * nBlocks * sizeof(FlagType); }
-
-// FabricGpuBarrier's state is private and only read on the device. Mirror its
-// layout to check what mallocAndInit hands the kernels; the test that reads it
-// gives the three ints distinct values, so a reordered field fails, not passes.
-struct BarrierState {
-  int nBlocks;
-  int selfRank;
-  int nRanks;
-  FlagType** peerFlags;
-};
-static_assert(sizeof(BarrierState) == sizeof(FabricGpuBarrier), "FabricGpuBarrier layout changed");
-static_assert(std::is_standard_layout<FabricGpuBarrier>::value, "FabricGpuBarrier layout is no longer fixed");
-static_assert(std::is_trivially_copyable<FabricGpuBarrier>::value, "FabricGpuBarrier is no longer a plain value");
-BarrierState StateOf(const FabricGpuBarrier& barrier) {
-  BarrierState state;
-  std::memcpy(&state, &barrier, sizeof(state));
-  return state;
-}
 
 using InitResult = std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier>;
 
@@ -296,7 +278,7 @@ TEST_F(FabricGpuBarrierTest, MallocAndInit_AllSucceed_BarrierCarriesGeometryAndD
   InitResult& r = Init();
   ASSERT_NE(r.first, nullptr);
 
-  const BarrierState state = StateOf(r.second);
+  const FabricGpuBarrierState state = StateOf(r.second);
   EXPECT_EQ(state.nBlocks, kNBlocks);
   EXPECT_EQ(state.selfRank, kRank);
   EXPECT_EQ(state.nRanks, kNRanks);

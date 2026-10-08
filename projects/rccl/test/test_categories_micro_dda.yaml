@@ -9,6 +9,12 @@ test_categories:
       - "Geometry/FabricGpuBarrierInvalidGeometryTest.*"
       - "Geometry/FabricGpuBarrierValidGeometryTest.*"
       - "FabricMemHandlerTest.*"
+      - "DdaUseFabricPathTest.*"
+      - "Arch/DdaUseFabricPathTest.*"
+      - "DdaFabricCommInitTest.*"
+      - "Skip/DdaFabricCommInitSkipTest.*"
+      - "Step/DdaFabricCommInitFailTest.*"
+      - "DdaFabricCommFiniTest.*"
     exclude_windows:
       - "*"
     labels:

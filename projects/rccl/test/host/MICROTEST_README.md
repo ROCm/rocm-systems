@@ -227,17 +227,28 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `FabricMemHandlerTest.*`) and `fabric/fabric_gpu_barrier.cu`'s host-side
   `mallocAndInit` (via `FABRIC_GPU_BARRIER_CC_PATH`; hipify renames `.cu` to
   `.cu.cpp`; suites `FabricGpuBarrierTest.*` and
-  `Geometry/FabricGpuBarrier{Invalid,Valid}GeometryTest.*`). A unit
+  `Geometry/FabricGpuBarrier{Invalid,Valid}GeometryTest.*`), and
+  `fabric/fabric_init.cu` (via `FABRIC_INIT_CC_PATH`; suites
+  `DdaUseFabricPathTest.*`, `Arch/DdaUseFabricPathTest.*`,
+  `DdaFabricCommInitTest.*`, `Skip/DdaFabricCommInitSkipTest.*`,
+  `Step/DdaFabricCommInitFailTest.*`, `DdaFabricCommFiniTest.*`). A unit
   `#include`d here is the definition the other DDA tests link against, so the
-  barrier exercises the real mem handler; `device/device_buffer.cc` is compiled
-  as a real oracle TU for the same reason. Tests here mirror the source tree:
+  barrier exercises the real mem handler and init the real handler and
+  barrier; `device/device_buffer.cc` and `misc/archinfo.cc` (`IsArchMatch`) are
+  compiled as real oracle TUs for the same reason, so do not add a fake for
+  either to this binary, and never link `fakes/nccl_stubs.cc`, whose fail-loud
+  `ncclDdaFabricCommInit/Fini` would collide. The DDA params and thresholds
+  come from `fakes/rccl_wrap_fakes.cc`; `RCCL_DDA_FABRIC_BUFFER_SIZE` reaches
+  `g_loadParam` through `fakes/param_redirect.h`, and
+  `RCCL_DDA_FABRIC_MAXBLOCKS` is set with `SetMicroEnv`. Tests here mirror the
+  source tree:
   `test/host/<path under src>/<file>-test.cc`, e.g.
   `algorithms/dda/fabric/fabric-mem-handler-test.cc`; the files are listed by
   path from `test/host/CMakeLists.txt`, with no nested CMake project. One binary
   for all of DDA, since its units share the same seams (cuMem VMM, bootstrap
   allgather). Their fixtures track device memory with `HipVmmLedger.h` (VMM
   emulator plus reservation/handle/buffer bookkeeping, and a record of every
-  free or copy it refused), and pin `NCCL_CUMEM_SKIP_FREE` unset because
+  free, memset or non-host-bound copy it refused), and pin `NCCL_CUMEM_SKIP_FREE` unset because
   `alloc.h` memoises that skip once per process. See
   `test_categories_micro_dda.yaml`.
 
@@ -387,7 +398,7 @@ symbol.
 | `src/plugin/gin.cc`, `src/gin/gin_host.cc` | `fakes/gin_fakes.cc` |
 | `src/proxy.cc` | `fakes/proxy_fakes.cc` |
 | `src/ras/ras_param.cc` | `fakes/ras_param_fakes.cc` (the direct `ras-param-test.cc` inclusion uses renamed symbols) |
-| `src/rccl_wrap.cc`'s own public entry points (targets that don't compile the real file, e.g. `rccl-UnitTestsMicroEnqueue`) | `fakes/rccl_wrap_fakes.cc` |
+| `src/rccl_wrap.cc`'s own public entry points (targets that don't compile the real file, e.g. `rccl-UnitTestsMicroEnqueue`, `rccl-UnitTestsMicroDda`) | `fakes/rccl_wrap_fakes.cc` |
 | `src/rccl_wrap.cc`'s dependencies (`rccl-UnitTestsMicro`, which compiles the real file and tests it directly) | `fakes/wrap_fakes.cc` |
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |
 | `src/register/*.cc` | `fakes/register_stubs.cc` |

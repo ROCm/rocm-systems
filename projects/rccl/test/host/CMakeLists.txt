@@ -305,13 +305,16 @@ function(rccl_define_micro_source_lists)
   # src/algorithms/dda/. Tests mirror the source tree: test/host/<path under src>/<file>-test.cc.
   set(TEST_MICRO_DDA_SOURCE_FILES
     algorithms/dda/fabric/fabric-gpu-barrier-test.cc
+    algorithms/dda/fabric/fabric-init-test.cc
     algorithms/dda/fabric/fabric-mem-handler-test.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/device/device_buffer.cc  # real DeviceBuffer
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
     fakes/alloc_fakes.cc                 # alloc.h data symbols (allocTracker)
     fakes/bootstrap_stubs.cc             # bootstrapAllGather
     fakes/env_fakes.cc                   # NCCL_CUMEM_SKIP_FREE
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
+    fakes/rccl_wrap_fakes.cc             # DDA params and thresholds
     fakes/utils_fakes.cc                 # getBusId (alloc.h side stream)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -956,6 +959,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDda
     FABRIC_MEM_HANDLER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_mem_handler.cc"
     # hipify renames .cu to .cu.cpp
     FABRIC_GPU_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_gpu_barrier.cu.cpp"
+    FABRIC_INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_init.cu.cpp"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda.yaml")
 
 # =====================================================================

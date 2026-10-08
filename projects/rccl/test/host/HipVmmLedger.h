@@ -15,13 +15,14 @@
 //     through retain/release. Imported handles are recorded on release only:
 //     their lifetime belongs to the exporting peer.
 //   - plain device buffers from hipMalloc / hipExtMallocWithFlags.
-// hipMemcpy and hipMemset act on the host-memory stand-ins.
+// hipMemcpy and hipMemset act on the host-memory stand-ins; any copy not
+// explicitly host-bound must land inside a live allocation.
 //
 // Production code usually discards free results ((void), CUDACHECKIGNORE), so
 // a bad free would pass silently. The ledger records every call it refuses in
 // `rejected` instead: a free of an unknown, already-freed or still-mapped
-// range, a release of a handle no longer live, a copy or memset outside any
-// live allocation. Clean() checks both that and that nothing is left live.
+// range, a release of a handle no longer live, a memset or non-host-bound copy
+// outside any live allocation. Clean() checks both that and that nothing is left live.
 //
 // Hooks capture `this`; destroy the unit under test before the fixture's
 // ResetHipFakes(), which restores every hook installed here.
@@ -119,8 +120,9 @@ class HipVmmLedger {
       return hipSuccess;
     };
 
-    g_hipMemcpy = [this](void* dst, const void* src, size_t n, hipMemcpyKind) {
-      if (!Covers(dst, n)) return Reject("hipMemcpy outside any live allocation");
+    g_hipMemcpy = [this](void* dst, const void* src, size_t n, hipMemcpyKind kind) {
+      const bool toHost = kind == hipMemcpyHostToHost || kind == hipMemcpyDeviceToHost;
+      if (!toHost && !Covers(dst, n)) return Reject("hipMemcpy outside any live allocation");
       std::memcpy(dst, src, n);
       return hipSuccess;
     };
