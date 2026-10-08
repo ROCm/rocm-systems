@@ -26,7 +26,8 @@ env:
   # pools, and a machine whose arch is missing from the binary fails every
   # workload with hipErrorInvalidImage (200) rather than skipping. gfx1250 is
   # carried so the binary is ready once its runner is enabled below.
-  HRR_ARCHS: "gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1153;gfx1200;gfx1201;gfx1250"
+  # CROSS-CHECK ONLY (hrr-ci/2894gfx90a): the gfx90a pools only.
+  HRR_ARCHS: "gfx90a"
   ROCM_INDEX_URL: "https://rocm.nightlies.amd.com/whl-multi-arch/"
 
 jobs:
@@ -333,7 +334,7 @@ jobs:
   # Integration suite on every family that has a test runner.
   # ---------------------------------------------------------------------------
   integration:
-    name: "Integration (${{ matrix.family }})"
+    name: "Integration (${{ matrix.family }} ${{ matrix.pool }} #${{ matrix.replica }})"
     needs: [ci_config, build]
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     runs-on: ${{ matrix.runner }}
@@ -341,7 +342,7 @@ jobs:
     # and the default timeout is six hours, so a workload that deadlocks on one
     # part would hold a runner for the rest of the day and publish no log to
     # say why. Fail instead, while the log still gets uploaded.
-    timeout-minutes: 30
+    timeout-minutes: 45
     # The OSSCI pod pools (gfx90a, gfx950) expose /dev/kfd only to a job with
     # a container spec: run bare there and hipGetDeviceCount returns 100 with
     # no devices. Every other pool is a bare machine and gets no container,
@@ -366,28 +367,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # CROSS-CHECK ONLY (hrr-ci/2894gfx90a): four jobs on the smci250 pool
+        # and three on the OSSCI MI250X pool, PinnedHost cases only.
         include:
-          - { family: gfx90a, container: true, runner: "${{ needs.ci_config.outputs.gfx90a_runner }}" }
-          # gfx94x uses the resolved 1-GPU runner: the 8-GPU gfx942 pool
-          # exposes /dev/kfd only to a job with a container spec.
-          - { family: gfx94x, runner: "${{ needs.ci_config.outputs.gfx94x_runner }}" }
-          # The T3 tier needs two visible devices and there is no 2-GPU pool,
-          # so gfx950 takes an 8-GPU machine; every other family skips T3.
-          # Do not pin HIP_VISIBLE_DEVICES: on the CCS pool fixed indices can
-          # be empty even though the job has GPUs.
-          - { family: gfx950, container: true, runner: "linux-gfx950-8gpu-ccs-ossci-rocm" }
-          - { family: gfx103x, runner: "${{ needs.ci_config.outputs.gfx103x_runner }}" }
-          - { family: gfx110x, runner: "${{ needs.ci_config.outputs.gfx110x_runner }}" }
-          - { family: gfx120x, runner: "${{ needs.ci_config.outputs.gfx120x_runner }}" }
-          - { family: gfx1151, runner: "${{ needs.ci_config.outputs.gfx1151_runner }}" }
-          # Not exposed by resolve-ci-config; taken from TheRock's family matrix.
-          - { family: gfx1150, runner: "linux-gfx1150-gpu-rocm" }
-          - { family: gfx1153, runner: "linux-gfx1153-gpu-rocm" }
-          # gfx1250 (MI455) is withheld until linux-mi455-gpu-rocm is healthy.
-          # If it is wanted sooner, add it as a separate non-blocking job, as
-          # therock-ci.yml does, so the report job never waits on that queue:
-          #
-          #   - { family: gfx1250, runner: "linux-mi455-gpu-rocm" }
+          - { family: gfx90a, pool: smci250, replica: 1, container: true, runner: "linux-gfx90a-gpu-rocm" }
+          - { family: gfx90a, pool: smci250, replica: 2, container: true, runner: "linux-gfx90a-gpu-rocm" }
+          - { family: gfx90a, pool: smci250, replica: 3, container: true, runner: "linux-gfx90a-gpu-rocm" }
+          - { family: gfx90a, pool: smci250, replica: 4, container: true, runner: "linux-gfx90a-gpu-rocm" }
+          - { family: gfx90a, pool: ossci, replica: 1, container: true, runner: "linux-gfx90a-1gpu-ossci-rocm" }
+          - { family: gfx90a, pool: ossci, replica: 2, container: true, runner: "linux-gfx90a-1gpu-ossci-rocm" }
+          - { family: gfx90a, pool: ossci, replica: 3, container: true, runner: "linux-gfx90a-1gpu-ossci-rocm" }
     steps:
       # Only the test runner: this job compiles nothing and takes its binaries
       # from the build artifact. It has to come first, because checkout cleans
@@ -397,6 +386,7 @@ jobs:
         with:
           sparse-checkout: |
             projects/hrr/tests/run_catch2.py
+            projects/hrr/tests/ci_pinned_repeat.sh
           sparse-checkout-cone-mode: false
           set-safe-directory: true
 
@@ -448,61 +438,20 @@ jobs:
       - name: Restore executable bits
         run: chmod +x build/hrr/playback/hrr-playback build/hrr/tests/*/hrr-*tests
 
-      # The binaries carry no RUNPATH, so the capture build is selected here.
-      - name: Run integration suite
+      # CROSS-CHECK ONLY (hrr-ci/2894gfx90a): the PinnedHost cases that hit
+      # "GPU Hang" on smci250, repeated, with no-capture and CP-wait controls,
+      # then every PinnedHost case once. The full suite is not run.
+      - name: PinnedHost repeat
         run: |
-          # hipamd/lib holds the amdhip64 carrying the capture shims and must
-          # precede the SDK, which ships a plain build under the same soname.
-          # No ROCr preload here: CLR was built against the SDK's ROCr, so the
-          # two agree and there is no in-tree runtime to substitute.
-          # Keep the runner's existing path: setup-python puts libpython there,
-          # and replacing it makes python3 fail to start on some GPU machines.
           export LD_LIBRARY_PATH="${PWD}/build/clr/hipamd/lib:${ROCM_SDK}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-          # A GPU-labelled runner with no visible device is infrastructure
-          # failure, not 67 unsupported capabilities. Still run the four
-          # CPU-only integration checks and publish their JUnit, then fail the
-          # job so the table cannot make a broken runner look green.
-          # Exit 1 is "confirmed no device". Any other probe failure (broken
-          # ctypes, missing libpython) is not a device count and must not
-          # skip the GPU suite.
-          set +e
-          python3 - <<'PY'
-          import sys
-
-          try:
-              import ctypes
-              hip = ctypes.CDLL("libamdhip64.so.7")
-              count = ctypes.c_int()
-              status = hip.hipGetDeviceCount(ctypes.byref(count))
-          except Exception as exc:
-              print(f"GPU probe unavailable: {type(exc).__name__}: {exc}", file=sys.stderr)
-              sys.exit(2)
-          print(f"hipGetDeviceCount: status={status}, devices={count.value}")
-          sys.exit(0 if status == 0 and count.value > 0 else 1)
-          PY
-          probe_rc=$?
-          set -e
-          if [ "$probe_rc" -eq 1 ]; then
-            echo "::error::GPU runner has no visible ROCm-capable device"
-            python3 projects/hrr/tests/run_catch2.py \
-              --xml integration-${{ matrix.family }}.xml \
-              -- ./build/hrr/tests/integration/hrr-integration-tests "[cpu]"
-            exit 1
-          fi
-          # Keep passing logs to one result line per case. The wrapper captures
-          # Catch2 and subprocess output, and only emits it when the suite fails.
-          # Time out inside the job's 30 minutes, so a hang prints the cases
-          # that finished instead of being cancelled with no output.
-          python3 projects/hrr/tests/run_catch2.py \
-            --xml integration-${{ matrix.family }}.xml --timeout 1200 \
-            -- ./build/hrr/tests/integration/hrr-integration-tests
+          bash projects/hrr/tests/ci_pinned_repeat.sh integration-${{ matrix.family }}-${{ matrix.pool }}-${{ matrix.replica }}.xml
 
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: results-integration-${{ matrix.family }}
-          path: integration-${{ matrix.family }}.xml
+          name: results-integration-${{ matrix.family }}-${{ matrix.pool }}-${{ matrix.replica }}
+          path: integration-${{ matrix.family }}-${{ matrix.pool }}-${{ matrix.replica }}.xml
           retention-days: 3
 
   # ---------------------------------------------------------------------------
