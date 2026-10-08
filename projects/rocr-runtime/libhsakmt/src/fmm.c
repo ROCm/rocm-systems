@@ -480,6 +480,11 @@ static inline HsaSharedMemoryHandle *to_hsa_shared_memory_handle(
 }
 
 static int __fmm_release(HsaKFDContext *ctx, vm_object_t *object, manageable_aperture_t *aperture);
+static int __fmm_release_locked(HsaKFDContext *ctx, vm_object_t *object,
+				manageable_aperture_t *aperture);
+static int _fmm_unmap_from_gpu(HsaKFDContext *ctx, manageable_aperture_t *aperture,
+			       void *address, uint32_t *device_ids_array,
+			       uint32_t device_ids_array_size, vm_object_t *obj);
 static int _fmm_unmap_from_gpu_scratch(HsaKFDContext *ctx, uint32_t gpu_id,
 				       manageable_aperture_t *aperture, void *address);
 static void print_device_id_array(uint32_t *device_id_array, uint32_t device_id_array_size);
@@ -1051,6 +1056,67 @@ static void aperture_release_area(manageable_aperture_t *app, void *address,
 				  uint64_t MemorySizeInBytes)
 {
 	app->ops->release_area(app, address, MemorySizeInBytes);
+}
+
+/*
+ * mmap apertures reserve with MAP_FIXED_NOREPLACE or a kernel-chosen address,
+ * so a successful reservation proves no CPU mapping existed in [mem, mem+size).
+ * A userptr registration with a page in that range pins host pages that are
+ * gone, and since userptrs are looked up first in mmap apertures it would
+ * shadow the new object. Unmap and release such registrations, all
+ * references at once, before the caller publishes its object.
+ * Caller holds app->fmm_mutex.
+ */
+static int fmm_retire_stale_userptrs(HsaKFDContext *ctx,
+				     manageable_aperture_t *app,
+				     void *mem, uint64_t size)
+{
+	uint64_t start = (uint64_t)mem;
+	uint64_t end = PAGE_ALIGN_UP(start + size);
+	rbtree_node_t *n = rbtree_min_max(&app->user_tree, LEFT);
+	int ret;
+
+	while (n) {
+		vm_object_t *obj = vm_object_entry(n, 1);
+		uint64_t ustart = (uint64_t)obj->userptr & ~(uint64_t)(PAGE_SIZE - 1);
+		uint64_t uend = PAGE_ALIGN_UP((uint64_t)obj->userptr + obj->userptr_size);
+
+		/* user_tree is ordered by userptr; fetch next before removal */
+		n = hsakmt_rbtree_next(&app->user_tree, n);
+		if (ustart >= end)
+			break;
+		if (uend <= start)
+			continue;
+
+		if (obj->mapped_device_id_array_size > 0) {
+			obj->mapping_count = 1;
+			ret = _fmm_unmap_from_gpu(ctx, app, obj->start, NULL, 0, obj);
+			if (ret)
+				return ret;
+		}
+		obj->registration_count = 1;
+		ret = __fmm_release_locked(ctx, obj, app);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+/* Reserve VA for a new object. Caller holds app->fmm_mutex. */
+static void *aperture_reserve_area(HsaKFDContext *ctx, manageable_aperture_t *app,
+				   void *address, uint64_t size, uint64_t align)
+{
+	void *mem = aperture_allocate_area_aligned(app, address, size, align);
+
+	if (mem && app->ops == &mmap_aperture_ops &&
+	    fmm_retire_stale_userptrs(ctx, app, mem, size)) {
+		pr_err("Failed to retire stale userptr overlapping %p\n", mem);
+		aperture_release_area(app, mem, size);
+		return NULL;
+	}
+
+	return mem;
 }
 
 /* returns 0 on success. Assumes, that fmm_mutex is locked on entry */
@@ -2343,7 +2409,7 @@ void *hsakmt_fmm_allocate_scratch(HsaKFDContext *ctx,
 	/* Allocate address space for scratch backing, 64KB aligned */
 	if (hsakmt_is_dgpu) {
 		pthread_mutex_lock(&fmm_ctx->svm.dgpu_aperture->fmm_mutex);
-		mem = aperture_allocate_area_aligned(
+		mem = aperture_reserve_area(ctx,
 			fmm_ctx->svm.dgpu_aperture, address,
 			aligned_size, SCRATCH_ALIGN);
 		pthread_mutex_unlock(&fmm_ctx->svm.dgpu_aperture->fmm_mutex);
@@ -2395,7 +2461,7 @@ static void *__fmm_allocate_device(HsaKFDContext *ctx,
 
 	/* Allocate address space */
 	pthread_mutex_lock(&aperture->fmm_mutex);
-	mem = aperture_allocate_area_aligned(aperture, address, MemorySizeInBytes, alignment);
+	mem = aperture_reserve_area(ctx, aperture, address, MemorySizeInBytes, alignment);
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 
 	if (!mem)
@@ -2441,7 +2507,7 @@ static void *fmm_map_to_cpu(void *mem, uint64_t size, bool host_access,
 	return ret;
 }
 
-static void *fmm_allocate_va(uint32_t gpu_id, void *address, uint64_t size,
+static void *fmm_allocate_va(HsaKFDContext *ctx, uint32_t gpu_id, void *address, uint64_t size,
 			manageable_aperture_t *aperture, uint64_t alignment, HsaMemFlags mflags)
 {
 	void *mem = NULL;
@@ -2453,7 +2519,7 @@ static void *fmm_allocate_va(uint32_t gpu_id, void *address, uint64_t size,
 
 	/* Allocate address space */
 	pthread_mutex_lock(&aperture->fmm_mutex);
-	mem = aperture_allocate_area_aligned(aperture, address, size, alignment);
+	mem = aperture_reserve_area(ctx, aperture, address, size, alignment);
 
 	if (mem) {
 		/* Assign handle 0 to vm_obj since no memory allocated yet */
@@ -2627,7 +2693,7 @@ void *hsakmt_fmm_allocate_device(HsaKFDContext *ctx,
 
 	/* special case for va allocation without vram alloc */
 	if (mflags.ui32.OnlyAddress)
-		return fmm_allocate_va(gpu_id, address, size, aperture, alignment, mflags);
+		return fmm_allocate_va(ctx, gpu_id, address, size, aperture, alignment, mflags);
 
 	/* special case for vram allocation without addr */
 	if(mflags.ui32.NoAddress)
@@ -2912,7 +2978,7 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 
 	/* special case for va allocation without real memory alloc */
 	if (mflags.ui32.OnlyAddress)
-		return fmm_allocate_va(gpu_id, address, size, aperture, alignment, mflags);
+		return fmm_allocate_va(ctx, gpu_id, address, size, aperture, alignment, mflags);
 
 	/* KFD refuses userptr on a node in recoverable-fault mode: evicting a
 	 * userptr BO invalidates its PTEs instead of preempting the queues,
@@ -2935,7 +3001,7 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 
 		/* Allocate address space */
 		pthread_mutex_lock(&aperture->fmm_mutex);
-		mem = aperture_allocate_area_aligned(aperture, address, size, alignment);
+		mem = aperture_reserve_area(ctx, aperture, address, size, alignment);
 		pthread_mutex_unlock(&aperture->fmm_mutex);
 		if (!mem)
 			return NULL;
@@ -3050,7 +3116,8 @@ void *hsakmt_fmm_allocate_host(HsaKFDContext *ctx,
 	return fmm_allocate_host_cpu(ctx, address, MemorySizeInBytes, mflags);
 }
 
-static int __fmm_release(HsaKFDContext *ctx,
+/* Caller holds aperture->fmm_mutex. */
+static int __fmm_release_locked(HsaKFDContext *ctx,
 			vm_object_t *object, manageable_aperture_t *aperture)
 {
 	struct kfd_ioctl_free_memory_of_gpu_args args = {0};
@@ -3060,14 +3127,10 @@ static int __fmm_release(HsaKFDContext *ctx,
 	if (!object)
 		return -EINVAL;
 
-	pthread_mutex_lock(&aperture->fmm_mutex);
-
 	if (object->userptr) {
 		object->registration_count--;
-		if (object->registration_count > 0) {
-			pthread_mutex_unlock(&aperture->fmm_mutex);
+		if (object->registration_count > 0)
 			return 0;
-		}
 	}
 
 	/* If memory is user memory and it's still GPU mapped, munmap
@@ -3084,7 +3147,7 @@ static int __fmm_release(HsaKFDContext *ctx,
 	}
 
 	if (ret)
-		goto err_free_mem_failed;
+		return ret;
 
 	if (object->is_svm_paged) {
 		/* Paged host memory backed by SVM is registered through
@@ -3117,7 +3180,16 @@ static int __fmm_release(HsaKFDContext *ctx,
 	aperture_release_area(aperture, object->start, object->size);
 	vm_remove_object(aperture, object);
 
-err_free_mem_failed:
+	return 0;
+}
+
+static int __fmm_release(HsaKFDContext *ctx,
+			vm_object_t *object, manageable_aperture_t *aperture)
+{
+	int ret;
+
+	pthread_mutex_lock(&aperture->fmm_mutex);
+	ret = __fmm_release_locked(ctx, object, aperture);
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 	return ret;
 }
@@ -5057,7 +5129,7 @@ HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HsaKFDContext *ctx,
 	if (!aperture_is_valid(aperture->base, aperture->limit))
 		goto error_free_metadata;
 	pthread_mutex_lock(&aperture->fmm_mutex);
-	mem = aperture_allocate_area_aligned(aperture, NULL, infoArgs.size,
+	mem = aperture_reserve_area(ctx, aperture, NULL, infoArgs.size,
 					     IMAGE_ALIGN);
 	if (!mem) {
 		pthread_mutex_unlock(&aperture->fmm_mutex);
@@ -5264,8 +5336,8 @@ HSAKMT_STATUS hsakmt_fmm_register_shared_memory(HsaKFDContext *ctx,
 	}
 
 	pthread_mutex_lock(&aperture->fmm_mutex);
-	reservedMem = aperture_allocate_area(aperture, NULL,
-			(SizeInPages << PAGE_SHIFT));
+	reservedMem = aperture_reserve_area(ctx, aperture, NULL,
+			(SizeInPages << PAGE_SHIFT), 0);
 	if (!reservedMem) {
 		err = HSAKMT_STATUS_NO_MEMORY;
 		goto err_free_buffer;
