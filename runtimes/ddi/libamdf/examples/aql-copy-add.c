@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 /* Direct AQL execution qualification for the GFX1201 Linux KFD provider.

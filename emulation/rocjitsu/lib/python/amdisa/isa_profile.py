@@ -1194,8 +1194,18 @@ _FLAT_MODIFIERS_GLC = [
     EncodingModifier('slc'),
 ]
 
+# RDNA address helpers also accept 0x7f as a legacy no-offset sentinel;
+# CDNA5 reads EXEC_HI for that selector.
+_SMEM_REGISTER_OFFSET_CDNA5 = 'inst->soffset != OPR_SMEM_OFFSET_NULL'
+_SMEM_REGISTER_OFFSET_RDNA = _SMEM_REGISTER_OFFSET_CDNA5 + ' && inst->soffset != 0x7f'
+
 # GFX10/GFX11 (RDNA1/2/3/3.5): GLC+DLC+SLC; SMEM has no soffset_en/imm.
 _SMEM_MODIFIERS_GLC_DLC = [
+    EncodingModifier(
+        'offset',
+        is_offset=True,
+        condition=_SMEM_REGISTER_OFFSET_RDNA + ' && inst->offset',
+    ),
     EncodingModifier('glc'),
     EncodingModifier('dlc'),
 ]
@@ -1228,6 +1238,20 @@ _FLAT_MODIFIERS_GLC_DLC = [
 # GFX12 (RDNA4): encoding-specific modifiers beyond the data-driven SCOPE+TH
 # cache policy emitted for every encoding that carries op/scope/th fields.
 _SMEM_MODIFIERS_RDNA4 = [
+    EncodingModifier(
+        'ioffset',
+        is_offset=True,
+        condition=_SMEM_REGISTER_OFFSET_RDNA + ' && inst->ioffset',
+    ),
+    EncodingModifier('nv'),
+]
+
+_SMEM_MODIFIERS_CDNA5 = [
+    EncodingModifier(
+        'ioffset',
+        is_offset=True,
+        condition=_SMEM_REGISTER_OFFSET_CDNA5 + ' && inst->ioffset',
+    ),
     EncodingModifier('nv'),
 ]
 
@@ -1667,15 +1691,21 @@ class _AmdgpuProfileBase(IsaProfile):
 
         When ``None``, the ISA uses the three-field CDNA model:
         ``soffset_en``, ``imm``, and ``offset``/``soffset``.  When a
-        string (e.g. ``'offset'`` or ``'ioffset'``), the generated
-        ``make_smem_offset`` helper always returns
-        ``enc-><field>`` directly with no conditional logic.
+        string (e.g. ``'offset'`` or ``'ioffset'``), the ISA adds that
+        immediate to the independent ``soffset`` register. The operand
+        model exposes the register when present and renders the immediate
+        as an offset modifier; otherwise the immediate is the operand.
 
         CDNA1/2/3/4 → ``None`` (three-field model).
         RDNA1/2/3/3.5 → ``'offset'``.
-        RDNA4 → ``'ioffset'``.
+        RDNA4/CDNA5 → ``'ioffset'``.
         """
         return None
+
+    @property
+    def smem_register_offset_condition(self) -> str:
+        """C++ predicate shared by direct-offset operands and modifier rendering."""
+        return _SMEM_REGISTER_OFFSET_RDNA
 
     @property
     def global_addtid_offset_expr(self) -> str:
@@ -2230,6 +2260,11 @@ class Rdna3Profile(_AmdgpuProfileBase):
       ``gen_vopd`` after XML parsing skips normal instruction generation.
     - Reserved field omissions (version 1.0.0): synthesized by the parser.
     """
+
+    def saddr_null_selector_expr(self, enc_name: str) -> str | None:
+        if enc_name.upper() == 'ENC_FLAT':
+            return '0x7C'
+        return super().saddr_null_selector_expr(enc_name)
 
     _FLAT_SEGMENTS = frozenset({'GLOBAL', 'SCRATCH'})
 
@@ -2861,6 +2896,15 @@ class Cdna5Profile(Rdna4Profile):
     """
 
     @property
+    def smem_register_offset_condition(self) -> str:
+        return _SMEM_REGISTER_OFFSET_CDNA5
+
+    def encoding_modifiers(self, enc_name: str) -> list[EncodingModifier]:
+        if enc_name.upper() == 'ENC_SMEM':
+            return _SMEM_MODIFIERS_CDNA5
+        return super().encoding_modifiers(enc_name)
+
+    @property
     def atomic_source_nan_first(self) -> bool:
         # Preserve the existing L2 policy until qualified on CDNA5 hardware.
         return False
@@ -2911,10 +2955,6 @@ class Cdna5Profile(Rdna4Profile):
     def semantic_class_overrides(self) -> dict[str, str]:
         return {
             'DS_STORE_ADDTID_B32': 'ds_write_addtid',
-            'DS_STOREXCHG_2ADDR_RTN_B32': 'ds_atomic2',
-            'DS_STOREXCHG_2ADDR_RTN_B64': 'ds_atomic2',
-            'DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32': 'ds_atomic2',
-            'DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64': 'ds_atomic2',
         }
 
     @property

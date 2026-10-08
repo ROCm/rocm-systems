@@ -57,13 +57,6 @@ on:
         type: string
         required: false
         default: 'rccl'
-      baseline_stack:
-        description: >-
-          Stack held at its configured ref rather than PR head (mode=pr), for
-          the perf lane to measure against. Applies to both phases.
-        type: string
-        required: false
-        default: ''
       build_job:
         description: >-
           coco job key compiled with --build-only before `job` runs (mode=pr).
@@ -168,12 +161,8 @@ jobs:
             echo "dir=${PR_DIR}" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
-          # initialise_plugins() must precede load_job_config, or plugin-typed
-          # jobs (rccl_test) fail config validation.
           stage_dir=$("${COCO_VENV}/bin/python3" -c '
           import os
-          from coco.core.registry import initialise_plugins
-          initialise_plugins()
           from coco.core.config import load_job_config
           print(load_job_config(os.environ["JOB"]).advanced.stage_dir or "")
           ')
@@ -189,7 +178,6 @@ jobs:
           MODE: ${{ inputs.mode }}
           JOB: ${{ inputs.job }}
           BUILD_JOB: ${{ inputs.build_job }}
-          BASELINE_STACK: ${{ inputs.baseline_stack }}
           TRIGGER_KIND: ${{ inputs.trigger_kind }}
           COCO_ARGS: ${{ inputs.coco_args }}
           PR_NUMBER: ${{ inputs.pr_number }}
@@ -226,6 +214,15 @@ jobs:
             echo "No build or fetch failures in $(basename "${log}")."
           }
 
+          # The build job and the smoke job it feeds can declare different baselines.
+          job_baseline() {
+            "${COCO_VENV}/bin/python3" -c '
+          import sys
+          from coco.core.config import load_job_config
+          print(load_job_config(sys.argv[1]).comparison.baseline)
+          ' "$1"
+          }
+
           coco_pr() {
             local job="$1" log="$2"
             shift 2
@@ -252,16 +249,13 @@ jobs:
               echo "::error::mode=pr requires a full 40-hex pr_sha"
               exit 1
             fi
-            baseline=()
-            if [[ -n "${BASELINE_STACK}" ]]; then
-              baseline+=(--baseline-stack "${BASELINE_STACK}")
-            fi
             # Superset first, into the same -o tree the test pass reads its
             # stacks back out of.
             if [[ -n "${BUILD_JOB}" ]]; then
-              coco_pr "${BUILD_JOB}" "${BUILD_LOG}" --build-only ${baseline[@]+"${baseline[@]}"}
+              coco_pr "${BUILD_JOB}" "${BUILD_LOG}" --build-only \
+                --baseline-stack "$(job_baseline "${BUILD_JOB}")"
             fi
-            coco_pr "${JOB}" "${LOG_FILE}" ${baseline[@]+"${baseline[@]}"}
+            coco_pr "${JOB}" "${LOG_FILE}" --baseline-stack "$(job_baseline "${JOB}")"
           elif [[ "${MODE}" == 'run' ]]; then
             echo "==> coco run --job ${JOB} --trigger-kind ${TRIGGER_KIND} ${COCO_ARGS}"
             "${COCO_VENV}/bin/coco" run \

@@ -4588,6 +4588,37 @@
           }
         }
       ]
+    },
+    "symmetric_kernel_mpi_8rank": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "description": "Symmetric ReduceScatter, AllReduce and AllGather partitioning and kernel selection correctness on 8 co-located ranks. Requires NCCL_CUMEM_ENABLE=1 for symmetric window registration.",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "HSA_NO_SCRATCH_RECLAIM": "1"
+      },
+      "tests": [
+        {
+          "name": "Symk_CountSweep",
+          "description": "ReduceScatter, AllReduce and AllGather across LL and deep-path sizes, including partial final chunk waves",
+          "test_filter": "SymmetricKernelCorruptionTest.CountSweep_PartitioningAndSlots"
+        },
+        {
+          "name": "Symk_MisalignedPacks",
+          "description": "ReduceScatter, AllReduce and AllGather with a 4-byte but not 16-byte aligned relative buffer offset",
+          "test_filter": "SymmetricKernelCorruptionTest.MisalignedBuffers_FourBytePackTier"
+        },
+        {
+          "name": "Symk_AllGatherStoreCrossover",
+          "description": "AllGather switches from LL to the store kernel at 4 MB on gfx950, skipped on other architectures",
+          "test_filter": "SymmetricKernelCorruptionTest.AllGather_StoreKernelFrom4MB"
+        }
+      ]
     }
   },
   "test_suites": [
@@ -5315,6 +5346,12 @@
       "name": "Symmetric Abort + CheckMode Tests - Single Node",
       "description": "NCCL_CHECK_MODE validation and symmetric-kernel abort (AICOMRCCL-806)",
       "config": "symmetric_abort_checkmode_tests",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric Kernels (8-rank)",
+      "description": "Symmetric ReduceScatter, AllReduce and AllGather partitioning and buffer-alignment correctness on 8 co-located ranks (NCCL_CUMEM_ENABLE=1)",
+      "config": "symmetric_kernel_mpi_8rank",
       "enabled": true
     }
   ]
