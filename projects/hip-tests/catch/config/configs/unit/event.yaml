@@ -43,6 +43,9 @@ event:
   Unit_hipEventElapsedTime_Verify_Capture:
     <<: *level_2
     tags: [synchronization]
+  Unit_hipEventElapsedTime_DeferredCollection:
+    <<: *level_2
+    tags: [synchronization, P1]
   Unit_hipEventRecord:
     <<: *level_2
     disabled: [amd_windows, amd_wsl]

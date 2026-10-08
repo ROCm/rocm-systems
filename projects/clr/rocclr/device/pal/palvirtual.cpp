@@ -884,8 +884,6 @@ VirtualGPU::VirtualGPU(Device& device)
       managedBuffer_(*this, device.settings().stagedXferSize_ + 32 * Ki),
       writeBuffer_(device, managedBuffer_, device.settings().stagedXferSize_),
       hwRing_(0),
-      readjustTimeGPU_(0),
-      lastTS_(nullptr),
       profileTs_(nullptr),
       vqHeader_(nullptr),
       virtualQueue_(nullptr),
@@ -3367,10 +3365,10 @@ void VirtualGPU::flush(amd::Command* list, bool wait) {
     }
 
     if (nullptr == cb) {
-      cb = new CommandBatch(list, events_, lastTS_);
+      cb = new CommandBatch(list, events_);
     } else {
       freeCbQueue_.pop();
-      cb->init(list, events_, lastTS_);
+      cb->init(list, events_);
     }
   }
 
@@ -3387,8 +3385,6 @@ void VirtualGPU::flush(amd::Command* list, bool wait) {
     }
   }
 
-  // Mark last TS as nullptr, so runtime won't process empty batches with the old TS
-  lastTS_ = nullptr;
   if (nullptr != cb) {
     cbQueue_.push(cb);
   }
@@ -3470,7 +3466,6 @@ bool VirtualGPU::waitAllEngines(CommandBatch* cb) {
 }
 
 void VirtualGPU::waitEventLock(CommandBatch* cb) {
-  bool earlyDone = true;
   GpuEvent eventsCopy[AllEngines];
 
   {
@@ -3478,11 +3473,11 @@ void VirtualGPU::waitEventLock(CommandBatch* cb) {
 
     GpuEvent* events = (cb == nullptr) ? events_ : cb->events_;
 
-    // The first loop is to flush all engines and/or check if
-    // engines are idle already
+    // The first loop is to flush all engines and retire the events
+    // of any engine that is idle already
     for (uint i = 0; i < AllEngines; ++i) {
       eventsCopy[i] = events[i];
-      earlyDone &= isDone(&events[i]);
+      isDone(&events[i]);
     }
 
     // Release all pinned memory
@@ -3493,35 +3488,11 @@ void VirtualGPU::waitEventLock(CommandBatch* cb) {
     waitForEvent(&eventsCopy[i]);
   }
 
-  // Get timestamp, incase readjustTimeGPU_ needs to be updated
-  uint64_t endTimeStampCPU = amd::Os::timeNanos();
-
   // Free resource cache if we have too many entries
   //! \note we do it here, when all engines are idle,
   // because Vista/Win7 idles GPU on a resource destruction
   static const size_t MinCacheEntries = 4096;
   dev().resourceCache().free(MinCacheEntries);
-
-  // Find the timestamp object of the last command in the batch
-  if (cb->lastTS_ != nullptr) {
-    // If earlyDone is TRUE, then CPU didn't wait for GPU.
-    // Thus the sync point between CPU and GPU is unclear and runtime
-    // will use an older adjustment value to maintain the same timeline
-    if (!earlyDone ||
-        //! \note Workaround for APU(s).
-        //! GPU-CPU timelines may go off too much, thus always
-        //! force calibration with the last batch in the list
-        (cbQueue_.size() <= 1) || (readjustTimeGPU_ == 0)) {
-      uint64_t startTimeStampGPU = 0;
-      uint64_t endTimeStampGPU = 0;
-
-      // Get the timestamp value of the last command in the batch
-      cb->lastTS_->value(&startTimeStampGPU, &endTimeStampGPU);
-
-      // Adjust the base time by the execution time
-      readjustTimeGPU_ = endTimeStampGPU - endTimeStampCPU;
-    }
-  }
 }
 
 bool VirtualGPU::allocConstantBuffers() {
@@ -3547,6 +3518,7 @@ bool VirtualGPU::allocConstantBuffers() {
 }
 
 void VirtualGPU::profilingBegin(amd::Command& command) {
+  profileTs_ = nullptr;
   // Is profiling enabled?
   if (command.profilingInfo().enabled_) {
     // Allocate a timestamp object from the cache
@@ -3567,9 +3539,7 @@ void VirtualGPU::profilingEnd(amd::Command& command) {
       !command.data().empty() ? reinterpret_cast<TimeStamp*>(command.data().back()) : nullptr;
   if (ts != nullptr) {
     // Check if the command actually did any GPU submission
-    if (ts->isValid()) {
-      lastTS_ = ts;
-    } else {
+    if (!ts->isValid()) {
       // Destroy the TimeStamp object
       tsCache_->freeTimeStamp(ts);
       command.data().clear();
@@ -3590,7 +3560,7 @@ bool VirtualGPU::profilingCollectResults(CommandBatch* cb, const amd::Event* wai
   // Wait for the last known GPU events on all engines
   waitEventLock(cb);
 
-  // Find the CPU base time of the entire command batch execution
+  // Fallback base time, used only if no command in the batch has a GPU timestamp
   uint64_t endTimeStamp = amd::Os::timeNanos();
   uint64_t startTimeStamp = endTimeStamp;
 
@@ -3606,8 +3576,6 @@ bool VirtualGPU::profilingCollectResults(CommandBatch* cb, const amd::Event* wai
 
     if (ts != nullptr) {
       ts->value(&startTimeStamp, &endTimeStamp);
-      endTimeStamp -= readjustTimeGPU_;
-      startTimeStamp -= readjustTimeGPU_;
       // Assign to endTimeStamp the start of the first valid command
       endTimeStamp = startTimeStamp;
       break;
@@ -3626,8 +3594,6 @@ bool VirtualGPU::profilingCollectResults(CommandBatch* cb, const amd::Event* wai
 
     if (ts != nullptr) {
       ts->value(&startTimeStamp, &endTimeStamp);
-      endTimeStamp -= readjustTimeGPU_;
-      startTimeStamp -= readjustTimeGPU_;
       // Destroy the TimeStamp object
       tsCache_->freeTimeStamp(ts);
       first->data().clear();
