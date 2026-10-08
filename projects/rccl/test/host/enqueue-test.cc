@@ -3869,6 +3869,37 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_SelectsTheCheapestScriptedCell) {
   EXPECT_EQ(NCCL_PROTO_LL, task.protocol) << "SIMPLE here means the table was not read";
 }
 
+// The per-call selection has to survive the argmin, not just narrow the table.
+// The sibling cases above stop at the cost table, so none of them would notice
+// topoGetAlgoInfo overwriting the winner. RING/LL is scripted strictly cheapest
+// and is NOT named, so an unfiltered argmin picks it; TREE/LL is the named row
+// and differs from the RING/SIMPLE defaults at :2573-2580, which keeps both the
+// "selection ignored" and "fell back to the default pair" outcomes red.
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_HonorsThePerCallAlgSelection) {
+  AlgoInfoComm cc;
+  auto task = CostTask(ncclFuncAllReduce);
+  CostTable tbl;
+  task.algMask = GeneralBit(NCCL_ALGO_TREE, NCCL_PROTO_LL);
+  g_topoGetAlgoTime = [](struct ncclComm*, int, int a, int p, size_t, int, float* t) {
+    if (t) {
+      *t = (a == NCCL_ALGO_RING && p == NCCL_PROTO_LL) ? 0.5f : 1.0f;
+    }
+    return ncclSuccess;
+  };
+
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, /*collNet=*/0,
+                                             /*nvls=*/0, /*numPipeOps=*/1,
+                                             /*userAlgoInput=*/0, tbl.ptr()));
+  // EXPECT, not ASSERT: a regression should report the selection too, not stop at the table.
+  EXPECT_TRUE(tbl.written(NCCL_ALGO_TREE, NCCL_PROTO_LL)) << "the named row must survive the filter";
+  EXPECT_FALSE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_LL)) << "the cheaper unnamed row must be blanked";
+
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(),
+                                         /*simInfo=*/nullptr));
+  EXPECT_EQ(NCCL_ALGO_TREE, task.algorithm) << "RING here means the selection did not reach the argmin";
+  EXPECT_EQ(NCCL_PROTO_LL, task.protocol) << "SIMPLE here means the default pair won";
+}
+
 // ===========================================================================
 // Seams whose comments promised a tested rejection path. Driving them here so
 // the promise holds; the remaining declared-but-undriven seams are marked in
