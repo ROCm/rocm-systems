@@ -2548,7 +2548,6 @@ void hrr_placement_after_event(PlaybackContext& ctx, uint16_t event_type,
                                 ? props.location.id : -1;
             std::unique_lock lk(ctx.map_mutex);
             ctx.pool_device[a->mem_pool] = dev;
-            ctx.pool_max_size[a->mem_pool] = props.maxSize;
             break;
         }
         case HRR_API_HIPDEVICEGETDEFAULTMEMPOOL:
@@ -3020,28 +3019,6 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     return r;
 }
 
-// A pool created with a maxSize refuses an allocation that would take it past
-// that, with hipErrorOutOfMemory. Unmapping placement's deferred frees gives
-// the pool nothing back, so that failure is not retried. Asked only when
-// placement is on and the allocation `r` ran out of memory.
-static bool hrr_pool_at_limit(PlaybackContext& ctx, hipError_t r, uint64_t rec_pool,
-                              hipMemPool_t pool, size_t size) {
-    if (r != hipErrorOutOfMemory || !hrr_placing(ctx)) return false;
-    size_t max = 0;
-    {
-        std::shared_lock lk(ctx.map_mutex);
-        auto it = ctx.pool_max_size.find(rec_pool);
-        if (it != ctx.pool_max_size.end()) max = it->second;
-    }
-    if (max == 0 || !pool) return false;
-    uint64_t high = 0;
-    if (hipMemPoolGetAttribute(pool, hipMemPoolAttrReservedMemHigh, &high) != hipSuccess) {
-        (void)hipGetLastError();
-        return false;
-    }
-    return high + size > max;
-}
-
 hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
                                            const uint8_t* pl) {
     const auto* a  = reinterpret_cast<const hrr_args_hipMallocFromPoolAsync*>(pl);
@@ -3060,14 +3037,14 @@ hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
     if (why) {
         hrr_placing(ctx)->fell_back(a->dev_ptr, orig_sz, "hipMallocFromPoolAsync", why);
         r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
-        if (!hrr_pool_at_limit(ctx, r, a->mem_pool, pool, pad_sz) && hrr_drain_for_retry(ctx, r))
+        if (hrr_drain_for_retry(ctx, r))
             r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
     } else if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocFromPoolAsync",
                                      stream, device, &live)) {
         pad_sz = orig_sz;
     } else {
         r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
-        if (!hrr_pool_at_limit(ctx, r, a->mem_pool, pool, pad_sz) && hrr_drain_for_retry(ctx, r))
+        if (hrr_drain_for_retry(ctx, r))
             r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
     }
     if (r == hipSuccess) {

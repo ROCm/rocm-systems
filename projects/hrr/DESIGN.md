@@ -1141,9 +1141,7 @@ is not placed runs out of memory, replay unmaps every deferred mapping and tries
 once more. It does not while a capture is open. The allocations retried this way
 are `hipMalloc`, `hipMallocManaged`, `hipExtMallocWithFlags`, `hipMallocAsync`,
 `hipMallocFromPoolAsync`, a region segment, a replayed `hipMemCreate`,
-`hipArrayCreate` and `hipArray3DCreate`. A `hipMallocFromPoolAsync` is not
-retried when its pool was created with a `maxSize` and the allocation would take
-it past that: the pool refuses it whatever replay unmaps. Not retried:
+`hipArrayCreate` and `hipArray3DCreate`. Not retried:
 `hipMallocPitch`, `hipMemAllocPitch`, `hipMalloc3D`, `hipMallocArray`,
 `hipMalloc3DArray`, `hipMallocMipmappedArray` and `hipMipmappedArrayCreate`,
 whose handlers are generated; graph memory nodes, which allocate when the graph
