@@ -39,6 +39,7 @@
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/copy_fence.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
@@ -1106,16 +1107,32 @@ WriteInterceptor(const void* packets,
             // It does not block work already submitted to their queues. So wait for every queue on
             // this agent to finish its outstanding kernels before snapshotting. We wait outside the
             // queue-map lock so it does not block stream creation or destruction. See
-            // replay_drain_agent_or_fatal. Async SDMA copies bypass both the AQL queues and the
-            // replay gate and serializing those is a separate follow-up (TODO: mkuriche,
-            // amd-vkale).
+            // replay_drain_agent_or_fatal.
             replay_drain_agent_or_fatal(replay_agent);
+
+            // Async copies bypass both the AQL queues drained above and the replay lock. Stop new
+            // ones on this agent until the window ends and wait for the ones in flight; otherwise
+            // the snapshot captures a copy half-written and the restores write it back over bytes
+            // the copy has since delivered. A copy that cannot finish while this window holds the
+            // replay lock (it waits on a signal only a blocked dispatch would raise) declines
+            // replay.
+            const bool copies_fenced =
+                kernel_replay::copy_fence::open_window(replay_agent, std::chrono::seconds{5});
+            auto _copy_fence_guard = common::scope_destructor{[copies_fenced, replay_agent]() {
+                if(copies_fenced) kernel_replay::copy_fence::close_window(replay_agent);
+            }};
+            if(!copies_fenced)
+                LOG_FIRST_N(WARNING, 1)
+                    << "kernel replay: async copies on this agent did not complete within 5 s; "
+                       "running this dispatch once without replay";
 
             // Save this agent's tracked device allocations so every pass runs against identical
             // inputs. snap() returns ok=false if it could not capture the complete set (host memory
             // pressure, a failed copy, or module-scope variables it could not enumerate). It logs
             // which of those it hit.
-            const auto snapshot = kernel_replay::memory_snapshot::snap(replay_agent);
+            auto snapshot = copies_fenced ? kernel_replay::memory_snapshot::snap(replay_agent)
+                                          : kernel_replay::memory_snapshot::device_snapshot_t{};
+            if(!copies_fenced) snapshot.ok = false;
 
             // Snapshot incomplete: restoring a partial snapshot between passes would corrupt
             // application data, so decline replay. Close the CONFIG sequence, free our drain

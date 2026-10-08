@@ -51,6 +51,7 @@
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/copy_fence.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
@@ -1593,6 +1594,8 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::counters::device_counting_service_hsa_registration();
 
         rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
+        // After async_copy_init, so the fence is the outermost wrapper and sees every copy first.
+        rocprofiler::kernel_replay::copy_fence_init(hsa_api_table->amd_ext_, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->core_, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->amd_ext_, lib_instance);
         rocprofiler::kernel_replay::memory_tracker_init(hsa_api_table->core_, lib_instance);
