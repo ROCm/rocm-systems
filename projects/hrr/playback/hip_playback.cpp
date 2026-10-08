@@ -2238,18 +2238,20 @@ static void hrr_zero_init_alloc(PlaybackContext& ctx, void* live, size_t sz) {
 
 // ---- Capture-address placement ---------------------------------------------
 
-// Map a recorded allocation at its recorded address on the current device.
-// False when placement is off or this allocation has to fall back, in which
-// case the caller allocates the way it always did. A placed allocation is
-// never padded: the recording had nothing after it but the next allocation,
-// and that one is placed too.
+// The placement when it is on, nullptr otherwise.
 static hrr::VaPlacement* hrr_placing(PlaybackContext& ctx) {
     hrr::VaPlacement* p = ctx.placement.get();
     return p && p->active() ? p : nullptr;
 }
 
-// `stream` is the live stream of a stream-ordered allocation, nullptr for the
-// others: taking back a mapping freed on another stream orders after its free.
+// Map a recorded allocation at its recorded address on `device`. A negative
+// `device` means the stream's own device with a stream, and the current
+// device only without one. `stream` is the live stream of a stream-ordered
+// allocation, nullptr for the others: taking back a mapping freed on another
+// stream orders after its free. False when placement is off or this
+// allocation has to fall back, in which case the caller allocates the way it
+// always did. A placed allocation is never padded: the recording had nothing
+// after it but the next allocation, and that one is placed too.
 static bool hrr_place_alloc(PlaybackContext& ctx, uint64_t rec, size_t size,
                             const char* api, void** live, int device = -1,
                             const hipStream_t* stream = nullptr) {

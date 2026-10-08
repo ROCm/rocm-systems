@@ -1115,8 +1115,9 @@ An allocation over a deferred mapping is handled three ways:
 - From the same first page on the same device, and the same size in pages: the
   allocation takes the mapping back as it is. A stream-ordered allocation also
   takes back a mapping it fits in whose recorded size is up to 9/8 of its own in
-  bytes, keeping the mapping's end and size, as the pool hands back a freed block
-  up to 9/8 of the request in bytes and keeps the whole block. `hipMalloc`,
+  bytes, keeping the mapping's end and the larger of the two sizes, as the pool
+  hands back a freed block up to 9/8 of the request in bytes and keeps the whole
+  block. `hipMalloc`,
   `hipExtMallocWithFlags` and a region segment do not come from that pool, so
   they take back only the same size; keeping a larger mapping would make a later
   allocation in its tail fall back. No unmap and no new map. The recording's

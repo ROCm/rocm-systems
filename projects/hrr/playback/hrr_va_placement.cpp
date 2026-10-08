@@ -479,12 +479,12 @@ bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
             // mapping would only make a later allocation in its tail fall
             // back. Take the mapping back as it is, keeping its end and the
             // larger of the two sizes, as the pool kept the whole block. That
-            // needs no unmap, so no device-wide wait. The recording's pool reused the block only
-            // once the free was done, or ordered after it, so replay orders
-            // the allocation after the free too: nothing to do on the stream
-            // that freed it; on another, or for an allocation with no stream,
-            // wait for the event the free left, unless a capture is open,
-            // where that wait would sync inside it.
+            // needs no unmap, so no device-wide wait. The recording's pool
+            // reused the block only once the free was done, or ordered after
+            // it, so replay orders the allocation after the free too: nothing
+            // to do on the stream that freed it; on another, or for an
+            // allocation with no stream, wait for the event the free left,
+            // unless a capture is open, where that wait would sync inside it.
             const bool fits = stream ? pe <= d.end && d.bytes * 8 <= uint64_t(size) * 9
                                      : pe == d.end;
             const bool same_stream =
