@@ -645,22 +645,12 @@ rocpd_processor_t::handle(const hipfile_pmc_sample& hipfile_sample)
 {
     namespace collector = pmc::collectors::hipfile;
 
-    const auto*  name         = trait::name<category::hipfile>::value;
-    const auto&  process_info = m_metadata->get_process_info();
-    const agent* agent_ptr    = nullptr;
-    try
-    {
-        agent_ptr = &m_agent_manager->get_agent_by_type_index(hipfile_sample.device_id,
-                                                              agent_type::gpu);
-    } catch(const std::out_of_range& e)
-    {
-        LOG_WARNING(
-            "hipFile PMC sample skipped: agent lookup failed for device_id={}: {}",
-            hipfile_sample.device_id, e.what());
-        return;
-    }
+    const auto* name         = trait::name<category::hipfile>::value;
+    const auto& process_info = m_metadata->get_process_info();
+    const auto& agent_ref    = m_agent_manager->get_agent_by_type_index(
+        hipfile_sample.device_id, agent_type::gpu);
 
-    const auto agent_uid = make_agent_uid(*agent_ptr);
+    const auto agent_uid = make_agent_uid(agent_ref);
     const auto event     = make_event(0, 0, 0, name);
 
     const auto enabled = hipfile_sample.enabled_metric.value;
@@ -951,6 +941,10 @@ rocpd_processor_t::handle(const kfd_sample& kfd)
     auto const& n_info       = node_info::get_instance();
     auto const  process_info = m_metadata->get_process_info();
 
+    // Resolve the agent first so a lookup failure leaves no partial region behind.
+    const auto& agent_ref = m_agent_manager->get_agent_by_type_index(
+        kfd.device_id, static_cast<agent_type>(kfd.device_type));
+
     auto event    = make_event(0, 0, 0, kfd.category.data());
     event.extdata = kfd.event_metadata;
 
@@ -974,40 +968,29 @@ rocpd_processor_t::handle(const kfd_sample& kfd)
     auto const env = make_trace_env(n_info.id, process_info.pid, kfd.thread_id);
     m_writer->insert_region_data(region, env);
 
-    try
+    profiler_hub::writer_types::pmc_event_data_t pmc_data;
+    pmc_data.event = event;
+    pmc_data.value = kfd.value;
+
+    profiler_hub::writer_types::track_info_t track;
+    track.name       = kfd.track_name;
+    track.node_id    = n_info.id;
+    track.process_id = process_info.pid;
+    if(kfd.system_tid.has_value())
     {
-        const auto& agent_ref = m_agent_manager->get_agent_by_type_index(
-            kfd.device_id, static_cast<agent_type>(kfd.device_type));
-
-        profiler_hub::writer_types::pmc_event_data_t pmc_data;
-        pmc_data.event = event;
-        pmc_data.value = kfd.value;
-
-        profiler_hub::writer_types::track_info_t track;
-        track.name       = kfd.track_name;
-        track.node_id    = n_info.id;
-        track.process_id = process_info.pid;
-        if(kfd.system_tid.has_value())
-        {
-            track.thread_id = kfd.system_tid.value();
-        }
-
-        profiler_hub::writer_types::sample_data_t sample;
-        sample.timestamp = kfd.start_timestamp;
-        sample.track     = track;
-        pmc_data.sample  = sample;
-
-        profiler_hub::writer_types::pmc_info_unique_id_t pmc_uid;
-        pmc_uid.name     = kfd.pmc_info_name;
-        pmc_uid.agent_id = make_agent_uid(agent_ref);
-
-        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
-    } catch(const std::out_of_range& e)
-    {
-        LOG_WARNING("KFD PMC event skipped: agent lookup failed for device_id={}, "
-                    "device_type={}: {}",
-                    kfd.device_id, kfd.device_type, e.what());
+        track.thread_id = kfd.system_tid.value();
     }
+
+    profiler_hub::writer_types::sample_data_t sample;
+    sample.timestamp = kfd.start_timestamp;
+    sample.track     = track;
+    pmc_data.sample  = sample;
+
+    profiler_hub::writer_types::pmc_info_unique_id_t pmc_uid;
+    pmc_uid.name     = kfd.pmc_info_name;
+    pmc_uid.agent_id = make_agent_uid(agent_ref);
+
+    m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
 }
 
 rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& md,

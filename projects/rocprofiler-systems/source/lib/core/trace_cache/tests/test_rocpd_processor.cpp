@@ -1985,6 +1985,11 @@ TEST_F(rocpd_write_read_test_interface, handle_in_time_sample_pathway)
     EXPECT_EQ(pmc_info->target_arch, "GPU");
     EXPECT_EQ(pmc_info->description, "IN_TIME");
     EXPECT_EQ(pmc_info->agent_info, nullptr);
+    ASSERT_NE(pmc_info->node_info, nullptr);
+    EXPECT_EQ(pmc_info->node_info->hostname,
+              rocprofsys::node_info::get_instance().node_name);
+    ASSERT_NE(pmc_info->process_info, nullptr);
+    EXPECT_EQ(pmc_info->process_info->pid, k_pid);
 
     expect_reader_has_tracks({ "my_track" });
 }
@@ -2345,6 +2350,34 @@ TEST_F(rocpd_write_read_test_interface, handle_kfd_sample_pathway)
                             .expected_description = "KFD page fault counter" });
 
     expect_reader_has_tracks({ "KFD Events [GPU 0]" });
+}
+
+TEST_F(rocpd_write_read_test_interface, handle_kfd_sample_unknown_agent_throws)
+{
+    // Prepare: no agent matches the sample's device_id.
+    run_processor_and_open_reader(
+        { managed_gpu_agent() }, [](const std::shared_ptr<metadata_registry>&) {},
+        [](rocpd_processor_t& processor) {
+            constexpr std::uint32_t k_unknown_device_id = 999;
+            const kfd_sample        sample{ k_thread_id,
+                                     "KFD_PAGE_FAULT",
+                                     14000,
+                                     14500,
+                                     "",
+                                     "kfd",
+                                     "KFD Events [GPU 0]",
+                                     "{}",
+                                     k_unknown_device_id,
+                                     static_cast<std::uint8_t>(agent_type::gpu),
+                                     "kfd_page_fault",
+                                     1.0,
+                                     static_cast<std::int64_t>(k_thread_id) };
+            expect_throws_with_message<std::out_of_range>(
+                [&] { processor.handle(sample); }, "Agent not found for type index");
+        });
+
+    // Validate: the failed sample wrote no region.
+    EXPECT_TRUE(m_reader->get_events().empty());
 }
 
 // ---------------------------------------------------------------------------
