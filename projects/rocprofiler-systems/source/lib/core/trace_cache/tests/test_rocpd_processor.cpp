@@ -1080,18 +1080,12 @@ protected:
         constexpr std::uint64_t k_start_ts   = 3000;
         constexpr std::uint64_t k_end_ts     = 3100;
         constexpr std::uint64_t k_alloc_size = 131072;
-        return { k_start_ts,
-                 k_end_ts,
-                 k_thread_id,
-                 k_managed_gpu_handle,
-                 queue_id,
-                 static_cast<std::int32_t>(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY),
-                 operation,
-                 0,
-                 k_alloc_size,
-                 100,
-                 50,
-                 stream_id };
+        return { k_start_ts,   k_end_ts,
+                 k_thread_id,  k_managed_gpu_handle,
+                 queue_id,     "SCRATCH_MEMORY",
+                 operation,    0,
+                 k_alloc_size, 100,
+                 50,           stream_id };
     }
 
     static std::string extract_rocpd_uuid(const std::filesystem::path& db_path)
@@ -1727,21 +1721,18 @@ TEST_F(rocpd_write_read_test_interface, handle_memory_copy_unregistered_stream_t
     run_processor_and_open_reader(
         { managed_gpu_agent(), managed_cpu_agent() }, {},
         [](rocpd_processor_t& processor) {
-            const memory_copy_sample mcs{
-                6500,
-                7000,
-                k_thread_id,
-                k_managed_gpu_handle,
-                k_managed_cpu_handle,
-                static_cast<std::int32_t>(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY),
-                static_cast<std::int32_t>(ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE),
-                4096,
-                1,
-                0,
-                0x100000,
-                0x7F0000000000,
-                k_unregistered_stream_id
-            };
+            const memory_copy_sample mcs{ 6500,
+                                          7000,
+                                          k_thread_id,
+                                          k_managed_gpu_handle,
+                                          k_managed_cpu_handle,
+                                          "MEMORY_COPY_HOST_TO_DEVICE",
+                                          4096,
+                                          1,
+                                          0,
+                                          0x100000,
+                                          0x7F0000000000,
+                                          k_unregistered_stream_id };
             expect_throws_with_message<std::runtime_error>([&] { processor.handle(mcs); },
                                                            "Stream not registered");
         });
