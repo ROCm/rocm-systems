@@ -3383,7 +3383,7 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
   return false;
 }
 
-/// @brief Apply the F16 special cases before the shared modifier/writeback path.
+/// @brief Apply F16 DIV_FIXUP special cases before F32 modifiers and F16 narrowing.
 inline util::native<float> div_fixup_f16_promoted_simd(util::native<float> quotient,
                                                        util::native<float> denominator,
                                                        util::native<float> numerator,

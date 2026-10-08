@@ -1,7 +1,11 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Instruction policies shared by scalar, SIMD and SDWA output lowering."""
+"""Shared instruction classifications for FP lowering.
+
+F16_OPERATIONS currently covers TRANS only. CEIL/FLOOR source flushing uses
+INPUT_FLUSHED_ROUNDING; sema_lower.py handles arithmetic and conversions separately.
+"""
 
 from dataclasses import dataclass
 
@@ -15,7 +19,7 @@ FLUSH_NEAREST_F32_OPS = frozenset(
 
 @dataclass(frozen=True)
 class F16Operation:
-    """How a VALU F16 operation treats its source and its result.
+    """Independent source-flush and TRANS output properties of an F16 operation.
 
     ``calls`` are the helper spellings the semantics lowering uses for it.
     The two properties are decided separately, even where they coincide.
@@ -26,11 +30,12 @@ class F16Operation:
     # The source half is flushed under MODE at the register read, before it
     # is widened; the helper itself does not flush.
     flushed_source: bool
-    # Evaluated by the transcendental unit: the result is rounded to half
-    # before OMOD/CLAMP, with the TRANS-unit output policy.
+    # Select TRANS-unit OMOD overflow rounding. Round-before-OMOD also applies
+    # to migrated non-TRANS results; this flag does not select that ordering.
     transcendental: bool
 
 
+# TRANS entries only; other F16 source policies are selected outside this table.
 F16_OPERATIONS = (
     F16Operation(
         'V_LOG_F16', ('log', 'log2'), flushed_source=True, transcendental=True
@@ -45,7 +50,7 @@ F16_OPERATIONS = (
     F16Operation('V_COS_F16', ('cos',), flushed_source=True, transcendental=True),
 )
 
-# Instructions rounded to half before output modifiers, with the TRANS policy.
+# TRANS instructions selecting the TRANS output policy.
 F16_TRANSCENDENTAL_OPS = frozenset(
     op.instruction for op in F16_OPERATIONS if op.transcendental
 )
@@ -55,12 +60,12 @@ F16_TRANSCENDENTAL_CALLS = frozenset(
     call for op in F16_OPERATIONS if op.transcendental for call in op.calls
 )
 
-# Instructions whose F16 source is flushed before widening.
+# TRANS instructions whose F16 source is flushed before widening.
 F16_FLUSHED_SOURCE_OPS = frozenset(
     op.instruction for op in F16_OPERATIONS if op.flushed_source
 )
 
-# Helper calls whose F16 source the caller flushes before widening.
+# TRANS helper calls whose F16 source the caller flushes before widening.
 F16_FLUSHED_SOURCE_CALLS = frozenset(
     call for op in F16_OPERATIONS if op.flushed_source for call in op.calls
 )
