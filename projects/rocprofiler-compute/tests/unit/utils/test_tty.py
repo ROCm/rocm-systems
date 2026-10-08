@@ -33,7 +33,7 @@ from utils.utils_analysis import (
     build_call_trees,
     build_operator_summary,
 )
-from utils.utils_common import is_gfx115x, is_gfx1250
+from utils.utils_common import is_gfx115x, is_gfx120x, is_gfx1250
 
 TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 
@@ -647,6 +647,7 @@ def test_edge_cases_and_error_handling() -> None:
     "gpu_arch",
     [
         pytest.param("gfx1151", id="rdna35"),
+        pytest.param("gfx1201", id="rdna4"),
         pytest.param("gfx942", id="cdna"),
         pytest.param("gfx1250", id="gfx1250"),
     ],
@@ -658,7 +659,12 @@ def test_format_table_output_dispatches_memory_chart_renderer(
     """Memory Chart output uses the architecture renderer and shared heading."""
     calls: dict[str, dict] = {}
 
-    def gfx11_stub(mem_data: dict, *, chart_title: str) -> str:
+    def gfx11_stub(
+        mem_data: dict,
+        *,
+        chart_title: str,
+        gpu_arch: str | None = None,
+    ) -> str:
         calls["gfx11"] = {
             "mem_data": mem_data,
             "chart_title": chart_title,
@@ -712,7 +718,7 @@ def test_format_table_output_dispatches_memory_chart_renderer(
         gpu_arch=gpu_arch,
     )
 
-    if is_gfx115x(gpu_arch):
+    if is_gfx115x(gpu_arch) or is_gfx120x(gpu_arch):
         expected, return_value = "gfx11", "rendered RDNA3.5 memory chart"
     elif is_gfx1250(gpu_arch):
         expected, return_value = "gfx1250", "rendered gfx1250 memory chart"

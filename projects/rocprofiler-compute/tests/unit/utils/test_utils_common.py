@@ -1213,6 +1213,17 @@ def test_canonical_config_arch_maps_gfx115_variants_to_shared_dir():
     assert canonical_config_arch("gfx1152") == "gfx115x"
     assert canonical_config_arch("gfx1153") == "gfx115x"
     assert canonical_config_arch("gfx942") == "gfx942"
+    assert canonical_config_arch("gfx1201") == "gfx120x"
+    assert canonical_config_arch("gfx1250") == "gfx1250"
+
+
+@pytest.mark.misc
+def test_is_gfx120x_matches_rdna4_consumer_only():
+    assert utils_common.is_gfx120x("gfx1201")
+    assert utils_common.is_gfx120x("gfx1200")
+    assert not utils_common.is_gfx120x("gfx1250")
+    assert not utils_common.is_gfx120x("gfx1151")
+    assert not utils_common.is_gfx120x(None)
 
 
 @pytest.mark.misc
@@ -1221,3 +1232,135 @@ def test_is_gfx1250_matches_only_the_supported_architecture():
     assert not utils_common.is_gfx1250("gfx12500")
     assert not utils_common.is_gfx1250("gfx1251")
     assert not utils_common.is_gfx1250(None)
+
+
+def test_definitions_limited_to_agent_drops_builtin_duplicates_and_dependents():
+    sdk_config = {
+        "rocprofiler-sdk": {
+            "counters": [
+                {
+                    "name": "SQ_WAVES",
+                    "definitions": [
+                        {
+                            "architectures": ["gfx1201", "gfx1250"],
+                            "block": "SQ",
+                            "event": 4,
+                        }
+                    ],
+                },
+                {
+                    "name": "GL2C_MC_WRREQ",
+                    "definitions": [
+                        {
+                            "architectures": ["gfx1201", "gfx1250"],
+                            "block": "GL2C",
+                            "event": 7,
+                        }
+                    ],
+                },
+                {
+                    "name": "WRITE_SIZE",
+                    "definitions": [
+                        {
+                            "architectures": ["gfx1201"],
+                            "expression": (
+                                "((GL2C_MC_WRREQ_sum-GL2C_EA_WRREQ_64B_sum)*32"
+                                "+GL2C_EA_WRREQ_64B_sum*64)/1024"
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "name": "WriteSize",
+                    "definitions": [
+                        {
+                            "architectures": ["gfx1201"],
+                            "expression": "WRITE_SIZE",
+                        }
+                    ],
+                },
+                {
+                    "name": "GL2C_EA_RDREQ_96B_sum",
+                    "definitions": [
+                        {
+                            "architectures": ["gfx1201"],
+                            "expression": "reduce(GL2C_MC_WRREQ,sum)",
+                        }
+                    ],
+                },
+            ]
+        }
+    }
+
+    limited = utils_common.definitions_limited_to_agent(
+        sdk_config, "gfx1201", {"SQ_WAVES", "GL2C_EA_WRREQ_64B_sum"}
+    )
+
+    names = [counter["name"] for counter in limited["rocprofiler-sdk"]["counters"]]
+    assert names == ["GL2C_MC_WRREQ", "GL2C_EA_RDREQ_96B_sum"]
+    definition = limited["rocprofiler-sdk"]["counters"][0]["definitions"][0]
+    assert definition["architectures"] == ["gfx1201"]
+
+
+def test_definitions_limited_to_agent_keeps_installed_builtins():
+    sdk_config = {
+        "rocprofiler-sdk": {
+            "counters": [
+                {
+                    "name": "SQ_WAVES",
+                    "definitions": [
+                        {
+                            "architectures": ["gfx1201"],
+                            "block": "SQ",
+                            "event": 4,
+                        }
+                    ],
+                },
+                {
+                    "name": "CPC_STAT_BUSY",
+                    "definitions": [
+                        {
+                            "architectures": ["gfx1201", "gfx1250"],
+                            "block": "CPC",
+                            "event": 25,
+                        }
+                    ],
+                },
+                {
+                    "name": "Wavefronts",
+                    "definitions": [
+                        {
+                            "architectures": ["gfx1201"],
+                            "expression": "reduce(SQ_WAVES,sum)",
+                        }
+                    ],
+                },
+            ]
+        }
+    }
+    installed = {
+        "rocprofiler-sdk": {
+            "counters-schema-version": 1,
+            "counters": [
+                {
+                    "name": "SQ_WAVES",
+                    "definitions": [
+                        {
+                            "architectures": ["gfx1201"],
+                            "block": "SQ",
+                            "event": 4,
+                        }
+                    ],
+                }
+            ],
+        }
+    }
+
+    limited = utils_common.definitions_limited_to_agent(
+        sdk_config, "gfx1201", {"SQ_WAVES"}, installed
+    )
+
+    names = [counter["name"] for counter in limited["rocprofiler-sdk"]["counters"]]
+    assert names == ["SQ_WAVES", "CPC_STAT_BUSY", "Wavefronts"]
+    busy = limited["rocprofiler-sdk"]["counters"][1]
+    assert busy["definitions"][0]["architectures"] == ["gfx1201"]

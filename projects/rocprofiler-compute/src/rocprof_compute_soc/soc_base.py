@@ -32,7 +32,9 @@ from utils.utils_common import (
     canonical_config_arch,
     convert_metric_id_to_panel_info,
     create_temp_rocprofiler_metrics_path,
+    definitions_limited_to_agent,
     get_arch_alias_to_panel_id,
+    installed_sdk_counter_config,
     is_only_pc_sampling,
     is_tcc_channel_counter,
     parse_sets_yaml,
@@ -673,6 +675,16 @@ class OmniSoC_Base:
             encoding="utf-8",
         ) as filename:
             sdk_config = yaml.safe_load(filename)
+        agent_arch = self.get_arch()
+        if agent_arch:
+            sdk_config = definitions_limited_to_agent(
+                sdk_config,
+                agent_arch,
+                rocprofv3_avail_interface.builtin_counter_names(
+                    args.rocprofiler_sdk_tool_path
+                ),
+                installed_sdk_counter_config(args.rocprofiler_sdk_tool_path),
+            )
         os.environ["ROCPROFILER_METRICS_PATH"] = create_temp_rocprofiler_metrics_path(
             sdk_config
         )

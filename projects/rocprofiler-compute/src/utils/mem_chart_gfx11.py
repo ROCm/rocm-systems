@@ -38,6 +38,7 @@ from utils.mem_chart_common import (
     safe_float_sum,
     stack_metrics,
 )
+from utils.utils_common import is_gfx120x
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -387,6 +388,7 @@ def _build_cache_columns(
 def _build_memory_columns(
     metrics: dict[str, Any],
     std_arrows: dict[str, str],
+    memory_label: str = "DDR5/LPDDR5",
 ) -> tuple[Text, Panel, Text, Panel]:
     """GL2-GCEA edges, GCEA panel, DRAM edges, DRAM panel."""
     gl2_gcea_edges_text = build_bw_edges(
@@ -414,7 +416,7 @@ def _build_memory_columns(
 
     total = format_value(metrics["total_bw"], "Bytes/s")
     dram_content = stack_metrics(
-        "[dim]DDR5/LPDDR5[/dim]",
+        f"[dim]{memory_label}[/dim]",
         f"Total: [bold bright_green]{total}[/bold bright_green]",
     )
     dram_panel = build_ip_block("DRAM", _CACHE_PANEL_W, _TOTAL_H, dram_content)
@@ -445,8 +447,9 @@ def create_mem_chart_diagram(
         metrics, cu_arrows, std_arrows
     )
     gl1_panel, gl1_gl2_edges, gl2_panel = _build_cache_columns(metrics, std_arrows)
+    memory_label = "GDDR7" if is_gfx120x(gpu_arch) else "DDR5/LPDDR5"
     gl2_gcea_edges, gcea_panel, dram_edges, dram_panel = _build_memory_columns(
-        metrics, std_arrows
+        metrics, std_arrows, memory_label
     )
 
     # Assemble 11-column grid (edge columns use vertical middle alignment)

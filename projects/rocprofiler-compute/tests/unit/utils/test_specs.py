@@ -160,10 +160,11 @@ def test_kw_only_rejects_positional_arguments():
     "series, expected_cls",
     [
         ("RDNA3.5", MachineSpecsRDNA35),
+        ("RDNA4", MachineSpecsRDNA35),
         ("mi300", MachineSpecsCDNA),
         (None, MachineSpecsCDNA),
     ],
-    ids=["rdna35", "cdna", "unknown"],
+    ids=["rdna35", "rdna4", "cdna", "unknown"],
 )
 def test_spec_family_for_arch_dispatch(series, expected_cls):
     with patch.object(specs.mi_gpu_specs, "get_gpu_series", return_value=series):

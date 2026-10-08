@@ -512,6 +512,29 @@ mi_gpu_spec:
               physical: 6402
 
   #########################################################
+  # RDNA 4 family (gfx120x) - discrete dGPU
+  - gpu_series: rdna4
+    gpu_archs:
+      - gpu_arch: gfx1201
+        perfmon_config:
+          SQ: 8
+          TA: 2
+          GRBM: 2
+          CPC: 2
+          GCEA: 2
+          TCP: 4
+          SPI: 6
+          GL1A: 4
+          GL1C: 4
+          GL2A: 4
+          GL2C: 4
+        models:
+          - gpu_model: navi48
+            design:
+              memory_levels: ["LDS", "L0", "L1", "L2"]
+            chip_ids:
+              physical: 30032  # 0x7550 — Navi48 / Radeon RX 9070 XT
+  #########################################################
   # gfx1250 family
   - gpu_series: gfx1250_series
     gpu_archs:

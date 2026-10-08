@@ -113,6 +113,7 @@ class TestMIGPUSpecs:
             "gfx1151",
             "gfx1152",
             "gfx1153",
+            "gfx1201",
             "gfx908",
             None,
             "",

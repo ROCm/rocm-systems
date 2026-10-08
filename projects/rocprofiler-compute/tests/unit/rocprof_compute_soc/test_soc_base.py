@@ -570,9 +570,9 @@ def test_allocate_keeps_one_accum_counter_per_bucket(gfx1250_soc):
         assert len(accum_counters) <= 1
 
 
-@pytest.mark.parametrize("gpu_arch", ["gfx1151", "gfx1152", "gfx1153"])
+@pytest.mark.parametrize("gpu_arch", ["gfx1151", "gfx1152", "gfx1153", "gfx1201"])
 def test_same_bucket_priority_resolves_gfx115x_policy(gpu_arch):
-    """gfx115x parts share one profiling_counter_grouping_policy.yaml block."""
+    """gfx115x and gfx1201 share the same priority metric IDs."""
     soc = _make_soc(PERFMON_CONFIG, arch=gpu_arch)
     ids = soc._same_bucket_priority_metric_ids()
     assert "2.1.3" in ids

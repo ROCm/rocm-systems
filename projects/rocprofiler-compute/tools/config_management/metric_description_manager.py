@@ -43,6 +43,16 @@ def is_gfx115x_ip_variant(arch_name: str) -> bool:
     return bool(re.fullmatch(r"gfx115([0-9a-f]|x)", arch_name, re.IGNORECASE))
 
 
+def is_gfx120x_ip_variant(arch_name: str) -> bool:
+    """True for RDNA 4 consumer names (gfx1200 to gfx120f, and gfx120x)."""
+    return bool(re.fullmatch(r"gfx120([0-9a-f]|x)", arch_name, re.IGNORECASE))
+
+
+def uses_rdna35_metric_docs(arch_name: str) -> bool:
+    """gfx115x and gfx120x share the RDNA 3.5 panel-id documentation map."""
+    return is_gfx115x_ip_variant(arch_name) or is_gfx120x_ip_variant(arch_name)
+
+
 def is_gfx1250_arch(arch_name: str) -> bool:
     """Check if arch is gfx1250 to correctly use the gfx1250 analysis layout."""
     return arch_name == "gfx1250"
@@ -176,7 +186,7 @@ def format_yaml_scalar(value: str):
 
 def normalize_docs_section_name(arch_name: str, section_name: str) -> str:
     """Apply docs-only section name cleanup for selected architectures."""
-    if not is_gfx115x_ip_variant(arch_name):
+    if not uses_rdna35_metric_docs(arch_name):
         return section_name
 
     replacements = {
@@ -189,7 +199,7 @@ def normalize_docs_section_name(arch_name: str, section_name: str) -> str:
 
 def normalize_docs_metric_name(arch_name: str, metric_name: str) -> str:
     """Apply docs-only metric name cleanup for selected architectures."""
-    if not is_gfx115x_ip_variant(arch_name):
+    if not uses_rdna35_metric_docs(arch_name):
         return metric_name
 
     replacements = {
@@ -300,7 +310,7 @@ def panel_id_to_section(arch_name: str, table_id: int | None) -> str | None:
     """Resolve documentation section name for a metric_table id (arch-specific)."""
     if table_id is None:
         return None
-    if is_gfx115x_ip_variant(arch_name):
+    if uses_rdna35_metric_docs(arch_name):
         return RDNA35_PANEL_ID_TO_SECTION_BY_ARCH.get(table_id)
     if is_gfx1250_arch(arch_name):
         return GFX1250_PANEL_ID_TO_SECTION.get(table_id)

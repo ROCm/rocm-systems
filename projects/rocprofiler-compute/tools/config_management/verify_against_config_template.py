@@ -66,8 +66,18 @@ def is_gfx115x_ip_variant(arch_name: str) -> bool:
     return bool(re.fullmatch(r"gfx115([0-9a-f]|x)", arch_name, re.IGNORECASE))
 
 
+def is_gfx120x_ip_variant(arch_name: str) -> bool:
+    """True for RDNA 4 consumer dirs (gfx1200 to gfx120f, and gfx120x)."""
+    return bool(re.fullmatch(r"gfx120([0-9a-f]|x)", arch_name, re.IGNORECASE))
+
+
+def is_rdna_gfx11_template_arch(arch_name: str) -> bool:
+    """gfx115x and gfx120x share the gfx11 analysis template."""
+    return is_gfx115x_ip_variant(arch_name) or is_gfx120x_ip_variant(arch_name)
+
+
 def is_gfx12_ip_variant(arch_name: str) -> bool:
-    """True for GFX12 IP dirs: gfx12xx (e.g. gfx1250)."""
+    """True for GFX12 IP dirs that use the gfx12 template (e.g. gfx1250)."""
     return bool(re.fullmatch(r"gfx12[0-9a-f]{2}", arch_name, re.IGNORECASE))
 
 
@@ -395,7 +405,9 @@ def main() -> None:
 
     gfx11_panels: list[TemplatePanel] = []
     gfx11_by_id: dict[int, TemplatePanel] = {}
-    if any(is_gfx115x_ip_variant(p.name) for p in configs_dir.iterdir() if p.is_dir()):
+    if any(
+        is_rdna_gfx11_template_arch(p.name) for p in configs_dir.iterdir() if p.is_dir()
+    ):
         if not gfx11_template_path.is_file():
             print(
                 f"Error: gfx115x architecture(s) present but template missing: "
@@ -440,7 +452,7 @@ def main() -> None:
         if is_gfx12_ip_variant(arch_dir.name):
             tpl_panels, tpl_by_id = gfx12_panels, gfx12_by_id
             tpl_label = "gfx12"
-        elif is_gfx115x_ip_variant(arch_dir.name):
+        elif is_rdna_gfx11_template_arch(arch_dir.name):
             tpl_panels, tpl_by_id = gfx11_panels, gfx11_by_id
             tpl_label = "gfx11"
         else:

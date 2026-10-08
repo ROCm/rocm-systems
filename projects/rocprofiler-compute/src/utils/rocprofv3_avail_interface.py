@@ -49,6 +49,24 @@ def get_pc_sample_configs(
     return configs
 
 
+def builtin_counter_names(sdk_tool_path: Optional[str]) -> set[str]:
+    """Names rocprofv3 already provides, without our metrics file loaded."""
+    saved_metrics_path = os.environ.pop("ROCPROFILER_METRICS_PATH", None)
+    try:
+        per_agent = get_counters(sdk_tool_path)
+    finally:
+        if saved_metrics_path is not None:
+            os.environ["ROCPROFILER_METRICS_PATH"] = saved_metrics_path
+
+    names: set[str] = set()
+    for agent_counters in per_agent.values():
+        for counter in agent_counters:
+            name = getattr(counter, "name", None)
+            if isinstance(name, str):
+                names.add(name)
+    return names
+
+
 def get_counters(sdk_tool_path: Optional[str]) -> dict[str, Any]:
     """Return the avail module's per-agent counter listing."""
     # Load through ctypes first so the beta gate is applied before the avail

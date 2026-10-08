@@ -1,0 +1,15 @@
+# =============================================================================
+# RDNA 4 (gfx120x) - RDNA 4 Architecture System Information
+# =============================================================================
+# Provides system-level information about the GPU and kernel execution
+
+Panel Config:
+  id: 100
+  title: System Info
+  data source:
+  - raw_csv_table:
+      id: 101
+      title: System Info
+      source: sysinfo.csv
+      columnwise: true
+  metrics_description: {}

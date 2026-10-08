@@ -118,3 +118,16 @@ architectures:
       # 17.1.0 = panel 1700, table 1701 (GPU Utilization), metric index 0.
       "17.1.0":
         name: "GPU Busy"
+
+  # RDNA 4 (gfx120x): same priority metrics as gfx115x. Panels share the
+  # gfx11 template, so the metric ids match.
+  gfx120x:
+    same_bucket_priority_metric_ids:
+      "2.1.3":
+        name: "Wavefront Occupancy"
+      "8.3.0":
+        name: "Hit Rate (TCP Cache Performance)"
+      "11.3.0":
+        name: "Hit Rate (GL1C Cache Performance)"
+      "17.1.0":
+        name: "GPU Busy"

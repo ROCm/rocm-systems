@@ -26,10 +26,13 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.rocprofv3_avail_interface import builtin_counter_names
 from utils.utils_common import (
     capture_subprocess_output,
     create_temp_rocprofiler_metrics_path,
+    definitions_limited_to_agent,
     get_rocprof_cmd,
+    installed_sdk_counter_config,
     parse_pmc_perf,
     perform_attach_detach,
 )
@@ -161,6 +164,8 @@ def run_prof(
     ml_api_trace_enabled: bool = False,
     retain_rocpd_output: bool = False,
     extra_env: Optional[dict[str, str]] = None,
+    agent_arch: Optional[str] = None,
+    sdk_tool_path: Optional[str] = None,
 ) -> None:
     multiple_files = isinstance(fnames, list)
     if multiple_files and (
@@ -230,6 +235,13 @@ def run_prof(
                 sdk_config["rocprofiler-sdk"]["counters"].extend(
                     yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
                 )
+    if agent_arch:
+        sdk_config = definitions_limited_to_agent(
+            sdk_config,
+            agent_arch,
+            builtin_counter_names(sdk_tool_path),
+            installed_sdk_counter_config(sdk_tool_path),
+        )
     # Set counter definitions
     new_env["ROCPROFILER_METRICS_PATH"] = create_temp_rocprofiler_metrics_path(
         sdk_config
