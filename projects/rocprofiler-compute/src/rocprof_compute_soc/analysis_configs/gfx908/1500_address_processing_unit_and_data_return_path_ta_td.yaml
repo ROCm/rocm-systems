@@ -139,9 +139,9 @@ Panel Config:
           max: MAX(TD_COALESCABLE_WAVEFRONT_sum / $denom)
           unit: (Instructions + $normUnit)
         Read Instructions:
-          avg: SUM(TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum - TD_ATOMIC_WAVEFRONT_sum) / SUM($denom)
-          min: MIN((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum - TD_ATOMIC_WAVEFRONT_sum) / $denom)
-          max: MAX((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum - TD_ATOMIC_WAVEFRONT_sum) / $denom)
+          avg: COLLECT_SUM(_collect.td_read_load, _collect.td_read_store_atomic_corr)
+          min: None  # MIN(a/d)+MIN(b/d) is not MIN((a+b)/d)
+          max: None
           unit: (Instructions + $normUnit)
         Write Instructions:
           avg: SUM(TD_STORE_WAVEFRONT_sum) / SUM($denom)
@@ -153,6 +153,12 @@ Panel Config:
           min: MIN(TD_ATOMIC_WAVEFRONT_sum / $denom)
           max: MAX(TD_ATOMIC_WAVEFRONT_sum / $denom)
           unit: (Instructions + $normUnit)
+        _collect.td_read_load:
+          avg: SUM(TD_LOAD_WAVEFRONT_sum) / SUM($denom)
+          _collectable_id: collect.td_read_load
+        _collect.td_read_store_atomic_corr:
+          avg: SUM(-(TD_STORE_WAVEFRONT_sum + TD_ATOMIC_WAVEFRONT_sum)) / SUM($denom)
+          _collectable_id: collect.td_read_store_atomic_corr
   metrics_description:
     Address Processing Unit Busy: Percent of the total CU cycles the address processor
       was busy
