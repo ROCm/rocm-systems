@@ -159,11 +159,13 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
   }
   if (!IsSystem() && !is_windxg && (size > max_single_alloc_size_)) {
     // max_single_alloc_size_ is a discovery-time snapshot and may understate the
-    // device's current cap, so confirm against the driver's live figure before
-    // refusing. Reached only on a request the static check already rejected.
+    // device's current cap, so confirm against the agent's live free figure before
+    // refusing. That figure counts reclaimable cache, which the allocation path
+    // trims and retries against, and it is what applications are told is free.
+    // Reached only on a request the static check already rejected.
     uint64_t available_size = 0;
-    if (owner()->driver().AvailableMemory(owner()->node_id(), &available_size) !=
-            HSA_STATUS_SUCCESS ||
+    if (owner()->GetInfo(static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_AVAIL),
+                         &available_size) != HSA_STATUS_SUCCESS ||
         size > available_size) {
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
