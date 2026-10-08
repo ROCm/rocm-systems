@@ -7,13 +7,14 @@ Everything is discovered from the layout files and the analysis configs, so a ne
 layout or architecture is covered without editing the tests.
 """
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import common
 import yaml
 
-from memory_chart.loader import layout_files, load_layout
+from memory_chart.loader import Layout, layout_files, load_layout
 from utils.utils_common import panel_tables
 
 ANALYSIS_CONFIGS_DIR = Path(common.SRC) / "rocprof_compute_soc" / "analysis_configs"
@@ -45,3 +46,21 @@ def panel_metric_names(arch: str) -> list[str]:
         for _, table in panel_tables(panel_config(arch))
         for name in table.get("metric") or {}
     ]
+
+
+def stored_blocks(blocks: list[dict[str, Any]]) -> Iterator[dict[str, Any]]:
+    """Stored blocks with their nested blocks, each parent first."""
+    for block in blocks:
+        yield block
+        yield from stored_blocks(block.get("children", []))
+
+
+def unresolved_metrics(layout: Layout, stored: dict[str, Any]) -> set[str]:
+    """Names of the layout metrics stored without an id."""
+    names = [item.metric for block in layout.blocks() for item in block.items]
+    names += [arrow.metric for arrow in layout.arrows]
+    blocks = stored_blocks(stored["blocks"])
+    refs = [item["metric"] for b in blocks for item in b.get("content", [])]
+    refs += [arrow["metric"] for arrow in stored["arrows"]]
+    assert len(refs) == len(names), "the stored layout lost items or arrows"
+    return {name for name, ref in zip(names, refs) if ref is None}

@@ -17,7 +17,10 @@ FORMAT_VERSION = 1
 
 
 def layout_extdata(layout: Layout, metric_ids: Mapping[str, str]) -> dict[str, Any]:
-    """*layout* in stored form; *metric_ids* maps metric names to metric ids."""
+    """*layout* in stored form.
+
+    Each metric name becomes its id in *metric_ids*, or None when it has none.
+    """
     hosts = [block for column in layout.columns for block in column]
     blocks = [
         _block(block, order, 0, metric_ids)
@@ -63,7 +66,7 @@ def _block(
     if block.items:
         stored["content"] = [
             {
-                "metric": metric_ids[item.metric],
+                "metric": metric_ids.get(item.metric),
                 "title": item.title,
                 "category": item.category,
             }
@@ -81,7 +84,7 @@ def _arrow(arrow: LayoutArrow, metric_ids: Mapping[str, str]) -> dict[str, Any]:
         "from": arrow.source,
         "to": arrow.target,
         "direction": arrow.direction,
-        "metric": metric_ids[arrow.metric],
+        "metric": metric_ids.get(arrow.metric),
         "title": arrow.title,
         "category": arrow.category,
     }
