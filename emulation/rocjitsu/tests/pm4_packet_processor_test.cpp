@@ -297,6 +297,21 @@ TEST_F(Pm4PacketProcessorTest, RetriesUnavailableFetchWithoutApplyingAnEffect) {
   EXPECT_EQ(queue.commands.submissions.front().buffers.front().address, 0u);
 }
 
+TEST_F(Pm4PacketProcessorTest, RevokedTransactionBecomesTerminalInsteadOfBlocked) {
+  const std::array words{0xffff1000u};
+  submit(words, true);
+  memory->make_read_unavailable(kRing);
+  EXPECT_EQ(service(), Pm4TestStatus::Blocked);
+  ASSERT_TRUE(queue.command_access);
+  ASSERT_TRUE(vm.invalidate(address_space));
+
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+  EXPECT_TRUE(queue.faulted);
+  EXPECT_FALSE(queue.command_retry_pending);
+  EXPECT_FALSE(completed);
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), 0u);
+}
+
 TEST_F(Pm4PacketProcessorTest, RejectsTruncatedPacketBeforeCallingItsHandler) {
   const std::array words{0xc0017900u, 0x40u};
   submit(words, true);
