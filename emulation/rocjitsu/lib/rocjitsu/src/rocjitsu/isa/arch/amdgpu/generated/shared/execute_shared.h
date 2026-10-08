@@ -127,6 +127,9 @@ inline void execute_ds_bpermute_fi_b32_vds([[maybe_unused]] Inst &inst,
 }
 
 template <typename Inst>
+inline void execute_ds_gws_init_ds([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
+
+template <typename Inst>
 inline void execute_ds_nop_ds([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
 
 template <typename Inst>

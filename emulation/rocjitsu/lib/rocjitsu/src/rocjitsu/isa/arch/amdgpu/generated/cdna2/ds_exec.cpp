@@ -2813,7 +2813,7 @@ void DsGwsSemaReleaseAllDs::execute_impl(amdgpu::Wavefront &wf) {
       amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
-void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_ds_gws_init_ds(*this, wf); }
 
 void DsGwsSemaVDs::execute_impl(amdgpu::Wavefront &wf) {
   wf.report_instruction_execution_error(

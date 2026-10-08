@@ -9294,23 +9294,19 @@ TEST(InstructionExecution, Cdna2GwsInitRetiresAndSynchronizationStaysUnimplement
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
   ASSERT_NE(decoder, nullptr);
 
-  // Encodings from the CDNA2 test table: SEMA_RELEASE_ALL, INIT, SEMA_V,
-  // SEMA_BR, SEMA_P, and BARRIER. Only INIT retires.
-  const std::array<std::array<uint32_t, 2>, 6> encodings = {{
-      {{0xD9300000U, 0}},
-      {{0xD9320000U, 0}},
-      {{0xD9340000U, 0}},
-      {{0xD9360000U, 0}},
-      {{0xD9380000U, 0}},
-      {{0xD93A0000U, 0}},
-  }};
-  for (const auto &words : encodings) {
+  // Only INIT retires.
+  for (const std::string_view mnemonic : {"ds_gws_sema_release_all", "ds_gws_init", "ds_gws_sema_v",
+                                          "ds_gws_sema_br", "ds_gws_sema_p", "ds_gws_barrier"}) {
+    SCOPED_TRACE(mnemonic);
+    const auto *encoding = std::ranges::find(cdna2::test_data::ENCODINGS, mnemonic,
+                                             &cdna2::test_data::TestEncoding::mnemonic);
+    ASSERT_NE(encoding, std::ranges::end(cdna2::test_data::ENCODINGS));
     amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wf, nullptr);
-    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, encoding->words.data()));
     ASSERT_NE(inst, nullptr);
-    SCOPED_TRACE(inst->mnemonic());
-    if (inst->mnemonic() == "ds_gws_init") {
+    EXPECT_EQ(inst->mnemonic(), mnemonic);
+    if (mnemonic == "ds_gws_init") {
       EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
       EXPECT_EQ(wf->instruction_execution_error(), amdgpu::InstructionExecutionError::None);
     } else {

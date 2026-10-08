@@ -9743,10 +9743,6 @@ class CodeGenerator:
         """
         if self.shared_plan is None:
             return False
-        # Keep the one-line GWS INIT retire inline, beside the GWS ops that
-        # stay unimplemented.
-        if mnemonic.upper() == 'DS_GWS_INIT':
-            return False
         if self._requires_arch_local_execute(inst, enc_name):
             return False
         if self._shared_execute_key_denied(mnemonic, inst, enc_name):
