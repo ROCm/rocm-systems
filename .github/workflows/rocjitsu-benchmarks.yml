@@ -17,7 +17,7 @@ defaults:
     shell: bash
 
 env:
-  CORPUS_SHA: 8443bc956e889c0bebd2ee8663ec419df1a68cad
+  CORPUS_SHA: 8443bc956e889c0bebd2ee8663ec419df1a68cad # rocjitsu-test-corpus#56
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
   CORPUS_SOURCE_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
   RESULTS_BRANCH: gh-pages-rocjitsu
