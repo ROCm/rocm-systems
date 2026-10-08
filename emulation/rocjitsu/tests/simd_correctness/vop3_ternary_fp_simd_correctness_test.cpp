@@ -540,10 +540,11 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
           } else {
             EXPECT_EQ(static_cast<uint16_t>(actual >> (high ? 16 : 0)), test.expected)
                 << "active lane " << lane;
-            if (high)
+            if (high) {
               EXPECT_EQ(static_cast<uint16_t>(actual), static_cast<uint16_t>(DST_SENTINEL32));
-            else if (test.arch == ROCJITSU_CODE_ARCH_RDNA3)
+            } else if (test.arch == ROCJITSU_CODE_ARCH_RDNA3) {
               EXPECT_EQ(actual >> 16, DST_SENTINEL32 >> 16);
+            }
           }
           if (force_scalar)
             scalar_out[lane] = actual;
