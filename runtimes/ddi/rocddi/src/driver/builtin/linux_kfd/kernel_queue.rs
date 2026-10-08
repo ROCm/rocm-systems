@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! One bounded DRM command stream in the KFD-bound device VM.
@@ -212,10 +213,22 @@ impl KfdKernelQueue {
             .compare_exchange(IDLE, SUBMITTING, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
-            return Err(error(
-                ErrorKind::Busy,
-                "kernel queue submission slot is occupied",
-            ));
+            // Reclaim a completed native slot once before rejecting work. A
+            // concurrent submitter may still own the publication claim.
+            let status = self.refresh_status()?;
+            if let Some(kind) = status.terminal {
+                return Err(error(kind, "kernel queue has a terminal failure"));
+            }
+            if self
+                .slot
+                .compare_exchange(IDLE, SUBMITTING, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
+            {
+                return Err(error(
+                    ErrorKind::Busy,
+                    "kernel queue submission slot is occupied",
+                ));
+            }
         }
         if self.vm.has_observed_loss() {
             self.observe_terminal(ErrorKind::DeviceLost);
@@ -302,6 +315,20 @@ impl KfdKernelQueue {
                 .terminal_kind()
                 .or_else(|| self.vm.has_observed_loss().then_some(ErrorKind::DeviceLost)),
         }
+    }
+
+    pub(super) fn refresh_status(&self) -> Result<KernelQueueStatus, Error> {
+        self.check_process()?;
+        let accepted = self.accepted.load(Ordering::Acquire);
+        if accepted > self.retired.load(Ordering::Acquire) {
+            match self.wait(accepted, 0, 0) {
+                Err(error) if self.retired.load(Ordering::Acquire) < accepted => {
+                    return Err(error);
+                }
+                _ => {}
+            }
+        }
+        Ok(self.status())
     }
 
     pub(super) fn wait(
@@ -515,6 +542,121 @@ mod tests {
                 .unwrap();
             assert_eq!(error.kind(), ErrorKind::InvalidArgument);
         });
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn refresh_checks_native_retirement_without_changing_cached_query() {
+        let vm = scripted_vm();
+        drm::with_script(
+            [
+                drm::TestCall::CreateSyncobj(7),
+                drm::TestCall::CreateContext(5),
+                drm::TestCall::WaitSubmission(Ok(true)),
+                drm::TestCall::Submit(Ok(1)),
+                drm::TestCall::WaitSubmission(Ok(false)),
+                drm::TestCall::WaitSubmission(Ok(true)),
+                drm::TestCall::DestroyContext,
+                drm::TestCall::DestroySyncobj,
+            ],
+            || {
+                let mut queue = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::Pm4).unwrap();
+                let submission = queue
+                    .submit(KernelCommand {
+                        device_address: 0x1000,
+                        byte_length: 4,
+                    })
+                    .unwrap();
+                assert_eq!(queue.status().retired_submission, 0);
+                assert_eq!(queue.refresh_status().unwrap().retired_submission, 0);
+                assert_eq!(queue.status().retired_submission, 0);
+                assert_eq!(
+                    queue.refresh_status().unwrap().retired_submission,
+                    submission
+                );
+                assert_eq!(queue.status().retired_submission, submission);
+                // No pending work means another refresh has no native wait.
+                assert_eq!(
+                    queue.refresh_status().unwrap().retired_submission,
+                    submission
+                );
+                queue.destroy().unwrap();
+            },
+        );
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn refresh_error_preserves_checked_frontier_and_terminal_state() {
+        let vm = scripted_vm();
+        drm::with_script(
+            [
+                drm::TestCall::CreateSyncobj(7),
+                drm::TestCall::CreateContext(5),
+                drm::TestCall::WaitSubmission(Ok(true)),
+                drm::TestCall::Submit(Ok(1)),
+                drm::TestCall::WaitSubmission(Err(5)),
+                drm::TestCall::WaitTimeline(Err(110)),
+                drm::TestCall::WaitSubmission(Ok(true)),
+                drm::TestCall::DestroyContext,
+                drm::TestCall::DestroySyncobj,
+            ],
+            || {
+                let mut queue = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::Pm4).unwrap();
+                let submission = queue
+                    .submit(KernelCommand {
+                        device_address: 0x1000,
+                        byte_length: 4,
+                    })
+                    .unwrap();
+                assert_eq!(
+                    queue.refresh_status().unwrap_err().native_error_code(),
+                    Some(5)
+                );
+                assert_eq!(queue.status().retired_submission, 0);
+                assert_eq!(queue.status().terminal, Some(ErrorKind::Driver));
+                // A later checked completion can retire storage even when the
+                // terminal failure remains sticky.
+                let status = queue.refresh_status().unwrap();
+                assert_eq!(status.retired_submission, submission);
+                assert_eq!(status.terminal, Some(ErrorKind::Driver));
+                queue.destroy().unwrap();
+            },
+        );
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn occupied_submission_slot_checks_progress_before_busy() {
+        let vm = scripted_vm();
+        drm::with_script(
+            [
+                drm::TestCall::CreateSyncobj(7),
+                drm::TestCall::CreateContext(5),
+                drm::TestCall::WaitSubmission(Ok(true)),
+                drm::TestCall::Submit(Ok(1)),
+                drm::TestCall::WaitSubmission(Ok(false)),
+                drm::TestCall::WaitSubmission(Ok(true)),
+                drm::TestCall::Submit(Ok(2)),
+                drm::TestCall::WaitSubmission(Ok(true)),
+                drm::TestCall::DestroyContext,
+                drm::TestCall::DestroySyncobj,
+            ],
+            || {
+                let mut queue = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::Pm4).unwrap();
+                let command = KernelCommand {
+                    device_address: 0x1000,
+                    byte_length: 4,
+                };
+                assert_eq!(queue.submit(command).unwrap(), 1);
+                assert_eq!(queue.submit(command).unwrap_err().kind(), ErrorKind::Busy);
+                assert_eq!(queue.status().retired_submission, 0);
+                assert_eq!(queue.submit(command).unwrap(), 2);
+                assert_eq!(queue.status().retired_submission, 1);
+                assert_eq!(queue.wait(2, 0, 0).unwrap(), KernelQueueWait::Retired);
+                queue.destroy().unwrap();
+            },
+        );
     }
 
     #[test]

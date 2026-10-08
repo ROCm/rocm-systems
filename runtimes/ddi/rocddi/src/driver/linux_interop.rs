@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Private Linux memory-interop contract implemented by the selected backend.

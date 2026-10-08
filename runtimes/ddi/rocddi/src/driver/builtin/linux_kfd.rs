@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Linux native control. Construction is inert; activation opens KFD and
@@ -1112,6 +1113,10 @@ impl KernelQueueDriver for LinuxKfdDriver {
 
     fn kernel_queue_status(queue: &NativeKernelQueue) -> KernelQueueStatus {
         queue.status()
+    }
+
+    fn refresh_kernel_queue(queue: &NativeKernelQueue) -> Result<KernelQueueStatus, Error> {
+        queue.refresh_status()
     }
 
     fn wait_kernel_queue(

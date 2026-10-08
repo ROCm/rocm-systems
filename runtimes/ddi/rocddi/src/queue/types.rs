@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Descriptor fields describe one requested native queue. Engine-specific

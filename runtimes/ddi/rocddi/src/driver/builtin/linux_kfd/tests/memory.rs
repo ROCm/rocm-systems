@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Native ownership tests use real anonymous reservations and scripted KFD

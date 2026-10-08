@@ -1,3 +1,4 @@
+<!-- Copyright (c) 2026 Advanced Micro Devices, Inc. -->
 <!-- SPDX-License-Identifier: MIT -->
 
 # rocddi
@@ -29,7 +30,7 @@ own backend and frontend adapters.
 
 The peer frontends and shared package are:
 
-- `ddi/libamdf`, which implements the AMDF v3 table ABI and builds
+- `ddi/libamdf`, which implements the AMDF v5 table ABI and builds
   `libamdf.a`;
 - `hsa/libhsa`, which implements early-access HSA and AMD HSA extension
   entry points;

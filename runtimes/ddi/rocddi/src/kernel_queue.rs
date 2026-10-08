@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Bounded, kernel-mediated GPU command submission.
@@ -91,6 +92,16 @@ impl KernelQueue {
     #[must_use]
     pub fn status(&self) -> KernelQueueStatus {
         driver::PlatformDriver::kernel_queue_status(&self.inner)
+    }
+
+    /// Checks native completion once without waiting and returns the checked
+    /// retirement frontier and sticky terminal state.
+    ///
+    /// # Errors
+    /// Reports a native observation failure. Earlier checked retirement remains
+    /// available through [`Self::status`].
+    pub fn refresh_status(&self) -> Result<KernelQueueStatus, Error> {
+        driver::PlatformDriver::refresh_kernel_queue(&self.inner)
     }
 
     /// Waits through the native context under one caller-supplied deadline.
