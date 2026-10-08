@@ -2,7 +2,7 @@
 
 # MIT License
 #
-# Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,9 +22,17 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import atexit
+import contextlib
 import os
 import argparse
 import sys
+
+
+def remove_file(path):
+    """Drop a listing that was never published, whatever ended the process."""
+    with contextlib.suppress(OSError):
+        os.unlink(path)
 
 
 def format_help(formatter, w=120, h=40):
@@ -148,6 +156,20 @@ def parse_arguments(args=None):
         "--device",
         help="device index, device on a node to apply the sub-commands on",
         type=int,
+        default=None,
+    )
+
+    # no short forms: -d already means --device here, unlike in rocprofv3
+    parser.add_argument(
+        "--output-file",
+        help="write the listing to a file with this name instead of stdout",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--output-directory",
+        help="write the listing to a file in this directory instead of stdout",
+        type=str,
         default=None,
     )
 
@@ -602,8 +624,49 @@ def main(argv=None):
         "ROCPROF_LIST_AVAIL_TOOL_LIBRARY", ROCPROF_LIST_AVAIL_TOOL_LIBRARY
     )
     args = parse_arguments(argv)
-    if args.command:
-        args.func(args)
+    if not args.command:
+        return 0
+
+    # load up front so an unusable library is reported as such, rather than as
+    # whatever the command was doing when it first reached for a symbol
+    try:
+        avail.get_library()
+    except OSError as error:
+        avail.fatal_error(f"Could not load the rocprofv3-avail library: {error}")
+
+    # either option redirects the listing to a file: --output-file names it and
+    # --output-directory places it, as -o and -d do for every rocprofv3 artifact
+    write_to_file = args.output_file is not None or args.output_directory is not None
+
+    stream = None
+    try:
+        if write_to_file:
+            filename = avail.get_list_avail_output_filename(
+                args.output_directory, args.output_file
+            )
+            # a truncated listing looks complete, so build it out of the way and
+            # rename it into place only once every section has been written. The
+            # pid keeps concurrent runs sharing an output file off each other
+            tempname = f"{filename}.{os.getpid()}.tmp"
+            stream = open(tempname, "w")
+            atexit.register(remove_file, tempname)
+
+        if stream is None:
+            args.func(args)
+        else:
+            with stream, contextlib.redirect_stdout(stream):
+                args.func(args)
+            os.replace(tempname, filename)
+            atexit.unregister(remove_file)
+    except BrokenPipeError:
+        # A reader such as `head` closed the pipe. Send what is still
+        # buffered to /dev/null so the interpreter does not fail again
+        # while flushing at shutdown.
+        with contextlib.suppress(OSError, ValueError):
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 1
+    except OSError as error:
+        avail.fatal_error(f"Unable to write list-avail output: {error}")
 
 
 if __name__ == "__main__":

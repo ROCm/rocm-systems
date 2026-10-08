@@ -128,6 +128,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION "on GPU:0.*SQ_WAVES.*GRBM_COUNT.*${COUNTER_CHECK_L2_HIT}"
     DISABLED "${IS_COUNTER_CHECK_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
@@ -138,6 +139,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION "on GPU:0.*SQ_WAVES.*GRBM_COUNT.*${COUNTER_CHECK_L2_HIT}"
     DISABLED "${IS_COUNTER_CHECK_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
@@ -170,5 +172,19 @@ rocprofiler_add_integration_validate_test(
     ARGS --rocm-path ${rocprofiler-sdk_ROOT_DIR}
     TIMEOUT 45
     PRELOAD "${PRELOAD_ENV}"
+    LABELS "integration-tests"
+    DISABLED "${IS_DISABLED}")
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-avail-cli-test
+    TEST_PATHS validate_cli.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    BUNDLE_TESTS
+    ARGS --rocm-path ${rocprofiler-sdk_ROOT_DIR}
+    TIMEOUT 120
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on"
+    TARGET_DEPENDS "rocprofiler-sdk::rocprofv3;rocprofiler-sdk::rocprofv3-avail"
     LABELS "integration-tests"
     DISABLED "${IS_DISABLED}")
