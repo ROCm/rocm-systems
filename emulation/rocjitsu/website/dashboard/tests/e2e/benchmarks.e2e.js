@@ -17,7 +17,7 @@ test('grid picker bounds search and eight slots while draft cancel, pointer remo
   const extras = Array.from({ length: 55 }, (_, index) => ({ id: `picker-${index}`, name: `Fictional picker ${String(index).padStart(2, '0')}`, suite: 'Triton', problem: { size: index, ...(index === 54 ? { dataType: 64 } : {}) } }));
   catalog.tests.push(...extras);
   catalog.configurations['gfx1250:ST'].push(...extras.map((entry) => entry.id));
-  run.configurations.find((config) => config.target === 'gfx1250' && config.mode === 'ST')
+  run.configurations.find((config) => config.target === 'gfx1250' && config.threadingMode === 'ST')
     .results.push(...extras.map((entry) => ({ testId: entry.id, status: 'failed', durationSeconds: null, error: 'Fictional picker-only diagnostic' })));
   await installPublication(page, { publication });
   await openDashboard(page, '/?view=benchmarks');

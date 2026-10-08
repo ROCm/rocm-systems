@@ -80,9 +80,8 @@ export function validatePublishedResult(result) {
 
 function normalizeRun(run, catalog, generatedAt) {
   const source = run?.source; const execution = run?.execution;
-  const plugin = run?.plugin; const environment = run?.environment;
-  if (typeof run?.id !== 'string' || !TOKEN.test(run.id) || !hasText(run.comparisonId) || !hasText(plugin?.id) || !hasText(plugin?.name)
-    || (Object.hasOwn(plugin, 'version') && !hasText(plugin.version)) || (Object.hasOwn(plugin, 'options') && !object(plugin.options))
+  const environment = run?.environment;
+  if (typeof run?.id !== 'string' || !TOKEN.test(run.id)
     || !hasText(source?.branch) || typeof source.commit !== 'string' || !SHA.test(source.commit ?? '') || !isIsoTimestamp(source.committedAt)
     || (Object.hasOwn(source, 'message') && !hasText(source.message))
     || !isIsoTimestamp(execution?.completedAt) || !['auto', 'manual'].includes(execution.trigger) || !hasText(execution.machine)
@@ -94,52 +93,44 @@ function normalizeRun(run, catalog, generatedAt) {
   if (Object.hasOwn(source, 'base') && (!hasText(source.base?.branch) || typeof source.base?.commit !== 'string' || !SHA.test(source.base?.commit ?? ''))) throw new Error(`Run ${run.id} has an invalid source base`);
   if (Object.hasOwn(source, 'pullRequest') && (!Number.isInteger(source.pullRequest?.number) || source.pullRequest.number <= 0
     || (Object.hasOwn(source.pullRequest, 'url') && (!safeUrl(source.pullRequest.url, true) || !new URL(source.pullRequest.url).pathname.endsWith(`/pull/${source.pullRequest.number}`))))) throw new Error(`Run ${run.id} has an invalid pullRequest`);
-  if (Object.hasOwn(execution, 'workflowUrl') && !safeUrl(execution.workflowUrl, true)) throw new Error(`Run ${run.id} has an unsafe workflowUrl`);
+
   const definitions = new Map(catalog.tests.map((test) => [test.id, test]));
   const seen = new Set();
   const tests = run.configurations.flatMap((configuration) => {
-    const { target, mode, threadCount, results } = configuration;
-    if (typeof mode !== 'string' || !['ST', 'MT'].includes(mode)) throw new Error(`Run ${run.id} has an invalid configuration mode`);
-    const key = `${target}:${mode}`;
+    const { target, threadingMode, results } = configuration;
+    if (typeof threadingMode !== 'string' || !['ST', 'MT'].includes(threadingMode)) throw new Error(`Run ${run.id} has an invalid configuration threadingMode`);
+    const key = `${target}:${threadingMode}`;
     if (!hasText(target) || !CONFIGURATION.test(key) || !Object.hasOwn(catalog.configurations, key) || seen.has(key) || !Array.isArray(results)) throw new Error(`Run ${run.id} has an invalid or duplicate configuration ${key}`);
-    if (Object.hasOwn(configuration, 'threadCount') && (!Number.isInteger(threadCount) || (mode === 'ST' ? threadCount !== 1 : threadCount < 2))) throw new Error(`Run ${run.id} has an invalid ${mode} threadCount`);
+
     seen.add(key);
     results.forEach(validatePublishedResult);
     const ids = results.map(({ testId }) => testId);
     if (new Set(ids).size !== ids.length || !sameSet(ids, catalog.configurations[key])) throw new Error(`Run ${run.id} must contain exactly one result per ${key} catalog workload`);
     return results.map(({ testId, status, durationSeconds, error }) => ({ ...definitions.get(testId), status, durationSeconds, error,
-      testId: `${key}:${testId}`, logicalTestId: testId, target, mode }));
+      testId: `${key}:${testId}`, logicalTestId: testId, target, mode: threadingMode }));
   });
   return {
-    runId: run.id, comparisonId: run.comparisonId, testCatalog: run.testCatalog, catalogId: catalog.id, plugin: { ...plugin },
+    runId: run.id, testCatalog: run.testCatalog, catalogId: catalog.id,
     timestamp: execution.completedAt, commitTimestamp: source.committedAt, trigger: execution.trigger, machineId: execution.machine,
-    targets: [...new Set(run.configurations.map(({ target }) => target))], modes: ['ST', 'MT'].filter((mode) => run.configurations.some((c) => c.mode === mode)),
+    targets: [...new Set(run.configurations.map(({ target }) => target))], modes: ['ST', 'MT'].filter((mode) => run.configurations.some((c) => c.threadingMode === mode)),
     branch: source.branch, ...(source.base ? { sourceBase: { ...source.base } } : {}), ...(source.pullRequest ? { pullRequest: { ...source.pullRequest } } : {}),
-    ...(execution.workflowUrl ? { workflowUrl: execution.workflowUrl } : {}), environmentId: environmentIdentity(environment),
+    environmentId: environmentIdentity(environment),
     provenance: { rocjitsuCommitSha: source.commit, ...(source.message ? { commitMessage: source.message } : {}), details: environment },
-    configurations: run.configurations.map(({ target, mode, threadCount }) => ({ target, mode, ...(threadCount === undefined ? {} : { threadCount }) })), tests,
+    configurations: run.configurations.map(({ target, threadingMode }) => ({ target, threadingMode })), tests,
   };
-}
-
-function comparisonIdentity(run) {
-  return identity([run.testCatalog, run.branch, run.provenance.rocjitsuCommitSha, run.commitTimestamp, run.provenance.commitMessage ?? null,
-    run.sourceBase ? [run.sourceBase.branch, run.sourceBase.commit] : null,
-    run.pullRequest ? [run.pullRequest.number, run.pullRequest.url ?? null] : null, run.machineId, run.environmentId,
-    [...run.configurations].sort((a, b) => `${a.target}:${a.mode}`.localeCompare(`${b.target}:${b.mode}`))]);
 }
 
 function buildDashboardData(raw) {
   if (raw?.schemaVersion === 1) throw new Error('Dashboard schema 1 requires migration to schema 2');
-  const sourceRuns = raw?.pluginRuns ?? raw?.allRuns ?? raw?.runs;
+  const sourceRuns = raw?.allRuns ?? raw?.runs;
   if (raw?.schemaVersion !== 2 || !Array.isArray(sourceRuns) || !Array.isArray(raw.testCatalog)) throw new Error('Expected schema-2 normalized data with runs and testCatalog');
   for (const run of sourceRuns) {
     if (!hasText(run?.runId) || !Array.isArray(run.tests) || !Array.isArray(run.configurations) || !isIsoTimestamp(run.timestamp)
-      || !isIsoTimestamp(run.commitTimestamp) || !hasText(run.branch) || !hasText(run.plugin?.id)) throw new Error('Invalid normalized dashboard run');
+      || !isIsoTimestamp(run.commitTimestamp) || !hasText(run.branch)) throw new Error('Invalid normalized dashboard run');
   }
-  const pluginRuns = [...sourceRuns].sort(compareRunExecution);
-  const allRuns = pluginRuns.filter(({ plugin }) => plugin.id === 'vanilla');
+  const allRuns = [...sourceRuns].sort(compareRunExecution);
   const runs = allRuns.filter(({ branch }) => branch === (raw.canonicalBranch ?? 'develop'));
-  return { ...raw, canonicalBranch: raw.canonicalBranch ?? 'develop', pluginRuns, allRuns, runs,
+  return { ...raw, canonicalBranch: raw.canonicalBranch ?? 'develop', allRuns, runs,
     targets: [...new Set(allRuns.flatMap(({ targets }) => targets))].sort(), suites: [...new Set(raw.testCatalog.map(({ suite }) => suite))].sort(), modes: ['ST', 'MT'],
     latestRun: runs.at(-1) ?? null, latestCommitRun: sortRunsByCommit(runs).at(-1) ?? null, backfillRunIds: backfillRunIds(runs) };
 }
@@ -148,26 +139,26 @@ function buildDashboardData(raw) {
 export function loadDashboardData(raw) {
   const shape = buildDashboardData(raw);
   const seenIds = new Set();
-  for (const run of shape.pluginRuns) {
+  for (const run of shape.allRuns) {
     if (seenIds.has(run.runId)) throw new Error(`Duplicate run ID ${run.runId}`);
     seenIds.add(run.runId);
   }
   const catalogs = { ...(raw.catalogs ?? {}) };
-  const runs = shape.pluginRuns.map((run) => {
+  const runs = shape.allRuns.map((run) => {
     for (const test of run.tests) {
       if (test.testId !== `${test.target}:${test.mode}:${test.logicalTestId}`
-        || !run.configurations.some((c) => c.target === test.target && c.mode === test.mode)) {
+        || !run.configurations.some((c) => c.target === test.target && c.threadingMode === test.mode)) {
         throw new Error(`Run ${run.runId} has an invalid normalized test identity`);
       }
     }
-    return { id: run.runId, comparisonId: run.comparisonId, testCatalog: run.testCatalog, plugin: run.plugin,
+    return { id: run.runId, testCatalog: run.testCatalog,
       source: { branch: run.branch, commit: run.provenance?.rocjitsuCommitSha, committedAt: run.commitTimestamp,
         ...(Object.hasOwn(run.provenance ?? {}, 'commitMessage') ? { message: run.provenance.commitMessage } : {}),
         ...(run.sourceBase ? { base: run.sourceBase } : {}), ...(run.pullRequest ? { pullRequest: run.pullRequest } : {}) },
-      execution: { completedAt: run.timestamp, trigger: run.trigger, machine: run.machineId, ...(run.workflowUrl ? { workflowUrl: run.workflowUrl } : {}) },
+      execution: { completedAt: run.timestamp, trigger: run.trigger, machine: run.machineId },
       environment: run.provenance?.details ?? [],
-      configurations: run.configurations.map((configuration) => ({ ...configuration,
-        results: run.tests.filter((t) => t.target === configuration.target && t.mode === configuration.mode)
+      configurations: run.configurations.map(({ target, threadingMode }) => ({ target, threadingMode,
+        results: run.tests.filter((t) => t.target === target && t.mode === threadingMode)
           .map(({ logicalTestId, status, durationSeconds, error }) => ({ testId: logicalTestId, status, durationSeconds, error })) })),
     };
   });
@@ -197,21 +188,13 @@ export function validatePublishedDashboardData({ metadata, index, runs, runError
     } catch (error) { failures.push(`- ${file}: ${error.message}`); }
   });
   if (failures.length) throw new Error(`Dashboard data failed validation:\n${failures.join('\n')}`);
-  const ids = new Set(); const commits = new Map(); const groups = new Map(); const definitions = new Map();
+  const ids = new Set(); const commits = new Map(); const definitions = new Map();
   for (const run of normalizedRuns) {
     if (ids.has(run.runId)) throw new Error(`Duplicate run ID ${run.runId}`);
     ids.add(run.runId);
     const sha = run.provenance.rocjitsuCommitSha; const timestamp = Date.parse(run.commitTimestamp);
     if (commits.has(sha) && commits.get(sha) !== timestamp) throw new Error(`Commit ${sha} has conflicting committedAt values`);
     commits.set(sha, timestamp);
-    const group = groups.get(run.comparisonId) ?? [];
-    group.push(run); groups.set(run.comparisonId, group);
-  }
-  for (const [comparisonId, group] of groups) {
-    if (new Set(group.map(({ plugin }) => plugin.id)).size !== group.length) throw new Error(`Comparison ${comparisonId} repeats plugin identity`);
-    if (!group.some(({ plugin }) => plugin.id !== 'vanilla')) continue;
-    if (!group.some(({ plugin }) => plugin.id === 'vanilla')) throw new Error(`Comparison ${comparisonId} has plugin runs without a Vanilla baseline`);
-    if (new Set(group.map(comparisonIdentity)).size !== 1) throw new Error(`Runs do not match plugin comparison ${comparisonId}`);
   }
   for (const [file, catalog] of normalizedCatalogs) for (const definition of catalog.tests) {
     const previous = definitions.get(definition.id);

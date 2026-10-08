@@ -28,7 +28,7 @@ export default function BranchRunsView({ data, state, onOpenComparison }) {
   if (!data) return <Paper variant="outlined" sx={{ p: 3 }}><Typography role="status" variant="body2">Loading published branch runs…</Typography></Paper>;
   const branches = selectPublishedBranches(data);
   const visible = selectPublishedBranches(data, { query, pr });
-  const runs = (data.allRuns ?? []).filter((run) => run.plugin.id === 'vanilla').sort(compareRunExecution).reverse();
+  const runs = [...(data.allRuns ?? [])].sort(compareRunExecution).reverse();
   const snapshot = state?.branchSelection ?? {};
   const preliminary = resolveBranchSelection(snapshot, { branches, runs });
   const candidate = runs.find((run) => run.runId === preliminary.candidateId && run.branch === preliminary.branch) ?? null;

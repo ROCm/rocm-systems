@@ -31,13 +31,13 @@ export function createSchema2Publication() {
     const testCatalog = `test-catalogs/fictional-${current ? 'current' : 'old'}.json`;
     const id = `fictional-develop-${String(index).padStart(2, '0')}`;
     return {
-      id, comparisonId: id, testCatalog, plugin: { id: 'vanilla', name: 'Vanilla' },
+      id, testCatalog,
       source: { branch: 'develop', commit: sha(index + 1), committedAt: iso(index, 4), message: `FICTIONAL develop measurement ${index}` },
       execution: { completedAt: index === 21 ? '2026-10-05T10:00:00.000Z' : iso(index), trigger: index === 21 ? 'manual' : 'auto', machine: index < 16 ? 'fictional-node-a' : 'fictional-node-b' },
       environment: [{ key: 'sdk', label: 'Fictional SDK', value: index < 16 ? 'test-a' : 'test-b' }, { key: 'enabled', label: 'Feature enabled', value: true }, { key: 'cores', label: 'CPU cores', value: 32 }],
       configurations: CONFIGURATION_KEYS.filter((key) => !(index === 12 && key === 'gfx950:MT')).map((key, configIndex) => {
         const [target, mode] = key.split(':');
-        return { target, mode, threadCount: mode === 'ST' ? 1 : 8,
+        return { target, threadingMode: mode,
           results: catalogs[testCatalog].configurations[key].map((testId, testIndex) => {
             const status = (index === 8 && mode === 'ST' && testId === 'd') || (index === 9 && mode === 'ST' && testId === 'e') ? 'failed'
               : index === 8 && testId === 'e' ? 'timeout' : 'completed';
@@ -50,7 +50,6 @@ export function createSchema2Publication() {
   const branches = Array.from({ length: 20 }, (_, index) => {
     const run = structuredClone(canonical[23]);
     run.id = `fictional-branch-${String(index + 1).padStart(2, '0')}`;
-    run.comparisonId = run.id;
     run.source = { branch: `fictional/optimization-${String(index + 1).padStart(2, '0')}`, commit: sha(100 + index), committedAt: '2026-10-05T09:00:00.000Z', message: `FICTIONAL branch ${index + 1}`,
       ...(index % 2 === 0 ? { base: { branch: 'develop', commit: canonical[20].source.commit }, pullRequest: { number: 1000 + index } } : {}),
     };
@@ -58,18 +57,14 @@ export function createSchema2Publication() {
     run.execution.trigger = 'manual';
     run.execution.machine = 'fictional-branch-node';
     run.environment[0].value = 'test-branch';
-    if (index === 1) run.configurations = run.configurations.filter(({ mode }) => mode === 'ST');
+    if (index === 1) run.configurations = run.configurations.filter(({ threadingMode }) => threadingMode === 'ST');
     if (index === 2) Object.assign(run.configurations[0].results[0], { status: 'failed', durationSeconds: null, error: 'Fictional branch failure' });
     for (const config of run.configurations) for (const result of config.results) {
       if (result.status === 'completed') result.durationSeconds = Number((result.durationSeconds * (0.9 + index / 100)).toFixed(2));
     }
     return run;
   });
-  const plugin = structuredClone(canonical[23]);
-  plugin.id = 'fictional-develop-23-asan';
-  plugin.plugin = { id: 'asan', name: 'ASan', version: 'fictional', options: { enabled: true } };
-  plugin.execution.completedAt = '2026-10-05T10:30:00.000Z';
-  const runs = [...canonical, ...branches, plugin];
+  const runs = [...canonical, ...branches];
   return {
     metadata: { schemaVersion: 2, repository: 'https://github.com/ROCm/rocm-systems', isBeta: true, canonicalBranch: 'develop' },
     index: { generatedAt: '2026-10-05T12:00:00.000Z', runFiles: runs.map(({ id }) => `runs/${id}.json`) },
@@ -93,5 +88,5 @@ export async function writeSchema2FixtureDirectory(directory) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   await writeSchema2FixtureDirectory(fileURLToPath(new URL('./data/', import.meta.url)));
-  console.log('Wrote fictional schema-2 test fixtures (24 develop, 20 branches, 1 reserved plugin).');
+  console.log('Wrote fictional schema-2 test fixtures (24 develop, 20 branches).');
 }

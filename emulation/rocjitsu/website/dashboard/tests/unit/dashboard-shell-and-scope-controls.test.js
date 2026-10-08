@@ -81,7 +81,7 @@ describe('v10 publication header', () => {
   it('executes reload/theme callbacks and exports the unmodified raw JSON envelope', async () => {
     const onReloadData = vi.fn();
     const onToggleMode = vi.fn();
-    const raw = { metadata: { schemaVersion: 2, isBeta: true }, runs: [{ id: 'unit-attempt', plugin: { id: 'reserved-experiment' } }] };
+    const raw = { metadata: { schemaVersion: 2, isBeta: true }, runs: [{ id: 'unit-attempt' }] };
     const anchor = { click: vi.fn() };
     const createObjectURL = vi.fn(() => 'blob:unit-export');
     const revokeObjectURL = vi.fn();
@@ -191,7 +191,7 @@ describe('v10 explicit scope controls', () => {
   it('uses only published availability without thread-count/name inference or Check all rows', () => {
     const onlyST = { ...data, modes: ['ST'] };
     expect(filterControls({ data: onlyST, state }, 'Execution modes')).toHaveLength(1);
-    const noModes = { ...data, modes: [], runs: [{ threadCount: 16, tests: [{ name: 'MT workload' }] }] };
+    const noModes = { ...data, modes: [], runs: [{ tests: [{ name: 'MT workload' }] }] };
     expect(filterControls({ data: noModes, state }, 'Execution modes')).toHaveLength(0);
     const html = markup(FiltersBar, { data: noModes, state });
     expect(html.includes('No available execution modes')).toBe(true);

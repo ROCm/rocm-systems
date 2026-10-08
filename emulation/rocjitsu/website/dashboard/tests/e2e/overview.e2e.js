@@ -30,7 +30,7 @@ test('all-page shell, theme and overview controls retain develop-only selected-s
   const rows = page.getByTestId('recent-runs-table').locator('tbody tr');
   await expect(rows).toHaveCount(20);
   expect(await rows.evaluateAll((entries) => entries.map((entry) => entry.dataset.runId)))
-    .toEqual(createSchema2Publication().runs.filter((run) => run.source.branch === 'develop' && run.plugin.id === 'vanilla')
+    .toEqual(createSchema2Publication().runs.filter((run) => run.source.branch === 'develop')
       .sort((a, b) => Date.parse(b.execution.completedAt) - Date.parse(a.execution.completedAt) || b.id.localeCompare(a.id))
       .slice(0, 20).map((run) => run.id));
   await expect(rows.first()).toHaveAttribute('data-run-id', 'fictional-develop-21');
@@ -40,7 +40,7 @@ test('all-page shell, theme and overview controls retain develop-only selected-s
   // One line is a selected-scope sum, not one line per target or synthetic MT.
   await page.getByRole('checkbox', { name: 'MT', exact: true }).uncheck();
   const latest = createSchema2Publication().runs.find((run) => run.id === 'fictional-develop-23');
-  const sum = latest.configurations.filter((config) => config.mode === 'ST')
+  const sum = latest.configurations.filter((config) => config.threadingMode === 'ST')
     .flatMap((config) => config.results).reduce((total, result) => total + result.durationSeconds, 0);
   await expect(page.getByTestId('metric-card-total-duration')).toContainText(formatDuration(sum));
   const trend = page.getByTestId('performance-trend');

@@ -15,7 +15,7 @@ export default function BranchEnvironment({ candidate, reference, selection, rep
     baseline: baselineFacts.get(key)?.value, candidate: candidateFacts.get(key)?.value,
     baselineLabel: baselineFacts.get(key)?.label, candidateLabel: candidateFacts.get(key)?.label,
   }));
-  const configuration = (run) => run?.configurations.find((item) => item.target === selection.target && item.mode === selection.mode);
+  const configuration = (run) => run?.configurations.find((item) => item.target === selection.target && item.threadingMode === selection.mode);
   const sourceFacts = [
     ['attempt', 'Exact attempt', (run) => run?.runId], ['branch', 'Source branch', (run) => run?.branch],
     ['commit', 'Source SHA', (run) => run?.provenance?.rocjitsuCommitSha], ['message', 'Commit message', (run) => run?.provenance?.commitMessage],
@@ -24,7 +24,6 @@ export default function BranchEnvironment({ candidate, reference, selection, rep
     ['machine', 'Machine', (run) => run?.machineId], ['trigger', 'Trigger', (run) => run?.trigger],
     ['catalog', 'Test catalog', (run) => run?.catalogId], ['environment', 'Environment identity', (run) => run?.environmentId],
     ['configuration', 'Selected configuration', (run) => run ? configuration(run) ? `${selection.target} · ${selection.mode}` : 'Not published' : null],
-    ['threadCount', 'Declared simulator thread count', (run) => configuration(run)?.threadCount],
   ].map(([key, label, value]) => ({ key, label, baseline: value(reference), candidate: value(candidate) }));
   const rows = (items, prefix) => items.map((fact) => {
     const changed = Boolean(reference && candidate) && JSON.stringify(fact.baseline ?? null) !== JSON.stringify(fact.candidate ?? null);
@@ -40,7 +39,7 @@ export default function BranchEnvironment({ candidate, reference, selection, rep
   });
   return <Box component="details" data-testid="branch-environment" sx={{ borderTop: 1, borderColor: 'divider', mt: 1 }}>
     <Box component="summary" sx={{ cursor: 'pointer', minHeight: 44, display: 'list-item', py: 1.5, ml: 2 }}>Environment &amp; measurement details</Box>
-    <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>These are independent published attempts. Matching workloads does not imply equivalent environments, machines, or thread counts.</Typography>
+    <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>These are independent published attempts. Matching workloads does not imply equivalent environments or machines.</Typography>
     <TableContainer role="region" tabIndex={0} aria-label="Branch source and environment facts, scrollable" sx={{ maxHeight: 366, scrollbarGutter: 'stable', overscrollBehavior: 'contain', border: 1, borderColor: 'divider' }}>
       <Table size="small" stickyHeader aria-label="Branch source and environment facts" sx={{ tableLayout: 'fixed', minWidth: 540, '& td, & th': { p: 1.25, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap', verticalAlign: 'top' } }}>
         <TableHead><TableRow><TableCell>Field</TableCell><TableCell>Reference · {reference?.runId ?? 'Unavailable'}</TableCell><TableCell>Candidate · {candidate?.runId ?? 'Unavailable'}</TableCell></TableRow></TableHead>
@@ -53,8 +52,6 @@ export default function BranchEnvironment({ candidate, reference, selection, rep
     </TableContainer>
     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
       {safeExternalUrl(repository) && <Button component="a" href={repository} target="_blank" rel="noopener noreferrer" sx={{ minHeight: 44 }}>Source repository ↗</Button>}
-      {[[reference, 'Reference'], [candidate, 'Candidate']].map(([run, label]) => safeExternalUrl(run?.workflowUrl) && <Button key={label} component="a" href={run.workflowUrl} target="_blank" rel="noopener noreferrer" sx={{ minHeight: 44 }}>{label} workflow ↗</Button>)}
     </Box>
-    {![reference, candidate].some((run) => safeExternalUrl(run?.workflowUrl)) && <Typography variant="caption" color="text.secondary">No workflow links were provided for this pair.</Typography>}
   </Box>;
 }

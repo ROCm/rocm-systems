@@ -13,8 +13,8 @@ const testResult = (id, durationSeconds, target = 'gfx1250', mode = 'ST', suite 
 });
 const run = (runId, branch, timestamp, digit, tests = [testResult('work', 10)]) => ({
   runId, branch, timestamp, commitTimestamp: timestamp,
-  plugin: { id: 'vanilla', name: 'Vanilla' }, catalogId: 'fictional-catalog',
-  configurations: [...new Map(tests.map((test) => [`${test.target}:${test.mode}`, { target: test.target, mode: test.mode }])).values()],
+  catalogId: 'fictional-catalog',
+  configurations: [...new Map(tests.map((test) => [`${test.target}:${test.mode}`, { target: test.target, threadingMode: test.mode }])).values()],
   targets: [...new Set(tests.map((test) => test.target))], modes: [...new Set(tests.map((test) => test.mode))],
   provenance: { rocjitsuCommitSha: sha(digit), commitMessage: `Fictional ${runId}`, details: [] },
   tests, machineId: 'fictional-machine', trigger: 'manual',
@@ -106,8 +106,8 @@ test('difference table and stacked phone rows share actual matched sums, suite g
 });
 
 test('environment disclosure aligns arbitrary facts including zero and false and renders only safe provided source links', () => {
-  const base = { ...baseline, workflowUrl: 'javascript:alert(1)', provenance: { ...baseline.provenance, details: [{ key: 'baseline-only', label: 'Fictional baseline tool', value: 'old-tool' }, { key: 'flag', label: 'Fictional flag', value: false }] } };
-  const next = { ...candidate, workflowUrl: 'https://github.com/ROCm/rocm-systems/actions/runs/123', pullRequest: { number: 17, url: 'https://github.com/ROCm/rocm-systems/pull/17' }, provenance: { ...candidate.provenance, details: [{ key: 'candidate-only', label: 'Fictional candidate tool', value: '<script>not code</script>' }, { key: 'flag', label: 'Fictional flag', value: 0 }] } };
+  const base = { ...baseline, pullRequest: { number: 1, url: 'javascript:alert(1)' }, provenance: { ...baseline.provenance, details: [{ key: 'baseline-only', label: 'Fictional baseline tool', value: 'old-tool' }, { key: 'flag', label: 'Fictional flag', value: false }] } };
+  const next = { ...candidate, pullRequest: { number: 17, url: 'https://github.com/ROCm/rocm-systems/pull/17' }, provenance: { ...candidate.provenance, details: [{ key: 'candidate-only', label: 'Fictional candidate tool', value: '<script>not code</script>' }, { key: 'flag', label: 'Fictional flag', value: 0 }] } };
   const html = render({ ...data, repository: 'https://github.com/ROCm/rocm-systems', allRuns: [base, next], runs: [base] });
   expect(html.includes('Environment &amp; measurement details')).toBe(true);
   expect(html.includes('data-testid="branch-environment-baseline-only"')).toBe(true);
@@ -116,7 +116,7 @@ test('environment disclosure aligns arbitrary facts including zero and false and
   expect(html.includes('&lt;script&gt;not code&lt;/script&gt;')).toBe(true);
   expect(html.includes('>false<')).toBe(true);
   expect(html.includes('>0<')).toBe(true);
-  expect(html.includes('href="https://github.com/ROCm/rocm-systems/actions/runs/123"')).toBe(true);
+  expect(html).not.toContain('Workflow');
   expect(html.includes('href="https://github.com/ROCm/rocm-systems/pull/17"')).toBe(true);
   expect(html.includes('href="javascript:')).toBe(false);
 });
@@ -142,7 +142,7 @@ test('pending published data has a scoped loading state and never stale demonstr
 });
 
 test('selected target/mode rows and matched totals change together for real published configurations', () => {
-  const base = { ...baseline, configurations: [{ target: 'gfx1250', mode: 'ST' }, { target: 'gfx950', mode: 'MT' }], tests: [testResult('st-work', 10), testResult('mt-work', 60, 'gfx950', 'MT')] };
+  const base = { ...baseline, configurations: [{ target: 'gfx1250', threadingMode: 'ST' }, { target: 'gfx950', threadingMode: 'MT' }], tests: [testResult('st-work', 10), testResult('mt-work', 60, 'gfx950', 'MT')] };
   const next = { ...candidate, configurations: base.configurations, tests: [testResult('st-work', 8), testResult('mt-work', 72, 'gfx950', 'MT')] };
   for (const [target, mode, name, other] of [['gfx1250', 'ST', 'st-work', 'mt-work'], ['gfx950', 'MT', 'mt-work', 'st-work']]) {
     const model = selectConfigurationComparison(next, base, { target, mode, suites: ['Fictional suite'] });

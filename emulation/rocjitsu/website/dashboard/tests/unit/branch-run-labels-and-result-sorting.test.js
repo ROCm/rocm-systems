@@ -15,7 +15,7 @@ test('attempt selector labels and search identify branch, full SHA, PR, message,
 });
 
 test('configuration availability uses explicit published modes and positive matched coverage, while measured zero is not an absent result', () => {
-  const run = { configurations: [{ target: 'gfx1250', mode: 'ST' }] };
+  const run = { configurations: [{ target: 'gfx1250', threadingMode: 'ST' }] };
   const noPairs = { comparable: [], notComparable: [], baselineDuration: 0, candidateDuration: 0, aggregateDelta: null };
   expect(presentation.configurationState?.(run, run, noPairs, 'gfx1250', 'ST')).toMatchObject({ available: false, deltaSeconds: null, deltaPercent: null });
   expect(presentation.configurationState(run, run, noPairs, 'gfx950', 'MT').reason).toContain('Candidate configuration not published');

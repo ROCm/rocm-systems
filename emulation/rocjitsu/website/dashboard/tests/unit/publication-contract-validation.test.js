@@ -1,7 +1,6 @@
 import { expect, test } from 'vitest';
 import { loadDashboardData, validatePublishedDashboardData, validatePublishedResult } from '../../src/data/dashboardValidation.js';
 import { createSchema2Publication } from '../fixtures/schema2Dataset.js';
-import { selectPluginComparisonGroups } from '../../src/data/pluginComparison.js';
 
 const invalidCases = [
   ['unsafe repository', (s) => { s.metadata.repository = 'javascript:alert(1)'; }, /repository URL/],
@@ -19,9 +18,7 @@ const invalidCases = [
   ['duplicate result', (s) => { const r = s.runs[0].configurations[0].results; r.push(r[0]); }, /exactly one result/],
   ['unknown workload', (s) => { s.runs[0].configurations[0].results[0].testId = 'unknown'; }, /exactly one result/],
   ['duplicate configuration', (s) => { s.runs[0].configurations.push(s.runs[0].configurations[0]); }, /duplicate configuration/],
-  ['missing explicit mode', (s) => { delete s.runs[0].configurations[0].mode; }, /configuration/],
-  ['invalid ST threads', (s) => { s.runs[0].configurations[0].threadCount = 8; }, /threadCount/],
-  ['invalid MT threads', (s) => { s.runs[0].configurations[1].threadCount = 1; }, /threadCount/],
+  ['missing explicit mode', (s) => { delete s.runs[0].configurations[0].threadingMode; }, /configuration/],
   ['negative duration', (s) => { s.runs[0].configurations[0].results[0].durationSeconds = -1; }, /nonnegative/],
   ['completed error', (s) => { s.runs[0].configurations[0].results[0].error = 'invalid'; }, /cannot contain an error/],
   ['failure duration', (s) => { s.runs[0].configurations[0].results[0].status = 'failed'; }, /null durationSeconds/],
@@ -29,14 +26,9 @@ const invalidCases = [
   ['commit after completion', (s) => { s.runs[0].source.committedAt = '2026-10-06T00:00:00Z'; }, /committed/],
   ['invalid base SHA', (s) => { s.runs[0].source.base = { branch: 'develop', commit: 'abcd' }; }, /source base/],
   ['unsafe PR URL', (s) => { s.runs[0].source.pullRequest = { number: 1, url: 'https://evil.test/pull/1' }; }, /pullRequest/],
-  ['unsafe workflow URL', (s) => { s.runs[0].execution.workflowUrl = 'http://github.com/actions/runs/1'; }, /workflowUrl/],
   ['duplicate environment key', (s) => { s.runs[0].environment.push(s.runs[0].environment[0]); }, /run contract/],
   ['changed reused workload', (s) => { s.catalogs['test-catalogs/fictional-current.json'].tests[0].problem.m = 999; }, /defined differently/],
   ['conflicting commit time', (s) => { s.runs[1].source.commit = s.runs[0].source.commit; }, /conflicting committedAt/],
-  ['duplicate Vanilla experiment identity', (s) => { s.runs[1].comparisonId = s.runs[0].comparisonId; }, /repeats plugin identity/],
-  ['orphan plugin experiment', (s) => { s.runs.at(-1).comparisonId = 'orphan'; }, /Vanilla baseline/],
-  ['unequal plugin environment', (s) => { s.runs.at(-1).environment[0].value = 'different'; }, /plugin comparison/],
-  ['unequal plugin configuration', (s) => { s.runs.at(-1).configurations.pop(); }, /plugin comparison/],
 ];
 
 test.each(invalidCases)('schema 2 rejects %s', (_, mutate, expected) => {
@@ -44,12 +36,11 @@ test.each(invalidCases)('schema 2 rejects %s', (_, mutate, expected) => {
   expect(() => validatePublishedDashboardData(source)).toThrow(expected);
 });
 
-test('independent branch machines and scalar environments remain disclosed, reserved plugin groups survive', () => {
+test('independent branch machines and scalar environments remain disclosed', () => {
   const source = createSchema2Publication(); source.runs[0].environment = [];
   const { data } = validatePublishedDashboardData(source);
   expect(data.allRuns.at(-1).machineId).toBe('fictional-branch-node');
   expect(data.allRuns.at(-1).provenance.details).toEqual(source.runs[43].environment);
-  expect(selectPluginComparisonGroups(data)).toHaveLength(1);
   expect(data.runs.some((run) => data.backfillRunIds.has(run.runId))).toBe(true);
   expect(loadDashboardData(structuredClone(data)).allRuns).toHaveLength(44);
 });

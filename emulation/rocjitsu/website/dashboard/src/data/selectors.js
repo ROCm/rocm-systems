@@ -11,7 +11,7 @@ const resultMap = (run) => new Map((run?.tests ?? []).map((test) => [test.testId
 const testMatches = (test, filters) => filters.targets.includes(test.target) && filters.suites.includes(test.suite) && modesFor(filters).includes(test.mode);
 const selected = (run, filters) => (run?.tests ?? []).filter((test) => testMatches(test, filters));
 const pairsFor = (filters) => filters.targets.flatMap((target) => modesFor(filters).map((mode) => ({ target, mode, key: `${target}:${mode}` })));
-const hasConfiguration = (run, target, mode) => (run?.configurations ?? []).some((c) => c.target === target && c.mode === mode);
+const hasConfiguration = (run, target, mode) => (run?.configurations ?? []).some((c) => c.target === target && c.threadingMode === mode);
 
 export function periodKey(timestamp, period = 'weekly') {
   const date = new Date(timestamp);

@@ -12,7 +12,7 @@ export function filterRunOptions(options, { inputValue }) {
 export function configurationState(candidate, baseline, comparison, target, mode) {
   const matched = comparison.comparable.length;
   const excluded = comparison.notComparable.length;
-  const published = (run) => run?.configurations?.some((configuration) => configuration.target === target && configuration.mode === mode);
+  const published = (run) => run?.configurations?.some((configuration) => configuration.target === target && configuration.threadingMode === mode);
   const reason = !candidate ? 'Candidate attempt unavailable'
     : !baseline ? 'No reference selected'
       : !published(candidate) ? 'Candidate configuration not published'

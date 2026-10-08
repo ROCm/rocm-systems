@@ -4,20 +4,31 @@ import { loadDashboardData, validatePublishedDashboardData } from '../../src/dat
 import { selectRecentRuns } from '../../src/data/selectors.js';
 import { createSchema2Publication } from '../fixtures/schema2Dataset.js';
 
-test('normalizes only schema 2 with explicit modes and keeps branch/plugin source envelopes', () => {
+test('normalizes only schema 2 with explicit modes and keeps branch source envelopes', () => {
   const source = createSchema2Publication();
   const { data, sourceData } = validatePublishedDashboardData(source);
   expect(data.schemaVersion).toBe(2);
   expect(data.runs).toHaveLength(24);
   expect(data.allRuns).toHaveLength(44);
-  expect(data.pluginRuns).toHaveLength(45);
-  expect(data.runs.every(({ branch, plugin }) => branch === 'develop' && plugin.id === 'vanilla')).toBe(true);
+  expect(data).not.toHaveProperty('pluginRuns');
+  expect(data.runs.every(({ branch }) => branch === 'develop')).toBe(true);
   expect(data.modes).toEqual(['ST', 'MT']);
   expect(data.latestCommitRun.runId).toBe('fictional-develop-23');
   expect(data.latestRun.runId).toBe('fictional-develop-21');
   expect(data.runs[0].tests[0].testId).toBe('gfx1250:ST:a');
   expect(data.allRuns.at(-1).sourceBase).toBeUndefined();
   expect(sourceData).toEqual(source);
+  for (const run of [...sourceData.runs, ...data.allRuns]) {
+    expect(run).not.toHaveProperty('plugin');
+    expect(run).not.toHaveProperty('comparisonId');
+    expect(run).not.toHaveProperty('workflowUrl');
+    if (run.execution) expect(run.execution).not.toHaveProperty('workflowUrl');
+    for (const configuration of run.configurations) {
+      expect(['ST', 'MT']).toContain(configuration.threadingMode);
+      expect(configuration).not.toHaveProperty('mode');
+      expect(configuration).not.toHaveProperty('threadCount');
+    }
+  }
   expect(data.runs.find(({ runId }) => runId === 'fictional-develop-14').tests[0].durationSeconds).toBe(0);
 });
 
@@ -49,13 +60,13 @@ test('empty and branch-only snapshots remain valid', () => {
 test('normalized reload validates result identities, statuses and duplicate attempts dynamically', () => {
   const data = validatePublishedDashboardData(createSchema2Publication()).data;
   const invalidResult = structuredClone(data);
-  invalidResult.pluginRuns[0].tests[0].durationSeconds = -1;
+  invalidResult.allRuns[0].tests[0].durationSeconds = -1;
   expect(() => loadDashboardData(invalidResult)).toThrow(/durationSeconds/);
   const invalidIdentity = structuredClone(data);
-  invalidIdentity.pluginRuns[0].tests[0].testId = 'gfx1250:MT:a';
+  invalidIdentity.allRuns[0].tests[0].testId = 'gfx1250:MT:a';
   expect(() => loadDashboardData(invalidIdentity)).toThrow(/identity/);
   const duplicate = structuredClone(data);
-  duplicate.pluginRuns.push(duplicate.pluginRuns[0]);
+  duplicate.allRuns.push(duplicate.allRuns[0]);
   expect(() => loadDashboardData(duplicate)).toThrow(/Duplicate run ID/);
 });
 
@@ -70,15 +81,14 @@ test('configuration targets must be declared strings, not coerced numbers', () =
 });
 
 test.each([
-  { mode: ['ST'], threadCount: 1 },
-  { mode: ['ST'], threadCount: 8 },
-  { mode: ['MT'], threadCount: 8 },
-])('DATA-01 rejects coerced array mode $mode with $threadCount threads', ({ mode, threadCount }) => {
+  { threadingMode: ['ST'] },
+  { threadingMode: ['MT'] },
+])('DATA-01 rejects coerced array threadingMode $threadingMode', ({ threadingMode }) => {
   const source = createSchema2Publication();
   const run = source.runs[0];
   source.runs = [run]; source.index.runFiles = [`runs/${run.id}.json`];
   run.configurations = [run.configurations[0]];
-  Object.assign(run.configurations[0], { mode, threadCount });
+  Object.assign(run.configurations[0], { threadingMode });
   expect(() => validatePublishedDashboardData(source)).toThrow(/invalid.*configuration/i);
 });
 
@@ -111,7 +121,7 @@ test.each(['absent map', 'empty map', 'missing referenced envelope'])('DATA-04 r
   const normalized = structuredClone(validatePublishedDashboardData(source).data);
   if (missing === 'absent map') delete normalized.catalogs;
   else if (missing === 'empty map') normalized.catalogs = {};
-  else delete normalized.catalogs[normalized.pluginRuns[0].testCatalog];
+  else delete normalized.catalogs[normalized.allRuns[0].testCatalog];
   expect(() => loadDashboardData(normalized)).toThrow(/catalog/i);
 });
 
@@ -121,7 +131,7 @@ test('DATA-04 missing catalogs cannot conceal omitted required normalized worklo
   source.index.runFiles = source.runs.map(({ id }) => `runs/${id}.json`);
   const normalized = structuredClone(validatePublishedDashboardData(source).data);
   delete normalized.catalogs;
-  normalized.pluginRuns[0].tests = normalized.pluginRuns[0].tests.filter(({ logicalTestId }) => logicalTestId !== 'c');
+  normalized.allRuns[0].tests = normalized.allRuns[0].tests.filter(({ logicalTestId }) => logicalTestId !== 'c');
   expect(() => loadDashboardData(normalized)).toThrow(/catalog/i);
 });
 
@@ -129,7 +139,7 @@ test('DATA-04 normalized JSON round trips retain authoritative catalog membershi
   const data = validatePublishedDashboardData(createSchema2Publication()).data;
   const serialized = JSON.parse(JSON.stringify({ ...data, backfillRunIds: [...data.backfillRunIds] }));
   expect(loadDashboardData(serialized)).toEqual(data);
-  serialized.pluginRuns[0].tests = serialized.pluginRuns[0].tests.filter(({ logicalTestId }) => logicalTestId !== 'c');
+  serialized.allRuns[0].tests = serialized.allRuns[0].tests.filter(({ logicalTestId }) => logicalTestId !== 'c');
   expect(() => loadDashboardData(serialized)).toThrow(/exactly one result.*catalog workload/i);
 });
 
@@ -139,7 +149,7 @@ test.each(['publication', 'normalized reload'])('DATA-06 rejects array source.co
   source.runs = [run]; source.index.runFiles = [`runs/${run.id}.json`];
   const input = entrypoint === 'publication' ? source
     : JSON.parse(JSON.stringify(validatePublishedDashboardData(source).data));
-  const identity = entrypoint === 'publication' ? run.source : input.pluginRuns[0].provenance;
+  const identity = entrypoint === 'publication' ? run.source : input.allRuns[0].provenance;
   const key = entrypoint === 'publication' ? 'commit' : 'rocjitsuCommitSha';
   identity[key] = [identity[key]];
   const validate = entrypoint === 'publication' ? validatePublishedDashboardData : loadDashboardData;
@@ -152,7 +162,7 @@ test.each(['publication', 'normalized reload'])('DATA-06 rejects array source.ba
   source.runs = [run]; source.index.runFiles = [`runs/${run.id}.json`];
   const input = entrypoint === 'publication' ? source
     : JSON.parse(JSON.stringify(validatePublishedDashboardData(source).data));
-  const base = entrypoint === 'publication' ? run.source.base : input.pluginRuns[0].sourceBase;
+  const base = entrypoint === 'publication' ? run.source.base : input.allRuns[0].sourceBase;
   base.commit = [base.commit];
   const validate = entrypoint === 'publication' ? validatePublishedDashboardData : loadDashboardData;
   expect(() => validate(input)).toThrow(/Run fictional-branch-01 has an invalid source base/);
@@ -172,13 +182,4 @@ test.each(['publication', 'normalized reload'])('DATA-06 preserves primitive ful
   expect(selectPublishedBranches(data, { query: branch.source.commit.toLowerCase() }).map(({ latestRun }) => latestRun.runId)).toEqual([branch.id]);
   expect(selectPublishedBranches(data, { query: 'nonmatching-query' })).toEqual([]);
   expect(selectAutomaticReference(data, candidate)).toMatchObject({ reason: 'exact-base', run: { runId: 'fictional-develop-20' } });
-});
-
-test('equivalent plugin source metadata does not depend on JSON property order', () => {
-  const source = createSchema2Publication();
-  const vanilla = source.runs.find(({ id }) => id === 'fictional-develop-23');
-  const plugin = source.runs.at(-1);
-  vanilla.source.base = { branch: 'develop', commit: source.runs[0].source.commit };
-  plugin.source.base = { commit: source.runs[0].source.commit, branch: 'develop' };
-  expect(() => validatePublishedDashboardData(source)).not.toThrow();
 });

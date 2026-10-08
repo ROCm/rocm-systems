@@ -1,11 +1,6 @@
 {
   "id": "fictional-develop-04",
-  "comparisonId": "fictional-develop-04",
   "testCatalog": "test-catalogs/fictional-old.json",
-  "plugin": {
-    "id": "vanilla",
-    "name": "Vanilla"
-  },
   "source": {
     "branch": "develop",
     "commit": "0005f1c70005f1c70005f1c70005f1c70005f1c7",
@@ -37,8 +32,7 @@
   "configurations": [
     {
       "target": "gfx1250",
-      "mode": "ST",
-      "threadCount": 1,
+      "threadingMode": "ST",
       "results": [
         {
           "testId": "a",
@@ -62,8 +56,7 @@
     },
     {
       "target": "gfx1250",
-      "mode": "MT",
-      "threadCount": 8,
+      "threadingMode": "MT",
       "results": [
         {
           "testId": "a",
@@ -87,8 +80,7 @@
     },
     {
       "target": "gfx950",
-      "mode": "ST",
-      "threadCount": 1,
+      "threadingMode": "ST",
       "results": [
         {
           "testId": "a",
@@ -112,8 +104,7 @@
     },
     {
       "target": "gfx950",
-      "mode": "MT",
-      "threadCount": 8,
+      "threadingMode": "MT",
       "results": [
         {
           "testId": "a",

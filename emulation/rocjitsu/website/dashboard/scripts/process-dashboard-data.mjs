@@ -46,7 +46,7 @@ async function main() {
     throw new Error('Usage: node scripts/process-dashboard-data.mjs <data-directory> [--output <new-file-outside-input>]');
   }
   const result = await processDashboardDataDirectory(directory, { output });
-  if (output) console.log(`Processed schema 2: ${result.data.runs.length} develop, ${result.data.allRuns.length} Vanilla, ${result.data.pluginRuns.length} total attempts. Output: ${path.resolve(output)}`);
+  if (output) console.log(`Processed schema 2: ${result.data.runs.length} develop, ${result.data.allRuns.length} total attempts. Output: ${path.resolve(output)}`);
   else console.log(JSON.stringify(result, null, 2));
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

@@ -11,7 +11,7 @@ function nodes(element) {
   if (!isValidElement(element)) return [];
   return [element, ...nodes(element.props.children)];
 }
-const candidate = { runId: 'fictional-candidate-exact', configurations: [{ target: 'gfx950', mode: 'MT' }], tests: [] };
+const candidate = { runId: 'fictional-candidate-exact', configurations: [{ target: 'gfx950', threadingMode: 'MT' }], tests: [] };
 const reference = { ...candidate, runId: 'fictional-manual-reference-exact' };
 const selection = { branch: 'fictional/branch', candidateId: candidate.runId, referenceId: reference.runId, manual: true, target: 'gfx950', mode: 'MT', detail: true };
 

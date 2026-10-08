@@ -8,11 +8,13 @@ vi.mock('@mui/material', async (importOriginal) => {
   return { ...original, Dialog: ({ open, children }) => open ? createElement('div', { role: 'dialog' }, children) : null };
 });
 
-test('benchmark details disclose authoritative simulator mode, thread count and arbitrary environment facts', () => {
-  const record = { run: { runId: 'fictional-details', timestamp: '2026-10-05T14:00:00Z', commitTimestamp: '2026-10-05T13:00:00Z', configurations: [{ target: 'gfx1250', mode: 'MT', threadCount: 8 }], environment: [{ key: 'tool', label: 'Generic tool', value: '-full+value' }], provenance: { rocjitsuCommitSha: 'a'.repeat(40) } }, test: { name: 'Fictional workload', target: 'gfx1250', mode: 'MT', suite: 'Triton', status: 'completed', durationSeconds: 0 } };
+test('benchmark details disclose authoritative simulator mode and arbitrary environment facts', () => {
+  const record = { run: { runId: 'fictional-details', timestamp: '2026-10-05T14:00:00Z', commitTimestamp: '2026-10-05T13:00:00Z', configurations: [{ target: 'gfx1250', threadingMode: 'MT' }], environment: [{ key: 'tool', label: 'Generic tool', value: '-full+value' }], provenance: { rocjitsuCommitSha: 'a'.repeat(40) } }, test: { name: 'Fictional workload', target: 'gfx1250', mode: 'MT', suite: 'Triton', status: 'completed', durationSeconds: 0 } };
   const html = renderToStaticMarkup(createElement(BenchmarkResultDialog, { record, onClose() {} }));
   expect(html).toContain('gfx1250 · MT · Triton');
-  expect(html).toContain('Simulator threads');
+  expect(html).not.toContain('Simulator threads');
+  expect(html).not.toContain('Plugin');
+  expect(html).not.toContain('Workflow');
   expect(html).toContain('Generic tool');
   expect(html).toContain('-full+value');
   expect(html).toContain(formatDuration(0));

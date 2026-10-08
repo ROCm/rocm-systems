@@ -19,7 +19,7 @@ export default function BranchRunSelector({ label, options, value, selectedId, o
         <Typography variant="body2" sx={{ fontFamily: monoFont }}>{runOptionLabel(run)}</Typography>
         {run.provenance?.commitMessage && <Typography variant="caption" color="text.secondary">{run.provenance.commitMessage}</Typography>}
       </Box>}
-      renderInput={(params) => <TextField {...params} label={label} placeholder={label === 'Reference' ? 'Choose reference' : 'Choose candidate'} helperText={`Search ${options.length} published ${label === 'Candidate' ? 'attempts on this branch' : 'Vanilla attempts across all branches'}`} />}
+      renderInput={(params) => <TextField {...params} label={label} placeholder={label === 'Reference' ? 'Choose reference' : 'Choose candidate'} helperText={`Search ${options.length} published ${label === 'Candidate' ? 'attempts on this branch' : 'attempts across all branches'}`} />}
       slotProps={{ listbox: { sx: { maxHeight: 360, '& li': { minHeight: 44 } } }, popper: { sx: { maxWidth: 'calc(100vw - 24px)' } }, clearIndicator: { sx: { minWidth: 44, minHeight: 44 } }, popupIndicator: { sx: { minWidth: 44, minHeight: 44 } } }}
       sx={{ '& .MuiInputBase-root': { minHeight: 44 }, minWidth: 0 }} />
     <Typography component="div" variant="caption" data-testid={`${label.toLowerCase()}-selected-identity`} sx={{ mt: 0.75, overflowWrap: 'anywhere', fontFamily: monoFont, color: 'text.secondary' }}>

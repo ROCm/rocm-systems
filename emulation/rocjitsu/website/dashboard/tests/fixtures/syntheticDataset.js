@@ -11,13 +11,13 @@ const catalog = {
 function syntheticRun(index) {
   const day = new Date(Date.UTC(2026, 0, 1) + index * 86400_000).toISOString();
   const id = `synthetic-run-${String(index).padStart(4, '0')}`;
-  return { id, comparisonId: id, testCatalog: CATALOG_PATH, plugin: { id: 'vanilla', name: 'Vanilla' },
+  return { id, testCatalog: CATALOG_PATH,
     source: { branch: 'develop', commit: index.toString(16).padStart(40, '0'), committedAt: day, message: `Fictional queue test ${index}` },
     execution: { completedAt: day, trigger: 'auto', machine: 'fictional-queue-node' },
     environment: [{ key: 'sdk', label: 'Fictional SDK', value: 'test-only' }],
     configurations: KEYS.map((key) => {
       const [target, mode] = key.split(':');
-      return { target, mode, results: catalog.configurations[key].map((testId, testIndex) => ({ testId, status: 'completed', durationSeconds: 1 + testIndex + index / 1000, error: null })) };
+      return { target, threadingMode: mode, results: catalog.configurations[key].map((testId, testIndex) => ({ testId, status: 'completed', durationSeconds: 1 + testIndex + index / 1000, error: null })) };
     }),
   };
 }

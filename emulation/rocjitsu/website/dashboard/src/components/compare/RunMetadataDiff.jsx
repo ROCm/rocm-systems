@@ -33,7 +33,6 @@ export default function RunMetadataDiff({ baseline, candidate, filters }) {
     ['catalog', 'Test catalog', (run) => run?.testCatalog ?? run?.catalogId],
     ['machine', 'Machine', (run) => run?.machineId],
     ['configurations', 'Published configurations', (run) => run?.configurations],
-    ['plugin', 'Plugin', (run) => run?.plugin],
   ].map(([key, label, value]) => ({ key, label, baseline: value(baseline), candidate: value(candidate) }));
   const environment = keys.map((key) => ({ key, label: oldDetails.get(key)?.label ?? newDetails.get(key)?.label, baseline: oldDetails.get(key)?.value, candidate: newDetails.get(key)?.value }));
   const rows = (items) => items.map((row) => {

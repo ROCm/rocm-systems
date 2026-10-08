@@ -7,7 +7,6 @@ it('UI-002 round-trips exact long validated attempt and branch identities', () =
   const source = createSchema2Publication();
   const run = source.runs.find(({ id }) => id === 'fictional-branch-01');
   run.id = `fictional-${'x'.repeat(192)}`;
-  run.comparisonId = run.id;
   run.source.branch = `fictional/${'b'.repeat(192)}`;
   source.index.runFiles = source.runs.map(({ id }) => `runs/${id}.json`);
   expect(validatePublishedDashboardData(source).data.allRuns.some(({ runId }) => runId === run.id)).toBe(true);

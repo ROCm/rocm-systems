@@ -8,8 +8,8 @@ the `gh-pages-rocjitsu branch` in the `ROCm/rocm-systems` repository.
 **Live website:** [RocJitsu Performance Dashboard](https://rocm.github.io/rocm-systems/rocjitsu-dashboard/)
 
 The consumer accepts **schema 2 only**, with explicitly declared ST/MT
-configurations. No real schema-2 dataset has been published yet; schema-1 data
-requires migration and is not inferred or adapted. The local fixtures are
+`configurations[].threadingMode` values. No real schema-2 dataset has been
+published yet; schema-1 data requires migration and is not inferred or adapted. The local fixtures are
 fictional test input, not performance measurements. See the
 [schema-2 data contract](docs/website-data-contract.md) for fields, normalization,
 branch-reference rules, local processing and future publisher acceptance. This

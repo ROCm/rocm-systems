@@ -7,7 +7,6 @@ export function createFeedbackPublication() {
   const publication = createSchema2Publication();
   const run = structuredClone(publication.runs.find((run) => run.id === 'fictional-branch-01'));
   run.id = 'fictional-rattataking-test-branch';
-  run.comparisonId = run.id;
   run.source = { branch: 'users/RattataKing/test-branch', commit: 'f1c7'.repeat(10),
     committedAt: '2026-10-05T09:00:00.000Z', message: 'FICTIONAL RattataKing test branch',
     base: { branch: 'develop', commit: publication.runs.find((run) => run.id === 'fictional-develop-20').source.commit },
@@ -42,7 +41,6 @@ export const benchmarkData = publishedResult.data;
 // A canonical-only clone for scoped mutation tests; do not reseed from derived run collections.
 export function cloneBenchmarkData() {
   const cloned = structuredClone(benchmarkData);
-  delete cloned.pluginRuns;
   delete cloned.allRuns;
   return cloned;
 }

@@ -27,7 +27,7 @@ test('published branches use the inclusive publication-relative 30-day window an
 });
 
 test('all qualifying branches are returned without a twenty-branch cap, newest executions first even for old commits', () => {
-  const base = data.allRuns.find((run) => run.branch !== data.canonicalBranch && run.plugin.id === 'vanilla');
+  const base = data.allRuns.find((run) => run.branch !== data.canonicalBranch);
   const runs = Array.from({ length: 35 }, (_, index) => ({ ...base, runId: `run-${index}`, branch: `fictional/branch-${index}`, timestamp: new Date(Date.parse('2026-10-01T00:00:00Z') + index * 60000).toISOString(), commitTimestamp: '2026-09-01T00:00:00Z' }));
   const branches = selectors.selectPublishedBranches({ ...data, allRuns: runs });
   expect(branches).toHaveLength(35);

@@ -1,11 +1,6 @@
 {
   "id": "fictional-branch-02",
-  "comparisonId": "fictional-branch-02",
   "testCatalog": "test-catalogs/fictional-current.json",
-  "plugin": {
-    "id": "vanilla",
-    "name": "Vanilla"
-  },
   "source": {
     "branch": "fictional/optimization-02",
     "commit": "0065f1c70065f1c70065f1c70065f1c70065f1c7",
@@ -37,8 +32,7 @@
   "configurations": [
     {
       "target": "gfx1250",
-      "mode": "ST",
-      "threadCount": 1,
+      "threadingMode": "ST",
       "results": [
         {
           "testId": "a",
@@ -68,8 +62,7 @@
     },
     {
       "target": "gfx950",
-      "mode": "ST",
-      "threadCount": 1,
+      "threadingMode": "ST",
       "results": [
         {
           "testId": "a",

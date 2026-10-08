@@ -95,7 +95,7 @@ test.each(['gfx1250', 'gfx950'])('DATA-03 preserves historical %s MT scope when 
   catalog.configurations = { [key]: catalog.configurations[key] };
   latest.testCatalog = `test-catalogs/${catalog.id}.json`;
   source.catalogs[latest.testCatalog] = catalog;
-  latest.configurations = latest.configurations.filter((configuration) => `${configuration.target}:${configuration.mode}` === key);
+  latest.configurations = latest.configurations.filter((configuration) => `${configuration.target}:${configuration.threadingMode}` === key);
   const scoped = validatePublishedDashboardData(source).data;
   const scope = { targets: [target], modes: ['ST', 'MT'], suites: scoped.suites };
   const measured = earlier.configurations.filter((configuration) => configuration.target === target)
@@ -111,7 +111,7 @@ test.each(['gfx1250', 'gfx950'])('DATA-03 preserves historical %s MT scope when 
   expect(overview.history.anchors.filter(({ mode }) => mode === 'MT')).toHaveLength(3);
   expect(overview.history.anchors.filter(({ mode }) => mode === 'MT').every((anchor) => anchor.catalogId === 'fictional-old' && anchor.runId === earlier.id)).toBe(true);
   expect(overview.history.anchors.filter(({ mode }) => mode === 'ST').every((anchor) => anchor.catalogId === catalog.id && anchor.runId === latest.id)).toBe(true);
-  const mtMeasured = earlier.configurations.find((configuration) => configuration.target === target && configuration.mode === 'MT')
+  const mtMeasured = earlier.configurations.find((configuration) => configuration.target === target && configuration.threadingMode === 'MT')
     .results.reduce((total, result) => total + result.durationSeconds, 0);
   expect(selectOverview(scoped, { ...scope, modes: ['MT'] }).history.series[0].data).toEqual([mtMeasured, null]);
 });
@@ -130,13 +130,13 @@ test('DATA-03 resolves each selected configuration catalog by commit rather than
     catalog.configurations = { [key]: memberships[key] };
     run.testCatalog = `test-catalogs/${catalog.id}.json`;
     source.catalogs[run.testCatalog] = catalog;
-    run.configurations = run.configurations.filter((configuration) => `${configuration.target}:${configuration.mode}` === key);
+    run.configurations = run.configurations.filter((configuration) => `${configuration.target}:${configuration.threadingMode}` === key);
     run.configurations[0].results = run.configurations[0].results.filter(({ testId }) => memberships[key].includes(testId));
   }
   const scoped = validatePublishedDashboardData(source).data;
   expect(scoped.latestRun.runId).toBe(mtRun.id);
   expect(scoped.latestCommitRun.runId).toBe(stRun.id);
-  const measured = earlier.configurations.filter(({ target }) => target === 'gfx1250').flatMap(({ mode, results }) =>
+  const measured = earlier.configurations.filter(({ target }) => target === 'gfx1250').flatMap(({ threadingMode: mode, results }) =>
     results.filter(({ testId }) => memberships[`gfx1250:${mode}`].includes(testId))).reduce((total, result) => total + result.durationSeconds, 0);
   const { history } = selectOverview(scoped, { targets: ['gfx1250'], modes: ['ST', 'MT'], suites: scoped.suites });
   expect(history.series[0].data).toEqual([measured, null, null]);

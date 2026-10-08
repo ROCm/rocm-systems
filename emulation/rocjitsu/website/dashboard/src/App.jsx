@@ -103,7 +103,6 @@ const emptyDashboardData = {
   runs: [],
   allRuns: [],
   modes: [],
-  pluginRuns: [],
   testCatalog: [],
   targets: [],
   suites: [],

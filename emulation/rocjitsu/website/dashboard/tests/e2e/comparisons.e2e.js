@@ -92,7 +92,6 @@ test('branch-only publications keep comparison filters usable and long linked id
   const [candidate, baseline] = publication.runs;
   candidate.id = `fictional-candidate-${'x'.repeat(220)}`;
   baseline.id = `fictional-baseline-${'y'.repeat(220)}`;
-  for (const run of publication.runs) run.comparisonId = run.id;
   publication.index.runFiles = publication.runs.map((run) => `runs/${run.id}.json`);
   // Valid fictional HTTP publication, with no develop attempts or disk fixture.
   await installPublication(page, { publication });

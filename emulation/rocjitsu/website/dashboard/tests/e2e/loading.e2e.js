@@ -22,7 +22,7 @@ test('loading shell reports partial progress and disables data actions until all
     const progress = loading.getByRole('progressbar', { name: 'Loading benchmark run data' });
     await expect.poll(async () => Number(await progress.getAttribute('aria-valuenow'))).toBeGreaterThan(0);
     expect(Number(await progress.getAttribute('aria-valuenow'))).toBeLessThan(100);
-    await expect(progress).toHaveAttribute('aria-valuetext', /\d+ of 45 run files loaded/);
+    await expect(progress).toHaveAttribute('aria-valuetext', /\d+ of 44 run files loaded/);
     await expect(page.getByRole('button', { name: 'Download JSON' })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Reload all data' })).toBeDisabled();
     await expect(page.getByTestId('dashboard-navigation').getByRole('tab')).toHaveCount(4);
@@ -60,7 +60,7 @@ test('fatal load and failed refresh discard stale exports; Retry restores raw sc
   const source = await downloadSource(page);
   expect(source).toEqual(publication);
   expect(source.metadata).toMatchObject({ schemaVersion: 2, isBeta: true });
-  expect(source.runs.some((run) => run.plugin.id === 'asan')).toBe(true);
+  expect(source.runs.every((run) => !('plugin' in run) && !('comparisonId' in run))).toBe(true);
   expect(source.runs.some((run) => run.source.branch.startsWith('fictional/'))).toBe(true);
   const policies = await fetchPolicies(page);
   const initialImmutable = policies.filter(({ url }) => /\/(runs|test-catalogs)\//.test(url));

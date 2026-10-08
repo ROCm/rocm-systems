@@ -54,7 +54,7 @@ test.each(['baseline', 'candidate'])('ST-only %s reports unpublished MT before c
   const source = createSchema2Publication();
   // Different catalogs also exercise genuinely absent ST workloads.
   const stOnly = source.runs[0];
-  stOnly.configurations = stOnly.configurations.filter(({ mode }) => mode === 'ST');
+  stOnly.configurations = stOnly.configurations.filter(({ threadingMode }) => threadingMode === 'ST');
   const both = source.runs[8];
   source.runs = [stOnly, both];
   source.index.runFiles = source.runs.map(({ id }) => `runs/${id}.json`);

@@ -1,6 +1,6 @@
 # Published Branch Runs v11
 
-`views/BranchRunsView.jsx` receives `{ data, state, onOpenComparison }`. It consumes validated schema-2 Vanilla runs from `data.allRuns` and the three selectors in `src/data/branchSelectors.js`; it has no preview-data dependency. The shell owns fixture disclosure, resource retry/error UI, and page navigation.
+`views/BranchRunsView.jsx` receives `{ data, state, onOpenComparison }`. It consumes validated schema-2 runs from `data.allRuns` and the three selectors in `src/data/branchSelectors.js`; it has no preview-data dependency. The shell owns fixture disclosure, resource retry/error UI, and page navigation.
 
 ## State boundary
 
@@ -14,7 +14,7 @@ Branch changes select that branch's latest published execution and automatic ref
 - `BranchDetail` / `BranchRunSelector`: exact SHA and attempt identities, branch-scoped candidate search, all-published reference search, unavailable identity disclosure, local suite/search/sort state.
 - `ConfigurationMatrix`: gfx1250/gfx950 columns, ST/MT rows using shared categorical shapes; unavailable cells remain inspectable. Its selected cell and difference rows use one pair/suite/search scope.
 - `BenchmarkDifferences`: shared matched sums, separate signed Abs change (candidate minus baseline seconds) and Pct change columns with MUI sort headers, phone stacked entries and equivalent sort controls, exclusions, and full-comparison callback. Default sorting is signed seconds descending; each column toggles descending/ascending. Missing values stay last in either direction and test IDs break ties. Contiguous real-suite sections may recur to preserve global sorted order. Zero reference has no percentage. Empty coverage never renders success or synthesized totals.
-- `BranchEnvironment`: key-union generic facts, literal scalar values, source clocks/attempts/configuration/thread counts, safe supplied repository/PR/workflow links.
+- `BranchEnvironment`: key-union generic facts, literal scalar values, source clocks/attempts/configuration, safe supplied repository/PR links.
 - `branchSelection.js` and `branchPresentation.js`: pure state/presentation helpers, covered separately from JSX rendering.
 
 Phones use list/detail CSS states without unmounting the list or local filter state. The view saves/restores list scroll position and focus; its only effect updates UI focus/scroll, never route state.

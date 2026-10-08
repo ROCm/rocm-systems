@@ -15,7 +15,7 @@ function chartOptions() {
   const publication = createSchema2Publication();
   // A valid partial publication: this interior attempt has no gfx1250 MT result.
   const missing = publication.runs.find((run) => run.id === 'fictional-develop-10');
-  missing.configurations = missing.configurations.filter((config) => config.target !== 'gfx1250' || config.mode !== 'MT');
+  missing.configurations = missing.configurations.filter((config) => config.target !== 'gfx1250' || config.threadingMode !== 'MT');
   const data = validatePublishedDashboardData(publication).data;
   renderToStaticMarkup(createElement(BenchmarkHistoryChart, {
     data,

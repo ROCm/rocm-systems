@@ -84,7 +84,7 @@ async function main() {
   }
 
   const result = await validateDashboardDataDirectory(directory);
-  console.log(`Dashboard schema 2 is valid (${result.sourceData.runs.length} run files; ${result.data.runs.length} develop Vanilla attempts).`);
+  console.log(`Dashboard schema 2 is valid (${result.sourceData.runs.length} run files; ${result.data.runs.length} develop attempts).`);
 }
 
 const invokedAsScript = process.argv[1]

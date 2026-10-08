@@ -111,8 +111,6 @@ export default function RunDetailsDialog({ run, filters, repository, onClose }) 
             <DetailGrid>
               <DetailItem label="Rocjitsu commit">{commitSha}</DetailItem>
               {hasDisplayValue(provenance.commitMessage) && <DetailItem label="Commit message">{provenance.commitMessage}</DetailItem>}
-              {hasDisplayValue(run.plugin?.name) && <DetailItem label="Plugin">{run.plugin.name}</DetailItem>}
-              {hasDisplayValue(run.plugin?.version) && <DetailItem label="Plugin version">{run.plugin.version}</DetailItem>}
               {hasDisplayValue(run.machineId) && <DetailItem label="Machine">{run.machineId}</DetailItem>}
               {hasDisplayValue(run.branch) && <DetailItem label="Branch">{run.branch}</DetailItem>}
             </DetailGrid>

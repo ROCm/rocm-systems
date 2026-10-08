@@ -104,7 +104,7 @@ Unless stated otherwise:
   number. It excludes `null`, arrays and objects. Numeric zero and boolean false
   are preserved.
 - **Object** means a non-null JSON object, not an array. An empty object is allowed
-  for `problem` and plugin `options`.
+  for `problem`.
 - Optional fields may be omitted. Supplying `null`, an empty string or a wrong
   type is not equivalent to omitting a constrained optional field.
 - Timestamps require a calendar-valid `YYYY-MM-DDTHH:mm:ss`, optional fractional
@@ -126,7 +126,6 @@ fields specified here, not UI aggregates.
 | --- | --- |
 | `metadata.repository` | Parseable absolute HTTP or HTTPS URL with no username/password; not restricted to GitHub |
 | `source.pullRequest.url` | HTTPS, hostname exactly `github.com`, no username/password, pathname ending exactly `/pull/<number>` for the accompanying PR number |
-| `execution.workflowUrl` | HTTPS, hostname exactly `github.com`, no username/password; no workflow-path pattern required |
 
 GitHub URLs are **not** required to refer to `metadata.repository`; there is no
 owner/repository allowlist, API lookup or existence check. Query strings and
@@ -155,7 +154,7 @@ Illustrative settings:
 | `isBeta` | Required boolean; retained in normalized/raw exports even if no Beta badge is rendered |
 | `canonicalBranch` | Required string exactly `develop` |
 
-There is no inline branch directory, result matrix, catalog or plugin list in
+There is no inline branch directory, result matrix or catalog in
 metadata. `canonicalBranch` defines long-term history, not a restriction on every
 run's source branch.
 
@@ -222,7 +221,7 @@ at `test-catalogs/illustrative-catalog.json`:
 | --- | --- |
 | `id` | Required string exactly matching the catalog filename stem |
 | `tests` | Required array of definitions with unique IDs |
-| `tests[].id` | Required nonempty logical workload identity, independent of target, mode and plugin; no token/hash pattern imposed |
+| `tests[].id` | Required nonempty logical workload identity, independent of target and threading mode; no token/hash pattern imposed |
 | `tests[].suite` | Required nonempty grouping text |
 | `tests[].name` | Required nonempty display name |
 | `tests[].problem` | Required object; each key is nonempty text and each value is scalar |
@@ -248,7 +247,7 @@ of its own included configurations, not the size of a later catalog.
 ## 6. Immutable run files
 
 A run is one uniquely identified published attempt for a source revision,
-plugin, machine and environment, with one or more explicitly measured
+machine and environment, with one or more explicitly measured
 configurations. It may include a subset of its catalog's configurations. It need
 not represent all targets/modes in the catalog or an entire four-configuration
 workflow. An absent configuration means **not published**, not success, failure
@@ -261,9 +260,7 @@ value, not a real zero-runtime claim. The GitHub URLs demonstrate syntax only.
 ```json
 {
   "id": "illustrative-branch-01",
-  "comparisonId": "illustrative-experiment-01",
   "testCatalog": "test-catalogs/illustrative-catalog.json",
-  "plugin": { "id": "vanilla", "name": "Vanilla" },
   "source": {
     "branch": "illustrative/optimization",
     "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -281,8 +278,7 @@ value, not a real zero-runtime claim. The GitHub URLs demonstrate syntax only.
   "execution": {
     "completedAt": "2026-10-02T10:00:00.000Z",
     "trigger": "manual",
-    "machine": "illustrative-runner",
-    "workflowUrl": "https://github.com/ROCm/rocm-systems/actions/runs/12345"
+    "machine": "illustrative-runner"
   },
   "environment": [
     { "key": "sdk", "label": "Illustrative SDK", "value": "example-only" },
@@ -293,8 +289,7 @@ value, not a real zero-runtime claim. The GitHub URLs demonstrate syntax only.
   "configurations": [
     {
       "target": "gfx1250",
-      "mode": "ST",
-      "threadCount": 1,
+      "threadingMode": "ST",
       "results": [
         {
           "testId": "illustrative-gemm",
@@ -318,8 +313,7 @@ value, not a real zero-runtime claim. The GitHub URLs demonstrate syntax only.
     },
     {
       "target": "gfx1250",
-      "mode": "MT",
-      "threadCount": 8,
+      "threadingMode": "MT",
       "results": [
         {
           "testId": "illustrative-gemm",
@@ -333,28 +327,20 @@ value, not a real zero-runtime claim. The GitHub URLs demonstrate syntax only.
 }
 ```
 
-### Run identity and plugin fields
+### Run identity
 
 | Field | Requirement |
 | --- | --- |
 | `id` | Required globally unique primitive-string attempt ID matching `^[A-Za-z0-9._-]+$`; filename must match; not a commit SHA |
-| `comparisonId` | Required nonempty reserved plugin-experiment identity; no token/hash pattern imposed |
 | `testCatalog` | Required relative catalog path matching the catalog pattern |
-| `plugin.id` | Required nonempty plugin identity; exact `vanilla` is the uninstrumented population |
-| `plugin.name` | Required nonempty display name |
-| `plugin.version` | Optional nonempty string |
-| `plugin.options` | Optional object; no plugin-specific property schema imposed |
 
 Attempt IDs must be primitive strings before the token pattern is applied.
 Numbers, booleans, arrays (including single-element string arrays), and objects
 are rejected rather than coerced to strings. This also applies to `runId` in
 normalized reloads; valid string IDs retain their exact value for URL selection.
 
-Each rerun receives a new run ID. `comparisonId` is not a target/mode batch ID,
-a source SHA or an attempt selector. Distinct attempts of the same plugin must
-also use distinct comparison IDs to avoid duplicate plugin identity in a group.
-The conventional baseline is `{ "id": "vanilla", "name": "Vanilla" }`; filtering
-uses the exact plugin ID, not its display name.
+Each rerun receives a new run ID. Attempts are selected by this ID, not by
+source SHA or a target/mode batch identity.
 
 ### `source`
 
@@ -382,7 +368,6 @@ SHA must have the same parsed `committedAt` instant, even on different branches.
 | `completedAt` | Required strict timestamp of attempt completion |
 | `trigger` | Required enum exactly `auto` or `manual` |
 | `machine` | Required nonempty machine identifier |
-| `workflowUrl` | Optional GitHub HTTPS URL, with the scope described above |
 
 The following ordering is enforced, with equality permitted:
 
@@ -407,9 +392,7 @@ There is no mandatory fixed SDK/compiler/version key list.
 Environment identity is a JSON string of sorted `[key,value]` pairs, ordered by
 key with `localeCompare`. Labels and item order do not affect compatibility;
 scalar type and value do. Two empty environments are compatible; an empty and
-populated one are not. This identity is **not a hash or attestation**. Plugin
-identity/options are the intended reserved experiment dimension, not substitutes
-for environment facts.
+populated one are not. This identity is **not a hash or attestation**.
 
 ### `configurations` and result rules
 
@@ -417,9 +400,8 @@ for environment facts.
 
 | Field | Requirement |
 | --- | --- |
-| `target` | Required nonempty string; `${target}:${mode}` must match the configuration pattern and exist in the catalog |
-| `mode` | Required string exactly `ST` or `MT`; no type coercion |
-| `threadCount` | Optional integer; if present, ST requires exactly `1`, MT requires at least `2` |
+| `target` | Required nonempty string; `${target}:${threadingMode}` must match the configuration pattern and exist in the catalog |
+| `threadingMode` | Required string exactly `ST` or `MT`; no type coercion |
 | `results` | Required array with exactly one result for each workload in this catalog configuration |
 
 A target/mode pair may appear at most once in a run. Configuration order and
@@ -443,12 +425,11 @@ unpublished configuration for the ST-only side's MT rows, in either comparison
 direction. Neither an unpublished configuration nor catalog absence is a failed
 result or a zero-duration measurement.
 
-Mode is an **explicit declaration of simulator threading**, never inferred from
-workload names, `.threads1`/`.threads8` suffixes, sample counts, warmup counts,
-functional/clocked execution mode or another configuration. `threadCount` is
-optional and does not cause mode inference. The validator checks the mode's
-string type and exact enum before constructing the target/mode key or checking
-`threadCount`; arrays such as `["ST"]` or `["MT"]` are invalid even if string
+`threadingMode` is an **explicit declaration of simulator threading**, never
+inferred from workload names, `.threads1`/`.threads8` suffixes, sample counts,
+warmup counts, functional/clocked execution mode or another configuration. The
+validator checks its string type and exact enum before constructing the
+target/mode key; arrays such as `["ST"]` or `["MT"]` are invalid even if string
 coercion would resemble a supported mode. The producer must truthfully declare
 the actual execution semantics; the JSON validator cannot verify them. A run
 may include any measured subset of gfx950/gfx1250 × ST/MT configurations; all
@@ -469,40 +450,11 @@ Failed/timed-out results must stay in the matrix with null seconds; diagnostics
 are optional in content but the `error` field itself is mandatory. There is no
 published `missing` status. `exitCode` and `findings` are removed fields.
 
-Raw result identity is `(run id, target, mode, logical testId)`. Comparison
+Raw result identity is `(run id, target, threadingMode, logical testId)`. Comparison
 matching requires the exact target, mode and logical workload; ST and MT are
 never paired implicitly.
 
-## 7. Reserved plugin compatibility
-
-Plugin presentation is hidden from active navigation, but validation,
-`comparisonId`, `plugin`, normalized `pluginRuns`, helper calculations and raw
-exports remain reserved. A non-Vanilla record is not canonical performance history
-and is not discarded merely because the UI hides plugins.
-
-For each `comparisonId`:
-
-1. A plugin ID may appear at most once.
-2. A group containing any non-`vanilla` run must also contain a `vanilla` run.
-3. Such a group must have equal catalog path; source branch/SHA/commit timestamp/
-   optional message; optional source-base branch/SHA; optional PR number/URL;
-   machine; normalized environment; and configuration set including optional
-   `threadCount`. Configuration ordering does not affect this equality.
-
-Completion time, result values, trigger and workflow URL are **not** included in
-this implemented equality check. Plugin version/options may differ as part of the
-plugin dimension. Source commit timestamps in this group comparison use their
-stored strings; the separate same-SHA consistency check uses parsed instants.
-A Vanilla-only group does not gain a new global environment-equality rule.
-
-Reserved plugin selectors match exact normalized target/mode/workload IDs. They
-retain completed zero as a matched measurement but cannot compute a percentage
-against a zero baseline. Existing overhead helpers use the geometric mean of
-available per-test ratios and mark a partial whole-set estimate; they do not
-publish additional measured results or replace failures. No plugin workflow or
-supported-plugin catalog is implemented by this document.
-
-## 8. Normalized and export envelopes
+## 7. Normalized and export envelopes
 
 `validatePublishedDashboardData` returns `{ data, sourceData }`. The HTTP loader
 adds a consumer-only `cacheGeneration` field alongside those two keys. Neither
@@ -521,7 +473,7 @@ The dashboard's **Download JSON** exports this envelope, unfiltered:
 }
 ```
 
-It preserves indexed develop/branch attempts, reserved plugins, optional source
+It preserves indexed develop/branch attempts, optional source
 and execution metadata, generic environments, configurations, diagnostics and
 zero durations. It includes only referenced catalogs. It is not the filtered
 chart, the comparison's matched subset, or `{data,sourceData}` from processing.
@@ -534,9 +486,8 @@ chart, the comparison's matched subset, or `{data,sourceData}` from processing.
 | `generatedAt` | Index publication timestamp |
 | `catalogs` | Authoritative referenced catalog envelopes keyed by relative path; required for reloading every referenced run |
 | `testCatalog` | Union of referenced catalog definitions, keyed logically by workload ID |
-| `pluginRuns` | All normalized attempts, ascending execution order |
-| `allRuns` | All Vanilla attempts, including non-develop branches, ascending execution order |
-| `runs` | Develop Vanilla attempts only, ascending execution order |
+| `allRuns` | All attempts, including non-develop branches, ascending execution order |
+| `runs` | Develop attempts only, ascending execution order |
 | `targets` | Sorted unique targets present in `allRuns`, not all catalog-only targets |
 | `suites` | Sorted unique suites in the union `testCatalog` |
 | `modes` | Supported mode names `['ST','MT']`; not proof both were published |
@@ -548,16 +499,16 @@ A normalized run contains:
 
 | Field | Origin/meaning |
 | --- | --- |
-| `runId`, `comparisonId`, `testCatalog`, `catalogId`, `plugin` | Raw identities, catalog ID and preserved plugin object |
+| `runId`, `testCatalog`, `catalogId` | Raw attempt identity, catalog path and catalog ID |
 | `timestamp`, `commitTimestamp` | Completion time and source commit time, respectively |
 | `trigger`, `machineId`, `branch` | Raw execution trigger/machine and source branch |
-| `sourceBase`, `pullRequest`, `workflowUrl` | Present only when the corresponding optional raw metadata exists |
+| `sourceBase`, `pullRequest` | Present only when the corresponding optional raw metadata exists |
 | `environmentId` | Sorted key/value JSON identity described above |
 | `provenance.rocjitsuCommitSha` | Full source commit SHA |
 | `provenance.commitMessage` | Optional source message |
 | `provenance.details` | Raw generic environment items |
 | `targets`, `modes` | Targets actually included; included modes in ST/MT order |
-| `configurations` | Included `{target,mode,threadCount?}` descriptors, without raw result arrays |
+| `configurations` | Included `{target,threadingMode}` descriptors, without raw result arrays |
 | `tests` | Flattened definition/result records with explicit configuration identity |
 
 A normalized test carries definition fields `id`, `suite`, `name`, `problem`,
@@ -567,7 +518,7 @@ result fields `status`, `durationSeconds`, `error`, and:
 logicalTestId = raw result.testId
 testId        = "<target>:<mode>:<logicalTestId>"
 target        = configuration.target
-mode          = configuration.mode
+mode          = configuration.threadingMode
 ```
 
 Its definition `id` remains the logical workload ID; normalized `testId` is the
@@ -581,7 +532,7 @@ or hide a required workload from coverage. Accepted result extensions remain in
 The local processor serializes runtime `backfillRunIds` as an array. To rehydrate,
 pass **`processed.data`**, not the entire processing envelope, to
 `loadDashboardData`. That function chooses the normalized source array in priority
-order `pluginRuns`, then `allRuns`, then `runs`; reconstructs raw runs; checks
+order `allRuns`, then `runs`; reconstructs raw runs; checks
 normalized test identities and duplicate attempts; and routes the reconstruction
 through the same wire validator. Every run's referenced authoritative catalog
 envelope must be present in `data.catalogs` and pass catalog validation. Missing
@@ -594,7 +545,7 @@ backfill Set are rebuilt, not trusted as authoritative input. Retain the full
 processed envelope for lossless raw-source provenance; do not treat rehydration
 as byte-preserving raw export.
 
-## 9. Chronology and population boundaries
+## 8. Chronology and population boundaries
 
 **Execution order** is ascending parsed completion timestamp, with `runId`
 `localeCompare` as the stable tie-break. "Latest execution" includes late reruns
@@ -609,12 +560,11 @@ position in history.
 
 | Consumer | Population and order |
 | --- | --- |
-| Overview and long-term benchmark history | `data.runs`: develop Vanilla only; commit chronology |
-| Recent Runs | All canonical develop Vanilla attempts by completion, newest first, paginated in groups of 20 with numbered pages and icon-only first/previous/next/last controls; selected target/suite/mode filters affect coverage, not the run population |
+| Overview and long-term benchmark history | `data.runs`: develop only; commit chronology |
+| Recent Runs | All canonical develop attempts by completion, newest first, paginated in groups of 20 with numbered pages and icon-only first/previous/next/last controls; selected target/suite/mode filters affect coverage, not the run population |
 | Benchmark records | Canonical attempts newest by completion; default record page size 25 |
-| General Run Comparison | Selected Vanilla attempts may come from `data.allRuns`, including branches |
-| Branch Runs | Published non-develop Vanilla attempts, grouped by source branch |
-| Reserved plugin helpers/raw download | All appropriate plugin records; raw download preserves index order |
+| General Run Comparison | Selected attempts may come from `data.allRuns`, including branches |
+| Branch Runs | Published non-develop attempts, grouped by source branch |
 
 A recent-row baseline is the nearest earlier **commit position** with completed
 selected tests and a completed exact match for every selected candidate ID;
@@ -624,7 +574,7 @@ configuration/workload. Neither means "the last file published." Arbitrary
 Run Comparison consumes the explicit candidate/reference pair; it does not
 require equal machines/environments or decide that differences are harmless.
 
-## 10. Scope, zero, failure and comparison calculations
+## 9. Scope, zero, failure and comparison calculations
 
 Selector filters are `{ targets: string[], suites: string[], modes: string[] }`.
 The intersection is exact. Explicit empty arrays mean empty selections, not
@@ -669,7 +619,7 @@ failed/timeout/absent results are gaps, with available diagnostics retained in
 records. Catalog normalization is not applied to individual benchmark series or
 to arbitrary selected-pair comparison totals.
 
-## 11. Overview chronology and catalog adjustment
+## 10. Overview chronology and catalog adjustment
 
 Overview exposes **one selected-scope sum**, named `Selected runtime`, not one
 line per target. Its cards and history duration/delta use the same period
@@ -717,7 +667,7 @@ clear an otherwise available endpoint percentage because of this flag.
    catalog in canonical history, or no members in the selected suites, contributes
    no workload. Deleted workloads disappear according to each pair's chosen
    catalog, even if older runs measured them.
-2. Scan canonical develop Vanilla attempts in ascending completion time, then
+2. Scan canonical develop attempts in ascending completion time, then
    attempt-ID order. For each current-catalog workload and exact target/mode,
    record the **first completed finite measurement in that pair's chosen current
    catalog**.
@@ -747,11 +697,11 @@ Anchor records identify `testId`, `logicalTestId`, target, mode, duration,
 not label them measured historical results. General pair comparisons and raw
 exports do not receive these adjustments.
 
-## 12. Published branches and automatic references
+## 11. Published branches and automatic references
 
 `selectPublishedBranches(data, { query: '', pr: 'all' })` uses publication time,
 not the viewer's current date. A branch is active when its latest published
-Vanilla execution lies in the inclusive interval from **30 days before
+execution lies in the inclusive interval from **30 days before
 `data.generatedAt` through `data.generatedAt`**. Develop and future completions
 are excluded. An active group's `runs` retains **all published attempts for that
 branch**, including older attempts outside the active window, newest first.
@@ -765,7 +715,7 @@ are `{branch,runs,latestRun,pullRequest}`, with `pullRequest` taken from the
 latest run or `null`; this is published metadata, not live GitHub branch status.
 
 `selectAutomaticReference(data, candidate)` selects only published develop
-Vanilla attempts:
+attempts:
 
 1. If the recorded `sourceBase.branch` is develop and its commit is published,
    choose the **latest execution of that exact base commit**, breaking completion
@@ -791,7 +741,7 @@ matches workload name, logical ID or suite. Comparable rows are sorted by
 absolute seconds change descending, then normalized test ID. Percentage sorting,
 when offered by a UI, is a presentation choice, not a different denominator.
 
-## 13. Local validation and processing
+## 12. Local validation and processing
 
 From `emulation/rocjitsu/website/dashboard`, with the Node version required by
 `package.json` and a complete staged **data root**:
@@ -811,7 +761,7 @@ node scripts/process-dashboard-data.mjs /absolute/path/to/staged/data \
 
 `npm run process:data -- <data-root>` is also available as the package alias for
 the direct processor entry point above. Validation succeeds with exit status 0 and reports indexed run
-files and develop Vanilla attempts; malformed input exits nonzero. Processing
+files and develop attempts; malformed input exits nonzero. Processing
 validates the snapshot before emitting output, creates output parents as needed,
 and refuses to overwrite an existing output (`wx`). Its output path must be
 outside the input directory, not a published wire file. Before creating any
@@ -832,7 +782,7 @@ It does not scan unindexed files or forbid every symlink/root alias. Both CLI
 entry points use the same schema validator as the browser. They do not execute
 benchmarks, infer threading, add authoritative measurements, publish or deploy.
 
-## 14. Publication checklist
+## 13. Publication checklist
 
 Before releasing a dataset:
 
@@ -840,8 +790,8 @@ Before releasing a dataset:
   provenance. Preserve actual sample/warmup protocol; do not
   import fictional fixtures. Declare only measured/published configurations.
 - [ ] Generate the fields above from real executions, including
-  explicit mode, immutable attempt IDs, truthful source/base/PR metadata,
-  completion time, generic environment, machine and reserved plugin identity.
+  explicit `threadingMode`, immutable attempt IDs, truthful source/base/PR metadata,
+  completion time, generic environment and machine.
 - [ ] Use immutable catalog snapshots. Preserve unchanged workload identities;
   give changed definitions new IDs. Record every required workload in each
   included configuration, including failed and timed-out results with null
@@ -849,15 +799,12 @@ Before releasing a dataset:
 - [ ] Enforce source-to-completion-to-publication chronology and consistent
   source timestamps. Verify URL destinations and provenance independently where
   needed; passing shape validation is not attestation.
-- [ ] For non-Vanilla groups, include their Vanilla partner, unique plugin IDs
-  and all compatibility facts required by the implemented group check. Never
-  repurpose `comparisonId` as a four-configuration batch key.
 - [ ] Stage the full intended metadata/index and every reachable run/catalog.
   Audit unindexed/orphan files separately; the CLI cannot certify them. Run
   `npm run validate:data -- <staged-data-root>` with the actual consumer validator
   and require exit status 0 before publication.
 - [ ] Exercise normalization/reload/export against that staged **real** snapshot:
-  canonical/branch/plugin separation, first-success anchors and disclosed
+  canonical/branch separation, first-success anchors and disclosed
   estimates, missing-mode gaps, zero-baseline percentages, failures, exact-base
   selection and strictly earlier-completion fallback.
 - [ ] Publish to `gh-pages-rocjitsu/rocjitsu-dashboard/data/`, not the application

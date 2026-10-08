@@ -284,7 +284,7 @@ test('feedback: compared metadata highlights complete differing rows instead of 
     expect(backgrounds).toHaveLength(3);
     expect(new Set(backgrounds).size).toBe(1);
     expect(backgrounds[0]).not.toBe('rgba(0, 0, 0, 0)');
-    const same = page.getByTestId('metadata-row-plugin');
+    const same = page.getByTestId('metadata-row-catalog');
     await expect(same).toHaveAttribute('data-different', 'false');
     expect(await same.locator('th').evaluate((cell) => getComputedStyle(cell).backgroundColor)).not.toBe(backgrounds[0]);
   }

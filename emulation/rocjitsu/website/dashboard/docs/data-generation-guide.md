@@ -30,15 +30,14 @@ Supply actual measurement and provenance values from your execution system.
   ID across catalogs requires identical definition facts; changed definitions
   need new workload IDs.
 - Run: give each attempt a unique `id` matching its filename, reference its
-  immutable catalog, record `comparisonId`, `plugin`, `source`, `execution`,
+  immutable catalog, record `source`, `execution`,
   `environment`, and the actual measured `configurations`.
 - Index: record a strict `generatedAt` timestamp and the unique
   `runs/<run-id>.json` paths for the complete intended snapshot, not just the
   latest upload. Only indexed runs and their referenced catalogs are loaded.
 
-Read contract sections 2–7 for exact types, allowed URLs, optional-field rules
-and reserved plugin compatibility. Filenames and references are relative to the
-data root; do not put absolute paths or URLs in `runFiles` or `testCatalog`.
+Read contract sections 2–6 for exact types, allowed URLs and optional-field rules.
+Filenames and references are relative to the data root; do not put absolute paths or URLs in `runFiles` or `testCatalog`.
 
 ## 2. Map execution facts without inventing data
 
@@ -49,9 +48,8 @@ data root; do not put absolute paths or URLs in `runFiles` or `testCatalog`.
 - Record the actual source branch, machine, `auto`/`manual` trigger and generic
   scalar environment facts. Optional source base and PR metadata must be
   truthful. The recorded base is not proof of a measured baseline.
-- Declare simulator mode exactly `ST` or `MT`; never infer it from workload
-  suffixes, sample counts or functional/clocked execution. If supplying
-  `threadCount`, ST requires 1 and MT requires at least 2. Include only
+- Declare `configurations[].threadingMode` exactly `ST` or `MT`; never infer it
+  from workload suffixes, sample counts or functional/clocked execution. Include only
   configurations actually measured and published; all four target/mode pairs
   are not required in one file.
 - For each included configuration, emit exactly one result for every workload
@@ -63,10 +61,6 @@ data root; do not put absolute paths or URLs in `runFiles` or `testCatalog`.
 - An absent whole configuration means not published. An omitted required
   workload inside a published configuration is invalid. There is no `missing`
   status; `exitCode` and `findings` are not allowed.
-- For ordinary runs use `plugin: {"id":"vanilla","name":"Vanilla"}` and a
-  distinct `comparisonId` for each independent attempt. Do not use
-  `comparisonId` as a four-configuration batch ID. Non-Vanilla experiments
-  must include a compatible Vanilla partner as specified in contract section 7.
 - Publish raw measurements only. Do not generate chart points, aggregate
   percentages, adjusted history, estimated anchors, UI coverage or normalized
   consumer records as wire inputs; the dashboard derives these.
@@ -121,5 +115,5 @@ with the publication snapshot. Read back and validate the exact published
 snapshot and verify the real consumer's fetch/reload behavior. Shape validation
 cannot attest execution semantics, experiment equivalence or provenance.
 
-Use the [publication checklist](website-data-contract.md#14-publication-checklist)
+Use the [publication checklist](website-data-contract.md#13-publication-checklist)
 before releasing a dataset.

@@ -32,7 +32,7 @@ export default function BranchDetail({ selection, candidate, reference, automati
     </Box>
     {!candidate && <Typography variant="body2" sx={{ mb: 2 }}>Selected candidate is not in the current published data. Its exact identity is retained; choose another published attempt above.</Typography>}
     <Typography variant="body2" color="text.secondary" data-testid="branch-reference-reason" sx={{ mt: 1.5 }}>
-      {selection.referenceId && !reference ? 'Saved reference attempt is unavailable. Its exact identity is retained; choose a published reference above.' : selection.manual ? 'Manual reference · any published Vanilla attempt; only matching target, mode and completed workloads are compared.' : reference && reference.runId !== automatic.run?.runId ? 'Saved automatic reference attempt retained. Only matching completed workloads are compared.' : automatic.description}
+      {selection.referenceId && !reference ? 'Saved reference attempt is unavailable. Its exact identity is retained; choose a published reference above.' : selection.manual ? 'Manual reference · any published attempt; only matching target, mode and completed workloads are compared.' : reference && reference.runId !== automatic.run?.runId ? 'Saved automatic reference attempt retained. Only matching completed workloads are compared.' : automatic.description}
     </Typography>
     {selection.manual && <Button onClick={onAutomatic} sx={{ minHeight: 44 }}>Restore automatic base</Button>}
     <ConfigurationMatrix candidate={candidate} reference={reference} selection={selection} suites={suites} query={query} onSelect={(target, mode) => {

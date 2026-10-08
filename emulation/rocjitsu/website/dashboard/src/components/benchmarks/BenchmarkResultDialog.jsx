@@ -28,7 +28,6 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
   const commitSha = provenance.rocjitsuCommitSha;
   const testProblemDetails = problemDetails(test?.problem);
   const environmentDetails = [...new Map([...provenanceDetails(provenance), ...(provenance.details ?? []), ...(run?.environment ?? [])].map((detail) => [detail.key, detail])).values()];
-  const configuration = run?.configurations?.find((item) => item.target === test?.target && item.mode === test?.mode);
 
   return (
     <Dialog open={Boolean(record)} onClose={onClose} fullWidth maxWidth="md">
@@ -45,7 +44,6 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
               <DetailItem label="Status"><StatusChip status={test.status} /></DetailItem>
               <DetailItem label="Duration">{formatDuration(test.durationSeconds)}</DetailItem>
               <DetailItem label="Execution mode">{test.mode}</DetailItem>
-              {configuration?.threadCount != null && <DetailItem label="Simulator threads">{configuration.threadCount}</DetailItem>}
               {test.error && <Box sx={{ gridColumn: '1 / -1' }}><DetailItem label="Error">{test.error}</DetailItem></Box>}
             </DetailGrid>
 
@@ -83,8 +81,6 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
               <DetailItem label="Rocjitsu commit">{commitSha}</DetailItem>
               <DetailItem label="Commit time">{formatFullDate(commitTimestampFor(run))}</DetailItem>
               {hasDisplayValue(provenance.commitMessage) && <DetailItem label="Commit message">{provenance.commitMessage}</DetailItem>}
-              {hasDisplayValue(run.plugin?.name) && <DetailItem label="Plugin">{run.plugin.name}</DetailItem>}
-              {hasDisplayValue(run.plugin?.version) && <DetailItem label="Plugin version">{run.plugin.version}</DetailItem>}
             </DetailGrid>
 
           </DialogContent>

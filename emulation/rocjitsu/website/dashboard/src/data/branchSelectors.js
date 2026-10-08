@@ -2,7 +2,7 @@ import { compareRunExecution, commitShaFor } from './runOrdering.js';
 import { selectRunComparison } from './selectors.js';
 
 export function selectAutomaticReference(data, candidate) {
-  const develop = (data.runs ?? []).filter((run) => run.branch === (data.canonicalBranch ?? 'develop') && run.plugin.id === 'vanilla');
+  const develop = (data.runs ?? []).filter((run) => run.branch === (data.canonicalBranch ?? 'develop'));
   if (candidate?.sourceBase?.branch === (data.canonicalBranch ?? 'develop')) {
     const exact = develop.filter((run) => commitShaFor(run) === candidate.sourceBase.commit).sort(compareRunExecution).at(-1);
     if (exact) return { run: exact, reason: 'exact-base', description: `Exact develop base ${commitShaFor(exact)} · attempt ${exact.runId}` };
@@ -25,7 +25,7 @@ export function selectPublishedBranches(data, { query = '', pr = 'all' } = {}) {
   const groups = new Map(); const search = query.trim().toLowerCase();
   for (const run of data.allRuns ?? []) {
     const time = Date.parse(run.timestamp);
-    if (run.plugin.id !== 'vanilla' || run.branch === data.canonicalBranch || !Number.isFinite(time) || time > end) continue;
+    if (run.branch === data.canonicalBranch || !Number.isFinite(time) || time > end) continue;
     const group = groups.get(run.branch) ?? [];
     group.push(run); groups.set(run.branch, group);
   }

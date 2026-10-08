@@ -15,7 +15,7 @@ function MeasuredChange({ row, measurement = 'seconds' }) {
 }
 
 function ExcludedResults({ rows, candidate, reference, target, mode }) {
-  const status = (test, run) => !run ? 'No run selected' : !run.configurations.some((configuration) => configuration.target === target && configuration.mode === mode) ? 'Configuration not published'
+  const status = (test, run) => !run ? 'No run selected' : !run.configurations.some((configuration) => configuration.target === target && configuration.threadingMode === mode) ? 'Configuration not published'
     : !test ? 'Not in this catalog' : test.status === 'completed' ? `Completed · ${formatDuration(test.durationSeconds)}` : test.status === 'timeout' ? 'Timeout' : 'Failed';
   return <Box component="details" data-testid="branch-exclusions" sx={{ mt: 2, borderTop: 1, borderColor: 'divider' }}>
     <Box component="summary" sx={{ cursor: 'pointer', minHeight: 44, display: 'list-item', py: 1.5, ml: 2 }}>Excluded results ({rows.length})</Box>
