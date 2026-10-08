@@ -4550,6 +4550,8 @@ TEST_F(InitMicrotestIsolated, NcclInit_UnreadableKernelVersion_ReturnsSystemErro
       []() {
         ncclResult_t res = ncclSuccess;
         std::string log;
+        ScopedHook cpuid(g_microCpuid, CpuidWithoutHypervisorBit);
+        ScopedHook iommu(g_microIommuPassthroughOk, [](const char*) { return false; });
         {
           ScopedHook sysText(g_microTopoGetStrFromSys,
                              [](const char*, const char* file, char* out, int maxLen) {
@@ -4560,19 +4562,20 @@ TEST_F(InitMicrotestIsolated, NcclInit_UnreadableKernelVersion_ReturnsSystemErro
                                }
                                return SysFileText(file, "0", out, maxLen);
                              });
-          ScopedHook iommu(g_microIommuPassthroughOk, [](const char*) { return false; });
           log = RcclUnitTesting::CaptureLog([&] { res = ncclInit(); });
           ASSERT_EQ(ncclSystemError, res);
           ASSERT_TRUE(LogHas(log, "Could not read kernel version from /proc/version")) << "actual log:\n" << log;
           ASSERT_EQ(0, iommu.calls);
         }
         // The empty-version hook is gone. A regression that stored the error in initResult
-        // before returning would make this second call fail.
+        // before returning would make this second call fail. cpuid and iommu stay hooked so
+        // this call does not depend on the host.
         ScopedHook sysText(g_microTopoGetStrFromSys,
                            [](const char*, const char* file, char* out, int maxLen) {
                              return SysFileText(file, "0", out, maxLen);
                            });
         ASSERT_EQ(ncclSuccess, ncclInit());
+        ASSERT_EQ(1, iommu.calls);
       });
 }
 
