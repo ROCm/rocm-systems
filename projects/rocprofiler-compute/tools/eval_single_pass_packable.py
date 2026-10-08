@@ -8,14 +8,13 @@ Example::
     PYTHONPATH=src:tools python3 tools/eval_single_pass_packable.py --arch gfx942
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Dict, Optional, Set, Tuple, Union
 
 _ROOT = Path(__file__).resolve().parent.parent
 for _p in (_ROOT / "src", _ROOT / "tools"):
@@ -37,6 +36,7 @@ from rocprof_compute_soc.counter_grouping_single_pass import (  # noqa: E402
     collect_unique_slot_limit_unions,
     try_allocate_single_pass_packable,
 )
+from rocprof_compute_soc.soc_base import OmniSoC_Base  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
 
 _ENV_KEYS = (
@@ -45,11 +45,11 @@ _ENV_KEYS = (
 )
 
 
-def _backup_env() -> dict[str, str | None]:
+def _backup_env() -> Dict[str, Optional[str]]:
     return {k: os.environ.get(k) for k in _ENV_KEYS}
 
 
-def _restore_env(backup: dict[str, str | None]) -> None:
+def _restore_env(backup: Dict[str, Optional[str]]) -> None:
     for key, val in backup.items():
         if val is None:
             os.environ.pop(key, None)
@@ -57,7 +57,7 @@ def _restore_env(backup: dict[str, str | None]) -> None:
             os.environ[key] = val
 
 
-def _build_soc(arch: str, tmp: Path):
+def _build_soc(arch: str, tmp: Path) -> Tuple[OmniSoC_Base, Set[str], Dict[str, int]]:
     config_dir = get_default_config_dir()
     perfmon_config = mi_gpu_specs.get_perfmon_config(arch)
     soc = _build_inspector_soc(arch, config_dir, None, perfmon_config, tmp)
@@ -69,7 +69,7 @@ def _build_soc(arch: str, tmp: Path):
     return soc, counters, perfmon_config
 
 
-def _run_legacy(arch: str) -> dict[str, int | float]:
+def _run_legacy(arch: str) -> Dict[str, Union[int, float]]:
     backup = _backup_env()
     try:
         os.environ["ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC"] = "1"
@@ -96,7 +96,7 @@ def _run_legacy(arch: str) -> dict[str, int | float]:
     }
 
 
-def _run_spp_default(arch: str) -> dict[str, int | float]:
+def _run_spp_default(arch: str) -> Dict[str, Union[int, float]]:
     backup = _backup_env()
     try:
         os.environ.pop("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", None)
