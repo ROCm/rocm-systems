@@ -470,22 +470,22 @@ void AnvilLib::querySdmaEngineCounts() {
     LOG_WARN("anvil: no mapped HIP GPU agents; SDMA engine count unknown");
     return;
   }
-  hsa_status_t status = hsa_agent_get_info(
+  const hsa_status_t hostStatus = hsa_agent_get_info(
       agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SDMA_ENG), &numSdmaEngines_);
-  if (status != HSA_STATUS_SUCCESS) {
-    LOG_WARN("anvil: HSA_AMD_AGENT_INFO_NUM_SDMA_ENG query failed: %#x", status);
-    numSdmaEngines_ = 0;
-  }
-
-  status = hsa_agent_get_info(
+  const hsa_status_t xgmiStatus = hsa_agent_get_info(
       agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SDMA_XGMI_ENG),
       &numSdmaXgmiEngines_);
-  if (status != HSA_STATUS_SUCCESS) {
-    LOG_WARN("anvil: HSA_AMD_AGENT_INFO_NUM_SDMA_XGMI_ENG query failed: %#x", status);
+  if (hostStatus != HSA_STATUS_SUCCESS || xgmiStatus != HSA_STATUS_SUCCESS) {
+    // A zero count from a failed query would read as a CPX partition (no xGMI engines) and fold a
+    // full SPX node onto the host engines. A total of 0 means "unknown": no fold, no budget check.
+    LOG_ERROR("anvil: SDMA engine count query failed (host=%#x xgmi=%#x); engine counts unknown",
+              hostStatus, xgmiStatus);
+    numSdmaEngines_ = 0;
     numSdmaXgmiEngines_ = 0;
+    numSdmaEnginesTotal_ = 0;
+  } else {
+    numSdmaEnginesTotal_ = numSdmaEngines_ + numSdmaXgmiEngines_;
   }
-
-  numSdmaEnginesTotal_ = numSdmaEngines_ + numSdmaXgmiEngines_;
 
   uint32_t node = 0;
   HsaNodeProperties nodeProps{};
@@ -534,6 +534,7 @@ SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t 
   lastQueueStatus_ = queue->createStatus();
   if (!queue->valid()) return nullptr;
   vec.emplace_back(std::move(queue));
+  queuesUsedTotal_ += 1;
   if (channelIdx != nullptr) {
     *channelIdx = static_cast<int>(vec.size() - 1);
   }
@@ -541,11 +542,17 @@ SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t 
 }
 
 bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
-  // createSdmaQueue's getHipGpuAgent exits the process on an unmapped device; refuse here instead.
+  // createSdmaQueue's getHipGpuAgent exits the process on an unmapped device, and getBusId exits on
+  // an out-of-range one; refuse here instead.
   if (srcDeviceId < 0 || srcDeviceId >= static_cast<int>(gpuAgentsByHipDev_.size()) ||
       !hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(srcDeviceId)])) {
     LOG_ERROR("anvil: no HSA agent mapped for HIP device %d, cannot connect to %d", srcDeviceId,
               dstDeviceId);
+    return false;
+  }
+  if (dstDeviceId < 0 || dstDeviceId >= static_cast<int>(gpuAgentsByHipDev_.size())) {
+    LOG_ERROR("anvil: destination HIP device %d out of range [0, %zu), cannot connect from %d",
+              dstDeviceId, gpuAgentsByHipDev_.size(), srcDeviceId);
     return false;
   }
   const EngineSelection selection = getSdmaEngineId(srcDeviceId, dstDeviceId);
@@ -605,7 +612,6 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
       rollback();
       return false;
     }
-    queuesUsedTotal_ += 1;
   }
   return true;
 }
@@ -620,7 +626,7 @@ void AnvilLib::disconnect() {
 void AnvilLib::disconnectDevice(int dstDeviceId) {
   auto it = sdma_channels_.find(dstDeviceId);
   if (it == sdma_channels_.end()) return;
-  // Only valid queues were charged to the budget in connect().
+  // Only valid queues were charged to the budget in createSdmaQueue().
   for (const auto& q : it->second) {
     if (q != nullptr && q->valid() && queuesUsedTotal_ > 0) queuesUsedTotal_ -= 1;
   }

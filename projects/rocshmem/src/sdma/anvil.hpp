@@ -38,66 +38,12 @@
 #include <vector>
 
 #include "anvil_device.hpp"
+#include "anvil_engine_map.hpp"
 #include "hsa/hsa_ext_amd.h"
 #include "hsakmt/hsakmt.h"
 #include "hsakmt/hsakmttypes.h"
 
 namespace sdma_anvil {
-
-// A CPX/DPX partition owns host SDMA engines but no xGMI engines.
-inline bool isSdmaPartition(uint32_t numSdmaXgmiEngines, uint32_t numSdmaEnginesTotal) {
-  return numSdmaXgmiEngines == 0 && numSdmaEnginesTotal > 0;
-}
-
-// True when the doubled OAM-map id cannot be used as-is. A partition (no xGMI
-// engines) folds even when the doubled id is in range: same-device peers share
-// the map diagonal and would otherwise all land on engine 0. An id past the
-// engines this node reports folds too. numSdmaEnginesTotal == 0 never folds,
-// so the modulo below is not asked to divide by zero.
-inline bool oamMapEngineNeedsFold(uint32_t numSdmaXgmiEngines, uint32_t numSdmaEnginesTotal,
-                                  int doubledEngineId) {
-  const bool partition = isSdmaPartition(numSdmaXgmiEngines, numSdmaEnginesTotal);
-  const bool outOfRange =
-      numSdmaEnginesTotal > 0 && static_cast<uint32_t>(doubledEngineId) >= numSdmaEnginesTotal;
-  return partition || outOfRange;
-}
-
-// Fold the undoubled OAM-map value and both PCI functions into the engines this
-// node reports. numEngines must be > 0. An unreadable function (-1) counts as 0
-// and therefore collides with function 0.
-inline int foldOamMapEngine(int oamEngine, int srcFn, int dstFn, uint32_t numEngines) {
-  const int src = srcFn < 0 ? 0 : srcFn;
-  const int dst = dstFn < 0 ? 0 : dstFn;
-  return (oamEngine + src + dst) % static_cast<int>(numEngines);
-}
-
-// PCI function and the function-0 BDF of the same device. function is -1 when the tail is not a
-// function digit, so an unreadable id is not treated as function 0. The physical BDF is rewritten
-// only in that case; a bad tail is left unchanged.
-struct PciFunctionBus {
-  std::string busId;
-  std::string physBusId;
-  int function;
-};
-
-// Split a BDF into its function digit and the function-0 BDF of the same device. Pure, and beside
-// the two helpers above because it decides the same fallback they do: a tail outside '0'-'7'
-// leaves function at -1 and physBusId equal to busId, which collapses getOamId's candidate list to
-// one entry so the physical-BDF read never runs. PCI function numbers are three bits, so '0'-'7'
-// is the whole range.
-inline PciFunctionBus pciFunctionBus(const std::string& busId) {
-  PciFunctionBus loc;
-  loc.busId = busId;
-  loc.physBusId = busId;
-  loc.function = -1;
-  if (busId.empty()) return loc;
-  const char c = busId.back();
-  if (c >= '0' && c <= '7') {
-    loc.function = c - '0';
-    loc.physBusId.back() = '0';
-  }
-  return loc;
-}
 
 // How an engine was chosen for one peer, and the values that explain the choice. The two failure
 // logs that report it -- the queue-create error and the missing-xGMI-id error -- need the same
