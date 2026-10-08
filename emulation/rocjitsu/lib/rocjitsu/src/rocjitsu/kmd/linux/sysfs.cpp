@@ -485,6 +485,14 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
       write_file(device_dir + "/revision", revision_hex.str());
       write_file(device_dir + "/subsystem_vendor", vendor_hex.str());
       write_file(device_dir + "/subsystem_device", device_hex.str());
+      for (const auto &block : gpu.ip_versions) {
+        std::string instance_dir =
+            device_dir + "/ip_discovery/die/0/" + std::to_string(block.hardware_id) + "/0";
+        make_dir(instance_dir);
+        write_file(instance_dir + "/major", std::to_string(block.major) + "\n");
+        write_file(instance_dir + "/minor", std::to_string(block.minor) + "\n");
+        write_file(instance_dir + "/revision", std::to_string(block.revision) + "\n");
+      }
     }
   }
 
@@ -546,6 +554,7 @@ Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t
   gpu.debug_prop = dev.debug_prop;
   gpu.drm_render_minor = dev.drm_render_minor;
   gpu.marketing_name = dev.marketing_name;
+  gpu.ip_versions = dev.ip_versions;
   gpu.revision_id = dev.revision_id;
   gpu.pci_revision_id = dev.pci_revision_id;
   gpu.simd_count = dev.simd_count;

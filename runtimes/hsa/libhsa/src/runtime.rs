@@ -1,59 +1,213 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Process-global HSA initialization, discovery, and object ownership.
 //!
 //! The single runtime registry owns the rocddi session and every HSA-visible
-//! object map. Entry points hold its mutex only while validating or updating
-//! registry state; blocking native operations, worker joins, and application
-//! callbacks must occur after the relevant ownership has been moved out of the
-//! lock. Final shutdown removes public reachability before releasing workers
-//! and native resources.
+//! object map. Native queries that release its mutex retain an in-flight token
+//! until they finish, so shutdown waits before freeing their device VM.
+//! Application callbacks and worker joins occur outside the lock. Final
+//! shutdown removes public reachability before releasing native resources.
 //!
 //! Host and GPU discovery go through the rocddi provider.
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::c_void;
 use std::fmt::Arguments;
 use std::io::Write;
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::ptr::NonNull;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use crate::platform::event::{GpuMemoryFault, SignalEvent, SignalEventPage, poll_memory_fault};
 use rocddi::device::Device;
-use rocddi::gpu::event::linux::{GpuMemoryFault, SignalEvent, poll_memory_fault};
 use rocddi::memory::Allocation;
 use rocddi::session::{Session, SessionLifetime};
-use rocddi::topology::platform::linux::host::{self as linux_host, CpuCacheKind, CpuInfo};
 use rocddi::topology::{Endpoint, GpuInfo};
 
+use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
 use crate::loader::{CodeObject, CodeSymbol, Executable, Reader, Symbol};
 use crate::memory::{LockedMemory, Memory, VmemHandle, VmemMapping, VmemReservation};
-use crate::pc_sampling::PcSamplingSession;
-use crate::queue::{CountedHardwareQueue, CountedQueue, Queue, QueueSharedEvent, SoftQueue};
-use crate::signal::{AsyncDispatcher, ImportedIpcSignal, OwnedIpcSignal, SignalSlab};
+use crate::platform::host::{self as platform_host, CpuCacheKind, CpuInfo};
+use crate::queue::{
+    CountedHardwareQueue, CountedQueue, Queue, QueueSharedEvent, SdmaQueue, SoftQueue,
+};
+use crate::signal::{
+    AsyncDispatcher, AsyncSignalRecord, ImportedIpcSignal, OwnedIpcSignal, SignalSlab,
+};
+
+thread_local! {
+    static IN_CALLBACK: Cell<bool> = const { Cell::new(false) };
+    static IN_LOG_WRITE: Cell<bool> = const { Cell::new(false) };
+}
+
+// KFD retains a primary process VM after its last descriptor closes. Later
+// HSA generations therefore need a private context to acquire a fresh VM.
+static PRIMARY_CONTEXT_USED: AtomicBool = AtomicBool::new(false);
+
+pub(crate) struct InitFailure {
+    pub(crate) status: Status,
+    pub(crate) cleanup_failed: bool,
+}
+
+impl From<Status> for InitFailure {
+    fn from(status: Status) -> Self {
+        Self {
+            status,
+            cleanup_failed: false,
+        }
+    }
+}
+
+/// Marks application callbacks whose teardown would wait for the caller.
+pub(crate) struct CallbackScope(bool);
+
+impl CallbackScope {
+    pub(crate) fn enter() -> Self {
+        Self(IN_CALLBACK.with(|active| active.replace(true)))
+    }
+
+    pub(crate) fn active() -> bool {
+        IN_CALLBACK.with(Cell::get)
+    }
+}
+
+impl Drop for CallbackScope {
+    fn drop(&mut self) {
+        IN_CALLBACK.with(|active| active.set(self.0));
+    }
+}
+
+/// Prevents C stream callbacks from recursively entering the log writer or
+/// replacing its stream while the borrowed pointer is in use.
+pub(crate) struct LogWriteScope;
+
+impl LogWriteScope {
+    fn enter() -> Option<Self> {
+        if IN_LOG_WRITE.with(|active| active.replace(true)) {
+            return None;
+        }
+        Some(Self)
+    }
+
+    pub(crate) fn active() -> bool {
+        IN_LOG_WRITE.with(Cell::get)
+    }
+}
+
+impl Drop for LogWriteScope {
+    fn drop(&mut self) {
+        IN_LOG_WRITE.with(|active| active.set(false));
+    }
+}
+
+struct LogConfig {
+    flags: [u8; 8],
+    stream: Option<BorrowedCStream>,
+    stopping: bool,
+}
+
+#[derive(Clone, Copy)]
+struct BorrowedCStream(NonNull<c_void>);
+
+// SAFETY: The C stdio stream is used only while LogOutput holds its config
+// mutex. The HSA caller keeps the stream open while it is configured, and C
+// stdio serializes access from other threads using the same FILE pointer.
+unsafe impl Send for BorrowedCStream {}
+
+unsafe extern "C" {
+    fn fwrite(buffer: *const c_void, size: usize, count: usize, stream: *mut c_void) -> usize;
+    fn fflush(stream: *mut c_void) -> i32;
+}
+
+pub(crate) struct LogOutput {
+    enabled: AtomicU64,
+    config: Mutex<LogConfig>,
+}
+
+impl LogOutput {
+    fn new() -> Self {
+        Self {
+            enabled: AtomicU64::new(0),
+            config: Mutex::new(LogConfig {
+                flags: [0; 8],
+                stream: None,
+                stopping: false,
+            }),
+        }
+    }
+
+    pub(crate) fn set(&self, flags: [u8; 8], stream: *mut c_void) -> Status {
+        let Ok(mut config) = self.config.lock() else {
+            return ERROR;
+        };
+        if config.stopping {
+            return INVALID_RUNTIME_STATE;
+        }
+        config.flags = flags;
+        config.stream = NonNull::new(stream).map(BorrowedCStream);
+        self.enabled
+            .store(u64::from_le_bytes(flags), Ordering::Release);
+        SUCCESS
+    }
+
+    fn stop(&self) {
+        let mut config = self
+            .config
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        config.stopping = true;
+        config.flags = [0; 8];
+        config.stream = None;
+        self.enabled.store(0, Ordering::Release);
+    }
+
+    fn write(&self, flag: u32, line: &[u8]) {
+        let Some(_scope) = LogWriteScope::enter() else {
+            return;
+        };
+        let Ok(config) = self.config.lock() else {
+            return;
+        };
+        if config.stopping || !logging_flag_enabled(config.flags, flag) {
+            return;
+        }
+        if let Some(stream) = config.stream {
+            // SAFETY: The public logging contract keeps the borrowed FILE open
+            // while enabled. This mutex prevents replacement or shutdown from
+            // finishing until the C stdio calls finish.
+            unsafe {
+                let _ = fwrite(line.as_ptr().cast(), 1, line.len(), stream.0.as_ptr());
+                let _ = fflush(stream.0.as_ptr());
+            }
+        } else {
+            let mut stream = std::io::stderr().lock();
+            let _ = stream.write_all(line);
+            let _ = stream.flush();
+        }
+    }
+}
+
+pub(crate) struct LogWork {
+    output: Arc<LogOutput>,
+    _inflight: InFlightToken,
+    flag: u32,
+    line: String,
+}
+
+impl LogWork {
+    pub(crate) fn write(self) {
+        self.output.write(self.flag, self.line.as_bytes());
+    }
+}
 
 fn gpu_agent_name(gpu: &GpuInfo) -> String {
     format!("gfx{}{}{}", gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping)
-}
-
-fn gpu_product_name(endpoint: &Endpoint) -> String {
-    let end = endpoint
-        .name
-        .iter()
-        .position(|byte| *byte == 0)
-        .unwrap_or(endpoint.name.len());
-    std::str::from_utf8(&endpoint.name[..end])
-        .ok()
-        .filter(|name| {
-            name.starts_with("AMD ") || name.starts_with("Radeon ") || name.starts_with("Instinct ")
-        })
-        .unwrap_or("AMD Radeon Graphics")
-        .to_owned()
-}
-
-fn select_asic_family_id(topology: u32, drm: Option<u32>) -> u32 {
-    drm.filter(|family| *family != 0).unwrap_or(topology)
 }
 
 fn hdp_flush_pointers(address: Option<usize>) -> [usize; 2] {
@@ -67,20 +221,28 @@ fn full_profile_platform(local_memory_bytes: impl IntoIterator<Item = u64>) -> b
         .is_some_and(|bytes| bytes == 0 && local_memory_bytes.all(|bytes| bytes == 0))
 }
 
-fn notify_system_shutdown(handlers: &[(SystemEventHandler, usize)]) {
+fn notify_system_shutdown(handlers: &[(SystemEventHandler, CallbackArg)]) {
     let event = HsaAmdEvent {
         event_type: AMD_SYSTEM_SHUTDOWN_EVENT,
         payload: [0; 3],
     };
-    let _ = notify_system_event(handlers, &event);
+    let _ = notify_system_event(handlers, &event, None);
 }
 
-fn notify_system_event(handlers: &[(SystemEventHandler, usize)], event: &HsaAmdEvent) -> bool {
+fn notify_system_event(
+    handlers: &[(SystemEventHandler, CallbackArg)],
+    event: &HsaAmdEvent,
+    stop: Option<&AtomicBool>,
+) -> bool {
     let mut handled = false;
     for (callback, data) in handlers {
+        if stop.is_some_and(|stop| stop.load(Ordering::Acquire)) {
+            break;
+        }
+        let _scope = CallbackScope::enter();
         // SAFETY: Registration supplies an ABI-compatible callback. The event
         // remains live for the duration of each synchronous invocation.
-        handled |= unsafe { callback(event, *data as *mut c_void) } == SUCCESS;
+        handled |= unsafe { callback(event, data.as_ptr()) } == SUCCESS;
     }
     handled
 }
@@ -119,28 +281,57 @@ fn system_event_worker(device: &Device, stop: &AtomicBool) {
         match poll_memory_fault(gpu_device) {
             Ok(Some(fault)) => {
                 let notification = {
-                    let Ok(guard) = lock() else {
+                    let Ok(mut guard) = lock() else {
                         return;
                     };
-                    let Some(runtime) = guard.as_ref() else {
+                    let Some(runtime) = guard.as_mut() else {
                         return;
                     };
                     let Some(index) = runtime.gpus.iter().position(|gpu| {
-                        gpu.endpoint.linux_kfd_drm_info().gpu_id == fault.kfd_gpu_id
+                        crate::platform::fault_matches_endpoint(&gpu.endpoint, &fault)
                     }) else {
                         return;
                     };
-                    (
-                        memory_fault_event(
-                            HsaAgent {
-                                handle: GPU_AGENT_BASE + index as u64,
-                            },
-                            fault,
-                        ),
-                        runtime.system_event_handlers.clone(),
-                    )
+                    let agent = HsaAgent {
+                        handle: GPU_AGENT_BASE + index as u64,
+                    };
+                    let event = memory_fault_event(agent, fault);
+                    let reason = event.payload[2] as u32;
+                    runtime.vm_fault_details = Some((agent, fault.virtual_address, reason));
+                    // KFD reports the process fault and the queue error on
+                    // different workers. Let the queue worker identify the
+                    // faulted queue before delivering the system callback.
+                    let Ok((mut guard, _)) = VM_FAULT_CONDVAR.wait_timeout_while(
+                        guard,
+                        Duration::from_millis(50),
+                        |registry| {
+                            registry.as_ref().is_some_and(|runtime| {
+                                runtime.queues.values().any(|queue| queue.agent == agent)
+                                    && !runtime
+                                        .queues
+                                        .values()
+                                        .any(|queue| queue.agent == agent && queue.vm_faulted)
+                            })
+                        },
+                    ) else {
+                        return;
+                    };
+                    let Some(runtime) = guard.as_mut() else {
+                        return;
+                    };
+                    for queue in runtime.queues.values_mut() {
+                        if queue.agent == agent && queue.vm_faulted {
+                            queue.vm_fault_address = fault.virtual_address;
+                            queue.vm_fault_reason = reason;
+                        }
+                    }
+                    (event, runtime.system_event_handlers.clone())
                 };
-                if !notify_system_event(&notification.1, &notification.0) {
+                let handled = notify_system_event(&notification.1, &notification.0, Some(stop));
+                if stop.load(Ordering::Acquire) {
+                    return;
+                }
+                if !handled {
                     std::process::abort();
                 }
                 return;
@@ -193,10 +384,50 @@ pub(crate) struct Gpu {
     pub(crate) name: Box<str>,
     pub(crate) product_name: Box<str>,
     pub(crate) asic_family_id: u32,
+    pub(crate) timestamp_frequency_hz: u64,
     pub(crate) hdp_flush: [usize; 2],
     _mmio_remap: Option<Allocation>,
     pub(crate) coherency_type: u32,
     pub(crate) fine_grain_pool: bool,
+    pub(crate) persisting_l2_cache_size: Arc<Mutex<usize>>,
+}
+
+trait RetireSession {
+    fn retire(&mut self) -> bool;
+}
+
+impl RetireSession for Session {
+    fn retire(&mut self) -> bool {
+        self.destroy().is_ok()
+    }
+}
+
+struct PendingInit<S: RetireSession = Session, G = Gpu> {
+    session: Option<S>,
+    gpus: Vec<G>,
+}
+
+impl<S: RetireSession, G> PendingInit<S, G> {
+    fn cleanup(&mut self) -> bool {
+        // Device and MMIO owners must release their session borrows first.
+        self.gpus.clear();
+        let Some(mut session) = self.session.take() else {
+            return true;
+        };
+        if !session.retire() {
+            // A failed native close may retain a VM or KFD runtime state.
+            // Keep its owning controller alive until process teardown.
+            std::mem::forget(session);
+            return false;
+        }
+        true
+    }
+}
+
+impl<S: RetireSession, G> Drop for PendingInit<S, G> {
+    fn drop(&mut self) {
+        self.cleanup();
+    }
 }
 
 /// Stable HSA cache object associated with one CPU or GPU agent.
@@ -208,7 +439,7 @@ pub(crate) struct Cache {
 }
 
 impl Cache {
-    fn new(agent: HsaAgent, agent_name: &[u8], level: u32, size_bytes: u32) -> Self {
+    fn new(agent: HsaAgent, agent_name: &[u8], level: u32, size: u32) -> Self {
         let name_length = agent_name
             .iter()
             .position(|byte| *byte == 0)
@@ -223,9 +454,73 @@ impl Cache {
             agent,
             name: name.into_boxed_slice(),
             level: level as u8,
-            size: size_bytes,
+            size,
         }
     }
+}
+
+/// Counts calls that must finish before shutdown releases runtime storage.
+pub(crate) struct InFlightTracker {
+    active: Mutex<usize>,
+    idle: Condvar,
+}
+
+impl InFlightTracker {
+    fn new() -> Self {
+        Self {
+            active: Mutex::new(0),
+            idle: Condvar::new(),
+        }
+    }
+
+    pub(crate) fn enter(self: &Arc<Self>) -> Option<InFlightToken> {
+        let mut active = self
+            .active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *active = active.checked_add(1)?;
+        Some(InFlightToken {
+            tracker: self.clone(),
+        })
+    }
+
+    pub(crate) fn wait_idle(&self) {
+        let mut active = self
+            .active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while *active != 0 {
+            active = self
+                .idle
+                .wait(active)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+}
+
+pub(crate) struct InFlightToken {
+    tracker: Arc<InFlightTracker>,
+}
+
+impl Drop for InFlightToken {
+    fn drop(&mut self) {
+        let mut active = self
+            .tracker
+            .active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *active -= 1;
+        if *active == 0 {
+            self.tracker.idle.notify_all();
+        }
+    }
+}
+
+/// Process-wide setting captured by each accepted asynchronous copy.
+#[derive(Clone, Copy)]
+pub(crate) enum AsyncCopyProfiling {
+    Disabled,
+    Enabled,
 }
 
 /// Complete process-global HSA state.
@@ -236,7 +531,7 @@ impl Cache {
 /// and worker joins to happen after the global mutex is released.
 pub(crate) struct Runtime {
     pub(crate) references: u32,
-    pub(crate) log_flags: [u8; 8],
+    pub(crate) logging: Arc<LogOutput>,
     pub(crate) next_handle: u64,
     pub(crate) next_queue_id: u64,
     pub(crate) code_objects: HashMap<u64, CodeObject>,
@@ -248,20 +543,26 @@ pub(crate) struct Runtime {
     pub(crate) ipc_allocations: HashMap<usize, Memory>,
     pub(crate) interop_allocations: HashMap<usize, Memory>,
     pub(crate) locked_allocations: Vec<LockedMemory>,
+    pub(crate) async_copy_borrows: HashMap<usize, usize>,
+    pub(crate) async_copy_quarantine: Arc<AtomicBool>,
+    pub(crate) async_copy_profiling: AsyncCopyProfiling,
     pub(crate) vmem_reservations: BTreeMap<usize, VmemReservation>,
     pub(crate) vmem_handles: HashMap<u64, VmemHandle>,
     pub(crate) vmem_mappings: BTreeMap<usize, VmemMapping>,
     pub(crate) signal_slabs: Vec<SignalSlab>,
-    pub(crate) signal_event_page: Option<Allocation>,
+    pub(crate) recycled_signals: Vec<usize>,
+    pub(crate) signal_event_page: Option<SignalEventPage>,
+    pub(crate) signal_event_page_confirmed: bool,
     pub(crate) queue_event: Option<Arc<QueueSharedEvent>>,
     pub(crate) interrupt_signals: HashMap<usize, Option<SignalEvent>>,
     pub(crate) signal_event_pool: Vec<SignalEvent>,
     pub(crate) owned_ipc_signals: HashMap<usize, OwnedIpcSignal>,
     pub(crate) imported_ipc_signals: HashMap<usize, ImportedIpcSignal>,
+    pub(crate) async_signal_refs: HashMap<usize, AsyncSignalRecord>,
     pub(crate) signal_groups: HashMap<u64, Vec<HsaSignal>>,
-    pub(crate) pc_sampling: HashMap<u64, Arc<Mutex<PcSamplingSession>>>,
-    pub(crate) pc_sampling_agents: HashMap<usize, u64>,
     pub(crate) queues: HashMap<usize, Queue>,
+    pub(crate) cooperative_teardown: HashSet<u64>,
+    pub(crate) sdma_queues: HashMap<usize, SdmaQueue>,
     pub(crate) soft_queues: HashMap<usize, SoftQueue>,
     pub(crate) counted_queues: HashMap<usize, CountedQueue>,
     pub(crate) counted_queue_pools: HashMap<(u64, u32), Vec<CountedHardwareQueue>>,
@@ -269,17 +570,21 @@ pub(crate) struct Runtime {
     pub(crate) counted_queue_limit: usize,
     pub(crate) counted_queue_size: u32,
     pub(crate) host_memory_bytes: usize,
+    pub(crate) host_page_size: usize,
     pub(crate) host_name: Box<str>,
     pub(crate) host_compute_units: u32,
     pub(crate) full_profile: bool,
-    pub(crate) system_event_handlers: Vec<(SystemEventHandler, usize)>,
+    pub(crate) vm_fault_details: Option<(HsaAgent, u64, u32)>,
+    pub(crate) system_event_handlers: Vec<(SystemEventHandler, CallbackArg)>,
     pub(crate) system_event_worker_started: bool,
     pub(crate) async_dispatcher: Option<AsyncDispatcher>,
     pub(crate) workers: Vec<JoinHandle<()>>,
     pub(crate) stop_workers: Arc<AtomicBool>,
+    pub(crate) inflight: Arc<InFlightTracker>,
     pub(crate) caches: Vec<Cache>,
     pub(crate) gpus: Vec<Gpu>,
     pub(crate) session: Session,
+    pub(crate) lifetime: SessionLifetime,
 }
 
 pub(crate) fn defer_cleanup<T: Send + 'static>(
@@ -317,18 +622,55 @@ impl Runtime {
     }
 
     pub(crate) fn request_stop(&self) {
+        self.logging.stop();
         self.stop_workers.store(true, Ordering::Release);
     }
 
-    pub(crate) fn create() -> Result<Self, Status> {
-        let host_memory_bytes = linux_host::memory_bytes().ok_or(ERROR)?;
-        let host = linux_host::cpu_info().unwrap_or_else(|| CpuInfo {
+    pub(crate) fn create() -> Result<Self, InitFailure> {
+        let host_page_size = usize::try_from(rocddi::memory::host_page_size().map_err(map_error)?)
+            .map_err(|_| ERROR)?;
+        if host_page_size < 4096 || !host_page_size.is_power_of_two() {
+            return Err(ERROR.into());
+        }
+        let host_memory_bytes = platform_host::memory_bytes().ok_or(ERROR)?;
+        let host = platform_host::cpu_info().unwrap_or_else(|| CpuInfo {
             name: "CPU".to_owned(),
             compute_units: 0,
         });
-        let force_fine_grain_pcie =
-            std::env::var("HSA_FORCE_FINE_GRAIN_PCIE").is_ok_and(|value| value == "1");
-        let session = Session::new(SessionLifetime::Process).map_err(map_error)?;
+        // The HSA lifecycle gate admits one initialization at a time. Passive
+        // enumeration may fail before a primary KFD VM is acquired.
+        let lifetime = if PRIMARY_CONTEXT_USED.load(Ordering::Acquire) {
+            SessionLifetime::Session
+        } else {
+            SessionLifetime::Process
+        };
+        let mut pending = PendingInit {
+            session: Some(Session::new(lifetime).map_err(map_error)?),
+            gpus: Vec::new(),
+        };
+        match Self::create_with_session(
+            &mut pending,
+            host_page_size,
+            host_memory_bytes,
+            host,
+            lifetime,
+        ) {
+            Ok(runtime) => Ok(runtime),
+            Err(status) => Err(InitFailure {
+                status,
+                cleanup_failed: !pending.cleanup(),
+            }),
+        }
+    }
+
+    fn create_with_session(
+        pending: &mut PendingInit,
+        host_page_size: usize,
+        host_memory_bytes: usize,
+        host: CpuInfo,
+        lifetime: SessionLifetime,
+    ) -> Result<Self, Status> {
+        let session = pending.session.as_ref().ok_or(ERROR)?;
         let mut endpoints = Vec::new();
         session
             .enumerate(&mut |endpoint| {
@@ -344,8 +686,8 @@ impl Runtime {
         let full_profile =
             full_profile_platform(endpoints.iter().map(|endpoint| endpoint.local_memory_bytes));
         let cpu_agent = HsaAgent { handle: CPU_AGENT };
-        let mut caches = linux_host::caches_for_numa_node(0)
-            .unwrap_or_else(linux_host::caches)
+        let mut caches = platform_host::caches_for_numa_node(0)
+            .unwrap_or_else(platform_host::caches)
             .into_iter()
             .filter(|cache| {
                 cache.kind == CpuCacheKind::Data && cache.first_shared_cpu == Some(cache.cpu)
@@ -359,13 +701,16 @@ impl Runtime {
                 )
             })
             .collect::<Vec<_>>();
-        let mut gpus = Vec::with_capacity(endpoints.len());
+        pending
+            .gpus
+            .try_reserve(endpoints.len())
+            .map_err(|_| OUT_OF_RESOURCES)?;
         for endpoint in endpoints {
             let Some(info) = endpoint.gpu().copied() else {
                 continue;
             };
             let agent = HsaAgent {
-                handle: GPU_AGENT_BASE + gpus.len() as u64,
+                handle: GPU_AGENT_BASE + pending.gpus.len() as u64,
             };
             let name = gpu_agent_name(&info);
             for cache in endpoint
@@ -377,36 +722,48 @@ impl Runtime {
                     agent,
                     name.as_bytes(),
                     cache.level(),
-                    cache.size(),
+                    u32::try_from(cache.size_bytes()).unwrap_or(u32::MAX),
                 ));
             }
+            let presentation = session.gpu_presentation(&endpoint).map_err(map_error)?;
+            if lifetime == SessionLifetime::Process {
+                // Activation may retain a primary VM even when it returns an
+                // error. A later generation must use a private context.
+                PRIMARY_CONTEXT_USED.store(true, Ordering::Release);
+            }
             let device = session.activate(&endpoint).map_err(map_error)?;
-            let product_name = gpu_product_name(&endpoint);
-            let asic_family_id =
-                select_asic_family_id(info.asic_family_id, device.asic_family_id().ok());
+            let product_name = presentation
+                .product_name
+                .unwrap_or_else(|| "AMD Radeon Graphics".to_owned());
+            let asic_family_id = presentation.asic_family_id;
+            let timestamp_frequency_hz = presentation.gpu_counter_frequency_hz.unwrap_or(0);
             let mmio_remap = device.gpu().and_then(|gpu| gpu.map_mmio_remap()).ok();
             let hdp_flush = hdp_flush_pointers(
                 mmio_remap
                     .as_ref()
                     .and_then(|mapping| mapping.info().host_address),
             );
-            let fine_grain_pool = info.hive_id != 0 || force_fine_grain_pcie;
-            gpus.push(Gpu {
+            let fine_grain_pool = info.hive_id != 0;
+            pending.gpus.push(Gpu {
                 endpoint,
                 info,
                 device,
                 name: name.into_boxed_str(),
                 product_name: product_name.into_boxed_str(),
                 asic_family_id,
+                timestamp_frequency_hz,
                 hdp_flush,
                 _mmio_remap: mmio_remap,
                 coherency_type: AMD_COHERENCY_TYPE_NONCOHERENT,
                 fine_grain_pool,
+                persisting_l2_cache_size: Arc::new(Mutex::new(0)),
             });
         }
+        let gpus = std::mem::take(&mut pending.gpus);
+        let session = pending.session.take().ok_or(ERROR)?;
         Ok(Self {
             references: 1,
-            log_flags: [0; 8],
+            logging: Arc::new(LogOutput::new()),
             next_handle: 0x4853_4101_0000_0000,
             next_queue_id: 0,
             code_objects: HashMap::new(),
@@ -418,38 +775,48 @@ impl Runtime {
             ipc_allocations: HashMap::new(),
             interop_allocations: HashMap::new(),
             locked_allocations: Vec::new(),
+            async_copy_borrows: HashMap::new(),
+            async_copy_quarantine: Arc::new(AtomicBool::new(false)),
+            async_copy_profiling: AsyncCopyProfiling::Disabled,
             vmem_reservations: BTreeMap::new(),
             vmem_handles: HashMap::new(),
             vmem_mappings: BTreeMap::new(),
             signal_slabs: Vec::new(),
+            recycled_signals: Vec::new(),
             signal_event_page: None,
+            signal_event_page_confirmed: false,
             queue_event: None,
             interrupt_signals: HashMap::new(),
             signal_event_pool: Vec::new(),
             owned_ipc_signals: HashMap::new(),
             imported_ipc_signals: HashMap::new(),
+            async_signal_refs: HashMap::new(),
             signal_groups: HashMap::new(),
-            pc_sampling: HashMap::new(),
-            pc_sampling_agents: HashMap::new(),
             queues: HashMap::new(),
+            cooperative_teardown: HashSet::new(),
+            sdma_queues: HashMap::new(),
             soft_queues: HashMap::new(),
             counted_queues: HashMap::new(),
             counted_queue_pools: HashMap::new(),
             released_counted_queues: HashSet::new(),
-            counted_queue_limit: environment_u32("GPU_MAX_HW_QUEUES", 4) as usize,
-            counted_queue_size: environment_u32("HSA_COUNTED_QUEUE_SIZE", 16_384),
+            counted_queue_limit: 4,
+            counted_queue_size: 16_384,
             host_memory_bytes,
+            host_page_size,
             host_name: host.name.into_boxed_str(),
             host_compute_units: host.compute_units,
             full_profile,
+            vm_fault_details: None,
             system_event_handlers: Vec::new(),
             system_event_worker_started: false,
             async_dispatcher: None,
             workers: Vec::new(),
             stop_workers: Arc::new(AtomicBool::new(false)),
+            inflight: Arc::new(InFlightTracker::new()),
             caches,
             gpus,
             session,
+            lifetime,
         })
     }
 
@@ -503,44 +870,6 @@ impl Runtime {
         cache_sizes(&self.caches, agent)
     }
 
-    pub(crate) fn system_timestamp(&self) -> Result<u64, Status> {
-        self.gpus[0]
-            .device
-            .gpu()
-            .and_then(|gpu| gpu.clock_counters())
-            .map(|counters| counters.system)
-            .map_err(map_error)
-    }
-
-    pub(crate) fn translate_gpu_tick(&self, index: usize, tick: u64) -> Result<u64, Status> {
-        let counters = self.gpus[index]
-            .device
-            .gpu()
-            .and_then(|gpu| gpu.clock_counters())
-            .map_err(map_error)?;
-        translate_gpu_tick(counters, tick)
-    }
-
-    pub(crate) fn translate_gpu_interval(
-        &self,
-        index: usize,
-        start: u64,
-        end: u64,
-    ) -> Result<(u64, u64), Status> {
-        if start == 0 || end == 0 {
-            return Ok((0, 0));
-        }
-        let counters = self.gpus[index]
-            .device
-            .gpu()
-            .and_then(|gpu| gpu.clock_counters())
-            .map_err(map_error)?;
-        Ok((
-            translate_gpu_tick(counters, start)?,
-            translate_gpu_tick(counters, end)?,
-        ))
-    }
-
     pub(crate) fn isa_parts(&self, isa: HsaIsa) -> Option<(usize, u64)> {
         let offset = isa.handle.checked_sub(ISA_BASE)?;
         let index = usize::try_from(offset / ISA_COUNT_PER_GPU).ok()?;
@@ -571,29 +900,45 @@ impl Runtime {
         (kind != 2 || self.gpus[index].fine_grain_pool).then_some((index, kind))
     }
 
-    pub(crate) fn log(&self, flag: u32, arguments: Arguments<'_>) {
-        if !logging_flag_enabled(self.log_flags, flag) {
-            return;
+    pub(crate) fn prepare_log(&self, flag: u32, arguments: Arguments<'_>) -> Option<LogWork> {
+        if flag >= 64 || self.logging.enabled.load(Ordering::Acquire) & (1_u64 << flag) == 0 {
+            return None;
         }
+        let inflight = self.inflight.enter()?;
         let mut line = String::from("[***rocddi***] ");
         if std::fmt::write(&mut line, arguments).is_err() {
-            return;
+            return None;
         }
         line.push('\n');
-        let mut stream = std::io::stderr().lock();
-        let _ = stream.write_all(line.as_bytes());
-        let _ = stream.flush();
+        Some(LogWork {
+            output: self.logging.clone(),
+            _inflight: inflight,
+            flag,
+            line,
+        })
     }
 
     pub(crate) fn stop(mut self) -> Status {
+        if self.running_on_worker() || CallbackScope::active() {
+            // Releasing signal storage from its own callback worker is unsafe.
+            self.request_stop();
+            std::mem::forget(self);
+            return INVALID_RUNTIME_STATE;
+        }
         self.request_stop();
+        // Multi-signal waits observe stop_workers and release their signal
+        // references. Native calls finish before we release the device VM.
+        self.inflight.wait_idle();
+        notify_system_shutdown(&self.system_event_handlers);
         for worker in self.workers.drain(..) {
             let _ = worker.join();
         }
-        notify_system_shutdown(&self.system_event_handlers);
-        self.pc_sampling_agents.clear();
-        let pc_sampling_status =
-            crate::pc_sampling::destroy_sessions(std::mem::take(&mut self.pc_sampling));
+        if self.async_copy_quarantine.load(Ordering::Acquire) {
+            // A copy with unproved native retirement can still reach runtime
+            // allocations and signals. Keep their entire ownership graph live.
+            std::mem::forget(self);
+            return INVALID_RUNTIME_STATE;
+        }
         self.counted_queues.clear();
         self.counted_queue_pools.clear();
         self.released_counted_queues.clear();
@@ -602,6 +947,13 @@ impl Runtime {
                 // An unresolved native queue can still reference its scratch
                 // and inactive signal. Preserve the complete dependency set
                 // for KFD process teardown instead of freeing reachable pages.
+                std::mem::forget(queue);
+            }
+        }
+        for (_, mut queue) in self.sdma_queues.drain() {
+            if crate::queue::destroy_runtime_sdma_queue(&mut queue).is_err() {
+                // Native teardown may still reach the ring, pointer page, or
+                // doorbell. Keep their owner and the public handle together.
                 std::mem::forget(queue);
             }
         }
@@ -621,25 +973,19 @@ impl Runtime {
         self.interop_allocations.clear();
         self.allocations.clear();
         self.signal_groups.clear();
+        self.async_signal_refs.clear();
         self.imported_ipc_signals.clear();
         self.owned_ipc_signals.clear();
+        self.recycled_signals.clear();
         self.signal_slabs.clear();
         self.gpus.clear();
         let session_status = self.session.destroy().map_or_else(map_error, |()| SUCCESS);
-        if pc_sampling_status != SUCCESS {
-            pc_sampling_status
-        } else if signal_status != SUCCESS {
-            signal_status
-        } else {
+        if signal_status == SUCCESS {
             session_status
+        } else {
+            signal_status
         }
     }
-}
-
-fn environment_u32(name: &str, default: u32) -> u32 {
-    std::env::var(name).map_or(default, |value| {
-        value.trim().parse::<i32>().map_or(0, |value| value as u32)
-    })
 }
 
 fn logging_flag_enabled(flags: [u8; 8], flag: u32) -> bool {
@@ -649,16 +995,37 @@ fn logging_flag_enabled(flags: [u8; 8], flag: u32) -> bool {
         .is_some_and(|byte| byte & (1 << (flag % 8)) != 0)
 }
 
-fn translate_gpu_tick(
+pub(crate) fn translate_gpu_interval(
+    device: &Device,
+    start: u64,
+    end: u64,
+) -> Result<(u64, u64), Status> {
+    if start == 0 || end == 0 {
+        return Ok((0, 0));
+    }
+    let counters = device
+        .gpu()
+        .and_then(|gpu| gpu.clock_counters())
+        .map_err(map_error)?;
+    Ok((
+        translate_gpu_tick(counters, start)?,
+        translate_gpu_tick(counters, end)?,
+    ))
+}
+
+pub(crate) fn translate_gpu_tick(
     counters: rocddi::gpu::profiling::ClockCounters,
     tick: u64,
 ) -> Result<u64, Status> {
-    if counters.system_frequency == 0 {
+    if counters.system_frequency == 0 || counters.gpu_frequency == 0 {
         return Err(ERROR);
     }
     let scaled = |delta: u64| {
-        u64::try_from(u128::from(delta) * u128::from(counters.system_frequency) / 100_000_000_u128)
-            .unwrap_or(u64::MAX)
+        u64::try_from(
+            u128::from(delta) * u128::from(counters.system_frequency)
+                / u128::from(counters.gpu_frequency),
+        )
+        .unwrap_or(u64::MAX)
     };
     Ok(if tick >= counters.gpu {
         counters.system.wrapping_add(scaled(tick - counters.gpu))
@@ -722,11 +1089,19 @@ impl RuntimeRegistry {
         Ok(())
     }
 
-    pub(crate) fn cancel_init(&mut self, generation: u64) -> Result<(), Status> {
+    pub(crate) fn cancel_init(
+        &mut self,
+        generation: u64,
+        cleanup_failed: bool,
+    ) -> Result<(), Status> {
         if self.phase != LifecyclePhase::Starting(generation) {
             return Err(ERROR);
         }
-        self.phase = LifecyclePhase::Inactive;
+        self.phase = if cleanup_failed {
+            LifecyclePhase::Quarantined
+        } else {
+            LifecyclePhase::Inactive
+        };
         Ok(())
     }
 
@@ -824,6 +1199,7 @@ impl Drop for LifecycleTransition {
 }
 
 pub(crate) static RUNTIME: Mutex<RuntimeRegistry> = Mutex::new(RuntimeRegistry::new());
+pub(crate) static VM_FAULT_CONDVAR: Condvar = Condvar::new();
 
 pub(crate) fn lock() -> Result<MutexGuard<'static, RuntimeRegistry>, Status> {
     RUNTIME.lock().map_err(|_| ERROR)
@@ -852,7 +1228,53 @@ pub(crate) fn initialized_mut(runtime: &mut Option<Runtime>) -> Result<&mut Runt
 mod tests {
     use super::*;
     use rocddi::gpu::profiling::ClockCounters;
-    use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
+    use std::ffi::c_void;
+    use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering as AtomicOrdering};
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn shutdown_waits_for_inflight_calls() {
+        let inflight = Arc::new(InFlightTracker::new());
+        let token = inflight.enter().unwrap();
+        let (started_send, started_recv) = std::sync::mpsc::channel();
+        let (done_send, done_recv) = std::sync::mpsc::channel();
+        let worker_inflight = inflight.clone();
+        let worker = thread::spawn(move || {
+            started_send.send(()).unwrap();
+            worker_inflight.wait_idle();
+            done_send.send(()).unwrap();
+        });
+        started_recv.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(done_recv.recv_timeout(Duration::from_millis(10)).is_err());
+        drop(token);
+        done_recv.recv_timeout(Duration::from_secs(1)).unwrap();
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn callback_scope_restricts_queue_and_sampling_teardown() {
+        assert!(!CallbackScope::active());
+        {
+            let _scope = CallbackScope::enter();
+            // SAFETY: Queue teardown is rejected before inspecting the
+            // non-null pointer while a callback is active.
+            assert_eq!(
+                unsafe {
+                    crate::queue::hsa_queue_destroy(
+                        std::ptr::NonNull::<HsaQueue>::dangling().as_ptr(),
+                    )
+                },
+                INVALID_RUNTIME_STATE
+            );
+            assert_eq!(
+                crate::pc_sampling::hsa_ven_amd_pcs_stop(HsaPcSampling { handle: 1 }),
+                INVALID_RUNTIME_STATE
+            );
+            let _nested = CallbackScope::enter();
+            assert!(CallbackScope::active());
+        }
+        assert!(!CallbackScope::active());
+    }
 
     #[test]
     fn deferred_cleanup_joins_the_callback_worker_after_exit() {
@@ -896,10 +1318,67 @@ mod tests {
         let first = registry.begin_init().unwrap().unwrap();
         assert_eq!(registry.begin_init().unwrap_err(), INVALID_RUNTIME_STATE);
         assert_eq!(registry.begin_shutdown().err(), Some(INVALID_RUNTIME_STATE));
-        registry.cancel_init(first).unwrap();
+        registry.cancel_init(first, false).unwrap();
         let second = registry.begin_init().unwrap().unwrap();
         assert_ne!(second, first);
-        registry.cancel_init(second).unwrap();
+        registry.cancel_init(second, false).unwrap();
+    }
+
+    #[test]
+    fn failed_initialization_cleanup_quarantines_the_next_generation() {
+        let mut registry = RuntimeRegistry::new();
+        let generation = registry.begin_init().unwrap().unwrap();
+        registry.cancel_init(generation, true).unwrap();
+        assert_eq!(registry.begin_init().unwrap_err(), INVALID_RUNTIME_STATE);
+    }
+
+    #[test]
+    fn first_and_later_gpu_activation_failures_retire_the_session_join() {
+        struct Activated {
+            live: Arc<AtomicUsize>,
+        }
+        impl Drop for Activated {
+            fn drop(&mut self) {
+                self.live.fetch_sub(1, AtomicOrdering::Relaxed);
+            }
+        }
+        struct Joined {
+            live: Arc<AtomicUsize>,
+            joins: Arc<AtomicUsize>,
+        }
+        impl RetireSession for Joined {
+            fn retire(&mut self) -> bool {
+                assert_eq!(self.live.load(AtomicOrdering::Relaxed), 0);
+                self.joins.fetch_sub(1, AtomicOrdering::Relaxed);
+                true
+            }
+        }
+
+        for completed_activations in [0, 1] {
+            let live = Arc::new(AtomicUsize::new(completed_activations));
+            let joins = Arc::new(AtomicUsize::new(1));
+            let mut pending = PendingInit {
+                session: Some(Joined {
+                    live: live.clone(),
+                    joins: joins.clone(),
+                }),
+                gpus: (0..completed_activations)
+                    .map(|_| Activated { live: live.clone() })
+                    .collect(),
+            };
+            assert!(pending.cleanup());
+            assert_eq!(live.load(AtomicOrdering::Relaxed), 0);
+            assert_eq!(joins.load(AtomicOrdering::Relaxed), 0);
+        }
+    }
+
+    #[test]
+    #[ignore = "requires a qualified GPU and KFD runtime"]
+    fn hsa_runtime_reinitializes_after_shutdown() {
+        for _ in 0..3 {
+            assert_eq!(crate::hsa_init(), SUCCESS);
+            assert_eq!(crate::hsa_shut_down(), SUCCESS);
+        }
     }
 
     struct ObservedEvent {
@@ -922,6 +1401,53 @@ mod tests {
         ERROR
     }
 
+    struct StopEventProbe {
+        stop: AtomicBool,
+        later_calls: AtomicU32,
+    }
+
+    unsafe extern "C" fn stop_from_fault_handler(
+        _event: *const HsaAmdEvent,
+        data: *mut c_void,
+    ) -> Status {
+        // SAFETY: The test keeps the probe live until both callbacks finish.
+        let probe = unsafe { &*data.cast::<StopEventProbe>() };
+        probe.stop.store(true, AtomicOrdering::Release);
+        ERROR
+    }
+
+    unsafe extern "C" fn count_later_fault_handler(
+        _event: *const HsaAmdEvent,
+        data: *mut c_void,
+    ) -> Status {
+        // SAFETY: The test keeps the probe live until both callbacks finish.
+        let probe = unsafe { &*data.cast::<StopEventProbe>() };
+        probe.later_calls.fetch_add(1, AtomicOrdering::Relaxed);
+        SUCCESS
+    }
+
+    #[test]
+    fn shutdown_requested_by_fault_handler_skips_later_handlers() {
+        let probe = StopEventProbe {
+            stop: AtomicBool::new(false),
+            later_calls: AtomicU32::new(0),
+        };
+        // SAFETY: The probe outlives synchronous event delivery.
+        let data = unsafe { CallbackArg::new(std::ptr::from_ref(&probe).cast_mut().cast()) };
+        let handlers = [
+            (stop_from_fault_handler as SystemEventHandler, data),
+            (count_later_fault_handler as SystemEventHandler, data),
+        ];
+        let event = HsaAmdEvent {
+            event_type: AMD_GPU_MEMORY_FAULT_EVENT,
+            payload: [0; 3],
+        };
+
+        assert!(!notify_system_event(&handlers, &event, Some(&probe.stop)));
+        assert!(probe.stop.load(AtomicOrdering::Acquire));
+        assert_eq!(probe.later_calls.load(AtomicOrdering::Relaxed), 0);
+    }
+
     #[test]
     fn canonical_gpu_agent_name_uses_the_gfx_target() {
         assert_eq!(
@@ -933,13 +1459,6 @@ mod tests {
             }),
             "gfx1201"
         );
-    }
-
-    #[test]
-    fn drm_device_info_supplies_missing_asic_family_id() {
-        assert_eq!(select_asic_family_id(0, Some(0x98)), 0x98);
-        assert_eq!(select_asic_family_id(0x91, Some(0)), 0x91);
-        assert_eq!(select_asic_family_id(0x91, None), 0x91);
     }
 
     #[test]
@@ -969,11 +1488,13 @@ mod tests {
         notify_system_shutdown(&[
             (
                 observe_system_event,
-                std::ptr::from_ref(&first).cast::<c_void>() as usize,
+                // SAFETY: The first probe outlives synchronous delivery.
+                unsafe { CallbackArg::new(std::ptr::from_ref(&first).cast_mut().cast()) },
             ),
             (
                 observe_system_event,
-                std::ptr::from_ref(&second).cast::<c_void>() as usize,
+                // SAFETY: The second probe outlives synchronous delivery.
+                unsafe { CallbackArg::new(std::ptr::from_ref(&second).cast_mut().cast()) },
             ),
         ]);
         assert_eq!(first.count.load(AtomicOrdering::Relaxed), 1);
@@ -1032,9 +1553,20 @@ mod tests {
             host: 0,
             system: 1_000,
             system_frequency: 1_000_000_000,
+            gpu_frequency: 100_000_000,
         };
         assert_eq!(translate_gpu_tick(counters, 110), Ok(1_100));
         assert_eq!(translate_gpu_tick(counters, 90), Ok(900));
+        assert_eq!(
+            translate_gpu_tick(
+                ClockCounters {
+                    gpu_frequency: 200_000_000,
+                    ..counters
+                },
+                110,
+            ),
+            Ok(1_050)
+        );
         assert_eq!(
             translate_gpu_tick(
                 ClockCounters {
