@@ -108,6 +108,8 @@ jobs:
       skip_tests: ${{ steps.configure-pr.outputs.skip_tests || steps.configure-manual.outputs.skip_tests }}
       # Allowlist of build stages this PR needs (fed to TheRock's build_stages).
       build_stages: ${{ steps.build_stages.outputs.build_stages }}
+      # "none" when every changed project is Linux-only, else empty (use default).
+      windows_amdgpu_families: ${{ steps.build_stages.outputs.windows_amdgpu_families }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -158,7 +160,8 @@ jobs:
       # Map the changed projects to the minimal allowlist of TheRock build
       # stages needed to build them (BUILD_TOPOLOGY.toml is the source of truth;
       # this only reads it). Empty output = build all (fan-out / unknown project
-      # / run_all_tests CI-infra change).
+      # / run_all_tests CI-infra change). Also skips Windows when every changed
+      # project is disabled on Windows in the topology.
       - name: Compute build-stage allowlist
         id: build_stages
         run: |
@@ -175,7 +178,7 @@ jobs:
       # Limit GPU families for rocm-systems CI
       # Note: gfx125X is added for MI455 bringup with limited tests (hip-tests, rocrtst, sanity)
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
-      windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
+      windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || needs.configure.outputs.windows_amdgpu_families || 'gfx110X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
       # Per-PR selective build: the configure job maps the changed projects to

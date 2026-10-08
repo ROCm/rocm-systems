@@ -203,19 +203,12 @@ public:
 
   /// @brief Return the two-bit VGPR high-bank selector for an operand role.
   uint32_t vgpr_msb_for_role(VgprMsbRole role) const {
-    switch (role) {
-    case VgprMsbRole::Src0:
-      return vgpr_msb_mode_ & 0x3u;
-    case VgprMsbRole::Src1:
-      return (vgpr_msb_mode_ >> 2) & 0x3u;
-    case VgprMsbRole::Src2:
-      return (vgpr_msb_mode_ >> 4) & 0x3u;
-    case VgprMsbRole::Dst:
-      return (vgpr_msb_mode_ >> 6) & 0x3u;
-    case VgprMsbRole::None:
+    const unsigned field = static_cast<unsigned>(role);
+    if (field > static_cast<unsigned>(VgprMsbRole::Dst))
       return 0;
-    }
-    return 0;
+    // The zero field for None precedes Src0/Src1/Src2/Dst. Padding the byte
+    // with that field makes every role one shift without a selector switch.
+    return ((uint32_t{vgpr_msb_mode_} << 2) >> (field * 2)) & 3u;
   }
 
   /// @brief Return the wavefront slot index within the CU.
@@ -384,16 +377,7 @@ public:
 
   /// @brief Return the EXEC mask.
   /// @returns EXEC mask (one bit per lane, 1 = active).
-  uint64_t exec() const {
-    check_mask_memory_wait(RegClass::EXEC, lane_mask(), false);
-    return exec_ & lane_mask();
-  }
-
-  /// @brief Read selected scalar words of EXEC, preserving the raw pair value.
-  uint64_t read_exec(uint16_t index = 0, uint8_t width = 2) const {
-    check_scalar_memory_wait({RegClass::EXEC, index, width});
-    return exec_;
-  }
+  uint64_t exec() const { return exec_ & lane_mask(); }
 
   /// @brief Return the raw architectural EXEC register pair.
   ///
@@ -407,16 +391,10 @@ public:
   ///
   /// Wave32 leaves EXEC_HI available as scalar scratch. Vector instructions
   /// that update the execution mask must therefore preserve the non-lane bits.
-  void set_exec(uint64_t val) {
-    check_mask_memory_wait(RegClass::EXEC, lane_mask(), true);
-    exec_ = (exec_ & ~lane_mask()) | (val & lane_mask());
-  }
+  void set_exec(uint64_t val) { exec_ = (exec_ & ~lane_mask()) | (val & lane_mask()); }
 
   /// @brief Write both architectural EXEC words as a scalar instruction result.
-  void write_exec(uint64_t val) {
-    check_scalar_memory_wait({RegClass::EXEC, 0, 2}, true);
-    exec_ = val;
-  }
+  void write_exec(uint64_t val) { exec_ = val; }
 
   /// @brief Set the raw architectural EXEC register pair.
   void set_exec_raw(uint64_t val) { exec_ = val; }
@@ -435,28 +413,16 @@ public:
   /// @returns Raw VCC register value, including non-lane bits in wave32 mode.
   uint64_t vcc() const { return vcc_; }
 
-  /// @brief Read selected scalar words of VCC, preserving the raw pair value.
-  uint64_t read_vcc(uint16_t index = 0, uint8_t width = 2) const {
-    check_scalar_memory_wait({RegClass::VCC, index, width});
-    return vcc_;
-  }
-
   /// @brief Return the active-lane portion of the VCC register pair.
   /// @returns VCC mask with non-lane bits cleared.
-  uint64_t vcc_mask(uint64_t read_lanes = ~uint64_t{0}) const {
-    check_mask_memory_wait(RegClass::VCC, read_lanes, false);
-    return vcc_ & lane_mask();
-  }
+  uint64_t vcc_mask() const { return vcc_ & lane_mask(); }
 
   /// @brief Set the active-lane portion of the VCC register pair.
   /// @param val New VCC mask value.
   ///
   /// Wave32 leaves VCC_HI available as scalar state. Mask-producing writes
   /// must therefore preserve the non-lane bits, matching set_exec().
-  void set_vcc(uint64_t val) {
-    check_mask_memory_wait(RegClass::VCC, lane_mask(), true);
-    vcc_ = (vcc_ & ~lane_mask()) | (val & lane_mask());
-  }
+  void set_vcc(uint64_t val) { vcc_ = (vcc_ & ~lane_mask()) | (val & lane_mask()); }
 
   /// @brief Set the raw architectural VCC register pair.
   void set_vcc_raw(uint64_t val) { vcc_ = val; }
@@ -471,17 +437,11 @@ public:
 
   /// @brief Return the M0 special register.
   /// @returns M0 register value.
-  uint32_t m0() const {
-    check_scalar_memory_wait({RegClass::M0, 0, 1});
-    return m0_;
-  }
+  uint32_t m0() const { return m0_; }
 
   /// @brief Set the M0 special register.
   /// @param val New M0 value.
-  void set_m0(uint32_t val) {
-    check_scalar_memory_wait({RegClass::M0, 0, 1}, true);
-    m0_ = val;
-  }
+  void set_m0(uint32_t val) { m0_ = val; }
 
   static constexpr uint32_t DX10_CLAMP_BIT = 1u << 8;
   static constexpr uint32_t IEEE_BIT = 1u << 9;
@@ -507,12 +467,6 @@ public:
   /// @brief Return the per-wavefront scratch (private segment) base address.
   /// @returns Byte address in GPU memory where this wavefront's scratch starts.
   uint64_t scratch_base() const { return scratch_base_; }
-
-  /// @brief Read FLAT_SCRATCH as an instruction's address input.
-  uint64_t read_scratch_base(uint16_t index = 0, uint8_t width = 2) const {
-    check_scalar_memory_wait({RegClass::FLAT_SCRATCH, index, width});
-    return scratch_base_;
-  }
 
   /// @brief Set the per-wavefront scratch base address.
   /// @param val Scratch base byte address (set at dispatch by CP).
@@ -547,12 +501,6 @@ public:
     shared_aperture_limit_ = sl;
     private_aperture_base_ = pb;
     private_aperture_limit_ = pl;
-  }
-
-  /// @brief Observe an instruction's access to logical scalar register words.
-  void check_scalar_memory_wait(RegisterRef reg, bool write = false) const {
-    if (memory_wait_checks_enabled_ && memory_wait_shadow_.pending(reg, write))
-      check_active_memory_wait(reg, ~uint64_t{0}, MemoryWaitScoreboard::kFullDwordByteMask, write);
   }
 
   /// Diagnostic readiness is independent of eager functional writeback.
@@ -712,15 +660,11 @@ public:
   /// @brief Read the Scalar Condition Code (SCC) from the status register.
   /// @retval true SCC bit is set.
   /// @retval false SCC bit is clear.
-  bool read_scc() const {
-    check_scalar_memory_wait({RegClass::SCC, 0, 1});
-    return status_raw() & 1u;
-  }
+  bool read_scc() const { return status_raw() & 1u; }
 
   /// @brief Write the Scalar Condition Code (SCC) in the status register.
   /// @param val New SCC value.
   void write_scc(bool val) {
-    check_scalar_memory_wait({RegClass::SCC, 0, 1}, true);
     uint32_t s = status_raw();
     set_status_raw(val ? (s | 1u) : (s & ~1u));
   }
@@ -1158,18 +1102,6 @@ private:
 
   /// @brief Check only the scalar words consumed by a wave mask operation.
   /// Raw access remains available for preserving the other half and observers.
-  void check_mask_memory_wait(RegClass reg_class, uint64_t lanes, bool write) const {
-    // Special-register halves share one shadow byte; records retain word indices.
-    if (!memory_wait_checks_enabled_ || !memory_wait_shadow_.pending({reg_class, 0, 1}, write))
-      return;
-    lanes &= lane_mask();
-    if (lanes & 0xffffffffu)
-      check_active_memory_wait({reg_class, 0, 1}, ~uint64_t{0},
-                               MemoryWaitScoreboard::kFullDwordByteMask, write);
-    if (lanes >> 32)
-      check_active_memory_wait({reg_class, 1, 1}, ~uint64_t{0},
-                               MemoryWaitScoreboard::kFullDwordByteMask, write);
-  }
 
   uint64_t lane_mask() const { return wf_size_ >= 64 ? ~0ULL : ((1ULL << wf_size_) - 1ULL); }
 

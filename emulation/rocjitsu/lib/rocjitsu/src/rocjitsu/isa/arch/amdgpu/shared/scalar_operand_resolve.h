@@ -26,42 +26,45 @@ namespace amdgpu {
 // (SGPR/VCC/EXEC/M0 reads plus inline constants). `m0_ev` is the M0 encoding
 // value for this arch (124 on most arches; 125 on RDNA 3 / RDNA 3.5 / RDNA4
 // / GFX1250, where 124 is the NULL slot).
-inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
+// Compile-time readers preserve the three-argument execution ABI. Passing
+// capturing callbacks at runtime would spill wave references on every broadcast.
+template <auto ReadSgpr, auto ReadTtmp>
+inline uint32_t resolve_src_scalar_value(const Wavefront &wf, int ev, int m0_ev) {
   if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) &&
       ev == static_cast<int>(kFlatScratchSelectorFirst))
-    return static_cast<uint32_t>(wf.read_scratch_base(0, 1));
+    return static_cast<uint32_t>(wf.scratch_base());
   if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) &&
       ev == static_cast<int>(kFlatScratchSelectorLast))
-    return static_cast<uint32_t>(wf.read_scratch_base(1, 1) >> 32);
+    return static_cast<uint32_t>(wf.scratch_base() >> 32);
   if (ev <= static_cast<int>(kScalarSgprSelectorLast))
-    return RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+    return ReadSgpr(wf, static_cast<uint32_t>(ev));
   if (ev == static_cast<int>(kVccSelectorFirst))
-    return static_cast<uint32_t>(wf.read_vcc(0, 1));
+    return static_cast<uint32_t>(wf.vcc());
   if (ev == static_cast<int>(kVccSelectorLast))
-    return static_cast<uint32_t>(wf.read_vcc(1, 1) >> 32);
+    return static_cast<uint32_t>(wf.vcc() >> 32);
   // TTMP0-15 are the trap handler's private scratch registers. They are NOT
   // part of the wave's SGPR allocation: hardware banks them separately, the CP
   // seeds them with the dispatch/queue identity that rocm-dbgapi reads back out
   // of the CWSR area, and a shader that never enters a trap must not be able to
   // clobber them through an SGPR write.
   if (ev >= static_cast<int>(kTtmpSelectorFirst) && ev <= static_cast<int>(kTtmpSelectorLast))
-    return RegisterAccess(wf).read_ttmp(static_cast<uint32_t>(ev) - kTtmpSelectorFirst);
+    return ReadTtmp(wf, static_cast<uint32_t>(ev) - kTtmpSelectorFirst);
   if (m0_ev == static_cast<int>(kModernM0Selector) && ev == static_cast<int>(kModernNullSelector))
     return 0u; // NULL
   if (ev == m0_ev)
     return wf.m0();
   if (ev == static_cast<int>(kExecSelectorFirst))
-    return static_cast<uint32_t>(wf.read_exec(0, 1));
+    return static_cast<uint32_t>(wf.exec_raw());
   if (ev == static_cast<int>(kExecSelectorLast))
-    return static_cast<uint32_t>(wf.read_exec(1, 1) >> 32);
+    return static_cast<uint32_t>(wf.exec_raw() >> 32);
   if (ev >= 128 && ev <= 192)
     return static_cast<uint32_t>(ev - 128);
   if (ev >= 193 && ev <= 208)
     return static_cast<uint32_t>(static_cast<int32_t>(-(ev - 192)));
   if (ev == static_cast<int>(kFlatScratchBaseSelectorFirst))
-    return static_cast<uint32_t>(wf.read_scratch_base(0, 1)); // SRC_FLAT_SCRATCH_BASE_LO
+    return static_cast<uint32_t>(wf.scratch_base()); // SRC_FLAT_SCRATCH_BASE_LO
   if (ev == static_cast<int>(kFlatScratchBaseSelectorLast))
-    return static_cast<uint32_t>(wf.read_scratch_base(1, 1) >> 32); // SRC_FLAT_SCRATCH_BASE_HI
+    return static_cast<uint32_t>(wf.scratch_base() >> 32); // SRC_FLAT_SCRATCH_BASE_HI
   if (ev == 240)
     return 0x3F000000u; // 0.5f
   if (ev == 241)
@@ -99,6 +102,15 @@ inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
   if (ev == 253)
     return wf.read_scc() ? 1u : 0u; // SCC
   throw std::logic_error("Unsupported encoding value for scalar read: " + std::to_string(ev));
+}
+
+inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
+  return resolve_src_scalar_value<[](const Wavefront &wave, uint32_t reg) {
+    return RegisterAccess(wave).read_sgpr(wave.sgpr_alloc().base + reg);
+  },
+                                  [](const Wavefront &wave, uint32_t reg) {
+                                    return RegisterAccess(wave).read_ttmp(reg);
+                                  }>(wf, ev, m0_ev);
 }
 
 // 16-bit reads of the inline float constants use the half-precision bit
@@ -151,19 +163,19 @@ inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
   if (is_src_scalar_register_pair(ev)) {
     if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) &&
         ev == static_cast<int>(kFlatScratchSelectorFirst))
-      return wf.read_scratch_base();
+      return wf.scratch_base();
     if (ev <= static_cast<int>(kScalarSgprSelectorLast))
       return RegisterAccess(wf).read_sgpr64(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
     if (ev == static_cast<int>(kVccSelectorFirst))
-      return wf.read_vcc();
+      return wf.vcc();
     if (ev >= static_cast<int>(kTtmpSelectorFirst) &&
         ev < static_cast<int>(kTtmpSelectorLast)) { // TTMP pair; see resolve_src_scalar()
       return RegisterAccess(wf).read_ttmp64(static_cast<uint32_t>(ev) - kTtmpSelectorFirst);
     }
     if (ev == static_cast<int>(kExecSelectorFirst))
-      return wf.read_exec();
+      return wf.exec_raw();
     if (ev == static_cast<int>(kFlatScratchBaseSelectorFirst))
-      return wf.read_scratch_base(); // SRC_FLAT_SCRATCH_BASE
+      return wf.scratch_base(); // SRC_FLAT_SCRATCH_BASE
     throw std::logic_error("Scalar register-pair selector is not resolved: " + std::to_string(ev));
   }
   if (m0_ev == static_cast<int>(kModernM0Selector) && ev == static_cast<int>(kModernNullSelector))
@@ -210,14 +222,12 @@ inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
 inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
   if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) &&
       ev == static_cast<int>(kFlatScratchSelectorFirst)) {
-    wf.check_scalar_memory_wait({RegClass::FLAT_SCRATCH, 0, 1}, true);
     uint64_t sb = wf.scratch_base();
     wf.set_scratch_base((sb & 0xFFFFFFFF00000000ULL) | val);
     return;
   }
   if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) &&
       ev == static_cast<int>(kFlatScratchSelectorLast)) {
-    wf.check_scalar_memory_wait({RegClass::FLAT_SCRATCH, 1, 1}, true);
     uint64_t sb = wf.scratch_base();
     wf.set_scratch_base((sb & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
     return;
@@ -227,12 +237,10 @@ inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
     return;
   }
   if (ev == static_cast<int>(kVccSelectorFirst)) {
-    wf.check_scalar_memory_wait({RegClass::VCC, 0, 1}, true);
     wf.set_vcc_raw((wf.vcc() & 0xFFFFFFFF00000000ULL) | val);
     return;
   }
   if (ev == static_cast<int>(kVccSelectorLast)) {
-    wf.check_scalar_memory_wait({RegClass::VCC, 1, 1}, true);
     wf.set_vcc_raw((wf.vcc() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
     return;
   }
@@ -248,12 +256,10 @@ inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
     return;
   }
   if (ev == static_cast<int>(kExecSelectorFirst)) {
-    wf.check_scalar_memory_wait({RegClass::EXEC, 0, 1}, true);
     wf.set_exec_raw((wf.exec_raw() & 0xFFFFFFFF00000000ULL) | val);
     return;
   }
   if (ev == static_cast<int>(kExecSelectorLast)) {
-    wf.check_scalar_memory_wait({RegClass::EXEC, 1, 1}, true);
     wf.set_exec_raw((wf.exec_raw() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
     return;
   }
@@ -263,7 +269,6 @@ inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
 inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
   if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) &&
       ev == static_cast<int>(kFlatScratchSelectorFirst)) {
-    wf.check_scalar_memory_wait({RegClass::FLAT_SCRATCH, 0, 2}, true);
     wf.set_scratch_base(val);
     return;
   }
@@ -272,7 +277,6 @@ inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
     return;
   }
   if (ev == static_cast<int>(kVccSelectorFirst)) {
-    wf.check_scalar_memory_wait({RegClass::VCC, 0, 2}, true);
     wf.set_vcc_raw(val);
     return;
   }
@@ -284,7 +288,6 @@ inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
   if (ev == static_cast<int>(kModernNullSelector))
     return;
   if (ev == static_cast<int>(kExecSelectorFirst)) {
-    wf.check_scalar_memory_wait({RegClass::EXEC, 0, 2}, true);
     wf.set_exec_raw(val);
     return;
   }

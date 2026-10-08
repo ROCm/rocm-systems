@@ -746,6 +746,13 @@ struct ComputeQueueRecord : ComputeQueueConfig {
   /// the queue's read_dispatch_id at a trapped dispatch (so packets are not
   /// re-fetched). See fetch_from_queue and serialize_queue_debug_waves.
   uint64_t fetch_cursor = 0;
+  /// A durable admission must invalidate its ring slot before publishing the cursor.
+  struct AqlSlotRelease {
+    GpuVmAccess access;
+    uint64_t address;
+    uint32_t header;
+  };
+  std::optional<AqlSlotRelease> aql_slot_release;
   /// Set on the replicas that xcd_fanout creates. A replica never reads the ring
   /// and never polls a doorbell; work reaches it as dispatch shards from the XCD
   /// that owns the queue.
