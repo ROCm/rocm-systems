@@ -41,7 +41,7 @@
 #if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) ||                        \
     defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) ||                        \
     defined(__gfx1152__) || defined(__gfx1153__) || defined(__gfx1170__) ||                        \
-    defined(__gfx1171__) || defined(__gfx1172__) || defined(__gfx1200__) || defined(__gfx1201__)
+    defined(__gfx1171__) || defined(__gfx1200__) || defined(__gfx1201__)
 #    define GFX11_RDNA3_ARCH 1
 #endif
 

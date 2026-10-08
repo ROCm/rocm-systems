@@ -16,7 +16,6 @@ set(ROCPROFILER_DEFAULT_GPU_TARGETS
     "gfx1152"
     "gfx1170"
     "gfx1171"
-    "gfx1172"
     "gfx1250")
 
 if(NOT GPU_TARGETS)

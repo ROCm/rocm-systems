@@ -53,7 +53,6 @@ TEST(Pm4FactoryTest, GetGpuIdGfx117x)
 {
     EXPECT_EQ(Pm4Factory::GetGpuId("gfx1170"), GFX117X_GPU_ID);
     EXPECT_EQ(Pm4Factory::GetGpuId("gfx1171"), GFX117X_GPU_ID);
-    EXPECT_EQ(Pm4Factory::GetGpuId("gfx1172"), GFX117X_GPU_ID);
 }
 
 // Test: the gfxip table is matched by ordered prefix, so adding "gfx117" must
