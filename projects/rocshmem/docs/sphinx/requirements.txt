@@ -60,7 +60,7 @@ fastjsonschema==2.21.1
     #   rocm-docs-core
 gitdb==4.0.12
     # via gitpython
-gitpython==3.1.59
+gitpython==3.1.62
     # via rocm-docs-core
 greenlet==3.2.1
     # via sqlalchemy
@@ -162,7 +162,7 @@ pygments==2.20.0
     #   ipython
     #   pydata-sphinx-theme
     #   sphinx
-pyjwt[crypto]==2.13.0
+pyjwt[crypto]==2.15.0
     # via pygithub
 pynacl==1.6.2
     # via pygithub
@@ -268,7 +268,7 @@ typing-extensions==4.13.2
     #   pyjwt
     #   referencing
     #   sqlalchemy
-urllib3==2.7.0
+urllib3==2.8.0
     # via
     #   pygithub
     #   requests

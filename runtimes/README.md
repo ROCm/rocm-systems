@@ -1,3 +1,4 @@
+<!-- Copyright (c) 2026 Advanced Micro Devices, Inc. -->
 <!-- SPDX-License-Identifier: MIT -->
 
 # ROCm Runtime Components
@@ -38,8 +39,8 @@ and SONAME, and marks the image `NODELETE` while native KFD and DRM owners may
 remain live. `cmake/SharedImage.cmake` owns the corresponding CMake targets.
 
 The CMake build below stages one physical `libhsa-runtime64.so.1` with
-`libhsa-runtime64.so`, `libhsa_runtime64.so`, and `libamdf.so` aliases.
-The AMDF static archive is built separately.
+`libhsa-runtime64.so`, `libhsa_runtime64.so`, `libamdf.so.0`, and
+`libamdf.so` aliases. The AMDF static archive is built separately.
 
 ## Build with CMake
 

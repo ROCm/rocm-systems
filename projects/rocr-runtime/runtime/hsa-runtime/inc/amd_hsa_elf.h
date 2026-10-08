@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: NCSA
-
 ////////////////////////////////////////////////////////////////////////////////
 //
 // The University of Illinois/NCSA
@@ -150,13 +148,16 @@ enum : unsigned {
   EF_AMDGPU_MACH_AMDGCN_GFX1153         = 0x058,
   EF_AMDGPU_MACH_AMDGCN_GFX12_GENERIC   = 0x059,
   EF_AMDGPU_MACH_AMDGCN_GFX12_5_GENERIC = 0x05b,
+  EF_AMDGPU_MACH_AMDGCN_GFX1170         = 0x05D,
+  EF_AMDGPU_MACH_AMDGCN_GFX1171         = 0x05E,
   EF_AMDGPU_MACH_AMDGCN_GFX9_4_GENERIC  = 0x05f,
+  EF_AMDGPU_MACH_AMDGCN_GFX11_7_GENERIC = 0x062,
   EF_AMDGPU_MACH_AMDGCN_GFX1250_STRICT  = 0x0eb,
   // clang-format on
 
   // First/last AMDGCN-based processors.
   EF_AMDGPU_MACH_AMDGCN_FIRST = EF_AMDGPU_MACH_AMDGCN_GFX600,
-  EF_AMDGPU_MACH_AMDGCN_LAST = EF_AMDGPU_MACH_AMDGCN_GFX9_4_GENERIC,
+  EF_AMDGPU_MACH_AMDGCN_LAST = EF_AMDGPU_MACH_AMDGCN_GFX1250_STRICT,
 
   // Indicates if the "xnack" target feature is enabled for all code contamained
   // in the object.

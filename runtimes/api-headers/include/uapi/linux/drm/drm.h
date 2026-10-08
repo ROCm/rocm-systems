@@ -1,5 +1,3 @@
-/* SPDX-License-Identifier: MIT */
-
 /*
  * Header for the Direct Rendering Manager
  *

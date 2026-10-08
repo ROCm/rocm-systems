@@ -1,5 +1,3 @@
-/* SPDX-License-Identifier: MIT */
-
 /* amdgpu_drm.h -- Public header for the amdgpu driver -*- linux-c -*-
  *
  * Copyright 2000 Precision Insight, Inc., Cedar Park, Texas.

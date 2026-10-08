@@ -1,5 +1,3 @@
-/* SPDX-License-Identifier: MIT */
-
 /**
  * \file xf86drm.h 
  * OS-independent header for DRM user-level library interface.

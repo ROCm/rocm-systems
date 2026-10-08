@@ -9,11 +9,11 @@
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/l2_maintenance_mutex.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "simdojo/components/cache.h"
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/message.h"
-#include "util/distributed_shared_mutex.h"
 
 #include <algorithm>
 #include <array>
@@ -64,14 +64,20 @@ namespace amdgpu {
 /// requests, OUT for HBM/fabric traffic).
 ///
 /// @par Thread safety
-/// Public cache operations are thread-safe. Normal line operations take a
-/// shared maintenance lock followed by a per-set mutex, so CPU dispatch workers
-/// sharing an XCD-local L2 can make progress on independent cache sets.
-/// Whole-cache maintenance takes the maintenance lock exclusively, avoiding
-/// both concurrent set access and TSan's fixed lock-tracker limit. Each line
-/// operation is atomic with respect to other operations on that set; a request
-/// spanning multiple lines is intentionally not an atomic snapshot of the full
-/// range.
+/// Public cache operations are thread-safe.
+/// Normal line accesses take shared maintenance admission before a per-set
+/// mutex; whole-cache maintenance takes admission exclusively. Independent sets
+/// proceed concurrently while admission is open. A writer that closes the gate
+/// blocks new accesses to every set while existing accesses finish. Device
+/// atomics and domain-wide maintenance exclude every L2 in the coherence domain.
+/// Operations on a set are atomic, but multi-line requests are not snapshots.
+///
+/// Current-epoch accesses skip reconciliation. Stale accesses release shared
+/// admission before taking the per-L2 reconciliation mutex, then reacquire
+/// admission and recheck the epoch so peers reuse the first refresh. When both
+/// locks are held, reconciliation precedes maintenance admission; admission
+/// always precedes the per-set mutex. Direct maintenance never acquires the
+/// reconciliation mutex. See L2MaintenanceMutex for admission and publication.
 class L2Cache : public simdojo::Component {
 public:
   static constexpr uint32_t LINE_SIZE_BITS = 7; // 128 bytes
@@ -365,8 +371,9 @@ private:
     return SetRangeLocks(set_mutexes_, line_start, line_count);
   }
 
-  std::shared_lock<util::DistributedSharedMutex> acquire_cache_access();
-  std::unique_lock<util::DistributedSharedMutex> acquire_cache_maintenance();
+  using MaintenanceMutex = L2MaintenanceMutex;
+  std::shared_lock<MaintenanceMutex> acquire_cache_access();
+  std::unique_lock<MaintenanceMutex> acquire_cache_maintenance();
   void synchronize_epoch_locked();
   VmAccessOutcome cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size,
                                       uint32_t vmid);
@@ -396,7 +403,8 @@ private:
   static VmAccessOutcome access_outcome(simdojo::MessageStatus status);
 
   CacheStore cache_;
-  mutable util::DistributedSharedMutex maintenance_mutex_;
+  mutable MaintenanceMutex maintenance_mutex_;
+  std::mutex epoch_reconcile_mutex_;
   mutable std::array<std::mutex, NUM_SETS> set_mutexes_;
   simdojo::Port *req_port_ = nullptr;
   GpuMemory *backing_memory_ = nullptr; ///< Direct writeback path (functional mode).
