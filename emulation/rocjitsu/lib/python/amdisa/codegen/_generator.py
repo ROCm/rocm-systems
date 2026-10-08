@@ -10469,27 +10469,39 @@ class CodeGenerator:
                                 )
                             )
                         )
-                        # Compare-swap consumes two elements through vdata but
-                        # returns only the old element. Keep the destination
-                        # metadata on a narrow view of the same encoded VGPR so
-                        # liveness does not kill the untouched payload half.
+                        # Compare-swap consumes two elements through its data
+                        # operand but returns only the old element. Keep the
+                        # destination metadata on a narrow view of the same
+                        # encoded register so liveness does not kill the
+                        # untouched payload half.
                         _needs_atomic_return_view = (
-                            _is_optional_atomic_return
-                            and inst_sem.semantic_class == 'buffer_atomic'
+                            opnd.is_output
+                            and inst_sem is not None
                             and inst_sem.operation in ('cmpswap', 'fcmpswap')
-                            and opnd.name == 'vdata'
+                            and (
+                                (
+                                    inst_sem.semantic_class == 'buffer_atomic'
+                                    and opnd.name == 'vdata'
+                                )
+                                or (
+                                    inst_sem.semantic_class == 'smem_atomic'
+                                    and opnd.name == 'sdata'
+                                )
+                            )
                         )
                         _needs_tied_destination_result_view = (
                             opnd.name == tied_destination_name
                             and tied_destination_result_name is not None
                         )
                         atomic_return_operand = (
-                            'vdata_return' if _needs_atomic_return_view else opnd.name
+                            f'{opnd.name}_return'
+                            if _needs_atomic_return_view
+                            else opnd.name
                         )
                         destination_operand = (
                             tied_destination_result_name
                             if _needs_tied_destination_result_view
-                            else opnd.name
+                            else atomic_return_operand
                         )
                         if _is_optional_atomic_return:
                             sc0, _, _ = self._coherency_exprs()
@@ -10610,15 +10622,15 @@ class CodeGenerator:
                                     )
                             if _needs_atomic_return_view:
                                 private_members.append(
-                                    cgen.Statement('Operand vdata_return')
+                                    cgen.Statement(f'Operand {atomic_return_operand}')
                                 )
                                 opnd_ctor_init.append(
-                                    f'vdata_return({(inst_sem.elem_size or 4) * 8}, '
+                                    f'{atomic_return_operand}({(inst_sem.elem_size or 4) * 8}, '
                                     f'OperandType::{opr_type}, {operand_value})'
                                 )
                                 if _uses_vgpr_msb_roles or _uses_gpr_idx_roles:
                                     vgpr_msb_role_body.append(
-                                        'vdata_return.set_vgpr_msb_role('
+                                        f'{atomic_return_operand}.set_vgpr_msb_role('
                                         'amdgpu::VgprMsbRole::Dst);'
                                     )
                         elif opnd.fieldless:

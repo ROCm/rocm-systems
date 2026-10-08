@@ -387,12 +387,20 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   return MemoryAccessCompletion::Complete;
 }
 
+/// @brief Read data operand @p index of a scalar atomic as one T-wide value.
+/// @details T is the atomic width. Operand 0 is the source; compare-swap's
+/// compare value is operand 1.
+template <typename T> T scalar_atomic_operand(const ScalarMemState &d, uint32_t index) {
+  T value;
+  std::memcpy(&value, d.store_data + index * (sizeof(T) / sizeof(uint32_t)), sizeof(value));
+  return value;
+}
+
 /// @brief Compute the memory value a scalar atomic stores over @p old.
-/// @details T is the atomic width; the source occupies the low data dwords.
+/// @details Operations other than compare-swap ignore the compare value.
 template <typename T> T scalar_atomic_result(const ScalarMemState &d, T old) {
-  T source;
-  std::memcpy(&source, d.store_data, sizeof(source));
-  return apply_int_atomic(d.atomic_op, old, source);
+  return apply_int_atomic(d.atomic_op, old, scalar_atomic_operand<T>(d, 0),
+                          scalar_atomic_operand<T>(d, 1));
 }
 
 template <typename T> VmAccessOutcome execute_translated_scalar_atomic_rmw(ScalarMemState &d) {
@@ -408,6 +416,13 @@ template <typename T> VmAccessOutcome execute_translated_scalar_atomic_rmw(Scala
   // Retain the load across unavailable CAS attempts, as for vector atomics.
   while (true) {
     const T old = static_cast<T>(d.translated.atomic_loaded_value);
+    // A failed compare-swap returns the loaded value without writing, as for
+    // vector atomics.
+    if (d.atomic_op == AtomicOp::CMPSWAP && old != scalar_atomic_operand<T>(d, 1)) {
+      std::memcpy(d.response_data, &old, sizeof(old));
+      d.translated.atomic_loaded = false;
+      return VmAccessOutcome::Complete;
+    }
     const T value = scalar_atomic_result(d, old);
     const AtomicCompareExchangeResult exchanged =
         d.translated.access->compare_exchange(d.addr, sizeof(T), old, value);
@@ -556,8 +571,7 @@ ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
   auto &d = *inst.data_as<ScalarMemState>();
   if (!d.is_load)
     return MemoryAccessCompletion::Complete;
-  if (d.dst_register.width != d.num_dwords)
-    return MemoryAccessCompletion::Complete;
+  assert(d.dst_register.width == d.num_dwords);
   RegisterAccess registers(wf);
   for (uint32_t i = 0; i < d.num_dwords; ++i)
     registers.write_scalar_unobserved(d.dst_register, i, d.response_data[i]);
