@@ -1566,6 +1566,13 @@ TEST(VfioDeviceHostDma, EnforcesWriteProtection) {
   ASSERT_TRUE(read_all_at(read_only.fd(), 0, unchanged));
   EXPECT_EQ(unchanged, initial) << "the rejected compare-exchange changed the backing file";
 
+  // atomic_load asks for PROT_READ on its own, separately from a bulk read.
+  uint32_t expected_load = 0;
+  std::memcpy(&expected_load, initial.data(), sizeof(expected_load));
+  const auto loaded = served.host().atomic_load(kProtectionIova, sizeof(uint32_t));
+  EXPECT_EQ(loaded.outcome, simdojo::DmaAccessOutcome::Complete);
+  EXPECT_EQ(loaded.value, expected_load) << "the read-only atomic load returned the wrong value";
+
   const std::vector<std::byte> accepted = byte_pattern(page_size, 0x77);
   EXPECT_TRUE(served.dma().write(kProtectionIova + page_size, accepted));
 
