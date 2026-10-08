@@ -3353,6 +3353,7 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
     // Retrieve the backing buffer regardless of whether translate_ptr succeeds —
     // we must free it even if the alloc_map entry was already removed.
     void* buf = nullptr;
+    bool reset_unregistered = false;
     {
         std::unique_lock lk(ctx.map_mutex);
         auto it = ctx.host_reg_bufs.find(a->hostPtr);
@@ -3360,6 +3361,9 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
             buf = it->second;
             ctx.host_reg_bufs.erase(it);
         }
+        auto ai = ctx.alloc_map.find(a->hostPtr);
+        reset_unregistered = ai != ctx.alloc_map.end() &&
+                             ai->second.kind == AllocKind::HostUnregistered;
     }
 
     void* live = buf ? buf : ctx.translate_ptr(a->hostPtr);
@@ -3370,10 +3374,18 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
         return hipSuccess;
     }
     hipError_t r = hipHostUnregister(live);
-    // The buffer is freed below even when the unregister fails, as it does for
-    // a range a replayed hipDeviceReset already unregistered, so nothing may
+    // The buffer is freed below even when the unregister fails, so nothing may
     // translate into it afterwards.
     if (r == hipSuccess || buf) ctx.remove_alloc(a->hostPtr);
+    // It fails for a range a replayed hipDeviceReset already unregistered.
+    // Capture records an unregister only when it succeeded, so this happens
+    // only when replay sees fewer GPUs than capture did: capture's reset kept
+    // the registration and replay's dropped it. The application's call
+    // succeeded, so replay's does too.
+    if (r != hipSuccess && reset_unregistered) {
+        (void)hipGetLastError();
+        r = hipSuccess;
+    }
 
 #ifdef _WIN32
     _aligned_free(buf);
