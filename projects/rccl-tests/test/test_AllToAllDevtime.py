@@ -41,6 +41,7 @@
 #   RCCL_TESTS_A2A_XENV          extra "-x K=V" env beyond the GIN essentials
 #   RCCL_TESTS_A2A_EXE           path to alltoall_perf (default: ../build/...)
 #   RCCL_TESTS_A2A_TIMEOUT_S     per-run timeout seconds (default: 300)
+#   RCCL_TESTS_A2A_CONN_RETRIES  connectivity-gate retries (default: 5)
 #   RCCL_TESTS_A2A_CTAS          -V grid CTAs (default: 8)
 #   RCCL_TESTS_A2A_GIN_TYPE      NCCL_GIN_TYPE (default: 2, matches device-api CI)
 
@@ -58,6 +59,7 @@ from .gin_sdma_harness import (
     gin_perf_argv,
     launch_mpi_shell,
     mpi_launch_prefix,
+    run_with_conn_gate_retry,
 )
 
 KiB = 1024
@@ -80,6 +82,7 @@ NP = env_int("RCCL_TESTS_A2A_NP", 0) or (detect_ngpus() if _enabled else 0)
 LAUNCHER = os.environ.get("RCCL_TESTS_MPI_LAUNCHER", "mpirun")
 CTAS = os.environ.get("RCCL_TESTS_A2A_CTAS", "8")
 TIMEOUT_S = env_int("RCCL_TESTS_A2A_TIMEOUT_S", 300)
+CONN_RETRIES = env_int("RCCL_TESTS_A2A_CONN_RETRIES", 5)
 GIN_TYPE = os.environ.get("RCCL_TESTS_A2A_GIN_TYPE", "2")
 MPI_OPTS = shlex.split(os.environ.get("RCCL_TESTS_MPI_OPTS", ""))
 XENV = shlex.split(os.environ.get("RCCL_TESTS_A2A_XENV", ""))
@@ -103,11 +106,8 @@ def _assert_datacheck_clean(out):
         return
 
 
-def _run_devtime(request, device_timing_mode, devtime_check=False):
-    """Launch alltoall_perf with GIN (-D 3) and device-timing CLI flags."""
-    if NP < 2:
-        pytest.skip("need >= 2 ranks/GPUs for AllToAll")
-
+def _launch_devtime(request, device_timing_mode, devtime_check=False):
+    """Launch alltoall_perf once with GIN (-D 3) and device-timing CLI flags."""
     size = str(SMOKE_BYTES)
     # Match device-api CI gin-d3 essentials; deployment extras via RCCL_TESTS_A2A_XENV.
     gin_env = gin_env_xflags(
@@ -140,6 +140,16 @@ def _run_devtime(request, device_timing_mode, devtime_check=False):
         "mode -B {}".format(device_timing_mode),
     )
     return launch_mpi_shell(cmd, TIMEOUT_S, hang_msg)
+
+
+def _run_devtime(request, device_timing_mode, devtime_check=False):
+    """Retry the devtime launch on gfx950 connectivity-gate aborts."""
+    if NP < 2:
+        pytest.skip("need >= 2 ranks/GPUs for AllToAll")
+    return run_with_conn_gate_retry(
+        lambda: _launch_devtime(request, device_timing_mode, devtime_check),
+        CONN_RETRIES,
+    )
 
 
 def test_AllToAllDevtimeMode1Augment(request):
