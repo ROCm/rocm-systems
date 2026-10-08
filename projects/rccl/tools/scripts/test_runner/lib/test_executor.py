@@ -454,6 +454,66 @@ def collect_gtest_case_details_from_file(json_path):
     return collect_gtest_case_details(data)
 
 
+def extract_skip_reasons_from_log(log_path):
+    """Return a mapping of full_name → skip_reason parsed from a captured gtest log.
+
+    Google Test does not carry the GTEST_SKIP() / SKIP() message in its JSON
+    report.  It only appears in stdout, two lines before the
+    ``[  SKIPPED ] Suite.Case (N ms)`` banner:
+
+        [ RUN      ] Suite.Case
+        path/to/test.cpp:42: Skipped
+        [  SKIPPED ] Suite.Case (0 ms)
+
+    We scan for that pattern and return a dict so callers can enrich the
+    case_details entries produced from the gtest JSON with the reason text.
+    Returns an empty dict when the log is absent or unreadable.
+    """
+    reasons = {}
+    if not log_path or not os.path.isfile(log_path):
+        return reasons
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except OSError:
+        return reasons
+
+    for i, line in enumerate(lines):
+        # Match the terminal "[  SKIPPED ] Suite.Case (N ms)" line.
+        m = re.match(r'\[  SKIPPED  \] ([\w./]+)\s+\(\d+', line)
+        if not m:
+            continue
+        full_name = m.group(1)
+        # The skip reason is the line immediately before this one (index i-1),
+        # provided it looks like "path:line: message" and is not a gtest banner.
+        if i > 0:
+            prev = lines[i - 1].rstrip()
+            if prev and not prev.startswith("["):
+                reasons[full_name] = prev.strip()
+    return reasons
+
+
+def enrich_skip_reasons(case_details, log_path):
+    """Attach skip reason strings to SKIPPED entries in case_details in-place.
+
+    Reads the captured log file via extract_skip_reasons_from_log() and sets
+    the ``reason`` field on any SKIPPED case_detail entry whose full_name
+    appears in the log's skip map.  Non-SKIPPED entries are untouched.
+    Returns the (mutated) case_details list.
+    """
+    if not case_details or not log_path:
+        return case_details
+    reasons = extract_skip_reasons_from_log(log_path)
+    if not reasons:
+        return case_details
+    for entry in case_details:
+        if entry.get("status") == "SKIPPED":
+            fn = entry.get("full_name", "")
+            if fn in reasons:
+                entry["reason"] = reasons[fn]
+    return case_details
+
+
 def collect_pytest_case_details_from_junit(junit_path):
     """Return leaf-case details from a pytest JUnit XML report, or None."""
     if not junit_path or not os.path.isfile(junit_path):
@@ -2541,6 +2601,7 @@ class TestExecutor:
                 case_details = merge_timeout_details(
                     parsed, test_name, test_filter, timeout
                 )
+                enrich_skip_reasons(case_details, emit_log_path)
                 case_counts = _counts_from_details(case_details)
                 print_case_result(
                     TestResult.RESULT_TIMEOUT.value,
@@ -2647,6 +2708,9 @@ class TestExecutor:
             if case_counts is not None:
                 result["case_counts"] = case_counts
             if case_details is not None:
+                # Enrich SKIPPED entries with the reason text from the captured
+                # log (gtest JSON does not carry GTEST_SKIP() messages).
+                enrich_skip_reasons(case_details, emit_log_path)
                 result["case_details"] = case_details
             return _done(result)
         finally:
