@@ -1161,6 +1161,17 @@ TEST_CASE("Unit_HRR_VaPlacement_MultiGpu_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMemGetInfo(&free_b, &total_b));
   HRR_HIP_CHECK(hipFreeAsync(big1, s1));
   HRR_HIP_CHECK(hipStreamSynchronize(s1));
+  // Once that free is done, the pool hands big1's block to another stream of
+  // device 1. Replay recorded an event at the free on s1, with device 0
+  // current, and the new stream waits for it before taking the mapping back.
+  HRR_HIP_CHECK(hipSetDevice(1));
+  hipStream_t s1b = nullptr;
+  HRR_HIP_CHECK(hipStreamCreate(&s1b));
+  HRR_HIP_CHECK(hipSetDevice(0));
+  void* again = nullptr;
+  HRR_HIP_CHECK(hipMallocAsync(&again, kMultiGpuBig, s1b));
+  HRR_HIP_CHECK(hipFreeAsync(again, s1b));
+  HRR_HIP_CHECK(hipStreamSynchronize(s1b));
 
   // Allocated while device 0 is current, on device 1's stream: it lives on
   // device 1, and replay has to map it there.
@@ -1170,7 +1181,6 @@ TEST_CASE("Unit_HRR_VaPlacement_MultiGpu_Direct", "[.][hrr-direct]") {
   hipPointerAttribute_t attr{};
   HRR_HIP_CHECK(hipPointerGetAttributes(&attr, async1));
   REQUIRE(attr.device == 1);
-
 
   // Device 0 reads its own buffer and both of device 1's through stored
   // pointers. Without peer access in replay, the last two fault.
@@ -1183,8 +1193,8 @@ TEST_CASE("Unit_HRR_VaPlacement_MultiGpu_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMemcpy(got.data(), buf0, kBytes, hipMemcpyDeviceToHost));
   for (int i = 0; i < kElems; ++i) REQUIRE(got[i] == 80 + i);
 
-  printf(HRR_PLACE_MARKER " buf0=0x%llx async1=0x%llx type=%d\n", u64(buf0), u64(async1),
-         static_cast<int>(attr.type));
+  printf(HRR_PLACE_MARKER " buf0=0x%llx async1=0x%llx type=%d big1=0x%llx again=0x%llx\n",
+         u64(buf0), u64(async1), static_cast<int>(attr.type), u64(big1), u64(again));
   fflush(stdout);
 
   HRR_HIP_CHECK(hipFree(cella));
@@ -1195,6 +1205,7 @@ TEST_CASE("Unit_HRR_VaPlacement_MultiGpu_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(buf0));
   HRR_HIP_CHECK(hipFree(out0));
   HRR_HIP_CHECK(hipFree(buf1));
+  HRR_HIP_CHECK(hipStreamDestroy(s1b));
   HRR_HIP_CHECK(hipStreamDestroy(s1));
 }
 
@@ -1219,10 +1230,11 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_MultiGpu) {
     REQUIRE(ret == 0); }
   const size_t at = cout_.find(HRR_PLACE_MARKER);
   REQUIRE(at != std::string::npos);
-  unsigned long long buf0 = 0, async1 = 0;
+  unsigned long long buf0 = 0, async1 = 0, big1 = 0, again = 0;
   int type = -1;
-  REQUIRE(sscanf(cout_.c_str() + at, HRR_PLACE_MARKER " buf0=0x%llx async1=0x%llx type=%d",
-                 &buf0, &async1, &type) == 3);
+  REQUIRE(sscanf(cout_.c_str() + at,
+                 HRR_PLACE_MARKER " buf0=0x%llx async1=0x%llx type=%d big1=0x%llx again=0x%llx",
+                 &buf0, &async1, &type, &big1, &again) == 5);
 
   auto [rc, out] = hrr_playback_merged(hrr_single_process_archive(cap.path), "--verbose");
   INFO("Replay:\n" << out);
@@ -1256,8 +1268,23 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_MultiGpu) {
   const long long took1 = static_cast<long long>(info[0].second - info[2].second);
   const long long took0 = static_cast<long long>(info[1].second - info[3].second);
   INFO("device 1 gave " << took1 << " bytes, device 0 " << took0);
-  CHECK(took1 >= static_cast<long long>(kMultiGpuBig));
-  CHECK(took0 < static_cast<long long>(kMultiGpuBig / 2));
+  // With a margin: another process may allocate or free on either device
+  // meanwhile.
+  CHECK(took1 >= static_cast<long long>(kMultiGpuBig / 4 * 3));
+  CHECK(took0 < static_cast<long long>(kMultiGpuBig / 4));
+  // big1 was freed on device 1's stream with device 0 current. The event
+  // recorded at that free is on device 1 too, so the other stream that got
+  // the block back waits for it rather than unmapping the mapping first.
+  if (again == big1) {
+    CHECK(out.find("no event could be recorded after the hipFreeAsync of " + hex(big1)) ==
+          std::string::npos);
+    CHECK(out.find("[HRR] Placement: hipMallocAsync " + hex(big1) +
+                   " takes back the mapping freed there (its stream waits for the free)") !=
+          std::string::npos);
+  } else {
+    WARN("the pool did not hand big1's block to the other stream; the take-back is not "
+         "checked");
+  }
 }
 
 #endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE

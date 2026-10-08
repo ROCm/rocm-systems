@@ -140,15 +140,33 @@ hipError_t hrr_vmm_map_into(void* va, size_t len, int device,
     return hipSuccess;
 }
 
+int hrr_stream_device(hipStream_t stream) {
+    int dev = 0;
+    hipDevice_t sd = 0;
+    if (stream && hipStreamGetDevice(stream, &sd) == hipSuccess) return static_cast<int>(sd);
+    (void)hipGetDevice(&dev);
+    return dev;
+}
+
 hipError_t hrr_record_free_event(hipStream_t stream, hipEvent_t* event) {
+    // hipEventRecord refuses a stream of another device than the event's, and
+    // an event belongs to the device current when it is created: make the
+    // stream's device current around both.
+    const int device = hrr_stream_device(stream);
+    int cur = -1;
+    if (hipGetDevice(&cur) != hipSuccess) cur = -1;
+    const bool switched = cur >= 0 && cur != device;
+    if (switched) {
+        if (const hipError_t sr = hipSetDevice(device); sr != hipSuccess) return sr;
+    }
     hipEvent_t e = nullptr;
     hipError_t r = hipEventCreateWithFlags(&e, hipEventDisableTiming);
-    if (r != hipSuccess) return r;
-    r = hipEventRecord(e, stream);
-    if (r != hipSuccess) {
-        (void)hipEventDestroy(e);
-        return r;
+    if (r == hipSuccess) {
+        r = hipEventRecord(e, stream);
+        if (r != hipSuccess) (void)hipEventDestroy(e);
     }
+    if (switched) (void)hipSetDevice(cur);
+    if (r != hipSuccess) return r;
     *event = e;
     return hipSuccess;
 }
@@ -371,6 +389,14 @@ void VaPlacement::drop_event(hipEvent_t e) {
     if (r != hipSuccess) clear_error();
 }
 
+int VaPlacement::stream_device(hipStream_t stream) {
+#ifdef HRR_VA_PLACEMENT_TESTING
+    return ops_.stream_device(stream);
+#else
+    return hrr_stream_device(stream);
+#endif
+}
+
 void VaPlacement::wait_for_free(hipEvent_t e, const hipStream_t* stream) {
 #ifdef HRR_VA_PLACEMENT_TESTING
     hipError_t (*wait)(hipStream_t, hipEvent_t, unsigned int) = ops_.wait_event;
@@ -401,6 +427,9 @@ bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
     bool drained_overlap = false;  // this call unmapped the freed mappings here
     bool drained_oom     = false;  // this call unmapped every freed mapping
     std::vector<uint64_t> drained;
+    // Every device's null stream has the same handle: the device tells them
+    // apart.
+    const int sdev = stream ? stream_device(*stream) : -1;
     std::unique_lock<std::mutex> lk(mu_);
     while (!why) {
         if (pe != 0 && va_overlaps(plan_.exported, pb, pe)) {
@@ -437,24 +466,32 @@ bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
         if (freed.size() == 1) {
             auto it = deferred_.find(freed[0]);
             const PlacedMapping& d = it->second;
-            // Freed from the same first page on this device, and big enough:
-            // a stream-ordered pool hands a block back for a request up to
-            // 12.5% smaller. Take the mapping back as it is, keeping its end,
-            // as the pool kept the whole block. That needs no unmap, so no
-            // device-wide wait. The recording's pool reused the block only
+            // Freed from the same first page on this device, and the same
+            // size. A stream-ordered pool also hands a block back for a
+            // request up to 12.5% smaller (FindMemory), so a stream-ordered
+            // allocation takes back a mapping up to 9/8 of its own pages too.
+            // An allocation with no stream does not come from that pool, and
+            // keeping a larger mapping would only make a later allocation in
+            // its tail fall back. Take the mapping back as it is, keeping its
+            // end, as the pool kept the whole block. That needs no unmap, so
+            // no device-wide wait. The recording's pool reused the block only
             // once the free was done, or ordered after it, so replay orders
             // the allocation after the free too: nothing to do on the stream
             // that freed it; on another, or for an allocation with no stream,
             // wait for the event the free left, unless a capture is open,
             // where that wait would sync inside it.
-            const bool same_stream = stream && d.on_stream && d.stream == *stream;
-            if (it->first == pb && pe <= d.end && d.device == device &&
+            const bool fits = stream ? pe <= d.end && (d.end - pb) * 8 <= (pe - pb) * 9
+                                     : pe == d.end;
+            const bool same_stream =
+                stream && d.on_stream && d.stream == *stream && d.stream_device == sdev;
+            if (it->first == pb && fits && d.device == device &&
                 (same_stream || (!capturing && d.event))) {
                 PlacedMapping m = d;
                 const hipEvent_t ev = d.event;
                 m.rec = rec;
                 m.on_stream = false;
                 m.stream = nullptr;
+                m.stream_device = -1;
                 m.event = nullptr;
                 deferred_.erase(it);
                 mapped_[pb] = m;
@@ -462,6 +499,14 @@ bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
                 lk.unlock();
                 if (ev && !same_stream) wait_for_free(ev, stream);
                 drop_event(ev);
+                if (verbose_)
+                    fprintf(stderr,
+                            "[HRR] Placement: %s 0x%llx takes back the mapping freed "
+                            "there (%s)\n",
+                            api, (ull)rec,
+                            same_stream ? "freed on the same stream"
+                            : stream    ? "its stream waits for the free"
+                                        : "the host waits for the free");
                 *live = reinterpret_cast<void*>(rec);
                 return true;
             }
@@ -588,6 +633,7 @@ bool VaPlacement::unmap_impl(void* live, bool defer, bool on_stream, hipStream_t
                              bool capturing) {
     if (!active_ || !live) return false;
     const uint64_t v = reinterpret_cast<uint64_t>(live);
+    const int sdev = on_stream ? stream_device(stream) : -1;
     std::unique_lock<std::mutex> lk(mu_);
     auto it = mapped_.upper_bound(v);
     if (it == mapped_.begin()) return false;
@@ -597,6 +643,7 @@ bool VaPlacement::unmap_impl(void* live, bool defer, bool on_stream, hipStream_t
     PlacedMapping m = it->second;
     m.on_stream = on_stream;
     m.stream = stream;
+    m.stream_device = sdev;
     m.event = nullptr;
     // An event on the freeing stream, recorded now, marks the end of the
     // stream's work on this memory. Recording one inside a capture would add
@@ -609,6 +656,12 @@ bool VaPlacement::unmap_impl(void* live, bool defer, bool on_stream, hipStream_t
 #endif
         if (r != hipSuccess) {
             m.event = nullptr;
+            if (verbose_)
+                fprintf(stderr,
+                        "[HRR] Placement: no event could be recorded after the "
+                        "hipFreeAsync of 0x%llx (%s); an allocation there on another "
+                        "stream unmaps it first\n",
+                        (ull)m.rec, hipGetErrorString(r));
             clear_error();
         }
     }
@@ -636,6 +689,7 @@ void VaPlacement::stream_destroyed(hipStream_t stream) {
         if (kv.second.on_stream && kv.second.stream == stream) {
             kv.second.on_stream = false;
             kv.second.stream = nullptr;
+            kv.second.stream_device = -1;
         }
 }
 
@@ -667,7 +721,6 @@ void VaPlacement::adopt_mapping_for_test(uint64_t rec, size_t size, int device) 
     active_ = true;
     mapped_[va_floor(rec, gran_)] = {va_ceil(rec + size, gran_), rec, {}, device, false};
 }
-#endif
 
 bool VaPlacement::is_mapped(void* live) {
     if (!active_ || !live) return false;
@@ -678,6 +731,7 @@ bool VaPlacement::is_mapped(void* live) {
     --it;
     return it->second.rec == v;
 }
+#endif
 
 std::vector<uint64_t> VaPlacement::mapped_bases() {
     std::lock_guard<std::mutex> lk(mu_);
@@ -747,10 +801,14 @@ void VaPlacement::vmm_reserved(uint64_t rec, size_t size, bool held, uint64_t li
     if (held) restore_vmm_hold(rec, size);
 }
 
+// Placement never turns on in a Windows replay (hold() refuses), but the
+// unit tests adopt mappings there too, so only the placeholders, which need
+// mmap, are left out on Windows.
 void VaPlacement::release_all() {
-#ifndef _WIN32
     std::unique_lock<std::mutex> lk(mu_);
+#ifndef _WIN32
     for (const auto& r : denied_held_) drop_hold(r.base, r.end);
+#endif
     denied_held_.clear();
     if (!active_) return;
     cv_.wait(lk, [&] { return !any_unmapping(); });
@@ -772,13 +830,14 @@ void VaPlacement::release_all() {
 #endif
     }
     reserved_.clear();
+#ifndef _WIN32
     for (const auto& r : alloc_holds_) drop_hold(r.base, r.end);
-    alloc_holds_.clear();
     for (const auto& r : vmm_held_) drop_hold(r.base, r.end);
+#endif
+    alloc_holds_.clear();
     vmm_held_.clear();
     vmm_released_.clear();
     active_ = false;
-#endif
 }
 
 }  // namespace hrr

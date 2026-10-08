@@ -635,12 +635,17 @@ hipError_t fake_destroy(hipEvent_t) {
   return hipSuccess;
 }
 hipError_t fake_address_free(void*, size_t) { return hipSuccess; }
+// The current device, which the null stream belongs to; S1 and S2 are on
+// device 0.
+int g_cur_dev = 0;
+int fake_stream_device(hipStream_t s) { return s ? 0 : g_cur_dev; }
 
 void reset_events() {
   reset_vmm_counts();
   g_unmap_bytes = 0;
   g_events = g_destroyed = g_host_waits = 0;
   g_waits.clear();
+  g_cur_dev = 0;
 }
 
 // Counted maps and unmaps, and fake events.
@@ -654,6 +659,7 @@ hrr::VmmOps event_ops() {
   ops.sync_event    = fake_sync;
   ops.destroy_event = fake_destroy;
   ops.address_free  = fake_address_free;
+  ops.stream_device = fake_stream_device;
   return ops;
 }
 }  // namespace
@@ -715,7 +721,8 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapRunsOutsideTheLock) {
 
 HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedRangeTakenBack) {
   // hipFreeAsync defers the unmap, and a stream-ordered pool hands the block
-  // straight back, for a request up to 12.5% smaller too. The allocation
+  // straight back, for a request up to 12.5% smaller too; hipMalloc only for
+  // the same size. The allocation
   // recorded there takes the mapping back as it is: no device-wide wait for
   // an unmap the recording never had. The pool reused the block only once
   // the free was done, or ordered after it, so on another stream the
@@ -760,7 +767,7 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedRangeTakenBack) {
     REQUIRE(g_host_waits == 1);
     REQUIRE(g_destroyed == 1);
   }
-  SECTION("another stream inside a capture: falls back, still mapped") {
+  SECTION("another stream while a capture is open: falls back, still mapped") {
     REQUIRE_FALSE(pl.map_at(B, 2 * P, 0, "hipMallocAsync", &live, /*capturing=*/true, &S2));
     REQUIRE(g_unmaps == 0);
     REQUIRE(g_waits.empty());
@@ -770,20 +777,43 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedRangeTakenBack) {
     REQUIRE(pl.drain_deferred() == 1);
     REQUIRE(g_destroyed == 1);
   }
-  SECTION("the same stream inside a capture: taken back") {
+  SECTION("the same stream while another captures: taken back") {
     REQUIRE(pl.map_at(B, 2 * P, 0, "hipMallocAsync", &live, /*capturing=*/true, &S1));
     REQUIRE(g_unmaps == 0);
     REQUIRE(pl.fallbacks() == 0);
     REQUIRE(g_destroyed == 1);
   }
-  SECTION("a smaller request from the same page keeps the whole mapping") {
+  SECTION("up to 12.5% smaller from the same page keeps the whole mapping") {
+    const uint64_t C = B + 4 * P;
+    REQUIRE(pl.map_at(C, 9 * P, 0, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(pl.unmap_async(at(C), S1, /*capturing=*/false));
+    REQUIRE(pl.map_at(C, 8 * P, 0, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(live == at(C));
+    REQUIRE(g_maps == 2);
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(pl.unmap(at(C)));
+    REQUIRE(g_unmaps == 1);
+    REQUIRE(g_unmap_bytes == 9 * P);
+  }
+  SECTION("much smaller: unmapped, then mapped") {
     REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live, false, &S1));
     REQUIRE(live == at(B));
-    REQUIRE(g_maps == 1);
-    REQUIRE(g_unmaps == 0);
-    REQUIRE(pl.unmap(at(B)));
     REQUIRE(g_unmaps == 1);
     REQUIRE(g_unmap_bytes == 2 * P);
+    REQUIRE(g_maps == 2);
+  }
+  SECTION("hipMalloc smaller: not taken back") {
+    // hipMalloc does not come from the pool, so only the same size is
+    // taken back.
+    const uint64_t C = B + 4 * P;
+    REQUIRE(pl.map_at(C, 9 * P, 0, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(pl.unmap_async(at(C), S1, /*capturing=*/false));
+    REQUIRE(pl.map_at(C, 8 * P, 0, "hipMalloc", &live));
+    REQUIRE(live == at(C));
+    REQUIRE(g_host_waits == 0);
+    REQUIRE(g_unmaps == 1);
+    REQUIRE(g_unmap_bytes == 9 * P);
+    REQUIRE(g_maps == 3);
   }
   SECTION("its stream destroyed: a new stream with the same handle waits") {
     pl.stream_destroyed(S1);
@@ -820,17 +850,50 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedRangeTakenBack) {
   }
 }
 
+HRR_TEST_CASE(Unit_HRR_VaPlacement_NullStreamsOfTwoDevices) {
+  // Every device's null stream has the same handle. A hipFreeAsync on one
+  // device's null stream is not a free on another's: an allocation there
+  // waits for the free's event like any other stream.
+  reset_events();
+  hrr::VaPlacement pl;
+  pl.set_vmm_ops_for_test(event_ops());
+  pl.adopt_reservation_for_test(B, B + 16 * P, 2);
+  const hipStream_t null_stream = nullptr;
+  void* live = nullptr;
+  g_cur_dev = 1;
+  REQUIRE(pl.map_at(B, 2 * P, 1, "hipMallocAsync", &live, false, &null_stream));
+  SECTION("freed on another device's null stream: waits for the free") {
+    g_cur_dev = 0;
+    REQUIRE(pl.unmap_async(at(B), null_stream, /*capturing=*/false));
+    g_cur_dev = 1;
+    REQUIRE(pl.map_at(B, 2 * P, 1, "hipMallocAsync", &live, false, &null_stream));
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(g_waits.size() == 1);
+    REQUIRE(g_waits[0].first == null_stream);
+    REQUIRE(g_waits[0].second == fake_event(1));
+  }
+  SECTION("freed on the same device's null stream: nothing to wait for") {
+    REQUIRE(pl.unmap_async(at(B), null_stream, /*capturing=*/false));
+    REQUIRE(pl.map_at(B, 2 * P, 1, "hipMallocAsync", &live, false, &null_stream));
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(g_waits.empty());
+    REQUIRE(g_destroyed == 1);
+  }
+}
+
 HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedWithNothingToWaitFor) {
   // A free made while a capture was open keeps no event: recording one would
   // add it to the graph. Only the stream that freed it can take it back as it
   // is. Anything else is an ordinary overlap: unmapped first, which waits for
-  // every stream, or a fallback while a capture is open.
+  // every stream, or a fallback while a capture is open. A hipFreeAsync on
+  // the capturing stream itself is deferred as a free on no stream, like a
+  // hipFree (the hipFree sections), since it runs when the graph does.
   reset_events();
   hrr::VaPlacement pl;
   pl.set_vmm_ops_for_test(event_ops());
   pl.adopt_reservation_for_test(B, B + 16 * P, 1);
   void* live = nullptr;
-  SECTION("hipFreeAsync inside a capture, then another stream") {
+  SECTION("hipFreeAsync while another stream captures, then another stream") {
     REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live, false, &S1));
     REQUIRE(pl.unmap_async(at(B), S1, /*capturing=*/true));
     REQUIRE(g_events == 0);
@@ -839,7 +902,7 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedWithNothingToWaitFor) {
     REQUIRE(g_maps == 2);
     REQUIRE(g_waits.empty());
   }
-  SECTION("hipFreeAsync inside a capture, then the same stream") {
+  SECTION("hipFreeAsync while another stream captures, then the same stream") {
     REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live, false, &S1));
     REQUIRE(pl.unmap_async(at(B), S1, /*capturing=*/true));
     REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live, false, &S1));

@@ -172,6 +172,13 @@ memory, `hipExtMallocWithFlags` with a flag, pitched, 3D and array allocations,
 and graph memory nodes are never placed. `__device__` globals are outside it
 altogether. See `DESIGN.md` for the full list.
 
+Under `--verbose`, replay also prints `[HRR] hipMemGetInfo device=<d>
+free=<bytes> total=<bytes>` at each replayed `hipMemGetInfo` and `[HRR]
+hipPointerGetAttributes <recorded> -> type=<t> device=<d> devicePointer=<live>`
+at each replayed `hipPointerGetAttributes`, which show where placed memory
+lives, plus a line for each drain of deferred frees and each freed mapping taken
+back. `DESIGN.md` lists them.
+
 Placement is off, with a line saying why, under `--no-placement`, under
 `--guard-segments`, when `HIP_HRR_REPLAY_ALLOC_PAD_FACTOR` is above 1, on a
 device without virtual memory management, and on Windows (`Placement : off

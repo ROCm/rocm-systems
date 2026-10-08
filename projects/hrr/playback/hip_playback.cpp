@@ -2570,7 +2570,6 @@ void hrr_placement_after_event(PlaybackContext& ctx, uint16_t event_type,
                                 ? props.location.id : -1;
             std::unique_lock lk(ctx.map_mutex);
             ctx.pool_device[a->mem_pool] = dev;
-            ctx.pool_max_size[a->mem_pool] = props.maxSize;
             break;
         }
         case HRR_API_HIPDEVICEGETDEFAULTMEMPOOL:
@@ -2970,28 +2969,23 @@ hipError_t playback_hipExtMallocWithFlags(PlaybackContext& ctx, const uint8_t* p
 // capture the allocation is a graph node with its own address, so placement
 // cannot apply and it falls back. The pool's attributes are not carried over
 // to a placed allocation; its location is, as the device the mapping is on.
+//
+// The null stream is never asked: it cannot be captured, and while another
+// stream has a blocking capture open, hipStreamIsCapturing on it fails with
+// hipErrorStreamCaptureImplicit, which would stick.
 static bool hrr_stream_capturing(hipStream_t stream) {
+    if (!stream) return false;
     hipStreamCaptureStatus st = hipStreamCaptureStatusNone;
     return hipStreamIsCapturing(stream, &st) == hipSuccess &&
            st != hipStreamCaptureStatusNone;
 }
 
-// The device a stream-ordered allocation on `stream` lands on: the stream's,
-// or the current device's for the null stream.
-static int hrr_stream_device(hipStream_t stream) {
-    int dev = 0;
-    hipDevice_t sd = 0;
-    if (stream && hipStreamGetDevice(stream, &sd) == hipSuccess) return static_cast<int>(sd);
-    (void)hipGetDevice(&dev);
-    return dev;
-}
-
 static bool hrr_place_async_alloc(PlaybackContext& ctx, uint64_t rec, size_t size,
-                                  const char* api, hipStream_t stream, int device,
-                                  void** live) {
+                                  const char* api, hipStream_t stream, bool capturing,
+                                  int device, void** live) {
     hrr::VaPlacement* pl = hrr_placing(ctx);
     if (!pl) return false;
-    if (hrr_stream_capturing(stream)) {
+    if (capturing) {
         pl->fell_back(rec, size, api, "it was allocated inside a graph capture");
         return false;
     }
@@ -3027,8 +3021,8 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     size_t pad_sz  = replay_padded_alloc_size(orig_sz);
     hipError_t r = hipSuccess;
     const bool capturing = hrr_stream_capturing(stream);
-    if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocAsync", stream,
-                              hrr_stream_device(stream), &live))
+    if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocAsync", stream, capturing,
+                              hrr::hrr_stream_device(stream), &live))
         pad_sz = orig_sz;
     else {
         r = hipMallocAsync(&live, pad_sz, stream);
@@ -3040,28 +3034,6 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
         ctx.record_alloc(a->dev_ptr, live, pad_sz);
     }
     return r;
-}
-
-// A pool created with a maxSize refuses an allocation that would take it past
-// that, with hipErrorOutOfMemory. Unmapping placement's deferred frees gives
-// the pool nothing back, so that failure is not retried. Asked only when
-// placement is on and the allocation `r` ran out of memory.
-static bool hrr_pool_at_limit(PlaybackContext& ctx, hipError_t r, uint64_t rec_pool,
-                              hipMemPool_t pool, size_t size) {
-    if (r != hipErrorOutOfMemory || !hrr_placing(ctx)) return false;
-    size_t max = 0;
-    {
-        std::shared_lock lk(ctx.map_mutex);
-        auto it = ctx.pool_max_size.find(rec_pool);
-        if (it != ctx.pool_max_size.end()) max = it->second;
-    }
-    if (max == 0 || !pool) return false;
-    uint64_t high = 0;
-    if (hipMemPoolGetAttribute(pool, hipMemPoolAttrReservedMemHigh, &high) != hipSuccess) {
-        (void)hipGetLastError();
-        return false;
-    }
-    return high + size > max;
 }
 
 hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
@@ -3082,14 +3054,14 @@ hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
     if (why) {
         hrr_placing(ctx)->fell_back(a->dev_ptr, orig_sz, "hipMallocFromPoolAsync", why);
         r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
-        if (!hrr_pool_at_limit(ctx, r, a->mem_pool, pool, pad_sz) && hrr_drain_for_retry(ctx, r))
+        if (hrr_drain_for_retry(ctx, r))
             r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
     } else if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocFromPoolAsync",
-                                     stream, device, &live)) {
+                                     stream, capturing, device, &live)) {
         pad_sz = orig_sz;
     } else {
         r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
-        if (!hrr_pool_at_limit(ctx, r, a->mem_pool, pool, pad_sz) && hrr_drain_for_retry(ctx, r))
+        if (hrr_drain_for_retry(ctx, r))
             r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
     }
     if (r == hipSuccess) {
@@ -3340,12 +3312,17 @@ hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
     // stream-ordered free into a device-wide sync the recording never had. So
     // the unmap is deferred to the next replayed device synchronization. An
     // allocation recorded from the same first page on the same device, no
-    // larger, takes the mapping back without unmapping it, ordered after this
-    // free when it is on another stream (VaPlacement::map_at). One that only
+    // larger and close enough in size, takes the mapping back without
+    // unmapping it, ordered after this free when it is on another stream
+    // (VaPlacement::map_at). One that only
     // overlaps it unmaps it first, unless a capture is open, in which case
-    // that allocation falls back.
+    // that allocation falls back. A free captured into a graph runs when the
+    // graph is launched, on whatever stream that is, so it is deferred as a
+    // free on no stream.
     hrr::VaPlacement* placing = hrr_placing(ctx);
-    if (placing && placing->unmap_async(live, stream, ctx.in_graph_capture.any())) {
+    if (placing && (hrr_stream_capturing(stream)
+                        ? placing->unmap(live, /*defer=*/true)
+                        : placing->unmap_async(live, stream, ctx.in_graph_capture.any()))) {
         ctx.remove_alloc(a->dev_ptr);
         return hipSuccess;
     }
@@ -3861,7 +3838,8 @@ hipError_t playback_hipStreamDestroy(PlaybackContext& ctx,
     hipError_t r = hipSuccess;
     // A free deferred on this stream no longer matches a new stream that
     // gets the same handle.
-    if (hrr::VaPlacement* pl = hrr_placing(ctx); pl && stream) pl->stream_destroyed(stream);
+    if (hrr::VaPlacement* placing = hrr_placing(ctx); placing && stream)
+        placing->stream_destroyed(stream);
     if (stream) r = hipStreamDestroy(stream);
     ctx.remove_stream(a->stream);
     // Destroying a capturing stream ends its capture. The recording shows no
