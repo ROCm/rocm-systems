@@ -672,10 +672,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#cost" class="md-nav__link">
+  <a href="#access-planning-and-cost" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Cost
+        Access planning and cost
       
     </span>
   </a>
@@ -1446,10 +1446,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#cost" class="md-nav__link">
+  <a href="#access-planning-and-cost" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Cost
+        Access planning and cost
       
     </span>
   </a>
@@ -1483,8 +1483,18 @@ Reading or overwriting an outstanding destination prints a <code>memory-wait</co
 with the issuing PC, consuming PC, register, counter, and sufficient wait
 threshold. Execution continues with the eager value. The first conflicting access
 reports the producer and recovers its readiness to avoid cascading warnings. Each CU
-prints at most 16 warnings during its lifetime.</p>
-<p>Diagnostics default to <code>off</code>. To enable tracking and messages, add this entry to each
+prints at most 16 warnings during its lifetime, then one suppression notice.
+This budget is per CU, so N active CUs can print up to 17 × N lines for the
+same kernel. The budget stays local so a faulty kernel on one CU does not hide
+diagnostics from another CU or device. Repeated sites can exhaust this budget
+and hide distinct later hazards; the printed set is not exhaustive. Per-CU
+diagnostic counts continue after printing is suppressed. Fix reported waits and
+rerun to expose later sites. For an unfiltered investigation, a host debugger
+breakpoint at <code>ComputeUnitCore::report_memory_wait</code> observes every reported
+hazard before the output limit is applied.</p>
+<p>Registers in diagnostics use the scoreboard's physical numbering. On targets
+with an accumulator bank, <code>v256+n</code> names <code>aN</code> (for example, <code>v288</code> is <code>a32</code>).</p>
+<p>Memory-result diagnostics default to <code>off</code>. To enable them, add this entry to each
 <code>compute_unit</code> node's <code>config</code> array:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"memory_wait_diagnostics"</span><span class="p">,</span><span class="w"> </span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"warn"</span><span class="p">}</span>
 </code></pre></div>
@@ -1497,9 +1507,15 @@ original value for XNACK replay. This checks scalar address operands and VMEM
 address/data operands, including EXEC and dynamically selected VGPR banks. Reading
 a protected source again is allowed. <code>xcnt-wait</code> warnings have their own limit of
 16 per CU and do not consume the ordinary <code>memory-wait</code> warning budget.</p>
-<p>XCNT tracking and warnings are enabled by the same <code>memory_wait_diagnostics</code>
-setting as the completion checks above. Setting it to <code>off</code> disables both.
-The setting controls diagnostics, not hardware XNACK support.</p>
+<p>XCNT tracking and warnings default to <code>off</code>. Enable them independently of
+memory-result checks by adding this entry to each <code>compute_unit</code> node's <code>config</code>
+array:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"xcnt_diagnostics"</span><span class="p">,</span><span class="w"> </span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"warn"</span><span class="p">}</span>
+</code></pre></div>
+<p>The accepted values are <code>warn</code> and <code>off</code>; invalid values reject the configuration.
+This setting has no effect on other architectures. It controls diagnostics, not
+hardware XNACK support. Setting <code>memory_wait_diagnostics=off</code> leaves an explicitly
+enabled XCNT check active; set both options to <code>off</code> to disable all wait checking.</p>
 <p>VMEM coverage is qualified for <code>MODE.REPLAY_MODE=1</code> (bit 25), the multi-group mode
 selected by LLVM at kernel entry. VMEM replay sources in single-group mode are
 not checked; scalar replay sources are checked in either mode. This is an explicit
@@ -1518,8 +1534,9 @@ visibility are outside this register-source check.</p>
 <h2 id="coverage">Coverage<a class="headerlink" href="#coverage" title="Permanent link">&para;</a></h2>
 <p>The checker tracks scalar and vector register results from both memory pipelines and
 inline producers, including DS permutations and message returns. Store operands are
-checked when they consume a pending result. Register checks use executed physical
-accesses, including lane masks, byte masks and high VGPRs. Counter-only producers
+checked when they consume a pending result. The issuer checks each instruction
+before execution, using decoded register numbers and the wave's current EXEC,
+register-bank and addressing state. Counter-only producers
 contribute to partial waits even without a register result. Implicit SCC consumers and
 overwrites (including HWREG aliases), M0 and EXEC message results, wave-sized VCC
 accesses, and private address uses of FLAT_SCRATCH are checked too. Preserved scalar
@@ -1561,31 +1578,37 @@ only where the target's counter capacity and completion ordering prove readiness
 unqualified completion classes remain conservative. The checker does not simulate
 hardware occupancy or select a latency at which memory becomes visible.</p>
 <p>These are known limits, not an exhaustive list. Investigate warnings against the
-target's ordering rules; <code>memory_wait_diagnostics=off</code> suppresses both classes of
-warning when needed. Plugins may overlap with these checks and additionally
+target's ordering rules; <code>memory_wait_diagnostics=off</code> suppresses memory-result
+warnings and <code>xcnt_diagnostics=off</code> suppresses replay-source warnings when needed. Plugins may overlap with these checks and additionally
 validate hazards such as memory visibility and communication between waves.</p>
-<h2 id="cost">Cost<a class="headerlink" href="#cost" title="Permanent link">&para;</a></h2>
-<p>The scoreboard retains register dependency records, not memory addresses, payloads
-or decoded instructions. A byte of shadow state per register rejects unrelated
-accesses before any thread-local lookup. The 1,280-byte shadow is present in each
-wave slot, including when
-tracking is disabled. Detailed records are allocated on first tracked memory issue and
-reused across wave slot activations. Retirement clears affected shadow bytes and
-restores overlapping live records. Formatting occurs only when reporting a hazard.</p>
-<p>When tracking is disabled, a flag fixed at wavefront construction skips register
-indexing and shadow loads. The CU also skips register notifications and their region
-loops when diagnostics are off and no execution plugins are attached. Attaching a
-plugin preserves its register callbacks even with wait checking disabled.</p>
-<p>MMA helpers do not access the scoreboard concurrently. The issuer checks an eligible
-MMA's operands before publishing it; other executed register accesses are checked within
-the issuing thread's instruction scope. Observer snapshots and memory writeback do not
-count as instruction consumers.</p>
-<p>The slow register check is deliberately out of line: otherwise the compiler can hoist
-TLS lookup ahead of the shadow test. Empty instruction scopes skip TLS installation.
-Separate result and replay-source bits share the existing shadow byte. Reads ignore
-the replay bit, keeping reads of replay-only sources out of the detailed checker.
-Relaxed atomic shadow bytes let MMA helpers probe the filter without racing the issuer;
-only the issuer accesses dependency records.</p>
+<h2 id="access-planning-and-cost">Access planning and cost<a class="headerlink" href="#access-planning-and-cost" title="Permanent link">&para;</a></h2>
+<p>The scoreboard retains register dependencies, not memory payloads or cached access
+plans. Ordinary elementwise instructions probe decoded register numbers directly.
+A 1,280-byte shadow per wave covers physical VGPRs 0–1023 and scalar/special
+registers. Separate result and replay bits share each byte. A negative probe skips
+the detailed checker; a possible overlap checks the pending records' lane and byte
+masks. The shadow is conservative across overlapping records and counter retirement.</p>
+<p>The wave stores VGPR bank selection in one byte. An issued dependency records the
+physical register number, so a later bank change cannot redirect that dependency.
+VCC is wave state with separate low/high word identities. Unordered scalar memory
+results require a zero wait; they cannot be made ready by an unrelated partial wait.</p>
+<p>Exceptional instructions use shared addressing and lane-selection helpers before
+execution. Relative registers and permutations can require M0 or selector values;
+FLAT domain selection requires address values. Those control inputs are checked
+before being read for planning. Planning does not fire execution-plugin callbacks.
+The checks and producer registration precede execution lane loops and async MMA
+publication. Only the issuing thread accesses the scoreboard: register accessors,
+MMA workers, observer snapshots and memory writeback do not check it.</p>
+<p>Lane masks distinguish divergent consumers and pending results across waterfall
+iterations. Qualified sub-dword forms also distinguish consumed and written bytes,
+without treating preservation of the other bytes as a read. Other sub-dword forms
+can conservatively check a whole register. Encoded memory address/data sources keep
+their dependencies even when an invalid descriptor or an out-of-bounds address
+suppresses the memory effect.</p>
+<p>Detailed records are allocated on the first tracked issue and reused across wave
+slot activations. Retirement clears affected shadow bytes and restores overlapping
+live records. Diagnostic formatting occurs only on a hazard. With both settings
+disabled, the issuer skips the checker; execution-plugin callbacks remain independent.</p>
 
 
 
