@@ -188,7 +188,8 @@ ncclResult_t ncclSocketListen(struct ncclSocket* sock) {
  *
  * The result is written into buf and truncated to at most bufLen bytes, including the terminating NUL.
  */
-const char* ncclSocketToString(const union ncclSocketAddress* addr, char* buf, size_t bufLen, const int numericHostForm /*= 1*/) {
+const char* ncclSocketToString(const union ncclSocketAddress* addr, char* buf, size_t bufLen,
+                               const int numericHostForm /*= 1*/) {
   const struct sockaddr* saddr = &addr->sa;
   char host[NI_MAXHOST], service[NI_MAXSERV];
   int flag = NI_NUMERICSERV | (numericHostForm ? NI_NUMERICHOST : 0);

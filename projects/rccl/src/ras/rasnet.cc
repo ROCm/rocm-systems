@@ -387,7 +387,8 @@ ncclResult_t rasNetAcceptNewSocket() {
   // helps the code tell the sides apart.
   sock->status = RAS_SOCK_CONNECTING;
 
-  INFO(NCCL_RAS, "RAS new incoming socket connection from %s", ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)));
+  INFO(NCCL_RAS, "RAS new incoming socket connection from %s",
+       ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)));
 
 exit:
   return ret;
@@ -456,7 +457,8 @@ void rasSocksHandleTimeouts(int64_t now, int64_t* nextWakeup) {
           INFO(NCCL_RAS,
                "RAS init timeout error (%gs) on socket connection with %s "
                "(experiencingDelays %d, startRetryTime %.2fs, socket status %d)",
-               timeoutSecs, ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)), sock->conn->experiencingDelays,
+               timeoutSecs, ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)),
+               sock->conn->experiencingDelays,
                (sock->conn->startRetryTime ? (double)(now - sock->conn->startRetryTime) / CLOCK_UNITS_PER_SEC : 0.0),
                sock->status);
         }
@@ -903,7 +905,8 @@ ncclResult_t rasMsgHandleKeepAlive(const struct rasMsg* msg, struct rasSocket* s
     // Just in case there's some unforeseen problem with the peers propagation though, exchange with the
     // remote to get everybody in sync.
     INFO(NCCL_RAS, "RAS keepAlive hash mismatch from %s (peersHash 0x%lx, deadPeersHash 0x%lx)",
-         ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)), msg->keepAlive.peersHash, msg->keepAlive.deadPeersHash);
+         ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)), msg->keepAlive.peersHash,
+         msg->keepAlive.deadPeersHash);
     INFO(NCCL_RAS, "RAS my peersHash 0x%lx, deadPeersHash 0x%lx", rasPeersHash, rasDeadPeersHash);
     NCCLCHECK(rasConnSendPeersUpdate(sock->conn, rasPeers, nRasPeers));
   }
@@ -1072,7 +1075,8 @@ static void rasLinkSanitizeFallbacks(struct rasLink* link) {
       for (struct rasLinkConn* linkConn = link->conns->next; linkConn; i++) {
         struct rasLinkConn* linkConnNext = linkConn->next;
         INFO(NCCL_RAS, "RAS link %d: dropping %sfallback connection %d with %s", link->direction,
-             (linkConn->external ? "external " : ""), i, ncclSocketToString(&linkConn->conn->addr, rasLine, sizeof(rasLine)));
+             (linkConn->external ? "external " : ""), i,
+             ncclSocketToString(&linkConn->conn->addr, rasLine, sizeof(rasLine)));
         free(linkConn);
         linkConn = linkConnNext;
       }
@@ -1119,8 +1123,8 @@ static ncclResult_t rasLinkConnAdd(struct rasLink* link, struct rasConnection* c
           INFO(NCCL_RAS,
                "RAS link %d: rasLinkConnAdd peerIdx %d mismatch with connection with %s "
                "(pretend %d, insert %d, oldLinkConn->peerIdx %d) -- internal error?",
-               link->direction, peerIdx, ncclSocketToString(&oldLinkConn->conn->addr, rasLine, sizeof(rasLine)), pretend, insert,
-               oldLinkConn->peerIdx);
+               link->direction, peerIdx, ncclSocketToString(&oldLinkConn->conn->addr, rasLine, sizeof(rasLine)),
+               pretend, insert, oldLinkConn->peerIdx);
           ret = ncclInternalError;
           goto exit;
         }
@@ -1195,7 +1199,8 @@ static ncclResult_t rasLinkConnAdd(struct rasLink* link, struct rasConnection* c
         INFO(NCCL_RAS,
              "RAS link %d: rasLinkConnAdd new link index %d later in the list than the old one "
              "(insert %d, oldLinkConn %s, oldLinkIdx %d) -- internal error?",
-             link->direction, i, insert, ncclSocketToString(&oldLinkConn->conn->addr, rasLine, sizeof(rasLine)), oldLinkIdx);
+             link->direction, i, insert, ncclSocketToString(&oldLinkConn->conn->addr, rasLine, sizeof(rasLine)),
+             oldLinkIdx);
         ret = ncclInternalError;
         goto exit;
       }
@@ -1267,7 +1272,8 @@ static ncclResult_t rasLinkConnAddExternal(struct rasLink* link, struct rasConne
       INFO(NCCL_RAS,
            "RAS link %d: rasLinkConnAddExternald peerIdx %d mismatch with connection with %s "
            "(oldLinkConn->peerIdx %d) -- internal error?",
-           link->direction, peerIdx, ncclSocketToString(&oldLinkConn->conn->addr, rasLine, sizeof(rasLine)), oldLinkConn->peerIdx);
+           link->direction, peerIdx, ncclSocketToString(&oldLinkConn->conn->addr, rasLine, sizeof(rasLine)),
+           oldLinkConn->peerIdx);
       ret = ncclInternalError;
       goto exit;
     }
@@ -1296,8 +1302,8 @@ static ncclResult_t rasLinkConnAddExternal(struct rasLink* link, struct rasConne
         INFO(NCCL_RAS,
              "RAS link %d: rasLinkConnAddExternal connection mismatch: linkConn %s, conn %s "
              "(peerIdx %d) -- internal error?",
-             link->direction, ncclSocketToString(&linkConn->conn->addr, line, sizeof(line)), ncclSocketToString(&conn->addr, rasLine, sizeof(rasLine)),
-             peerIdx);
+             link->direction, ncclSocketToString(&linkConn->conn->addr, line, sizeof(line)),
+             ncclSocketToString(&conn->addr, rasLine, sizeof(rasLine)), peerIdx);
         ret = ncclInternalError;
         goto exit;
       }
@@ -1343,7 +1349,8 @@ static ncclResult_t rasLinkConnAddExternal(struct rasLink* link, struct rasConne
         goto exit;
       }
       INFO(NCCL_RAS, "RAS link %d: moving %sfallback connection with %s from %d to %d", link->direction,
-           (oldLinkConn->external ? "external " : ""), ncclSocketToString(&conn->addr, rasLine, sizeof(rasLine)), oldLinkIdx, i);
+           (oldLinkConn->external ? "external " : ""), ncclSocketToString(&conn->addr, rasLine, sizeof(rasLine)),
+           oldLinkIdx, i);
       // Remove oldLinkConn from its old spot.
       for (struct rasLinkConn* linkConn = linkConnPrev; linkConn->next; linkConn = linkConn->next) {
         if (linkConn->next == oldLinkConn) {

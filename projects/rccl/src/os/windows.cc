@@ -324,15 +324,16 @@ static ncclResult_t socketConnectCheck(struct ncclSocket* sock, int errCode, con
       }
       unsigned int sleepTime = sock->errorRetries * ncclParamRetryTimeOut();
       INFO(NCCL_NET | NCCL_INIT, "%s: connect to %s returned %s, retrying (%d/%ld) after sleep for %u msec", funcName,
-           ncclSocketToString(&sock->addr, line, sizeof(line)), getWSAErrorMessage(errCode), sock->errorRetries, ncclParamRetryCnt(),
-           sleepTime);
+           ncclSocketToString(&sock->addr, line, sizeof(line)), getWSAErrorMessage(errCode), sock->errorRetries,
+           ncclParamRetryCnt(), sleepTime);
       std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));
     }
     NCCLCHECK(ncclOsSocketResetFd(sock)); /* in case of failure in connect, socket state is unspecified */
     sock->state = ncclSocketStateConnecting;
   } else {
     sock->state = ncclSocketStateError;
-    WARN("%s: connect to %s failed : %s", funcName, ncclSocketToString(&sock->addr, line, sizeof(line)), getWSAErrorMessage(errCode));
+    WARN("%s: connect to %s failed : %s", funcName, ncclSocketToString(&sock->addr, line, sizeof(line)),
+         getWSAErrorMessage(errCode));
     return ncclSystemError;
   }
   return ncclSuccess;
@@ -403,8 +404,8 @@ ncclResult_t ncclOsSocketProgressOpt(int op, struct ncclSocket* sock, void* ptr,
       // WSAEINTR means interrupted by signal
       if (wsaError != WSAEWOULDBLOCK && wsaError != WSAEINPROGRESS && wsaError != WSAEINTR) {
         WARN("ncclOsSocketProgressOpt: Call to %s %s failed : %d (%s)",
-             (op == NCCL_SOCKET_RECV ? "recv from" : "send to"), ncclSocketToString(&sock->addr, line, sizeof(line)), wsaError,
-             getWSAErrorMessage(wsaError));
+             (op == NCCL_SOCKET_RECV ? "recv from" : "send to"), ncclSocketToString(&sock->addr, line, sizeof(line)),
+             wsaError, getWSAErrorMessage(wsaError));
         return ncclRemoteError;
       } else {
         bytes = 0;

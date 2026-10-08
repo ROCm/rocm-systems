@@ -161,7 +161,8 @@ static ncclResult_t cryptSocketProgressRaw(int op, struct ncclSocket* sock, void
   NCCLCHECK(ncclOsSocketProgressOpt(op, sock, ptr, size, offset, /*block=*/0, &closed));
   if (closed) {
     char line[SOCKET_NAME_MAXLEN + 1];
-    WARN("cryptSocketProgressRaw: Connection closed by remote peer %s", ncclSocketToString(&sock->addr, line, sizeof(line)));
+    WARN("cryptSocketProgressRaw: Connection closed by remote peer %s",
+         ncclSocketToString(&sock->addr, line, sizeof(line)));
     return ncclRemoteError;
   }
   return ncclSuccess;
@@ -649,7 +650,8 @@ ncclResult_t ncclCryptAcceptHello(struct ncclSocket* sock, enum ncclCryptHelloVe
       // connection cannot error out an accept loop.
       ncclResult_t res = cryptHandshakeStep(sock, &handshakeDone);
       if (res != ncclSuccess) {
-        ATTN("TLS handshake from %s failed, discarding peer connection", ncclSocketToString(&sock->addr, line, sizeof(line)));
+        ATTN("TLS handshake from %s failed, discarding peer connection",
+             ncclSocketToString(&sock->addr, line, sizeof(line)));
         *verdict = NCCL_CRYPT_HELLO_VERDICT_RESET;
         return ncclSuccess;
       }
@@ -660,7 +662,8 @@ ncclResult_t ncclCryptAcceptHello(struct ncclSocket* sock, enum ncclCryptHelloVe
       ncclResult_t res =
         ncclCryptSocketRecv(sock, sock->finalizeBuffer, NCCL_SOCKET_PLAIN_HELLO_BYTES, &sock->finalizeCounter, &closed);
       if (res == ncclRemoteError) {
-        ATTN("Handshake receive from %s failed, discarding peer connection", ncclSocketToString(&sock->addr, line, sizeof(line)));
+        ATTN("Handshake receive from %s failed, discarding peer connection",
+             ncclSocketToString(&sock->addr, line, sizeof(line)));
         *verdict = NCCL_CRYPT_HELLO_VERDICT_RESET;
         return ncclSuccess;
       }
@@ -684,7 +687,8 @@ ncclResult_t ncclCryptAcceptHello(struct ncclSocket* sock, enum ncclCryptHelloVe
         ncclOsSocketProgressOpt(NCCL_SOCKET_RECV, sock, sock->finalizeBuffer, NCCL_SOCKET_PLAIN_HELLO_BYTES,
                                 &sock->finalizeCounter, /*block=*/0, &closed);
       if (res == ncclRemoteError) {
-        ATTN("Handshake receive from %s failed, discarding peer connection", ncclSocketToString(&sock->addr, line, sizeof(line)));
+        ATTN("Handshake receive from %s failed, discarding peer connection",
+             ncclSocketToString(&sock->addr, line, sizeof(line)));
         *verdict = NCCL_CRYPT_HELLO_VERDICT_RESET;
         return ncclSuccess;
       }
@@ -707,7 +711,8 @@ ncclResult_t ncclCryptAcceptHello(struct ncclSocket* sock, enum ncclCryptHelloVe
     // record header never matches the socket magic, so mixed configurations
     // reset instead of erroring out the accept loop.
     ATTN("Socket magic mismatch from %s (peer 0x%016llx != expected 0x%016llx), discarding peer connection",
-         ncclSocketToString(&sock->addr, line, sizeof(line)), (unsigned long long)magic, (unsigned long long)sock->magic);
+         ncclSocketToString(&sock->addr, line, sizeof(line)), (unsigned long long)magic,
+         (unsigned long long)sock->magic);
     *verdict = NCCL_CRYPT_HELLO_VERDICT_RESET;
     return ncclSuccess;
   }
@@ -746,7 +751,8 @@ ncclResult_t ncclCryptSocketSend(struct ncclSocket* sock, void* ptr, int size, i
         *pclosed = true;
         return ncclSuccess;
       }
-      WARN("ncclCryptSocketSend: Connection closed by remote peer %s", ncclSocketToString(&sock->addr, line, sizeof(line)));
+      WARN("ncclCryptSocketSend: Connection closed by remote peer %s",
+           ncclSocketToString(&sock->addr, line, sizeof(line)));
       return ncclRemoteError;
     }
     cryptWarnOpenSsl("ncclCryptSocketSend", sock, sslError);
@@ -782,7 +788,8 @@ ncclResult_t ncclCryptSocketRecv(struct ncclSocket* sock, void* ptr, int size, i
         *pclosed = true;
         return ncclSuccess;
       }
-      WARN("ncclCryptSocketRecv: Connection closed by remote peer %s", ncclSocketToString(&sock->addr, line, sizeof(line)));
+      WARN("ncclCryptSocketRecv: Connection closed by remote peer %s",
+           ncclSocketToString(&sock->addr, line, sizeof(line)));
       return ncclRemoteError;
     }
     cryptWarnOpenSsl("ncclCryptSocketRecv", sock, sslError);

@@ -1479,7 +1479,8 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
               INFO(NCCL_RAS,
                    "RAS overflow of auxPeersBuf: nPeersBuf %d, rasPeerIdx %d (%s), collPeerIdx %d -- "
                    "internal error?",
-                   nPeersBuf, rasPeerIdx, ncclSocketToString(&rasPeers[rasPeerIdx].addr, rasLine, sizeof(rasLine)), collPeerIdx);
+                   nPeersBuf, rasPeerIdx, ncclSocketToString(&rasPeers[rasPeerIdx].addr, rasLine, sizeof(rasLine)),
+                   collPeerIdx);
             }
           }
           TRACE(NCCL_RAS, "RAS rasPeerIdx %d (%s) is missing from coll->peers; dead %d", rasPeerIdx,

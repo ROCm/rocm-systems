@@ -291,7 +291,8 @@ static ncclResult_t rasPeersUpdate(struct rasPeerInfo* rankPeers, int* nRankPeer
               INFO(NCCL_RAS,
                    "RAS old peer %s in-place mismatch: newPeerIdx %d, peerIdx %d, newNRasPeers %d, "
                    "nRasPeers %d -- internal error?",
-                   ncclSocketToString(&rasPeer->addr, rasLine, sizeof(rasLine)), newPeerIdx, peerIdx, newNRasPeers, nRasPeers);
+                   ncclSocketToString(&rasPeer->addr, rasLine, sizeof(rasLine)), newPeerIdx, peerIdx, newNRasPeers,
+                   nRasPeers);
             }
           }
 
@@ -351,7 +352,8 @@ static ncclResult_t rasPeersUpdate(struct rasPeerInfo* rankPeers, int* nRankPeer
           INFO(NCCL_RAS,
                "RAS old peer %s in-place mismatch: newPeerIdx %d, peerIdx %d, newNRasPeers %d, "
                "nRasPeers %d -- internal error?",
-               ncclSocketToString(&rasPeer->addr, rasLine, sizeof(rasLine)), newPeerIdx, peerIdx, newNRasPeers, nRasPeers);
+               ncclSocketToString(&rasPeer->addr, rasLine, sizeof(rasLine)), newPeerIdx, peerIdx, newNRasPeers,
+               nRasPeers);
         }
       }
       if (myPeerIdx == peerIdx) newMyPeerIdx = newPeerIdx;
@@ -527,8 +529,8 @@ ncclResult_t rasConnSendPeersUpdate(struct rasConnection* conn, const struct ras
   if (nPeers > 0) conn->lastSentPeersHash = rasPeersHash;
   if (nDeadPeers > 0) conn->lastSentDeadPeersHash = rasDeadPeersHash;
 
-  INFO(NCCL_RAS, "RAS sending a peersUpdate to %s (nPeers %d, nDeadPeers %d)", ncclSocketToString(&conn->addr, rasLine, sizeof(rasLine)),
-       nPeers, nDeadPeers);
+  INFO(NCCL_RAS, "RAS sending a peersUpdate to %s (nPeers %d, nDeadPeers %d)",
+       ncclSocketToString(&conn->addr, rasLine, sizeof(rasLine)), nPeers, nDeadPeers);
 
   rasConnEnqueueMsg(conn, msg, msgLen);
 exit:
@@ -548,8 +550,8 @@ ncclResult_t rasMsgHandlePeersUpdate(struct rasMsg* msg, struct rasSocket* sock)
   bool updatePeers, updateDeadPeers;
 
   INFO(NCCL_RAS, "RAS handling peersUpdate from %s (peersHash 0x%lx, deadPeersHash 0x%lx, nPeers %d, nDeadPeers %d)",
-       ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)), msg->peersUpdate.peersHash, msg->peersUpdate.deadPeersHash,
-       msg->peersUpdate.nPeers, msg->peersUpdate.nDeadPeers);
+       ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)), msg->peersUpdate.peersHash,
+       msg->peersUpdate.deadPeersHash, msg->peersUpdate.nPeers, msg->peersUpdate.nDeadPeers);
   INFO(NCCL_RAS, "RAS my old rasPeersHash 0x%lx, rasDeadPeersHash 0x%lx, nRasPeers %d, nRasDeadPeers %d", rasPeersHash,
        rasDeadPeersHash, nRasPeers, nRasDeadPeers);
   if (sock->conn == nullptr) {
@@ -793,8 +795,8 @@ ncclResult_t rasPeerDeclareDead(const union ncclSocketAddress* addr) {
 
     rasDeadPeersHash = getHash((const char*)rasDeadPeers, nRasDeadPeers * sizeof(*rasDeadPeers));
 
-    INFO(NCCL_RAS, "RAS declaring peer %s as DEAD; rasDeadPeersHash 0x%lx", ncclSocketToString(addr, rasLine, sizeof(rasLine)),
-         rasDeadPeersHash);
+    INFO(NCCL_RAS, "RAS declaring peer %s as DEAD; rasDeadPeersHash 0x%lx",
+         ncclSocketToString(addr, rasLine, sizeof(rasLine)), rasDeadPeersHash);
 
     struct rasEventNotification event = {
       .eventType = "PEER_DEAD", .details = "", .peerInfo = nullptr, .peerAddr = addr

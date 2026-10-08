@@ -294,15 +294,16 @@ static ncclResult_t socketConnectCheck(struct ncclSocket* sock, int errCode, con
       }
       unsigned int sleepTime = sock->errorRetries * ncclParamRetryTimeOut();
       INFO(NCCL_NET | NCCL_INIT, "%s: connect to %s returned %s, retrying (%d/%ld) after sleep for %u msec", funcName,
-           ncclSocketToString(&sock->addr, line, sizeof(line)), strerror(errCode), sock->errorRetries, ncclParamRetryCnt(),
-           sleepTime);
+           ncclSocketToString(&sock->addr, line, sizeof(line)), strerror(errCode), sock->errorRetries,
+           ncclParamRetryCnt(), sleepTime);
       std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));
     }
     NCCLCHECK(ncclOsSocketResetFd(sock)); /* in case of failure in connect, socket state is unspecified */
     sock->state = ncclSocketStateConnecting;
   } else {
     sock->state = ncclSocketStateError;
-    WARN("%s: connect to %s failed : %s", funcName, ncclSocketToString(&sock->addr, line, sizeof(line)), strerror(errCode));
+    WARN("%s: connect to %s failed : %s", funcName, ncclSocketToString(&sock->addr, line, sizeof(line)),
+         strerror(errCode));
     return ncclSystemError;
   }
   return ncclSuccess;
@@ -328,7 +329,8 @@ ncclResult_t ncclOsSocketPollConnect(struct ncclSocket* sock) {
   if (ret == 0 || (ret < 0 && errno == EINTR)) {
     return ncclSuccess;
   } else if (ret < 0) {
-    WARN("ncclOsSocketPollConnect to %s failed with error %s", ncclSocketToString(&sock->addr, line, sizeof(line)), strerror(errno));
+    WARN("ncclOsSocketPollConnect to %s failed with error %s", ncclSocketToString(&sock->addr, line, sizeof(line)),
+         strerror(errno));
     return ncclSystemError;
   }
 
@@ -513,7 +515,8 @@ ncclResult_t ncclFindInterfaceMatchSubnet(char* ifName, union ncclSocketAddress*
     strncpy(ifName, interface->ifa_name, ifNameMaxSize);
 
     TRACE(NCCL_INIT | NCCL_NET, "NET : Found interface %s:%s in the same subnet as remote address %s",
-          interface->ifa_name, ncclSocketToString(localAddr, line, sizeof(line)), ncclSocketToString(remoteAddr, line_a, sizeof(line_a)));
+          interface->ifa_name, ncclSocketToString(localAddr, line, sizeof(line)),
+          ncclSocketToString(remoteAddr, line_a, sizeof(line_a)));
     *found = 1;
   }
 
