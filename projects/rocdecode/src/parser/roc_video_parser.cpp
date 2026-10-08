@@ -280,11 +280,14 @@ ParserResult RocVideoParser::ParseSeiMessage(uint8_t *nalu, size_t size) {
         if((sei_message_count_ + 1) > sei_message_list_.size()) {
             sei_message_list_.resize((sei_message_count_ + 1));
         }
-        // sei_message_type is uint8_t in the public RocdecSeiMessage, so a type above 255
-        // truncates here. payload_type is still accumulated wide so the running total cannot
-        // wrap before the range checks above act on it.
-        sei_message_list_[sei_message_count_].sei_message_type = payload_type;
-        sei_message_list_[sei_message_count_].sei_message_size = payload_size;
+        // Both fields of the public RocdecSeiMessage are narrower than the accumulators, so both
+        // conversions are spelled out. sei_message_type is uint8_t, so a type above 255 truncates
+        // and the value stored is not the one parsed; payload_type is still accumulated wide so
+        // that the running total cannot wrap before the range checks above act on it.
+        // sei_message_size is uint32_t and payload_size was bounded by the size - offset check
+        // above, so that one is exact.
+        sei_message_list_[sei_message_count_].sei_message_type = static_cast<uint8_t>(payload_type);
+        sei_message_list_[sei_message_count_].sei_message_size = static_cast<uint32_t>(payload_size);
 
         if (sei_payload_buf_) {
             if ((payload_size + sei_payload_size_) > sei_payload_buf_size_) {
