@@ -1830,6 +1830,9 @@ contract:
   Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NvidiaPre128Unsupported_IsSkipped:
     <<: *level_0
     tags: [kernel_object_attributes, P0]
+  Contract_HipKernelSetCacheConfig_ValidValues_Are_Supported:
+    <<: *level_0
+    tags: [kernel_object_attributes, P0]
   Contract_KernelObjectAttributes_HipKernelGetParamInfo_Default_ReturnsFirstParamLayout:
     <<: *level_0
     tags: [kernel_object_attributes, P0]

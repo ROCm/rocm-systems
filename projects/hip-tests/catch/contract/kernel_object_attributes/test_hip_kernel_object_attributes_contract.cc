@@ -7,7 +7,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hiprtc.h>
 #include <hip_test_common.hh>
-
+#include <resource_guards.hh>
 #include <string>
 #include <vector>
 
@@ -16,25 +16,46 @@
 // exercised on both backends: on NVIDIA they map to the CUDA driver cuKernel*/
 // cuLibrary* entry points.
 namespace {
-constexpr char const kWriteKernelName[] = "write_value";
+constexpr char const kWriteValueKernelName[] = "write_value";
 
 // In-source device code compiled at runtime with HIPRTC. The kernel takes a
 // pointer and an int so the parameter-info contract has a known two-argument
 // layout to inspect.
-constexpr char const kKernelSource[] =
+constexpr char const kWriteValueKernelSource[] =
     "extern \"C\" __global__ void write_value(int* out, int value) {\n"
     "  if (threadIdx.x == 0 && blockIdx.x == 0) {\n"
     "    out[0] = value;\n"
     "  }\n"
     "}\n";
 
+constexpr char const kUseMaxSharedMemoryKernelName[] = "use_max_shared_memory";
+constexpr char const kUseMaxSharedMemoryKernelSource[] =
+R"%(
+extern "C" __global__ void use_max_shared_memory(int* result, int n)
+{
+  extern __shared__ int myArray[];
+
+  unsigned int pos = threadIdx.x + blockIdx.x * blockDim.x;
+
+  if (pos < n) {
+    myArray[pos] = pos;
+  }
+
+  __syncthreads();
+
+  if (pos < n) {
+    atomicAdd(result, pos);
+  }
+};
+)%";
+
 // Compiles kKernelSource with HIPRTC for device 0. A compile failure is a
 // contract violation rather than an unsupported-capability skip: it surfaces the
 // build log and aborts through HIPRTC_CHECK. The bool return keeps the familiar
 // `if (!Compile...())` shape at the call sites.
-bool CompileKernelSource(std::vector<char>& code) {
+bool CompileKernelSource(std::vector<char>& code, const char* source) {
   hiprtcProgram program{};
-  HIPRTC_CHECK(hiprtcCreateProgram(&program, kKernelSource, "kernel_object_attributes_contract.cu",
+  HIPRTC_CHECK(hiprtcCreateProgram(&program, source, "kernel_object_attributes_contract.cu",
                                    0, nullptr, nullptr));
 
 #if HT_AMD
@@ -74,18 +95,22 @@ bool CompileKernelSource(std::vector<char>& code) {
 // Compiles the kernel source and loads it as a library, resolving the known
 // kernel into `kernel`. Skips when HIPRTC is unavailable. `code` must stay alive
 // only until the library is loaded; callers keep it for simplicity.
-void LoadContractKernel(std::vector<char>& code, hipLibrary_t& library, hipKernel_t& kernel) {
+void LoadContractKernel(std::vector<char>& code,
+                        hipLibrary_t& library,
+                        hipKernel_t& kernel,
+                        const char* kernelName,
+                        const char* kernelSource) {
   // Establish a device context before the driver-style library/kernel entry
   // points run. On NVIDIA these map to the CUDA driver API (cuLibrary*/cuKernel*),
   // which requires a bound primary context; hipFree(0) is the canonical no-op
   // that forces primary-context initialization and is a harmless success on AMD.
   HIP_CHECK(hipFree(0));
-  if (!CompileKernelSource(code)) {
+  if (!CompileKernelSource(code, kernelSource)) {
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
   }
   HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
   REQUIRE(library != nullptr);
-  HIP_CHECK(hipLibraryGetKernel(&kernel, library, kWriteKernelName));
+  HIP_CHECK(hipLibraryGetKernel(&kernel, library, kernelName));
   REQUIRE(kernel != nullptr);
 }
 }  // namespace
@@ -95,7 +120,7 @@ HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelGetAttribute_Default_Retu
   std::vector<char> code;
   hipLibrary_t library = nullptr;
   hipKernel_t kernel = nullptr;
-  LoadContractKernel(code, library, kernel);
+  LoadContractKernel(code, library, kernel, kWriteValueKernelName, kWriteValueKernelSource);
 
   hipDevice_t device = 0;
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -121,7 +146,7 @@ HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelSetAttribute_SetMaxDynami
   std::vector<char> code;
   hipLibrary_t library = nullptr;
   hipKernel_t kernel = nullptr;
-  LoadContractKernel(code, library, kernel);
+  LoadContractKernel(code, library, kernel, kWriteValueKernelName, kWriteValueKernelSource);
 
   hipDevice_t device = 0;
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -156,7 +181,7 @@ HIP_TEST_CASE(
   std::vector<char> code;
   hipLibrary_t library = nullptr;
   hipKernel_t kernel = nullptr;
-  LoadContractKernel(code, library, kernel);
+  LoadContractKernel(code, library, kernel, kWriteValueKernelName, kWriteValueKernelSource);
 
   constexpr int current_device_for_call = 1;
   HIP_CHECK(hipSetDevice(current_device_for_call));
@@ -185,12 +210,71 @@ HIP_TEST_CASE(
 }
 #endif
 
+// TODO check nvidia minimum version
+// @asserts: Unit_hipKernelSetCacheConfig - all hipFuncCache_t values are supported and kernel
+//           launches execute correctly, regardless of the carveout (which is a hint and the kernel
+//           must work even if the user choose a carveout that does not provide enough shared memory).
+//           hiprtc launches too.
+HIP_TEST_CASE(Contract_HipKernelSetCacheConfig_ValidValues_Are_Supported)
+{
+  std::vector<char> code;
+  hipFuncCache_t carveouts[] = { hipFuncCachePreferNone,
+                                 hipFuncCachePreferShared,
+                                 hipFuncCachePreferL1,
+                                 hipFuncCachePreferEqual };
+  dim3 gridDim = {};
+  dim3 blockDim = { 128 };
+  int maxSharedMemPerBlock = 0;
+  int currentDevice = -1;
+  hipDevice_t device;
+  int h_result;
+  LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, sizeof(h_result));
+  int n;
+  hipKernel_t kernel;
+  hipLibrary_t library;
+  hipFunction_t useMaxSharedMemoryFunc;
+  int* devicePtr = d_result.ptr();
+  void* args[] = { &devicePtr, &n };
+
+  HIP_CHECK(hipGetDevice(&currentDevice));
+  HIP_CHECK(hipDeviceGet(&device, currentDevice));
+  HIP_CHECK(hipDeviceGetAttribute(&maxSharedMemPerBlock,
+                                  hipDeviceAttributeMaxSharedMemoryPerBlock,
+                                  currentDevice));
+  n = maxSharedMemPerBlock / sizeof(int);
+  gridDim.x = (n + blockDim.x - 1) / blockDim.x;
+  LoadContractKernel(code,
+                     library,
+                     kernel,
+                     kUseMaxSharedMemoryKernelName,
+                     kUseMaxSharedMemoryKernelSource);
+  HIP_CHECK(hipKernelGetFunction(&useMaxSharedMemoryFunc, kernel));
+
+  for (const auto& carveout : carveouts) {
+    // launch kernel
+    HIP_CHECK(hipMemset(d_result.ptr(), 0, d_result.size_bytes()));
+    HIP_CHECK(hipKernelSetCacheConfig(kernel, carveout, device));
+    HIP_CHECK(hipModuleLaunchKernel(useMaxSharedMemoryFunc,
+                       gridDim.x, gridDim.y, gridDim.z,
+                       blockDim.x, blockDim.y, blockDim.z,
+                       maxSharedMemPerBlock, 0,
+                       args, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipMemcpy(&h_result, d_result.ptr(), sizeof(h_result), hipMemcpyDeviceToHost));
+    REQUIRE(h_result == ((n * (n - 1)) / 2));
+  }
+
+  HIP_CHECK(hipLibraryUnload(library));
+}
+
 // @asserts: hipKernelGetParamInfo - reports the first parameter at offset zero with size at least that of a device pointer
 HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelGetParamInfo_Default_ReturnsFirstParamLayout) {
   std::vector<char> code;
   hipLibrary_t library = nullptr;
   hipKernel_t kernel = nullptr;
-  LoadContractKernel(code, library, kernel);
+
+  LoadContractKernel(code, library, kernel, kWriteValueKernelName, kWriteValueKernelSource);
 
   // The first parameter of write_value is an int* pointer. Its reported offset
   // must be zero (first on the argument stack) and its size must be large enough
