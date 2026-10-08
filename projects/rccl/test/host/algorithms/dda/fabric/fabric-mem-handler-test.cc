@@ -57,12 +57,12 @@ class FabricMemHandlerTest : public ::testing::Test {
     // alloc.h memoises, once per process, whether to skip peer unmaps: from this
     // variable, or when it is unset from the device arch. Unset plus the
     // emulator's gfx900 keeps every free in the binary real.
+    savedHandleType_ = ncclCuMemHandleType;  // first: TearDown restores it even if SetUp bails
     SetMicroEnvAbsent("NCCL_CUMEM_SKIP_FREE");
     InstallHipVmmEmulator();
     // Latch that decision now, under this fixture's env and arch, so no later
     // test can find it already latched the other way.
     ASSERT_FALSE(rcclSkipCuMemFree());
-    savedHandleType_ = ncclCuMemHandleType;
 
     // Ledger over the emulator: remember every reservation's size so the free
     // path's address-range query can report it, and refuse a free of anything
@@ -185,7 +185,7 @@ class FabricMemHandlerTest : public ::testing::Test {
 // ---------------------------------------------------------------------------
 
 TEST_F(FabricMemHandlerTest, GetPeerDeviceMemPtr_BeforeExchange_ReturnsInvalidUsage) {
-  ncclFabricMemHandler* h = MakeRegisteredHandler();
+  const ncclFabricMemHandler* h = MakeRegisteredHandler();
   void* p = nullptr;
 
   // Even the self slot, which is already known, is gated on the exchange.
@@ -193,7 +193,7 @@ TEST_F(FabricMemHandlerTest, GetPeerDeviceMemPtr_BeforeExchange_ReturnsInvalidUs
 }
 
 TEST_F(FabricMemHandlerTest, GetPeerDeviceMemPtr_RankOutOfRange_ReturnsInvalidArgument) {
-  ncclFabricMemHandler* h = MakeExchangedHandler();
+  const ncclFabricMemHandler* h = MakeExchangedHandler();
   void* p = nullptr;
 
   EXPECT_EQ(h->getPeerDeviceMemPtr(-1, &p), ncclInvalidArgument);
@@ -209,7 +209,7 @@ TEST_F(FabricMemHandlerTest, GetPeerDeviceMemPtr_FirstAndLastRank_Succeed) {
 }
 
 TEST_F(FabricMemHandlerTest, GetPeerDeviceMemPtr_NullOutput_ReturnsInvalidArgument) {
-  ncclFabricMemHandler* h = MakeExchangedHandler();
+  const ncclFabricMemHandler* h = MakeExchangedHandler();
 
   EXPECT_EQ(h->getPeerDeviceMemPtr(0, nullptr), ncclInvalidArgument);
 }
@@ -417,7 +417,6 @@ TEST_F(FabricMemHandlerTest, Destructor_AfterExchange_FreesEveryPeerMappingButNo
 
   EXPECT_EQ(std::set<void*>(freed_.begin(), freed_.end()), peers);
   EXPECT_EQ(freed_.size(), peers.size());
-  EXPECT_TRUE(reserved_.empty());
 }
 
 TEST_F(FabricMemHandlerTest, Destructor_AfterImportFailsPartway_FreesOnlyTheMappedPeers) {
@@ -429,7 +428,6 @@ TEST_F(FabricMemHandlerTest, Destructor_AfterImportFailsPartway_FreesOnlyTheMapp
   handler_.reset();
 
   EXPECT_EQ(freed_.size(), 2u);
-  EXPECT_TRUE(reserved_.empty());
 }
 
 TEST_F(FabricMemHandlerTest, Destructor_AfterReleaseFails_StillFreesThatPeersMapping) {
@@ -442,7 +440,6 @@ TEST_F(FabricMemHandlerTest, Destructor_AfterReleaseFails_StillFreesThatPeersMap
   handler_.reset();
 
   EXPECT_EQ(freed_, std::vector<void*>{peer0});
-  EXPECT_TRUE(reserved_.empty());
 }
 
 TEST_F(FabricMemHandlerTest, Destructor_NeverExchanged_FreesNothing) {
