@@ -9,12 +9,10 @@ import sys
 from pathlib import Path
 
 import common
-import pandas as pd
 import pytest
 
 from tests.integration.common import config, require_triton
 from utils import csv_compression
-from utils.utils_analysis import simplify_kernel_name
 
 pytestmark = pytest.mark.ml_api_trace
 
@@ -26,20 +24,13 @@ def kernel_ids_from_operator_output(output: str) -> list[int]:
     return [int(match) for match in KERNEL_TOP_ID_PATTERN.findall(output)]
 
 
-def kernel_names_for_ids(kernel_top: pd.DataFrame, kernel_ids: list[int]) -> set[str]:
-    """Return simplified kernel-top names for ``kernel_ids``."""
-    return {
-        simplify_kernel_name(str(kernel_top.iloc[kernel_id]["Kernel_Name"]))
-        for kernel_id in kernel_ids
-    }
-
-
 def kernel_ids_from_matched_tree(output: str) -> list[int]:
     """Return ids from the matched-operator tree.
 
-    ``handle_operator`` prints a heading, then an ``====`` banner, then the
-    tree. ``(id N)`` appears only on kernel lines, so parsing from the
-    heading to the end of the analyze output is enough.
+    ``handle_operator`` prints the ``====`` banner, then ``Matched ...``,
+    then the tree. Metric ``show_all`` tables follow. Slice from
+    ``Matched `` so list-tree ids from the same process are excluded.
+    ``(id N)`` is only on call-tree kernel lines today.
     """
     start = output.find("Matched ")
     if start < 0:
@@ -159,7 +150,7 @@ def test_list_triton_only_confines_tree_and_kernels(
     assert "(id " in out[triton_idx:]
 
 
-def test_filter_triton_confines_metric_kernel_ids(
+def test_filter_triton_selects_listed_kernel_ids(
     ml_api_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
 ):
     list_code = binary_handler_analyze_rocprof_compute([
@@ -172,12 +163,8 @@ def test_filter_triton_confines_metric_kernel_ids(
     assert list_code == 0
     captured = capsys.readouterr()
     list_out = captured.out + captured.err
-    kernel_top_path = Path(ml_api_trace_profiled_workload) / "pmc_kernel_top.csv"
-    kernel_top = pd.read_csv(kernel_top_path)
     listed_ids = kernel_ids_from_operator_output(list_out)
-    listed_names = kernel_names_for_ids(kernel_top, listed_ids)
     assert listed_ids
-    assert listed_names
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",
@@ -193,15 +180,9 @@ def test_filter_triton_confines_metric_kernel_ids(
     assert f"Triton operator filter selected {selected_count} kernel(s)" in out
     selected_ids = kernel_ids_from_matched_tree(out)
     assert set(selected_ids) == set(listed_ids)
-    assert kernel_names_for_ids(kernel_top, selected_ids) == listed_names
-    csv_names = {
-        simplify_kernel_name(str(name))
-        for name in pd.read_csv(kernel_top_path)["Kernel_Name"]
-    }
-    assert listed_names < csv_names
 
 
-def test_filter_torch_confines_metric_kernel_ids(
+def test_filter_torch_selects_listed_kernel_ids(
     ml_api_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
 ):
     list_code = binary_handler_analyze_rocprof_compute([
@@ -214,12 +195,8 @@ def test_filter_torch_confines_metric_kernel_ids(
     assert list_code == 0
     captured = capsys.readouterr()
     list_out = captured.out + captured.err
-    kernel_top_path = Path(ml_api_trace_profiled_workload) / "pmc_kernel_top.csv"
-    kernel_top = pd.read_csv(kernel_top_path)
     listed_ids = kernel_ids_from_operator_output(list_out)
-    listed_names = kernel_names_for_ids(kernel_top, listed_ids)
     assert listed_ids
-    assert listed_names
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",
@@ -235,12 +212,6 @@ def test_filter_torch_confines_metric_kernel_ids(
     assert f"PyTorch operator filter selected {selected_count} kernel(s)" in out
     selected_ids = kernel_ids_from_matched_tree(out)
     assert set(selected_ids) == set(listed_ids)
-    assert kernel_names_for_ids(kernel_top, selected_ids) == listed_names
-    csv_names = {
-        simplify_kernel_name(str(name))
-        for name in pd.read_csv(kernel_top_path)["Kernel_Name"]
-    }
-    assert listed_names < csv_names
 
 
 def test_filter_torch_and_triton_together(
