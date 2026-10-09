@@ -1383,6 +1383,111 @@ TEST(InterposerDrmTest, KfdBufferKeepsItsMetadataAfterEveryHandleCloses) {
   EXPECT_EQ(close(kfd), 0);
 }
 
+namespace {
+
+// A 4096-byte KFD allocation exported as a dma-buf. The allocation and its CPU
+// reservation stay alive until release().
+struct KfdExport {
+  int kfd = -1;
+  void *reserved = MAP_FAILED;
+  uint64_t handle = 0;
+  int dmabuf = -1;
+
+  bool create(int kfd_fd, uint32_t flags) {
+    kfd = kfd_fd;
+    uint32_t gpu_id = 0;
+    if (!read_gpu_id(gpu_id))
+      return false;
+    reserved = mmap(nullptr, 4096, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    if (reserved == MAP_FAILED)
+      return false;
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    allocation.va_addr = reinterpret_cast<uint64_t>(reserved);
+    allocation.size = 4096;
+    allocation.gpu_id = gpu_id;
+    allocation.flags = flags;
+    if (ioctl(kfd, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation) != 0)
+      return false;
+    handle = allocation.handle;
+    kfd_ioctl_export_dmabuf_args exported{};
+    exported.handle = handle;
+    exported.flags = O_CLOEXEC;
+    if (ioctl(kfd, AMDKFD_IOC_EXPORT_DMABUF, &exported) != 0)
+      return false;
+    dmabuf = static_cast<int>(exported.dmabuf_fd);
+    return true;
+  }
+
+  void release() {
+    if (handle != 0) {
+      kfd_ioctl_free_memory_of_gpu_args free_args{};
+      free_args.handle = handle;
+      EXPECT_EQ(ioctl(kfd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+    }
+    if (reserved != MAP_FAILED) {
+      EXPECT_EQ(munmap(reserved, 4096), 0);
+    }
+  }
+};
+
+constexpr uint32_t kPublicVram = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+                                 KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+
+// Opens /dev/null after @p expected_fd was freed and expects the interposer to treat
+// it as the plain character device it is, not as a DRM file.
+void expect_plain_dev_null_on(int expected_fd) {
+  const int null_fd = open("/dev/null", O_RDWR | O_CLOEXEC);
+  ASSERT_EQ(null_fd, expected_fd);
+  struct stat st {};
+  ASSERT_EQ(fstat(null_fd, &st), 0);
+  EXPECT_EQ(major(st.st_rdev), 1u);
+  EXPECT_EQ(minor(st.st_rdev), 3u);
+  drm_version version{};
+  errno = 0;
+  EXPECT_EQ(ioctl(null_fd, DRM_IOCTL_VERSION, &version), -1);
+  drm_amdgpu_info_device device{};
+  EXPECT_FALSE(query_drm_device_info(null_fd, &device));
+  EXPECT_EQ(close(null_fd), 0);
+}
+
+} // namespace
+
+// Closing the descriptors of a KFD export behind the interposer's back leaves its
+// record on a number the kernel then hands to another file. Closing that file must
+// still release what it is: the DRM tracking of a render fd, in particular, cannot
+// outlive it and classify the next file on the number.
+TEST(InterposerDrmTest, CloseRangeOfAKfdExportLeavesTheRecycledDescriptorOrdinary) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  KfdExport buffer;
+  ASSERT_TRUE(buffer.create(kfd, kPublicVram));
+  const int number = buffer.dmabuf;
+  ASSERT_EQ(close_range(static_cast<unsigned>(number), static_cast<unsigned>(number), 0), 0);
+  const int render = open_drm_render();
+  ASSERT_EQ(render, number);
+  ASSERT_EQ(close(render), 0);
+  expect_plain_dev_null_on(number);
+  buffer.release();
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDrmTest, PrimeImportRejectsADescriptorThatIsNotADmabuf) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  int importer = open_drm_render();
+  ASSERT_GE(importer, 0);
+  int render = open_drm_render();
+  ASSERT_GE(render, 0);
+  uint32_t handle = 0;
+  errno = 0;
+  EXPECT_FALSE(prime_import(importer, render, &handle));
+  EXPECT_EQ(errno, EINVAL);
+  ASSERT_EQ(close(render), 0);
+  expect_plain_dev_null_on(render);
+  EXPECT_EQ(close(importer), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
 TEST(InterposerDrmTest, KfdExportKeepsItsMetadataAfterTheAllocationIsFreed) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);

@@ -2139,6 +2139,7 @@ rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
 rj_add_interposer_test_suite(
     InterposerDrmTest
     CanonicalSysfsPathsRetainSimulatedDevice
+    CloseRangeOfAKfdExportLeavesTheRecycledDescriptorOrdinary
     DeviceInfoReportsActiveCuCount
     DmabufExportKeepsADriverCpuMapping
     DmabufExportKeepsAReservedCpuMapping
@@ -2155,6 +2156,7 @@ rj_add_interposer_test_suite(
     OpensWithinCurrentDescriptorLimit
     PrimeHandleToFdReturnsTheBuffer
     PrimeImportKeepsTheBoStateAfterTheHandleCloses
+    PrimeImportRejectsADescriptorThatIsNotADmabuf
     PrimeImportSharesTheBufferAndItsMetadata
     PrimaryNodePathHasCharacterDeviceMetadata
     RenderNodePathMetadataMatchesDescriptor

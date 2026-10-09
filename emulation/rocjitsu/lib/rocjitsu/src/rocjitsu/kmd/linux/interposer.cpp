@@ -2961,6 +2961,21 @@ public:
     return flags || state;
   }
 
+  /// @brief Whether @p fd is a descriptor the interposer serves itself (a KFD, DRM or
+  /// sync-file descriptor, or one of its private backing fds) and so cannot be a dma-buf.
+  bool is_interposer_fd(int fd) {
+    if (lookup(fd) || owns_fd(fd) || PrivateDrmFd::owns(fd))
+      return true;
+    std::lock_guard lock(fd_mutex_);
+    return drm_fds_.count(fd) != 0 || sync_file_fds_.count(fd) != 0 || kfd_dup_fds_.count(fd) != 0;
+  }
+
+  /// @brief Whether the interposer holds an export record for @p fd.
+  bool has_gem_export(int fd) {
+    std::lock_guard lock(fd_mutex_);
+    return pending_gem_flags_.count(fd) != 0 || exported_gem_objects_.count(fd) != 0;
+  }
+
   /// @brief Keep the BO state a PRIME export retained for @p source on its duplicate @p target.
   /// @details The state must outlive the export fd's last close, and a duplicate is
   /// that same open file under another number. Called after a successful dup,
@@ -4403,11 +4418,27 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   // later PRIME on the recycled fd number could misapply as the wrong PTE MTYPE.
   // A PRIME export fd also releases the BO state it retained. No-op for
   // non-dmabuf fds.
+  //
+  // A record does not prove the fd is a dmabuf: close_range or a raw SYS_close leaves
+  // it behind on a number the kernel then reuses. The descriptor's own cleanup below
+  // therefore still runs, and only a descriptor nothing else tracks is closed here.
+  const bool maybe_export = InterposerContext::ctx.has_gem_export(fd);
+  const bool tracked_elsewhere = maybe_export && (InterposerContext::ctx.lookup(fd) != nullptr ||
+                                                  InterposerContext::ctx.owns_fd(fd) ||
+                                                  InterposerContext::PrivateDrmFd::owns(fd));
+  bool dropped_export = false;
+  InterposerContext::DrmUntrackResult drm_close;
   {
     // The record goes with the kernel close, inside the scope a dup of this fd holds
     // from its syscall to duplicate_gem_export, so that dup sees both or neither.
     auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
-    if (InterposerContext::ctx.drop_gem_export(fd))
+    dropped_export = InterposerContext::ctx.drop_gem_export(fd);
+    if (InterposerContext::ctx.close_sync_file(fd))
+      return 0;
+    drm_close = InterposerContext::ctx.untrack_drm(fd);
+    if (drm_close.tracked)
+      InterposerContext::real().close(fd);
+    else if (dropped_export && !tracked_elsewhere && !InterposerContext::ctx.is_kfd_dup(fd))
       return static_cast<int>(InterposerContext::real().close(fd));
   }
   // NOTE: a GEM/dmabuf mapping is NOT torn down when a transient dmabuf EXPORT fd
@@ -4417,15 +4448,6 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   // handler). Closing the DRM FILE itself, however, is the true backstop: reap any
   // handles still open on it (mirroring the kernel dropping a drm_file's GEM
   // objects) so a leaked/never-GEM_CLOSE'd handle cannot outlive its DRM file.
-  InterposerContext::DrmUntrackResult drm_close;
-  {
-    auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
-    if (InterposerContext::ctx.close_sync_file(fd))
-      return 0;
-    drm_close = InterposerContext::ctx.untrack_drm(fd);
-    if (drm_close.tracked)
-      InterposerContext::real().close(fd);
-  }
   if (drm_close.tracked) {
     // Reaps GEM while the backend is still open, then drops the lease. Releasing a
     // local lease routes through release_local_open(), so a final DRM close can
@@ -4637,6 +4659,17 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
     if (type == kDrmIoctlType && nr == kDrmIoctlNrPrimeFdToHandle && arg) {
       auto *prime = static_cast<drm_prime_handle *>(arg);
       if (prime->fd < 0) {
+        errno = EINVAL;
+        return -1;
+      }
+
+      // Only a dma-buf can be imported. It is a regular file to fstat; a device node,
+      // pipe or socket is not, and neither is a descriptor the interposer serves
+      // itself. Retaining one as an export would misclassify it once its descriptor
+      // number is reused.
+      struct stat kind {};
+      if (InterposerContext::ctx.is_interposer_fd(prime->fd) ||
+          InterposerContext::real().fstat_fn(prime->fd, &kind) != 0 || !S_ISREG(kind.st_mode)) {
         errno = EINVAL;
         return -1;
       }
