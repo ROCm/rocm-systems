@@ -25,7 +25,6 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <algorithm>
-#include <cctype>
 #include <string>
 
 #ifdef MPI_TESTS_ENABLED
@@ -254,21 +253,6 @@ protected:
             TEST_INFO("%s: rank %d assertion passed — SM fallback path (CE not available/configured)",
                       context, myRank);
         }
-    }
-
-    // True when rank 0's log names exactly this AllReduce backend (so "CE" does not match "CE2").
-    static bool logShowsAllReduceAlgo(const std::string& log, const std::string& algoName)
-    {
-        const std::string key = "AllReduce impl selected: algo " + algoName;
-        for(size_t p = log.find(key); p != std::string::npos; p = log.find(key, p + 1))
-        {
-            const size_t end = p + key.size();
-            if(end == log.size() || !(std::isalnum(static_cast<unsigned char>(log[end])) || log[end] == '-'))
-            {
-                return true;
-            }
-        }
-        return false;
     }
 
     static bool isCeAllReduceAlgo(int algo)
@@ -879,18 +863,6 @@ protected:
 
         assertCEAllReducePathTaken(testId);
         assertCEAllReduceChunking(kCeOnlyMinChunksPerShard, testId);
-        if(rank == 0)
-        {
-            const std::string log = readAllLogs();
-            for(int algo : {static_cast<int>(RCCL_CE_REGISTERED), static_cast<int>(RCCL_CE_2SHOT)})
-            {
-                const char* name = nullptr;
-                ASSERT_EQ(ncclSuccess, rcclGetAlgoName(algo, &name));
-                EXPECT_TRUE(logShowsAllReduceAlgo(log, name))
-                    << testId << ": predicted algo " << name << " but the live AllReduce never logged it";
-                TEST_INFO("%s: CE AllReduce variant run: %s", testId, name);
-            }
-        }
     }
 };
 

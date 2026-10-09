@@ -3531,7 +3531,50 @@ int SelectWithSymkAndCeEligible(int ctaPolicy, size_t count) {
   DeleteCommWithArch(comm);
   return decision.algo;
 }
+
+// Selects a sum AllReduce of 8 floats where registered CE is available and symk is not requested.
+int SelectWithCeOnlyEligible(const char* arch, const rcclArchThresholds* table, int ctaPolicy) {
+  ScopedHook ceAvailable(
+      g_ceAvailable,
+      [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+         struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+  ncclComm* comm = MakeCommWithArch(arch);
+  comm->archThresholds = table;
+  comm->symmetricSupport = 1;
+  comm->config.CTAPolicy = ctaPolicy;
+  rcclCollDecision decision{};
+  EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                              /*stream=*/nullptr, /*query=*/true,
+                                              /*graphCapturingHint=*/false, &decision));
+  DeleteCommWithArch(comm);
+  return decision.algo;
+}
 }  // namespace
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyNullTableKeepsCeRegisteredDisabled) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ZeroPolicyNullTableKeepsCeRegisteredDisabled",
+      []() {
+        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED,
+                  SelectWithCeOnlyEligible("gfx90a", /*table=*/nullptr, NCCL_CTA_POLICY_ZERO));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceWithoutZeroTakesCeRegisteredWhenSymkIneligible) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceWithoutZeroTakesCeRegisteredWhenSymkIneligible",
+      []() {
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return 1;
+          return def;
+        };
+        const rcclArchThresholds table = MakeCeVsSymkTable();
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED,
+                  SelectWithCeOnlyEligible("gfx950", &table, NCCL_CTA_POLICY_DEFAULT));
+      });
+}
 
 TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyCeRegisteredBeatsEligibleSymmetric) {
   RUN_ISOLATED_TEST(
