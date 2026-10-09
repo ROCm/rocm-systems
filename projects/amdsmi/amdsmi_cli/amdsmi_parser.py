@@ -2678,6 +2678,17 @@ class AMDSMIParser(argparse.ArgumentParser):
                     metavar="GB",
                 )
 
+                set_node_balancing_mode_help = "Set NPM balancing mode: POWER_BALANCING or FREQUENCY_BALANCING.\n\tThis is a system-wide setting, not per-GPU."
+                set_value_exclusive_group.add_argument(
+                    "--node-balancing-mode",
+                    action="store",
+                    choices=["POWER_BALANCING", "FREQUENCY_BALANCING"],
+                    type=str.upper,
+                    required=False,
+                    help=set_node_balancing_mode_help,
+                    metavar="{POWER_BALANCING,FREQUENCY_BALANCING}",
+                )
+
             # Node power limit is enabled on guest (1VF), maintain order
             max_node_power_limit = self.helpers.get_max_node_power_limit()
             set_node_power_limit_help = f"Set the node-level (NPM) power limit in watts.\n\tThis is a node-wide setting, not per-GPU.\n\tMax node power limit: {max_node_power_limit}"
@@ -2899,6 +2910,15 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Reject --gtt combined with --gpu at the argparse level
         self._guard_gtt_gpu_conflict(set_value_parser, gtt_flags=("--gtt", "-G"))
+        # Improve the --gpu error message if combined with --node-balancing-mode;
+        # actual rejection happens at runtime in set_value.py, since these two
+        # flags sit in separate argparse groups and argparse itself never
+        # raises for this combination.
+        self._guard_gtt_gpu_conflict(
+            set_value_parser,
+            gtt_flags=("--node-balancing-mode",),
+            reason="--node-balancing-mode is a system-wide setting, not per-GPU",
+        )
         # Improve the --gpu error message if combined with --node-power-limit;
         # actual rejection happens at runtime in set_value.py, since these two
         # flags sit in separate argparse groups and argparse itself never

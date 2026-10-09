@@ -29,6 +29,30 @@ This document is the standing record of:
 
 If you just want to *run* it, jump to [Running and rebuilding](#running-and-rebuilding).
 
+## Naming a new microtest
+
+One unit under test fixes every other name, mechanically, so nothing has to be
+invented per binary. For a unit at `src/<dirs>/<stem>.cc`:
+
+| Thing | Rule | `src/gin/gin_host.cc` |
+|---|---|---|
+| Path macro | `<STEM>_CC_PATH`, `<STEM>` upper-snake | `GIN_HOST_CC_PATH` |
+| Test TU | `test/host/<stem>-test.cc`, `_` → `-` | `test/host/gin-host-test.cc` |
+| Binary | `rccl-UnitTestsMicro<Stem>`, `<Stem>` UpperCamel | `rccl-UnitTestsMicroGinHost` |
+| gtest suites | `<Stem>…Microtest` — every suite in the TU starts with `<Stem>` | `GinHostProxyAffinityMicrotest` |
+| CTest categories | `test/test_categories_micro_<stem>.yaml`, lowercase | `test/test_categories_micro_gin_host.yaml` |
+| JUnit XML | `host_tests_micro_<stem>.xml` (in `run_host_tests.sh`) | `host_tests_micro_gin_host.xml` |
+| Test-runner config | `unit_tests_micro_<stem>` (in `configs/ci-precheckin.json`) | `unit_tests_micro_gin_host` |
+
+Because every suite starts with the binary's `<Stem>`, the categories yaml needs
+exactly one pattern (`GinHost*`) and a new suite in the same TU is picked up
+without editing it — gtest's `*` does not cross the `.`, so a per-suite list
+silently drops any suite someone forgets to add.
+
+A new binary is named in four places: `rccl_add_micro_binary()` in
+`test/host/CMakeLists.txt`, the `binaries` array in `run_host_tests.sh`, the
+`test_configurations` + `test_suites` pair in `configs/ci-precheckin.json`, and
+the microtest list in `lib/test_executor.py` that llvm-cov reads as `--object`.
 
 ## Units under test
 
@@ -176,6 +200,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   entries are omitted for this target via `RCCL_STUBS_OMIT_<symbol>` macros
   because `enqueue.cc` defines them itself. See
   `test_categories_micro_enqueue.yaml`.
+- **`rccl-UnitTestsMicroCe`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suite
+  `CeCollMicrotest.*`. Its own binary because every other target links
+  `fakes/ce_fakes.cc`, which fakes the symbols this file defines.
 - **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
   `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
   GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
@@ -239,7 +266,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
-  `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`). Its own binary: it fakes the
+  `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
+  (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
   `transport/p2p.cc` shareable-buffer entry points that `rccl-UnitTestsMicro`
   compiles for real. See `test_categories_micro_diagnostics.yaml`.
 
@@ -308,11 +336,15 @@ test:
    hipified copy, and `#include` it from the test TU *after* the fakes/macro shims
    are in scope. A new unit generally warrants its own binary (see
    [Units under test](#units-under-test)) so its file-scope state stays isolated.
+   The unit's path fixes the test file, binary, suite and yaml names — see
+   [Naming a new microtest](#naming-a-new-microtest).
 2. **Register the source.** Add the test `.cc` to the target's source list in
    `rccl_define_micro_source_lists()` in `test/host/CMakeLists.txt`
    (`TEST_MICRO_SOURCE_FILES` for `rccl-UnitTestsMicro`), which both build paths
    share. If you add a new gtest suite, add its pattern to the target's
-   `test/test_categories_micro*.yaml` so CTest runs it.
+   `test/test_categories_micro*.yaml` so CTest runs it (a suite named for its
+   binary's stem is already matched). A new *binary* also has to be named in the
+   four places [Naming a new microtest](#naming-a-new-microtest) lists.
 3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls the
    unit's reset entry point (`ResetP2pFakes()`, `ResetInitFakes()`, ...) so
    hooks do not leak between tests. Install per-test behaviour by overwriting a
@@ -365,6 +397,7 @@ symbol.
 | `src/ce_coll.cc` | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
 | `src/dev_runtime.cc` (targets that do not compile the real file) | `fakes/dev_runtime_fakes.cc` |
+| `src/diagnostics.cc` (`ncclDiagChildRun*` external-tool runners) | `fakes/diagnostics_fakes.cc` |
 | `src/diagnostics/device/p2p.cu` (`ncclDiagP2p*` kernel launchers) | `fakes/diagnostics_p2p_device_fakes.cc` |
 | `src/graph/*.cc` (topo, paths, search, connect, rome consensus) | `fakes/topo_stubs.cc` |
 | `src/graph/tuning.cc`, `src/graph/connect.cc` params | `fakes/tuning_fakes.cc` |
@@ -395,10 +428,11 @@ symbol.
 | `src/rma/*.cc` | `fakes/rma_fakes.cc` |
 | `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
+| `src/transport/net_ib/connect.cc` params (`ncclParamIbQpsPerConn`) | `fakes/transport_net_ib_fakes.cc` |
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`) | `fakes/transport_p2p_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
-| libc (`gethostname`, `dladdr`) | `fakes/libc_interposers.cc` |
-| `src/ras/client.cc`'s libc surface (sockets/stdio/exit; see `fakes/libc_seam.h`) | `fakes/libc_fakes.cc` |
+| libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
+| libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`) | `fakes/libc_fakes.cc` |
 | reusable RAS poll-entry, message, and diagnostics-context seams | `fakes/ras_fakes.cc` |
 | core/lifecycle floor + data symbols | `fakes/nccl_stubs.cc` |
 | reusable `nccl*` seams | `fakes/nccl_fakes.cc` |
@@ -787,6 +821,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
+./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/{p2p,ib_write_bw}.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-HostUnitTests

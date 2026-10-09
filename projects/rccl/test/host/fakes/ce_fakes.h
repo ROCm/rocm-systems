@@ -24,6 +24,7 @@ struct ncclCeBatchOpsParams;
 struct ncclCeCollArgs;
 
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclCeInit;
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclCeEnsureAllReduceStaging;
 
 extern bool g_ceImplemented;
 extern bool g_ceAvailableValue;

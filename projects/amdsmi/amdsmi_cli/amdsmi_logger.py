@@ -41,6 +41,10 @@ class AMDSMILogger:
         self.store_partition_profiles_json_output = []
         self.store_partition_resources_json_output = []
 
+        # The event command prints one record at a time. The CSV header is
+        # captured from the first event so subsequent events emit only a row.
+        self._event_csv_header = None
+
     class LoggerFormat(Enum):
         """Enum for logger formats"""
 
@@ -462,6 +466,25 @@ class AMDSMILogger:
         gpu_id = self.helpers.get_gpu_id_from_device_handle(device_handle)
         self._store_output_amdsmi(gpu_id=gpu_id, argument=argument, data=data)
 
+    def store_event_output(self, device_handle, values_dict):
+        """Store one streamed event as a fresh, self-contained record.
+
+        Keep each event payload isolated from previous records. CSV output uses a
+        single stable ``message`` column containing the event's serialized payload,
+        so later events with a different schema do not inherit stale flattened
+        keys or silently lose data.
+        """
+        gpu_id = self.helpers.get_gpu_id_from_device_handle(device_handle)
+        message = values_dict.get("message", {})
+        if self.is_csv_format():
+            message = json.dumps(message, separators=(",", ":")) if message else "{}"
+        self.output = {
+            "gpu": int(gpu_id),
+            "timestamp": values_dict.get("timestamp"),
+            "event": values_dict.get("event"),
+            "message": message,
+        }
+
     def store_nic_output(self, device_handle, argument, data):
         """Convert device handle to nic id and store output
         params:
@@ -735,6 +758,69 @@ class AMDSMILogger:
                 self._print_human_readable_output(
                     multiple_device_enabled=multiple_device_enabled, watching_output=watching_output
                 )
+
+    def _format_event_human_readable(self, event):
+        """Render one event as the classic indented multi-line block.
+
+        Reuses the generic human-readable renderer so the block matches the rest
+        of the CLI (uppercased keys, GPU as the device header, nested MESSAGE),
+        while now including the ``TIMESTAMP`` line carried on the record. The
+        returned string keeps its single trailing newline so consecutive event
+        blocks are separated by a blank line.
+        """
+        return self._convert_json_to_human_readable(dict(event))
+
+    def print_event_output(self):
+        """Print a single event record in the configured format.
+
+        The event command streams one record per call. Each format emits a single
+        well-formed record: human-readable is one indented block (including its
+        TIMESTAMP), CSV writes the header once followed by a row per event, and
+        JSON emits one object per line (newline-delimited JSON so every line is
+        independently parseable).
+        """
+        if self.is_human_readable_format():
+            self._write_event_line(self._format_event_human_readable(self.output))
+        elif self.is_csv_format():
+            self._print_event_csv_output()
+        elif self.is_json_format():
+            self._write_event_line(json.dumps(self.output))
+        else:
+            raise ValueError("Invalid output format: expected json, csv, or human_readable")
+
+    def _write_event_line(self, line):
+        """Emit a single event line to stdout or append it to the output file."""
+        if self.destination == "stdout":
+            print(line)
+        else:
+            with self.destination.open("a", encoding="utf-8") as output_file:
+                output_file.write(line + "\n")
+
+    def _print_event_csv_output(self):
+        """Emit one CSV row per event, writing the header only on the first event.
+
+        The header is fixed from the first event's keys so the stream stays a
+        single valid CSV document. Later events fill missing columns with ``N/A``
+        and ignore any extra keys, keeping every row aligned to that header.
+        """
+        write_header = self._event_csv_header is None
+        if write_header:
+            self._event_csv_header = list(self.output.keys())
+        header = self._event_csv_header
+        row = {key: self.output.get(key, "N/A") for key in header}
+
+        builder = self.CsvStdoutBuilder()
+        writer = csv.DictWriter(builder, header, lineterminator="\n", extrasaction="ignore")
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
+        text = str(builder)
+
+        if self.destination == "stdout":
+            print(text, end="")
+        else:
+            with self.destination.open("a", encoding="utf-8") as output_file:
+                output_file.write(text)
 
     def _print_json_output(
         self, multiple_device_enabled=False, watching_output=False, emit_empty=False
