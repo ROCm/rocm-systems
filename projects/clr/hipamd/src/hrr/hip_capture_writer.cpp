@@ -567,9 +567,6 @@ static ScanResult scan_events_for_resume(FILE* f, std::int64_t file_size) {
       break;
     }
 
-    r.max_seq = (h.sequence_id > r.max_seq) ? h.sequence_id : r.max_seq;
-    r.count++;
-
     long body = static_cast<long>(h.payload_length) - static_cast<long>(hdr_size);
     // fseek past EOF "succeeds" on most platforms (it only fails to read on the
     // next fread), so a record claiming e.g. 65535 bytes of body in a 100-byte
@@ -583,6 +580,10 @@ static ScanResult scan_events_for_resume(FILE* f, std::int64_t file_size) {
       r.append_at = pos;
       break;
     }
+    // Counted only once it fits: the torn record is cut off, so counting it
+    // would make the resumed trailer claim one record too many.
+    r.max_seq = (h.sequence_id > r.max_seq) ? h.sequence_id : r.max_seq;
+    r.count++;
     r.append_at = static_cast<std::int64_t>(ftell(f));
   }
 
