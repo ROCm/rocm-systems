@@ -257,7 +257,7 @@ bool Memory::allocHostMemory(void* initFrom, bool allocHostMem, bool forceCopy) 
 
 // ================================================================================================
 bool Memory::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool forceAlloc,
-                    DeviceCreateStatus* status) {
+                    ErrorCode* errorCode) {
   static const bool forceAllocHostMem = false;
 
   // Sanity checks (can't defer and force allocations at the same time)
@@ -298,7 +298,7 @@ bool Memory::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool force
     deviceMemories_[i].value_ = NULL;
 
     if (forceAlloc || (!skipAlloc && ((devices.size() == 1) || DISABLE_DEFERRED_ALLOC))) {
-      device::Memory* mem = getDeviceMemory(*devices[i], true, status);
+      device::Memory* mem = getDeviceMemory(*devices[i], true, errorCode);
       if (NULL == mem) {
         LogPrintfError("Can't allocate memory size - 0x%08X bytes!", getSize());
         return false;
@@ -312,7 +312,7 @@ bool Memory::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool force
 }
 
 // ================================================================================================
-bool Memory::addDeviceMemory(const Device* dev, DeviceCreateStatus* status) {
+bool Memory::addDeviceMemory(const Device* dev, ErrorCode* errorCode) {
   bool result = false;
   AllocState create = AllocCreate;
   AllocState init = AllocInit;
@@ -325,7 +325,7 @@ bool Memory::addDeviceMemory(const Device* dev, DeviceCreateStatus* status) {
       deviceAlloced_[dev].store(AllocInit, std::memory_order_release);
       return result;
     }
-    device::Memory* dm = dev->createMemory(*this, status);
+    device::Memory* dm = dev->createMemory(*this, errorCode);
 
     // Add the new memory allocation to the device map
     if (NULL != dm) {
@@ -379,7 +379,7 @@ void Memory::replaceDeviceMemory(const Device* dev, device::Memory* dm) {
 }
 
 device::Memory* Memory::getDeviceMemory(const Device& dev, bool alloc,
-                                        DeviceCreateStatus* status) {
+                                        ErrorCode* errorCode) {
   device::Memory* dm = NULL;
   for (uint i = 0; i < numDevices_; ++i) {
     if (deviceMemories_[i].ref_ == &dev) {
@@ -389,7 +389,7 @@ device::Memory* Memory::getDeviceMemory(const Device& dev, bool alloc,
   }
 
   if ((NULL == dm) && alloc) {
-    if (!addDeviceMemory(&dev, status)) {
+    if (!addDeviceMemory(&dev, errorCode)) {
       return NULL;
     }
     dm = deviceMemories_[numDevices() - 1].value_;
@@ -561,7 +561,7 @@ void Buffer::initDeviceMemory() {
 }
 
 bool Buffer::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool forceAlloc,
-                    DeviceCreateStatus* status) {
+                    ErrorCode* errorCode) {
   if ((getMemFlags() & CL_MEM_EXTERNAL_PHYSICAL_AMD) && (initFrom != NULL)) {
     busAddress_ = *(reinterpret_cast<cl_bus_address_amd*>(initFrom));
     initFrom = NULL;
@@ -569,7 +569,7 @@ bool Buffer::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool force
     busAddress_.surface_bus_address = 0;
     busAddress_.marker_bus_address = 0;
   }
-  return Memory::create(initFrom, sysMemAlloc, skipAlloc, forceAlloc, status);
+  return Memory::create(initFrom, sysMemAlloc, skipAlloc, forceAlloc, errorCode);
 }
 
 bool Buffer::isEntirelyCovered(const Coord3D& origin, const Coord3D& region) const {

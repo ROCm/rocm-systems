@@ -849,7 +849,7 @@ void Buffer::destroy() {
 }
 
 // ================================================================================================
-bool Buffer::create(bool alloc_local, amd::Memory::DeviceCreateStatus* status) {
+bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
   bool success = false;
   OwningAgentGuard guard(this, &success);
 
@@ -1551,7 +1551,7 @@ bool Image::createInteropImage() {
   return true;
 }
 
-bool Image::create(bool alloc_local, amd::Memory::DeviceCreateStatus* status) {
+bool Image::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
   if (owner()->parent() != nullptr) {
     // Image view creation
     roc::Memory* parent = static_cast<roc::Memory*>(owner()->parent()->getDeviceMemory(dev_));
@@ -1561,7 +1561,7 @@ bool Image::create(bool alloc_local, amd::Memory::DeviceCreateStatus* status) {
       return false;
     }
 
-    return createView(*parent, status);
+    return createView(*parent, errorCode);
   }
 
   // Interop image
@@ -1641,7 +1641,7 @@ bool Image::create(bool alloc_local, amd::Memory::DeviceCreateStatus* status) {
   return true;
 }
 
-bool Image::createView(const Memory& parent, amd::Memory::DeviceCreateStatus* status) {
+bool Image::createView(const Memory& parent, amd::Memory::ErrorCode* errorCode) {
   deviceMemory_ = parent.getDeviceMemory();
 
   originalDeviceMemory_ = (parent.owner()->asBuffer() != nullptr)
@@ -1809,9 +1809,9 @@ bool Image::createView(const Memory& parent, amd::Memory::DeviceCreateStatus* st
 
   if (hsaStatus != HSA_STATUS_SUCCESS) {
     LogPrintfError("[OCL] Fail to allocate image memory with status: %d \n", hsaStatus);
-    if (status != nullptr &&
+    if (errorCode != nullptr &&
         hsaStatus == static_cast<hsa_status_t>(HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED)) {
-      *status = amd::Memory::kDeviceCreateImagePitchUnsupported;
+      *errorCode = amd::Memory::kErrorImagePitchUnsupported;
     }
     return false;
   }

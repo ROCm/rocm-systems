@@ -188,7 +188,7 @@ class NullDevice : public amd::Device {
 
   //! Just returns nullptr for the dummy device
   device::Memory* createMemory(
-      amd::Memory& owner, amd::Memory::DeviceCreateStatus* status) const override {
+      amd::Memory& owner, amd::Memory::ErrorCode* errorCode) const override {
     ShouldNotReachHere();
     return nullptr;
   }
@@ -422,7 +422,7 @@ class Device : public NullDevice {
                                          amd::option::Options* options = nullptr) override;
 
   virtual device::Memory* createMemory(
-      amd::Memory& owner, amd::Memory::DeviceCreateStatus* status) const override;
+      amd::Memory& owner, amd::Memory::ErrorCode* errorCode) const override;
   virtual device::Memory* createMemory(size_t size, size_t alignment = 0) const override;
   //! Sampler object allocation
   virtual bool createSampler(const amd::Sampler& owner,  //!< abstraction layer sampler object

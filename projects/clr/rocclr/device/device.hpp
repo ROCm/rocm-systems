@@ -1869,7 +1869,7 @@ class Device : public RuntimeObject {
 
   //! Allocate a chunk of device memory as a cache for a CL memory object
   virtual device::Memory* createMemory(
-      Memory& owner, Memory::DeviceCreateStatus* status = nullptr) const = 0;
+      Memory& owner, Memory::ErrorCode* errorCode = nullptr) const = 0;
 
   //! Allocate a chunk of device memory with address alignment
   virtual device::Memory* createMemory(size_t size, size_t alignment = 0) const = 0;
