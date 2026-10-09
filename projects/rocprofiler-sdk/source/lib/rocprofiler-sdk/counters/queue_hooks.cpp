@@ -79,7 +79,7 @@ kernel_dispatch_phase_enter_hook(
         // A kernel-replay pass may have locally stopped this context. queue_cb still runs for it,
         // because its disabled path is what keeps the dispatch serialized.
         const bool locally_enabled =
-            kernel_replay::is_locally_enabled({.handle = ctx->context_idx});
+            kernel_replay::is_locally_enabled({.handle = ctx->context_idx}, agent_id);
 
         for(auto& cb : ctx->dispatch_counter_collection->callbacks)
         {

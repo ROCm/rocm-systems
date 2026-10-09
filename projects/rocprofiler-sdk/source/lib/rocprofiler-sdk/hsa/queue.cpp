@@ -727,8 +727,10 @@ WriteInterceptor(const void* packets,
             // kernel_replay/local_context.hpp.
             if(kernel_replay::local_context_has_overrides())
             {
-                auto disabled = [](const auto& e) {
-                    return !kernel_replay::is_locally_enabled({.handle = e.ctx->context_idx});
+                const auto agent_id = queue.get_agent().get_rocp_agent()->id;
+                auto       disabled = [agent_id](const auto& e) {
+                    return !kernel_replay::is_locally_enabled({.handle = e.ctx->context_idx},
+                                                              agent_id);
                 };
                 auto& cbc = _packet_data.tracing_data.callback_contexts;
                 auto& bfc = _packet_data.tracing_data.buffered_contexts;
@@ -1107,7 +1109,10 @@ WriteInterceptor(const void* packets,
     // graph_launch_active from the gate declines the graph gracefully instead of aborting: it falls
     // through to the ordinary path and runs once, and the one-shot warning above already told the
     // tool. Non-graph single dispatches replay as usual below.
-    if(has_kernel_replay && pkt_count == 1 && num_dispatch_packets == 1 && !graph_launch_active)
+    // A dispatch issued from a replay callback on the replaying thread is never replayed itself: a
+    // nested loop would replace, then clear, the outer loop's thread-local toggle routing.
+    if(has_kernel_replay && pkt_count == 1 && num_dispatch_packets == 1 && !graph_launch_active &&
+       !kernel_replay::replaying_agent())
     {
         const auto thr_id           = corr_id->thread_idx;
         const auto internal_corr_id = corr_id->internal;
@@ -1210,8 +1215,8 @@ WriteInterceptor(const void* packets,
             // active now (loop start) as the toggle mask, so a tool may only enable/disable one of
             // those and a local start cannot promote a globally-stopped context
             // (local_context.hpp).
-            auto local_ctx_tls_guard =
-                kernel_replay::scoped_local_context_control{context::get_active_contexts()};
+            auto local_ctx_tls_guard = kernel_replay::scoped_local_context_control{
+                context::get_active_contexts(), queue.get_agent().get_rocp_agent()->id};
 
             // Per-pass loop: PASS enter -> submit -> drain the async handler -> PASS exit -> ask
             // the tool whether to continue -> restore device memory before the next pass.
@@ -1287,7 +1292,19 @@ WriteInterceptor(const void* packets,
     // agent-wide drain, not by this lock.)
     std::optional<std::shared_lock<std::shared_mutex>> replay_reader_guard{};
     if(has_kernel_replay)
-        replay_reader_guard.emplace(agent_replay_mutex(queue.get_agent().get_rocp_agent()->id));
+    {
+        const auto agent_id = queue.get_agent().get_rocp_agent()->id;
+        // A replay callback on the replaying thread dispatching to the agent being replayed would
+        // take this shared lock while the thread holds it exclusively (std::system_error, EDEADLK),
+        // and the next restore() would revert the dispatch's writes anyway.
+        auto replaying = kernel_replay::replaying_agent();
+        ROCP_FATAL_IF(replaying && *replaying == agent_id) << fmt::format(
+            "kernel replay: a replay callback submitted GPU work to agent {} while it is being "
+            "replayed. Replay callbacks must not launch kernels (or runtime copies and fills "
+            "implemented as kernels) on the replayed agent.",
+            agent_id.handle);
+        replay_reader_guard.emplace(agent_replay_mutex(agent_id));
+    }
 
     bool should_batch_packets = true;
     queue.signal_callback([&should_batch_packets](const auto& map) {

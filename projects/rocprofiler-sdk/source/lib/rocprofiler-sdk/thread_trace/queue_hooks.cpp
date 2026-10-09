@@ -66,7 +66,7 @@ kernel_dispatch_phase_enter_hook(
         // A kernel-replay pass may have locally stopped this context. pre_kernel_call still runs
         // for it, because its disabled path is what keeps the dispatch serialized.
         const bool locally_enabled =
-            kernel_replay::is_locally_enabled({.handle = ctx->context_idx});
+            kernel_replay::is_locally_enabled({.handle = ctx->context_idx}, agent_id);
 
         auto [packet, bSerial] = tracer.pre_kernel_call(
             queue, kernel_id, dispatch_id, user_data, correlation_id, locally_enabled);
