@@ -568,6 +568,61 @@ TEST(SdmaPacketProcessorTest, LinearRectHonorsElementSizeAndSlicePitch) {
   }
 }
 
+TEST(SdmaPacketProcessorTest, LinearRectKeepsDistinctPaddedSliceStrides) {
+  const struct {
+    bool gfx12_rect;
+    SdmaPacketDialect dialect;
+  } cases[] = {
+      {false, SdmaPacketDialect::LegacyExtendedCount},
+      {true, SdmaPacketDialect::Gfx1250},
+      {true, SdmaPacketDialect::Rdna4},
+  };
+  // 16-byte elements, two per row. The source rows are 48 bytes apart and its slices
+  // 128 apart; the destination rows are 64 and its slices 160. Each slice pitch
+  // exceeds two row pitches, so a copy that flattens the volume into rows moves the
+  // wrong bytes and writes into the padding.
+  constexpr uint64_t kSource = 0x2000;
+  constexpr uint64_t kDestination = 0x3000;
+  constexpr uint32_t kRowBytes = 32;
+  constexpr uint32_t kRows = 2;
+  constexpr uint32_t kSlices = 3;
+  constexpr uint32_t kSrcPitch = 48;
+  constexpr uint32_t kDstPitch = 64;
+  constexpr uint32_t kSrcSlice = 128;
+  constexpr uint32_t kDstSlice = 160;
+  constexpr uint8_t kGap = 0xee;
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(static_cast<int>(test_case.dialect));
+    PacketProcessorFixture fixture;
+    ASSERT_TRUE(fixture.access);
+    for (uint32_t i = 0; i < kSrcSlice * kSlices; ++i)
+      fixture.memory->store<uint8_t>(kSource + i, static_cast<uint8_t>(i + 1));
+    for (uint32_t i = 0; i < kDstSlice * kSlices; ++i)
+      fixture.memory->store<uint8_t>(kDestination + i, kGap);
+
+    const std::array<uint32_t, 13> packet = linear_rect_packet(
+        test_case.gfx12_rect, kSource, kDestination, /*element=*/4, /*rect_x=*/kRowBytes / 16,
+        /*rect_y=*/kRows, /*rect_z=*/kSlices, kSrcPitch, kDstPitch, kSrcSlice, kDstSlice);
+    SdmaPacketProcessor processor(test_case.dialect);
+    const SdmaPacketProcessResult result =
+        processor.process({.available_dwords = packet,
+                           .access = *fixture.access,
+                           .continuation = fixture.continuation});
+
+    EXPECT_EQ(result.packet.status, PacketProcessStatus::Complete);
+    for (uint32_t i = 0; i < kDstSlice * kSlices; ++i) {
+      const uint32_t slice = i / kDstSlice;
+      const uint32_t row = (i % kDstSlice) / kDstPitch;
+      const uint32_t column = (i % kDstSlice) % kDstPitch;
+      const bool copied = row < kRows && column < kRowBytes;
+      const uint8_t expected =
+          copied ? static_cast<uint8_t>(slice * kSrcSlice + row * kSrcPitch + column + 1) : kGap;
+      EXPECT_EQ(fixture.memory->load<uint8_t>(kDestination + i), expected)
+          << "slice " << slice << " row " << row << " column " << column;
+    }
+  }
+}
+
 TEST(SdmaPacketProcessorTest, LinearRectUsesZOriginWhenTheCopyIsOneSlice) {
   const struct {
     bool gfx12_rect;
