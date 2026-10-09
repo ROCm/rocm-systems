@@ -232,6 +232,15 @@ class GraphSignalManager : public amd::ReferenceCountedObject {
   std::unordered_map<amd::Device*, std::vector<std::vector<void*>>> free_sets_;
 };
 
+//! Records one signal set borrowed by a root or child graph during a launch.
+//! The root completion callback collects these records across the hierarchy and
+//! returns each set to the GraphSignalManager that owns it.
+struct GraphLaunchSignalSet {
+  GraphSignalManager* manager;
+  amd::Device* device;
+  std::vector<void*> signals;
+};
+
 class GraphNode : public hipGraphNodeDOTAttribute {
  protected:
   /// Copy Constructor. This is protected to prevent accidental copies causing unexpected behaviors.
@@ -908,6 +917,9 @@ class Graph {
       if (segment.dependency_level != -1) {
         fout << "\\nLevel: " << segment.dependency_level;
       }
+      if (segment.parent_entry_hw_event_index >= 0) {
+        fout << "\\nParent entry event: " << segment.parent_entry_hw_event_index;
+      }
       fout << "\";" << std::endl;
       fout << "style=\"rounded,filled\";" << std::endl;
       fout << "fillcolor=\"lightblue\";" << std::endl;
@@ -1031,6 +1043,12 @@ class Graph {
 
     // Most urgent declared priority across this segment's nodes.
     int declared_priority = hip::Stream::Priority::Normal;
+    //! Parent child-graph segment: emit a completion on the leading barrier batch so
+    //! parallel child roots on other streams can wait via AQL before starting.
+    bool needs_child_entry_signal = false;
+    //! Immediate parent's compact HW-event slot waited on by this child root.
+    //! -1 means this segment has no cross-stream parent boundary.
+    int parent_entry_hw_event_index = -1;
   };
 
   //! Segment information for batch scheduling
@@ -1176,8 +1194,6 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   virtual hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled) {
     return hipSuccess;
   }
-  //! Recycle HW event signals borrowed for a launch. No-op on classic path.
-  virtual void RecycleLaunchSignals(amd::Device* device, std::vector<void*>& signal_set) {}
 
  protected:
   uint64_t flags_ = 0;
@@ -1247,12 +1263,6 @@ class GraphExecSegmented : public GraphExecBase {
   void EndAQLPacketUpdates() override;
   // Handle packetBatches_ updates when nodes are enabled/disabled
   hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled) override;
-  //! Recycle HW event signals borrowed for a launch back to the signal pool.
-  void RecycleLaunchSignals(amd::Device* device, std::vector<void*>& signal_set) override {
-    if (signalManager_ != nullptr && !signal_set.empty()) {
-      signalManager_->ReleaseSet(device, signal_set);
-    }
-  }
   // Kernel arg manager is for the entire graph.
   // Child graph also shares the same kernel arg manager object. some apps have 100's of
   // child graph nodes and each child graph has only one node.
@@ -1263,22 +1273,26 @@ class GraphExecSegmented : public GraphExecBase {
   hipError_t CaptureAndFormPacketsForGraph(bool reuseKernargSlots = true);
   void GetKernelArgSizeForGraph(std::unordered_map<int, size_t>& kernArgSizeForGraph);
 
-  //! out_signal_set, when non-null, marks the top-level launch path: signals
-  //! are taken from the per-graph pool and returned via this out-parameter so
-  //! the completion callback can re-arm and recycle them. When null (legacy /
-  //! recursive child-graph path), signals are created locally and destroyed by
-  //! the AccumulateCommand destructor.
+  //! All signal sets borrowed by the root and child graphs are collected for
+  //! recycling by the root launch-completion callback.
   amd::Command* EnqueueSegmentedGraph(hip::Stream* launch_stream,
                                       const std::vector<hip::Stream*>& streams,
                                       hipError_t* out_status = nullptr,
-                                      std::vector<void*>* out_signal_set = nullptr);
+                                      std::vector<GraphLaunchSignalSet>* signal_sets = nullptr,
+                                      const std::vector<void*>* parent_hw_events = nullptr,
+                                      int parent_entry_hw_event_index = -1,
+                                      bool sync_launch_stream_deps = true);
   hipError_t EnqueueSegment(const Segment& segment, hip::Stream* stream,
-                            amd::AccumulateCommand* accumulate);
+                            const std::vector<hip::Stream*>& streams,
+                            std::vector<GraphLaunchSignalSet>* signal_sets,
+                            amd::AccumulateCommand* accumulate,
+                            const std::vector<void*>* parent_segment_hw_events = nullptr);
 
   //! Find the number of streams required per device for packet engine mode
   //! This method analyzes segments to determine per-device stream requirements
   hipError_t FindStreamsReqPerDevForSegments();
-  //! Round-robin stream assignment: spreads parallel segments evenly per dependency level
+  //! Round-robin stream assignment: spreads parallel segments evenly per dependency level,
+  //! starting child roots from inherited_exec_stream_id_ in the parent's absolute pool.
   void RoundRobinStreamAssignment();
   //! DFS stream assignment: preserves chain continuity across segment DAG branches
   void DFSStreamAssignment();
@@ -1292,6 +1306,9 @@ class GraphExecSegmented : public GraphExecBase {
   //! onto a single stream because the cross-stream barriers multi-stream would
   //! cost outweigh the work that could actually overlap. Returns true to collapse.
   bool ShouldCollapseToSingleStream() const;
+  //! Apply mode-0 collapse before packet materialization. Child graphs collapse
+  //! onto their inherited absolute parent stream rather than local stream zero.
+  void ApplyCollapseSelection();
   //! Get the parallel streams map for synchronization before destruction
   const std::unordered_map<int, std::vector<hip::Stream*>>& GetParallelStreams() const {
     return parallel_streams_;
@@ -1355,14 +1372,24 @@ class GraphExecSegmented : public GraphExecBase {
     PacketBatch() {}
     // O(1) enable/disable operations - just update state
     void setEnabled(GraphNode* node, bool enabled);
-    // Rebuild cached filtered lists if cache is stale.
-    // Updates flat_packet pointers in patch_list to point into filteredFlatPacketData.
-    void rebuildFilteredLists(std::vector<amd::Device::HwEventPatch>& patch_list);
+    // Rebuild cached filtered lists if cache is stale. Updates  flat_packet pointers (including
+    // parent-boundary ) into filteredFlatPacketData.
+    void rebuildFilteredLists(
+        std::vector<amd::Device::HwEventPatch>& patch_list,
+        std::vector<amd::Device::HwEventPatch>& parent_boundary_patches);
+    // Point this batch's patches into filteredFlatPacketData, relocating a completion
+    // signal when its original packet belongs to a disabled node.
+    void retargetPatchesToFilteredBuffer(
+        std::vector<amd::Device::HwEventPatch>& patches,
+        const std::unordered_map<const void*, size_t>& packet_to_filtered_index,
+        const std::unordered_set<const void*>& disabled_batch_packets);
     // Rebuild the flat buffer from the current dispatchPackets contents.
     void rebuildFlatBuffer();
-    // Restore flat_packet pointers in patch_list back to flatPacketData when
-    // all nodes are re-enabled (disabledNodeCount == 0).
-    void restorePatchListPointers(std::vector<amd::Device::HwEventPatch>& patch_list);
+    // Restore ordinary and parent-boundary flat_packet pointers back to
+    // flatPacketData when all nodes are re-enabled (disabledNodeCount == 0).
+    void restorePatchListPointers(
+        std::vector<amd::Device::HwEventPatch>& patch_list,
+        std::vector<amd::Device::HwEventPatch>& parent_boundary_patches);
     // Append one 64-byte AQL packet to a flat buffer: copies the body, saves the
     // full_header dword, and invalidates the header. Zeroes completion_signal
     // (ApplyHwEventPatches re-patches it directly via flat_packet pointers at launch).
@@ -1404,6 +1431,8 @@ class GraphExecSegmented : public GraphExecBase {
     // seg_to_hw_event[seg_id] == -1  ->  no completion signal emitted.
     // seg_to_hw_event[seg_id] >= 0  ->  index into the compact hw_events vector.
     std::vector<int> seg_to_hw_event;
+    //! HW slot for a child-graph segment's leading-batch entry gate (parent graph only).
+    std::vector<int> seg_to_child_entry_hw_event;
 
     std::vector<amd::Device::HwEventPatch> patch_list;
     std::vector<uint8_t*> barrier_packets;
@@ -1416,12 +1445,23 @@ class GraphExecSegmented : public GraphExecBase {
 
   SyncPlan sync_plan_;
 
-  //! Set by BuildSyncPlan's collapse pass when the barrier-ROI heuristic folds
-  //! the graph onto a single stream. Read by Init() to size stream creation.
-  bool collapsed_to_single_stream_ = false;
-
   void BuildSyncPlan();
   void RebuildAQLPacketBatch(PacketBatch& packetBatch);
+  //! After the parent sync plan is built, wire child root boundary patches to parent entry slots.
+  void FinalizeChildParentBoundaries();
+  //! Return whether any level-0 segment runs on a stream other than the child graph node's
+  //! execution stream and therefore needs a parent-entry wait.
+  bool HasOffStreamRoots(int exec_stream_id) const;
+  //! Recursively assign child segments absolute IDs in the shared parent stream pool, apply
+  //! collapse selection, and mark child graph nodes whose off-stream roots need an entry signal.
+  void AssignNestedChildStreamPlans();
+
+  //! Absolute stream in the parent pool for this child graph node (-1 = root exec).
+  int inherited_exec_stream_id_ = -1;
+  //! Patches applied at child launch using the immediate parent's segment_hw_events.
+  std::vector<amd::Device::HwEventPatch> parent_boundary_patches_;
+  //! Child segment corresponding to each parent_boundary_patches_ entry.
+  std::vector<int> parent_boundary_segment_ids_;
 };
 
 
