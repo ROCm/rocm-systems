@@ -39,6 +39,10 @@ enum Reply {
 struct Fixture {
     replies: Arc<Mutex<VecDeque<Reply>>>,
     lost: Arc<AtomicBool>,
+    hardware: Arc<AtomicU32>,
+    hardware_reset_errno: Arc<AtomicU32>,
+    fault_gpu_id: Arc<AtomicU32>,
+    memory_wait_errno: Arc<AtomicU32>,
     scratch_base: Arc<AtomicU64>,
     vm: Shared<DeviceVm>,
 }
@@ -155,6 +159,14 @@ impl Fixture {
         let expected_devices = expected_devices.to_vec();
         let lost = Arc::new(AtomicBool::new(false));
         let loss_signal = lost.clone();
+        let hardware = Arc::new(AtomicU32::new(0));
+        let hardware_signal = hardware.clone();
+        let hardware_reset_errno = Arc::new(AtomicU32::new(0));
+        let injected_reset_error = hardware_reset_errno.clone();
+        let fault_gpu_id = Arc::new(AtomicU32::new(42));
+        let reported_gpu_id = fault_gpu_id.clone();
+        let memory_wait_errno = Arc::new(AtomicU32::new(0));
+        let injected_memory_error = memory_wait_errno.clone();
         let scratch_base = Arc::new(AtomicU64::new(0));
         let observed_scratch_base = scratch_base.clone();
         let kfd = shared(sys::Kfd::with_hook_allocator(
@@ -162,18 +174,46 @@ impl Fixture {
             Arc::new(move |call| {
                 match call {
                     sys::Call::Wait(args, event) if event.event_id == 19 => {
-                        args.result = uapi::WAIT_TIMEOUT;
+                        let state = hardware_signal.load(Ordering::Acquire);
+                        if state == 0 {
+                            args.result = uapi::WAIT_TIMEOUT;
+                        } else {
+                            event.payload[0] =
+                                u64::from(reported_gpu_id.load(Ordering::Acquire)) | (1_u64 << 32);
+                            event.payload[1] = u64::from(state == 2) | (1_u64 << 32);
+                            args.result = uapi::WAIT_COMPLETE;
+                        }
                         return Ok(());
                     }
                     sys::Call::Wait(args, event) if event.event_id == 20 => {
+                        let errno = injected_memory_error.load(Ordering::Acquire);
+                        if errno != 0 {
+                            return Err(io::Error::from_raw_os_error(
+                                i32::try_from(errno).unwrap(),
+                            ));
+                        }
                         if loss_signal.load(Ordering::Relaxed) {
                             event.payload[0] = u64::from_ne_bytes([0, 0, 0, 0, 1, 0, 0, 0]);
                             event.payload[2] = 0x1234_5000;
-                            event.payload[3] = u64::from_ne_bytes([42, 0, 0, 0, 0, 0, 0, 0]);
+                            event.payload[3] = u64::from(reported_gpu_id.load(Ordering::Acquire));
                             args.result = uapi::WAIT_COMPLETE;
                         } else {
                             args.result = uapi::WAIT_TIMEOUT;
                         }
+                        return Ok(());
+                    }
+                    sys::Call::ResetEvent(args) if args.event_id == 19 => {
+                        let errno = injected_reset_error.swap(0, Ordering::AcqRel);
+                        if errno != 0 {
+                            return Err(io::Error::from_raw_os_error(
+                                i32::try_from(errno).unwrap(),
+                            ));
+                        }
+                        hardware_signal.store(0, Ordering::Release);
+                        return Ok(());
+                    }
+                    sys::Call::ResetEvent(args) if args.event_id == 20 => {
+                        loss_signal.store(false, Ordering::Release);
                         return Ok(());
                     }
                     sys::Call::DestroyEvent(_) => return Ok(()),
@@ -316,7 +356,7 @@ impl Fixture {
                         memory_event_id: AtomicU32::new(20),
                         hardware_destroy_uncertain: AtomicBool::new(false),
                         memory_destroy_uncertain: AtomicBool::new(false),
-                        memory_event_claimed: Mutex::new(false),
+                        observed: Mutex::new(ObservedEvents::new(allocator).unwrap()),
                         lost: AtomicBool::new(false),
                     },
                     allocator,
@@ -347,6 +387,10 @@ impl Fixture {
         Self {
             replies,
             lost,
+            hardware,
+            hardware_reset_errno,
+            fault_gpu_id,
+            memory_wait_errno,
             scratch_base,
             vm,
         }
@@ -967,7 +1011,7 @@ fn installed_signal_event_page_transfers_to_process_lifetime() {
         allocation.signal_event_page_handle(&fixture.vm).unwrap(),
         17
     );
-    fixture.lost.store(true, Ordering::Relaxed);
+    fixture.hardware.store(2, Ordering::Relaxed);
     allocation.retain_signal_event_page().unwrap();
     drop(allocation);
     fixture.exhausted();
@@ -1798,7 +1842,7 @@ fn owned_system_pages_use_one_cpu_and_gpu_address() {
 #[test]
 fn invalid_registered_host_address_fails_before_native_observation() {
     let fixture = Fixture::new([]);
-    fixture.lost.store(true, Ordering::Relaxed);
+    fixture.hardware.store(2, Ordering::Relaxed);
     assert_eq!(
         fixture
             .allocate(
@@ -1826,7 +1870,7 @@ fn permissions_without_read_fail_before_loss_polling_or_native_acquisition() {
         DeviceAccess::WRITE | DeviceAccess::EXECUTE,
     ] {
         let fixture = Fixture::new([]);
-        fixture.lost.store(true, Ordering::Relaxed);
+        fixture.hardware.store(2, Ordering::Relaxed);
         assert_eq!(
             fixture
                 .allocate(MemoryKind::System, permissions)
@@ -2021,14 +2065,14 @@ fn native_loss_latches_without_preventing_explicit_cleanup() {
     ]);
     let mut allocation = fixture.create().unwrap();
     assert!(!fixture.vm.has_latched_loss());
-    fixture.lost.store(true, Ordering::Relaxed);
+    fixture.hardware.store(2, Ordering::Relaxed);
     assert!(!fixture.vm.has_latched_loss());
     assert_eq!(
         allocation.device_address(&fixture.vm).unwrap_err().kind(),
         ErrorKind::DeviceLost
     );
     assert!(fixture.vm.has_latched_loss());
-    fixture.lost.store(false, Ordering::Relaxed);
+    fixture.hardware.store(0, Ordering::Relaxed);
     assert_eq!(
         allocation.device_address(&fixture.vm).unwrap_err().kind(),
         ErrorKind::DeviceLost
@@ -2042,9 +2086,9 @@ fn native_loss_latches_without_preventing_explicit_cleanup() {
 }
 
 #[test]
-fn concurrent_memory_fault_observers_all_receive_the_sticky_loss() {
+fn concurrent_hardware_loss_observers_all_receive_the_sticky_loss() {
     let fixture = Fixture::new([]);
-    fixture.lost.store(true, Ordering::Release);
+    fixture.hardware.store(2, Ordering::Release);
     std::thread::scope(|scope| {
         let observers = (0..8)
             .map(|_| {
@@ -2060,7 +2104,7 @@ fn concurrent_memory_fault_observers_all_receive_the_sticky_loss() {
             observer.join().unwrap();
         }
     });
-    fixture.lost.store(false, Ordering::Release);
+    fixture.hardware.store(0, Ordering::Release);
     assert_eq!(
         fixture.vm.check().unwrap_err().kind(),
         ErrorKind::DeviceLost
@@ -2068,24 +2112,256 @@ fn concurrent_memory_fault_observers_all_receive_the_sticky_loss() {
 }
 
 #[test]
-fn claimed_memory_fault_is_reported_without_latching_device_loss() {
+fn memory_fault_reaches_each_subscriber_without_inventing_device_loss() {
     let fixture = Fixture::new([]);
+    fixture.vm.loss.register_identity(42, [0; 16]).unwrap();
+    let mut first = fixture.vm.subscribe_events().unwrap();
+    let mut second = fixture.vm.subscribe_events().unwrap();
     fixture.lost.store(true, Ordering::Release);
-    assert_eq!(
-        fixture.vm.poll_memory_fault().unwrap(),
-        Some(GpuMemoryFault {
-            kfd_gpu_id: 42,
-            virtual_address: 0x1234_5000,
-            page_not_present: false,
-            read_only: true,
-            no_execute: false,
-            imprecise: false,
-            error_type: 0,
-        })
-    );
+    let expected = DeviceEvent::GpuMemoryFault(GpuMemoryFault {
+        endpoint_id: Some([0; 16]),
+        virtual_address: 0x1234_5000,
+        page_not_present: false,
+        read_only: true,
+        no_execute: false,
+        imprecise: false,
+        error_type: 0,
+    });
+    assert_eq!(first.poll().unwrap(), Some(expected));
+    assert_eq!(second.poll().unwrap(), Some(expected));
+    assert_eq!(first.poll().unwrap(), None);
+    assert_eq!(second.poll().unwrap(), None);
     assert!(fixture.vm.check().is_ok());
     assert!(!fixture.vm.has_latched_loss());
     fixture.lost.store(false, Ordering::Release);
+}
+
+#[test]
+fn sequential_memory_faults_reach_each_subscriber_in_order() {
+    let fixture = Fixture::new([]);
+    fixture.vm.loss.register_identity(42, [42; 16]).unwrap();
+    fixture.vm.loss.register_identity(77, [77; 16]).unwrap();
+    let mut first = fixture.vm.subscribe_events().unwrap();
+    let mut second = fixture.vm.subscribe_events().unwrap();
+
+    fixture.lost.store(true, Ordering::Release);
+    let Some(DeviceEvent::GpuMemoryFault(first_fault)) = first.poll().unwrap() else {
+        panic!("first memory fault was not delivered");
+    };
+    assert_eq!(first_fault.endpoint_id, Some([42; 16]));
+
+    fixture.fault_gpu_id.store(77, Ordering::Release);
+    fixture.lost.store(true, Ordering::Release);
+    let Some(DeviceEvent::GpuMemoryFault(second_fault)) = first.poll().unwrap() else {
+        panic!("second memory fault was not delivered");
+    };
+    assert_eq!(second_fault.endpoint_id, Some([77; 16]));
+    assert_eq!(
+        second.poll().unwrap(),
+        Some(DeviceEvent::GpuMemoryFault(first_fault))
+    );
+    assert_eq!(
+        second.poll().unwrap(),
+        Some(DeviceEvent::GpuMemoryFault(second_fault))
+    );
+    assert_eq!(first.poll().unwrap(), None);
+    assert_eq!(second.poll().unwrap(), None);
+}
+
+#[test]
+fn slow_subscriber_backs_up_native_polling_without_dropping_exceptions() {
+    let fixture = Fixture::new([]);
+    let mut slow = fixture.vm.subscribe_events().unwrap();
+    let mut fast = fixture.vm.subscribe_events().unwrap();
+    for _ in 0..MAX_RETAINED_EXCEPTIONS {
+        fixture.hardware.store(1, Ordering::Release);
+        assert!(matches!(
+            fast.poll().unwrap(),
+            Some(DeviceEvent::GpuHardwareException(_))
+        ));
+    }
+    fixture.hardware.store(1, Ordering::Release);
+    assert_eq!(fast.poll().unwrap_err().kind(), ErrorKind::Busy);
+    assert!(matches!(
+        slow.poll().unwrap(),
+        Some(DeviceEvent::GpuHardwareException(_))
+    ));
+    assert!(matches!(
+        fast.poll().unwrap(),
+        Some(DeviceEvent::GpuHardwareException(_))
+    ));
+}
+
+#[test]
+fn operation_check_keeps_fault_details_for_late_subscribers() {
+    let fixture = Fixture::new([]);
+    fixture.vm.loss.register_identity(42, [42; 16]).unwrap();
+    fixture.lost.store(true, Ordering::Release);
+    assert!(fixture.vm.check().is_ok());
+    fixture.lost.store(false, Ordering::Release);
+    let mut late = fixture.vm.subscribe_events().unwrap();
+    let Some(DeviceEvent::GpuMemoryFault(fault)) = late.poll().unwrap() else {
+        panic!("late subscriber missed the memory fault");
+    };
+    assert_eq!(fault.endpoint_id, Some([42; 16]));
+    assert_eq!(fault.virtual_address, 0x1234_5000);
+    assert_eq!(late.poll().unwrap(), None);
+}
+
+#[test]
+fn late_subscriber_receives_the_latest_fault_without_unbounded_history() {
+    let fixture = Fixture::new([]);
+    fixture.vm.loss.register_identity(42, [42; 16]).unwrap();
+    fixture.vm.loss.register_identity(77, [77; 16]).unwrap();
+    fixture.lost.store(true, Ordering::Release);
+    assert!(fixture.vm.check().is_ok());
+    fixture.fault_gpu_id.store(77, Ordering::Release);
+    fixture.lost.store(true, Ordering::Release);
+    assert!(fixture.vm.check().is_ok());
+    assert_eq!(fixture.vm.loss.observed.lock().unwrap().events.len(), 1);
+
+    let mut late = fixture.vm.subscribe_events().unwrap();
+    let Some(DeviceEvent::GpuMemoryFault(fault)) = late.poll().unwrap() else {
+        panic!("late subscriber missed the latest fault");
+    };
+    assert_eq!(fault.endpoint_id, Some([77; 16]));
+    assert_eq!(late.poll().unwrap(), None);
+}
+
+#[test]
+fn later_hardware_loss_is_reported_after_a_nonterminal_exception() {
+    let fixture = Fixture::new([]);
+    fixture.vm.loss.register_identity(42, [42; 16]).unwrap();
+    fixture.hardware.store(1, Ordering::Release);
+    assert!(fixture.vm.check().is_ok());
+    let mut subscriber = fixture.vm.subscribe_events().unwrap();
+    assert_eq!(
+        subscriber.poll().unwrap(),
+        Some(DeviceEvent::GpuHardwareException(GpuHardwareException {
+            endpoint_id: Some([42; 16]),
+            reset_type: 1,
+            memory_lost: false,
+            reset_cause: 1,
+        }))
+    );
+    assert_eq!(subscriber.poll().unwrap(), None);
+    assert!(!fixture.vm.has_latched_loss());
+    fixture.hardware.store(2, Ordering::Release);
+    assert_eq!(
+        fixture.vm.check().unwrap_err().kind(),
+        ErrorKind::DeviceLost
+    );
+    assert_eq!(
+        subscriber.poll().unwrap(),
+        Some(DeviceEvent::GpuHardwareException(GpuHardwareException {
+            endpoint_id: Some([42; 16]),
+            reset_type: 1,
+            memory_lost: true,
+            reset_cause: 1,
+        }))
+    );
+    assert_eq!(subscriber.poll().unwrap(), None);
+}
+
+#[test]
+fn failed_native_rearm_retries_without_replaying_the_record() {
+    let fixture = Fixture::new([]);
+    let mut subscriber = fixture.vm.subscribe_events().unwrap();
+    fixture
+        .hardware_reset_errno
+        .store(5, Ordering::Release);
+    fixture.hardware.store(1, Ordering::Release);
+    assert!(matches!(
+        subscriber.poll().unwrap(),
+        Some(DeviceEvent::GpuHardwareException(_))
+    ));
+    assert_eq!(subscriber.poll().unwrap(), None);
+    fixture.hardware.store(1, Ordering::Release);
+    assert!(matches!(
+        subscriber.poll().unwrap(),
+        Some(DeviceEvent::GpuHardwareException(_))
+    ));
+}
+
+#[test]
+fn memory_fault_identity_uses_the_reported_gpu_across_a_shared_connection() {
+    let fixture = Fixture::new([]);
+    fixture.vm.loss.register_identity(42, [42; 16]).unwrap();
+    fixture.vm.loss.register_identity(77, [77; 16]).unwrap();
+    fixture.fault_gpu_id.store(77, Ordering::Release);
+    fixture.lost.store(true, Ordering::Release);
+    let mut subscriber = fixture.vm.subscribe_events().unwrap();
+    let Some(DeviceEvent::GpuMemoryFault(fault)) = subscriber.poll().unwrap() else {
+        panic!("subscriber missed the second GPU's memory fault");
+    };
+    assert_eq!(fault.endpoint_id, Some([77; 16]));
+    assert!(fixture.vm.check().is_ok());
+}
+
+#[test]
+fn concurrent_subscribers_receive_the_same_manual_reset_event_once() {
+    let fixture = Fixture::new([]);
+    fixture.vm.loss.register_identity(42, [42; 16]).unwrap();
+    fixture.hardware.store(2, Ordering::Release);
+    std::thread::scope(|scope| {
+        let observers = (0..8)
+            .map(|_| {
+                let mut subscription = fixture.vm.subscribe_events().unwrap();
+                scope.spawn(move || {
+                    let Some(DeviceEvent::GpuHardwareException(exception)) =
+                        subscription.poll().unwrap()
+                    else {
+                        panic!("concurrent subscriber missed the hardware exception");
+                    };
+                    assert_eq!(exception.endpoint_id, Some([42; 16]));
+                    assert!(exception.memory_lost);
+                    assert_eq!(subscription.poll().unwrap(), None);
+                })
+            })
+            .collect::<Vec<_>>();
+        for observer in observers {
+            observer.join().unwrap();
+        }
+    });
+    assert_eq!(
+        fixture.vm.check().unwrap_err().kind(),
+        ErrorKind::DeviceLost
+    );
+}
+
+#[test]
+fn late_identity_registration_resolves_an_already_observed_source() {
+    let fixture = Fixture::new([]);
+    fixture.lost.store(true, Ordering::Release);
+    assert!(fixture.vm.check().is_ok());
+    fixture.vm.loss.register_identity(42, [42; 16]).unwrap();
+    let mut subscription = fixture.vm.subscribe_events().unwrap();
+    let Some(DeviceEvent::GpuMemoryFault(fault)) = subscription.poll().unwrap() else {
+        panic!("late subscriber missed the memory fault");
+    };
+    assert_eq!(fault.endpoint_id, Some([42; 16]));
+}
+
+#[test]
+fn terminal_hardware_loss_survives_a_second_event_poll_error() {
+    let fixture = Fixture::new([]);
+    fixture.hardware.store(2, Ordering::Release);
+    fixture.memory_wait_errno.store(5, Ordering::Release);
+    assert_eq!(
+        fixture.vm.check().unwrap_err().kind(),
+        ErrorKind::DeviceLost
+    );
+    let mut subscription = fixture.vm.subscribe_events().unwrap();
+    let Some(DeviceEvent::GpuHardwareException(exception)) = subscription.poll().unwrap() else {
+        panic!("hardware exception was lost after the memory poll failed");
+    };
+    assert!(exception.memory_lost);
+    assert_eq!(
+        subscription.poll().unwrap_err().native_error_code(),
+        Some(5)
+    );
+    fixture.memory_wait_errno.store(0, Ordering::Release);
+    assert_eq!(subscription.poll().unwrap(), None);
 }
 
 #[test]
@@ -2339,7 +2615,7 @@ fn instance_shutdown_quarantines_ambiguous_event_destroy_without_replaying_id() 
         memory_event_id: AtomicU32::new(20),
         hardware_destroy_uncertain: AtomicBool::new(false),
         memory_destroy_uncertain: AtomicBool::new(false),
-        memory_event_claimed: Mutex::new(false),
+        observed: Mutex::new(ObservedEvents::new(Allocator::default()).unwrap()),
         lost: AtomicBool::new(false),
     }));
     assert_eq!(

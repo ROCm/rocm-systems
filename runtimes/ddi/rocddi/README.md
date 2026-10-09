@@ -112,8 +112,9 @@ The core source is organized by ownership domain:
   `topology::platform::linux` carries KFD and DRM identities and procfs/sysfs
   host facts needed by Linux compatibility frontends;
 - `device.rs` owns explicitly activated endpoint state, core lifecycle checks,
-  and kind-neutral introspection. `gpu/` is the checked GPU capability view and
-  exposes GPU queues and profiling, with KFD events below `gpu::event::linux`;
+  kind-neutral introspection, and device-event subscriptions. `gpu/` is the
+  checked GPU capability view and exposes GPU queues and profiling.
+  Linux-specific signal events remain below `gpu::event::linux`;
 - `memory/` owns driver-generic allocation, address-reservation, and
   mapping owners. `memory::interop::linux` contains DMA-BUF, KFD IPC, KFD
   SVM, and AIS file-transfer contracts used with Linux APIs and other
@@ -123,9 +124,24 @@ The core source is organized by ownership domain:
   Linux KFD and DRM implementation
   lives in `driver/linux_kfd.rs` and `driver/linux_kfd/`. Its `operations.rs`
   implements portable capabilities; `interop.rs` provides Linux descriptor
-  helpers and KFD sharing and event operations. Native resource
+  helpers and KFD sharing operations. Native resource
   owners and low-level KFD and DRM calls remain in their corresponding Linux
   modules.
+
+Each activated KFD process connection owns one hardware-exception event and
+one memory-exception event. Device checks and `device::event` subscriptions use a
+single serialized observer for both events. After copying a native payload, the
+observer rearms its manual-reset event so later faults and resets can be
+reported. The DDI keeps unread records in a bounded buffer and retains the
+latest record of each exception kind for later subscribers. Each subscription
+has an independent cursor. If a subscriber falls behind enough to fill the
+buffer, native polling pauses until it reads or drops its backlog. A
+subscription retains the native event owner until it is dropped; the session
+releases that owner after all devices and subscriptions are gone. Hardware
+exceptions that report lost
+memory latch connection-wide `DeviceLost` for operations. Memory faults and
+hardware exceptions without lost memory remain notifications. Polling never
+invokes a frontend callback while holding the native observation lock.
 
 The [safety boundary and resource state guide](docs/safety.md) records the
 native reachability rules shared by the core and both adapters.

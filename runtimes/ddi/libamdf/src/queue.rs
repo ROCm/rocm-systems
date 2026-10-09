@@ -75,6 +75,7 @@ struct Queue {
     // These counters borrow the public device, which cannot be destroyed while
     // this queue is registered. No public device ownership is retained.
     device_queues: *const AtomicU64,
+    #[cfg(test)]
     device_reset_epoch: *const AtomicU64,
     _scratch_borrow: Option<memory::QueueScratchBorrow>,
     info: amdf_user_queue_info_t,
@@ -94,6 +95,21 @@ struct Mapping {
 }
 
 impl Queue {
+    fn observe_loss(&self) {
+        #[cfg(test)]
+        if matches!(self.native, NativeQueue::Fixture(_)) {
+            // The queue fixture has no activated native device.
+            // SAFETY: Its environment keeps this epoch live through the test.
+            instance::advance_reset_epoch(
+                unsafe { &*self.device_reset_epoch },
+                self.info.reset_epoch,
+            );
+            return;
+        }
+        // SAFETY: The registered queue borrows this live device.
+        unsafe { (*self.device).observe_loss(self.info.reset_epoch) };
+    }
+
     fn require_usable(&self) -> Result<(), u64> {
         if self.destroying.load(Ordering::Acquire) {
             Err(PRECONDITION)
@@ -118,11 +134,7 @@ impl Queue {
                 .terminal
                 .compare_exchange(0, encoded, Ordering::AcqRel, Ordering::Acquire);
             if lost {
-                // SAFETY: The registered queue borrows this still-live device.
-                instance::advance_reset_epoch(
-                    unsafe { &*self.device_reset_epoch },
-                    self.info.reset_epoch,
-                );
+                self.observe_loss();
             }
         }
         status
@@ -525,7 +537,8 @@ pub(crate) unsafe extern "C" fn create(
             allocator: instance.allocator,
             device: pointer.cast(),
             device_queues: &raw const device.queues,
-            device_reset_epoch: &raw const device.reset_epoch,
+            #[cfg(test)]
+            device_reset_epoch: &raw const *device.reset_epoch,
             _scratch_borrow: scratch_borrow,
             info: queue_info,
             host_mapping,

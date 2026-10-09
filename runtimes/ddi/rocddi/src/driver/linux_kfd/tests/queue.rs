@@ -178,17 +178,19 @@ impl Fixture {
                 let mut state = observed.lock().unwrap();
                 match call {
                     sys::Call::Wait(args, event) if event.event_id == 19 => {
-                        args.result = uapi::WAIT_TIMEOUT;
-                    }
-                    sys::Call::Wait(args, event) if event.event_id == 20 => {
                         if state.lost {
-                            event.payload[0] = u64::from_ne_bytes([0, 0, 0, 0, 1, 0, 0, 0]);
-                            event.payload[2] = 0x1234_5000;
-                            event.payload[3] = u64::from_ne_bytes([42, 0, 0, 0, 0, 0, 0, 0]);
+                            event.payload[0] = 42;
+                            event.payload[1] = 1;
                             args.result = uapi::WAIT_COMPLETE;
                         } else {
                             args.result = uapi::WAIT_TIMEOUT;
                         }
+                    }
+                    sys::Call::Wait(args, event) if event.event_id == 20 => {
+                        args.result = uapi::WAIT_TIMEOUT;
+                    }
+                    sys::Call::ResetEvent(args) if args.event_id == 19 => {
+                        state.lost = false;
                     }
                     sys::Call::DestroyEvent(_) => {}
                     sys::Call::SetScratchBackingVa(args) => {

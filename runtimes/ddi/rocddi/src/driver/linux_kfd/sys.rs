@@ -87,6 +87,7 @@ pub(super) enum Call<'a> {
     Ais(&'a mut uapi::AisArgs),
     CreateEvent(&'a mut uapi::CreateEvent),
     DestroyEvent(&'a mut uapi::DestroyEvent),
+    ResetEvent(&'a mut uapi::ResetEvent),
     Wait(&'a mut uapi::WaitEvents, &'a mut uapi::EventData),
     SetScratchBackingVa(&'a mut uapi::SetScratchBackingVa),
     SetTrapHandler(&'a mut uapi::SetTrapHandler),
@@ -261,6 +262,7 @@ impl Kfd {
             Call::Ais(args) => (uapi::AIS, ptr::from_mut(*args).cast()),
             Call::CreateEvent(args) => (uapi::CREATE_EVENT, ptr::from_mut(*args).cast()),
             Call::DestroyEvent(args) => (uapi::DESTROY_EVENT, ptr::from_mut(*args).cast()),
+            Call::ResetEvent(args) => (uapi::RESET_EVENT, ptr::from_mut(*args).cast()),
             Call::SetScratchBackingVa(args) => {
                 (uapi::SET_SCRATCH_BACKING_VA, ptr::from_mut(*args).cast())
             }
@@ -912,8 +914,13 @@ impl Kfd {
         }))
     }
 
-    /// Exception events are created without auto-reset. Concurrent zero-timeout
-    /// observers therefore cannot consume a terminal notification.
+    pub(super) fn reset_event(&self, event_id: u32) -> io::Result<()> {
+        self.call(Call::ResetEvent(&mut uapi::ResetEvent { event_id, pad: 0 }))
+    }
+
+    /// Exception events are created without auto-reset. The connection owner
+    /// snapshots each payload, then explicitly resets the native event while
+    /// serializing all observers of that connection.
     fn poll_exception(&self, event_id: u32) -> io::Result<Option<uapi::EventData>> {
         let mut event = uapi::EventData {
             event_id,
@@ -931,9 +938,18 @@ impl Kfd {
         }
     }
 
-    pub(super) fn hardware_memory_lost(&self, event_id: u32) -> io::Result<bool> {
-        self.poll_exception(event_id)
-            .map(|event| event.is_some_and(|event| payload_u32(&event, 2) != 0))
+    pub(super) fn hardware_exception(
+        &self,
+        event_id: u32,
+    ) -> io::Result<Option<HardwareException>> {
+        self.poll_exception(event_id).map(|event| {
+            event.map(|event| HardwareException {
+                gpu_id: payload_u32(&event, 0),
+                reset_type: payload_u32(&event, 1),
+                memory_lost: payload_u32(&event, 2) != 0,
+                reset_cause: payload_u32(&event, 3),
+            })
+        })
     }
 
     pub(super) fn memory_exception(&self, event_id: u32) -> io::Result<Option<MemoryException>> {
@@ -949,6 +965,15 @@ impl Kfd {
             })
         })
     }
+}
+
+/// Decoded hardware exception reported by KFD.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct HardwareException {
+    pub(super) gpu_id: u32,
+    pub(super) reset_type: u32,
+    pub(super) memory_lost: bool,
+    pub(super) reset_cause: u32,
 }
 
 /// Decoded memory-exception information returned by KFD event polling.

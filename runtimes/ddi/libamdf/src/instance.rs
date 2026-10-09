@@ -11,10 +11,13 @@ use crate::generated::amdf::*;
 use crate::memory::Scope;
 use crate::platform;
 use crate::support::*;
-use rocddi::host_storage::{Allocator, Buffer, Owned};
+use rocddi::device::event::{DeviceEvent, DeviceEventSubscription, subscribe};
+use rocddi::host_storage::{Allocator, Buffer, Owned, Shared};
 use rocddi::{device as native_device, memory as native_memory, session, topology};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 const INITIAL_RESET_EPOCH: u64 = 1;
 
@@ -30,6 +33,8 @@ pub(crate) struct Instance {
     pub closing: bool,
     pub ids: AtomicU64,
     pub host_backing_head: Mutex<usize>,
+    /// One observer per activated endpoint, shared by its device handles.
+    event_observers: Mutex<Buffer<ObserverRecord>>,
     // Cached host facts keep profile queries independent of native calls.
     pub host_page_size: u64,
     pub host_cache_line: Option<u32>,
@@ -46,14 +51,151 @@ pub(crate) struct Endpoint {
 
 /// Explicitly activated device handle borrowing its endpoint.
 ///
-/// Queue ownership is counted for BUSY destruction, while `reset_epoch`
-/// monotonically records terminal loss reported by operations on this device.
+/// Queue ownership is counted for BUSY destruction. The endpoint observer
+/// advances this handle's reset epoch on native exception notifications;
+/// operation errors also advance it when they observe terminal loss first.
 pub(crate) struct Device {
     pub endpoint: *mut Endpoint,
     pub native: native_device::Device,
     pub id: amdf_device_id_t,
     pub queues: AtomicU64,
-    pub reset_epoch: AtomicU64,
+    pub reset_epoch: Shared<AtomicU64>,
+    event_observer: Shared<EventObserver>,
+}
+
+/// Instance registry entry for one endpoint's shared exception observer.
+struct ObserverRecord {
+    endpoint_id: [u8; 16],
+    observer: Shared<EventObserver>,
+}
+
+/// Polls one endpoint's native subscription and fans reset evidence out to
+/// every public device handle created from that endpoint.
+struct EventObserver {
+    endpoint_id: [u8; 16],
+    state: Mutex<ObserverState>,
+    stop: AtomicBool,
+    worker: Mutex<Option<JoinHandle<()>>>,
+}
+
+/// Reset generations and deduplication state serialized with handle registration.
+struct ObserverState {
+    generation: u64,
+    epochs: Buffer<Shared<AtomicU64>>,
+    /// A connection-wide terminal loss cannot become valid again.
+    terminal_loss_observed: bool,
+    /// A queue reported loss before its corresponding exception was polled.
+    operation_reset_pending: bool,
+}
+
+impl ObserverState {
+    fn new(allocator: Allocator) -> Self {
+        Self {
+            generation: INITIAL_RESET_EPOCH,
+            epochs: Buffer::new(allocator),
+            terminal_loss_observed: false,
+            operation_reset_pending: false,
+        }
+    }
+
+    fn latest_epoch(&self) -> u64 {
+        self.epochs
+            .iter()
+            .map(|epoch| epoch.load(Ordering::Acquire))
+            .max()
+            .unwrap_or(self.generation)
+            .max(self.generation)
+    }
+
+    fn publish_epoch(&self, generation: u64) {
+        for epoch in &self.epochs {
+            epoch.fetch_max(generation, Ordering::AcqRel);
+        }
+    }
+}
+
+impl EventObserver {
+    fn register_epoch(&self, epoch: Shared<AtomicU64>) -> Result<(), u64> {
+        let mut state = self.state.lock().map_err(|_| INTERNAL)?;
+        // Holding the epoch list lock pairs registration with event delivery:
+        // a newly activated handle observes delivered events and any terminal
+        // operation report that reached another handle first.
+        epoch.fetch_max(state.latest_epoch(), Ordering::AcqRel);
+        state.epochs.try_push(epoch).map_err(|_| EXHAUSTED)
+    }
+
+    fn unregister_epoch(&self, epoch: &Shared<AtomicU64>) -> Result<bool, u64> {
+        let mut state = self.state.lock().map_err(|_| INTERNAL)?;
+        let index = state
+            .epochs
+            .iter()
+            .position(|candidate| Shared::ptr_eq(candidate, epoch))
+            .ok_or(INTERNAL)?;
+        let last = state.epochs.len() - 1;
+        state.epochs.as_mut_slice().swap(index, last);
+        let _ = state.epochs.pop();
+        Ok(state.epochs.is_empty())
+    }
+
+    fn record_event(&self, event: DeviceEvent) -> Result<(), u64> {
+        if event_resets_device(event, self.endpoint_id) {
+            let mut state = self.state.lock().map_err(|_| INTERNAL)?;
+            // An operation can report loss before this notification is polled.
+            // Adopt its advanced epoch instead of counting the same reset twice.
+            let generation = state.latest_epoch().max(state.generation.saturating_add(1));
+            state.generation = generation;
+            state.publish_epoch(generation);
+            state.operation_reset_pending = false;
+            if matches!(event, DeviceEvent::GpuHardwareException(exception) if exception.memory_lost)
+            {
+                state.terminal_loss_observed = true;
+            }
+        }
+        Ok(())
+    }
+
+    /// Counts an operation's loss once. A queue supplies its creation epoch;
+    /// device-level terminal loss reads the current epoch under this lock.
+    fn record_operation_loss(&self, epoch: &AtomicU64, resource_epoch: Option<u64>) {
+        // Only epoch atomics and scalar state change while this lock is held.
+        // Recovery from poison still invalidates resources on terminal loss.
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.terminal_loss_observed {
+            return;
+        }
+        let terminal = resource_epoch.is_none();
+        if state.operation_reset_pending {
+            if terminal {
+                state.publish_epoch(state.latest_epoch());
+            }
+            state.terminal_loss_observed = terminal;
+            return;
+        }
+        let previous = epoch.load(Ordering::Acquire);
+        advance_reset_epoch(epoch, resource_epoch.unwrap_or(previous));
+        if epoch.load(Ordering::Acquire) != previous {
+            if terminal {
+                state.publish_epoch(epoch.load(Ordering::Acquire));
+            }
+            state.operation_reset_pending = !terminal;
+            state.terminal_loss_observed = terminal;
+        }
+    }
+
+    fn stop_worker(&self) {
+        self.stop.store(true, Ordering::Release);
+        // A poisoned worker-slot lock does not invalidate the JoinHandle.
+        let mut worker = self
+            .worker
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(worker) = worker.take() {
+            let _ = worker.join();
+        }
+    }
 }
 
 pub(crate) fn advance_reset_epoch(epoch: &AtomicU64, resource_epoch: u64) {
@@ -62,7 +204,8 @@ pub(crate) fn advance_reset_epoch(epoch: &AtomicU64, resource_epoch: u64) {
 
 impl Device {
     pub(crate) fn observe_loss(&self, resource_epoch: u64) {
-        advance_reset_epoch(&self.reset_epoch, resource_epoch);
+        self.event_observer
+            .record_operation_loss(&self.reset_epoch, Some(resource_epoch));
     }
 
     pub(crate) fn current_reset_epoch(&self) -> u64 {
@@ -73,9 +216,121 @@ impl Device {
     /// converting its error to an AMDF status.
     pub(crate) fn native_error_status(&self, error: &rocddi::Error) -> u64 {
         if error.kind() == rocddi::ErrorKind::DeviceLost {
-            self.observe_loss(INITIAL_RESET_EPOCH);
+            self.event_observer
+                .record_operation_loss(&self.reset_epoch, None);
         }
         native(error)
+    }
+}
+
+/// Applies AMDF reset-epoch policy to events from the shared DDI observer.
+///
+/// The worker owns only allocator-backed atomics and its subscription. Device
+/// destruction joins it before releasing either the public handle or native
+/// connection, so a notification cannot access freed frontend state.
+fn device_event_worker(mut subscription: DeviceEventSubscription, observer: &EventObserver) {
+    while !observer.stop.load(Ordering::Acquire) {
+        match subscription.poll() {
+            Ok(Some(event)) => {
+                if observer.record_event(event).is_err() {
+                    return;
+                }
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(1)),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    rocddi::ErrorKind::Driver | rocddi::ErrorKind::Busy
+                ) =>
+            {
+                thread::sleep(Duration::from_millis(1));
+            }
+            Err(_) => return,
+        }
+    }
+}
+
+/// Registers a public handle with the one observer for its endpoint. Native
+/// subscription and thread creation occur only for the first handle.
+fn register_event_observer(
+    instance: &Instance,
+    native: &native_device::Device,
+    endpoint_id: [u8; 16],
+    epoch: Shared<AtomicU64>,
+) -> Result<Shared<EventObserver>, u64> {
+    let mut observers = instance.event_observers.lock().map_err(|_| INTERNAL)?;
+    if let Some(record) = observers
+        .iter()
+        .find(|record| record.endpoint_id == endpoint_id)
+    {
+        record.observer.register_epoch(epoch)?;
+        return Ok(record.observer.clone());
+    }
+
+    observers.try_reserve(1).map_err(|_| EXHAUSTED)?;
+    let subscription = subscribe(native).map_err(|error| crate::support::native(&error))?;
+    let observer = Shared::new(
+        EventObserver {
+            endpoint_id,
+            state: Mutex::new(ObserverState::new(instance.allocator)),
+            stop: AtomicBool::new(false),
+            worker: Mutex::new(None),
+        },
+        instance.allocator,
+    )
+    .map_err(|_| EXHAUSTED)?;
+    observer.register_epoch(epoch)?;
+    observers
+        .try_push(ObserverRecord {
+            endpoint_id,
+            observer: observer.clone(),
+        })
+        .map_err(|_| EXHAUSTED)?;
+    let worker_observer = observer.clone();
+    let worker = thread::Builder::new()
+        .name("amdf-endpoint-events".into())
+        .spawn(move || device_event_worker(subscription, &worker_observer));
+    let Ok(worker) = worker else {
+        let _ = observers.pop();
+        return Err(EXHAUSTED);
+    };
+    *observer
+        .worker
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(worker);
+    Ok(observer)
+}
+
+/// Removes a handle's epoch and joins the worker when it was the last handle
+/// for that endpoint. The caller retains the handle until this succeeds.
+fn unregister_event_observer(device: &Device) -> Result<(), u64> {
+    // SAFETY: A live device borrows its live endpoint and instance.
+    let instance = unsafe { &*(*device.endpoint).instance };
+    let mut observers = instance.event_observers.lock().map_err(|_| INTERNAL)?;
+    let index = observers
+        .iter()
+        .position(|record| Shared::ptr_eq(&record.observer, &device.event_observer))
+        .ok_or(INTERNAL)?;
+    if !device
+        .event_observer
+        .unregister_epoch(&device.reset_epoch)?
+    {
+        return Ok(());
+    }
+    device.event_observer.stop_worker();
+    let last = observers.len() - 1;
+    observers.as_mut_slice().swap(index, last);
+    let _ = observers.pop();
+    Ok(())
+}
+
+/// A VM fault reports failed work; only reset evidence invalidates this epoch.
+pub(crate) fn event_resets_device(event: DeviceEvent, endpoint_id: [u8; 16]) -> bool {
+    match event {
+        DeviceEvent::GpuMemoryFault(_) => false,
+        DeviceEvent::GpuHardwareException(exception) => {
+            exception.memory_lost || exception.endpoint_id == Some(endpoint_id)
+        }
     }
 }
 
@@ -351,6 +606,7 @@ pub(crate) unsafe extern "C" fn create(
             closing: false,
             ids: AtomicU64::new(1),
             host_backing_head: Mutex::new(0),
+            event_observers: Mutex::new(Buffer::new(allocator)),
             scope: Scope {
                 instance: std::ptr::null_mut(),
                 endpoint: std::ptr::null_mut(),
@@ -581,6 +837,8 @@ pub(crate) unsafe extern "C" fn device_create(
         supported_endpoint(endpoint)?;
         let instance = &*endpoint.instance;
         let slot = Owned::<Device>::try_new_uninit(instance.allocator).map_err(|_| EXHAUSTED)?;
+        let reset_epoch = Shared::new(AtomicU64::new(INITIAL_RESET_EPOCH), instance.allocator)
+            .map_err(|_| EXHAUSTED)?;
         let id = next_id(&instance.ids)?;
         register(&endpoint.children)?;
         let result = instance.native.activate(&endpoint.native);
@@ -591,6 +849,18 @@ pub(crate) unsafe extern "C" fn device_create(
                 return Err(crate::support::native(&error));
             }
         };
+        let event_observer = match register_event_observer(
+            instance,
+            &native,
+            endpoint.native.id,
+            reset_epoch.clone(),
+        ) {
+            Ok(observer) => observer,
+            Err(status) => {
+                unregister(&endpoint.children);
+                return Err(status);
+            }
+        };
         let owner = slot.write(Device {
             endpoint: pointer.cast(),
             native,
@@ -598,7 +868,8 @@ pub(crate) unsafe extern "C" fn device_create(
                 words: [endpoint.instance as u64, id],
             },
             queues: AtomicU64::new(0),
-            reset_epoch: AtomicU64::new(INITIAL_RESET_EPOCH),
+            reset_epoch,
+            event_observer,
         });
         out.write(owner.into_raw().cast());
         Ok(())
@@ -629,12 +900,128 @@ pub(crate) unsafe extern "C" fn device_info(
 
 pub(crate) unsafe extern "C" fn device_destroy(pointer: *mut amdf_device_t) -> u64 {
     crate::support::boundary(|| unsafe {
-        let device = object(pointer.cast::<Device>())?;
+        let device = exclusive(pointer.cast::<Device>())?;
         if device.queues.load(Ordering::Acquire) != 0 {
             return Err(BUSY);
         }
+        unregister_event_observer(device)?;
         unregister(&(*device.endpoint).children);
         drop(Owned::from_raw(pointer.cast::<Device>()));
         Ok(())
     })
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod observer_tests {
+    use super::*;
+    use rocddi::device::event::GpuHardwareException;
+
+    fn observer(allocator: Allocator, endpoint_id: [u8; 16]) -> EventObserver {
+        EventObserver {
+            endpoint_id,
+            state: Mutex::new(ObserverState::new(allocator)),
+            stop: AtomicBool::new(false),
+            worker: Mutex::new(None),
+        }
+    }
+
+    fn reset(endpoint_id: [u8; 16], memory_lost: bool) -> DeviceEvent {
+        DeviceEvent::GpuHardwareException(GpuHardwareException {
+            endpoint_id: Some(endpoint_id),
+            reset_type: 0,
+            memory_lost,
+            reset_cause: 0,
+        })
+    }
+
+    #[test]
+    fn shared_observer_fans_out_each_reset_and_initializes_late_handles() {
+        let allocator = Allocator::default();
+        let endpoint_id = [7; 16];
+        let observer = observer(allocator, endpoint_id);
+        let first = Shared::new(AtomicU64::new(INITIAL_RESET_EPOCH), allocator).unwrap();
+        let second = Shared::new(AtomicU64::new(INITIAL_RESET_EPOCH), allocator).unwrap();
+        observer.register_epoch(first.clone()).unwrap();
+        observer.register_epoch(second.clone()).unwrap();
+        let reset = reset(endpoint_id, false);
+
+        observer.record_event(reset).unwrap();
+        assert_eq!(first.load(Ordering::Acquire), 2);
+        assert_eq!(second.load(Ordering::Acquire), 2);
+        assert!(!observer.unregister_epoch(&first).unwrap());
+        observer.record_event(reset).unwrap();
+        assert_eq!(first.load(Ordering::Acquire), 2);
+        assert_eq!(second.load(Ordering::Acquire), 3);
+
+        // The operation error and its later event describe one reset.
+        observer.record_operation_loss(&second, Some(3));
+        observer.record_event(reset).unwrap();
+        assert_eq!(second.load(Ordering::Acquire), 4);
+
+        let late = Shared::new(AtomicU64::new(INITIAL_RESET_EPOCH), allocator).unwrap();
+        observer.register_epoch(late.clone()).unwrap();
+        assert_eq!(late.load(Ordering::Acquire), 4);
+        observer.record_event(reset).unwrap();
+        assert_eq!(second.load(Ordering::Acquire), 5);
+        assert_eq!(late.load(Ordering::Acquire), 5);
+    }
+
+    #[test]
+    fn terminal_operation_loss_advances_after_prior_reset_and_deduplicates_its_event() {
+        let allocator = Allocator::default();
+        let endpoint_id = [7; 16];
+        let observer = observer(allocator, endpoint_id);
+        let epoch = Shared::new(AtomicU64::new(INITIAL_RESET_EPOCH), allocator).unwrap();
+        let peer = Shared::new(AtomicU64::new(INITIAL_RESET_EPOCH), allocator).unwrap();
+        observer.register_epoch(epoch.clone()).unwrap();
+        observer.register_epoch(peer.clone()).unwrap();
+        observer.record_event(reset(endpoint_id, false)).unwrap();
+        observer.record_event(reset(endpoint_id, false)).unwrap();
+        assert_eq!(epoch.load(Ordering::Acquire), 3);
+
+        observer.record_operation_loss(&epoch, None);
+        observer.record_operation_loss(&epoch, None);
+        assert_eq!(epoch.load(Ordering::Acquire), 4);
+        assert_eq!(peer.load(Ordering::Acquire), 4);
+        let late = Shared::new(AtomicU64::new(INITIAL_RESET_EPOCH), allocator).unwrap();
+        observer.register_epoch(late.clone()).unwrap();
+        assert_eq!(late.load(Ordering::Acquire), 4);
+        observer.record_event(reset(endpoint_id, true)).unwrap();
+        assert_eq!(epoch.load(Ordering::Acquire), 4);
+        assert_eq!(late.load(Ordering::Acquire), 4);
+    }
+
+    #[test]
+    fn terminal_event_before_operation_does_not_count_loss_twice() {
+        let allocator = Allocator::default();
+        let endpoint_id = [7; 16];
+        let observer = observer(allocator, endpoint_id);
+        let epoch = Shared::new(AtomicU64::new(INITIAL_RESET_EPOCH), allocator).unwrap();
+        observer.register_epoch(epoch.clone()).unwrap();
+        observer.record_event(reset(endpoint_id, true)).unwrap();
+        observer.record_operation_loss(&epoch, None);
+        assert_eq!(epoch.load(Ordering::Acquire), 2);
+    }
+
+    #[test]
+    fn queue_loss_and_later_terminal_report_share_one_generation() {
+        let allocator = Allocator::default();
+        let endpoint_id = [7; 16];
+        let observer = observer(allocator, endpoint_id);
+        let epoch = Shared::new(AtomicU64::new(INITIAL_RESET_EPOCH), allocator).unwrap();
+        observer.register_epoch(epoch.clone()).unwrap();
+
+        observer.record_operation_loss(&epoch, Some(1));
+        observer.record_operation_loss(&epoch, None);
+        assert_eq!(epoch.load(Ordering::Acquire), 2);
+        observer.record_event(reset(endpoint_id, true)).unwrap();
+        observer.record_operation_loss(&epoch, None);
+        assert_eq!(epoch.load(Ordering::Acquire), 2);
+        // The terminal latch remains set even if KFD later reports another
+        // hardware notification without a lost-memory bit.
+        observer.record_event(reset(endpoint_id, false)).unwrap();
+        observer.record_operation_loss(&epoch, None);
+        assert_eq!(epoch.load(Ordering::Acquire), 3);
+    }
 }

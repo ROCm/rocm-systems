@@ -274,12 +274,4 @@ impl LinuxKfdDriver {
     pub(crate) fn destroy_kfd_signal_event(event: &mut KfdSignalEvent) -> Result<(), Error> {
         event.destroy()
     }
-
-    pub(crate) fn poll_kfd_memory_fault(
-        &self,
-        device: &DeviceState,
-    ) -> Result<Option<GpuMemoryFault>, Error> {
-        self.ensure_open()?;
-        device.vm.poll_memory_fault()
-    }
 }

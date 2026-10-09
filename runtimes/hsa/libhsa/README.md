@@ -75,7 +75,12 @@ the queue error arrives later. System event callbacks run after a bounded wait
 for queue identification. Handlers can query per-queue fault status, address,
 and reason; memory faults do not invoke queue error callbacks when a system
 event handler is registered. Without one, the queue error callback receives
-the fault status.
+the fault status. The same system-event worker also delivers GPU hardware
+exceptions with the AMD extension's reset cause and agent identity. The DDI
+retains native exception records, so a system handler registered after a
+device operation observed an exception receives that record. HSA handlers run
+outside the DDI and runtime locks; an unhandled memory fault or hardware
+exception terminates the process.
 
 On Linux, the workspace-root shared package builds
 `libhsa-runtime64.so.1` with `ROCR_1` default versions on its public HSA

@@ -591,11 +591,11 @@ fn malformed_prefixes_and_aperture_counts_are_rejected() {
 }
 
 #[test]
-fn hardware_loss_poll_uses_persistent_events_and_decodes_memory_loss() {
-    for (wait_result, memory_lost, expected) in [
-        (uapi::WAIT_TIMEOUT, 0_u32, false),
-        (uapi::WAIT_COMPLETE, 0, false),
-        (uapi::WAIT_COMPLETE, 1, true),
+fn hardware_exception_poll_uses_persistent_events_and_decodes_payload() {
+    for (wait_result, memory_lost) in [
+        (uapi::WAIT_TIMEOUT, 0_u32),
+        (uapi::WAIT_COMPLETE, 0),
+        (uapi::WAIT_COMPLETE, 1),
     ] {
         let kfd = endpoint(Arc::new(move |call| {
             match call {
@@ -609,9 +609,8 @@ fn hardware_loss_poll_uses_persistent_events_and_decodes_memory_loss() {
                     assert_eq!(args.count, 1);
                     assert_eq!(args.timeout, 0);
                     assert_eq!(event.event_id, 19);
-                    let mut bytes = [0; 8];
-                    bytes[..4].copy_from_slice(&memory_lost.to_ne_bytes());
-                    event.payload[1] = u64::from_ne_bytes(bytes);
+                    event.payload[0] = u64::from_ne_bytes([42, 0, 0, 0, 1, 0, 0, 0]);
+                    event.payload[1] = u64::from(memory_lost) | (1_u64 << 32);
                     args.result = wait_result;
                 }
                 _ => panic!("unexpected event call"),
@@ -620,7 +619,15 @@ fn hardware_loss_poll_uses_persistent_events_and_decodes_memory_loss() {
         }));
         kfd.create_exception_event(uapi::HW_EXCEPTION, &mut uapi::CreateEvent::default())
             .unwrap();
-        assert_eq!(kfd.hardware_memory_lost(19).unwrap(), expected);
+        assert_eq!(
+            kfd.hardware_exception(19).unwrap(),
+            (wait_result == uapi::WAIT_COMPLETE).then_some(HardwareException {
+                gpu_id: 42,
+                reset_type: 1,
+                memory_lost: memory_lost != 0,
+                reset_cause: 1,
+            })
+        );
     }
 }
 
@@ -662,6 +669,18 @@ fn memory_exception_poll_decodes_the_complete_uapi_payload() {
             error_type: 3,
         })
     );
+}
+
+#[test]
+fn exception_reset_targets_the_existing_native_event() {
+    let kfd = endpoint(Arc::new(|call| {
+        let Call::ResetEvent(args) = call else {
+            panic!("unexpected event call");
+        };
+        assert_eq!((args.event_id, args.pad), (19, 0));
+        Ok(())
+    }));
+    kfd.reset_event(19).unwrap();
 }
 
 #[test]

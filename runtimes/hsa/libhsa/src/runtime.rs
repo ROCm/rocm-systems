@@ -23,8 +23,11 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use crate::platform::event::{GpuMemoryFault, SignalEvent, SignalEventPage, poll_memory_fault};
+use crate::platform::event::{SignalEvent, SignalEventPage};
 use rocddi::device::Device;
+use rocddi::device::event::{
+    DeviceEvent, DeviceEventSubscription, GpuHardwareException, GpuMemoryFault, subscribe,
+};
 use rocddi::memory::Allocation;
 use rocddi::session::{DriverContextLifetime, Session};
 use rocddi::topology::{Endpoint, GpuInfo};
@@ -273,13 +276,27 @@ fn memory_fault_event(agent: HsaAgent, fault: GpuMemoryFault) -> HsaAmdEvent {
     }
 }
 
-fn system_event_worker(device: &Device, stop: &AtomicBool) {
-    let Ok(gpu_device) = device.gpu() else {
-        return;
+fn hardware_exception_event(agent: HsaAgent, exception: GpuHardwareException) -> HsaAmdEvent {
+    let cause = if exception.reset_cause == 1 {
+        AMD_HW_EXCEPTION_CAUSE_ECC
+    } else {
+        AMD_HW_EXCEPTION_CAUSE_GPU_HANG
     };
+    HsaAmdEvent {
+        event_type: AMD_GPU_HW_EXCEPTION_EVENT,
+        // The current HSA ABI exposes only the OTHER reset-type flag.
+        payload: [
+            agent.handle,
+            u64::from(AMD_HW_EXCEPTION_RESET_TYPE_OTHER) | (u64::from(cause) << 32),
+            0,
+        ],
+    }
+}
+
+fn system_event_worker(mut subscription: DeviceEventSubscription, stop: &AtomicBool) {
     while !stop.load(Ordering::Acquire) {
-        match poll_memory_fault(gpu_device) {
-            Ok(Some(fault)) => {
+        match subscription.poll() {
+            Ok(Some(DeviceEvent::GpuMemoryFault(fault))) => {
                 let notification = {
                     let Ok(mut guard) = lock() else {
                         return;
@@ -287,10 +304,12 @@ fn system_event_worker(device: &Device, stop: &AtomicBool) {
                     let Some(runtime) = guard.as_mut() else {
                         return;
                     };
-                    let Some(index) = runtime.gpus.iter().position(|gpu| {
-                        crate::platform::fault_matches_endpoint(&gpu.endpoint, &fault)
-                    }) else {
-                        return;
+                    let Some(index) = runtime
+                        .gpus
+                        .iter()
+                        .position(|gpu| Some(gpu.endpoint.id) == fault.endpoint_id)
+                    else {
+                        continue;
                     };
                     let agent = HsaAgent {
                         handle: GPU_AGENT_BASE + index as u64,
@@ -334,9 +353,47 @@ fn system_event_worker(device: &Device, stop: &AtomicBool) {
                 if !handled {
                     std::process::abort();
                 }
-                return;
+            }
+            Ok(Some(DeviceEvent::GpuHardwareException(exception))) => {
+                let notification = {
+                    let Ok(guard) = lock() else {
+                        return;
+                    };
+                    let Some(runtime) = guard.as_ref() else {
+                        return;
+                    };
+                    let Some(index) = runtime
+                        .gpus
+                        .iter()
+                        .position(|gpu| Some(gpu.endpoint.id) == exception.endpoint_id)
+                    else {
+                        continue;
+                    };
+                    let agent = HsaAgent {
+                        handle: GPU_AGENT_BASE + index as u64,
+                    };
+                    (
+                        hardware_exception_event(agent, exception),
+                        runtime.system_event_handlers.clone(),
+                    )
+                };
+                let handled = notify_system_event(&notification.1, &notification.0, Some(stop));
+                if stop.load(Ordering::Acquire) {
+                    return;
+                }
+                if !handled {
+                    std::process::abort();
+                }
             }
             Ok(None) => thread::sleep(Duration::from_micros(20)),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    rocddi::ErrorKind::Driver | rocddi::ErrorKind::Busy
+                ) =>
+            {
+                thread::sleep(Duration::from_millis(1));
+            }
             Err(_) => return,
         }
     }
@@ -836,10 +893,14 @@ impl Runtime {
         let Some(device) = self.gpus.first().map(|gpu| gpu.device.clone()) else {
             return OUT_OF_RESOURCES;
         };
+        let subscription = match subscribe(&device) {
+            Ok(subscription) => subscription,
+            Err(_) => return OUT_OF_RESOURCES,
+        };
         let stop = self.stop_workers.clone();
         let worker = match thread::Builder::new()
             .name("rocddi-system-events".into())
-            .spawn(move || system_event_worker(&device, &stop))
+            .spawn(move || system_event_worker(subscription, &stop))
         {
             Ok(worker) => worker,
             Err(_) => return OUT_OF_RESOURCES,
@@ -1524,7 +1585,7 @@ mod tests {
             let event = memory_fault_event(
                 agent,
                 GpuMemoryFault {
-                    kfd_gpu_id: 42,
+                    endpoint_id: Some([42; 16]),
                     virtual_address: 0x5678_9000,
                     page_not_present: true,
                     read_only: true,
@@ -1546,6 +1607,32 @@ mod tests {
                         | extra_reason
                 )
             );
+        }
+    }
+
+    #[test]
+    fn hardware_exception_events_match_the_amd_extension_layout() {
+        let agent = HsaAgent { handle: 0x1234 };
+        for (native_cause, expected_cause) in [
+            (0, AMD_HW_EXCEPTION_CAUSE_GPU_HANG),
+            (1, AMD_HW_EXCEPTION_CAUSE_ECC),
+        ] {
+            let event = hardware_exception_event(
+                agent,
+                GpuHardwareException {
+                    endpoint_id: Some([42; 16]),
+                    reset_type: 0,
+                    memory_lost: false,
+                    reset_cause: native_cause,
+                },
+            );
+            assert_eq!(event.event_type, AMD_GPU_HW_EXCEPTION_EVENT);
+            assert_eq!(event.payload[0], agent.handle);
+            assert_eq!(
+                event.payload[1],
+                u64::from(AMD_HW_EXCEPTION_RESET_TYPE_OTHER) | (u64::from(expected_cause) << 32)
+            );
+            assert_eq!(event.payload[2], 0);
         }
     }
 

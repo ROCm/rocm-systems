@@ -28,6 +28,7 @@ pub(super) const GET_AVAILABLE_MEMORY: u64 = request(3, 0x23, 16);
 pub(super) const UPDATE_QUEUE: u64 = request(1, 0x07, 24);
 pub(super) const CREATE_EVENT: u64 = request(3, 0x08, 32);
 pub(super) const DESTROY_EVENT: u64 = request(1, 0x09, 8);
+pub(super) const RESET_EVENT: u64 = request(1, 0x0b, 8);
 pub(super) const WAIT_EVENTS: u64 = request(3, 0x0c, 24);
 pub(super) const SET_SCRATCH_BACKING_VA: u64 = request(3, 0x11, 16);
 pub(super) const SET_TRAP_HANDLER: u64 = request(1, 0x13, 24);
@@ -426,6 +427,13 @@ pub(super) struct DestroyEvent {
     pub pad: u32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct ResetEvent {
+    pub event_id: u32,
+    pub pad: u32,
+}
+
 /// The kernel's event union occupies 32 bytes and has eight-byte alignment.
 /// `sys` decodes the hardware- and memory-exception layouts only after a
 /// successful wait on an event created with the matching type.
@@ -474,6 +482,8 @@ const _: () = {
     assert!(offset_of!(CreateQueue, context_address) == 72);
     assert!(offset_of!(CreateQueue, sdma_engine_id) == 88);
     assert!(size_of::<DestroyQueue>() == 8);
+    assert!(size_of::<ResetEvent>() == 8);
+    assert!(RESET_EVENT == 0x4008_4b0b);
     assert!(size_of::<UpdateQueue>() == 24);
     assert!(offset_of!(UpdateQueue, queue_id) == 8);
     assert!(size_of::<SetCuMask>() == 16);

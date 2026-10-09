@@ -110,8 +110,7 @@ pub mod event {
     #[cfg(target_os = "linux")]
     pub mod linux {
         pub use crate::event::{
-            GpuMemoryFault, SignalEvent, SignalEventInfo, SignalEventPage, create_signal_event,
-            poll_memory_fault,
+            SignalEvent, SignalEventInfo, SignalEventPage, create_signal_event,
         };
     }
 }

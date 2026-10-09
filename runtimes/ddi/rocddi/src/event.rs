@@ -1,12 +1,15 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Linux KFD GPU notification events shared with API frontends.
+//! Device notifications shared with API frontends.
 //!
-//! This implementation module is re-exported only through
-//! `gpu::event::linux`. Its event identifiers and mailbox slots are Linux KFD
-//! transport details, not requirements of the platform-neutral device model.
+//! System events describe observed device failures. Each subscription has its
+//! own delivery cursor; the driver observes each native notification once and
+//! retains unread records plus the latest details of each exception kind for
+//! subscribers that register after an operation observed it.
+//! Frontends own callback dispatch, error policy, and any worker threads.
 
+use crate::device::Device;
 use crate::driver;
 use crate::gpu::GpuDevice;
 use crate::host_storage::Owned;
@@ -14,16 +17,15 @@ use crate::memory::Allocation;
 use crate::queue::QueueErrorEvent;
 use crate::{Error, ErrorKind};
 
-/// One process-level GPU virtual-memory fault reported by the native driver.
-#[doc(hidden)]
+/// One process-level GPU virtual-memory fault reported by a driver.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(
     clippy::struct_excessive_bools,
     reason = "independent KFD memory-fault cause bits mirror the native event payload"
 )]
 pub struct GpuMemoryFault {
-    /// KFD's per-boot identifier for the faulting GPU.
-    pub kfd_gpu_id: u32,
+    /// Activated endpoint that reported the fault, when known to this session.
+    pub endpoint_id: Option<[u8; 16]>,
     /// Virtual address reported by KFD.
     pub virtual_address: u64,
     /// The address was not present or required supervisor privilege.
@@ -36,6 +38,65 @@ pub struct GpuMemoryFault {
     pub imprecise: bool,
     /// Native memory-exception error classification.
     pub error_type: u32,
+}
+
+/// One GPU hardware exception and its reset information.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GpuHardwareException {
+    /// Activated endpoint that reported the exception, when known.
+    pub endpoint_id: Option<[u8; 16]>,
+    /// Driver reset type. Zero denotes a whole-GPU reset on Linux KFD.
+    pub reset_type: u32,
+    /// Whether the driver reported loss of device memory.
+    pub memory_lost: bool,
+    /// Driver reset cause. Zero denotes a GPU hang and one denotes ECC on KFD.
+    pub reset_cause: u32,
+}
+
+/// A device event retained by the DDI for independent frontend observers.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeviceEvent {
+    /// A process-level GPU virtual-memory fault.
+    GpuMemoryFault(GpuMemoryFault),
+    /// A GPU hardware exception or reset.
+    GpuHardwareException(GpuHardwareException),
+}
+
+/// One observer of a driver's system event stream.
+///
+/// A subscription retains the native event owner until it is dropped. Polling
+/// never invokes frontend code, and an event is returned at most once to this
+/// subscription. Retained events are replayed to late subscribers. If a slow
+/// subscriber fills the finite event buffer, native polling waits until that
+/// subscriber reads or drops its backlog.
+pub struct DeviceEventSubscription {
+    inner: driver::EventSubscription,
+}
+
+impl DeviceEventSubscription {
+    /// Returns the next observed event, or `None` when no new event is ready.
+    ///
+    /// # Errors
+    /// Reports native polling or driver-lifetime failures. `Busy` means a
+    /// subscriber has not drained the finite event buffer; retry later. A
+    /// later poll can still retrieve an event recorded before a polling failure.
+    pub fn poll(&mut self) -> Result<Option<DeviceEvent>, Error> {
+        self.inner.poll()
+    }
+}
+
+/// Subscribes to events on the activated device's driver connection.
+///
+/// Multiple devices on one connection share native observation, while every
+/// returned subscription has an independent cursor. A driver without event
+/// support returns `Unsupported`.
+///
+/// # Errors
+/// Reports unsupported drivers and unavailable native event state.
+pub fn subscribe(device: &Device) -> Result<DeviceEventSubscription, Error> {
+    Ok(DeviceEventSubscription {
+        inner: device.activation.subscribe_events()?,
+    })
 }
 
 /// KFD identity and mailbox slot assigned to one interrupt-capable signal.
@@ -143,17 +204,6 @@ impl Drop for SignalEventPage {
             }
         }
     }
-}
-
-/// Claims and polls this session's process-level KFD GPU memory-fault event.
-/// Once claimed, ordinary device checks leave memory-fault delivery to the
-/// caller while continuing to observe terminal hardware loss.
-///
-/// # Errors
-/// Returns a native KFD error, or `DeviceLost` when terminal loss was already
-/// observed.
-pub fn poll_memory_fault(device: GpuDevice<'_>) -> Result<Option<GpuMemoryFault>, Error> {
-    device.driver.poll_kfd_memory_fault(device.state)
 }
 
 /// Creates an auto-reset KFD signal event. The first event in a process supplies
