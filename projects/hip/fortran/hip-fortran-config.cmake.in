@@ -1,0 +1,128 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# Config package for the HIP Fortran bindings:
+#   find_package(hip-fortran REQUIRED)
+#   target_link_libraries(my_app PRIVATE hip::hip_fortran)
+# A consumer may set HIP_FORTRAN_COMPILER_DIR to pick the per-compiler directory.
+
+@PACKAGE_INIT@
+
+set(_hip_built_dir "@HIP_FORTRAN_COMPILER_DIR@")
+
+# Never spell the init token in a comment: it is substituted there too.
+set(_hip_libdir "@PACKAGE_HIP_FORTRAN_LIBDIR@")
+set(_hip_incdir "@PACKAGE_HIP_FORTRAN_INCLUDEDIR@")
+
+set(hip_FORTRAN_FOUND FALSE)
+
+if(NOT CMAKE_Fortran_COMPILER_LOADED)
+  set(hip-fortran_FOUND FALSE)
+  # string(CONCAT), not set(): a list would render with semicolons.
+  string(CONCAT hip-fortran_NOT_FOUND_MESSAGE
+      "The HIP Fortran bindings need Fortran enabled before find_package: "
+      "add Fortran to your project() languages, or call enable_language(Fortran).")
+  return()
+endif()
+
+# Must match the mapping in projects/hip/fortran/CMakeLists.txt.
+if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+  set(_hip_fc "gfortran")
+elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")     # Flang, LLVMFlang
+  set(_hip_fc "amdflang")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Cray")
+  set(_hip_fc "ftn")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "IntelLLVM")
+  set(_hip_fc "ifx")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
+  set(_hip_fc "ifort")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC")
+  set(_hip_fc "nvfortran")
+else()
+  get_filename_component(_hip_fc "${CMAKE_Fortran_COMPILER}" NAME_WE)
+  string(TOLOWER "${_hip_fc}" _hip_fc)
+endif()
+
+function(_hip_dir_matches DIR FC OUT)
+  set(${OUT} FALSE PARENT_SCOPE)
+  if(DIR STREQUAL FC)
+    set(${OUT} TRUE PARENT_SCOPE)
+    return()
+  endif()
+  string(LENGTH "${FC}" _n)
+  string(LENGTH "${DIR}" _dn)
+  if(_dn GREATER _n)
+    string(SUBSTRING "${DIR}" 0 ${_n} _head)
+    string(SUBSTRING "${DIR}" ${_n} 1 _sep)
+    if(_head STREQUAL FC AND _sep MATCHES "^[-._]$")
+      set(${OUT} TRUE PARENT_SCOPE)
+    endif()
+  endif()
+endfunction()
+
+# A consumer's HIP_FORTRAN_COMPILER_DIR is used as given. Otherwise prefer the
+# consumer's own compiler: the recorded directory names only the last install.
+set(_hip_dir "")
+if(DEFINED HIP_FORTRAN_COMPILER_DIR)
+  if(EXISTS "${_hip_incdir}/${HIP_FORTRAN_COMPILER_DIR}/hip.mod")
+    set(_hip_dir "${HIP_FORTRAN_COMPILER_DIR}")
+  endif()
+elseif(EXISTS "${_hip_incdir}/${_hip_fc}/hip.mod")
+  set(_hip_dir "${_hip_fc}")
+else()
+  _hip_dir_matches("${_hip_built_dir}" "${_hip_fc}" _hip_ok)
+  if(_hip_ok)
+    set(_hip_dir "${_hip_built_dir}")
+  endif()
+endif()
+
+if(NOT _hip_dir)
+  file(GLOB _hip_avail RELATIVE "${_hip_incdir}" "${_hip_incdir}/*")
+  set(hip-fortran_FOUND FALSE)
+  if(DEFINED HIP_FORTRAN_COMPILER_DIR)
+    string(CONCAT hip-fortran_NOT_FOUND_MESSAGE
+        "HIP_FORTRAN_COMPILER_DIR is set to '${HIP_FORTRAN_COMPILER_DIR}', but "
+        "there is no hip.mod under ${_hip_incdir}/${HIP_FORTRAN_COMPILER_DIR}. "
+        "Available: ${_hip_avail}.")
+  else()
+    string(CONCAT hip-fortran_NOT_FOUND_MESSAGE
+        "This project builds with ${_hip_fc}, but no hip.mod for it is installed "
+        "under ${_hip_incdir}. Available: ${_hip_avail}. "
+        "A Fortran .mod cannot be shared across compilers; rebuild the bindings "
+        "with ${_hip_fc}, or set HIP_FORTRAN_COMPILER_DIR to the directory to use.")
+  endif()
+  return()
+endif()
+
+# hip::host must exist before the targets file names it; hip-config.cmake needs
+# C or CXX enabled for FindThreads.
+if(@HIP_FORTRAN_NEEDS_C_PACKAGE@)
+  if(NOT TARGET hip::host)
+    if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
+      enable_language(C)
+    endif()
+    include(CMakeFindDependencyMacro)
+    find_dependency(hip)
+  endif()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/hip-fortran-targets.cmake")
+
+# The targets file points at the built directory; repoint it at the chosen one.
+if(NOT _hip_dir STREQUAL "${_hip_built_dir}")
+  set_target_properties(hip::hip_fortran PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${_hip_incdir}/${_hip_dir}")
+  get_target_property(_hip_cfgs hip::hip_fortran IMPORTED_CONFIGURATIONS)
+  foreach(_hip_c IN LISTS _hip_cfgs)
+    get_target_property(_hip_loc hip::hip_fortran IMPORTED_LOCATION_${_hip_c})
+    get_filename_component(_hip_archive "${_hip_loc}" NAME)
+    set_target_properties(hip::hip_fortran PROPERTIES
+      IMPORTED_LOCATION_${_hip_c}
+        "${_hip_libdir}/${_hip_dir}/${_hip_archive}")
+  endforeach()
+endif()
+
+set(hip_FORTRAN_FOUND TRUE)
+
+check_required_components(hip-fortran)

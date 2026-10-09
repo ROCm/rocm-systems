@@ -11,6 +11,12 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - Library Management: support for API parity with corresponding CUDA API.
       * `hipLibraryGetModule` returns the module handle associated with a library.
 * Disable HRR capture feature
+* Generated Fortran bindings for the HIP runtime API, as a single `hip` module: `use hip`, link
+  `hip::hip_fortran`. Controlled by `BUILD_FORTRAN_BINDINGS` (`ON` on Linux, `OFF` on Windows,
+  where ROCm ships no Fortran compiler), `BUILD_FORTRAN_CLIENTS` and `FORTRAN_ARRAY_INTERFACES`
+  (`none`, `assumed-shape`, `assumed-rank`). Found with `find_package(hip-fortran)`; installed
+  per compiler, the archive under `<libdir>/fortran/<compiler>` and the `.mod` files under
+  `<includedir>/fortran/<compiler>`.
 
 ### Resolved issues
 * A registered `__device__` global that is absent from the loaded code object no longer aborts the process. Symbol lookup now returns `hipErrorInvalidSymbol` from the runtime's variable materialization path (`hipGetSymbolAddress`, `hipLibraryGetGlobal`, and related entry points). `hipModuleGetGlobal` still reports `hipErrorNotFound` for a missing name.
