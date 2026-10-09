@@ -67,9 +67,9 @@
           "test_filter": "NetIbMPITest.SimpleSendRecv"
         },
         {
-          "name": "A17_NetIB_PluginMatchesNcclNetEnv",
-          "description": "The plugin the fixture loaded is the one NCCL_NET names. Unset here, so this pins the AINIC default to IB-CAST.",
-          "test_filter": "NetIbMPITest.PluginMatchesNcclNetEnv"
+          "name": "A17_NetIB_DefaultPluginIsIbCastOnAinic",
+          "description": "NCCL_NET is unset here, so this pins the AINIC default to IB-CAST.",
+          "test_filter": "NetIbMPITest.DefaultPluginIsIbCastOnAinic"
         }
       ]
     },
@@ -79,7 +79,7 @@
       "num_ranks": 1,
       "num_nodes": 1,
       "timeout": 60,
-      "description": "NCCL_NET name resolution. Pure logic, single rank, no NIC/GPU required.",
+      "description": "NCCL_NET name resolution. Pure logic, single rank, no NIC required.",
       "tests": [
         {
           "name": "A18_NetPlugin_Selection",
@@ -98,7 +98,7 @@
       "tests": [
         {
           "name": "A19_NetIB_RocmIb_PluginMatchesNcclNetEnv",
-          "description": "ROCM-IB actually loads the ib-cast plugin rather than silently falling back to plain IB.",
+          "description": "ROCM-IB resolves to the ib-cast plugin in the fixture rather than silently falling back to plain IB.",
           "test_filter": "NetIbMPITest.PluginMatchesNcclNetEnv"
         },
         {

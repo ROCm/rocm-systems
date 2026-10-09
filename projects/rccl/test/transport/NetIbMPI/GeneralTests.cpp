@@ -86,13 +86,23 @@ static ncclNet_t* ExpectedPluginFor(const char* env) {
 
 TEST_F(NetIbMPITest, PluginMatchesNcclNetEnv) {
     const char* env = getenv("NCCL_NET");
+    // Unset, the only expectation is the one SetUp computed; DefaultPluginIsIbCastOnAinic pins it instead.
+    if (env == nullptr) GTEST_SKIP() << "NCCL_NET unset; see DefaultPluginIsIbCastOnAinic";
     ASSERT_NE(net_, nullptr);
-    ncclNet_t* expected = env ? ExpectedPluginFor(env) : rcclUseAinic() ? &netIbCast : &ncclNetIb;
+    ncclNet_t* expected = ExpectedPluginFor(env);
     ASSERT_NE(expected, nullptr) << "NCCL_NET=" << env << " is missing from this test's table";
-    EXPECT_EQ(net_, expected) << "NCCL_NET=" << (env ? env : "<unset>") << " but the fixture selected "
-                              << net_->name << ", expected " << expected->name;
-    TEST_INFO("Rank %d: NCCL_NET=%s resolved to plugin %s", MPIEnvironment::world_rank,
-              env ? env : "<unset>", net_->name);
+    EXPECT_EQ(net_, expected) << "NCCL_NET=" << env << " but the fixture selected " << net_->name
+                              << ", expected " << expected->name;
+    TEST_INFO("Rank %d: NCCL_NET=%s resolved to plugin %s", MPIEnvironment::world_rank, env, net_->name);
+}
+
+// AINIC configs only: asserts IB-CAST outright, without rcclUseAinic(), so it
+// also fails if AINIC detection misses the NIC.
+TEST_F(NetIbMPITest, DefaultPluginIsIbCastOnAinic) {
+    if (getenv("NCCL_NET") != nullptr) GTEST_SKIP() << "NCCL_NET is set; this pins the unset default";
+    ASSERT_NE(net_, nullptr);
+    EXPECT_EQ(net_, &netIbCast) << "NCCL_NET unset on AINIC but the fixture selected " << net_->name;
+    TEST_INFO("Rank %d: NCCL_NET unset resolved to plugin %s", MPIEnvironment::world_rank, net_->name);
 }
 
 // Initialization Tests
