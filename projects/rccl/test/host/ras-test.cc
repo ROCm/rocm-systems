@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include "comm.h"
+#include "fakes/ras_registry_test_support.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
 #include "fakes/signature-drift.h"
@@ -34,6 +35,7 @@ int RasTestPoll(struct pollfd*, nfds_t, int);
 int RasTestClose(int);
 int RasTestAtexit(void (*)(void));
 uint64_t RasTestClockNano();
+ncclResult_t RasTestDiagnosticsContextInit(struct rasDiagnosticsContext*, const struct ncclComm*);
 
 // Redirect the process-wide APIs used by ras.cc before including that file,
 // then restore their real names immediately afterward. Every header that uses
@@ -42,16 +44,17 @@ uint64_t RasTestClockNano();
 #define close RasTestClose
 #define atexit RasTestAtexit
 #define clockNano RasTestClockNano
+#define rasDiagnosticsContextInit RasTestDiagnosticsContextInit
 
 namespace {
 
-ncclResult_t DefaultSocketProgress(int, struct ncclSocket*, void*, int size, int* offset, int* closed) {
+ncclResult_t DefaultSocketProgress(int, struct ncclSocket*, void*, int size, int* offset, bool* closed) {
   *offset = size;
-  if (closed) *closed = 0;
+  if (closed) *closed = false;
   return ncclSuccess;
 }
 
-std::function<ncclResult_t(int, struct ncclSocket*, void*, int, int*, int*)> g_socketProgress =
+std::function<ncclResult_t(int, struct ncclSocket*, void*, int, int*, bool*)> g_socketProgress =
     DefaultSocketProgress;
 std::atomic<bool> g_initComplete{false};
 
@@ -59,7 +62,7 @@ std::atomic<bool> g_initComplete{false};
 
 ASSERT_HOOK_MATCHES_PROD(g_socketProgress, ncclSocketProgress);
 
-ncclResult_t ncclSocketProgress(int op, struct ncclSocket* sock, void* ptr, int size, int* offset, int* closed) {
+ncclResult_t ncclSocketProgress(int op, struct ncclSocket* sock, void* ptr, int size, int* offset, bool* closed) {
   return g_socketProgress(op, sock, ptr, size, offset, closed);
 }
 
@@ -74,6 +77,7 @@ const char* ncclSocketToString(const union ncclSocketAddress*, char* buf, const 
 #undef close
 #undef clockNano
 #undef poll
+#undef rasDiagnosticsContextInit
 
 namespace {
 
@@ -146,10 +150,7 @@ class RasMicrotest : public ::testing::Test {
     rasInitialized = false;
     rasInitRefCount = 0;
     rasNotificationPipe[0] = rasNotificationPipe[1] = NCCL_SOCKET_PAIR_INVALID;
-    std::free(ncclComms);
-    ncclComms = nullptr;
-    nNcclComms = 0;
-    ncclCommsSorted = false;
+    ras_test::ResetNcclComms();
     std::free(rasPfds);
     rasPfds = nullptr;
     nRasPfds = 0;
@@ -161,9 +162,7 @@ class RasMicrotest : public ::testing::Test {
     std::free(rasPfds);
     rasPfds = nullptr;
     nRasPfds = 0;
-    std::free(ncclComms);
-    ncclComms = nullptr;
-    nNcclComms = 0;
+    ras_test::ResetNcclComms();
     rasInitialized = false;
     rasInitRefCount = 0;
     g_socketProgress = DefaultSocketProgress;
@@ -197,11 +196,9 @@ TEST_F(RasMicrotest, CommInitAlreadyInitializedAcceptsNullRank) {
 
 TEST_F(RasMicrotest, CommInitReusesVacantCommSlot) {
   rasInitialized = true;
-  nNcclComms = 2;
-  ncclComms = static_cast<ncclComm**>(std::calloc(2, sizeof(*ncclComms)));
   auto incumbent = std::make_unique<ncclComm>();
   auto newcomer = std::make_unique<ncclComm>();
-  ncclComms[0] = incumbent.get();
+  ras_test::InstallNcclComms({incumbent.get(), nullptr});
   rasRankInit rank{};
   ASSERT_EQ(ncclSuccess, ncclRasCommInit(newcomer.get(), &rank));
   EXPECT_EQ(newcomer.get(), ncclComms[1]);
@@ -210,13 +207,10 @@ TEST_F(RasMicrotest, CommInitReusesVacantCommSlot) {
 
 TEST_F(RasMicrotest, CommInitGrowthPreservesRegisteredComms) {
   rasInitialized = true;
-  nNcclComms = 2;
-  ncclComms = static_cast<ncclComm**>(std::calloc(2, sizeof(*ncclComms)));
   auto first = std::make_unique<ncclComm>();
   auto second = std::make_unique<ncclComm>();
   auto newcomer = std::make_unique<ncclComm>();
-  ncclComms[0] = first.get();
-  ncclComms[1] = second.get();
+  ras_test::InstallNcclComms({first.get(), second.get()});
   rasRankInit rank{};
   ASSERT_EQ(ncclSuccess, ncclRasCommInit(newcomer.get(), &rank));
   EXPECT_EQ(first.get(), ncclComms[0]);
@@ -283,12 +277,9 @@ TEST_F(RasMicrotest, CommFiniUninitializedIsNoOp) {
 TEST_F(RasMicrotest, CommFiniRemovesMatchingCommAndDropsReference) {
   rasInitialized = true;
   rasInitRefCount = 1;
-  nNcclComms = 2;
-  ncclComms = static_cast<ncclComm**>(std::calloc(2, sizeof(*ncclComms)));
   auto first = std::make_unique<ncclComm>();
   auto second = std::make_unique<ncclComm>();
-  ncclComms[0] = first.get();
-  ncclComms[1] = second.get();
+  ras_test::InstallNcclComms({first.get(), second.get()});
   ncclCommsSorted = true;
   EXPECT_EQ(ncclSuccess, ncclRasCommFini(second.get()));
   EXPECT_EQ(first.get(), ncclComms[0]);
@@ -386,8 +377,7 @@ TEST_F(RasMicrotest, LocalHandleRunsDiagnosticsAndIgnoresHandlerFailure) {
 TEST_F(RasMicrotest, ThreadCleanupResetsAllGlobalState) {
   rasInitialized = true;
   rasInitRefCount = 3;
-  nNcclComms = 1;
-  ncclComms = static_cast<ncclComm**>(std::calloc(1, sizeof(*ncclComms)));
+  ras_test::InstallNcclComms({nullptr});
   InitPollFds(1);
   rasThreadCleanup();
   for (int calls : g_cleanupCalls) EXPECT_EQ(1, calls);
@@ -612,7 +602,7 @@ void rasClientSupportTerminate() { ++g_cleanupCalls[0]; }
 void rasNetTerminate() { ++g_cleanupCalls[1]; }
 void rasCollectivesTerminate() { ++g_cleanupCalls[2]; }
 void rasPeersTerminate() { ++g_cleanupCalls[3]; }
-ncclResult_t rasDiagnosticsContextInit(struct rasDiagnosticsContext* ctx, const struct ncclComm* comm) {
+ncclResult_t RasTestDiagnosticsContextInit(struct rasDiagnosticsContext* ctx, const struct ncclComm* comm) {
   ++g_diagnosticsInitCalls;
   g_diagnosticsInitComm = comm;
   if (ctx) std::memset(ctx, 0, sizeof(*ctx));
@@ -623,6 +613,8 @@ ncclResult_t rasLocalHandleRunDiag(const struct rasDiagnosticsContext* ctx) {
   if (ctx) g_lastRunDiagContext = *ctx;
   return g_localRunDiagResult;
 }
+// src/ras/diagnostics_xid.cc (NCCL 2.32): XID-baseline capture on RAS start; nothing to observe here.
+void rasDiagnosticsInit() {}
 void ncclProfilerSetRasOverride(int mask) { g_profilerMask = mask; }
 int64_t rasTimeoutFactorNs(int64_t baseSeconds) { return baseSeconds * CLOCK_UNITS_PER_SEC; }
 void rasSocksHandleTimeouts(int64_t, int64_t* nextWakeup) {
@@ -797,10 +789,10 @@ TEST_F(RasMicrotest, DiagnosticsParameterUsesDefaultAndOverride) {
   EXPECT_EQ(1, ncclParamRasDiagnostics());
 }
 
-TEST_F(RasMicrotest, RunDiagnosticsPassivePropagatesInitFailureAndNotifiesOnSuccess) {
+TEST_F(RasMicrotest, RunRasDiagnosticsPropagatesInitFailureAndNotifiesOnSuccess) {
   auto comm = std::make_unique<ncclComm>();
   g_diagnosticsInitResult = ncclSystemError;
-  EXPECT_EQ(ncclSystemError, ncclRunDiagnosticsPassive(comm.get()));
+  EXPECT_EQ(ncclSystemError, ncclRunRasDiagnostics(comm.get()));
   EXPECT_EQ(1, g_diagnosticsInitCalls);
   EXPECT_EQ(comm.get(), g_diagnosticsInitComm);
   EXPECT_TRUE(g_pairBytes.empty());
@@ -808,15 +800,15 @@ TEST_F(RasMicrotest, RunDiagnosticsPassivePropagatesInitFailureAndNotifiesOnSucc
   g_diagnosticsInitResult = ncclSuccess;
   rasInitialized = true;
   rasNotificationPipe[1] = 52;
-  EXPECT_EQ(ncclSuccess, ncclRunDiagnosticsPassive(comm.get()));
+  EXPECT_EQ(ncclSuccess, ncclRunRasDiagnostics(comm.get()));
   EXPECT_EQ(2, g_diagnosticsInitCalls);
   ASSERT_EQ(sizeof(rasNotification), g_pairBytes.size());
   EXPECT_EQ(RAS_RUN_DIAG, reinterpret_cast<const rasNotification*>(g_pairBytes.data())->type);
 }
 
-TEST_F(RasMicrotest, RunDiagnosticsPassiveReportsUnscopedInitFailure) {
+TEST_F(RasMicrotest, RunRasDiagnosticsReportsUnscopedInitFailure) {
   g_diagnosticsInitResult = ncclSystemError;
-  EXPECT_EQ(ncclSystemError, ncclRunDiagnosticsPassive(nullptr));
+  EXPECT_EQ(ncclSystemError, ncclRunRasDiagnostics(nullptr));
   EXPECT_EQ(nullptr, g_diagnosticsInitComm);
 }
 
@@ -874,7 +866,7 @@ TEST_F(RasMicrotest, ConnInitVersionMismatchSendsNackAndTerminatesSocket) {
   rasMsg msg = MakeConnInitMsg();
   msg.connInit.ncclVersion = NCCL_VERSION_CODE - 1;
   int progressCalls = 0;
-  g_socketProgress = [&](int, ncclSocket*, void* ptr, int size, int* offset, int* closed) {
+  g_socketProgress = [&](int, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
     ++progressCalls;
     if (progressCalls == 2) {
       const auto* nack = static_cast<const rasMsg*>(ptr);
@@ -882,7 +874,7 @@ TEST_F(RasMicrotest, ConnInitVersionMismatchSendsNackAndTerminatesSocket) {
       EXPECT_EQ(1, nack->connInitAck.nack);
     }
     *offset = size;
-    *closed = 0;
+    *closed = false;
     return ncclSuccess;
   };
   EXPECT_EQ(ncclInvalidUsage, rasMsgHandle(&msg, &sock));
@@ -896,10 +888,10 @@ TEST_F(RasMicrotest, ConnInitKnownDeadPeerNacksWithoutCreatingConnection) {
   rasSocket sock{};
   rasMsg msg = MakeConnInitMsg();
   int progressCalls = 0;
-  g_socketProgress = [&](int, ncclSocket*, void*, int size, int* offset, int* closed) {
+  g_socketProgress = [&](int, ncclSocket*, void*, int size, int* offset, bool* closed) {
     ++progressCalls;
     *offset = size;
-    *closed = 0;
+    *closed = false;
     return ncclSuccess;
   };
   EXPECT_EQ(ncclSuccess, rasMsgHandle(&msg, &sock));
@@ -1143,17 +1135,17 @@ TEST_F(RasMicrotest, ProfilerMaskBroadcastSetsOverrideAndKeepsPropagating) {
 TEST_F(RasMicrotest, NetSendNackStopsAfterPartialLengthAndPropagatesError) {
   rasSocket sock{};
   int calls = 0;
-  g_socketProgress = [&](int, ncclSocket*, void*, int, int* offset, int* closed) {
+  g_socketProgress = [&](int, ncclSocket*, void*, int, int* offset, bool* closed) {
     ++calls;
     *offset = 1;
-    *closed = 0;
+    *closed = false;
     return ncclSuccess;
   };
   EXPECT_EQ(ncclSuccess, rasNetSendNack(&sock));
   EXPECT_EQ(1, calls);
 
   calls = 0;
-  g_socketProgress = [&](int, ncclSocket*, void*, int, int*, int*) {
+  g_socketProgress = [&](int, ncclSocket*, void*, int, int*, bool*) {
     ++calls;
     return ncclSystemError;
   };
@@ -1339,10 +1331,10 @@ TEST_F(RasMicrotest, ConnSendEmptyQueueReportsAllSent) {
   rasConnection conn{};
   rasSocket sock{};
   conn.sock = &sock;
-  int closed = -1;
+  bool closed = true;  // sentinel: rasConnSendMsg must clear it
   bool allSent = false;
   EXPECT_EQ(ncclSuccess, rasConnSendMsg(&conn, &closed, &allSent));
-  EXPECT_EQ(0, closed);
+  EXPECT_FALSE(closed);
   EXPECT_TRUE(allSent);
 }
 
@@ -1351,11 +1343,11 @@ TEST_F(RasMicrotest, ConnSendHandshakeBlocksNonInitMessageWithoutCallingSocket) 
   rasSocket sock{};
   EnqueueMessage(&conn, &sock, RAS_SOCK_HANDSHAKE, RAS_MSG_KEEPALIVE);
   int calls = 0;
-  g_socketProgress = [&](int, ncclSocket*, void*, int, int*, int*) {
+  g_socketProgress = [&](int, ncclSocket*, void*, int, int*, bool*) {
     ++calls;
     return ncclSuccess;
   };
-  int closed;
+  bool closed;
   bool allSent = false;
   EXPECT_EQ(ncclSuccess, rasConnSendMsg(&conn, &closed, &allSent));
   EXPECT_EQ(0, calls);
@@ -1370,13 +1362,13 @@ TEST_F(RasMicrotest, ConnSendHandshakeAllowsConnInitMessage) {
   rasSocket sock{};
   EnqueueMessage(&conn, &sock, RAS_SOCK_HANDSHAKE, RAS_MSG_CONNINIT, 0);
   int calls = 0;
-  g_socketProgress = [&](int, ncclSocket*, void*, int size, int* offset, int* closed) {
+  g_socketProgress = [&](int, ncclSocket*, void*, int size, int* offset, bool* closed) {
     ++calls;
     *offset = size;
-    *closed = 0;
+    *closed = false;
     return ncclSuccess;
   };
-  int closed;
+  bool closed;
   bool allSent = false;
   EXPECT_EQ(ncclSuccess, rasConnSendMsg(&conn, &closed, &allSent));
   EXPECT_EQ(2, calls);
@@ -1390,16 +1382,16 @@ TEST_F(RasMicrotest, ConnSendCompleteMessageDequeuesIt) {
   // Closed avoids arming rasPfds; rasConnSendMsg itself accepts this state.
   EnqueueMessage(&conn, &sock, RAS_SOCK_CLOSED, RAS_MSG_KEEPALIVE);
   int calls = 0;
-  g_socketProgress = [&](int op, ncclSocket*, void* ptr, int size, int* offset, int* closed) {
+  g_socketProgress = [&](int op, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
     EXPECT_EQ(NCCL_SOCKET_SEND, op);
     ++calls;
     EXPECT_EQ(RAS_MSG_KEEPALIVE,
               reinterpret_cast<const rasMsg*>(static_cast<char*>(ptr) + sizeof(int))->type);
     *offset = size;
-    *closed = 0;
+    *closed = false;
     return ncclSuccess;
   };
-  int closed;
+  bool closed;
   bool allSent = false;
   EXPECT_EQ(ncclSuccess, rasConnSendMsg(&conn, &closed, &allSent));
   EXPECT_EQ(2, calls);
@@ -1411,12 +1403,12 @@ TEST_F(RasMicrotest, ConnSendPartialLengthKeepsMessageQueued) {
   rasConnection conn{};
   rasSocket sock{};
   EnqueueMessage(&conn, &sock, RAS_SOCK_CLOSED, RAS_MSG_KEEPALIVE);
-  g_socketProgress = [](int, ncclSocket*, void*, int, int* offset, int* closed) {
+  g_socketProgress = [](int, ncclSocket*, void*, int, int* offset, bool* closed) {
     *offset = 2;
-    *closed = 0;
+    *closed = false;
     return ncclSuccess;
   };
-  int closed;
+  bool closed;
   bool allSent = true;
   EXPECT_EQ(ncclSuccess, rasConnSendMsg(&conn, &closed, &allSent));
   EXPECT_FALSE(allSent);
@@ -1429,14 +1421,14 @@ TEST_F(RasMicrotest, ConnSendClosedSocketReturnsWithoutDequeuing) {
   rasConnection conn{};
   rasSocket sock{};
   EnqueueMessage(&conn, &sock, RAS_SOCK_CLOSED, RAS_MSG_KEEPALIVE);
-  g_socketProgress = [](int, ncclSocket*, void*, int, int*, int* closed) {
-    *closed = 1;
+  g_socketProgress = [](int, ncclSocket*, void*, int, int*, bool* closed) {
+    *closed = true;
     return ncclSuccess;
   };
-  int closed = 0;
+  bool closed = false;
   bool allSent = false;
   EXPECT_EQ(ncclSuccess, rasConnSendMsg(&conn, &closed, &allSent));
-  EXPECT_EQ(1, closed);
+  EXPECT_TRUE(closed);
   ASSERT_FALSE(ncclIntruQueueEmpty(&conn.sendQ));
   FreeSendQueue(&conn);
 }
@@ -1446,13 +1438,13 @@ TEST_F(RasMicrotest, ConnSendPartialBodyKeepsMessageQueued) {
   rasSocket sock{};
   EnqueueMessage(&conn, &sock, RAS_SOCK_CLOSED, RAS_MSG_KEEPALIVE);
   int calls = 0;
-  g_socketProgress = [&](int, ncclSocket*, void*, int size, int* offset, int* closed) {
+  g_socketProgress = [&](int, ncclSocket*, void*, int size, int* offset, bool* closed) {
     ++calls;
     *offset = calls == 1 ? size : size - 1;
-    *closed = 0;
+    *closed = false;
     return ncclSuccess;
   };
-  int closed;
+  bool closed;
   bool allSent = true;
   EXPECT_EQ(ncclSuccess, rasConnSendMsg(&conn, &closed, &allSent));
   EXPECT_EQ(2, calls);
@@ -1465,8 +1457,8 @@ TEST_F(RasMicrotest, ConnSendSocketErrorPropagates) {
   rasConnection conn{};
   rasSocket sock{};
   EnqueueMessage(&conn, &sock, RAS_SOCK_CLOSED, RAS_MSG_KEEPALIVE);
-  g_socketProgress = [](int, ncclSocket*, void*, int, int*, int*) { return ncclSystemError; };
-  int closed;
+  g_socketProgress = [](int, ncclSocket*, void*, int, int*, bool*) { return ncclSystemError; };
+  bool closed;
   bool allSent;
   EXPECT_EQ(ncclSystemError, rasConnSendMsg(&conn, &closed, &allSent));
   ASSERT_FALSE(ncclIntruQueueEmpty(&conn.sendQ));
@@ -1477,7 +1469,7 @@ TEST_F(RasMicrotest, MsgRecvCompletesLengthThenBodyAndResetsSocketState) {
   rasSocket sock{};
   const int msgLen = rasMsgLength(RAS_MSG_KEEPALIVE);
   int calls = 0;
-  g_socketProgress = [&](int op, ncclSocket*, void* ptr, int size, int* offset, int* closed) {
+  g_socketProgress = [&](int op, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
     EXPECT_EQ(NCCL_SOCKET_RECV, op);
     ++calls;
     if (calls == 1) {
@@ -1487,11 +1479,11 @@ TEST_F(RasMicrotest, MsgRecvCompletesLengthThenBodyAndResetsSocketState) {
       msg->type = RAS_MSG_KEEPALIVE;
     }
     *offset = size;
-    *closed = 0;
+    *closed = false;
     return ncclSuccess;
   };
   rasMsg* msg = nullptr;
-  int closed;
+  bool closed;
   ASSERT_EQ(ncclSuccess, rasMsgRecv(&sock, &msg, &closed));
   ASSERT_NE(nullptr, msg);
   EXPECT_EQ(RAS_MSG_KEEPALIVE, msg->type);
@@ -1505,7 +1497,7 @@ TEST_F(RasMicrotest, MsgRecvCompletesLengthThenBodyAndResetsSocketState) {
 TEST_F(RasMicrotest, MsgRecvAcceptsPeerSuppliedOneByteLength) {
   rasSocket sock{};
   int calls = 0;
-  g_socketProgress = [&](int op, ncclSocket*, void* ptr, int size, int* offset, int* closed) {
+  g_socketProgress = [&](int op, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
     EXPECT_EQ(NCCL_SOCKET_RECV, op);
     ++calls;
     if (calls == 1) {
@@ -1514,16 +1506,16 @@ TEST_F(RasMicrotest, MsgRecvAcceptsPeerSuppliedOneByteLength) {
       *(static_cast<char*>(ptr) + sizeof(int)) = 0x5a;
     }
     *offset = size;
-    *closed = 0;
+    *closed = false;
     return ncclSuccess;
   };
   rasMsg* msg = nullptr;
-  int closed = 0;
+  bool closed = false;
   ASSERT_EQ(ncclSuccess, rasMsgRecv(&sock, &msg, &closed));
   ASSERT_NE(nullptr, msg);
   EXPECT_EQ(0x5a, *reinterpret_cast<unsigned char*>(msg));
   EXPECT_EQ(2, calls);
-  EXPECT_EQ(0, closed);
+  EXPECT_FALSE(closed);
   EXPECT_EQ(0, sock.recvOffset);
   EXPECT_EQ(0, sock.recvLength);
   EXPECT_EQ(nullptr, sock.recvMsg);
@@ -1532,13 +1524,13 @@ TEST_F(RasMicrotest, MsgRecvAcceptsPeerSuppliedOneByteLength) {
 
 TEST_F(RasMicrotest, MsgRecvPartialLengthReturnsWithoutAllocatingBody) {
   rasSocket sock{};
-  g_socketProgress = [](int, ncclSocket*, void*, int, int* offset, int* closed) {
+  g_socketProgress = [](int, ncclSocket*, void*, int, int* offset, bool* closed) {
     *offset = 2;
-    *closed = 0;
+    *closed = false;
     return ncclSuccess;
   };
   rasMsg* msg = nullptr;
-  int closed;
+  bool closed;
   EXPECT_EQ(ncclSuccess, rasMsgRecv(&sock, &msg, &closed));
   EXPECT_EQ(nullptr, msg);
   EXPECT_EQ(nullptr, sock.recvMsg);
@@ -1547,23 +1539,23 @@ TEST_F(RasMicrotest, MsgRecvPartialLengthReturnsWithoutAllocatingBody) {
 
 TEST_F(RasMicrotest, MsgRecvClosedDuringLengthReturnsImmediately) {
   rasSocket sock{};
-  g_socketProgress = [](int, ncclSocket*, void*, int, int*, int* closed) {
-    *closed = 1;
+  g_socketProgress = [](int, ncclSocket*, void*, int, int*, bool* closed) {
+    *closed = true;
     return ncclSuccess;
   };
   rasMsg* msg = nullptr;
-  int closed = 0;
+  bool closed = false;
   EXPECT_EQ(ncclSuccess, rasMsgRecv(&sock, &msg, &closed));
-  EXPECT_EQ(1, closed);
+  EXPECT_TRUE(closed);
   EXPECT_EQ(nullptr, msg);
   EXPECT_EQ(nullptr, sock.recvMsg);
 }
 
 TEST_F(RasMicrotest, MsgRecvSocketErrorPropagates) {
   rasSocket sock{};
-  g_socketProgress = [](int, ncclSocket*, void*, int, int*, int*) { return ncclSystemError; };
+  g_socketProgress = [](int, ncclSocket*, void*, int, int*, bool*) { return ncclSystemError; };
   rasMsg* msg = nullptr;
-  int closed;
+  bool closed;
   EXPECT_EQ(ncclSystemError, rasMsgRecv(&sock, &msg, &closed));
   EXPECT_EQ(nullptr, msg);
   EXPECT_EQ(nullptr, sock.recvMsg);
@@ -1575,12 +1567,12 @@ TEST_F(RasMicrotest, MsgRecvBodySocketErrorPropagatesAndPreservesState) {
   sock.recvOffset = sizeof(sock.recvLength);
   sock.recvMsg = static_cast<rasMsg*>(std::calloc(1, sock.recvLength));
   ASSERT_NE(nullptr, sock.recvMsg);
-  g_socketProgress = [](int op, ncclSocket*, void*, int, int*, int*) {
+  g_socketProgress = [](int op, ncclSocket*, void*, int, int*, bool*) {
     EXPECT_EQ(NCCL_SOCKET_RECV, op);
     return ncclSystemError;
   };
   rasMsg* msg = nullptr;
-  int closed = 0;
+  bool closed = false;
   EXPECT_EQ(ncclSystemError, rasMsgRecv(&sock, &msg, &closed));
   EXPECT_EQ(nullptr, msg);
   EXPECT_EQ(sizeof(sock.recvLength), sock.recvOffset);
@@ -1593,21 +1585,21 @@ TEST_F(RasMicrotest, MsgRecvClosedDuringBodyPreservesAllocatedMessage) {
   rasSocket sock{};
   const int msgLen = rasMsgLength(RAS_MSG_KEEPALIVE);
   int calls = 0;
-  g_socketProgress = [&](int, ncclSocket*, void* ptr, int size, int* offset, int* closed) {
+  g_socketProgress = [&](int, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
     ++calls;
     if (calls == 1) {
       *static_cast<int*>(ptr) = msgLen;
       *offset = size;
-      *closed = 0;
+      *closed = false;
     } else {
-      *closed = 1;
+      *closed = true;
     }
     return ncclSuccess;
   };
   rasMsg* msg = nullptr;
-  int closed = 0;
+  bool closed = false;
   EXPECT_EQ(ncclSuccess, rasMsgRecv(&sock, &msg, &closed));
-  EXPECT_EQ(1, closed);
+  EXPECT_TRUE(closed);
   EXPECT_EQ(nullptr, msg);
   ASSERT_NE(nullptr, sock.recvMsg);
   std::free(sock.recvMsg);
@@ -1618,15 +1610,15 @@ TEST_F(RasMicrotest, MsgRecvPartialBodyPreservesProgressForNextCall) {
   rasSocket sock{};
   const int msgLen = rasMsgLength(RAS_MSG_KEEPALIVE);
   int calls = 0;
-  g_socketProgress = [&](int, ncclSocket*, void* ptr, int size, int* offset, int* closed) {
+  g_socketProgress = [&](int, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
     ++calls;
     if (calls == 1) *static_cast<int*>(ptr) = msgLen;
     *offset = calls == 1 ? size : size - 1;
-    *closed = 0;
+    *closed = false;
     return ncclSuccess;
   };
   rasMsg* msg = nullptr;
-  int closed;
+  bool closed;
   EXPECT_EQ(ncclSuccess, rasMsgRecv(&sock, &msg, &closed));
   EXPECT_EQ(nullptr, msg);
   ASSERT_NE(nullptr, sock.recvMsg);
@@ -1641,18 +1633,18 @@ TEST_F(RasMicrotest, MsgRecvResumesPartialBodyWithoutRereadingLength) {
   sock.recvOffset = sizeof(sock.recvLength) + 3;
   sock.recvMsg = static_cast<rasMsg*>(std::calloc(1, sock.recvLength));
   int calls = 0;
-  g_socketProgress = [&](int op, ncclSocket*, void* ptr, int size, int* offset, int* closed) {
+  g_socketProgress = [&](int op, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
     EXPECT_EQ(NCCL_SOCKET_RECV, op);
     EXPECT_EQ(sock.recvLength + (int)sizeof(sock.recvLength), size);
     ++calls;
     auto* msg = reinterpret_cast<rasMsg*>(static_cast<char*>(ptr) + sizeof(sock.recvLength));
     msg->type = RAS_MSG_KEEPALIVE;
     *offset = size;
-    *closed = 0;
+    *closed = false;
     return ncclSuccess;
   };
   rasMsg* msg = nullptr;
-  int closed;
+  bool closed;
   ASSERT_EQ(ncclSuccess, rasMsgRecv(&sock, &msg, &closed));
   ASSERT_NE(nullptr, msg);
   EXPECT_EQ(RAS_MSG_KEEPALIVE, msg->type);

@@ -10,6 +10,7 @@ from rocm_kpack.database_handlers import (
     HipSparseLtHandler,
     AotritonHandler,
     MIOpenHandler,
+    ComposableKernelHandler,
     HipKernelProviderArchContentHandler,
     HotswapCacheHandler,
     WHEEL_TYPE_PRESETS,
@@ -796,6 +797,91 @@ class TestMIOpenHandler:
         assert result is None
 
 
+class TestComposableKernelHandler:
+    """Tests for ComposableKernelHandler detection logic."""
+
+    @pytest.fixture
+    def handler(self):
+        return ComposableKernelHandler()
+
+    @pytest.fixture
+    def prefix_root(self, tmp_path):
+        root = tmp_path / "prefix"
+        root.mkdir()
+        return root
+
+    def _detect(self, handler, prefix_root, rel):
+        file_path = prefix_root / rel
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+        return handler.detect(file_path, prefix_root)
+
+    def test_name(self, handler):
+        assert handler.name() == "composablekernel"
+
+    _EXPORTS = "lib/cmake/composable_kernel/composable_kerneldevice_conv_operations_"
+
+    @pytest.mark.parametrize(
+        "relative,expected",
+        [
+            ("lib/libdevice_conv_operations_gfx942.a", "gfx942"),
+            ("lib/libdevice_conv_operations_gfx950_xnackp.a", "gfx950"),
+            ("lib/libdevice_conv_operations_gfx90a_xnack_.a", "gfx90a"),
+            ("lib/libdevice_conv_operations_gfx942_srameccp_xnack_.a", "gfx942"),
+            ("lib/libdevice_conv_operations_gfx942_xnack__srameccp.a", "gfx942"),
+            ("lib/libdevice_conv_operations_gfx1250_strict.a", "gfx1250-strict"),
+            ("lib/libdevice_conv_operations_gfx1250_strict_xnackp.a", "gfx1250-strict"),
+            ("lib/libdevice_conv_operations_gfx1100.a", "gfx1100"),
+            # Windows: no lib prefix, .lib extension.
+            ("lib/device_conv_operations_gfx942.lib", "gfx942"),
+            ("lib/device_conv_operations_gfx1250_strict.lib", "gfx1250-strict"),
+            # CMake exports travel with their archive.
+            (_EXPORTS + "gfx942Targets.cmake", "gfx942"),
+            (_EXPORTS + "gfx942Targets-release.cmake", "gfx942"),
+            (_EXPORTS + "gfx90aTargets-relwithdebinfo.cmake", "gfx90a"),
+            (_EXPORTS + "gfx950_xnack_Targets.cmake", "gfx950"),
+            (_EXPORTS + "gfx1250_strictTargets.cmake", "gfx1250-strict"),
+            (_EXPORTS + "gfx1250_strict_xnackpTargets-release.cmake", "gfx1250-strict"),
+        ],
+    )
+    def test_detect(self, handler, prefix_root, relative, expected):
+        assert self._detect(handler, prefix_root, relative) == expected
+
+    @pytest.mark.parametrize(
+        "relative",
+        [
+            "lib/libdevice_conv_operations.a",
+            "lib/libdevice_conv_operations_foo.a",
+            "lib/libdevice_conv_operations_xnack.a",
+            "lib/libdevice_conv_operations_gfx11_generic.a",
+            "lib/libdevice_conv_operations_amdgcnspirv.a",
+            # A target id has at most one letter after its digits.
+            "lib/libdevice_conv_operations_gfx942xnackp.a",
+            "lib/libdevice_gemm_operations_gfx942.a",
+            "lib/libdevice_conv_operations_gfx942.so",
+            "lib/libdevice_conv_operations_gfx942.a.bak",
+            "lib/libdevice_conv_operations_gfx942.lib.a",
+            "lib/xlibdevice_conv_operations_gfx942.a",
+            "lib/libMIOpen.a",
+            # The config and the unified export stay generic.
+            "lib/cmake/composable_kernel/composable_kernelConfig.cmake",
+            "lib/cmake/composable_kernel/composable_kerneldevice_conv_operationsTargets.cmake",
+            _EXPORTS + "gfx11_genericTargets.cmake",
+            _EXPORTS + "gfx942Targets.cmake.bak",
+            _EXPORTS + "gfx942Targets-.cmake",
+            "lib/cmake/composable_kernel/composable_kernelutilityTargets.cmake",
+        ],
+    )
+    def test_reject(self, handler, prefix_root, relative):
+        assert self._detect(handler, prefix_root, relative) is None
+
+    def test_reject_file_outside_prefix(self, handler, prefix_root):
+        with pytest.raises(ValueError, match="is not under prefix_root"):
+            handler.detect(
+                Path("/tmp/lib/libdevice_conv_operations_gfx942.a"), prefix_root
+            )
+
+
 class TestHipKernelProviderArchContentHandler:
     """Tests for HipKernelProviderArchContentHandler detection logic."""
 
@@ -1063,7 +1149,8 @@ class TestDatabaseHandlerRegistry:
         assert "miopen" in handlers
         assert "hipkernelprovider" in handlers
         assert "hotswap_cache" in handlers
-        assert len(handlers) == 7
+        assert "composablekernel" in handlers
+        assert len(handlers) == 8
 
     def test_get_database_handlers_single(self):
         """Test getting a single handler by name."""
@@ -1089,9 +1176,10 @@ class TestDatabaseHandlerRegistry:
                 "miopen",
                 "hipkernelprovider",
                 "hotswap_cache",
+                "composablekernel",
             ]
         )
-        assert len(handlers) == 7
+        assert len(handlers) == 8
         assert isinstance(handlers[0], RocBLASHandler)
         assert isinstance(handlers[1], HipBLASLtHandler)
         assert isinstance(handlers[2], HipSparseLtHandler)
@@ -1099,6 +1187,7 @@ class TestDatabaseHandlerRegistry:
         assert isinstance(handlers[4], MIOpenHandler)
         assert isinstance(handlers[5], HipKernelProviderArchContentHandler)
         assert isinstance(handlers[6], HotswapCacheHandler)
+        assert isinstance(handlers[7], ComposableKernelHandler)
 
     def test_wheel_type_preset(self):
         """Test that wheel type presets resolve to valid handlers."""

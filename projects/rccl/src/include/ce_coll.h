@@ -69,6 +69,11 @@ inline size_t ncclCeAllReduceChooseChunkBytes(size_t shardBytes, size_t slotChun
   return alignDown(targetChunkBytes, (size_t)16);
 }
 
+// CE collectives that stage through ceARTmpBuf. Its setup is collective, so it runs in the group job, never at launch.
+inline bool ncclCeCollNeedsStaging(ncclFunc_t func) {
+  return func == ncclFuncAllReduce;
+}
+
 enum ncclCeMethodId {
   ncclCeMethodId_AllGather_UC,
   ncclCeMethodId_AllGather_MC,
@@ -104,6 +109,7 @@ struct ncclCeColl {
   // The reduced result is written straight into the user recvbuff (no scratch).
   uint8_t* ceARTmpBuf;
   struct ncclDevrWindow* ceARTmpWin;
+  bool stagingPending;     // set at task append, consumed by the group's SymRegister job
   size_t ceArMaxBytes;     // 2-shot staging cap, resolved at init: env RCCL_CE_AR_MAX_MSG_BYTES > arch ceArMax
   size_t ceArStagingBytes; // resolved at init: env var RCCL_CE_AR_STAGING_BYTES > NCCL_CE_AR_STAGING_BYTES
   uint32_t* signalBuffer;
@@ -155,6 +161,8 @@ struct ncclCeBatchOpsParams {
   void** srcs;
   size_t* sizes;
   size_t numOps;
+  // Split operations into stream-ordered round-robin waves.
+  bool chunking;
   bool intraBatchSync;
 #ifdef CE_BATCH_ASYNC_SUPPORTED
   hipMemcpyAttributes* attrs;
@@ -180,6 +188,9 @@ bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRe
 bool ncclHierCeDispatch(struct ncclComm* comm);
 
 ncclResult_t ncclCeInit(struct ncclComm* comm);
+
+// Collective (window registration): call from every rank's group job, never from a single-thread launch loop.
+ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm);
 
 ncclResult_t ncclCeFinalize(struct ncclComm* comm);
 
@@ -215,6 +226,11 @@ ncclResult_t ncclAlltoAllvValidatePeerSendSize(size_t sendBytes, size_t peerRecv
 bool ncclCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
                              bool hasSysmemSegment, bool capturing);
 
+// Multi-node hierarchical CE AlltoAllv (RMA rail + intra-node CE).
+bool ncclHierCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
+                                 struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin,
+                                 bool hasSysmemSegment, bool capturing);
+
 // Same gates as AlltoAllv, then ncclCeAvailable (single-node CE; not hier).
 bool ncclCeAlltoAllEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
                             bool hasSysmemSegment, bool capturing);
@@ -222,6 +238,8 @@ bool ncclCeAlltoAllEligible(struct ncclComm* comm, ncclDataType_t datatype, nccl
 ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
 
 ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
+
+ncclResult_t ncclHierCeAlltoAllv(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
 
 // CE AllReduce: scatter → local-reduce → allgather (→ optional copy-to-user-recvbuff).
 // Requires comm->ceColl.ceARTmpBuf != NULL (i.e. ncclCeInit has run).

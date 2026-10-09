@@ -129,10 +129,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtWaitOnMultipleEvents_Ext(HsaEvent *Events[],
     std::this_thread::sleep_for(std::chrono::microseconds(20));
     return HSAKMT_STATUS_SUCCESS;
   }
-  HSAKMT_STATUS status =
-      wsl::thunk::WDDMDevice::WaitOnMultipleEvents(Events, NumEvents, WaitOnAll, Milliseconds);
-
-  return HSAKMT_STATUS_SUCCESS;
+  return wsl::thunk::WDDMDevice::WaitOnMultipleEvents(Events, NumEvents, WaitOnAll, Milliseconds);
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtOpenSMI(HSAuint32 NodeId, int *fd) {

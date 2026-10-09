@@ -461,6 +461,17 @@ hsa_status_t KfdDriver::FreeMemory(const core::DriverMemoryHandle& handle) {
       : HSA_STATUS_ERROR;
 }
 
+hsa_status_t KfdDriver::QueryPointerInfo(const void* ptr, const core::MemoryRegion* /*region*/,
+                                         core::MemoryRegion::AllocateFlags /*alloc_flags*/,
+                                         const core::DriverMemoryHandle* /*handle*/,
+                                         HsaPointerInfo* info) const {
+  if (HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, info)) != HSAKMT_STATUS_SUCCESS ||
+      info->Type == HSA_POINTER_UNKNOWN) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t KfdDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                                     HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
                                     void* queue_addr, uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes,
@@ -658,6 +669,23 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
   default:
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
+}
+
+hsa_status_t KfdDriver::QueryDmaBufInfo(int dmabuf_fd, core::DmaBufInfo* info) const {
+  if (dmabuf_fd < 0 || info == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // The symbol is loaded optionally, so an older thunk leaves it null.
+  if (HSAKMT_CALL(hsaKmtQueryDmaBufInfo) == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  HsaDmaBufInfo kmt_info = {};
+  if (HSAKMT_CALL(hsaKmtQueryDmaBufInfo)(dmabuf_fd, &kmt_info) != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  info->size = kmt_info.Size;
+  info->node_id = kmt_info.GpuId;
+  info->is_device_memory = kmt_info.IsDeviceMemory != 0;
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size,

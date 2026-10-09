@@ -13,9 +13,11 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <tuple>
+#include <typeinfo>
 #include <utility>
 
 struct libmnt_context;
@@ -27,16 +29,37 @@ using namespace testing;
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
 
+// A simpler version of GTest's output.
+#define CATCH_OTHER_EXCEPTIONS(expected)                                                                     \
+    catch (const std::exception &err)                                                                        \
+    {                                                                                                        \
+        /* Note: the typeid shown here is mangled. */                                                        \
+        FAIL() << "Expected " #expected " to be thrown.\n  Actual: it throws " << typeid(err).name()         \
+               << " with a description \"" << err.what() << "\".";                                           \
+    }                                                                                                        \
+    catch (...)                                                                                              \
+    {                                                                                                        \
+        FAIL() << "Expected " #expected " to be thrown.\n  "                                                 \
+                  "Actual: Something other than a std::exception was thrown.";                               \
+    }
+
 TEST(LibMountHelper, GetMountInfoThrowsOnContextCreationFailure)
 {
     StrictMock<MLibMount> mlibmount;
 
     auto dev{makedev(123, 456)};
 
-    EXPECT_CALL(mlibmount, mnt_new_context).Times(1).WillOnce(Return(nullptr));
+    EXPECT_CALL(mlibmount, mnt_new_context).WillOnce(Return(nullptr));
 
-    ASSERT_THAT(([=] { LibMountHelper().getMountInfo(dev); }),
-                ThrowsMessage<std::runtime_error>(StrEq("libmount: Could not create context")));
+    try {
+        LibMountHelper().getMountInfo(dev);
+        FAIL() << "Expected std::runtime_error to be thrown.\n  "
+                  "Actual: Nothing thrown.";
+    }
+    catch (const std::runtime_error &err) {
+        ASSERT_STREQ(err.what(), "libmount: Could not create context");
+    }
+    CATCH_OTHER_EXCEPTIONS(std::runtime_error)
 }
 
 TEST(LibMountHelper, GetMountInfoThrowsOnGetMountTableFailure)
@@ -50,11 +73,22 @@ TEST(LibMountHelper, GetMountInfoThrowsOnGetMountTableFailure)
     EXPECT_CALL(mlibmount, mnt_context_get_mtab(cxt, NotNull())).WillOnce(Return(-1));
     EXPECT_CALL(mlibmount, mnt_free_context(cxt));
 
-    ASSERT_THAT(([=] { LibMountHelper().getMountInfo(dev); }),
-                ThrowsMessage<std::runtime_error>(StrEq("libmount: Could not get mount table")));
+    try {
+        LibMountHelper().getMountInfo(dev);
+        FAIL() << "Expected std::system_error to be thrown.\n  "
+                  "Actual: Nothing thrown.";
+    }
+    catch (const std::system_error &err) {
+        // Additionally assert that the errno is being passed through.
+        // Note that the sign of the errno value is negated.
+        ASSERT_EQ(err.code().value(), 1);
+        // Don't check the message std::system_error appends to the error message.
+        ASSERT_THAT(err.what(), StartsWith("libmount: Could not get mount table"));
+    }
+    CATCH_OTHER_EXCEPTIONS(std::system_error)
 }
 
-TEST(LibMountHelper, GetMountInfoThowsOnGetFilesystemOptionFailure)
+TEST(LibMountHelper, GetMountInfoThrowsOnGetFilesystemOptionFailure)
 {
     StrictMock<MLibMount> mlibmount;
 
@@ -71,8 +105,15 @@ TEST(LibMountHelper, GetMountInfoThowsOnGetFilesystemOptionFailure)
     EXPECT_CALL(mlibmount, mnt_fs_get_option(fs, StrEq("data"), NotNull(), _)).WillOnce(Return(-1));
     EXPECT_CALL(mlibmount, mnt_free_context(cxt));
 
-    ASSERT_THAT(([=] { LibMountHelper().getMountInfo(dev); }),
-                ThrowsMessage<std::runtime_error>(StrEq("libmount: Could not get mount option: data")));
+    try {
+        LibMountHelper().getMountInfo(dev);
+        FAIL() << "Expected std::runtime_error to be thrown.\n  "
+                  "Actual: Nothing thrown.";
+    }
+    catch (const std::runtime_error &err) {
+        ASSERT_STREQ(err.what(), "libmount: Could not get mount option: data");
+    }
+    CATCH_OTHER_EXCEPTIONS(std::runtime_error)
 }
 
 TEST(LibMountHelper, GetMountInfoReturnsEmptyOptionIfNoInfoForDevFound)

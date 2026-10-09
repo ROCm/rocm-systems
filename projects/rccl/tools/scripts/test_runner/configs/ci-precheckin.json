@@ -58,6 +58,8 @@
         {"name": "AllReduce.UserBufferRegistration", "description": "AllReduce user-buffer registration path", "test_filter": "AllReduce.UserBufferRegistration"},
         {"name": "AllReduce.ROCTX", "description": "AllReduce roctx logging path", "test_filter": "AllReduce.ROCTX"},
         {"name": "AllReduce.BiasFloat32_Sum", "description": "AllReduce reduce-with-bias path (representative)", "test_filter": "AllReduce.BiasFloat32_Sum"},
+        {"name": "AllReduce.Fp8Avg", "description": "FP8 E4M3 avg (PreMulSum scalar carried as float); discriminates where the device fp8 type is FNUZ", "test_filter": "AllReduce.Fp8Avg", "timeout": 300},
+        {"name": "AllReduce.OneRankAvgTailElements", "description": "Single-rank oneRankReduce avg tail, including both FP8 types", "test_filter": "AllReduce.OneRankAvgTailElements"},
         {"name": "SendRecv.SinglePairs", "description": "SendRecv single pairs", "test_filter": "SendRecv.SinglePairs"},
         {"name": "GroupCall.Identical", "description": "GroupCall identical", "test_filter": "GroupCall.Identical"},
         {"name": "GroupCall.MultiRootBroadcast", "description": "Multi-root broadcast fallback (AllGatherV disabled)", "test_filter": "GroupCall.MultiRootBroadcast"},
@@ -74,6 +76,34 @@
         {"name": "Standalone.RegressionTiming", "description": "Verify no timing regression for protocols (LL, LL128, Simple)", "test_filter": "Standalone.RegressionTiming"},
         {"name": "Standalone.CommCuDevice_Check", "description": "Verify device associated with communicator in single/multi-device scenarios", "test_filter": "Standalone.CommCuDevice_Check"},
         {"name": "Standalone.SplitComms_RankCheck_Basic_Failure", "description": "Verify ncclCommUserRank fails with invalid communicator handle", "test_filter": "Standalone.SplitComms_RankCheck_Basic_Failure"},
+        {"name": "Fp8Validation.HostCompareIsExact", "description": "FP8 host comparison rejects a result one FP8 step away", "test_filter": "Fp8Validation.HostCompareIsExact", "timeout": 60},
+        {"name": "Fp8Validation.DeviceCompareIsExact", "description": "FP8 device comparison rejects a result one FP8 step away", "test_filter": "Fp8Validation.DeviceCompareIsExact", "timeout": 60},
+        {"name": "Fp8Validation.VerifiableReferenceDetectsErrors", "description": "FP8 verifiable generator verifies its expected output and detects a single corrupted element", "test_filter": "Fp8Validation.VerifiableReferenceDetectsErrors", "timeout": 60},
+        {"name": "Fp8Verifiable.AllReduce", "description": "FP8 AllReduce validated exactly against order-independent data", "test_filter": "Fp8Verifiable.AllReduce", "timeout": 300},
+        {"name": "Fp8Verifiable.Reduce", "description": "FP8 Reduce validated exactly against order-independent data", "test_filter": "Fp8Verifiable.Reduce", "timeout": 300},
+        {"name": "Fp8Verifiable.ReduceScatter", "description": "FP8 ReduceScatter validated exactly against order-independent data", "test_filter": "Fp8Verifiable.ReduceScatter", "timeout": 300},
+        {"name": "Fp8Verifiable.AllReduceSymmetric", "description": "FP8 AllReduce on symmetric windows (skips without symmetric support)", "test_filter": "Fp8Verifiable.AllReduceSymmetric", "timeout": 300},
+        {"name": "Fp8Verifiable.ReduceScatterSymmetric", "description": "FP8 ReduceScatter on symmetric windows (skips without symmetric support)", "test_filter": "Fp8Verifiable.ReduceScatterSymmetric", "timeout": 300},
+        {"name": "Fp8Verifiable.AvgAllReduce", "description": "FP8 AllReduce Avg validated against order-independent data (2-step tolerance)", "test_filter": "Fp8Verifiable.AvgAllReduce", "timeout": 300},
+        {"name": "Fp8Verifiable.AvgReduce", "description": "FP8 Reduce Avg validated against order-independent data (2-step tolerance)", "test_filter": "Fp8Verifiable.AvgReduce", "timeout": 300},
+        {"name": "Fp8Verifiable.AvgReduceScatter", "description": "FP8 ReduceScatter Avg validated against order-independent data (2-step tolerance)", "test_filter": "Fp8Verifiable.AvgReduceScatter", "timeout": 300},
+        {"name": "Fp8Verifiable.AvgAllReduceSymmetric", "description": "FP8 AllReduce Avg on symmetric windows (skips without symmetric support)", "test_filter": "Fp8Verifiable.AvgAllReduceSymmetric", "timeout": 300},
+        {"name": "Fp8Verifiable.AvgReduceScatterSymmetric", "description": "FP8 ReduceScatter Avg on symmetric windows (skips without symmetric support)", "test_filter": "Fp8Verifiable.AvgReduceScatterSymmetric", "timeout": 300},
+        {"name": "PipeUtils.RoundTripFullCount", "description": "safe_pipe_read/write round-trip a full value", "test_filter": "PipeUtils.RoundTripFullCount", "timeout": 60},
+        {"name": "PipeUtils.RoundTripLargerThanPipeBuffer", "description": "safe_pipe_read/write handle partial transfers beyond the pipe buffer", "test_filter": "PipeUtils.RoundTripLargerThanPipeBuffer", "timeout": 60},
+        {"name": "PipeUtils.ReadReturnsZeroOnImmediateEof", "description": "safe_pipe_read returns 0 when the writer closed first", "test_filter": "PipeUtils.ReadReturnsZeroOnImmediateEof", "timeout": 60},
+        {"name": "PipeUtils.ReadReturnsShortCountOnEof", "description": "safe_pipe_read returns the bytes read before EOF", "test_filter": "PipeUtils.ReadReturnsShortCountOnEof", "timeout": 60},
+        {"name": "PipeUtils.ReadAndWriteFailOnBadFd", "description": "safe_pipe_read/write report EBADF on an invalid descriptor", "test_filter": "PipeUtils.ReadAndWriteFailOnBadFd", "timeout": 60},
+        {"name": "PipeUtils.VectorRoundTrip", "description": "pipe_write_vec/pipe_read_vec round-trip non-empty and empty vectors", "test_filter": "PipeUtils.VectorRoundTrip", "timeout": 60},
+        {"name": "PipeUtils.VectorReadRejectsBadStream", "description": "pipe_read_vec rejects a negative count and a truncated payload", "test_filter": "PipeUtils.VectorReadRejectsBadStream", "timeout": 60},
+        {"name": "Teardown.RepeatedDestroyComms", "description": "Repeated multi-process TestBed teardown in blocking and non-blocking modes", "test_filter": "Teardown.RepeatedDestroyComms"},
+        {"name": "Teardown.DestroyCommsVaryingChildCount", "description": "TestBed teardown across varying child process counts", "test_filter": "Teardown.DestroyCommsVaryingChildCount"},
+        {"name": "Teardown.AlreadyExitedChildCleanup", "description": "TestBed reaps a worker that exited before teardown", "test_filter": "Teardown.AlreadyExitedChildCleanup", "timeout": 60},
+        {"name": "Teardown.PoolAfterParentHipInitialization", "description": "Pooled workers start clean after the parent initialized HIP", "test_filter": "Teardown.PoolAfterParentHipInitialization"},
+        {"name": "AllReduce.UserBufferRegistrationTestBed", "description": "Out-of-place AllReduce on ncclCommRegister'd buffers through TestBed", "test_filter": "AllReduce.UserBufferRegistrationTestBed"},
+        {"name": "AllGather.UserBufferRegistrationTestBed", "description": "Out-of-place AllGather on ncclCommRegister'd buffers through TestBed", "test_filter": "AllGather.UserBufferRegistrationTestBed"},
+        {"name": "ReduceScatter.InPlaceUserBufferRegistrationTestBed", "description": "In-place ReduceScatter on an ncclCommRegister'd base buffer through TestBed", "test_filter": "ReduceScatter.InPlaceUserBufferRegistrationTestBed"},
+        {"name": "Broadcast.ExplicitPrepareDataFunc", "description": "Explicit PrepareData function crosses the parent/worker pipe under ASLR", "test_filter": "Broadcast.ExplicitPrepareDataFunc"},
         {"name": "ProfilerPluginClose.UnusablePluginIsUnloaded", "description": "Verify a profiler plugin exposing no usable interface is unloaded instead of being left mapped", "test_filter": "ProfilerPluginClose.UnusablePluginIsUnloaded"},
         {"name": "Register.ProcessIsolatedRegisterTests", "description": "Process isolated buffer registration tests", "test_filter": "Register.ProcessIsolatedRegisterTests"},
         {"name": "DoneEventOrdering.FastPathStreamAlternation", "description": "DoneEventOrdering fast path stream alternation", "test_filter": "DoneEventOrdering.FastPathStreamAlternation", "timeout": 240},
@@ -85,6 +115,8 @@
         {"name": "Recorder.ParseBinary", "description": "Recorder parse binary tests", "test_filter": "Recorder.ParseBinary", "timeout": 60},
         {"name": "Recorder.ParseJson", "description": "Recorder parse JSON tests", "test_filter": "Recorder.ParseJson", "timeout": 60},
         {"name": "Recorder.VerifyMultithread", "description": "Recorder multithread verification tests", "test_filter": "Recorder.VerifyMultithread", "timeout": 60},
+        {"name": "Recorder.RedOpRecordJson", "description": "Recorder RedOp record JSON output", "test_filter": "Recorder.RedOpRecordJson", "timeout": 60},
+        {"name": "Recorder.RedOpRecordBinary", "description": "Recorder RedOp record binary output", "test_filter": "Recorder.RedOpRecordBinary", "timeout": 60},
         {"name": "ProxyTraceTestFixture.nonEmptySingleton", "description": "ProxyTrace non-empty singleton test", "test_filter": "ProxyTraceTestFixture.nonEmptySingleton", "timeout": 60},
         {"name": "ProxyTraceTestFixture.addTraceOp", "description": "ProxyTrace add trace operation test", "test_filter": "ProxyTraceTestFixture.addTraceOp", "timeout": 60},
         {"name": "ProxyTraceTestFixture.getMapSizeMB", "description": "ProxyTrace get map size test", "test_filter": "ProxyTraceTestFixture.getMapSizeMB", "timeout": 60},
@@ -129,11 +161,11 @@
         "NCCL_DEBUG": "INFO"
       },
       "tests": [
-        {"name": "BitOps", "description": "Bit operation utility tests (macros and typed fixtures)", "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash:BitOpsTemplate*"},
+        {"name": "BitOps", "description": "Bit operation utility tests (macros and typed fixtures)", "test_filter": "ALIGN_*:DIVUP.*:ROUNDUP.*:u32fp*:getHash.*:eatHash.*:BitOpsTemplate*:Add4G.*"},
         {"name": "EnqueueCountTests", "description": "Enqueue send/recv count helpers", "test_filter": "EnqueueCountTests.*"},
         {"name": "MiscTests.Sorter", "description": "Task coll sorter unit test", "test_filter": "MiscTests.Sorter"},
         {"name": "VersionInfoTests", "description": "HIP/ROCm version string formatting tests", "test_filter": "VersionInfoTests.*"},
-        {"name": "GinDeviceTest", "description": "GIN proxy backend device-leaf tests", "test_filter": "GinDeviceTest.*"},
+        {"name": "GinDeviceTest", "description": "GIN proxy backend device-leaf tests", "test_filter": "GinDeviceTest.*:GinProxyFlushWaitTest.*"},
         {"name": "DdaCollCommon", "description": "DDA collective common helper tests", "test_filter": "DdaCollCommon.*"}
       ]
     },
@@ -213,6 +245,17 @@
       "tests": [
         {"name": "SymKernelsMicrotests", "description": "Host-only sym_kernels.cc/sym_kernels_host.cc microtests (no GPU, no HIP/RCCL runtime); contributes sym_kernels coverage", "test_filter": "*"}
       ]
+    },
+    "unit_tests_micro_gin_host": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroGinHost",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "GinHostMicrotests", "description": "Host-only gin/gin_host.cc microtests (no GPU, no HIP/RCCL runtime); covers GIN_PROXY_NTHREADS (NVIDIA/nccl#2279 / AICOMRCCL-2017) and proxy-thread CPU affinity (AICOMRCCL-1859)", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -268,6 +311,12 @@
       "name": "RCCL Microtests - sym_kernels.cc",
       "description": "rccl-UnitTestsMicroSymKernels (host-only sym_kernels.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_symkernels",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - gin_host.cc",
+      "description": "rccl-UnitTestsMicroGinHost (host-only gin/gin_host.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_gin_host",
       "enabled": true
     }
   ]

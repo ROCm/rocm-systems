@@ -442,6 +442,100 @@ TEST(GpuVmPipeline, QuantumReleasesInstructionSnapshotOnReturnAndException) {
   }
 }
 
+TEST(GpuVmPipeline, QuantumRetainsAdmissionSnapshotAcrossReturnAndException) {
+  for (bool throw_from_plugin : {false, true}) {
+    SCOPED_TRACE(throw_from_plugin);
+    TranslatedPipelineContext context;
+    ASSERT_NE(context.wf, nullptr);
+    constexpr uint64_t kCode = 0x1000;
+    constexpr uint32_t kNop = 0xBF800000u;
+    context.external->store(kCode, std::array{kNop, kNop, S_ENDPGM_GFX12, 0u});
+    auto &vm = context.sim.soc->gpu_vm();
+    {
+      auto admitted = vm.snapshot_pinned(context.address_space);
+      ASSERT_TRUE(admitted);
+      context.wf->set_vm_access(std::make_shared<amdgpu::GpuVmAccess>(std::move(*admitted)));
+    }
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    auto plugin = std::make_unique<InstructionVmPlugin>();
+    auto *events = plugin.get();
+    events->after_instruction = [&](amdgpu::Wavefront &) {
+      if (throw_from_plugin)
+        throw std::runtime_error("instruction callback");
+    };
+    ASSERT_TRUE(group->add(std::move(plugin)));
+    context.sim.soc->set_plugin_group(group);
+    context.wf->pc = kCode;
+    context.cu->set_functional_quantum(1);
+    if (throw_from_plugin)
+      EXPECT_THROW(context.cu->run_quantum(), std::runtime_error);
+    else
+      EXPECT_TRUE(context.cu->run_quantum().ran);
+
+    auto replacement = std::make_shared<TestExternalAddressSpace>();
+    replacement->store(kCode, std::array{kNop, S_ENDPGM_GFX12, 0u, 0u});
+    ASSERT_TRUE(vm.replace_translated(context.address_space, replacement, replacement));
+    std::weak_ptr<TestExternalAddressSpace> old_backing = context.external;
+    context.external.reset();
+    EXPECT_FALSE(old_backing.expired());
+
+    // Resume after the callback, including when it threw before the PC advance.
+    events->after_instruction = {};
+    context.wf->pc = kCode + sizeof(uint32_t);
+    context.cu->set_functional_quantum(4);
+    EXPECT_TRUE(context.cu->run_quantum().ran);
+    EXPECT_EQ(events->nops, 2u);
+    EXPECT_FALSE(context.cu->has_active_wfs());
+    EXPECT_TRUE(old_backing.expired());
+  }
+}
+
+TEST(GpuVmPipeline, WaveUsesAdmissionSnapshotAcrossRootReplacement) {
+  TranslatedPipelineContext context;
+  ASSERT_TRUE(context.address_space);
+  ASSERT_NE(context.wf, nullptr);
+
+  constexpr uint64_t kAddress = 0x100;
+  constexpr uint32_t kOriginal = 0x11223344;
+  constexpr uint32_t kReplacement = 0xaabbccdd;
+  context.external->store(kAddress, kOriginal);
+
+  std::optional<amdgpu::GpuVmAccess> admitted =
+      context.sim.soc->gpu_vm().snapshot_pinned(context.address_space);
+  ASSERT_TRUE(admitted);
+  context.wf->set_vm_access(std::make_shared<amdgpu::GpuVmAccess>(std::move(*admitted)));
+
+  auto replacement = std::make_shared<TestExternalAddressSpace>();
+  replacement->store(kAddress, kReplacement);
+  ASSERT_TRUE(context.sim.soc->gpu_vm().replace_translated(context.address_space, replacement,
+                                                           replacement));
+
+  std::array<uint8_t, sizeof(uint32_t)> bytes{};
+  EXPECT_EQ(context.wf->read_gpu_memory(kAddress, bytes), amdgpu::VmAccessOutcome::Complete);
+  uint32_t observed = 0;
+  std::memcpy(&observed, bytes.data(), sizeof(observed));
+  EXPECT_EQ(observed, kOriginal);
+}
+
+TEST(GpuVmPipeline, WaveAdmissionSnapshotRevocationTerminatesAfterUnregister) {
+  TranslatedPipelineContext context;
+  ASSERT_TRUE(context.address_space);
+  ASSERT_NE(context.wf, nullptr);
+
+  std::optional<amdgpu::GpuVmAccess> admitted =
+      context.sim.soc->gpu_vm().snapshot_pinned(context.address_space);
+  ASSERT_TRUE(admitted);
+  context.wf->set_vm_access(std::make_shared<amdgpu::GpuVmAccess>(std::move(*admitted)));
+  ASSERT_TRUE(context.sim.soc->gpu_vm().unregister_address_space(context.address_space));
+
+  std::array<uint8_t, sizeof(uint32_t)> bytes{};
+  EXPECT_EQ(context.wf->read_gpu_memory(0x100, bytes), amdgpu::VmAccessOutcome::Revoked);
+  for (uint32_t step = 0; step < 4 && !context.cu->is_idle(); ++step)
+    static_cast<void>(context.cu->step());
+  EXPECT_TRUE(context.cu->is_idle());
+  EXPECT_EQ(context.wf->vm_access(), nullptr);
+}
+
 TEST(GpuVmPipeline, TranslatedScalarLoadAndStoreUseExternalBacking) {
   TranslatedPipelineContext context;
   ASSERT_TRUE(context.address_space);
@@ -599,7 +693,7 @@ TEST(GpuVmPipeline, CompletionRetryOnOneQueueDoesNotStarveAnotherQueue) {
   external->store(kDoorbellAddress, uint64_t{1});
   external->store(kSignalAddress + 8, uint64_t{1});
 
-  amdgpu::AqlQueueConfig stalled_queue{};
+  amdgpu::ComputeQueueConfig stalled_queue{};
   stalled_queue.address_space = address_space;
   stalled_queue.process_id = kProcessId;
   stalled_queue.queue_id = kStalledQueueId;
@@ -681,6 +775,48 @@ TEST(GpuVmPipeline, UnavailableDataRetryDoesNotReplayInstructionPluginCallbacks)
   EXPECT_EQ(events->route_count, 1u);
   EXPECT_EQ(context.external->read_calls, 3u);
   EXPECT_EQ(context.cu->read_vgpr_storage(context.wf->vgpr_alloc().base + kDestination, 0), kValue);
+}
+
+TEST(GpuVmPipeline, RevokedDataRetryTerminatesInsteadOfSpinning) {
+  TranslatedPipelineContext context;
+  ASSERT_TRUE(context.address_space);
+  ASSERT_NE(context.wf, nullptr);
+
+  std::optional<amdgpu::GpuVmAccess> admitted =
+      context.sim.soc->gpu_vm().snapshot_pinned(context.address_space);
+  ASSERT_TRUE(admitted);
+  context.wf->set_vm_access(std::make_shared<amdgpu::GpuVmAccess>(std::move(*admitted)));
+
+  constexpr uint64_t kAddress = 0x2000;
+  constexpr uint32_t kDestination = 1;
+  context.external->store(kAddress, 0x12345678u);
+  context.external->unavailable_read_call = 1;
+
+  auto load = std::make_unique<amdgpu::ScalarMemState>();
+  load->addr = kAddress;
+  load->dst_register = {amdgpu::ScalarRegisterStorage::SGPR, kDestination, 1};
+  load->num_dwords = 1;
+  load->is_load = true;
+
+  amdgpu::ScalarMemPipeline pipeline(&context.cu->l1_scalar());
+  uint32_t fault_count = 0;
+  amdgpu::VmAccessOutcome fault_outcome = amdgpu::VmAccessOutcome::Complete;
+  pipeline.set_fault_handler([&](amdgpu::Wavefront &, amdgpu::VmAccessOutcome outcome) {
+    ++fault_count;
+    fault_outcome = outcome;
+  });
+
+  EXPECT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(load)), *context.wf),
+            amdgpu::VmAccessOutcome::Complete);
+  ASSERT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+  ASSERT_TRUE(context.sim.soc->gpu_vm().invalidate(context.address_space));
+
+  pipeline.tick();
+
+  EXPECT_TRUE(pipeline.empty());
+  EXPECT_TRUE(context.wf->wait_counters().empty());
+  EXPECT_EQ(fault_count, 1u);
+  EXPECT_EQ(fault_outcome, amdgpu::VmAccessOutcome::Revoked);
 }
 
 TEST(GpuVmPipeline, TranslatedScalarReadAndWriteResumeWithoutReplayingCompletedChunks) {

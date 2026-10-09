@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! The audited Linux call boundary for KFD memory and queues.
 //!
 //! KFD calls are synchronous: the kernel copies the ioctl body and any pointed-to
@@ -33,8 +36,6 @@ pub(super) struct DmaBufDetails {
 
 unsafe extern "C" {
     fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
-    fn pread(fd: c_int, buffer: *mut c_void, count: usize, offset: i64) -> isize;
-    fn pwrite(fd: c_int, buffer: *const c_void, count: usize, offset: i64) -> isize;
     fn mmap(
         address: *mut c_void,
         length: usize,
@@ -46,44 +47,6 @@ unsafe extern "C" {
     fn madvise(address: *mut c_void, length: usize, advice: c_int) -> c_int;
     fn munmap(address: *mut c_void, length: usize) -> c_int;
     fn syscall(number: c_long, ...) -> c_long;
-}
-
-/// Borrows a caller-owned descriptor and writable host range for one read.
-pub(super) unsafe fn read_descriptor(
-    descriptor: i32,
-    address: usize,
-    size: usize,
-    offset: i64,
-) -> io::Result<usize> {
-    if descriptor < 0 || address == 0 || size > isize::MAX as usize || offset < 0 {
-        return Err(io::Error::from(io::ErrorKind::InvalidInput));
-    }
-    // SAFETY: The caller promises the complete writable range for this call.
-    let result = unsafe { pread(descriptor, address as *mut c_void, size, offset) };
-    if result < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        usize::try_from(result).map_err(|_| io::Error::from(io::ErrorKind::InvalidData))
-    }
-}
-
-/// Borrows a caller-owned descriptor and readable host range for one write.
-pub(super) unsafe fn write_descriptor(
-    descriptor: i32,
-    address: usize,
-    size: usize,
-    offset: i64,
-) -> io::Result<usize> {
-    if descriptor < 0 || address == 0 || size > isize::MAX as usize || offset < 0 {
-        return Err(io::Error::from(io::ErrorKind::InvalidInput));
-    }
-    // SAFETY: The caller promises the complete readable range for this call.
-    let result = unsafe { pwrite(descriptor, address as *const c_void, size, offset) };
-    if result < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        usize::try_from(result).map_err(|_| io::Error::from(io::ErrorKind::InvalidData))
-    }
 }
 
 const PROT_NONE: c_int = 0;
@@ -121,7 +84,7 @@ pub(super) enum Call<'a> {
     IpcExportHandle(&'a mut uapi::IpcExportHandle),
     Svm(&'a mut uapi::SvmArgs, &'a mut [uapi::SvmAttribute]),
     Spm(&'a mut uapi::Spm),
-    PcSampling(&'a mut uapi::PcSample, &'a mut [uapi::PcSampleInfo]),
+    Ais(&'a mut uapi::AisArgs),
     CreateEvent(&'a mut uapi::CreateEvent),
     DestroyEvent(&'a mut uapi::DestroyEvent),
     Wait(&'a mut uapi::WaitEvents, &'a mut uapi::EventData),
@@ -131,6 +94,7 @@ pub(super) enum Call<'a> {
     DestroyQueue(&'a mut uapi::DestroyQueue),
     UpdateQueue(&'a mut uapi::UpdateQueue),
     SetCuMask(&'a mut uapi::SetCuMask, &'a [u32]),
+    AllocQueueGws(&'a mut uapi::AllocQueueGws),
 }
 
 #[cfg(test)]
@@ -194,8 +158,17 @@ impl Kfd {
 
     #[cfg(test)]
     pub(super) fn with_hook(file: File, hook: IoctlHook) -> Self {
+        Self::with_hook_allocator(file, hook, crate::host_storage::Allocator::default())
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_hook_allocator(
+        file: File,
+        hook: IoctlHook,
+        allocator: crate::host_storage::Allocator,
+    ) -> Self {
         Self {
-            allocator: crate::host_storage::Allocator::default(),
+            allocator,
             file: Some(file),
             process: std::process::id(),
             runtime: Mutex::new(RuntimeControl {
@@ -216,13 +189,26 @@ impl Kfd {
         check_process(self.process)
     }
 
-    fn call(&self, mut call: Call<'_>) -> io::Result<()> {
+    fn call(&self, call: Call<'_>) -> io::Result<()> {
+        self.call_with_page_offer(call, None)
+    }
+
+    fn call_with_page_offer(
+        &self,
+        mut call: Call<'_>,
+        page_offered: Option<&mut bool>,
+    ) -> io::Result<()> {
         self.check_process()?;
         let descriptor = self
             .file
             .as_ref()
             .ok_or_else(|| io::Error::from(io::ErrorKind::NotConnected))?
             .as_raw_fd();
+        if let Some(page_offered) = page_offered {
+            // Validation has finished. KFD may retain this page even when the
+            // ioctl fails, so record the offer before dispatch or its test hook.
+            *page_offered = true;
+        }
         #[cfg(test)]
         if let Some(hook) = &self.hook {
             return hook(&mut call);
@@ -272,14 +258,7 @@ impl Kfd {
             Call::IpcExportHandle(args) => (uapi::IPC_EXPORT_HANDLE, ptr::from_mut(*args).cast()),
             Call::Svm(_, _) => return Err(invalid_data("SVM dispatch path was not selected")),
             Call::Spm(args) => (uapi::SPM, ptr::from_mut(*args).cast()),
-            Call::PcSampling(args, sample_info) => {
-                args.sample_info = if sample_info.is_empty() {
-                    0
-                } else {
-                    sample_info.as_mut_ptr() as u64
-                };
-                (uapi::PC_SAMPLE, ptr::from_mut(*args).cast())
-            }
+            Call::Ais(args) => (uapi::AIS, ptr::from_mut(*args).cast()),
             Call::CreateEvent(args) => (uapi::CREATE_EVENT, ptr::from_mut(*args).cast()),
             Call::DestroyEvent(args) => (uapi::DESTROY_EVENT, ptr::from_mut(*args).cast()),
             Call::SetScratchBackingVa(args) => {
@@ -293,6 +272,7 @@ impl Kfd {
                 args.mask = mask.as_ptr() as u64;
                 (uapi::SET_CU_MASK, ptr::from_mut(*args).cast())
             }
+            Call::AllocQueueGws(args) => (uapi::ALLOC_QUEUE_GWS, ptr::from_mut(*args).cast()),
             Call::Wait(args, event) => {
                 args.events = ptr::from_mut(*event) as u64;
                 (uapi::WAIT_EVENTS, ptr::from_mut(*args).cast())
@@ -500,20 +480,13 @@ impl Kfd {
         result
     }
 
-    fn disable_runtime(&mut self) -> io::Result<()> {
-        let state = self
-            .runtime
-            .get_mut()
-            .map_err(|_| invalid_data("KFD runtime lock poisoned"))?
-            .enable;
-        if state == RuntimeState::Disabled {
+    pub(super) fn disable_runtime(&self) -> io::Result<()> {
+        let mut runtime = self.runtime_guard()?;
+        if runtime.state.enable == RuntimeState::Disabled {
             return Ok(());
         }
         let result = self.call(Call::RuntimeEnable(&mut uapi::RuntimeEnable::default()));
-        self.runtime
-            .get_mut()
-            .map_err(|_| invalid_data("KFD runtime lock poisoned"))?
-            .enable = if result.is_ok() {
+        runtime.state.enable = if result.is_ok() {
             RuntimeState::Disabled
         } else {
             RuntimeState::CleanupRequired
@@ -542,6 +515,7 @@ impl Kfd {
             | uapi::NO_SUBSTITUTE
             | uapi::COHERENT
             | uapi::UNCACHED
+            | uapi::EXT_COHERENT
             | uapi::CONTIGUOUS;
         let kind = args.flags & (uapi::VRAM | uapi::GTT | uapi::USERPTR);
         if args.flags & !permitted != 0 || !matches!(kind, uapi::VRAM | uapi::GTT | uapi::USERPTR) {
@@ -758,112 +732,29 @@ impl Kfd {
         self.call(Call::Spm(args))
     }
 
-    pub(super) fn pc_sampling_capabilities(
-        &self,
-        gpu_id: u32,
-    ) -> io::Result<crate::host_storage::Buffer<uapi::PcSampleInfo>> {
-        if gpu_id == 0 {
-            return Err(io::Error::from(io::ErrorKind::InvalidInput));
-        }
-        let mut args = uapi::PcSample {
-            operation: uapi::PC_SAMPLE_OP_QUERY_CAPABILITIES,
-            gpu_id,
-            ..uapi::PcSample::default()
-        };
-        self.call(Call::PcSampling(&mut args, &mut []))?;
-        let count = usize::try_from(args.sample_info_count).map_err(invalid_data)?;
-        let mut configurations =
-            crate::host_storage::Buffer::try_with_capacity(count, self.allocator)
-                .map_err(|_| io::Error::from(io::ErrorKind::OutOfMemory))?;
-        for _ in 0..count {
-            configurations
-                .try_push(uapi::PcSampleInfo::default())
-                .map_err(|_| io::Error::from(io::ErrorKind::OutOfMemory))?;
-        }
-        if count == 0 {
-            return Ok(configurations);
-        }
-        self.call(Call::PcSampling(&mut args, &mut configurations))?;
-        let returned = usize::try_from(args.sample_info_count).map_err(invalid_data)?;
-        if returned > configurations.len() {
-            return Err(invalid_data(
-                "KFD returned more PC sampling configurations than supplied storage",
-            ));
-        }
-        configurations.truncate(returned);
-        Ok(configurations)
-    }
-
-    pub(super) fn pc_sampling_create(
-        &self,
-        gpu_id: u32,
-        sample_info: &mut uapi::PcSampleInfo,
-        trace_id: &mut u32,
-    ) -> io::Result<()> {
-        if gpu_id == 0
-            || *trace_id != 0
-            || sample_info.interval == 0
-            || !matches!(
-                sample_info.method,
-                uapi::PC_SAMPLE_METHOD_HOSTTRAP | uapi::PC_SAMPLE_METHOD_STOCHASTIC
-            )
-            || !matches!(
-                sample_info.sample_type,
-                uapi::PC_SAMPLE_TYPE_TIME_US
-                    | uapi::PC_SAMPLE_TYPE_CLOCK_CYCLES
-                    | uapi::PC_SAMPLE_TYPE_INSTRUCTIONS
-            )
+    /// A successful ioctl replaces the first 16 input bytes with its output.
+    /// An error leaves progress unknown because those bytes may still be input.
+    pub(super) fn ais(&self, input: uapi::AisInput) -> io::Result<uapi::AisOutput> {
+        if input.handle == 0
+            || input.size == 0
+            || input.size > crate::memory::interop::linux::AIS_MAX_TRANSFER_BYTES
+            || input.descriptor < 0
+            || input.file_offset < 0
+            || input
+                .file_offset
+                .checked_add(i64::try_from(input.size).map_err(invalid_data)?)
+                .is_none()
+            || !matches!(input.operation, uapi::AIS_READ | uapi::AIS_WRITE)
         {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
-        let mut args = uapi::PcSample {
-            sample_info_count: 1,
-            operation: uapi::PC_SAMPLE_OP_CREATE,
-            gpu_id,
-            ..uapi::PcSample::default()
-        };
-        let result = self.call(Call::PcSampling(
-            &mut args,
-            std::slice::from_mut(sample_info),
-        ));
-        *trace_id = args.trace_id;
-        if result.is_ok() && *trace_id == 0 {
-            return Err(invalid_data("KFD returned an invalid PC sampling trace ID"));
+        let mut args = uapi::AisArgs::new(input);
+        self.call(Call::Ais(&mut args))?;
+        let output = args.completed_output();
+        if output.size_copied > input.size || output.status > 0 {
+            return Err(invalid_data("KFD returned invalid AIS progress or status"));
         }
-        result
-    }
-
-    fn pc_sampling_control(&self, gpu_id: u32, trace_id: u32, operation: u32) -> io::Result<()> {
-        if gpu_id == 0
-            || trace_id == 0
-            || !matches!(
-                operation,
-                uapi::PC_SAMPLE_OP_DESTROY | uapi::PC_SAMPLE_OP_START | uapi::PC_SAMPLE_OP_STOP
-            )
-        {
-            return Err(io::Error::from(io::ErrorKind::InvalidInput));
-        }
-        self.call(Call::PcSampling(
-            &mut uapi::PcSample {
-                operation,
-                gpu_id,
-                trace_id,
-                ..uapi::PcSample::default()
-            },
-            &mut [],
-        ))
-    }
-
-    pub(super) fn pc_sampling_destroy(&self, gpu_id: u32, trace_id: u32) -> io::Result<()> {
-        self.pc_sampling_control(gpu_id, trace_id, uapi::PC_SAMPLE_OP_DESTROY)
-    }
-
-    pub(super) fn pc_sampling_start(&self, gpu_id: u32, trace_id: u32) -> io::Result<()> {
-        self.pc_sampling_control(gpu_id, trace_id, uapi::PC_SAMPLE_OP_START)
-    }
-
-    pub(super) fn pc_sampling_stop(&self, gpu_id: u32, trace_id: u32) -> io::Result<()> {
-        self.pc_sampling_control(gpu_id, trace_id, uapi::PC_SAMPLE_OP_STOP)
+        Ok(output)
     }
 
     pub(super) fn create_queue(&self, args: &mut uapi::CreateQueue) -> io::Result<()> {
@@ -875,6 +766,15 @@ impl Kfd {
             queue_id,
             pad: 0,
         }))
+    }
+
+    pub(super) fn alloc_queue_gws(&self, queue_id: u32) -> io::Result<()> {
+        let mut args = uapi::AllocQueueGws {
+            queue_id,
+            num_gws: 1,
+            ..uapi::AllocQueueGws::default()
+        };
+        self.call(Call::AllocQueueGws(&mut args))
     }
 
     pub(super) fn update_queue(&self, args: &mut uapi::UpdateQueue) -> io::Result<()> {
@@ -987,7 +887,9 @@ impl Kfd {
         &self,
         event_page_handle: Option<u64>,
         args: &mut uapi::CreateEvent,
+        page_offered: &mut bool,
     ) -> io::Result<()> {
+        *page_offered = false;
         if event_page_handle == Some(0) {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
@@ -997,7 +899,10 @@ impl Kfd {
             auto_reset: 1,
             ..uapi::CreateEvent::default()
         };
-        self.call(Call::CreateEvent(args))
+        self.call_with_page_offer(
+            Call::CreateEvent(args),
+            event_page_handle.map(|_| page_offered),
+        )
     }
 
     pub(super) fn destroy_event(&self, event_id: u32) -> io::Result<()> {
@@ -1467,17 +1372,11 @@ impl Reservation {
             unsafe { &*((self.address + read_offset) as *const std::sync::atomic::AtomicU64) };
         let write =
             unsafe { &*((self.address + write_offset) as *const std::sync::atomic::AtomicU64) };
-        loop {
-            let first_write = write.load(std::sync::atomic::Ordering::Acquire);
-            let native_read = read.load(std::sync::atomic::Ordering::Acquire);
-            let second_write = write.load(std::sync::atomic::Ordering::Acquire);
-            if first_write == second_write {
-                let consumed =
-                    first_write.wrapping_sub(first_write.wrapping_sub(native_read) & read_mask);
-                return Ok((consumed, first_write));
-            }
-            std::hint::spin_loop();
-        }
+        sample_wrapping_indices(
+            read_mask,
+            || write.load(std::sync::atomic::Ordering::Acquire),
+            || read.load(std::sync::atomic::Ordering::Acquire),
+        )
     }
 
     pub(super) fn zero(&mut self) -> io::Result<()> {
@@ -1585,6 +1484,30 @@ impl Drop for Reservation {
             let _ = self.release();
         }
     }
+}
+
+/// A progress query cannot wait indefinitely for a busy producer to pause.
+/// Destruction calls this only after producers stop, so exhaustion is retryable.
+const MAX_WRAPPING_INDEX_SAMPLES: usize = 64;
+
+#[inline]
+fn sample_wrapping_indices(
+    read_mask: u64,
+    mut load_write: impl FnMut() -> u64,
+    mut load_read: impl FnMut() -> u64,
+) -> io::Result<(u64, u64)> {
+    for _ in 0..MAX_WRAPPING_INDEX_SAMPLES {
+        let first_write = load_write();
+        let native_read = load_read();
+        let second_write = load_write();
+        if first_write == second_write {
+            let consumed =
+                first_write.wrapping_sub(first_write.wrapping_sub(native_read) & read_mask);
+            return Ok((consumed, first_write));
+        }
+        std::hint::spin_loop();
+    }
+    Err(io::Error::from(io::ErrorKind::WouldBlock))
 }
 
 #[cfg(test)]

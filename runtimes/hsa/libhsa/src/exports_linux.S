@@ -1,3 +1,6 @@
+/* Copyright (c) 2026 Advanced Micro Devices, Inc. */
+/* SPDX-License-Identifier: MIT */
+
 // ROCr HSA ELF symbol versions. The first 280 names match
 // projects/rocr-runtime/runtime/hsa-runtime/hsacore.so.def; the
 // loader extension names also appear in the public HSA header.
@@ -259,6 +262,7 @@
 .symver hsa_amd_vmem_retain_alloc_handle,hsa_amd_vmem_retain_alloc_handle@@ROCR_1
 .symver hsa_amd_vmem_get_alloc_properties_from_handle,hsa_amd_vmem_get_alloc_properties_from_handle@@ROCR_1
 .symver hsa_amd_agent_set_async_scratch_limit,hsa_amd_agent_set_async_scratch_limit@@ROCR_1
+.symver hsa_amd_agent_set_attribute,hsa_amd_agent_set_attribute@@ROCR_1
 .symver hsa_ven_amd_pcs_iterate_configuration,hsa_ven_amd_pcs_iterate_configuration@@ROCR_1
 .symver hsa_ven_amd_pcs_create,hsa_ven_amd_pcs_create@@ROCR_1
 .symver hsa_ven_amd_pcs_create_from_id,hsa_ven_amd_pcs_create_from_id@@ROCR_1
