@@ -548,7 +548,8 @@ inline void apply_dpp8(const Operand &source, uint32_t lane_sel, uint32_t fi,
 
 namespace sdwa {
 
-/// @brief Instruction policy for SDWA scaling, shared with its VOP3 form.
+/// @brief MODE or fixed flush-nearest policy for SDWA OMOD eligibility, shared with VOP3.
+/// This selects whether OMOD is enabled; producer helpers determine scaling order.
 enum class OutputPolicy : uint8_t { MODE, FLUSH_NEAREST };
 
 /// @brief Return the architectural source bytes selected by an SDWA selector.
