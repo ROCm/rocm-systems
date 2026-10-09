@@ -80,6 +80,8 @@ test_categories:
       - "ParamUtilsMicrotest.*"
       # include/param/parser_{default,enum,bitset,list}.h
       - "ParamParsersMicrotest.*"
+      # param/param_registry.cc
+      - "ParamRegistryMicrotest.*"
       # group.cc
       - "GroupEndInternalTest.*"
       - "ReclaimPlannerStateTest.*"

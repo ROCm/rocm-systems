@@ -197,6 +197,19 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     AICOMRCCL-2820 stacked chain; see `param-utils-test.cc` for the shared
     `ncclParamParser<T>` wrapper and option-set builders these factories
     build on.
+  - `param/param_registry.cc` (`PARAM_REGISTRY_CC_PATH`, from
+    `param-registry-test.cc`); suite `ParamRegistryMicrotest.*`. Covers the
+    process-wide `ncclParamRegistry` singleton: `add`'s duplicate-key `WARN`
+    and rejection (leaving the first registration's pointer intact), `find`
+    on known and unknown keys, `remove` (including as a no-op on an unknown
+    key, and re-registering the same key afterward), and that the
+    `state()`/`instance()`/`mutex()` accessors and the C-linkage
+    `ncclParamRegistryInstance()` all resolve to the same singleton. A
+    minimal `FakeParam` implementing `ncclParamInterface` stands in for
+    `ncclParam<T>`, since the registry only ever touches entries through
+    that interface pointer; this keeps the test independent of `param.h`'s
+    env-plugin-dependent `ncclParam<T>`, covered by a later PR in this
+    chain. Third PR in the AICOMRCCL-2820 stacked chain.
   - `misc/gdr_probe.cc` (`GDR_PROBE_CC_PATH`, from `gdr-probe-test.cc`); suite
     `GdrProbeTest.*`. Covers `ncclIbProbeGdrSupport`, the runtime GPU
     memory-registration fallback behind the sysfs peer-memory scan: the result
