@@ -22,7 +22,7 @@ const identity = (value) => JSON.stringify(value);
 const environmentIdentity = (environment) => identity(environment.map(({ key, value }) => [key, value]).sort(([a], [b]) => a.localeCompare(b)));
 const definitionIdentity = (test) => identity([test.suite, test.name, Object.entries(test.problem).sort(([a], [b]) => a.localeCompare(b))]);
 
-export function isIsoTimestamp(value) {
+function isIsoTimestamp(value) {
   if (typeof value !== 'string') return false;
   const match = ISO.exec(value);
   if (!match || !Number.isFinite(Date.parse(value))) return false;
@@ -141,37 +141,6 @@ function buildDashboardData(raw) {
   return { ...raw, canonicalBranch: raw.canonicalBranch ?? 'develop', allRuns, runs,
     targets: [...new Set(allRuns.flatMap(({ targets }) => targets))].sort(), suites: [...new Set(raw.testCatalog.map(({ suite }) => suite))].sort(), modes: ['ST', 'MT'],
     latestRun: runs.at(-1) ?? null, latestCommitRun: sortRunsByCommit(runs).at(-1) ?? null, backfillRunIds: backfillRunIds(runs) };
-}
-
-// Rehydrate processed normalized JSON through the same wire validator, not a schema bypass.
-export function loadDashboardData(raw) {
-  const shape = buildDashboardData(raw);
-  const seenIds = new Set();
-  for (const run of shape.allRuns) {
-    if (seenIds.has(run.runId)) throw new Error(`Duplicate run ID ${run.runId}`);
-    seenIds.add(run.runId);
-  }
-  const catalogs = { ...(raw.catalogs ?? {}) };
-  const runs = shape.allRuns.map((run) => {
-    for (const test of run.tests) {
-      if (test.testId !== `${test.target}:${test.mode}:${test.logicalTestId}`
-        || !run.configurations.some((c) => c.target === test.target && c.threadingMode === test.mode)) {
-        throw new Error(`Run ${run.runId} has an invalid normalized test identity`);
-      }
-    }
-    return { schemaVersion: CURRENT_SCHEMA_VERSION, id: run.runId, testCatalog: run.testCatalog,
-      source: { branch: run.branch, commit: run.provenance?.rocjitsuCommitSha, committedAt: run.commitTimestamp,
-        ...(Object.hasOwn(run.provenance ?? {}, 'commitMessage') ? { message: run.provenance.commitMessage } : {}),
-        ...(run.sourceBase ? { base: run.sourceBase } : {}), ...(run.pullRequest ? { pullRequest: run.pullRequest } : {}) },
-      execution: { completedAt: run.timestamp, trigger: run.trigger, machine: run.machineId },
-      environment: run.provenance?.details ?? [],
-      configurations: run.configurations.map(({ target, threadingMode }) => ({ target, threadingMode,
-        results: run.tests.filter((t) => t.target === target && t.mode === threadingMode)
-          .map(({ logicalTestId, status, durationSeconds, error }) => ({ testId: logicalTestId, status, durationSeconds, error })) })),
-    };
-  });
-  const siteConfig = { repository: raw.repository, isBeta: raw.isBeta, canonicalBranch: shape.canonicalBranch };
-  return validatePublishedDashboardData({ siteConfig, index: { generatedAt: raw.generatedAt, runFiles: runs.map((run) => publishedRunPath(run, siteConfig.canonicalBranch)) }, runs, catalogs }).data;
 }
 
 export function validatePublishedDashboardData({ index, runs, runErrors = [], catalogs = {}, catalogErrors = {}, siteConfig = DASHBOARD_SITE_CONFIG }) {

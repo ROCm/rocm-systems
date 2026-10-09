@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { loadDashboardData, validatePublishedDashboardData } from '../../src/data/dashboardValidation.js';
+import { validatePublishedDashboardData } from '../../src/data/dashboardValidation.js';
 import { loadDashboardDataFiles } from '../../src/data/dashboardData.js';
 import { createSchema2Publication } from '../fixtures/schema2Dataset.js';
 
@@ -57,13 +57,12 @@ test('site settings cannot be overridden by publication extensions and are not i
   expect(sourceData).toEqual(source);
 });
 
-test('explicit tool site configuration round trips separately from unchanged publication provenance', () => {
+test('explicit tool site configuration remains separate from unchanged publication provenance', () => {
   const source = publication();
   source.runs[0].source.repository = 'https://example.test/recorded-source';
   const siteConfig = { repository: 'https://example.test/site', isBeta: false, canonicalBranch: 'develop' };
   const { data, sourceData } = validatePublishedDashboardData({ ...source, siteConfig });
   expect(data).toMatchObject(siteConfig);
-  expect(loadDashboardData(JSON.parse(JSON.stringify(data)))).toEqual(data);
   expect(sourceData).toEqual(source);
   expect(sourceData.runs[0].source.repository).toBe('https://example.test/recorded-source');
 });

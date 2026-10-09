@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { loadDashboardData, validatePublishedDashboardData, validatePublishedResult } from '../../src/data/dashboardValidation.js';
+import { validatePublishedDashboardData, validatePublishedResult } from '../../src/data/dashboardValidation.js';
 import { createSchema2Publication } from '../fixtures/schema2Dataset.js';
 
 const invalidCases = [
@@ -10,6 +10,11 @@ const invalidCases = [
   ['unsafe run path', (s) => { s.index.runFiles[0] = 'runs/../../escape.json'; }, /filename/],
   ['duplicate file', (s) => { s.index.runFiles[1] = s.index.runFiles[0]; }, /Duplicate/],
   ['filename identity mismatch', (s) => { s.runs[0].id = 'different'; }, /filename/],
+  ['duplicate run identity across directories', (s) => { s.runs[24].id = s.runs[0].id; s.index.runFiles[24] = `runs/side-branches/${s.runs[0].id}.json`; }, /Duplicate run ID/],
+  ['absent catalogs', (s) => { delete s.catalogs; }, /catalog contract/],
+  ['empty catalogs', (s) => { s.catalogs = {}; }, /catalog contract/],
+  ['missing referenced catalog', (s) => { delete s.catalogs[s.runs[0].testCatalog]; }, /catalog contract/],
+  ['missing catalog with omitted workload', (s) => { delete s.catalogs[s.runs[0].testCatalog]; s.runs[0].configurations[0].results.pop(); }, /catalog contract/],
   ['unsafe catalog path', (s) => { s.runs[0].testCatalog = '../escape.json'; }, /catalog/],
   ['catalog identity mismatch', (s) => { s.catalogs[s.runs[0].testCatalog].id = 'different'; }, /catalog contract/],
   ['invalid configuration key', (s) => { s.catalogs[s.runs[0].testCatalog].configurations['gfx1250:unknown'] = ['a']; }, /invalid configuration/],
@@ -42,7 +47,7 @@ test('independent branch machines and scalar environments remain disclosed', () 
   expect(data.allRuns.at(-1).machineId).toBe('fictional-branch-node');
   expect(data.allRuns.at(-1).provenance.details).toEqual(source.runs[43].environment);
   expect(data.runs.some((run) => data.backfillRunIds.has(run.runId))).toBe(true);
-  expect(loadDashboardData(structuredClone(data)).allRuns).toHaveLength(44);
+  expect(data.allRuns).toHaveLength(44);
 });
 
 test('result status/error distinction preserves zero and failure/timeout diagnostics', () => {

@@ -31,7 +31,7 @@ export async function processDashboardDataDirectory(directory, { output } = {}) 
     throw new Error('Processing output must be outside the input data directory');
   }
   const { data, sourceData } = await validateDashboardDataDirectory(root);
-  // JSON has no Set type. Re-loading rebuilds backfillRunIds from canonical runs.
+  // JSON has no Set type, so serialize backfillRunIds as an array.
   const result = { data: { ...data, backfillRunIds: [...data.backfillRunIds] }, sourceData };
   if (outputPath) {
     await mkdir(path.dirname(outputPath), { recursive: true });

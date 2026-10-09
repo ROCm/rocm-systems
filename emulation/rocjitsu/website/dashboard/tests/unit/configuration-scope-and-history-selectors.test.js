@@ -1,7 +1,7 @@
 import { fixtureRunPath } from '../fixtures/runPath.js';
 import { expect, test } from 'vitest';
 import { validatePublishedDashboardData } from '../../src/data/dashboardValidation.js';
-import { selectOverview, selectRecentRuns, selectBenchmarkSeries, selectBenchmarkRecords, selectBenchmarkCatalog, selectRunComparison } from '../../src/data/selectors.js';
+import { selectOverview, selectRecentRunAttempts, selectRecentRunSummaries, selectBenchmarkSeries, selectBenchmarkCatalog, selectRunComparison } from '../../src/data/selectors.js';
 import { createSchema2Publication } from '../fixtures/schema2Dataset.js';
 
 const data = validatePublishedDashboardData(createSchema2Publication()).data;
@@ -55,16 +55,15 @@ test('mode-specific benchmark histories keep measured zero and missing configura
   expect(series[0].points[14].value).toBe(0);
   expect(selectBenchmarkSeries(data, { ...filters, modes: [] }, 'a').series).toEqual([]);
   expect(selectBenchmarkSeries(data, { ...filters, suites: [] }, 'a').series.every(({ points }) => points.every((p) => p === null))).toBe(true);
-  expect(selectBenchmarkRecords(data, { ...filters, modes: ['MT'] }, 'a').records.every(({ test }) => test.mode === 'MT')).toBe(true);
   expect(selectBenchmarkCatalog(data, { ...filters, modes: [] }).available).toEqual([]);
 });
 
 test('recent history includes only the latest 20 canonical executions and preserves failure denominators', () => {
-  const recent = selectRecentRuns(data, filters);
+  const recent = selectRecentRunSummaries(selectRecentRunAttempts(data).slice(0, 20), filters);
   expect(recent).toHaveLength(20);
   expect(recent[0].run.runId).toBe('fictional-develop-21');
   expect(recent.every(({ run }) => run.branch === 'develop')).toBe(true);
-  const failure = selectRecentRuns(data, filters, 24).find(({ run }) => run.runId === 'fictional-develop-08');
+  const failure = selectRecentRunSummaries(selectRecentRunAttempts(data), filters).find(({ run }) => run.runId === 'fictional-develop-08');
   expect(failure.completed).toBeLessThan(failure.total);
   expect(failure.duration).toBeNull();
 });

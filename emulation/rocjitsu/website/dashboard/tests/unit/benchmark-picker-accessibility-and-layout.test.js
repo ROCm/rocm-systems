@@ -1,7 +1,7 @@
 import { Children, createElement, isValidElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
-import BenchmarkPicker, { BenchmarkGridPicker } from '../../src/components/benchmarks/BenchmarkPicker.jsx';
+import { BenchmarkGridPicker } from '../../src/components/benchmarks/BenchmarkPicker.jsx';
 
 function descendants(node, predicate) {
   const found = [];
@@ -14,9 +14,9 @@ function descendants(node, predicate) {
   return found;
 }
 
-function renderOption(Picker, dataType) {
+function renderOption(dataType) {
   const option = { id: 'fictional-scalar', name: 'Fictional scalar workload', suite: 'Triton', problem: { operation: 'gemm', dataType } };
-  const picker = Picker({ allOptions: [option], availableOptions: [option], selected: Picker === BenchmarkGridPicker ? [] : null, showingAll: false, onChange() {} });
+  const picker = BenchmarkGridPicker({ allOptions: [option], availableOptions: [option], selected: [], showingAll: false, onChange() {} });
   return picker.props.renderOption({ key: option.id, role: 'option', 'aria-selected': true, tabIndex: -1 }, option, { selected: true });
 }
 
@@ -51,7 +51,7 @@ it('grid popup and long chip sets have viewport-bounded local scrolling', () => 
 });
 
 it('UI-005 keeps workload options named with no independently focusable nested checkbox', () => {
-  const row = renderOption(BenchmarkGridPicker, 'fp16');
+  const row = renderOption('fp16');
   const html = renderToStaticMarkup(row);
   expect(html).toContain('role="option"');
   expect(html).toContain('aria-selected="true"');
@@ -61,10 +61,8 @@ it('UI-005 keeps workload options named with no independently focusable nested c
 });
 
 it.each([16, true, false, 0, null, 'fp16'])('UI-001 renders dataType %j safely, formatting only strings', (dataType) => {
-  for (const Picker of [BenchmarkGridPicker, BenchmarkPicker]) {
-    const option = renderOption(Picker, dataType);
-    const description = descendants(option, (element) => 'secondary' in element.props)[0].props.secondary;
-    expect(description).toBe(dataType === null ? 'gemm' : `gemm · ${typeof dataType === 'string' ? dataType.toUpperCase() : String(dataType)}`);
-    expect(renderToStaticMarkup(createElement(() => option))).toContain('Fictional scalar workload');
-  }
+  const option = renderOption(dataType);
+  const description = descendants(option, (element) => 'secondary' in element.props)[0].props.secondary;
+  expect(description).toBe(dataType === null ? 'gemm' : `gemm · ${typeof dataType === 'string' ? dataType.toUpperCase() : String(dataType)}`);
+  expect(renderToStaticMarkup(createElement(() => option))).toContain('Fictional scalar workload');
 });

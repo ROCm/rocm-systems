@@ -9,8 +9,6 @@ import {
   validatePublishedDashboardData,
 } from './dashboardValidation.js';
 
-export { loadDashboardData, validatePublishedDashboardData } from './dashboardValidation.js';
-
 function hasText(value) {
   return typeof value === 'string' && Boolean(value.trim());
 }
@@ -26,10 +24,10 @@ function withReloadToken(url, reloadToken) {
 // per-host limit anyway, and an unbounded fan-out makes every request share the same slow ramp, so
 // the loader keeps a fixed number of requests in flight and reports progress as they settle.
 export const MAX_CONCURRENT_RUN_REQUESTS = 8;
-export const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
-export const DEFAULT_LOAD_TIMEOUT_MS = 60_000;
-export const DEFAULT_RETRY_DELAYS_MS = [250, 750];
-export const MAX_RETRY_DELAY_MS = 5_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
+const DEFAULT_LOAD_TIMEOUT_MS = 60_000;
+const DEFAULT_RETRY_DELAYS_MS = [250, 750];
+const MAX_RETRY_DELAY_MS = 5_000;
 
 const loadCancellation = Symbol('dashboard-load-cancellation');
 

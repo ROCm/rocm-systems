@@ -2,7 +2,7 @@ import metadata from '../config/metadata.json' with { type: 'json' };
 
 // Metadata selects the run format the website wants to consume.
 export const CURRENT_RUN_SCHEMA_VERSION = metadata.schemaVersion;
-export const SUPPORTED_RUN_SCHEMA_VERSIONS = Object.freeze([1, 2]);
+const SUPPORTED_RUN_SCHEMA_VERSIONS = Object.freeze([1, 2]);
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value) => typeof value === 'string' && Boolean(value.trim());
 

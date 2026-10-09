@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import * as presentation from '../../src/components/overview/overviewPresentation.js';
-import { selectRecentRuns } from '../../src/data/selectors.js';
+import { selectRecentRunAttempts, selectRecentRunSummaries } from '../../src/data/selectors.js';
 import { createRecentRunsHistory } from '../fixtures/recent-runs-history.js';
 
 const { data } = createRecentRunsHistory();
@@ -17,7 +17,7 @@ test('page bounds clamp shrinking, short and empty histories without overlapping
 });
 
 test('uncapped history preserves validated canonical attempts, tied execution order and selected coverage', () => {
-  const rows = selectRecentRuns(data, filters, Infinity);
+  const rows = selectRecentRunSummaries(selectRecentRunAttempts(data), filters);
   expect(rows).toHaveLength(65);
   expect(rows.map(({ run }) => run.runId)).toEqual(Array.from({ length: 65 }, (_, index) => `fictional-pagination-${String(64 - index).padStart(3, '0')}`));
   for (const row of rows) {
@@ -28,7 +28,7 @@ test('uncapped history preserves validated canonical attempts, tied execution or
   }
   expect(rows.find(({ run }) => run.runId === 'fictional-pagination-008').failed).toBeGreaterThan(0);
   for (const key of ['targets', 'suites', 'modes']) {
-    const emptyScope = selectRecentRuns(data, { ...filters, [key]: [] }, Infinity);
+    const emptyScope = selectRecentRunSummaries(selectRecentRunAttempts(data), { ...filters, [key]: [] });
     expect(emptyScope).toHaveLength(65);
     expect(emptyScope.every((row) => row.total === 0 && row.duration === null)).toBe(true);
   }

@@ -85,6 +85,9 @@ node scripts/process-dashboard-data.mjs <data-directory> --output <new-file-outs
 
 Processing validates the full snapshot before writing, refuses to overwrite an
 existing output or place it in the input directory, and emits `{data,sourceData}`.
-Only `backfillRunIds` changes representation to a JSON array; `loadDashboardData`
-revalidates normalized data and rebuilds its Set. Without `--output`, processing
-prints JSON to stdout. These are local consumer tools, not a producer or publisher.
+Only `backfillRunIds` changes representation to a JSON array. Normalized `data`
+is an output for inspection and downstream tools, not a supported dashboard input;
+there is no normalized-JSON re-import API. The dashboard consumes published
+index, run and catalog files, including supported schema-1 migration. Without
+`--output`, processing prints JSON to stdout. These are local consumer tools,
+not a producer or publisher.

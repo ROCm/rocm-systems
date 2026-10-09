@@ -21,7 +21,6 @@ function chartOptions() {
     data,
     filters: { targets: ['gfx1250', 'gfx950'], suites: ['Triton', 'Llama'], modes: ['ST', 'MT'] },
     benchmark: { id: 'a', name: 'Fictional GEMM' },
-    showDetailsOnClick: true,
   }));
   return captured.chart.option;
 }

@@ -3,28 +3,38 @@ import { act, Children, createElement, isValidElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, test, vi } from 'vitest';
 import RecentRuns from '../../src/components/overview/RecentRuns.jsx';
-import { selectRecentRunAttempts, selectRecentRunSummaries, selectRecentRuns } from '../../src/data/selectors.js';
+import { selectRecentRunAttempts, selectRecentRunSummaries } from '../../src/data/selectors.js';
 import { createRecentRunsHistory } from '../fixtures/recent-runs-history.js';
 
 const filters = { targets: ['gfx1250'], suites: ['Triton'], modes: ['ST'] };
 const roots = [];
 afterEach(() => { for (const root of roots.splice(0)) act(() => root.unmount()); vi.unstubAllGlobals(); });
 
-test('paged summaries preserve legacy ordering and coverage for selected and explicitly empty scopes', () => {
+test('paged summaries preserve execution ordering and coverage for selected and explicitly empty scopes', () => {
   const { data } = createRecentRunsHistory();
   const original = [...data.runs];
   const attempts = selectRecentRunAttempts(data);
   expect(data.runs).toEqual(original);
   for (const scope of [filters, ...['targets', 'suites', 'modes'].map((key) => ({ ...filters, [key]: [] }))]) {
-    const legacy = selectRecentRuns(data, scope, Infinity);
     const rows = [0, 20, 40, 60].flatMap((start) => selectRecentRunSummaries(attempts.slice(start, start + 20), scope));
     expect(rows).toHaveLength(65);
     rows.forEach((row, index) => {
-      expect(legacy[index]).toMatchObject(row);
+      expect(row.run.runId).toBe(`fictional-pagination-${String(64 - index).padStart(3, '0')}`);
+      const tests = row.run.tests.filter((test) => scope.targets.includes(test.target) && scope.suites.includes(test.suite) && scope.modes.includes(test.mode));
+      const completed = tests.filter((test) => test.status === 'completed' && Number.isFinite(test.durationSeconds));
+      expect(row).toMatchObject({
+        total: tests.length,
+        completed: completed.length,
+        failed: tests.filter((test) => test.status === 'failed').length,
+        timeout: tests.filter((test) => test.status === 'timeout').length,
+        completionPercent: tests.length ? completed.length / tests.length * 100 : null,
+      });
+      if (tests.length && completed.length === tests.length) {
+        expect(row.duration).toBeCloseTo(completed.reduce((sum, test) => sum + test.durationSeconds, 0), 10);
+      } else expect(row.duration).toBeNull();
       expect(row).not.toHaveProperty('baseline');
       expect(row).not.toHaveProperty('durationDelta');
     });
-    expect(selectRecentRuns(data, scope)).toEqual(legacy.slice(0, 20));
   }
 });
 

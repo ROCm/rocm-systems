@@ -48,7 +48,7 @@ export default function BenchmarksView({ data, filters, historyRange: controlled
     if (choice.record) openRecord(choice.record);
     else { onSelectRun?.(choice.run.runId); setUnavailable(choice); }
   };
-  const chartProps = { data, filters, range, selectedRunIds, onSelectRecord: openRecord, onOpenRecord: openRecord, onSelectRun, showDetailsOnClick: true, showPointSelector: false, scrollZoomEnabled: false };
+  const chartProps = { data, filters, range, selectedRunIds, onSelectRecord: openRecord };
   return (
     <Box data-testid="benchmark-explorer" sx={{ minWidth: 0 }}>
       <SectionCard title="Benchmark history" subtitle="Selected workloads across the configurations checked in the sidebar" sx={{ minWidth: 0 }} action={<Button variant="outlined" size="small" startIcon={<AddRoundedIcon />} disabled={!catalog.all.length} onClick={() => setDraft(selected)}>Add benchmarks</Button>}>
@@ -96,7 +96,7 @@ export default function BenchmarksView({ data, filters, historyRange: controlled
       <Dialog open={Boolean(inspectedBenchmark)} disableEnforceFocus={Boolean(selectedRecord)} onClose={closeInspector} fullWidth maxWidth="sm" aria-labelledby="inspect-results-title">
         <DialogTitle id="inspect-results-title">Inspect results · {inspectedBenchmark?.name}</DialogTitle>
         <DialogContent>
-          {!resultChoices.length ? <Typography color="text.secondary">No published results in this selected configuration and period.</Typography> : <ChartPointSelector label={`${inspectedBenchmark?.name} result`} actionLabel="Open result details" description="Search and select a published attempt, including failed, timed-out and unavailable results." descriptionId="inspect-result-help" options={resultChoices} selectedId={inspectedChoiceId} onSelectionChange={(id) => { setInspectedChoiceId(id); setUnavailable(null); }} hideAction onActivate={activateChoice} />}
+          {!resultChoices.length ? <Typography color="text.secondary">No published results in this selected configuration and period.</Typography> : <ChartPointSelector label={`${inspectedBenchmark?.name} result`} description="Search and select a published attempt, including failed, timed-out and unavailable results." descriptionId="inspect-result-help" options={resultChoices} selectedId={inspectedChoiceId} onSelectionChange={(id) => { setInspectedChoiceId(id); setUnavailable(null); }} />}
           {unavailable && <Alert severity="info" sx={{ mt: 1 }}>Unavailable · {unavailable.target} · {unavailable.mode} · {unavailable.run.runId}. No published result; this is not a failed or zero-duration measurement.</Alert>}
         </DialogContent>
         <DialogActions sx={{ px: 3, py: 1.5, flexWrap: 'wrap', gap: 1 }}><Button color="inherit" onClick={closeInspector}>Close</Button><Button variant="contained" disabled={!inspectedChoice} onClick={() => activateChoice(inspectedChoice)}>Open result details</Button></DialogActions>

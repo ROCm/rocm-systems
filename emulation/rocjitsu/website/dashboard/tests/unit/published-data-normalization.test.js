@@ -1,9 +1,16 @@
 import { fixtureRunPath } from '../fixtures/runPath.js';
 import { expect, test } from 'vitest';
 import { selectAutomaticReference, selectPublishedBranches } from '../../src/data/branchSelectors.js';
-import { loadDashboardData, validatePublishedDashboardData } from '../../src/data/dashboardValidation.js';
-import { selectRecentRuns } from '../../src/data/selectors.js';
+import * as dashboardValidation from '../../src/data/dashboardValidation.js';
+import * as dashboardData from '../../src/data/dashboardData.js';
+import { validatePublishedDashboardData } from '../../src/data/dashboardValidation.js';
+import { selectRecentRunSummaries } from '../../src/data/selectors.js';
 import { createSchema2Publication } from '../fixtures/schema2Dataset.js';
+
+test('data modules expose published loading rather than normalized JSON re-import', () => {
+  expect(dashboardValidation).not.toHaveProperty('loadDashboardData');
+  expect(dashboardData).not.toHaveProperty('loadDashboardData');
+});
 
 test('normalizes current runs with explicit modes and keeps branch source envelopes', () => {
   const source = createSchema2Publication();
@@ -61,19 +68,6 @@ test('empty and branch-only snapshots remain valid', () => {
   expect(validatePublishedDashboardData(branches).data.allRuns).toHaveLength(20);
 });
 
-test('normalized reload validates result identities, statuses and duplicate attempts dynamically', () => {
-  const data = validatePublishedDashboardData(createSchema2Publication()).data;
-  const invalidResult = structuredClone(data);
-  invalidResult.allRuns[0].tests[0].durationSeconds = -1;
-  expect(() => loadDashboardData(invalidResult)).toThrow(/durationSeconds/);
-  const invalidIdentity = structuredClone(data);
-  invalidIdentity.allRuns[0].tests[0].testId = 'gfx1250:MT:a';
-  expect(() => loadDashboardData(invalidIdentity)).toThrow(/identity/);
-  const duplicate = structuredClone(data);
-  duplicate.allRuns.push(duplicate.allRuns[0]);
-  expect(() => loadDashboardData(duplicate)).toThrow(/Duplicate run ID/);
-});
-
 test('configuration targets must be declared strings, not coerced numbers', () => {
   const source = createSchema2Publication();
   const run = source.runs[0];
@@ -114,67 +108,28 @@ test('DATA-02 result suite extensions cannot hide a failed workload from coverag
   source.runs = [run]; source.index.runFiles = [fixtureRunPath(run)];
   run.configurations[0].results.find(({ testId }) => testId === 'd').suite = 'not-a-catalog-suite';
   const { data } = validatePublishedDashboardData(source);
-  const recent = selectRecentRuns(data, { targets: ['gfx1250'], modes: ['ST'], suites: data.suites });
+  const recent = selectRecentRunSummaries(data.runs, { targets: ['gfx1250'], modes: ['ST'], suites: data.suites });
   expect(recent[0]).toMatchObject({ failed: 1, timeout: 1, completed: 2, total: 4, duration: null });
 });
 
-test.each(['absent map', 'empty map', 'missing referenced envelope'])('DATA-04 rejects normalized reload with %s', (missing) => {
-  const source = createSchema2Publication();
-  source.runs = [source.runs[0]];
-  source.index.runFiles = source.runs.map(fixtureRunPath);
-  const normalized = structuredClone(validatePublishedDashboardData(source).data);
-  if (missing === 'absent map') delete normalized.catalogs;
-  else if (missing === 'empty map') normalized.catalogs = {};
-  else delete normalized.catalogs[normalized.allRuns[0].testCatalog];
-  expect(() => loadDashboardData(normalized)).toThrow(/catalog/i);
-});
-
-test('DATA-04 missing catalogs cannot conceal omitted required normalized workloads', () => {
-  const source = createSchema2Publication();
-  source.runs = [source.runs[0]];
-  source.index.runFiles = source.runs.map(fixtureRunPath);
-  const normalized = structuredClone(validatePublishedDashboardData(source).data);
-  delete normalized.catalogs;
-  normalized.allRuns[0].tests = normalized.allRuns[0].tests.filter(({ logicalTestId }) => logicalTestId !== 'c');
-  expect(() => loadDashboardData(normalized)).toThrow(/catalog/i);
-});
-
-test('DATA-04 normalized JSON round trips retain authoritative catalog membership', () => {
-  const data = validatePublishedDashboardData(createSchema2Publication()).data;
-  const serialized = JSON.parse(JSON.stringify({ ...data, backfillRunIds: [...data.backfillRunIds] }));
-  expect(loadDashboardData(serialized)).toEqual(data);
-  serialized.allRuns[0].tests = serialized.allRuns[0].tests.filter(({ logicalTestId }) => logicalTestId !== 'c');
-  expect(() => loadDashboardData(serialized)).toThrow(/exactly one result.*catalog workload/i);
-});
-
-test.each(['publication', 'normalized reload'])('DATA-06 rejects array source.commit SHA via %s', (entrypoint) => {
+test('rejects array source.commit SHA in published input', () => {
   const source = createSchema2Publication();
   const run = source.runs.find(({ id }) => id === 'fictional-branch-01');
   source.runs = [run]; source.index.runFiles = [fixtureRunPath(run)];
-  const input = entrypoint === 'publication' ? source
-    : JSON.parse(JSON.stringify(validatePublishedDashboardData(source).data));
-  const identity = entrypoint === 'publication' ? run.source : input.allRuns[0].provenance;
-  const key = entrypoint === 'publication' ? 'commit' : 'rocjitsuCommitSha';
-  identity[key] = [identity[key]];
-  const validate = entrypoint === 'publication' ? validatePublishedDashboardData : loadDashboardData;
-  expect(() => validate(input)).toThrow(/Run fictional-branch-01 does not match the schema-2 run contract/);
+  run.source.commit = [run.source.commit];
+  expect(() => validatePublishedDashboardData(source)).toThrow(/Run fictional-branch-01 does not match the schema-2 run contract/);
 });
 
-test.each(['publication', 'normalized reload'])('DATA-06 rejects array source.base.commit SHA via %s', (entrypoint) => {
+test('rejects array source.base.commit SHA in published input', () => {
   const source = createSchema2Publication();
   const run = source.runs.find(({ id }) => id === 'fictional-branch-01');
   source.runs = [run]; source.index.runFiles = [fixtureRunPath(run)];
-  const input = entrypoint === 'publication' ? source
-    : JSON.parse(JSON.stringify(validatePublishedDashboardData(source).data));
-  const base = entrypoint === 'publication' ? run.source.base : input.allRuns[0].sourceBase;
-  base.commit = [base.commit];
-  const validate = entrypoint === 'publication' ? validatePublishedDashboardData : loadDashboardData;
-  expect(() => validate(input)).toThrow(/Run fictional-branch-01 has an invalid source base/);
+  run.source.base.commit = [run.source.base.commit];
+  expect(() => validatePublishedDashboardData(source)).toThrow(/Run fictional-branch-01 has an invalid source base/);
 });
 
-test.each(['publication', 'normalized reload'].flatMap((entrypoint) =>
-  ['source.commit', 'source.base.commit'].flatMap((field) =>
-    ['uppercase', 'mixed-case'].map((casing) => ({ entrypoint, field, casing })))))('rejects $casing $field via $entrypoint before reference selection', ({ entrypoint, field, casing }) => {
+test.each(['source.commit', 'source.base.commit'].flatMap((field) =>
+  ['uppercase', 'mixed-case'].map((casing) => ({ field, casing }))))('rejects $casing $field before reference selection', ({ field, casing }) => {
   const source = createSchema2Publication();
   source.runs = source.runs.filter(({ id }) => ['fictional-branch-01', 'fictional-develop-20', 'fictional-develop-21'].includes(id));
   source.index.runFiles = source.runs.map(fixtureRunPath);
@@ -183,27 +138,20 @@ test.each(['publication', 'normalized reload'].flatMap((entrypoint) =>
   const candidate = normalized.allRuns.find(({ runId }) => runId === branch.id);
   expect(selectAutomaticReference(normalized, candidate)).toMatchObject({ reason: 'exact-base', run: { runId: 'fictional-develop-20' } });
   expect(selectAutomaticReference(normalized, { ...candidate, sourceBase: undefined })).toMatchObject({ reason: 'earlier-develop', run: { runId: 'fictional-develop-21' } });
-  const input = entrypoint === 'publication' ? source : JSON.parse(JSON.stringify(normalized));
-  const run = entrypoint === 'publication' ? branch : input.allRuns.find(({ runId }) => runId === branch.id);
-  const identity = field === 'source.base.commit'
-    ? (entrypoint === 'publication' ? run.source.base : run.sourceBase)
-    : (entrypoint === 'publication' ? run.source : run.provenance);
-  const key = field === 'source.commit' && entrypoint === 'normalized reload' ? 'rocjitsuCommitSha' : 'commit';
-  identity[key] = casing === 'uppercase' ? identity[key].toUpperCase() : identity[key].replace(/[a-f]/, (letter) => letter.toUpperCase());
-  const invalidSha = identity[key];
-  const validate = entrypoint === 'publication' ? validatePublishedDashboardData : loadDashboardData;
-  expect(() => validate(input)).toThrow(field === 'source.commit' ? /schema-2 run contract/ : /invalid source base/);
-  expect(identity[key]).toBe(invalidSha);
+  const identity = field === 'source.base.commit' ? branch.source.base : branch.source;
+  identity.commit = casing === 'uppercase' ? identity.commit.toUpperCase() : identity.commit.replace(/[a-f]/, (letter) => letter.toUpperCase());
+  const invalidSha = identity.commit;
+  expect(() => validatePublishedDashboardData(source)).toThrow(field === 'source.commit' ? /schema-2 run contract/ : /invalid source base/);
+  expect(identity.commit).toBe(invalidSha);
 });
 
-test.each(['publication', 'normalized reload'])('DATA-06 preserves canonical lowercase full SHAs for branch search and exact base via %s', (entrypoint) => {
+test('preserves canonical lowercase full SHAs for branch search and exact base', () => {
   const source = createSchema2Publication();
   source.runs = source.runs.filter(({ id }) => ['fictional-branch-01', 'fictional-develop-20', 'fictional-develop-21'].includes(id));
   source.index.runFiles = source.runs.map(fixtureRunPath);
   const branch = source.runs.find(({ id }) => id === 'fictional-branch-01');
   expect(branch.source.commit).toMatch(/^[0-9a-f]{40}$/);
-  const normalized = validatePublishedDashboardData(source).data;
-  const data = entrypoint === 'publication' ? normalized : loadDashboardData(JSON.parse(JSON.stringify(normalized)));
+  const { data } = validatePublishedDashboardData(source);
   const candidate = data.allRuns.find(({ runId }) => runId === branch.id);
   expect(candidate.provenance.rocjitsuCommitSha).toBe(branch.source.commit);
   expect(candidate.sourceBase).toEqual(branch.source.base);

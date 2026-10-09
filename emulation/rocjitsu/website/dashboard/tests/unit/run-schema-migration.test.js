@@ -1,6 +1,6 @@
 import { loadDashboardDataFiles } from '../../src/data/dashboardData.js';
 import { expect, test } from 'vitest';
-import { loadDashboardData, validatePublishedDashboardData } from '../../src/data/dashboardValidation.js';
+import { validatePublishedDashboardData } from '../../src/data/dashboardValidation.js';
 
 function publication() {
   const run = {
@@ -48,7 +48,8 @@ test.each([true, false])('schema-1 Vanilla migrates target groups to MT and pres
   if (!declared) delete source.runs[0].schemaVersion;
   const before = structuredClone(source);
   const { data, sourceData } = validatePublishedDashboardData(source);
-  expect(data.runs[0].tests[0]).toMatchObject({ target: 'gfx950', mode: 'MT', durationSeconds: 2 });
+  expect(data.runs[0].runId).toBe(source.runs[0].id);
+  expect(data.runs[0].tests[0]).toMatchObject({ testId: 'gfx950:MT:a', logicalTestId: 'a', target: 'gfx950', mode: 'MT', durationSeconds: 2 });
   expect(data.catalogs['test-catalogs/current.json'].configurations).toEqual({ 'gfx950:MT': ['a'] });
   expect(sourceData).toEqual(before);
   expect(source).toEqual(before);
@@ -61,13 +62,6 @@ test('non-Vanilla files are skipped rather than relabeled as ordinary measuremen
   expect(data.allRuns).toEqual([]);
   expect(data.testCatalog).toEqual([]);
   expect(sourceData.runs).toEqual(source.runs);
-});
-
-test('migrated data survives JSON serialization and reload without changing comparison identity', () => {
-  const data = validatePublishedDashboardData(legacyPublication()).data;
-  const reloaded = loadDashboardData(JSON.parse(JSON.stringify(data)));
-  expect(reloaded.allRuns.map((run) => ({ id: run.runId, tests: run.tests })))
-    .toEqual(data.allRuns.map((run) => ({ id: run.runId, tests: run.tests })));
 });
 
 test('loader fetches no metadata or excluded-plugin catalog and retains skipped raw files', async () => {

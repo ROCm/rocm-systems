@@ -1,6 +1,6 @@
 import { targetColor } from '../utils/chartColors.js';
 import { resolveHistoryRange } from '../config/historyRanges.js';
-import { commitShaFor, commitTimestampFor, compareCommitPosition, compareRunsByCommit, compareRunExecution, sortRunsByCommit } from './runOrdering.js';
+import { commitShaFor, commitTimestampFor, compareRunExecution, sortRunsByCommit } from './runOrdering.js';
 
 
 const modesFor = (filters) => filters.modes ?? ['ST', 'MT'];
@@ -21,27 +21,6 @@ export function periodKey(timestamp, period = 'weekly') {
   const day = date.getUTCDay() || 7;
   date.setUTCDate(date.getUTCDate() - day + 1);
   return date.toISOString().slice(0, 10);
-}
-
-export function isRunCompletedForFilters(run, filters) {
-  const tests = selected(run, filters);
-  return tests.length > 0 && tests.every(completed);
-}
-
-export function previousCompletedRunForFilters(runs, candidate, filters) {
-  if (!candidate) return null;
-  const ids = selected(candidate, filters).map(({ testId }) => testId);
-  if (!ids.length) return null;
-  return runs.filter((run) => compareCommitPosition(run, candidate) < 0 && isRunCompletedForFilters(run, filters)
-    && ids.every((id) => completed(resultMap(run).get(id)))).sort(compareRunsByCommit).at(-1) ?? null;
-}
-
-function previousCompletedTestResult(runs, candidate, testId) {
-  for (const run of sortRunsByCommit(runs.filter((r) => compareCommitPosition(r, candidate) < 0)).reverse()) {
-    const test = resultMap(run).get(testId);
-    if (completed(test)) return { run, test };
-  }
-  return null;
 }
 
 export function compareRuns(candidate, baseline, filters) {
@@ -198,15 +177,6 @@ function labeledRuns(data) {
   return { runs, labels };
 }
 
-export function selectAggregateRunSeries(data, filters) {
-  const { runs, labels } = labeledRuns(data);
-  return { runs, labels, series: pairsFor(filters).map((pair, index) => ({ ...pair, name: `${pair.target} ${pair.mode}`, color: targetColor(pair.target, index),
-    data: runs.map((run) => {
-      const tests = selected(run, filters).filter((t) => t.target === pair.target && t.mode === pair.mode);
-      return { run, ...pair, value: tests.length > 0 && tests.every(completed) ? round(sum(tests)) : null, completed: tests.filter(completed).length, total: tests.length };
-    }), catalogBreaks: runs.flatMap((run, index) => index > 0 && run.catalogId !== runs[index - 1].catalogId ? [index] : []) })) };
-}
-
 // Canonical attempts are already scoped by the loader; sorting needs no test results.
 export function selectRecentRunAttempts(data) {
   return [...data.runs].sort(compareRunExecution).reverse();
@@ -215,24 +185,6 @@ export function selectRecentRunAttempts(data) {
 // The table needs coverage and duration, not historical baseline comparisons.
 export function selectRecentRunSummaries(runs, filters) {
   return runs.map((run) => ({ run, ...runSummary(run, filters) }));
-}
-
-export function selectRecentRuns(data, filters, limit = 20) {
-  return [...data.runs].sort(compareRunExecution).slice(-limit).reverse().map((run, index) => {
-    const summary = runSummary(run, filters); const baseline = previousCompletedRunForFilters(data.runs, run, filters);
-    const matched = compareRuns(run, baseline, filters).filter(({ comparable }) => comparable);
-    return { run, baseline, ...summary, latest: index === 0, latestCommit: data.latestCommitRun ? compareCommitPosition(run, data.latestCommitRun) === 0 : false,
-      olderCommit: data.backfillRunIds?.has(run.runId) ?? false,
-      durationDelta: summary.total > 0 && summary.completed === summary.total ? percentage(sum(matched.map(({ candidateTest }) => candidateTest)), sum(matched.map(({ baselineTest }) => baselineTest))) : null };
-  });
-}
-
-export function selectRunReliability(data, filters, limit = 20) {
-  const rows = [...data.runs].sort(compareRunExecution).slice(-limit).map((run) => ({ run, ...runSummary(run, filters) }));
-  return { rows, issueRuns: rows.filter(({ completed, total }) => completed < total).reverse(), runCount: rows.length,
-    fullyCompleteRuns: rows.filter(({ completed, total }) => total > 0 && completed === total).length,
-    completed: rows.reduce((s, r) => s + r.completed, 0), total: rows.reduce((s, r) => s + r.total, 0),
-    failed: rows.reduce((s, r) => s + r.failed, 0), timeout: rows.reduce((s, r) => s + r.timeout, 0) };
 }
 
 export function selectRunComparison(candidate, baseline, filters, tolerance = 3) {
@@ -260,14 +212,6 @@ export function selectBenchmarkSeries(data, filters, logicalTestId) {
   }) };
 }
 
-export function selectBenchmarkRecords(data, filters, logicalTestId, offset = 0, limit = 25) {
-  const records = [...data.runs].sort(compareRunExecution).reverse().flatMap((run) => selected(run, filters).filter((t) => t.logicalTestId === logicalTestId).map((test) => {
-    const previous = previousCompletedTestResult(data.runs, run, test.testId);
-    return { run, test, baseline: previous?.run ?? null, delta: completed(test) ? percentage(test.durationSeconds, previous?.test.durationSeconds) : null };
-  }));
-  return { records: records.slice(offset, offset + limit), total: records.length };
-}
-
 export function selectBenchmarkCatalog(data, filters) {
   const suites = new Map(data.testCatalog.map(({ id, suite }) => [id, suite]));
   // Direct explorer callers may omit result-level suite metadata. Resolve it
@@ -277,8 +221,4 @@ export function selectBenchmarkCatalog(data, filters) {
     .map(({ logicalTestId }) => logicalTestId)));
   const available = data.testCatalog.filter(({ id }) => ids.has(id));
   return { all: data.testCatalog, available, hiddenCount: data.testCatalog.length - available.length };
-}
-
-export function selectFailures(data, filters) {
-  return [...data.runs].sort(compareRunExecution).reverse().flatMap((run) => selected(run, filters).filter((t) => !completed(t)).map((test) => ({ run, test })));
 }

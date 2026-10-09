@@ -1,7 +1,7 @@
 import { fixtureRunPath } from '../fixtures/runPath.js';
 import { describe, expect, it } from 'vitest';
 import * as dashboardState from '../../src/hooks/useDashboardState.js';
-import { loadDashboardData, validatePublishedDashboardData } from '../../src/data/dashboardValidation.js';
+import { validatePublishedDashboardData } from '../../src/data/dashboardValidation.js';
 import { createSchema2Publication } from '../fixtures/schema2Dataset.js';
 
 it('UI-002 round-trips exact long validated attempt and branch identities', () => {
@@ -10,15 +10,15 @@ it('UI-002 round-trips exact long validated attempt and branch identities', () =
   run.id = `fictional-${'x'.repeat(192)}`;
   run.source.branch = `fictional/${'b'.repeat(192)}`;
   source.index.runFiles = source.runs.map(fixtureRunPath);
-  expect(validatePublishedDashboardData(source).data.allRuns.some(({ runId }) => runId === run.id)).toBe(true);
+  const { data } = validatePublishedDashboardData(source);
+  expect(data.allRuns.some(({ runId }) => runId === run.id)).toBe(true);
   const route = dashboardState.readDashboardRoute('https://example.test/app/?view=branch');
   const selection = { ...route, branchSelection: { ...route.branchSelection, branch: run.source.branch, candidateId: run.id, referenceId: run.id, manual: true }, comparisonCandidateId: run.id, comparisonBaselineId: run.id };
   const restored = dashboardState.readDashboardRoute(dashboardState.buildDashboardUrl('https://example.test/app/', selection));
   expect(restored).toEqual(selection);
   expect(restored.routeError).toBe('');
-  const reloaded = loadDashboardData(JSON.parse(JSON.stringify(validatePublishedDashboardData(source).data)));
   for (const id of [restored.branchSelection.candidateId, restored.branchSelection.referenceId, restored.comparisonCandidateId, restored.comparisonBaselineId]) {
-    expect(reloaded.allRuns.find(({ runId }) => runId === id)?.runId).toBe(run.id);
+    expect(data.allRuns.find(({ runId }) => runId === id)?.runId).toBe(run.id);
   }
 });
 

@@ -38,7 +38,7 @@ test('result action sits in inspector actions and details close preserves inspec
   const actions = nodes(inspector(tree)).find((node) => node.type === DialogActions);
   const action = nodes(actions).find((node) => node.type === Button && node.props.children === 'Open result details');
   expect(action).toBeDefined();
-  expect(selector(tree).props.hideAction).toBe(true);
+
   const choice = selector(tree).props.options[1];
   selector(tree).props.onSelectionChange(choice.id);
   tree = render();
@@ -69,27 +69,31 @@ test('result action sits in inspector actions and details close preserves inspec
 
 test('opening a record must not clear the inspector workload', () => {
   const tree = openInspect();
-  selector(tree).props.onActivate(selector(tree).props.options[0]);
+  nodes(inspector(tree)).find((node) => node.type === Button && node.props.children === 'Open result details').props.onClick();
   expect(inspector(render()).props.open).toBe(true);
 });
 
-test('selector keeps its default inline action and bounded search outside the inspector', () => {
+test('selector has bounded search and controlled selection without an inline action', () => {
   const options = Array.from({ length: 60 }, (_, index) => ({ id: `attempt-${index}`, label: `Attempt ${index}` }));
   hooks.cursor = 0;
-  const tree = ChartPointSelector({ label: 'Published attempt', actionLabel: 'Open result details', options, onActivate() {} });
-  expect(nodes(tree).find((node) => node.type === Button).props.children).toBe('Open result details');
+  const onSelectionChange = vi.fn();
+  const props = { label: 'Published attempt', options, selectedId: '', onSelectionChange };
+  const tree = ChartPointSelector(props);
+  expect(nodes(tree).some((node) => node.type === Button)).toBe(false);
   const autocomplete = nodes(tree).find((node) => node.props.options === options);
   expect(autocomplete.props.filterOptions(options, { inputValue: '', getOptionLabel: (option) => option.label })).toHaveLength(50);
   expect(autocomplete.props.value).toBe(options[0]);
   autocomplete.props.onChange(null, options[1]);
   hooks.cursor = 0;
-  const next = ChartPointSelector({ label: 'Published attempt', actionLabel: 'Open result details', options, onActivate() {} });
+  expect(onSelectionChange).toHaveBeenCalledWith(options[1].id);
+  expect(nodes(ChartPointSelector(props)).find((node) => node.props.options === options).props.value).toBe(options[0]);
+  const next = ChartPointSelector({ ...props, selectedId: options[1].id });
   expect(nodes(next).find((node) => node.props.options === options).props.value).toBe(options[1]);
 });
 
 test('direct chart details do not create an inspector context', () => {
   const tree = render();
-  nodes(tree).find((node) => node.type === BenchmarkHistoryChart).props.onOpenRecord({ run: runs[0], test: runs[0].tests[0] });
+  nodes(tree).find((node) => node.type === BenchmarkHistoryChart).props.onSelectRecord({ run: runs[0], test: runs[0].tests[0] });
   expect(inspector(render()).props.open).toBe(false);
   details(render()).props.onClose();
   expect(inspector(render()).props.open).toBe(false);
