@@ -26,7 +26,6 @@ use crate::driver::{
     GpuDriver, GpuProfilingDriver, GpuQueueResourceDriver, HostMemoryDriver, KernelQueueDriver,
     UserQueueDriver, VirtualMemoryDriver,
 };
-use crate::event::GpuMemoryFault;
 use crate::host_storage::{Allocator, Owned, Shared};
 use crate::kernel_queue::{KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait};
 use crate::memory::interop::linux::{
@@ -46,6 +45,7 @@ pub(crate) use allocation::LinuxAllocation;
 pub(crate) use event::KfdSignalEvent;
 pub(crate) use host::HostAllocation as LinuxHostAllocation;
 pub(crate) use kernel_queue::KfdKernelQueue;
+pub(crate) use memory::KfdEventSubscription;
 use memory::{error, native_error};
 pub(crate) use queue::KfdQueue;
 use std::fs::OpenOptions;
@@ -197,6 +197,9 @@ pub(crate) struct DeviceState {
 }
 
 impl DeviceState {
+    pub(crate) fn subscribe_events(&self) -> Result<KfdEventSubscription, Error> {
+        self.vm.subscribe_events()
+    }
     pub(crate) fn address_range(&self) -> (u64, u64) {
         self.vm.address_range()
     }

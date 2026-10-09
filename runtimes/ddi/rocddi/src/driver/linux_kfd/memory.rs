@@ -7,7 +7,7 @@
 //! Linux process connection retains its exact render files through exit for
 //! later activation; secondary bindings are released with their session.
 use super::{drm, sys, sysfs, uapi, util};
-use crate::event::GpuMemoryFault;
+use crate::event::{DeviceEvent, GpuHardwareException, GpuMemoryFault};
 use crate::host_storage::{Allocator, Buffer, Owned, Shared};
 use crate::memory::interop::linux::{DmaBuf, DmaBufInfo, KfdIpcMemoryHandle};
 use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess, HostCachePolicy};
@@ -16,7 +16,7 @@ use std::fs::File;
 use std::io;
 use std::os::fd::AsRawFd;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 /// Process-local set of activated device VMs and their shared loss events.
 ///
@@ -40,6 +40,8 @@ const IPC_APERTURE_DGPU: u32 = 1;
 const IPC_APERTURE_DGPU_ALT: u32 = 2;
 const IPC_APERTURE_GPUVM: u32 = 3;
 const IPC_FRAGMENT: u32 = 1 << 31;
+/// Native exception delivery pauses when a subscriber falls this far behind.
+const MAX_RETAINED_EXCEPTIONS: usize = 64;
 
 /// One free or allocated interval in the process scratch aperture.
 #[derive(Clone, Copy)]
@@ -402,6 +404,7 @@ impl VmBindings {
             .ok_or_else(|| error(ErrorKind::Internal, "KFD loss event was not published"))?
             .clone();
         loss.check()?;
+        loss.reserve_identity()?;
         bindings.devices.try_reserve(1).map_err(|_| {
             error(
                 ErrorKind::ResourceExhausted,
@@ -437,6 +440,7 @@ impl VmBindings {
         // exact render file until process teardown, so publish the same owner
         // before runtime activation can fail or block.
         bindings.devices.try_push(vm.clone())?;
+        vm.loss.register_identity(vm.gpu_id, vm.identity)?;
         kfd.enable_runtime_locked(&mut runtime)
             .map_err(|source| native_error("AMDKFD_IOC_RUNTIME_ENABLE", source))?;
         Ok(vm)
@@ -501,8 +505,8 @@ impl DeviceVm {
         self.loss.check()
     }
 
-    pub(super) fn poll_memory_fault(&self) -> Result<Option<GpuMemoryFault>, Error> {
-        self.loss.poll_memory_fault()
+    pub(super) fn subscribe_events(&self) -> Result<KfdEventSubscription, Error> {
+        LossEvent::subscribe(&self.loss)
     }
 
     /// Reads the connection's terminal latch without polling KFD.
@@ -575,17 +579,178 @@ impl DeviceVm {
 
 /// Hardware and memory exception events for one KFD process connection.
 ///
-/// Activated VMs on that connection share the sticky loss state. Detailed
-/// fault reporting may claim the memory event so operation prechecks do not
-/// consume it a second time.
+/// Activated VMs on that connection share the sticky loss state and retained
+/// event records. Operation checks and frontend subscribers use the same
+/// serialized observer, so neither path can consume another path's details.
 struct LossEvent {
     kfd: Shared<sys::Kfd>,
     hardware_event_id: AtomicU32,
     memory_event_id: AtomicU32,
     hardware_destroy_uncertain: AtomicBool,
     memory_destroy_uncertain: AtomicBool,
-    memory_event_claimed: Mutex<bool>,
+    observed: Mutex<ObservedEvents>,
     lost: AtomicBool,
+}
+
+/// Connection-wide exception records and source identity translation.
+struct ObservedEvents {
+    events: Buffer<ObservedEvent>,
+    cursors: Buffer<Shared<AtomicU64>>,
+    next_sequence: u64,
+    hardware_needs_reset: bool,
+    memory_needs_reset: bool,
+    identities: Buffer<(u32, [u8; 16])>,
+}
+
+/// One KFD notification retained until every live subscriber has read it.
+#[derive(Clone, Copy)]
+struct ObservedEvent {
+    sequence: u64,
+    gpu_id: u32,
+    event: DeviceEvent,
+}
+
+impl ObservedEvents {
+    fn new(allocator: Allocator) -> Result<Self, Error> {
+        Ok(Self {
+            events: Buffer::try_with_capacity(MAX_RETAINED_EXCEPTIONS, allocator)?,
+            cursors: Buffer::new(allocator),
+            next_sequence: 1,
+            hardware_needs_reset: false,
+            memory_needs_reset: false,
+            identities: Buffer::new(allocator),
+        })
+    }
+
+    fn endpoint_id(&self, gpu_id: u32) -> Option<[u8; 16]> {
+        self.identities
+            .iter()
+            .find(|(known, _)| *known == gpu_id)
+            .map(|(_, id)| *id)
+    }
+
+    fn record(&mut self, gpu_id: u32, event: DeviceEvent) -> Result<(), Error> {
+        let next = self.next_sequence.checked_add(1).ok_or_else(|| {
+            error(
+                ErrorKind::ResourceExhausted,
+                "KFD exception sequence exhausted",
+            )
+        })?;
+        self.events.try_push(ObservedEvent {
+            sequence: self.next_sequence,
+            gpu_id,
+            event,
+        })?;
+        self.next_sequence = next;
+        Ok(())
+    }
+
+    /// Releases delivered history, retaining the latest of each event kind
+    /// for a subscriber created after an operation observed the exception.
+    fn prune(&mut self) {
+        let delivered = self
+            .cursors
+            .iter()
+            .map(|cursor| cursor.load(Ordering::Acquire))
+            .min()
+            .unwrap_or(self.next_sequence - 1);
+        let latest_memory = self
+            .events
+            .iter()
+            .rev()
+            .find(|record| matches!(record.event, DeviceEvent::GpuMemoryFault(_)))
+            .map(|record| record.sequence);
+        let latest_hardware = self
+            .events
+            .iter()
+            .rev()
+            .find(|record| matches!(record.event, DeviceEvent::GpuHardwareException(_)))
+            .map(|record| record.sequence);
+        let mut index = 0;
+        while index < self.events.len() {
+            let sequence = self.events[index].sequence;
+            if sequence <= delivered
+                && Some(sequence) != latest_memory
+                && Some(sequence) != latest_hardware
+            {
+                self.events.as_mut_slice()[index..].rotate_left(1);
+                let _ = self.events.pop();
+            } else {
+                index += 1;
+            }
+        }
+    }
+}
+
+/// Independent cursor over retained exception records on one KFD connection.
+pub(crate) struct KfdEventSubscription {
+    owner: Shared<LossEvent>,
+    cursor: Shared<AtomicU64>,
+}
+
+impl KfdEventSubscription {
+    fn take_record(&self, records: &mut ObservedEvents) -> Option<DeviceEvent> {
+        let seen = self.cursor.load(Ordering::Acquire);
+        let record = *records.events.iter().find(|event| event.sequence > seen)?;
+        self.cursor.store(record.sequence, Ordering::Release);
+        let endpoint_id = records.endpoint_id(record.gpu_id);
+        let event = match record.event {
+            DeviceEvent::GpuMemoryFault(mut fault) => {
+                fault.endpoint_id = endpoint_id;
+                DeviceEvent::GpuMemoryFault(fault)
+            }
+            DeviceEvent::GpuHardwareException(mut exception) => {
+                exception.endpoint_id = endpoint_id;
+                DeviceEvent::GpuHardwareException(exception)
+            }
+        };
+        records.prune();
+        Some(event)
+    }
+
+    pub(crate) fn poll(&mut self) -> Result<Option<DeviceEvent>, Error> {
+        self.owner
+            .kfd
+            .check_process()
+            .map_err(|source| native_error("KFD event poll", source))?;
+        let owner = self.owner.clone();
+        let mut records = owner
+            .observed
+            .lock()
+            .map_err(|_| error(ErrorKind::Internal, "KFD event observation lock poisoned"))?;
+        if let Some(event) = self.take_record(&mut records) {
+            return Ok(Some(event));
+        }
+        let result = owner.observe_locked(&mut records);
+        if let Some(event) = self.take_record(&mut records) {
+            return Ok(Some(event));
+        }
+        result?;
+        Ok(None)
+    }
+}
+
+impl Drop for KfdEventSubscription {
+    fn drop(&mut self) {
+        if self.owner.kfd.check_process().is_err() {
+            return;
+        }
+        let mut records = self
+            .owner
+            .observed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(index) = records
+            .cursors
+            .iter()
+            .position(|cursor| Shared::ptr_eq(cursor, &self.cursor))
+        {
+            let last = records.cursors.len() - 1;
+            records.cursors.as_mut_slice().swap(index, last);
+            let _ = records.cursors.pop();
+            records.prune();
+        }
+    }
 }
 
 impl LossEvent {
@@ -633,6 +798,7 @@ impl LossEvent {
 
     fn create(kfd: Shared<sys::Kfd>) -> Result<Shared<Self>, Error> {
         let allocator = kfd.allocator();
+        let observed = ObservedEvents::new(allocator)?;
         let event = Shared::new(
             Self {
                 kfd,
@@ -640,7 +806,7 @@ impl LossEvent {
                 memory_event_id: AtomicU32::new(0),
                 hardware_destroy_uncertain: AtomicBool::new(false),
                 memory_destroy_uncertain: AtomicBool::new(false),
-                memory_event_claimed: Mutex::new(false),
+                observed: Mutex::new(observed),
                 lost: AtomicBool::new(false),
             },
             allocator,
@@ -676,43 +842,47 @@ impl LossEvent {
         Ok(event)
     }
 
+    fn subscribe(owner: &Shared<Self>) -> Result<KfdEventSubscription, Error> {
+        owner
+            .kfd
+            .check_process()
+            .map_err(|source| native_error("KFD event subscribe", source))?;
+        let mut records = owner
+            .observed
+            .lock()
+            .map_err(|_| error(ErrorKind::Internal, "KFD event observation lock poisoned"))?;
+        let first = records
+            .events
+            .first()
+            .map_or(records.next_sequence - 1, |record| record.sequence - 1);
+        let cursor = Shared::new(AtomicU64::new(first), owner.kfd.allocator())?;
+        records.cursors.try_push(cursor.clone())?;
+        Ok(KfdEventSubscription {
+            owner: owner.clone(),
+            cursor,
+        })
+    }
+
     fn check(&self) -> Result<(), Error> {
         self.kfd
             .check_process()
             .map_err(|source| native_error("KFD memory query", source))?;
-        if !self.lost.load(Ordering::Acquire) {
-            let hardware_lost = self
-                .kfd
-                .hardware_memory_lost(self.hardware_event_id.load(Ordering::Acquire))
-                .map_err(|source| native_error("KFD hardware-exception poll", source))?;
-            let memory_fault = if hardware_lost {
-                false
-            } else {
-                let claimed = self.memory_event_claimed.lock().map_err(|_| {
-                    error(
-                        ErrorKind::Internal,
-                        "KFD memory-event ownership lock poisoned",
-                    )
-                })?;
-                if *claimed {
-                    false
-                } else {
-                    self.kfd
-                        .memory_exception(self.memory_event_id.load(Ordering::Acquire))
-                        .map_err(|source| native_error("KFD memory-exception poll", source))?
-                        .is_some()
-                }
-            };
-            if hardware_lost || memory_fault {
-                self.lost.store(true, Ordering::Release);
-            }
-        }
+        let observation = if self.lost.load(Ordering::Acquire) {
+            Ok(())
+        } else {
+            let mut records = self
+                .observed
+                .lock()
+                .map_err(|_| error(ErrorKind::Internal, "KFD event observation lock poisoned"))?;
+            self.observe_locked(&mut records)
+        };
         if self.lost.load(Ordering::Acquire) {
             Err(error(
                 ErrorKind::DeviceLost,
                 "KFD reported loss of device memory; process restart is required",
             ))
         } else {
+            observation?;
             Ok(())
         }
     }
@@ -721,27 +891,97 @@ impl LossEvent {
         self.lost.load(Ordering::Acquire)
     }
 
-    fn poll_memory_fault(&self) -> Result<Option<GpuMemoryFault>, Error> {
-        let mut claimed = self.memory_event_claimed.lock().map_err(|_| {
-            error(
-                ErrorKind::Internal,
-                "KFD memory-event ownership lock poisoned",
-            )
-        })?;
-        let exception = self
+    fn reserve_identity(&self) -> Result<(), Error> {
+        self.observed
+            .lock()
+            .map_err(|_| error(ErrorKind::Internal, "KFD event observation lock poisoned"))?
+            .identities
+            .try_reserve(1)?;
+        Ok(())
+    }
+
+    fn register_identity(&self, gpu_id: u32, endpoint_id: [u8; 16]) -> Result<(), Error> {
+        self.observed
+            .lock()
+            .map_err(|_| error(ErrorKind::Internal, "KFD event observation lock poisoned"))?
+            .identities
+            .try_push((gpu_id, endpoint_id))?;
+        Ok(())
+    }
+
+    fn observe_locked(&self, records: &mut ObservedEvents) -> Result<(), Error> {
+        records.prune();
+        if records.events.len() == MAX_RETAINED_EXCEPTIONS {
+            return Err(error(
+                ErrorKind::Busy,
+                "KFD exception subscribers have not drained retained events",
+            ));
+        }
+        let hardware_id = self.hardware_event_id.load(Ordering::Acquire);
+        if records.hardware_needs_reset {
+            self.kfd
+                .reset_event(hardware_id)
+                .map_err(|source| native_error("KFD hardware-exception reset", source))?;
+            records.hardware_needs_reset = false;
+        }
+        if let Some(exception) = self
             .kfd
-            .memory_exception(self.memory_event_id.load(Ordering::Acquire))
-            .map_err(|source| native_error("KFD memory-exception poll", source))?;
-        *claimed = true;
-        Ok(exception.map(|fault| GpuMemoryFault {
-            kfd_gpu_id: fault.gpu_id,
-            virtual_address: fault.address,
-            page_not_present: fault.not_present != 0,
-            read_only: fault.read_only != 0,
-            no_execute: fault.no_execute != 0,
-            imprecise: fault.imprecise != 0,
-            error_type: fault.error_type,
-        }))
+            .hardware_exception(hardware_id)
+            .map_err(|source| native_error("KFD hardware-exception poll", source))?
+        {
+            records.record(
+                exception.gpu_id,
+                DeviceEvent::GpuHardwareException(GpuHardwareException {
+                    endpoint_id: None,
+                    reset_type: exception.reset_type,
+                    memory_lost: exception.memory_lost,
+                    reset_cause: exception.reset_cause,
+                }),
+            )?;
+            if exception.memory_lost {
+                self.lost.store(true, Ordering::Release);
+            }
+            records.hardware_needs_reset = true;
+            self.kfd
+                .reset_event(hardware_id)
+                .map_err(|source| native_error("KFD hardware-exception reset", source))?;
+            records.hardware_needs_reset = false;
+        }
+        if records.events.len() == MAX_RETAINED_EXCEPTIONS {
+            return Ok(());
+        }
+        let memory_id = self.memory_event_id.load(Ordering::Acquire);
+        if records.memory_needs_reset {
+            self.kfd
+                .reset_event(memory_id)
+                .map_err(|source| native_error("KFD memory-exception reset", source))?;
+            records.memory_needs_reset = false;
+        }
+        if let Some(fault) = self
+            .kfd
+            .memory_exception(memory_id)
+            .map_err(|source| native_error("KFD memory-exception poll", source))?
+        {
+            records.record(
+                fault.gpu_id,
+                DeviceEvent::GpuMemoryFault(GpuMemoryFault {
+                    endpoint_id: None,
+                    virtual_address: fault.address,
+                    page_not_present: fault.not_present != 0,
+                    read_only: fault.read_only != 0,
+                    no_execute: fault.no_execute != 0,
+                    imprecise: fault.imprecise != 0,
+                    error_type: fault.error_type,
+                }),
+            )?;
+            records.memory_needs_reset = true;
+            self.kfd
+                .reset_event(memory_id)
+                .map_err(|source| native_error("KFD memory-exception reset", source))?;
+            records.memory_needs_reset = false;
+        }
+        records.prune();
+        Ok(())
     }
 }
 
@@ -2391,7 +2631,7 @@ pub(super) fn queue_fixture_with_range(
             memory_event_id: AtomicU32::new(20),
             hardware_destroy_uncertain: AtomicBool::new(false),
             memory_destroy_uncertain: AtomicBool::new(false),
-            memory_event_claimed: Mutex::new(false),
+            observed: Mutex::new(ObservedEvents::new(allocator).unwrap()),
             lost: AtomicBool::new(false),
         },
         allocator,

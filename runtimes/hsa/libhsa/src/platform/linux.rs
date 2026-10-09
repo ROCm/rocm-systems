@@ -20,12 +20,6 @@ pub(crate) fn driver_uid(endpoint: Option<&Endpoint>) -> u32 {
         .map_or(0, |info| info.gpu_id)
 }
 
-pub(crate) fn fault_matches_endpoint(endpoint: &Endpoint, fault: &event::GpuMemoryFault) -> bool {
-    endpoint
-        .linux_kfd_drm_info()
-        .is_some_and(|info| info.gpu_id == fault.kfd_gpu_id)
-}
-
 pub(crate) mod fd {
     pub(crate) use std::os::fd::{AsFd, IntoRawFd};
 }

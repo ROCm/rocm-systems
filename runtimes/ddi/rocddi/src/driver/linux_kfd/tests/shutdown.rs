@@ -31,7 +31,7 @@ fn scripted_driver(allocator: Allocator) -> LinuxKfdDriver {
             memory_event_id: AtomicU32::new(20),
             hardware_destroy_uncertain: AtomicBool::new(false),
             memory_destroy_uncertain: AtomicBool::new(false),
-            memory_event_claimed: Mutex::new(false),
+            observed: Mutex::new(ObservedEvents::new(allocator).unwrap()),
             lost: AtomicBool::new(false),
         },
         allocator,

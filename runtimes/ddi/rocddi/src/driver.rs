@@ -25,6 +25,7 @@ pub(crate) use interface::{
     GpuProfilingDriver, GpuQueueResourceDriver, HostMemoryDriver, KernelQueueDriver,
     UserQueueDriver, VirtualMemoryDriver,
 };
+pub(crate) use linux_kfd::KfdEventSubscription;
 #[cfg(all(
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")
@@ -36,6 +37,7 @@ pub(crate) use linux_kfd::interop as linux_fd;
 ))]
 pub(crate) use linux_kfd::{KfdSignalEvent, LinuxKfdDriver as KfdDriver};
 
+use crate::event::DeviceEvent;
 use crate::host_storage::Shared;
 use crate::session::DriverContextLifetime;
 use crate::topology::{Endpoint, GpuPresentation};
@@ -170,6 +172,24 @@ pub(crate) enum DriverActivation {
 }
 
 impl DriverActivation {
+    /// Subscribes to the activated driver's retained system notifications.
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "other driver variants may not support events"
+    )]
+    pub(crate) fn subscribe_events(&self) -> Result<EventSubscription, Error> {
+        match self {
+            Self::LinuxKfd { state, .. } => {
+                Ok(EventSubscription::LinuxKfd(state.subscribe_events()?))
+            }
+            #[cfg(test)]
+            Self::Test { .. } => Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "driver does not expose system events",
+            }),
+        }
+    }
+
     pub(crate) fn shares_address_domain(&self, other: &Self) -> bool {
         match (self, other) {
             (
@@ -224,6 +244,19 @@ impl DriverActivation {
                 kind: ErrorKind::Unsupported,
                 detail: "device does not use the Linux KFD driver",
             }),
+        }
+    }
+}
+
+/// Concrete observer retained behind the device-independent event contract.
+pub(crate) enum EventSubscription {
+    LinuxKfd(KfdEventSubscription),
+}
+
+impl EventSubscription {
+    pub(crate) fn poll(&mut self) -> Result<Option<DeviceEvent>, Error> {
+        match self {
+            Self::LinuxKfd(subscription) => subscription.poll(),
         }
     }
 }

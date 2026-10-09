@@ -80,3 +80,10 @@ impl Device {
         })
     }
 }
+
+/// Driver-independent device notification contracts.
+pub mod event {
+    pub use crate::event::{
+        DeviceEvent, DeviceEventSubscription, GpuHardwareException, GpuMemoryFault, subscribe,
+    };
+}

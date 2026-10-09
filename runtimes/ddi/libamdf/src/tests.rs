@@ -27,6 +27,45 @@ fn reset_epoch_advances_once_for_observed_native_loss() {
 }
 
 #[test]
+fn reset_epoch_policy_uses_reset_evidence_and_device_identity() {
+    use rocddi::device::event::{DeviceEvent, GpuHardwareException, GpuMemoryFault};
+
+    let endpoint_id = [1; 16];
+    let memory_fault = DeviceEvent::GpuMemoryFault(GpuMemoryFault {
+        endpoint_id: Some(endpoint_id),
+        virtual_address: 0x1000,
+        page_not_present: true,
+        read_only: false,
+        no_execute: false,
+        imprecise: false,
+        error_type: 0,
+    });
+    assert!(!instance::event_resets_device(memory_fault, endpoint_id));
+
+    let exception = GpuHardwareException {
+        endpoint_id: Some(endpoint_id),
+        reset_type: 1,
+        memory_lost: false,
+        reset_cause: 0,
+    };
+    assert!(instance::event_resets_device(
+        DeviceEvent::GpuHardwareException(exception),
+        endpoint_id
+    ));
+    assert!(!instance::event_resets_device(
+        DeviceEvent::GpuHardwareException(exception),
+        [2; 16]
+    ));
+    assert!(instance::event_resets_device(
+        DeviceEvent::GpuHardwareException(GpuHardwareException {
+            memory_lost: true,
+            ..exception
+        }),
+        [2; 16]
+    ));
+}
+
+#[test]
 fn sdma_format_features_follow_native_encoding_rules() {
     assert_eq!(instance::sdma_format_features(11, 5, false), 0);
     assert_eq!(
