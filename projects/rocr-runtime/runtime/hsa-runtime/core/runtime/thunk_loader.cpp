@@ -470,6 +470,9 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       HSAKMT_PFN(hsaKmtSetPersistingCacheSize) = (HSAKMT_DEF(hsaKmtSetPersistingCacheSize)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtSetPersistingCacheSize");
       if (HSAKMT_PFN(hsaKmtSetPersistingCacheSize) == nullptr) goto LOAD_ERROR;
 
+      HSAKMT_PFN(hsaKmtGetPersistingCacheSize) = (HSAKMT_DEF(hsaKmtGetPersistingCacheSize)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetPersistingCacheSize");
+      if (HSAKMT_PFN(hsaKmtGetPersistingCacheSize) == nullptr) goto LOAD_ERROR;
+
       HSAKMT_PFN(hsaKmtMemoryCpuMap) = (HSAKMT_DEF(hsaKmtMemoryCpuMap)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtMemoryCpuMap");
       if (HSAKMT_PFN(hsaKmtMemoryCpuMap) == nullptr) goto LOAD_ERROR;
 
@@ -629,6 +632,8 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtMemHandleFreePreserveMetadata) = (HSAKMT_DEF(hsaKmtMemHandleFreePreserveMetadata)*)(&hsaKmtMemHandleFreePreserveMetadata);
       HSAKMT_PFN(hsaKmtMemoryGetCpuAddr) = (HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)*)(&hsaKmtMemoryGetCpuAddr);
       HSAKMT_PFN(hsaKmtGetAmdGPUDeviceFd) = (HSAKMT_DEF(hsaKmtGetAmdGPUDeviceFd)*)(&hsaKmtGetAmdGPUDeviceFd);
+      HSAKMT_PFN(hsaKmtSetPersistingCacheSize) = (HSAKMT_DEF(hsaKmtSetPersistingCacheSize)*)(&hsaKmtSetPersistingCacheSize);
+      HSAKMT_PFN(hsaKmtGetPersistingCacheSize) = (HSAKMT_DEF(hsaKmtGetPersistingCacheSize)*)(&hsaKmtGetPersistingCacheSize);
       HSAKMT_PFN(hsaKmtMemoryCpuMap) = (HSAKMT_DEF(hsaKmtMemoryCpuMap)*)(&hsaKmtMemoryCpuMap);
       HSAKMT_PFN(hsaKmtGetNodeWallclockFrequency) = (HSAKMT_DEF(hsaKmtGetNodeWallclockFrequency)*)(&hsaKmtGetNodeWallclockFrequency);
 

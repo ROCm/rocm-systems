@@ -2753,8 +2753,16 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       // GPU agents can participate in host memory DMA-BUF export if the system supports virtual memory APIs
       *static_cast<bool*>(value) = core::Runtime::runtime_singleton_->VirtualMemApiSupported();
       break;
-  case HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE:{
-        *((size_t*)value) = persisting_l2_cache_size_;
+  case HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE: {
+        // The kernel tracks the request per-VM on the render node, so query it
+        // directly: this stays correct when the VM was configured by another
+        // process or re-established by CRIU restore. Fall back to the locally
+        // cached request if the driver does not support the query.
+        uint64_t sz = 0;
+        if (driver().GetPersistingCacheSize(node_id(), &sz) == HSA_STATUS_SUCCESS)
+          *((size_t*)value) = sz;
+        else
+          *((size_t*)value) = persisting_l2_cache_size_;
         break;
     }
   case HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE: {
