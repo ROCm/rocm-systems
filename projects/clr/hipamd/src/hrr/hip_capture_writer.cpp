@@ -753,12 +753,15 @@ static void index_existing_blobs_locked(const std::string& output_dir) {
   std::lock_guard<std::mutex> lk(g_blob_mu);
   g_written_blobs.clear();
   size_t mismatched = 0;
-  // Ours, but holding other bytes than its name says: left unindexed like a
-  // file that is not ours, so the next write of that hash replaces it, and
-  // the archive is incomplete, since its events may name the lost bytes.
-  const auto trust = [&](const fs::path& p, const std::string& key, const std::string& hex) {
+  // Ours, but holding other bytes than its name says, or filed under a
+  // blobs/<xx> that is not the first two digits of its name, where playback
+  // does not look: left unindexed like a file that is not ours, so the next
+  // write of that hash makes it again, and the archive is incomplete, since
+  // its events may name the lost bytes.
+  const auto trust = [&](const fs::path& p, const std::string& key, const std::string& hex,
+                         bool in_place) {
     if (!resumed_file_is_ours(p)) return;
-    if (resumed_file_matches(p, hex))
+    if (in_place && resumed_file_matches(p, hex))
       g_written_blobs.insert(key);
     else
       ++mismatched;
@@ -775,8 +778,8 @@ static void index_existing_blobs_locked(const std::string& output_dir) {
   for (fs::directory_iterator dit(blobs_root, ec), dend; !ec && dit != dend; dit.increment(ec)) {
     std::error_code entry_ec;
     if (dit->symlink_status(entry_ec).type() != fs::file_type::directory) continue;
-#ifndef _WIN32
     const std::string name = dit->path().filename().string();
+#ifndef _WIN32
     const auto nibble = [](char c) -> int {
       return (c >= '0' && c <= '9') ? c - '0' : (c >= 'a' && c <= 'f') ? c - 'a' + 10 : -1;
     };
@@ -789,7 +792,7 @@ static void index_existing_blobs_locked(const std::string& output_dir) {
          it.increment(entry_ec)) {
       if (it->path().extension() == ".blob") {
         const std::string hex = it->path().stem().string();
-        trust(it->path(), hex, hex);
+        trust(it->path(), hex, hex, hex.compare(0, 2, name) == 0);
       }
     }
   }
@@ -799,14 +802,15 @@ static void index_existing_blobs_locked(const std::string& output_dir) {
   for (fs::directory_iterator it(co_root, ec), end; !ec && it != end; it.increment(ec)) {
     if (it->path().extension() == ".hsaco") {
       const std::string hex = it->path().stem().string();
-      trust(it->path(), std::string("co:") + hex, hex);
+      trust(it->path(), std::string("co:") + hex, hex, /*in_place=*/true);
     }
   }
 
   if (mismatched) {
     LogPrintfWarning("[HRR capture] %zu blob or code object files in %s do not hold the bytes "
-                     "their names are the hash of", mismatched, output_dir.c_str());
-    mark_incomplete("a blob or code object found on resume does not match its hash");
+                     "their names are the hash of, or are not where playback looks for them",
+                     mismatched, output_dir.c_str());
+    mark_incomplete("a blob or code object found on resume does not match its hash or its place");
   }
 }
 

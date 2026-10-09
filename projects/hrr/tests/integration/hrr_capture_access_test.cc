@@ -54,8 +54,9 @@
  *     written again rather than trusted (POSIX).
  *
  *   Unit_HRR_CaptureResumeChecksBlobBytes:
- *     resuming an archive with a blob whose bytes no longer hash to its name
- *     writes the blob again and leaves the archive marked incomplete (POSIX).
+ *     resuming an archive with a blob whose bytes no longer hash to its name,
+ *     or that sits under the wrong blobs/<xx>, writes the blob again where it
+ *     belongs and leaves the archive marked incomplete (POSIX).
  *
  *   Unit_HRR_CaptureEventsWriteFails:
  *     a failed write, fsync or close of events.bin leaves the archive without
@@ -1096,12 +1097,14 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles) {
 /**
  * Test Description
  * ----------------
- *   - Captures Unit_HRR_GpuWorkload_Direct, changes one byte of its largest
- *     blob, and copies the archive into the next run's pid-<pid>, which
+ *   - Captures Unit_HRR_GpuWorkload_Direct, then either changes one byte of
+ *     its largest blob or moves that blob, unchanged, under another
+ *     blobs/<xx>, and copies the archive into the next run's pid-<pid>, which
  *     resumes it.
- *   - The file no longer hashes to its name, so the resume does not trust it:
- *     the run writes that blob again, and the archive is marked incomplete,
- *     since events from the first run named the bytes it lost.
+ *   - The file no longer hashes to its name, or is not where playback looks
+ *     for it, so the resume does not trust it: the run writes that blob again
+ *     where it belongs, and the archive is marked incomplete, since events
+ *     from the first run named the bytes it lost.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureResumeChecksBlobBytes) {
 #ifdef _WIN32
@@ -1124,11 +1127,16 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeChecksBlobBytes) {
       });
   const std::string original = read_text_file(first_archive / changed);
   REQUIRE_FALSE(original.empty());
-  {
+  SECTION("a changed byte") {
     std::string altered = original;
     altered[0] = static_cast<char>(altered[0] ^ 0x5a);
     std::ofstream out(first_archive / changed, std::ios::binary | std::ios::trunc);
     out << altered;
+  }
+  SECTION("under the wrong prefix") {
+    const std::string other = changed.parent_path().filename().string() == "00" ? "01" : "00";
+    fs::create_directories(first_archive / "blobs" / other);
+    fs::rename(first_archive / changed, first_archive / "blobs" / other / changed.filename());
   }
 
   const PlantedRun run = capture_after_planting(

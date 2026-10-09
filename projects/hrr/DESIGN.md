@@ -133,9 +133,11 @@ Because the PID directory is always part of the archive path, a crashed process
 that is restarted with a new PID creates a new sub-archive rather than resuming
 the prior process's `events.bin`. Resuming still applies if the same process
 re-opens its own writer and finds an existing `pid-<pid>/events.bin`. A resume
-reuses a blob or code object file only when it hashes to its name; one that does
-not is written again when the run next records it, and the archive is marked
-incomplete, since events from the earlier run may name the bytes it lost.
+reuses a blob or code object file only when it hashes to its name and, for a
+blob, sits under the `blobs/<xx>` named by its first two digits, where playback
+looks for it; one that does not is written again when the run next records it,
+and the archive is marked incomplete, since events from the earlier run may name
+the bytes it lost.
 
 A write, `fsync` or close of `events.bin` that fails marks the archive incomplete
 as well: the clean-shutdown trailer is omitted and `manifest.complete` is false.
