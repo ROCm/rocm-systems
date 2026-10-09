@@ -92,7 +92,8 @@ public:
         qps(kNRanks),
         signals(static_cast<size_t>(kNSignals) * static_cast<size_t>(nContexts_)),
         counters(static_cast<size_t>(kNCounters) * static_cast<size_t>(nContexts_)),
-        signalRkeys(static_cast<size_t>(kNRanks) * static_cast<size_t>(nContexts_)),
+        // One peer-rkey array for the whole signal MR (mirrors createContext).
+        signalRkeys(kNRanks),
         signalRaddrs(static_cast<size_t>(kNRanks) * static_cast<size_t>(nContexts_)),
         dstRemoteVas(kNRanks),
         dstRkeys(kNRanks),
@@ -127,7 +128,7 @@ public:
       hostCtxs[static_cast<size_t>(c)].qps = qps.ptr;
       hostCtxs[static_cast<size_t>(c)].signals = signals.ptr + static_cast<size_t>(c) * kNSignals;
       hostCtxs[static_cast<size_t>(c)].counters = counters.ptr + static_cast<size_t>(c) * kNCounters;
-      hostCtxs[static_cast<size_t>(c)].signal_rkeys = signalRkeys.ptr + static_cast<size_t>(c) * kNRanks;
+      hostCtxs[static_cast<size_t>(c)].signal_rkeys = signalRkeys.ptr;
       hostCtxs[static_cast<size_t>(c)].signal_raddrs = signalRaddrs.ptr + static_cast<size_t>(c) * kNRanks;
       hostCtxs[static_cast<size_t>(c)].nSignals = kNSignals;
       hostCtxs[static_cast<size_t>(c)].nCounters = kNCounters;

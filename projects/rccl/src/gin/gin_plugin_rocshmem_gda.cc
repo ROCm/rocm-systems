@@ -46,6 +46,9 @@ struct ginRocshmemGdaGinCtx {
   bool hasError;
   uint64_t* signalsBase;
   uint64_t* countersBase;
+  // One peer-rkey array for the whole signal MR; every logical context shares it
+  // (the MR spans all stripes, so there is no per-context rkey offset).
+  uint32_t* signalRkeysDev;
   void* signalMr;
   void* counterMr;
   rocshmem_gin_qp_set_t qpSet;  // borrowed from collComm, not owned
@@ -57,10 +60,10 @@ static void ginRocshmemGdaFreeGinCtx(ginRocshmemGdaGinCtx* ctx) {
   if (ctx->counterMr) rocshmem_gin_dereg_mr(ctx->counterMr);
   if (ctx->gpuCtxHost) {
     for (int contextId = 0; contextId < ctx->nContexts; contextId++) {
-      if (ctx->gpuCtxHost[contextId].signal_rkeys) (void)hipFree(ctx->gpuCtxHost[contextId].signal_rkeys);
       if (ctx->gpuCtxHost[contextId].signal_raddrs) (void)hipFree(ctx->gpuCtxHost[contextId].signal_raddrs);
     }
   }
+  if (ctx->signalRkeysDev) (void)hipFree(ctx->signalRkeysDev);
   if (ctx->signalsBase) (void)hipFree(ctx->signalsBase);
   if (ctx->countersBase) (void)hipFree(ctx->countersBase);
   if (ctx->gpuCtxDev) (void)hipFree(ctx->gpuCtxDev);
@@ -272,6 +275,7 @@ static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_t*
   ncclResult_t ret = ncclSuccess;
   uint32_t* rkeys_buf = nullptr;
   uintptr_t* raddrs_buf = nullptr;
+  uintptr_t* perCtxAddrs = nullptr;
 
   auto* ctx = new ginRocshmemGdaGinCtx{};
   ctx->nRanks = cctx->nranks;
@@ -283,6 +287,7 @@ static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_t*
   ctx->qpSet = cctx->qpSet;  // borrow, not own
   ctx->signalsBase = nullptr;
   ctx->countersBase = nullptr;
+  ctx->signalRkeysDev = nullptr;
   ctx->signalMr = nullptr;
   ctx->counterMr = nullptr;
   ctx->gpuCtxHost = nullptr;
@@ -317,7 +322,8 @@ static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_t*
 
     rkeys_buf = (uint32_t*)malloc(sizeof(uint32_t) * (size_t)ctx->nRanks);
     raddrs_buf = (uintptr_t*)malloc(sizeof(uintptr_t) * (size_t)ctx->nRanks);
-    if (!rkeys_buf || !raddrs_buf) {
+    perCtxAddrs = (uintptr_t*)malloc(sizeof(uintptr_t) * (size_t)ctx->nRanks);
+    if (!rkeys_buf || !raddrs_buf || !perCtxAddrs) {
       ret = ncclSystemError;
       goto fail;
     }
@@ -325,6 +331,17 @@ static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_t*
     raddrs_buf[ctx->rank] = (uintptr_t)ctx->signalsBase;
     bootstrapAllGather(cctx->comm->bootstrap, rkeys_buf, sizeof(uint32_t));
     bootstrapAllGather(cctx->comm->bootstrap, raddrs_buf, sizeof(uintptr_t));
+
+    // Shared across logical contexts: one MR rkey covers every stripe.
+    if (hipMalloc(&ctx->signalRkeysDev, sizeof(uint32_t) * (size_t)ctx->nRanks) != hipSuccess) {
+      ret = ncclSystemError;
+      goto fail;
+    }
+    if (hipMemcpy(ctx->signalRkeysDev, rkeys_buf, sizeof(uint32_t) * (size_t)ctx->nRanks, hipMemcpyHostToDevice) !=
+        hipSuccess) {
+      ret = ncclSystemError;
+      goto fail;
+    }
   }
 
   if (config->nCounters > 0) {
@@ -348,19 +365,7 @@ static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_t*
         ctx->countersBase != nullptr ? ctx->countersBase + (size_t)contextId * (size_t)config->nCounters : nullptr;
 
     if (config->nSignals > 0) {
-      if (hipMalloc(&gpuCtx->signal_rkeys, sizeof(uint32_t) * (size_t)ctx->nRanks) != hipSuccess ||
-          hipMalloc(&gpuCtx->signal_raddrs, sizeof(uintptr_t) * (size_t)ctx->nRanks) != hipSuccess) {
-        ret = ncclSystemError;
-        goto fail;
-      }
-      if (hipMemcpy(gpuCtx->signal_rkeys, rkeys_buf, sizeof(uint32_t) * (size_t)ctx->nRanks, hipMemcpyHostToDevice) !=
-          hipSuccess) {
-        ret = ncclSystemError;
-        goto fail;
-      }
-
-      uintptr_t* perCtxAddrs = (uintptr_t*)malloc(sizeof(uintptr_t) * (size_t)ctx->nRanks);
-      if (!perCtxAddrs) {
+      if (hipMalloc(&gpuCtx->signal_raddrs, sizeof(uintptr_t) * (size_t)ctx->nRanks) != hipSuccess) {
         ret = ncclSystemError;
         goto fail;
       }
@@ -368,11 +373,10 @@ static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_t*
       for (int pe = 0; pe < ctx->nRanks; pe++) perCtxAddrs[pe] = raddrs_buf[pe] + stripeOff;
       if (hipMemcpy(gpuCtx->signal_raddrs, perCtxAddrs, sizeof(uintptr_t) * (size_t)ctx->nRanks,
                     hipMemcpyHostToDevice) != hipSuccess) {
-        free(perCtxAddrs);
         ret = ncclSystemError;
         goto fail;
       }
-      free(perCtxAddrs);
+      gpuCtx->signal_rkeys = ctx->signalRkeysDev;
       gpuCtx->signals = ctx->signalsBase + (size_t)contextId * (size_t)config->nSignals;
     } else {
       gpuCtx->signals = nullptr;
@@ -382,8 +386,10 @@ static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_t*
   }
   free(rkeys_buf);
   free(raddrs_buf);
+  free(perCtxAddrs);
   rkeys_buf = nullptr;
   raddrs_buf = nullptr;
+  perCtxAddrs = nullptr;
 
   if (hipMemcpy(ctx->gpuCtxDev, ctx->gpuCtxHost, (size_t)ctx->nContexts * sizeof(ncclGinRocshmemGdaGPUContext),
                 hipMemcpyHostToDevice) != hipSuccess) {
@@ -403,6 +409,7 @@ static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_t*
 fail:
   free(rkeys_buf);
   free(raddrs_buf);
+  free(perCtxAddrs);
   ginRocshmemGdaFreeGinCtx(ctx);
   return ret;
 }
