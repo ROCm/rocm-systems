@@ -2095,6 +2095,7 @@ rj_add_interposer_test_suite(
     DmabufExportKeepsAReservedCpuMapping
     DmabufExportKeepsStoresMadeDuringTheExport
     DmabufExportLeavesPagesPastAPartialMapping
+    ExportOfAUserptrBufferFailsAndLeavesTheCallersMemoryAlone
     GemMetadataRoundTripsOnABuffer
     GemOpReportsTheCreateSize
     GemOpSetPlacementChangesTheReportedDomain
