@@ -789,29 +789,19 @@ PyTorch operator analysis
 
 ``--list-*-operators`` and ``--*-operator`` load each profiling pass's marker
 and counter CSV pair. The on-disk join column is ``Correlation_Id``; analyze
-canonicalizes it to ``Correlation_ID`` before the full-outer-join (plus
-``GUID`` when both files have that column). Matching operator calls are then
-consolidated across passes using a stitch key that keeps ``seqNr``, ``tid``,
-and ``ftid`` and omits ``ltid``, plus ``function_ordinal``. Collapsed GPU time
-and kernel lists come from pass 0. Analyze parses
-Function, then nests marker intervals per ``Thread_Id``. Plain ``analyze -p``
-without those flags does not join markers and does not report
-``UnaccountedKernelError``. Analyze does not write
-``ml_api_trace/consolidated.csv``. Missing or null marker columns make
-analyze exit.
+canonicalizes it to ``Correlation_ID``. Collapsed GPU time and kernel lists
+come from pass 0. Analyze parses Function, then nests marker intervals per
+``Thread_Id``. Plain ``analyze -p`` without those flags does not join
+markers. Analyze does not write ``ml_api_trace/consolidated.csv``. Missing
+or null marker columns make analyze exit.
 
-Operator analyze reports after the call tree:
+Operator analyze reports warnings after the call tree and does not exit:
 
-* ``UnaccountedKernelError`` when a kernel's ``Correlation_ID`` is not in any
-  ROCTX range.
-* ``PassMarkerMismatchError`` when operator calls or the kernel-name set on a
-  call disagree across passes.
-* ``OverlappingMarkerRangeError`` when two markers on the same ``Thread_Id``
-  overlap in time (neither nested nor adjacent).
-* ``MissingSourceLocationError`` when a torch or triton worker root has empty
-  file/line and no ancestor with a source location.
-
-Those recorded errors are warnings printed after the tree and do not exit.
+* a kernel's ``Correlation_ID`` is not in any ROCTX range
+* operator calls or kernel names disagree across passes
+* two markers on the same ``Thread_Id`` overlap in time (neither nested
+  nor adjacent)
+* a torch or triton call-tree root has no file/line and no launcher thread
 
 A Function whose first token is the legacy stacked shape (``:#`` or
 ``#n@file:line``) makes analyze exit during parse, before the tree.
@@ -894,7 +884,7 @@ line ``Operator summary: (no operators with recorded dispatches)``.
 Filtering by Operator
 ---------------------
 
-``--torch-operator`` uses shell-style glob patterns (``fnmatch``) to select
+``--torch-operator`` uses shell-style glob patterns to select
 nodes whose backend is torch. Metric kernel ids come only from nodes whose
 backend is in the requested list. Ancestors of any backend stay in the path
 string, so ``user/.../aten::addmm`` still matches. Hierarchies are
