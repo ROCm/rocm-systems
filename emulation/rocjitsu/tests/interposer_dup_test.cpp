@@ -1082,9 +1082,53 @@ TEST(InterposerDrmTest, PrimeImportKeepsTheBoStateAfterTheHandleCloses) {
   }
 }
 
+namespace {
+
+#if defined(__SANITIZE_THREAD__)
+#define RJ_TEST_TSAN 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define RJ_TEST_TSAN 1
+#endif
+#endif
+
+#ifdef RJ_TEST_TSAN
+extern "C" {
+void AnnotateIgnoreReadsBegin(const char *file, int line);
+void AnnotateIgnoreReadsEnd(const char *file, int line);
+void AnnotateIgnoreWritesBegin(const char *file, int line);
+void AnnotateIgnoreWritesEnd(const char *file, int line);
+}
+#endif
+
+// Scopes the deliberate dup/close race on one descriptor number. The kernel
+// serializes the two on its descriptor table, so the race is the scenario under test,
+// not a defect; ThreadSanitizer would otherwise report it as a race on the fd itself.
+struct IgnoreFdRace {
+#ifdef RJ_TEST_TSAN
+  IgnoreFdRace() {
+    AnnotateIgnoreReadsBegin(__FILE__, __LINE__);
+    AnnotateIgnoreWritesBegin(__FILE__, __LINE__);
+  }
+  ~IgnoreFdRace() {
+    AnnotateIgnoreWritesEnd(__FILE__, __LINE__);
+    AnnotateIgnoreReadsEnd(__FILE__, __LINE__);
+  }
+#else
+  IgnoreFdRace() = default;
+  ~IgnoreFdRace() {}
+#endif
+};
+
+} // namespace
+
 // A dup racing the close of the export fd either fails or returns a descriptor that
 // still carries the BO state: the record follows the kernel descriptor, so neither
 // operation may slip between the other's table update and its syscall.
+//
+// Once the close wins, another thread of the process can open a file under the freed
+// number before the dup looks it up, and the dup then copies that file. A copy that is
+// not the exported buffer says nothing about the BO state and is not counted.
 TEST(InterposerDrmTest, DupRacingTheCloseOfAPrimeExportKeepsTheBoState) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
@@ -1094,6 +1138,7 @@ TEST(InterposerDrmTest, DupRacingTheCloseOfAPrimeExportKeepsTheBoState) {
   ASSERT_GE(importer, 0);
   constexpr int kAttempts = 3000;
   int duplicated = 0;
+  int foreign = 0;
   int lost = 0;
   for (int attempt = 0; attempt < kAttempts; ++attempt) {
     drm_amdgpu_gem_create create{};
@@ -1113,18 +1158,31 @@ TEST(InterposerDrmTest, DupRacingTheCloseOfAPrimeExportKeepsTheBoState) {
     prime.flags = DRM_CLOEXEC;
     ASSERT_EQ(ioctl(exporter, DRM_IOCTL_PRIME_HANDLE_TO_FD, &prime), 0);
     ASSERT_EQ(gem_close(exporter, create.out.handle), 0);
+    struct stat exported {};
+    ASSERT_EQ(fstat(prime.fd, &exported), 0);
 
     std::barrier start(2);
     int copy = -1;
     std::thread closer([&] {
+      IgnoreFdRace ignore;
       start.arrive_and_wait();
       close(prime.fd);
     });
-    start.arrive_and_wait();
-    copy = dup(prime.fd);
+    {
+      IgnoreFdRace ignore;
+      start.arrive_and_wait();
+      copy = dup(prime.fd);
+    }
     closer.join();
     if (copy < 0)
       continue;
+    struct stat copied {};
+    if (fstat(copy, &copied) != 0 || copied.st_dev != exported.st_dev ||
+        copied.st_ino != exported.st_ino) {
+      ++foreign;
+      EXPECT_EQ(close(copy), 0);
+      continue;
+    }
     ++duplicated;
     uint32_t imported = 0;
     ASSERT_TRUE(prime_import(importer, copy, &imported));
@@ -1138,7 +1196,8 @@ TEST(InterposerDrmTest, DupRacingTheCloseOfAPrimeExportKeepsTheBoState) {
     EXPECT_EQ(close(copy), 0);
   }
   EXPECT_GT(duplicated, 0);
-  EXPECT_EQ(lost, 0) << lost << " of " << duplicated << " duplicates lost the BO state";
+  EXPECT_EQ(lost, 0) << lost << " of " << duplicated << " duplicates lost the BO state (" << foreign
+                     << " copies were of another file)";
   EXPECT_EQ(close(importer), 0);
   EXPECT_EQ(close(exporter), 0);
   EXPECT_EQ(close(kfd), 0);
