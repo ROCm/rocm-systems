@@ -41,6 +41,8 @@ test_categories:
       - "RasCollectivesMicrotest.*"
       # ras/diagnostics.cc
       - "RasDiagnosticsMicrotest.*"
+      # ras/diagnostics_env.cc
+      - "RasDiagnosticsEnvMicrotest.*"
       # ras/client.cc
       - "RasClientMicrotest.*"
       # ras/client_support.cc
