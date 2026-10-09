@@ -191,10 +191,9 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
     return std::nullopt;
   }
 
-  // Copy the body into an aligned word buffer. One extra zero word of slack so
-  // the decoder succeeds in the event of a malformed input
+  // Copy the body into an aligned word buffer for the decoder.
   const size_t num_words = sym.body_size / sizeof(uint32_t);
-  std::vector<uint32_t> words(num_words + 1, 0);
+  std::vector<uint32_t> words(num_words);
   std::memcpy(words.data(), image.data() + sym.body_file_offset, sym.body_size);
 
   const auto &registry = default_isa_target_registry();
@@ -217,10 +216,15 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
   std::string_view last_mnemonic;
   std::string last_src0_name;
   bool last_has_src0 = false;
+  const std::span<const uint32_t> body(words);
   size_t w = 0;
   while (w < num_words) {
     util::StringDiagnostic decode_error;
-    DecodeResult decoded = decoder->decode(&words[w], decode_error.emitter());
+    // The window bounds both the decoder's reads and the decoded size by the
+    // words left in the body, so an instruction running past the end fails here
+    // as truncated.
+    DecodeResult decoded =
+        decoder->decode_window(body.subspan(w), w * sizeof(uint32_t), decode_error.emitter());
     if (decoded.failed()) {
       const std::string message = "probe body failed to decode at word " + std::to_string(w) +
                                   ": " + decode_error.message();
@@ -228,16 +232,7 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
       return std::nullopt;
     }
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
-    const int size = inst->size();
-    if (size != 4 && size != 8) {
-      report(error_out, "probe body has an unsupported instruction size");
-      return std::nullopt;
-    }
-    const size_t inst_words = static_cast<size_t>(size) / sizeof(uint32_t);
-    if (w + inst_words > num_words) {
-      report(error_out, "probe body's last instruction is truncated");
-      return std::nullopt;
-    }
+    const size_t inst_words = static_cast<size_t>(inst->size()) / sizeof(uint32_t);
     const std::string_view m = inst->mnemonic();
     if (is_call(*inst)) {
       report(error_out, "probe body contains a call and is not self-contained");
@@ -264,7 +259,7 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
   callable.symbol = sym.name;
   callable.arch = arch;
   callable.target = target;
-  callable.body_words.assign(words.begin(), words.begin() + num_words);
+  callable.body_words = std::move(words);
   // The body was just verified to return through s[30:31]; the argument count
   // was screened on entry. Whether the body agrees with that count is
   // analyze_probe_live_ins()'s to decide.

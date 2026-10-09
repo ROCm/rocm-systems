@@ -2332,7 +2332,57 @@ std::optional<uint16_t> storage_base_from_argument(const std::vector<uint32_t> &
   return std::nullopt;
 }
 
+// Five argument dwords: the buffer pointer, the Wave64 anchor mask, and a site
+// immediate, one more than the kernarg fixture's default allocation leaves
+// ordinary on CDNA.
+std::vector<ProbeArgValue> five_log_buffer_args() {
+  return {{ProbeArgSource::LogBufferPtrLo, 0},
+          {ProbeArgSource::LogBufferPtrHi, 0},
+          {ProbeArgSource::AnchorExecLo, 0},
+          {ProbeArgSource::AnchorExecHi, 0},
+          probe_arg_imm(0)};
+}
+
+InstrumentedCodeObjectDebug patch_five_log_buffer_args(const std::vector<uint8_t> &target) {
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt = log_buffer_point(probe_obj, /*anchor_offset=*/0);
+  pt.probe_args = five_log_buffer_args();
+  instr.add_point(pt);
+  return instr.patch_with_debug_summaries();
+}
+
 } // namespace
+
+// A kernarg kernel that declares a wider VGPR window admits the fifth argument:
+// 16 unified VGPRs with the AGPR window at v8 leaves v0..v7 ordinary.
+TEST(InstrumentorEntryPrologue, AWiderVgprAllocationAdmitsAFifthArgument) {
+  namespace kd = rocr::llvm::amdhsa;
+  const auto target = test::make_kernarg_kernel_elf(
+      {0xBF800000u, 0xBF800000u}, /*private_bytes=*/0, EF_AMDGPU_MACH_AMDGCN_GFX950,
+      kTestKernargSize, /*wave32=*/false, /*granulated_sgpr_count=*/3, /*entry_text_offset=*/0,
+      /*granulated_vgpr_count=*/1, /*accum_offset=*/1);
+
+  // The patch outcome turns on the AGPR window alone, so check that the helper
+  // wrote both fields.
+  AmdGpuCodeObject obj(target.data(), target.size());
+  ASSERT_TRUE(obj.is_valid());
+  const Section *text = obj.text_sections().front();
+  const auto kernels = scan_kernel_descriptors(target, text->sectionOffset(), text->size());
+  ASSERT_EQ(kernels.size(), 1u);
+  const kd::kernel_descriptor_t &desc = kernels.front().descriptor;
+  EXPECT_EQ(
+      AMDHSA_BITS_GET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
+      1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET), 1u);
+
+  const auto result = patch_five_log_buffer_args(target);
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  EXPECT_EQ(result.patches.size(), 1u);
+}
 
 // The prologue loads its pointer out of the kernarg wrapper the CP delivers, so
 // a kernel that never receives a kernarg pointer has nothing to load through.

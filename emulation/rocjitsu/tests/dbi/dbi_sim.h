@@ -8,7 +8,8 @@
 /// one workgroup, runs to completion, and reads VGPRs back from the halt
 /// snapshot. A wavefront frees its register file at s_endpgm, so the final
 /// register state has to come from a HaltSnapshotPlugin captured at halt rather
-/// than from the CU.
+/// than from the CU. Guest memory can be seeded with write_memory() and read back
+/// with run_and_read_memory().
 ///
 /// @warning The descriptor this dispatches is **not** the patched code object's.
 /// write_kernel() synthesizes a fresh one with 256 VGPRs and 104 SGPRs, taking
@@ -56,6 +57,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -126,6 +128,17 @@ public:
     kernarg_bytes_ = std::move(bytes);
     kernarg_properties_ = properties;
     user_sgpr_count_ = user_sgpr_count;
+  }
+
+  /// @brief Copy @p bytes into guest memory at @p addr.
+  /// @details Persists for the life of this DbiSim. The harness itself owns the
+  /// kernel at 0x1000, the kernargs at KERNARG_ADDR, and the queue rings from
+  /// AqlQueue::DEFAULT_RING_ADDR up. A run with private_bytes also gets per-wave
+  /// scratch from 0x1'0000'0000, the CP's fallback when a dispatch names no
+  /// scratch backing, which this harness never does. Place data clear of all
+  /// four.
+  void write_memory(uint64_t addr, std::span<const uint8_t> bytes) {
+    mem_->load_image(bytes.data(), bytes.size(), addr);
   }
 
   /// @brief Offset into the code passed to run_*() that dispatch enters at, as
@@ -200,6 +213,24 @@ public:
     if (wf == nullptr)
       return std::nullopt;
     return wf->sgpr64(base);
+  }
+
+  /// @brief Dispatch @p code over one wave and return the @p size bytes of guest
+  ///        memory at @p addr after the kernel halts.
+  /// @return std::nullopt when no wave halted, so an absent result is
+  ///   distinguishable from memory the kernel left zeroed.
+  std::optional<std::vector<uint8_t>> run_and_read_memory(const std::vector<uint32_t> &code,
+                                                          uint32_t private_bytes, uint64_t addr,
+                                                          size_t size) {
+    if (run(code, private_bytes) == nullptr)
+      return std::nullopt;
+    // This topology's caches already write stores through to GpuMemory, so the
+    // flush changes nothing today. It is SoC's documented visibility point, and
+    // keeps the read-back correct if a cache here starts holding dirty lines.
+    soc_->flush_all();
+    std::vector<uint8_t> bytes(size);
+    mem_->read_block(addr, bytes);
+    return bytes;
   }
 
 private:

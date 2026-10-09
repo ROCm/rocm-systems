@@ -239,11 +239,12 @@ struct ProbeCallable {
 /// Verification is intentionally conservative (fail-closed). The body must:
 ///   - copy in-bounds out of the code object image,
 ///   - have no relocation applied anywhere inside it,
-///   - decode cleanly as a sequence of 4- or 8-byte @p arch instructions that
-///     exactly tiles the body (no partial trailing word),
+///   - decode cleanly as a sequence of @p arch instructions that exactly tiles
+///     the body (no instruction running past its end),
 ///   - contain no call (s_swappc_b64 / s_call_b64) and no explicit scratch
 ///     access (FLAT scratch_* / SMEM s_scratch_*); note private access via FLAT
-///     addressing is not statically detectable here and is not rejected, and
+///     addressing, or via a buffer instruction given a scratch resource
+///     descriptor, is not statically detectable here and is not rejected, and
 ///   - end in `s_setpc_b64 s[30:31]`.
 ///
 /// On success the returned ProbeCallable carries the ABI derived from
