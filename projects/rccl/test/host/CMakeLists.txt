@@ -104,6 +104,7 @@ function(rccl_define_micro_source_lists)
     tuning-general-test.cc
     csv-tuner-test.cc                    # src/plugin/tuner/csv_tuner.cc
     param-utils-test.cc                  # src/include/param/utils.h, src/include/param/parser_common.h
+    param-parsers-test.cc                # src/include/param/parser_{default,enum,bitset,list}.h
     ras-client-test.cc
     group-test.cc
     devcomm-test.cc
