@@ -150,6 +150,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed xGMI read and write data counters reading as unavailable on MI450**.  
   - On MI450 the GPU connects to the CPU over xGMI, and the driver reports that link's traffic as a single counter. It was dropped instead of being stored as the first link, so `xgmi_read_data_acc` and `xgmi_write_data_acc` from `amdsmi_get_gpu_metrics_info()`, and the link `read`/`write` from `amdsmi_get_link_metrics()`, read `UINT64_MAX` (`N/A`).
 
+- **Fixed `amdsmi_get_processor_count_from_handles()` crashing on NULL output pointers**.  
+  - It wrote through a NULL `nr_cpusockets`, `nr_cpucores` or `nr_gpus` and crashed. It now returns `AMDSMI_STATUS_INVAL`.
+
+- **Fixed `amdsmi_get_gpu_cper_entries()` failing the page after a large CPER record**.  
+  - A record an earlier call had already returned still had to fit the caller's buffers on the next call, so that call failed with `AMDSMI_STATUS_OUT_OF_RESOURCES`. Records already returned are now skipped before the space check.
+
+- **Fixed `amd-smi static --clock` printing a Python traceback for an unknown clock name**.  
+  - It now reports the invalid parameter and exits `195` (`INVALID_PARAMETER`).
+
 - **Fixed crashes when several threads start or stop AMD SMI at the same time**.  
   - Programs that initialize and shut down the library from more than one thread could crash, find no GPUs, or leave the library initialized after every thread had shut it down.
 
