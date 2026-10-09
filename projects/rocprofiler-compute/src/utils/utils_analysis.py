@@ -268,16 +268,16 @@ def format_operator_args(
     return formatted_args
 
 
-def _split_name_and_location(first_token: str) -> tuple[str, str, object]:
+def _split_name_and_location(first_token: str) -> tuple[str, str, Optional[int]]:
     """Split `{name}:{location}` from the right into name, file, and line."""
     if first_token.endswith(":n/a"):
-        return first_token[: -len(":n/a")], "", ""
+        return first_token[: -len(":n/a")], "", None
     parts = first_token.rsplit(":", 2)
     if len(parts) == 3:
         operator_name, file_part, line_part = parts
         if file_part and line_part.isdigit():
             return operator_name, Path(file_part).name, int(line_part)
-    return first_token, "", ""
+    return first_token, "", None
 
 
 def parse_marker_function(function_value: object) -> dict[str, Any]:
