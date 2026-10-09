@@ -491,6 +491,33 @@ def _record_ml_api_trace_error(
     errors.append(err)
 
 
+def _record_overlapping_marker(
+    errors: Optional[list[MlApiTraceError]],
+    skipped_keys: Optional[set[tuple[str, str]]],
+    thread_key: str,
+    parent: tuple[CallTreeNode, float, float],
+    row: object,
+    start: float,
+    end: float,
+) -> None:
+    """Record an overlapping range and add its skip key when collecting skips."""
+    parent_node, parent_start, parent_end = parent
+    _record_ml_api_trace_error(
+        errors,
+        OverlappingMarkerRangeError(
+            thread_id=thread_key,
+            first_name=parent_node.name,
+            first_start=parent_start,
+            first_end=parent_end,
+            second_name=str(row.Operator_Name),
+            second_start=start,
+            second_end=end,
+        ),
+    )
+    if skipped_keys is not None:
+        skipped_keys.add((thread_key, str(row.Start_Timestamp)))
+
+
 def nest_marker_intervals(
     trace_df: pd.DataFrame,
     errors: Optional[list[MlApiTraceError]] = None,
@@ -520,21 +547,15 @@ def nest_marker_intervals(
             while open_ranges and open_ranges[-1][2] <= start:
                 open_ranges.pop()
             if open_ranges and end > open_ranges[-1][2]:
-                parent_node, parent_start, parent_end = open_ranges[-1]
-                _record_ml_api_trace_error(
+                _record_overlapping_marker(
                     errors,
-                    OverlappingMarkerRangeError(
-                        thread_id=thread_key,
-                        first_name=parent_node.name,
-                        first_start=parent_start,
-                        first_end=parent_end,
-                        second_name=str(row.Operator_Name),
-                        second_start=start,
-                        second_end=end,
-                    ),
+                    skipped_keys,
+                    thread_key,
+                    open_ranges[-1],
+                    row,
+                    start,
+                    end,
                 )
-                if skipped_keys is not None:
-                    skipped_keys.add((thread_key, str(row.Start_Timestamp)))
                 continue
             node = _call_tree_node_from_marker_row(row, errors)
             if open_ranges:
