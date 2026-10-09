@@ -13,12 +13,42 @@
 #include <cstdint>
 #include <cstring>
 
-// ncclParam* referenced by init.cc but not declared inside it, so the redirected NCCL_PARAM does not
-// cover them. Each stays here rather than moving to its owner's fakes file because that file is on a
-// link line whose unit under test already defines the symbol (enqueue.cc:1985 for LaunchOrderImplicit),
-// or has no fakes file at all. The trailing comment names the definition each copies.
-int64_t ncclParamLaunchOrderImplicit() { return g_loadParam("LAUNCH_ORDER_IMPLICIT", 0); }  // enqueue.cc:1985
-int64_t rcclParamIntraGraphGen() { return g_loadParam("INTRA_GRAPH_GEN", 0); }  // graph/rccl_graph_gen.cc:34
+#include "recorder.h"
+
+// micro_getenv / SetMicroEnv / ClearMicroEnv / the getenv interposer / ncclGetEnv
+// moved to env_fakes.cc so every microtest binary shares ONE env implementation:
+// a second, map-only copy cannot intercept production raw getenv() call sites.
+
+int64_t ncclParamEnqueueRearchEnable() { return g_loadParam("ENQUEUE_REARCH_ENABLE", 0); }
+
+// Real NCCL_PARAM(P2pLL128Enable, ...) lives in enqueue.cc. init.cc only has
+// `extern int64_t ncclParamP2pLL128Enable();` (param_redirect.h only generates
+// bodies for NCCL_PARAM macros in this TU). Without this fake, MicroInit
+// fails to link: undefined symbol referenced from initTransportsRank.
+int64_t ncclParamP2pLL128Enable() { return g_loadParam("P2P_LL128_ENABLE", -1); }
+int64_t ncclParamRasDiagnostics() { return g_loadParam("RUN_RAS_DIAGNOSTICS", 0); }
+int64_t ncclParamDiagnostics() { return g_loadParam("RUN_DIAGNOSTICS", 0); }
+// src/ras/ras.cc (NCCL 2.32): init.cc gates the progress-counter monitor on RAS being enabled.
+int64_t ncclParamRasEnable() { return g_loadParam("RAS_ENABLE", 1); }
+
+// src/cft_dev_runtime.cc: CFT needs CUDA >= 13.3 logical endpoints, so on HIP every capability is off.
+ncclResult_t ncclGpuCftSupport(struct ncclComm*, int* gpuCftSupport, bool* gpuCftMulticastSupport,
+                               bool* gpuCftCountedSupport) {
+  *gpuCftSupport = 0;
+  *gpuCftMulticastSupport = false;
+  *gpuCftCountedSupport = false;
+  return ncclSuccess;
+}
+
+// src/ras/progress_monitor.cc (NCCL 2.32). NCCL_PROGRESS_COUNTERS defaults to 0, so the suites here never
+// start a monitor; Destroy runs on every comm teardown and must succeed.
+ncclResult_t ncclProgressCounterMonitorInit(struct ncclComm*) { return ncclSuccess; }
+ncclResult_t ncclProgressCounterMonitorDestroy(struct ncclComm*) { return ncclSuccess; }
+
+// src/device/common.cu's __global__ ncclProgressCounterCaptureGpuTime. init.cc only takes its address to hand
+// to the (faked) kernel launch, so a host function with the same mangled name satisfies the link.
+void ncclProgressCounterCaptureGpuTime(uint64_t*) {}
+int64_t rcclParamIntraGraphGen() { return g_loadParam("INTRA_GRAPH_GEN", 0); }
 
 // Dead seam: no src/*.cc defines ncclTopoGetStrFromSys and no unit under test calls it. Kept as-is
 // rather than deleted, since removing it is a behaviour question this move is not answering.
@@ -57,6 +87,7 @@ void InstallDevCommSetupSuccess() {
 void ResetInitFakes() {
   ResetAmdSmiFakes();
   ResetBootstrapStubs();
+  ResetEnqueueFakes();
   ResetEnvFakes();
   ResetEnvPluginFakes();
   ResetGinFakes();
@@ -70,6 +101,9 @@ void ResetInitFakes() {
   ResetRcclWrapFakes();
   ResetRecorderFakes();
   ResetRocmWrapFakes();
+#ifdef ENABLE_ROCSHMEM
+  ResetRocshmemFakes();
+#endif
   ResetStrongStreamStubs();
   ResetTopoStubs();
   ResetTransportStubs();

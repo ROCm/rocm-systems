@@ -17,11 +17,28 @@ Unlike the other samples, this app does not decode a stream, so it needs no inpu
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir build && cd build
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir build && cd build
+set ROCM_PATH=<path-to-TheRock-build>
+cmake ..
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> Before running, add the rocDecode and VA-API DLL directories to your PATH:
+> ```bat
+> set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%PATH%
+> ```
 
 ## Run
 

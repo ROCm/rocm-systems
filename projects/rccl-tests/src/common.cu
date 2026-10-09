@@ -115,6 +115,12 @@ bool IsArchMatch(char const* arch, char const* target) {
 
 const char *test_memorytypes[nccl_NUM_MTYPES] = {"coarse", "fine", "host", "managed"};
 
+// AMD-only helper. Post-2.31 librccl exports the C++-mangled symbol; pre-sync
+// builds do not. Weak so latest tests still link against older RCCL.
+#if defined(__GNUC__)
+extern int ncclCuMemRuntimeSupported() __attribute__((weak));
+#endif
+
 // For libnccl's < 2.13
 #if defined(NCCL_OS_LINUX)
 extern "C" __attribute__((weak)) char const* ncclGetLastError(ncclComm_t comm) {
@@ -2596,6 +2602,28 @@ testResult_t run() {
     }
     //if parallel init is not selected, use main thread to initialize NCCL
     TESTCHECK(initComms(comms, nGpus*nThreads, ncclProc*nThreads*nGpus, ncclProcs*nThreads*nGpus, gpus.data(), ncclId));
+
+    {
+      // Missing symbol: pre-sync librccl; keep previous "just run" behavior.
+      const bool cuMemOk = !ncclCuMemRuntimeSupported || ncclCuMemRuntimeSupported();
+      if ((local_register == SYMMETRIC_REGISTER || deviceImpl > 0) && !cuMemOk) {
+        if (ncclProc == 0) {
+          printf("# SKIP: symmetric memory / device API not supported (cuMem runtime disabled)\n");
+        }
+        for (int i = 0; i < nGpus * nThreads; ++i) {
+          NCCLCHECK(ncclCommDestroy(comms[i]));
+        }
+        free(initFreeGpuMem);
+        free(comms);
+#ifdef MPI_SUPPORT
+        MPI_Barrier(mpi_comm);
+        MPI_Comm_free(&mpi_comm);
+        MPI_Finalize();
+#endif
+        cudaDeviceReset();
+        return testSuccess;
+      }
+    }
 
      // Capture the memory used by the GPUs after initializing the NCCL communicators
      for (int g = 0; g < nGpus; ++g) {

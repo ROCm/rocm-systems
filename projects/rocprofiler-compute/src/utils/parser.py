@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
+from pc_sampling.code_object_analysis import InstructionPipelines
 from pc_sampling.pc_sampling_analysis import (
     SOURCE_LINE_MISSING,
     aggregate_pc_sample_records,
@@ -16,12 +17,14 @@ from pc_sampling.pc_sampling_analysis import (
     load_pc_sample_records,
 )
 from utils import schema
+from utils.file_io import validate_kernel_filter_ids
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import gen_counter_list
 from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
 from utils.utils_common import (
+    MEMBW_ANALYSIS_PANEL_ID,
     METRIC_ID_RE,
     SUPPORTED_FIELD,
     convert_filter_blocks_to_panel_ids,
@@ -91,6 +94,12 @@ def build_dfs(
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
+        # Profile only collects block 30 counters with --membw-analysis.
+        if panel_id == MEMBW_ANALYSIS_PANEL_ID and not profiling_config.get(
+            "membw_analysis", False
+        ):
+            continue
+
         for data_source in panel["data source"]:
             for table_type, data_config in data_source.items():
                 table_id = data_config["id"]
@@ -325,14 +334,9 @@ def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataF
                 "is called before applying kernel filters."
             )
 
-        # Validate kernel IDs
-        for kernel_id in workload.filter_kernel_ids:
-            if kernel_id >= len(kernel_top_dataframe["Kernel_Name"]):
-                console_error(
-                    f"{kernel_id} is an invalid kernel id. "
-                    "Please enter an id between 0-"
-                    f"{len(kernel_top_dataframe['Kernel_Name']) - 1}"
-                )
+        validate_kernel_filter_ids(
+            workload.filter_kernel_ids, len(kernel_top_dataframe["Kernel_Name"])
+        )
 
         # Extract kernel names and mark selected kernels with "*"
         # TODO: fix it for unaligned comparison
@@ -365,13 +369,29 @@ def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataF
 
 def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
     """Apply dispatch ID filters."""
-    # NB: support ignoring the 1st n dispatched execution by '> n'
-    #     The better way may be parsing python slice string
+    # '> n' keeps the dispatches whose id is greater than n.
+    available_dispatch_ids = set(df["Dispatch_ID"].astype(int))
+    if available_dispatch_ids:
+        available_ids_hint = (
+            f"Dispatch ids run from {min(available_dispatch_ids)} to "
+            f"{max(available_dispatch_ids)}."
+        )
+    else:
+        available_ids_hint = "This workload has no dispatches."
+
     for dispatch_id in workload.filter_dispatch_ids:
         if isinstance(dispatch_id, str) and ">" in dispatch_id:
-            dispatch_id = re.match(r"\>\s*(\d+)", dispatch_id).group(1)
-        if int(dispatch_id) >= len(df):  # subtract 2 bc of the two header rows
-            console_error("analysis", f"{dispatch_id} is an invalid dispatch id.")
+            threshold = int(re.match(r"\>\s*(\d+)", dispatch_id).group(1))
+            valid = bool(available_dispatch_ids) and threshold <= max(
+                available_dispatch_ids
+            )
+        else:
+            valid = int(dispatch_id) in available_dispatch_ids
+        if not valid:
+            console_error(
+                "analysis",
+                f"{dispatch_id} is an invalid dispatch id. {available_ids_hint}",
+            )
 
     if (
         isinstance(workload.filter_dispatch_ids[0], str)
@@ -383,7 +403,7 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
         selected_dispatches = [
             int(dispatch_str) for dispatch_str in workload.filter_dispatch_ids
         ]
-        df = df.loc[selected_dispatches]
+        df = df[df["Dispatch_ID"].astype(int).isin(selected_dispatches)]
 
     return df
 
@@ -391,6 +411,7 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
 def _build_pc_sampling_partial_frame(
     method: str,
     tool_data: dict[str, Any],
+    sys_info: dict[str, Any],
     kernel_name: Optional[str] = None,
 ) -> pd.DataFrame:
     """Build one process's enriched sampling frame for an optional kernel."""
@@ -415,6 +436,7 @@ def _build_pc_sampling_partial_frame(
     aggregated_df = aggregate_pc_sample_records(
         records_df,
         group_by=["code_object_id", "code_object_offset", "kernel_id"],
+        sys_info=sys_info,
     )
     df = enrich_with_metadata(
         aggregated_df,
@@ -445,11 +467,15 @@ def _format_pc_sampling_display_frame(
     method: str,
     sorting_type: str,
     num_rows: Optional[int] = None,
+    gpu_arch: Optional[str] = None,
 ) -> pd.DataFrame:
     """Return the sampling rows in their requested display layout."""
     # Project stall_reason as a descending list[(reason, count)].
     df["stall_reason"] = df["stall_reason"].apply(_stall_reason_dict_to_list)
     df["source_line"] = df["source_line"].apply(_trim_source_line)
+    df["instruction_type"] = df["instruction"].apply(
+        lambda instruction: InstructionPipelines.lookup(instruction, gpu_arch)
+    )
 
     # Sort on the numeric offset (lexicographic hex order is wrong), then
     # format offset as hex for display. Leading with pid keeps each process's
@@ -477,11 +503,20 @@ def _format_pc_sampling_display_frame(
         "pid",
         "source_line",
         "instruction",
+        "instruction_type",
         "code_object_id",
         "offset",
         "count",
+        "active_thread_percent",
     ]
-    stochastic_only_columns = ["count_issued", "count_stalled", "stall_reason"]
+    # wave_occupancy_percent is stochastic-only: a host_trap record has no
+    # wave count to derive it from.
+    stochastic_only_columns = [
+        "count_issued",
+        "count_stalled",
+        "wave_occupancy_percent",
+        "stall_reason",
+    ]
     columns_to_return = shared_columns + (
         stochastic_only_columns if method == "stochastic" else []
     )
@@ -545,7 +580,7 @@ def load_pc_sampling_data(
 
         kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
         kernel_index = workload.filter_kernel_ids[0]
-        if kernel_index >= len(kernel_top_df):
+        if not 0 <= kernel_index < len(kernel_top_df):
             console_warning(
                 f"Kernel index {kernel_index} is out of bounds. "
                 f"kernel_top table has only {len(kernel_top_df)} rows."
@@ -554,10 +589,13 @@ def load_pc_sampling_data(
 
         kernel_name = kernel_top_df.iloc[kernel_index]["Kernel_Name"]
 
+    sys_info = (
+        workload.sys_info.iloc[0].to_dict() if not workload.sys_info.empty else {}
+    )
     process_frames = []
     for tool_data in tool_data_records:
         frame = _build_pc_sampling_partial_frame(
-            pc_sampling_method, tool_data, kernel_name
+            pc_sampling_method, tool_data, sys_info, kernel_name
         )
         if not frame.empty:
             process_frames.append(frame)
@@ -570,6 +608,7 @@ def load_pc_sampling_data(
         pc_sampling_method,
         sorting_type,
         num_rows=num_rows,
+        gpu_arch=sys_info.get("gpu_arch"),
     )
 
 

@@ -16,8 +16,19 @@
 #include <cstdlib>
 #include <functional>
 
+#include "channel.h"
+#include "fail_loud.h"
+#include "graph.h"
 #include "nccl.h"
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM default this floor stands in for
+#include "signature-drift.h"
+#include "transport.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_useAinic, rcclUseAinic);
+ASSERT_HOOK_MATCHES_PROD(g_pxnDisable, ncclPxnDisable);
+ASSERT_HOOK_MATCHES_PROD(g_ncclProxyStop, ncclProxyStop);
+ASSERT_HOOK_MATCHES_PROD(g_ncclTransportP2pSetup, ncclTransportP2pSetup);
+#undef ASSERT_HOOK_MATCHES_PROD
 
 struct ncclComm;
 struct ncclTopoGraph;
@@ -39,15 +50,29 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm*, int* gdrSupport) {
 // the enqueue target to omit it via a macro and supply its own; a seam here
 // serves both. `false` means "no AINIC", which is what a host-only binary with
 // no device actually has, so no test is silently steered by the default.
-bool g_rcclUseAinic = false;
-bool rcclUseAinic() { return g_rcclUseAinic; }
+bool g_rcclUseAinicValue = false;
+static bool DefaultUseAinic() { return g_rcclUseAinicValue; }
+std::function<bool()> g_useAinic = DefaultUseAinic;
+bool rcclUseAinic() { return g_useAinic(); }
+
+static int DefaultPxnDisable(struct ncclComm*) { return 0; }
+std::function<int(struct ncclComm*)> g_pxnDisable = DefaultPxnDisable;
+int ncclPxnDisable(struct ncclComm* comm) { return g_pxnDisable(comm); }
 
 // src/proxy.cc: comm teardown stops the proxy through this, so it needs a working default, not a fail-loud one.
 static ncclResult_t DefaultNcclProxyStop(struct ncclComm*) { return ncclSuccess; }
 std::function<ncclResult_t(struct ncclComm*)> g_ncclProxyStop = DefaultNcclProxyStop;
 
+static ncclResult_t DefaultTransportP2pSetup(struct ncclComm*, struct ncclTopoGraph*, int, bool*) {
+  FailLoudUnfaked("transport_stubs", "ncclTransportP2pSetup");
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclTopoGraph*, int, bool*)>
+    g_ncclTransportP2pSetup = DefaultTransportP2pSetup;
+
 void ResetTransportStubs() {
-  g_rcclUseAinic = false;
+  g_rcclUseAinicValue = false;
+  g_useAinic = DefaultUseAinic;
+  g_pxnDisable = DefaultPxnDisable;
   g_ncclProxyStop = DefaultNcclProxyStop;
   g_gdrSupportValue = 0;
   g_gdrSupportCalls = 0;
@@ -55,13 +80,18 @@ void ResetTransportStubs() {
   g_ncclNvlsInitCalls = 0;
   g_ncclNvlsTuningResult = ncclSuccess;
   g_ncclNvlsTuningCalls = 0;
+  g_ncclTransportP2pSetup = DefaultTransportP2pSetup;
 }
 
+#ifndef RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
 ncclResult_t ncclCollNetChainBufferSetup(ncclComm_t comm) { ::abort(); }
 ncclResult_t ncclCollNetDirectBufferSetup(ncclComm_t comm) { ::abort(); }
+#endif
 ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTopoGraph* graphs[]) { ::abort(); }
 // ncclGetUserP2pLevel (src/graph/paths.cc): topo_stubs.cc, with the rest of that TU's seams.
+#ifndef RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
 ncclResult_t ncclNvlsBufferSetup(struct ncclComm* comm) { ::abort(); }
+#endif
 // Controllable (was fail-loud). :1618 uses bare NCCLCHECK, not NCCLCHECKGOTO, so a failure here returns
 // WITHOUT running exit: -- the counter on ncclOsCpuCount is what makes that bypass observable.
 ncclResult_t g_ncclNvlsInitResult = ncclSuccess;
@@ -71,7 +101,9 @@ ncclResult_t ncclNvlsInit(struct ncclComm* comm) {
   return g_ncclNvlsInitResult;
 }
 ncclResult_t ncclNvlsSetup(struct ncclComm* comm, struct ncclComm* parent) { ::abort(); }
+#ifndef RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
 ncclResult_t ncclNvlsTreeConnect(struct ncclComm* comm) { ::abort(); }
+#endif
 // Controllable (was fail-loud). init.cc:2185, gated on comm->nvlsSupport surviving the :2182 fold.
 ncclResult_t g_ncclNvlsTuningResult = ncclSuccess;
 int g_ncclNvlsTuningCalls = 0;
@@ -83,11 +115,22 @@ ncclResult_t ncclProxyCreate(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclProxyDestroy(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclProxyShmUnlink(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclProxyStop(struct ncclComm* comm) { return g_ncclProxyStop(comm); }
-int ncclPxnDisable(struct ncclComm* comm) { ::abort(); }
+#ifndef RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
 ncclResult_t ncclTransportPatConnect(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTransportRingConnect(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTransportTreeConnect(struct ncclComm* comm) { ::abort(); }
+#endif
+ncclResult_t ncclTransportInitRankMap(struct ncclComm* comm, int, const int*) { return ncclSuccess; }
+ncclResult_t ncclTuningInit(struct ncclComm* comm) { return ncclSuccess; }
 // ncclTreeBasePostset (src/graph/connect.cc): topo_stubs.cc, next to ncclTopoPreset/ncclTopoPostset.
 ncclResult_t ncclTransportCheckP2pType(struct ncclComm*, bool*, bool*, bool*) { ::abort(); }
 ncclResult_t ncclTransportP2pConnect(struct ncclComm*, int, int, int*, int, int*, int) { ::abort(); }
-ncclResult_t ncclTransportP2pSetup(struct ncclComm*, struct ncclTopoGraph*, int, bool*) { ::abort(); }
+ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, int connIndex,
+                                   bool* needsProxy) {
+  return g_ncclTransportP2pSetup(comm, graph, connIndex, needsProxy);
+}
+
+// ppc64le TOC references survive --gc-sections, so netTransport must have
+// a definition even though the code path that uses it is dead.
+#include "transport.h"
+struct ncclTransport netTransport = {};

@@ -10,8 +10,10 @@
 #define RCCL_TEST_HOST_NCCL_STUBS_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "nccl.h"
@@ -33,17 +35,23 @@ extern std::function<ncclResult_t(int /*cudaArch*/, int /*maxSharedMem*/, size_t
 // src/misc/coll_trace.cc: comm teardown tears the trace ring down through this.
 extern std::function<ncclResult_t(struct ncclComm*)> g_collTraceDestroy;
 
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerThreadDestroy;
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerPluginFinalize;
+
 // src/plugin/tuner.cc: commCleanup unloads the tuner plugin through this.
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclTunerPluginUnload;
+
+// src/allocator.cc: ce_coll.cc allocates its staging buffers here; the default aborts.
+extern std::function<ncclResult_t(void**, size_t)> g_ncclMemAlloc;
 
 // src/misc/mem_manager.cc: commFree releases the single-node size arrays here.
 extern std::function<ncclResult_t(void*)> g_ncclMemFree;
 
-// src/symmetric.cc: commFree tears down symmetric-memory resources here.
-extern std::function<ncclResult_t(struct ncclComm*)> g_ncclSymkFinalize;
-
 // The public entry point commFree recurses through for hierarchical sub-communicators.
 extern std::function<ncclResult_t(ncclComm_t)> g_ncclCommDestroy;
+
+// rcclEnsureHierarchicalComms creates its two child communicators through this API.
+extern std::function<ncclResult_t(ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*)> g_ncclCommSplit;
 
 // src/channel.cc: the fake initChannel does NOT allocate ring->userRanks/rankToIndex like the real one;
 // callers must supply storage.
@@ -70,6 +78,16 @@ extern int g_getROCmVersionResult;
 extern unsigned int g_rocmVersionMajor;
 extern unsigned int g_rocmVersionMinor;
 extern unsigned int g_rocmVersionPatch;
+
+// src/plugin/profiler.cc: no profiler plugin loaded in a host-only binary by default.
+extern std::function<bool()> g_profilerPluginLoaded;
+
+// Generated device-function table (src/device/generate.py); empty default matches a miss (-1, with a WARN).
+extern std::unordered_map<uint64_t, int> ncclDevFuncNameToId;
+
+// src/misc/cudawrap.cc. ResetNcclStubs() restores this, so a raised version gate cannot leak forward.
+constexpr int kDefaultCudaDriverVersion = 12000;
+extern int ncclCudaDriverVersionCache;
 
 void ResetNcclStubs();
 

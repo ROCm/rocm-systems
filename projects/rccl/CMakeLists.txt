@@ -100,6 +100,7 @@ if(NOT ENABLE_FULL_COVERAGE MATCHES "^(AUTO|ON|OFF)$")
     "received '${ENABLE_FULL_COVERAGE}'.")
 endif()
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
+option(ENABLE_NET_PROFILING                    "Emit NET_IB/NET_SOCK profiler events"          OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
 option(DISABLE_KERNARG_PRELOAD                 "Disable amdgpu-kernarg-preload-count compile/link flag" OFF)
@@ -174,9 +175,6 @@ include(cmake/CheckSymbolExistsNoWarn.cmake)
 # Include rocSHMEM build module only if enabled
 if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   include(cmake/ROCSHMEM.cmake)
-  if(RCCL_POISON_HIP_ATOMICS)
-    message(WARNING "ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN are incompatible with RCCL_POISON_HIP_ATOMICS")
-  endif()
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -198,8 +196,10 @@ endif()
 set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
 
 
-# Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
+# Adjust GPU architectures for Address Sanitizer builds; per-family rules are
+# in cmake/AsanGpuTargets.cmake.
 if (BUILD_ADDRESS_SANITIZER)
+  include(cmake/AsanGpuTargets.cmake)
   set(_suffix "asan")
   set(_clang_rt_names "libclang_rt.${_suffix}.so" "libclang_rt.${_suffix}-x86_64.so")
   foreach(_clang_rt_name ${_clang_rt_names})
@@ -219,18 +219,13 @@ if (BUILD_ADDRESS_SANITIZER)
   endif()
   message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
 
-  SET(amdgpu_targets "")
-  foreach(amdgpu_target IN LISTS GPU_TARGETS)
-    if(NOT amdgpu_target STREQUAL "")
-      string(FIND "${amdgpu_target}" ":xnack+" HAS_XNACK_SUFFIX)
-      if(HAS_XNACK_SUFFIX EQUAL -1)
-        list(APPEND amdgpu_targets "${amdgpu_target}:xnack+")
-      else()
-        list(APPEND amdgpu_targets "${amdgpu_target}")
-      endif()
-    endif()
-  endforeach()
-  SET(GPU_TARGETS "${amdgpu_targets}")
+  # Guarded so that "no targets at all" still reaches the curated diagnostic
+  # below. rocm_local_targets() reports failure as the literal "NOTFOUND",
+  # which if() treats as false along with the empty case.
+  if(GPU_TARGETS)
+    rccl_asan_adjust_gpu_targets(GPU_TARGETS ${GPU_TARGETS})
+    message(STATUS "ASAN: GPU targets = ${GPU_TARGETS}")
+  endif()
 endif()
 
 # Check if clang compiler can offload to GPU_TARGETS
@@ -241,6 +236,10 @@ else()
   message(WARNING "Unable to check for supported GPU targets. Falling back to default GPUs.")
   set(SUPPORTED_GPUS ${DEFAULT_GPUS})
 endif()
+
+# TLS backend for socket encryption (empty = disabled; OPENSSL3 = headers only, libssl is dlopen'd at runtime)
+set(TLS_BACKEND "$ENV{TLS_BACKEND}" CACHE STRING "TLS backend (empty or OPENSSL3)")
+set_property(CACHE TLS_BACKEND PROPERTY STRINGS "" OPENSSL3)
 
 set(GPU_TARGETS "${SUPPORTED_GPUS}")
 
@@ -553,22 +552,39 @@ if(ROCM_VERSION VERSION_GREATER_EQUAL "71100")
     message(STATUS "Found amd_smi at ${SMI_INCLUDE_DIR}")
     set(SMI_LIBRARIES amd_smi)
 
-    ### Check whether the installed amdsmi headers expose the UALoE fabric struct
-    ### (amdsmi_fabric_info_t). The probe compiles against the struct only — no
-    ### link-time dependency on amdsmi_get_gpu_fabric_info — because amdsmi is
-    ### loaded lazily at runtime via dlopen. If the struct is absent, the compat
-    ### types in amdsmi_wrap.h must be compiled in.
+    ### Check whether the installed amdsmi headers expose UALoE fabric types.
+    ### Classic UALoE headers define AMDSMI_FABRIC_MAX_LOCAL_GPUS plus
+    ### amdsmi_fabric_info_t. ROCm 7.14 can ship fabric telemetry enumerators
+    ### without that macro; requiring the macro then leaves AMDSMI_FABRIC_DIRECT
+    ### off and amdsmi_wrap.h redefines the system enums.
     set(CMAKE_REQUIRED_INCLUDES "${SMI_INCLUDE_DIR}")
+    unset(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY CACHE)
     check_cxx_source_compiles("
       #include <amd_smi/amdsmi.h>
       int main() {
+        amdsmi_fabric_telemetry_category_t cat = AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN;
+        (void)cat;
+        return 0;
+      }
+    " AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+    check_cxx_source_compiles("
+      #include <amd_smi/amdsmi.h>
+      #if !defined(AMDSMI_FABRIC_MAX_LOCAL_GPUS)
+      #error amdsmi.h has no UALoE fabric types
+      #endif
+      int main() {
         amdsmi_fabric_info_t info{};
+        amdsmi_fabric_info_v1_t v1{};
         (void)info;
+        (void)v1;
         return 0;
       }
     " AMDSMI_FABRIC_API)
     unset(CMAKE_REQUIRED_INCLUDES)
-    if(AMDSMI_FABRIC_API)
+    if(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY AND NOT AMDSMI_FABRIC_API)
+      set(AMDSMI_FABRIC_API TRUE)
+      message(STATUS "amdsmi fabric telemetry types found (no AMDSMI_FABRIC_MAX_LOCAL_GPUS) - enabling AMDSMI_FABRIC_DIRECT")
+    elseif(AMDSMI_FABRIC_API)
       message(STATUS "amdsmi UALoE fabric API found - enabling AMDSMI_FABRIC_DIRECT")
     else()
       message(STATUS "amdsmi UALoE fabric API not found - using compat types")
@@ -611,6 +627,17 @@ set(USE_AMDSMI ON CACHE INTERNAL "Force enable AMD SMI path since we use lazy lo
 #     set(HAVE_ROCM_SMI_THREAD_ONLY_MUTEX True)
 #   endif ()
 # endif()
+
+## Check for TLS backend (socket encryption, see src/misc/crypt.cc)
+set(NCCL_TLS_INCLUDE_DIRS)
+if(TLS_BACKEND STREQUAL "OPENSSL3")
+  find_package(OpenSSL 3.0 REQUIRED COMPONENTS SSL Crypto)
+  add_compile_definitions(NCCL_TLS_BACKEND_OPENSSL3=1)
+  list(APPEND NCCL_TLS_INCLUDE_DIRS ${OPENSSL_INCLUDE_DIR})
+  include_directories(${NCCL_TLS_INCLUDE_DIRS})
+elseif(NOT TLS_BACKEND STREQUAL "")
+  message(FATAL_ERROR "Unsupported TLS_BACKEND '${TLS_BACKEND}'; expected OPENSSL3 or empty")
+endif()
 
 ## Check for BFD library if custom backtrace is requested
 if(BUILD_BFD)
@@ -774,6 +801,9 @@ endif()
 # Add subdirectories
 #==================================================================================================
 # Source directory contains library creation
+# ENABLE_MPI_TESTS is consumed here as well as under test/: MPI tests poke
+# librccl internals, so Release builds must export those symbols.
+option(ENABLE_MPI_TESTS "Enable MPI-based tests" OFF)
 add_subdirectory(src)
 
 # NCCL Inspector profiler plugin. Built as its own .so and loaded at runtime via
@@ -827,6 +857,16 @@ rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl.h
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device/
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device)
+# Install SDMA device headers so consumers can compile GIN SDMA device templates
+# without depending on ROCSHMEM_SOURCE_DIR.
+if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR)
+  rocm_install(FILES
+    ${ROCSHMEM_SOURCE_DIR}/src/sdma/anvil_device.hpp
+    ${ROCSHMEM_SOURCE_DIR}/src/sdma/sdma_opcodes.h
+    ${ROCSHMEM_SOURCE_DIR}/src/sdma/sdma_pkt_struct.h
+    ${ROCSHMEM_SOURCE_DIR}/src/sdma/sdma_pkt_struct_mi4.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device/gin/anvil_sdma/sdma)
+endif()
 ## Optional: install LLVM bitcode artifacts when EMIT_LLVM_IR is enabled.
 ## librccl_device.bc, nccl_device_wrapper.h, hipified nccl_device headers,
 ## and nccl.h (same as rccl.h; nccl_device #includes <nccl.h>) are produced
@@ -911,6 +951,7 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/env/json)
     add_subdirectory(plugins/gin/example)
     add_subdirectory(plugins/mixed/example)
+    add_subdirectory(plugins/rma/example)
   endif()
   add_subdirectory(test)
 
@@ -926,6 +967,12 @@ rccl_add_nccl_compat_package_targets()
 
 if(GENERATE_SYM_KERNELS)
   target_compile_definitions(rccl PRIVATE GENERATE_SYM_KERNELS)
+endif()
+
+# Off by default: the NET_IB/NET_SOCK profiler events instrument the network
+# data path, so they are opt-in rather than always compiled in.
+if(ENABLE_NET_PROFILING)
+  target_compile_definitions(rccl PRIVATE NCCL_ENABLE_NET_PROFILING)
 endif()
 
 # Keep librccl outputs in the top-level build dir for existing scripts.

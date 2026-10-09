@@ -1,6 +1,36 @@
 # Changelog for rocSHMEM
 ## Unreleased - rocSHMEM 3.8.0 for ROCm 10.x
 
+### Added
+* GDA device code refactor (#7217)
+  * Core GDA device code is now header-only.
+  * Removed indirection and branching when compiled for a single GDA provider.
+  * Significantly reduced size of device code GDA Queue Pair management objects.
+  * Reduced latency of `rocshmem_quiet` for AMD Pensando IONIC provider.
+    This also reduces the latency of blocking communication calls.
+  * Communications using the GDA backend can now selectively choose at compilation time
+    to reduce the internal GDA Queue Pair object correctness and safety constraints,
+    improving application performance when such relaxations are known to be safe by the caller.
+    These relaxations can be applied independently at each call site.
+    This is currently an internal mechanism and is not exposed by the public rocSHMEM APIs.
+* Added standalone signal APIs:
+    * `rocshmem_signal_add` and `rocshmem_ctx_signal_add`
+    * `rocshmem_signal_set` and `rocshmem_ctx_signal_set`
+    * `rocshmem_signal_wait_until`
+
+### Deprecated
+* Deprecated `rocshmem_signal_fetch_wg` and `rocshmem_signal_fetch_wave`.
+  Use `rocshmem_signal_fetch` instead.
+
+### Changed
+* SDMA transport is now built by default when IPC is enabled (`USE_SDMA` defaults to `ON`
+  when `USE_IPC=ON`). SDMA is disabled at runtime by default; set
+  `ROCSHMEM_SDMA_ENABLED=1` to activate it. This allows SDMA to be used without
+  rebuilding the library.
+* `ROCSHMEM_SDMA_THRESHOLD` default changed from 256 to 1024 bytes.
+  Wave and workgroup operations automatically scale the threshold by the wavefront size,
+  avoiding SDMA for small-to-medium transfers where parallel IPC copy is faster.
+
 ## rocSHMEM 3.7.0 for ROCm 10.1
 
 ### Added

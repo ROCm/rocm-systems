@@ -258,6 +258,7 @@ global:
 	hsa_amd_vmem_retain_alloc_handle;
 	hsa_amd_vmem_get_alloc_properties_from_handle;
 	hsa_amd_agent_set_async_scratch_limit;
+	hsa_amd_agent_set_attribute;
 	hsa_ven_amd_pcs_iterate_configuration;
 	hsa_ven_amd_pcs_create;
 	hsa_ven_amd_pcs_create_from_id;
@@ -282,6 +283,7 @@ global:
 	hsa_amd_vmem_export_fabric_handle;
 	hsa_amd_vmem_import_fabric_handle;
 	hsa_amd_svm_discard_and_prefetch_batch_async;
+	hsa_amd_vmem_get_vmem_info;
 local:
     *;
 };

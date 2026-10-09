@@ -119,7 +119,9 @@ def _register_handlers() -> None:
         gen_pk_fmac_vop3,
         gen_pk_binop_f32,
         gen_pk_ternary_f32,
+        gen_pk_ternary_f64,
         gen_pk_binop_u64,
+        gen_pk_binop_f64,
         gen_pk_lshl_add_u64,
         gen_pk_mov_b32,
         gen_mad_mix_f32,
@@ -291,6 +293,7 @@ def _register_handlers() -> None:
         ),
         dtype=c.dtype,
         is_vop3=c.is_vop3,
+        has_abs=c.has_abs,
         fp8_format_select=(
             'inst_.clamp'
             if c.cls == 'vector_cvt_pk'
@@ -341,6 +344,10 @@ def _register_handlers() -> None:
         use_cdna5_helpers=c.arch_name == 'cdna5',
     )
     DISPATCH['pk_binop_u64'] = lambda c: gen_pk_binop_u64(c.dst_ops, c.src_ops, c.op)
+    DISPATCH['pk_binop_f64'] = lambda c: gen_pk_binop_f64(c.dst_ops, c.src_ops, c.op)
+    DISPATCH['pk_ternary_f64'] = lambda c: gen_pk_ternary_f64(
+        c.dst_ops, c.src_ops, c.op
+    )
     DISPATCH['pk_lshl_add_u64'] = lambda c: gen_pk_lshl_add_u64(c.dst_ops, c.src_ops)
     DISPATCH['pk_mov_b32'] = lambda c: gen_pk_mov_b32(
         c.dst_ops,
@@ -353,6 +360,7 @@ def _register_handlers() -> None:
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
         use_cdna5_helpers=c.arch_name == 'cdna5',
+        fused_result=c.arch_name.startswith('rdna') or c.arch_name == 'cdna5',
     )
     DISPATCH['mad_mixlo_f16'] = lambda c: gen_mad_mix_lo_hi(
         c.dst_ops,
@@ -361,6 +369,7 @@ def _register_handlers() -> None:
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
         use_cdna5_helpers=c.arch_name == 'cdna5',
+        fused_result=c.arch_name.startswith('rdna') or c.arch_name == 'cdna5',
     )
     DISPATCH['mad_mixhi_f16'] = lambda c: gen_mad_mix_lo_hi(
         c.dst_ops,
@@ -369,6 +378,7 @@ def _register_handlers() -> None:
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
         use_cdna5_helpers=c.arch_name == 'cdna5',
+        fused_result=c.arch_name.startswith('rdna') or c.arch_name == 'cdna5',
     )
     DISPATCH['mad_mix_f32_bf16'] = lambda c: gen_mad_mix_bf16(
         c.dst_ops,
@@ -399,7 +409,7 @@ def _register_handlers() -> None:
         c.src_ops,
         c.cls,
         opsel_exprs=c.opsel_exprs,
-        replicate_inline=c.arch_name == 'rdna4',
+        arch_name=c.arch_name,
     )
     DISPATCH['dot2_f16_f16'] = lambda c: gen_dot2_true16(c.dst_ops, c.src_ops, c.cls)
     DISPATCH['dot2_bf16_bf16'] = lambda c: gen_dot2_true16(c.dst_ops, c.src_ops, c.cls)

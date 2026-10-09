@@ -97,6 +97,10 @@ STRUCT_FORMAT = (
 # Calculate the size of the struct in bytes
 STRUCT_SIZE = struct.calcsize(STRUCT_FORMAT) 
 
+# AllToAllv counts and displacements follow the record as size_t, as recorder.cc writes them
+COUNT_FORMAT = 'Q'
+COUNT_SIZE = struct.calcsize(COUNT_FORMAT)
+
 class Sanitizer:
     # Tracks and remaps pointer values to human-readable identifiers.
     
@@ -518,7 +522,7 @@ def json_to_bin(json_file, bin_file):
             )
             f.write(packed)
             
-            # Write extra data for AllToAllv (4 arrays of int32)
+            # Write extra data for AllToAllv (4 arrays of size_t)
             if data['type'] == RCCL_CALL_TYPES["AllToAllv"] and 'alltoallv_arrays' in data:
                 arrays = data['alltoallv_arrays']
                 nRanks = data.get('nRanks', -1)
@@ -528,16 +532,15 @@ def json_to_bin(json_file, bin_file):
                     print(f"Warning: Invalid nRanks={nRanks} for AllToAllv at call {call_count + 1}")
                     print(f"Skipping array data write.")
                 else:
-                    # Write sendcounts, sdispls, recvcounts, rdispls (each is nRanks * int32)
+                    # Write sendcounts, sdispls, recvcounts, rdispls (each is nRanks * size_t)
                     for array_name in ['sendcounts', 'sdispls', 'recvcounts', 'rdispls']:
                         if arrays.get(array_name):
                             array_len = len(arrays[array_name])
                             if array_len != nRanks:
                                 print(f"Warning: {array_name} length mismatch for AllToAllv at call {call_count + 1}")
                                 print(f"Expected {nRanks} elements, got {array_len} elements")
-                            # Pack as array of int32 (signed 32-bit integers, 4 bytes each)
                             for val in arrays[array_name]:
-                                f.write(struct.pack('i', val))
+                                f.write(struct.pack(COUNT_FORMAT, val))
             
             call_count += 1
     
@@ -613,7 +616,7 @@ def bin_to_json(bin_file, json_file):
                     'commId': unpacked[25]
                 }
                 
-                # Read extra data for AllToAllv (4 arrays of nRanks * int32)
+                # Read extra data for AllToAllv (4 arrays of nRanks * size_t)
                 if call_data['type'] == RCCL_CALL_TYPES["AllToAllv"]:
                     nRanks = call_data['nRanks']
                     
@@ -629,12 +632,12 @@ def bin_to_json(bin_file, json_file):
                         for array_name in ['sendcounts', 'sdispls', 'recvcounts', 'rdispls']:
                             array_data = []
                             for i in range(nRanks):
-                                val_bytes = f.read(4)  # int32 is 4 bytes
-                                if len(val_bytes) < 4:
+                                val_bytes = f.read(COUNT_SIZE)
+                                if len(val_bytes) < COUNT_SIZE:
                                     print(f"Warning: Incomplete {array_name} array for AllToAllv at record {record_num}")
                                     print(f"  Expected {nRanks} elements, got {i} elements")
                                     break
-                                array_data.append(struct.unpack('i', val_bytes)[0])
+                                array_data.append(struct.unpack(COUNT_FORMAT, val_bytes)[0])
                             call_data['alltoallv_arrays'][array_name] = array_data
                 
                 all_calls.append(call_data)

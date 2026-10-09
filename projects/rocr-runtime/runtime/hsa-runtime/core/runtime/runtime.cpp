@@ -1117,7 +1117,9 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
       // owning agent and the allocation's memory flags belong to the exporter. Report those as
       // unset instead of resolving them through MemoryHandle::region, which is NULL here.
       const AMD::MemoryRegion* memRegion =
-          static_cast<const AMD::MemoryRegion*>(mappedHandleIt->second.mem_handle->region);
+          mappedHandleIt->second.mem_handle->imported
+              ? nullptr
+              : static_cast<const AMD::MemoryRegion*>(mappedHandleIt->second.mem_handle->region);
       info->agentOwner = {};
       info->global_flags = 0;
       info->alloc_flags = 0;
@@ -1223,7 +1225,7 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
                 "Thunk pointer info mismatch");
 
   HsaPointerInfo thunkInfo;
-  uint32_t* mappedNodes;
+  uint32_t* mappedNodes = nullptr;
 
   hsa_amd_pointer_info_t retInfo = {0};
 
@@ -1236,6 +1238,20 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       ((alloc != nullptr) && (num_agents_accessible != nullptr) && (accessible != nullptr));
 
   bool allocation_map_entry_found = false;
+
+  // Driver that described ptr. Node ids are unique only within a driver, so a node id is matched
+  // only against agents of that driver's type.
+  const Driver* ptr_driver = nullptr;
+  auto same_driver = [&](const Agent* agent) {
+    return agent->driver().kernel_driver_type_ == ptr_driver->kernel_driver_type_;
+  };
+  auto first_agent = [&](uint32_t node, bool enabled_only) -> Agent* {
+    auto it = agents_by_node_.find(node);
+    if (it == agents_by_node_.end()) return nullptr;
+    for (auto agent : it->second)
+      if (same_driver(agent) && (!enabled_only || agent->Enabled())) return agent;
+    return nullptr;
+  };
 
   {  // memory_lock protects access to the NMappedNodes array and fragment user data since these may
      // change with calls to memory APIs.
@@ -1255,10 +1271,35 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       }
     }
 
-    // We don't care if this returns an error code.
-    // The type will be HSA_EXT_POINTER_TYPE_UNKNOWN if so.
-    auto err = HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, &thunkInfo));
-    if (err != HSAKMT_STATUS_SUCCESS || thunkInfo.Type == HSA_POINTER_UNKNOWN) {
+    // Ask the driver of the agent that owns the allocation. Memory the runtime has no record of
+    // is KFD's.
+    const AllocationRegion* record = nullptr;
+    auto entry = allocation_map_.upper_bound(ptr);
+    if (entry != allocation_map_.begin()) {
+      --entry;
+      if (ptr < reinterpret_cast<const uint8_t*>(entry->first) + entry->second.size)
+        record = &entry->second;
+    }
+    const Driver* driver = nullptr;
+    if (record != nullptr && record->region != nullptr) {
+      driver = &record->region->owner()->driver();
+    } else {
+      for (const auto& d : agent_drivers_) {
+        if (d->kernel_driver_type_ == DriverType::KFD) {
+          driver = d.get();
+          break;
+        }
+      }
+    }
+    if (driver != nullptr) {
+      const bool described =
+          driver->QueryPointerInfo(ptr, record ? record->region : nullptr,
+                                   record ? record->alloc_flags : MemoryRegion::AllocateNoFlags,
+                                   (record && record->region) ? &record->driver_handle : nullptr,
+                                   &thunkInfo) == HSA_STATUS_SUCCESS;
+      if (described) ptr_driver = driver;
+    }
+    if (ptr_driver == nullptr) {
       if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
         /* This is an address that was reserved using hsa_amd_vmem_address_reserve with
          * the HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag, but the address was not registered
@@ -1329,9 +1370,8 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       block_info->length = retInfo.sizeInBytes;
 
       // Report the owning agent, even if such an agent is not usable in the process.
-      auto nodeAgents = agents_by_node_.find(thunkInfo.Node);
-      assert(nodeAgents != agents_by_node_.end() && "Node id not found!");
-      block_info->agentOwner = nodeAgents->second[0];
+      block_info->agentOwner = first_agent(thunkInfo.Node, false);
+      assert(block_info->agentOwner != nullptr && "Node id not found!");
     }
     auto fragment = allocation_map_.upper_bound(ptr);
     if (fragment != allocation_map_.begin()) {
@@ -1339,11 +1379,14 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       if ((fragment->first <= ptr) &&
           (ptr <
            reinterpret_cast<const uint8_t*>(fragment->first) + fragment->second.size_requested)) {
-        // agent and host address must match here. Only lock memory is allowed to have differing
-        // addresses but lock memory has type HSA_EXT_POINTER_TYPE_LOCKED and cannot be
-        // suballocated.
-        retInfo.agentBaseAddress = const_cast<void*>(fragment->first);
-        retInfo.hostBaseAddress = retInfo.agentBaseAddress;
+        // The agent address of a block can differ from its host address, so offset it by the
+        // fragment's position in the block. It need not point to host memory, hence uintptr_t.
+        const uintptr_t block_base = reinterpret_cast<uintptr_t>(
+            retInfo.hostBaseAddress ? retInfo.hostBaseAddress : retInfo.agentBaseAddress);
+        const uintptr_t offset = reinterpret_cast<uintptr_t>(fragment->first) - block_base;
+        retInfo.agentBaseAddress =
+            reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(retInfo.agentBaseAddress) + offset);
+        retInfo.hostBaseAddress = const_cast<void*>(fragment->first);
         retInfo.sizeInBytes = fragment->second.size_requested;
         retInfo.userData = fragment->second.user_ptr;
         allocation_map_entry_found = true;
@@ -1360,20 +1403,14 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
   // IPC and Graphics memory may come from a node that does not have an agent in this process.
   // Ex. ROCR_VISIBLE_DEVICES or peer GPU is not supported by ROCm.
   retInfo.agentOwner.handle = 0;
-  auto nodeAgents = agents_by_node_.find(thunkInfo.Node);
-  assert(nodeAgents != agents_by_node_.end() && "Node id not found!");
-  for (auto agent : nodeAgents->second) {
-    if (agent->Enabled()) {
-      retInfo.agentOwner = agent->public_handle();
-      break;
-    }
-  }
+  Agent* node_agent = first_agent(thunkInfo.Node, false);
+  assert(node_agent != nullptr && "Node id not found!");
+  if (Agent* owner = first_agent(thunkInfo.Node, true)) retInfo.agentOwner = owner->public_handle();
 
   // Correct agentOwner for locked memory.  Thunk reports the GPU that owns the
   // alias but users are expecting to see a CPU when the memory is system.
   if (retInfo.type == HSA_EXT_POINTER_TYPE_LOCKED) {
-    if ((nodeAgents == agents_by_node_.end()) ||
-        (nodeAgents->second[0]->device_type() != core::Agent::kAmdCpuDevice)) {
+    if ((node_agent == nullptr) || (node_agent->device_type() != core::Agent::kAmdCpuDevice)) {
       retInfo.agentOwner = cpu_agents_[0]->public_handle();
     }
   }
@@ -1385,7 +1422,8 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
     for (HSAuint32 i = 0; i < thunkInfo.NMappedNodes; i++) {
       assert(mappedNodes[i] <= max_node_id() &&
              "PointerInfo: Invalid node ID returned from thunk.");
-      count += agents_by_node_[mappedNodes[i]].size();
+      for (auto agent : agents_by_node_[mappedNodes[i]])
+        if (same_driver(agent)) count++;
     }
 
     *num_agents_accessible = count;
@@ -1399,8 +1437,8 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
 
       uint32_t index = 0;
       for (HSAuint32 i = 0; i < thunkInfo.NMappedNodes; i++) {
-        auto& list = agents_by_node_[mappedNodes[i]];
-        for (auto agent : list) {
+        for (auto agent : agents_by_node_[mappedNodes[i]]) {
+          if (!same_driver(agent)) continue;
           (*accessible)[index] = agent->public_handle();
           index++;
         }
@@ -2716,7 +2754,7 @@ Runtime::AsyncEventsControl::AsyncEventsControl(AsyncEventsInfo* asyncInfo)
     : exit(false), info_(asyncInfo) {
   auto err = HSA::hsa_signal_create(0, 0, NULL, &wake);
   if (err != HSA_STATUS_SUCCESS)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to allocate async handler signal");
+    throw AMD::hsa_exception(err, "Failed to allocate async handler signal");
 }
 
 void Runtime::AsyncEventsControl::Start() {
@@ -3241,11 +3279,11 @@ void Runtime::LoadTools() {
   }
 }
 
-// Load the rocjitsu hotswap hook through the existing HSA tool lifecycle.
+// When enabled, load the rocjitsu hotswap hook through the existing HSA tool lifecycle.
 // Keeping its handle in tool_libs_ gives it the normal reverse-order OnUnload
 // and CloseTools handling without dedicated runtime state.
 hsa_status_t Runtime::LoadHotswapTool() {
-  if (flag().hotswap_disable()) return HSA_STATUS_SUCCESS;
+  if (!flag().hotswap_enable()) return HSA_STATUS_SUCCESS;
 
   bool has_gfx1250_a0_agent = false;
   for (const Agent* agent : gpu_agents_) {
@@ -4374,21 +4412,6 @@ void Runtime::ReleaseMemoryHandle(Runtime::MemoryHandle* handle) {
   memory_handles.erase(MemoryHandle::Convert(handle));
 }
 
-Agent* Runtime::KfdGttAnchorGpu() {
-  HSAuint32 node_id = 0;
-  HSAuint32 gpu_id = 0;
-  if (HSAKMT_CALL(hsaKmtGetDefaultHostGpu)(&node_id, &gpu_id) != HSAKMT_STATUS_SUCCESS) {
-    return nullptr;
-  }
-
-  auto it = agents_by_node_.find(node_id);
-  if (it == agents_by_node_.end() || it->second.empty()) {
-    return nullptr;
-  }
-
-  return it->second[0];
-}
-
 hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t size,
                                           MemoryRegion::AllocateFlags alloc_flags,
                                           uint64_t flags_unused,
@@ -4400,25 +4423,26 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
 
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   core::DriverMemoryHandle driver_handle = {};
+  auto agentOwner = region->owner();
 
-  hsa_status_t status = region->Allocate(size, alloc_flags, 0, &driver_handle);
+  /* Host memory has no DRM device of its own, so the GTT allocation and the DRM import 
+  that follows must be done using the same GPU. Rocr chooses the first enabled GPU here
+  and passes it down instead of letting thunk fall back to the default gpu node 0 */
+  core::Agent* agent_for_drm = agentOwner;
+  core::Agent* drm_owner = nullptr;
+  uint32_t alloc_node_id = 0;
+  if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+    if (gpu_agents().empty()) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    agent_for_drm = gpu_agents()[0];
+    drm_owner = agent_for_drm;
+    alloc_node_id = agent_for_drm->node_id();
+    alloc_flags |= MemoryRegion::AllocateGTTAccess;
+  }
+
+  hsa_status_t status = region->Allocate(size, alloc_flags, alloc_node_id, &driver_handle);
   if (status == HSA_STATUS_SUCCESS) {
     // TODO: Combine the Allocate and CreateShareableHandle into a single function.
     uint64_t offset;
-    auto agentOwner = region->owner();
-
-    /* CPU-owned host memory: DRM import requires a GPU agent; use libhsakmt
-     * first_gpu_mem (KFD GTT anchor). Device-owned: use owner agent. */
-    core::Agent* agent_for_drm = agentOwner;
-    core::Agent* drm_owner = nullptr;
-    if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-      agent_for_drm = core::Runtime::runtime_singleton_->KfdGttAnchorGpu();
-      if (agent_for_drm == nullptr) {
-        region->Free(driver_handle);
-        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-      }
-      drm_owner = agent_for_drm;
-    }
 
     // alloc_handle goes in as the allocation handle and is transformed in place into the shareable
     // memory handle. This lets the driver recover the allocation from its native id (no virtual
@@ -4577,9 +4601,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(MappedHandle* _mappe
 
   /* Avoid creating multiple amdgpu bos in the same gpu agent that was used
   for drm import of host memory during the creation of a shareable_handle */
-  if (!memHandle->imported && memHandle->region &&
-      memHandle->agentOwner()->device_type() == core::Agent::DeviceType::kAmdCpuDevice &&
-      memHandle->drm_owner && memHandle->drm_owner == targetAgent) {
+  if (memHandle->drm_owner == targetAgent) {
     driver_handle = memHandle->driver_handle;
     owns_driver_handle = false;
     return;
@@ -4598,7 +4620,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(MappedHandle* _mappe
 
 Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-    if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) assert(!"Unimplemented");
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) assert(!"Unimplemented");
 
     /* Remap the CPU mapping back to anonymous, freeing the DRM FD while retaining VA reservation */
     bool result = rocr::os::UncommitMemory(va, size);
@@ -4615,28 +4637,36 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-    if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return HSA_STATUS_ERROR;
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return HSA_STATUS_ERROR;
 
-    core::Agent* agent = nullptr;
-    int mmap_fd = -1;
+    MemoryHandle* memHandle = mappedHandle->mem_handle;
 
-    /* For imported handles, we don't have a region/owner, but we can use any GPU agent for mmap.
-     * The driver_handle created during import should have the correct mmap_offset. */
-    if (mappedHandle->mem_handle->imported) {
-      core::Agent* drm_agent = core::Runtime::runtime_singleton_->KfdGttAnchorGpu();
-      if (drm_agent != nullptr) {
-        agent = drm_agent;
-        agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
-      }
-    } else if (mappedHandle->mem_handle->region) {
-      agent = mappedHandle->mem_handle->drmAgent();
-      /* Do not check the return value of GetDeviceFd. We do not need mmap_fd in some cases, so it
-       * is valid for mmap_fd to be -1*/
-      agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
+    // For imported handles, we don't have a region/drm_owner 
+    // we can import into first enabled gpu agent for getting an mmap_offset
+    if (!memHandle->drm_owner && memHandle->imported) {
+      const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
+      if (gpus.empty()) return HSA_STATUS_ERROR;
+      core::Agent* defaultDrm = gpus[0];
+
+      core::DriverMemoryHandle imported = {};
+      hsa_status_t status = defaultDrm->driver().ImportMemoryHandle(
+          *defaultDrm, &imported,
+          memHandle->is_fabric_handle ? ShareType::FABRIC_HANDLE : ShareType::DMABUF_FD,
+          &memHandle->driver_handle);
+      if (status != HSA_STATUS_SUCCESS) return status;
+
+      memHandle->driver_handle.handle = imported.handle;
+      memHandle->driver_handle.size = imported.size;
+      memHandle->driver_handle.mmap_offset = imported.mmap_offset;
+      memHandle->drm_owner = defaultDrm;
     }
 
+    core::Agent* agent = memHandle->drmAgent();
+    int mmap_fd = -1;
+    agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
+
     if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd,
-                             mappedHandle->mem_handle->driver_handle.mmap_offset)) {
+                             memHandle->driver_handle.mmap_offset)) {
       return HSA_STATUS_ERROR;
     }
   } else {
@@ -4651,7 +4681,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (permissions != HSA_ACCESS_PERMISSION_NONE) {
-      if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return HSA_STATUS_ERROR;
+      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return HSA_STATUS_ERROR;
 
       hsa_access_permission_t perms = HSA_ACCESS_PERMISSION_NONE;
       if (!rocr::os::ProtectMemory(va, size, PermissionsToMemProt(perms))) {
@@ -4671,7 +4701,7 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle* mem_handle, AddressHandle* add
                                     hsa_access_permission_t perm)
     : mem_handle(mem_handle), address_handle(address_handle), offset(offset), size(size) {
   /* Create a CPU mapping with PROT_NONE */
-  if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return;
+  if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return;
 
   if (!mem_handle->imported) {
     /*
@@ -4702,7 +4732,8 @@ Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, uint64_t flags_u
       imported(false),
       is_fabric_handle(false),
       alloc_flag(alloc_flag),
-      drm_owner(nullptr) {
+      drm_owner(nullptr),
+      import_info_queried(false) {
   assert(driver_handle.handle != 0);
 }
 
@@ -4714,7 +4745,8 @@ Runtime::MemoryHandle::MemoryHandle(int dmabuf_fd)
       imported(true),
       is_fabric_handle(false),
       alloc_flag(MemoryRegion::AllocateNoFlags),
-      drm_owner(nullptr) {}
+      drm_owner(nullptr),
+      import_info_queried(false) {}
 
 Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
     : region(nullptr),
@@ -4724,16 +4756,16 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
       imported(true),
       is_fabric_handle(true),
       alloc_flag(MemoryRegion::AllocateNoFlags),
-      drm_owner(nullptr) {}
+      drm_owner(nullptr),
+      import_info_queried(false) {}
 
 Runtime::MemoryHandle::~MemoryHandle() {
-  if (driver_handle.handle != 0 && region != nullptr) {
+  if (driver_handle.handle != 0) {
     /* For host memory, CreateShareableHandle imports the BO into a GPU DRM context
     (drm_owner) to produce a driver_handle. The resulting driver_handle
     is owned by that GPU agent, not the CPU region, so destruction must be
     dispatched through drm_owner */
-    core::Agent* destroy_agent = drmAgent();
-    destroy_agent->driver().DestroyMemoryHandle(&driver_handle);
+    drmAgent()->driver().DestroyMemoryHandle(&driver_handle);
   } else {
     /* FIXME: the Driver class should close the dmabuf_fd, but in case of imported handles,
      * we do not have a region so we do not have an agentOwner() to call the driver.*/
@@ -4968,6 +5000,51 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
                                                  ShareType::DMABUF_FD, dmabuf_fd);
 }
 
+/* Map a driver-reported placement onto a region ROCr can name. Returns nullptr
+ * when no suitable region exists, leaving the handle's properties unresolved. */
+const core::MemoryRegion* Runtime::ResolveImportedRegion(const core::DmaBufInfo& info) {
+  if (info.is_device_memory) {
+    core::Agent* owner = agent_by_gpuid(info.node_id);
+    if (owner == nullptr) return nullptr;
+
+    /* Device VMM allocations come from the coarse-grained local pool. */
+    for (const auto& region : owner->regions()) {
+      const auto* amd_region = static_cast<const AMD::MemoryRegion*>(region.get());
+      if (amd_region->IsLocalMemory() && !region->fine_grain()) return region.get();
+    }
+    return nullptr;
+  }
+
+  /* Host memory. The driver query reports no NUMA node, so the default
+   * fine-grained system region is used. */
+  if (system_regions_fine_.empty()) return nullptr;
+  return system_regions_fine_[0].get();
+}
+
+/* Recover an imported handle's placement and size from its dmabuf and cache it in
+ * the handle's own fields. Ask each agent driver in turn and take the first that
+ * recognizes the fd; AgentDriver(KFD) is not used because it throws when no KFD
+ * driver is present. A buffer the driver cannot describe is marked queried so the
+ * ioctl is not repeated. Caller must hold memory_lock_. */
+void Runtime::EnsureImportInfo(MemoryHandle* memoryHandle) {
+  if (!memoryHandle->imported || memoryHandle->import_info_queried) return;
+  memoryHandle->import_info_queried = true;
+
+  if (memoryHandle->driver_handle.dmabuf_fd < 0) return;
+
+  core::DmaBufInfo info = {};
+  for (auto& driver : AgentDrivers()) {
+    if (driver->QueryDmaBufInfo(memoryHandle->driver_handle.dmabuf_fd, &info) ==
+        HSA_STATUS_SUCCESS) {
+      memoryHandle->region = ResolveImportedRegion(info);
+      memoryHandle->driver_handle.size = info.size;
+      /* alloc_flag stays AllocateNoFlags: the dmabuf carries no memory-type
+       * metadata, and the exporter may legitimately have used MEMORY_TYPE_NONE. */
+      return;
+    }
+  }
+}
+
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
   /* The per-GPU import of this dmabuf is deferred until hsa_amd_vmem_set_access is called, but the
@@ -4977,6 +5054,8 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   int owned_fd = os::DmaBufDup(dmabuf_fd);
   if (owned_fd < 0) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
+  /* Placement is not recovered here: importers that never query it should not pay
+   * for an ioctl. EnsureImportInfo does it on the first query that needs it. */
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto memoryHandle = std::make_unique<MemoryHandle>(owned_fd);
   *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
@@ -5041,14 +5120,52 @@ hsa_status_t Runtime::VMemoryGetAllocPropertiesFromHandle(hsa_amd_vmem_alloc_han
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
   if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  if (!memoryHandle->imported) {
-    *mem_region = memoryHandle->region;
-    *type = (memoryHandle->alloc_flag & core::MemoryRegion::AllocatePinned) ? MEMORY_TYPE_PINNED
-                                                                            : MEMORY_TYPE_NONE;
-  } else {
-    *mem_region = nullptr;
-    *type = MEMORY_TYPE_NONE;
-  }
+  EnsureImportInfo(memoryHandle);
+
+  const MemoryRegion* region = memoryHandle->region;
+  *mem_region = region;
+  *type = (region != nullptr && (memoryHandle->alloc_flag & core::MemoryRegion::AllocatePinned))
+              ? MEMORY_TYPE_PINNED
+              : MEMORY_TYPE_NONE;
+  return HSA_STATUS_SUCCESS;
+}
+
+/* fits() below compares the caller's byte count against member end offsets, which
+ * only holds while every member starts where the previous one ended. */
+static_assert(offsetof(hsa_amd_vmem_handle_info_t, alloc_size) ==
+                  offsetof(hsa_amd_vmem_handle_info_t, size) +
+                      sizeof(hsa_amd_vmem_handle_info_t::size),
+              "padding before hsa_amd_vmem_handle_info_t::alloc_size");
+static_assert(offsetof(hsa_amd_vmem_handle_info_t, agent) ==
+                  offsetof(hsa_amd_vmem_handle_info_t, alloc_size) +
+                      sizeof(hsa_amd_vmem_handle_info_t::alloc_size),
+              "padding before hsa_amd_vmem_handle_info_t::agent");
+static_assert(sizeof(hsa_amd_vmem_handle_info_t) ==
+                  offsetof(hsa_amd_vmem_handle_info_t, agent) +
+                      sizeof(hsa_amd_vmem_handle_info_t::agent),
+              "trailing padding in hsa_amd_vmem_handle_info_t");
+
+hsa_status_t Runtime::VMemoryGetHandleInfo(hsa_amd_vmem_alloc_handle_t allocHandle,
+                                           hsa_amd_vmem_handle_info_t* info) {
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
+  MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
+  if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+
+  EnsureImportInfo(memoryHandle);
+  const MemoryRegion* region = memoryHandle->region;
+
+  /* An unresolved import has no agent to report, and succeeding would hand back a
+   * null one the caller cannot tell apart from a real agent. */
+  if (memoryHandle->imported && region == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  
+  // Fill in the handle info structure with the allocation size and agent.
+  const size_t caller_size = info->size;
+  info->size = Min(caller_size, sizeof(hsa_amd_vmem_handle_info_t));
+  info->alloc_size = memoryHandle->driver_handle.size;
+  info->agent = (region != nullptr && region->owner() != nullptr)
+      ? core::Agent::Convert(region->owner())
+      : hsa_agent_t{0};
   return HSA_STATUS_SUCCESS;
 }
 

@@ -23,9 +23,7 @@ enum
     HW_BREAKPOINT_X = 4
 };
 
-namespace rocprofsys
-{
-namespace perf
+namespace rocprofsys::perf
 {
 /// An enum class with all the available sampling data
 enum class sample : std::uint64_t
@@ -265,5 +263,4 @@ int        get_hw_cache_config(std::string_view);
 
 void
 config_overflow_sampling(struct perf_event_attr&, std::string_view, double);
-}  // namespace perf
-}  // namespace rocprofsys
+}  // namespace rocprofsys::perf

@@ -4,9 +4,7 @@
 #   1. Standalone:   cmake -S . -B build && cmake --build build
 #   2. As part of the main RCCL build via add_subdirectory(plugins/profiler/inspector)
 #
-# The legacy Makefile in this directory remains for CUDA-only standalone builds.
-# This target additionally supports ROCm: inspector_gpu_compat.h maps the CUDA
-# spellings used by the sources onto their HIP equivalents.
+# The Makefile in this directory is a third, ROCm standalone path (ROCM_PATH + hipify).
 
 # Detect standalone vs. in-tree configuration.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
@@ -59,6 +57,7 @@ add_library(rccl-profiler-inspector SHARED
     ${CMAKE_CURRENT_SOURCE_DIR}/inspector.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/inspector_json.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/inspector_prom.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/inspector_otel.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/inspector_plugin.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/inspector_cudawrap.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/inspector_ring.cc

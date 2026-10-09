@@ -54,6 +54,7 @@ endif
 SRCS := inspector.cc \
 	inspector_json.cc \
 	inspector_prom.cc \
+	inspector_otel.cc \
 	inspector_plugin.cc \
 	inspector_cudawrap.cc \
 	inspector_ring.cc \

@@ -46,6 +46,7 @@
 #include <atomic>
 
 #include "util/atomic_helpers.h"
+#include "impl/wddm/cmdbuf_frame_ring.h"
 #include "impl/wddm/queue.h"
 #include "impl/registers.h"
 
@@ -70,6 +71,20 @@ namespace thunk {
 // indirect-buffer packet (amd_aql_pm4_ib). A VENDOR_SPECIFIC slot is only fully
 // published once ven_hdr holds this; until then the body is still being written.
 static constexpr uint16_t AMD_AQL_FORMAT_PM4_IB = 0x1;
+
+// Read a queue's monitored-fence value. The KMD writes this location from
+// outside the program, but it is typed as a plain uint64_t, so a bare
+// dereference is a value the compiler may cache. Both spins below - whether a
+// frame may be reused, whether the GPU has drained - need an actual load,
+// ordered like every other read of memory the GPU publishes here.
+//
+// sync_addr is the KMD's read-only CPU mapping of the fence value, so
+// whatever reads it must never write: an atomic read-modify-write here
+// raises 0xC0000005. That is a property of the mapping rather than of
+// this function, so it rules out a fetch-or or compare-exchange too.
+static inline uint64_t LoadSyncValue(const uint64_t* sync_addr) {
+  return rocr::atomic::Load(sync_addr, std::memory_order_acquire);
+}
 
 hsa_status_t WDDMQueue::SwsInit(void) {
   if (!device->CreateSyncobj(&syncobj, &sync_addr)) return HSA_STATUS_ERROR;
@@ -179,8 +194,8 @@ void ComputeQueue::HandleError(hsa_status_t status) {
       {32, HSA_STATUS_ERROR_INVALID_PACKET_FORMAT},
       {64, HSA_STATUS_ERROR_INVALID_ARGUMENT},
       //{128, HSA_STATUS_ERROR_OUT_OF_REGISTERS},
-      //{0x20000000, HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION},
-      //{0x40000000, HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION},
+      {0x20000000, static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION)},
+      {0x40000000, static_cast<hsa_status_t>(HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION)},
       {0x80000000, HSA_STATUS_ERROR_EXCEPTION},
   };
   for (std::size_t i = 0; i < sizeof(QueueErrors) / sizeof(QueueErrors[0]); ++i) {
@@ -191,11 +206,41 @@ void ComputeQueue::HandleError(hsa_status_t status) {
     }
   }
 
+  // Trigger ROCr's DynamicQueueEventsHandler → callbackQueue(); it decodes this bitmask back.
   if (sig.handle) {
     hsakmt_hsa_signal_store_screlease(sig, val);
   }
-  if (error_code_) {
-    error_code_->store(val, std::memory_order_release);
+}
+
+void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
+  constexpr int kStallTimeoutMs = 30000;
+  uint64_t last_rptr = 0;
+  auto last_progress = std::chrono::steady_clock::now();
+
+  while (!queue->thread_stop_) {
+    // Stall detection: rptr hasn't advanced while work is pending.
+    // Skipped when disable_wait_timeout_ is set (user opt-out for long-running kernels).
+    if (!dxg_runtime->disable_wait_timeout_) {
+      uint64_t current_rptr = queue->ring_rptr->load(std::memory_order_relaxed);
+      uint64_t current_wptr = queue->ring_wptr->load(std::memory_order_relaxed);
+      if (current_rptr != last_rptr) {
+        last_rptr = current_rptr;
+        last_progress = std::chrono::steady_clock::now();
+      } else if (current_wptr > current_rptr) {
+        auto stall_duration = std::chrono::steady_clock::now() - last_progress;
+        if (stall_duration > std::chrono::milliseconds(kStallTimeoutMs)) {
+          if (queue->thread_stop_.exchange(true)) return;
+          pr_err("GPU stall detected: rptr=%" PRIu64 " wptr=%" PRIu64
+                 " stalled for %dms — possible device memory fault\n",
+                 current_rptr, current_wptr, kStallTimeoutMs);
+          // error reason is not set. So setting this error as default
+          queue->HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+          return;
+        }
+      }
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 }
 
@@ -210,6 +255,8 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
   start_time = std::chrono::steady_clock::now();
 
   while (true) {
+    if (queue->thread_stop_) break;
+
     if (!queue->IsInvalidPacket()) {
       hsa_status_t status = queue->Process();
       if (status != HSA_STATUS_SUCCESS) {
@@ -238,7 +285,7 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
       if (queue->thread_stop_) break;
       pr_debug("wait %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n", queue->ring,
                queue->GetRingWptr()->load(), queue->GetRingRptr()->load());
-      queue->thread_cond_.wait(lock);
+      queue->thread_cond_.wait_for(lock, std::chrono::milliseconds(100));
     }
   }
 
@@ -254,7 +301,6 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
           (use_hws && device->IsAqlSupported()) ? ring_size * 64 : cmdbuf_size, engine, use_hws),
       ring(ring),
       ring_size(ring_size),
-      error_code_(reinterpret_cast<volatile std::atomic<int64_t>*>(error_addr)),
       ib_start_addr(0),
       ib_size(0),
       sync_point(0),
@@ -271,6 +317,7 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
       scratch_base_(nullptr) {
   ring_wptr = _ring_wptr;
   ring_rptr = _ring_rptr;
+  // Null on WSL: ROCr sets it only under supports_exception_debugging, and nothing writes it.
   error_reason_ = error_addr;
   error_event_id_ = event_id;
   amd_queue_rocr_ = (amd_queue_v2_t*)((char*)ring_rptr - offsetof(amd_queue_t, read_dispatch_id));
@@ -294,6 +341,10 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
   if (!native_aql_) {
     aql_to_pm4_thread_ = std::thread(AqlToPm4Thread, this);
   }
+  // trigger thread when no interrupts are available
+  if (error_event_id_ == 0) {
+    fault_monitor_thread_ = std::thread(FaultMonitorThread, this);
+  }
 
   if (device->Major() >= 11)
     scratch_mem_alignment_size_ = 256;
@@ -302,12 +353,17 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
 }
 
 ComputeQueue::~ComputeQueue() {
+  thread_stop_ = true;
+
   if (!native_aql_) {
     thread_cond_lock_.lock();
-    thread_stop_ = true;
     thread_cond_lock_.unlock();
     thread_cond_.notify_one();
     aql_to_pm4_thread_.join();
+  }
+
+  if (fault_monitor_thread_.joinable()) {
+    fault_monitor_thread_.join();
   }
 
   // doorbell_signal_->Release();
@@ -634,11 +690,12 @@ hsa_status_t ComputeQueue::PreSubmit(void) {
 }
 
 hsa_status_t ComputeQueue::EndSubmit(void) {
-  // record last submitted cmdbuf_aql_frame_write_index to see if GPU is hungry
-  sync_point = cmdbuf_aql_frame_write_index;
+  // The submission just issued is this queue's next ordinal, and the fence
+  // value it signals. Point the ib at the frame the one after it will write.
+  sync_point = CmdbufFrameRing::NextFenceValue(sync_point);
 
   ib_start_addr = cmdbuf_addr +
-      (cmdbuf_aql_frame_write_index % WDDMDevice::GetAqlFrameNum()) * cmdbuf_aql_frame_size;
+      CmdbufFrameRing::NextFrameIndex(sync_point, device->GetAqlFrameNum()) * cmdbuf_aql_frame_size;
   ib_size = 0;
 
   return HSA_STATUS_SUCCESS;
@@ -648,8 +705,12 @@ hsa_status_t ComputeQueue::Submit(void) {
   hsa_status_t ret = PreSubmit();
   if (ret) return HSA_STATUS_ERROR;
 
-  ret = use_hws ? HwsSubmit(ib_start_addr, ib_size, cmdbuf_aql_frame_write_index)
-                : SwsSubmit(ib_start_addr, ib_size, cmdbuf_aql_frame_write_index);
+  // The same value EndSubmit() latches into sync_point below, so the frame just
+  // written and the fence value that retires it cannot drift apart.
+  const uint64_t fence_value = CmdbufFrameRing::NextFenceValue(sync_point);
+
+  ret = use_hws ? HwsSubmit(ib_start_addr, ib_size, fence_value)
+                : SwsSubmit(ib_start_addr, ib_size, fence_value);
   if (ret) return HSA_STATUS_ERROR;
 
   ret = EndSubmit();
@@ -773,10 +834,14 @@ hsa_status_t ComputeQueue::KernelDispatchAqlToPm4(char* cpu, hsa_kernel_dispatch
     i += cmd_util.BuildWriteData64Command(cpu + i, (uint64_t*)ring_rptr,
                                           cmdbuf_aql_frame_write_index + 1);
 
-  // Check if we exceeded the frame size
-  if ((i - ib_size) > cmdbuf_aql_frame_size) {
-    pr_err("PM4 command buffer overflow in KernelDispatch: used %" PRIu64 " bytes, limit %u bytes\n",
-           i - ib_size, cmdbuf_aql_frame_size);
+  // This packet was written at ib_size, not at the frame base: SwitchAql2PM4() merges a
+  // run of consecutive dispatches into one frame, which is exactly what
+  // cmdbuf_aql_merge_limit_ bounds, so the frame has to be measured cumulatively. Testing
+  // this packet alone would never notice the run itself outgrowing the frame.
+  if (i > cmdbuf_aql_frame_size) {
+    pr_err("PM4 command buffer overflow in KernelDispatch: used %" PRIu64
+           " bytes at offset %" PRIu64 ", limit %u bytes\n",
+           i - ib_size, ib_size, cmdbuf_aql_frame_size);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -862,10 +927,13 @@ hsa_status_t ComputeQueue::BarrierGenericAqlToPm4(char* cpu, hsa_barrier_and_pac
     i += cmd_util.BuildWriteData64Command(cpu + i, (uint64_t*)ring_rptr,
                                           cmdbuf_aql_frame_write_index + 1);
 
-  // Check if we exceeded the frame size
-  if ((i - ib_size) > cmdbuf_aql_frame_size) {
-    pr_err("PM4 command buffer overflow in BarrierGeneric: used %" PRIu64 " bytes, limit %u bytes\n",
-           i - ib_size, cmdbuf_aql_frame_size);
+  // Cumulative for the same reason as in KernelDispatchAqlToPm4(): a barrier terminates a
+  // merge run rather than starting one, so it is appended to whatever the run before it
+  // already put in this frame.
+  if (i > cmdbuf_aql_frame_size) {
+    pr_err("PM4 command buffer overflow in BarrierGeneric: used %" PRIu64
+           " bytes at offset %" PRIu64 ", limit %u bytes\n",
+           i - ib_size, ib_size, cmdbuf_aql_frame_size);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -902,9 +970,13 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* pac
     }
   }
 
-  if (required_size > cmdbuf_aql_frame_size) {
-    pr_err("PM4 command buffer overflow in VendorSpecific: required %zu bytes, limit %u bytes\n",
-           required_size, cmdbuf_aql_frame_size);
+  // The IB is inlined at ib_size, not at the frame base: SwitchAql2PM4() defers
+  // submission to merge consecutive dispatches, so earlier packets may already
+  // own part of this frame and only the remainder is available here.
+  if (ib_size + required_size > cmdbuf_aql_frame_size) {
+    pr_err("PM4 command buffer overflow in VendorSpecific: required %zu bytes at offset %" PRIu64
+           ", limit %u bytes\n",
+           required_size, ib_size, cmdbuf_aql_frame_size);
     // Oversized vendor IB: drop the PM4 payload but still retire the AQL
     // packet and signal completion, matching the existing
     // vendor_packet_process=off skip contract below (no queue hang).
@@ -969,7 +1041,7 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* pac
   // Safety net: required_size above must stay in lockstep with the Build*
   // calls emitted in this function. Catch drift in debug builds if a new
   // Build* call is added without a matching required_size term.
-  assert((i - ib_size) <= cmdbuf_aql_frame_size);
+  assert(i <= cmdbuf_aql_frame_size);
 
   ib_size = i;
   cmdbuf_aql_frame_write_index++;
@@ -992,6 +1064,9 @@ hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
   hsa_kernel_dispatch_packet_t* aql_packet = (hsa_kernel_dispatch_packet_t*)packet;
   hsa_status_t ret;
 
+  // A failing translation helper leaves the packet unretired: the write index is
+  // not advanced and the header is still valid, so dropping its status would let
+  // Process() re-read the same slot forever instead of surfacing the failure.
   switch (header) {
     case HSA_PACKET_TYPE_KERNEL_DISPATCH:
       ret = KernelDispatchAqlToPm4((char*)ib_start_addr, aql_packet);
@@ -999,20 +1074,24 @@ hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
 
       // Stop merging packages util below conditions are met:
       // 1) The kernel with completion signal;
-      // 2) The cmdbuf_aql_frame_write_index reaches the end of cmdbuf
+      // 2) The merged packets would no longer fit in the current cmdbuf frame
       // 3) The HW queue is empty now, submit the packet right now.
       // 4) The AQL queue is empty now, submit the packet right now.
       if (!(aql_packet->completion_signal.handle) &&
-          (cmdbuf_aql_frame_write_index % WDDMDevice::GetAqlFrameNum()) &&
-          (*sync_addr != sync_point) && (cmdbuf_aql_frame_write_index != GetRingWptr()->load()))
+          (cmdbuf_aql_frame_write_index % device->GetAqlMergeLimit()) &&
+          (LoadSyncValue(sync_addr) != sync_point) &&
+          (cmdbuf_aql_frame_write_index != GetRingWptr()->load()))
         return HSA_STATUS_SUCCESS;
 
       break;
     case HSA_PACKET_TYPE_BARRIER_AND:
-      BarrierGenericAqlToPm4((char*)ib_start_addr, (hsa_barrier_and_packet_t*)aql_packet);
+      ret = BarrierGenericAqlToPm4((char*)ib_start_addr, (hsa_barrier_and_packet_t*)aql_packet);
+      if (ret != HSA_STATUS_SUCCESS) return ret;
       break;
     case HSA_PACKET_TYPE_BARRIER_OR:
-      BarrierGenericAqlToPm4((char*)ib_start_addr, (hsa_barrier_and_packet_t*)aql_packet, true);
+      ret =
+          BarrierGenericAqlToPm4((char*)ib_start_addr, (hsa_barrier_and_packet_t*)aql_packet, true);
+      if (ret != HSA_STATUS_SUCCESS) return ret;
       break;
     case HSA_PACKET_TYPE_VENDOR_SPECIFIC:
       // A burst commit makes the producer bump the write index before the new
@@ -1022,7 +1101,8 @@ hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
       // exactly like an INVALID packet.
       if (((amd_aql_pm4_ib*)aql_packet)->ven_hdr != AMD_AQL_FORMAT_PM4_IB)
         return HSA_STATUS_SUCCESS;
-      VendorSpecificAqlToPm4((char*)ib_start_addr, (amd_aql_pm4_ib*)aql_packet);
+      ret = VendorSpecificAqlToPm4((char*)ib_start_addr, (amd_aql_pm4_ib*)aql_packet);
+      if (ret != HSA_STATUS_SUCCESS) return ret;
       break;
     case HSA_PACKET_TYPE_INVALID:
       // When packets are submitted out of order, the format field of current AQL packet
@@ -1041,19 +1121,27 @@ hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
 }
 
 hsa_status_t ComputeQueue::Process(void) {
+  const uint32_t frame_num = device->GetAqlFrameNum();
+
   while (cmdbuf_aql_frame_write_index < ring_wptr->load() && !IsInvalidPacket()) {
     pr_debug("process %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n", ring, ring_wptr->load(),
              ring_rptr->load());
 
     hsa_status_t ret;
 
-    // wait for next few cmdbuf slots to be free
-    // If wptr catch up the rptr in the cmdbuf, this needs wait for the rptr to free the cmdbuf.
-    // Here the wptr comes from queue->cmdbuf_aql_frame_write_index, while rptr comes from
-    // *queue->sync_addr.
-    if (*sync_addr + WDDMDevice::GetAqlFrameNum() <= cmdbuf_aql_frame_write_index) {
-      uint64_t value = cmdbuf_aql_frame_write_index - WDDMDevice::GetAqlFrameNum() + 1;
-      if (!device->CpuWait(&syncobj, &value, 1, false)) return HSA_STATUS_ERROR;
+    // Frame reuse gate. The frame SwitchAql2PM4() is about to write was last
+    // written by the submission that many ordinals back, and that submission
+    // signals its own ordinal as a fence value only once every AQL packet
+    // merged into it has retired. Waiting for exactly that value is what makes
+    // "the GPU is finished with this frame" decidable.
+    //
+    // Only sync_point is read, so this is a no-op for the remaining packets of
+    // a merge run: the run's frame was gated when its first packet claimed it,
+    // and re-evaluating here can never name a value this queue has not
+    // submitted yet.
+    uint64_t reuse_fence = CmdbufFrameRing::NextFrameReuseFence(sync_point, frame_num);
+    if (LoadSyncValue(sync_addr) < reuse_fence) {
+      if (!device->CpuWait(&syncobj, &reuse_fence, 1, false)) return HSA_STATUS_ERROR;
     }
 
     ret = SwitchAql2PM4();
@@ -1066,9 +1154,17 @@ hsa_status_t ComputeQueue::Process(void) {
 
     // CPU wait for GPU fence, and cpu update the signal.
     if (!platform_atomic_support_ && signal_addr_) {
-      // CPU wait for GPU fence
-      if (!device->CpuWait(&syncobj, &cmdbuf_aql_frame_write_index, 1, false))
-        return HSA_STATUS_ERROR;
+      constexpr int kFaultTimeoutMs = 30000;
+      auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kFaultTimeoutMs);
+      while (*sync_addr < cmdbuf_aql_frame_write_index) {
+        if (!dxg_runtime->disable_wait_timeout_ &&
+            std::chrono::steady_clock::now() >= deadline) {
+          pr_err("GPU fence timeout after %dms — possible device fault (sync_addr=%" PRIu64
+                 " expected=%" PRIu64 ")\n", kFaultTimeoutMs, *sync_addr, cmdbuf_aql_frame_write_index);
+          return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      }
       // CPU update completional signal
       rocr::atomic::Decrement(signal_addr_);
       signal_addr_ = NULL;

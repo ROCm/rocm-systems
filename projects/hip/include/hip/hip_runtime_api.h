@@ -96,6 +96,12 @@ typedef struct hipUUID_t {
 #define __HIP_NODISCARD
 #endif
 
+#if defined(_MSC_VER) && (_MSC_VER >= 1800)
+#define UINT32_BASE :uint32_t
+#else
+#define UINT32_BASE
+#endif
+
 /**
  * HIP error type
  *
@@ -103,7 +109,7 @@ typedef struct hipUUID_t {
 // Developer note - when updating these, update the hipErrorName and hipErrorString functions in
 // NVCC and HIP-Clang paths Also update the hipCUDAErrorTohipError function in NVCC path.
 
-typedef enum __HIP_NODISCARD hipError_t {
+typedef enum __HIP_NODISCARD hipError_t UINT32_BASE {
   hipSuccess = 0,            ///< Successful completion.
   hipErrorInvalidValue = 1,  ///< One or more of the parameters passed to the API call is NULL
                              ///< or not in an acceptable range.
@@ -181,6 +187,9 @@ typedef enum __HIP_NODISCARD hipError_t {
                                             ///< launched per grid for a kernel that was launched
                                             ///< via cooperative launch APIs exceeds the maximum
                                             ///< number of allowed blocks for the current device.
+  hipErrorNotPermitted = 800,  ///< The attempted operation is not permitted, typically because the
+                               ///< resource is owned by another object that is responsible for
+                               ///< releasing it.
   hipErrorNotSupported = 801,  ///< Produced when the hip API is not supported/implemented
   hipErrorStreamCaptureUnsupported = 900,  ///< The operation is not permitted when the stream
                                            ///< is capturing.
@@ -227,6 +236,7 @@ typedef enum __HIP_NODISCARD hipError_t {
 } hipError_t;
 
 #undef __HIP_NODISCARD
+#undef UINT32_BASE
 
 /*
  Versioning struct. Because each public API must use the versioned struct to
@@ -578,6 +588,15 @@ typedef enum hipDeviceAttribute_t {
                                                        ///< management)
   hipDeviceAttributeHandleTypeFabricSupported,   ///< Device supports exporting memory to a fabric handle
   hipDeviceAttributeHostAllocDmaBufSupported,  ///< Device supports host-allocated DMABuf buffer sharing
+  hipDeviceAttributeGPUDirectRDMASupported,  ///< Device supports GPUDirect RDMA APIs
+  hipDeviceAttributeGPUDirectRDMAFlushWritesOptions,  ///< Bitmask of
+                                                      ///< hipFlushGPUDirectRDMAWritesOptions
+                                                      ///< describing the flush paths the device
+                                                      ///< supports
+  hipDeviceAttributeGPUDirectRDMAWritesOrdering,  ///< A hipGPUDirectRDMAWritesOrdering value
+                                                  ///< giving the scope at which GPUDirect RDMA
+                                                  ///< writes are naturally ordered, i.e. visible
+                                                  ///< without an explicit flush
 
   hipDeviceAttributeCudaCompatibleEnd = 9999,
   hipDeviceAttributeAmdSpecificBegin = 10000,
@@ -668,6 +687,25 @@ enum hipGPUDirectRDMAWritesOrdering {
   hipGPUDirectRDMAWritesOrderingNone = 0,
   hipGPUDirectRDMAWritesOrderingOwner = 100,
   hipGPUDirectRDMAWritesOrderingAllDevices = 200
+};
+
+/**
+ * The target of a hipDeviceFlushGPUDirectRDMAWrites operation.
+ */
+enum hipFlushGPUDirectRDMAWritesTarget {
+  hipFlushGPUDirectRDMAWritesTargetCurrentDevice = 0  ///< Memory of the current HIP device
+};
+
+/**
+ * The scope at which hipDeviceFlushGPUDirectRDMAWrites makes pending remote writes visible.
+ *
+ * The enumerator values match hipGPUDirectRDMAWritesOrdering, so a device whose
+ * hipDeviceAttributeGPUDirectRDMAWritesOrdering is greater than or equal to the requested
+ * scope already orders those writes and needs no explicit flush.
+ */
+enum hipFlushGPUDirectRDMAWritesScope {
+  hipFlushGPUDirectRDMAWritesToOwner = 100,      ///< Visible to the device owning the memory
+  hipFlushGPUDirectRDMAWritesToAllDevices = 200  ///< Visible to all HIP devices
 };
 
 #if defined(__HIP_PLATFORM_AMD__) && !defined(__HIP_PLATFORM_NVIDIA__)
@@ -1540,13 +1578,11 @@ typedef struct hipExternalSemaphoreWaitParams_st {
   unsigned int reserved[16];
 } hipExternalSemaphoreWaitParams;
 
-#if __HIP_HAS_GET_PCH
 /**
  * Internal use only. This API may change in the future
  * Pre-Compiled header for online compilation
  */
 void __hipGetPCH(const char** pch, unsigned int* size);
-#endif
 
 /**
  * HIP Access falgs for Interop resources.
@@ -2499,6 +2535,29 @@ hipError_t hipGetDeviceCount(int* count);
  */
 hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int deviceId);
 /**
+ * @brief Blocks until remote writes are visible to the specified scope
+ *
+ * Blocks until GPUDirect RDMA writes to the target device, issued by a third-party device
+ * such as an RDMA-capable NIC, are visible to the specified scope. This is a host-ordered
+ * visibility barrier on inbound remote writes; it does not synchronize with any stream or
+ * kernel.
+ *
+ * If @p scope is at or within the scope reported by
+ * #hipDeviceAttributeGPUDirectRDMAWritesOrdering, the writes are already ordered by the
+ * hardware and the call is a no-op.
+ *
+ * Support is reported by #hipDeviceAttributeGPUDirectRDMAFlushWritesOptions. The call
+ * returns #hipErrorNotSupported when that bitmask does not contain
+ * #hipFlushGPUDirectRDMAWritesOptionHost.
+ *
+ * @param [in] target The target of the operation, see #hipFlushGPUDirectRDMAWritesTarget
+ * @param [in] scope  The scope of the operation, see #hipFlushGPUDirectRDMAWritesScope
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ */
+hipError_t hipDeviceFlushGPUDirectRDMAWrites(enum hipFlushGPUDirectRDMAWritesTarget target,
+                                             enum hipFlushGPUDirectRDMAWritesScope scope);
+/**
  * @brief Returns the default memory pool of the specified device
  *
  * @param [out] mem_pool Default memory pool to return
@@ -3125,6 +3184,7 @@ hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags);
  * @param[out] stream  Pointer to new stream
  * @param[in] flags  Parameters to control stream creation
  * @param[in] priority  Priority of the stream. Lower numbers represent higher priorities.
+ * Stream priority is disabled at this time.
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  * Creates a new asynchronous stream with the specified priority, with its associated current
@@ -3137,6 +3197,9 @@ hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags);
  * The @p flags parameter controls behavior of the stream. The valid values are #hipStreamDefault
  * and #hipStreamNonBlocking.
  *
+ * @warning Stream priority is currently disabled to avoid queue-priority-related
+ * issues in KFD.
+ *
  * @see hipStreamCreate, hipStreamSynchronize, hipStreamWaitEvent, hipStreamDestroy
  *
  */
@@ -3146,8 +3209,8 @@ hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int flags, 
  *
  * @param[in, out] leastPriority  Pointer in which a value corresponding to least priority
  * is returned.
- * @param[in, out] greatestPriority  Pointer in which a value corresponding to greatest priority
- * is returned.
+ * @param[in, out] greatestPriority  Pointer in which a value corresponding to
+ * greatest priority. Stream priority is disabled at this time.
  * @returns #hipSuccess
  *
  * Returns in *leastPriority and *greatestPriority the numerical values that correspond to the
@@ -3157,7 +3220,8 @@ hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int flags, 
  * value that is outside the meaningful range as specified by this API, the priority is
  * automatically clamped to within the valid range.
  *
- * @warning This API is under development on AMD GPUs and simply returns #hipSuccess.
+ * @warning Stream priority is currently disabled to avoid queue-priority-related
+ * issues in KFD.
  */
 hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPriority);
 /**
@@ -3224,6 +3288,7 @@ hipError_t hipStreamSynchronize(hipStream_t stream);
  * @param[in] flags  Parameters to control the operation
  *
  * @returns #hipSuccess, #hipErrorInvalidHandle, #hipErrorInvalidValue,
+ * #hipErrorStreamCaptureInvalidated, #hipErrorStreamCaptureMerge,
  * #hipErrorStreamCaptureIsolation
  *
  * This function inserts a wait operation into the specified stream.
@@ -3269,6 +3334,9 @@ hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId);
  * @param[in] stream  Stream to be queried
  * @param[in,out] priority  Pointer to an unsigned integer in which the stream's priority is
  * returned
+ *
+ * @warning Stream priority is currently disabled by default to avoid queue-priority-related
+ * issues in KFD.
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle.
  *
@@ -5014,6 +5082,18 @@ hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr);
  * typically one of the writes will "win" and overwrite data from the other registered memory
  * region.
  *
+ *  @warning Avoid registering very large host memory allocations (for example,
+ * multi-gigabyte buffers such as LLM KV caches) with hipHostRegister.
+ *
+ * Unregistering large pinned allocations through hipHostUnregister, or
+ * during process termination, requires synchronous kernel-level page-table
+ * cleanup and unmapping. This operation can incur significant delays and
+ * may trigger kernel CPU soft-lockup warnings.
+ *
+ * For large shared-memory workloads, use Shared Virtual Memory (SVM) via
+ * hipMallocManaged or Heterogeneous Memory Management (HMM)-based memory
+ * management instead.
+ *
  *  @returns #hipSuccess, #hipErrorOutOfMemory
  *
  *  @see hipHostUnregister, hipHostGetFlags, hipHostGetDevicePointer
@@ -5385,8 +5465,10 @@ hipError_t hipMemcpyHtoAAsync(hipArray_t dstArray, size_t dstOffset, const void*
  *  @ingroup Module
  *
  *  Returns in *dptr and *bytes the pointer and size of the global of name name located in module
- * hmod. If no variable of that name exists, it returns hipErrorNotFound. Both parameters dptr and
- * bytes are optional. If one of them is NULL, it is ignored and hipSuccess is returned.
+ * hmod. If no variable of that name exists, it returns hipErrorNotFound. A registered
+ * `__device__` global that the compiler dropped from the loaded code object is also reported as
+ * hipErrorNotFound (the runtime no longer aborts). Both parameters dptr and bytes are optional.
+ * If one of them is NULL, it is ignored and hipSuccess is returned.
  *
  *  @param[out]  dptr  Returns global device pointer
  *  @param[out]  bytes Returns global size in bytes
@@ -5405,7 +5487,7 @@ hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t h
  *  @param[out]  devPtr  pointer to the device associated the symbole
  *  @param[in]   symbol  pointer to the symbole of the device
  *
- *  @returns #hipSuccess, #hipErrorInvalidValue
+ *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidSymbol
  *
  */
 hipError_t hipGetSymbolAddress(void** devPtr, const void* symbol);
@@ -5966,7 +6048,7 @@ hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hip
  *  @param[in]   src    Source memory address
  *  @param[in]   spitch Pitch size in bytes of source memory
  *  @param[in]   width  Width size in bytes of matrix transfer (columns)
- *  @param[in]   height Height size in bytes of matrix transfer (rows)
+ *  @param[in]   height Height of matrix transfer (rows)
  *  @param[in]   kind   Type of transfer
  *  @returns     #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidPitchValue,
  * #hipErrorInvalidDevicePointer, #hipErrorInvalidMemcpyDirection
@@ -7056,9 +7138,16 @@ hipError_t hipModuleLoad(hipModule_t* module, const char* fname);
  *
  * @param [in] module  Module to free
  *
- * @returns #hipSuccess, #hipErrorInvalidResourceHandle
+ * @returns #hipSuccess, #hipErrorInvalidResourceHandle, #hipErrorNotFound,
+ *          #hipErrorNotPermitted
  *
  * The module is freed, and the code objects associated with it are destroyed.
+ *
+ * @note Returns #hipErrorNotPermitted if @p module was obtained from
+ * hipLibraryGetModule(). Such a module is owned by its library and should be released with
+ * hipLibraryUnload() instead.
+ *
+ * @see hipLibraryGetModule, hipLibraryUnload
  */
 hipError_t hipModuleUnload(hipModule_t module);
 /**
@@ -7083,6 +7172,19 @@ hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, con
  * #hipErrorNotFound,
  */
 hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod);
+
+/**
+ * @brief Returns the function handles within a module.
+ *
+ * @param [out] functions Buffer where the function handles are returned
+ * @param [in] numFunctions Maximum number of function handles to return to the buffer
+ * @param [in] mod Module to query from
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle,
+ * #hipErrorInvalidContext, #hipErrorNotInitialized, #hipErrorNotFound
+ */
+hipError_t hipModuleEnumerateFunctions(hipFunction_t* functions, unsigned int numFunctions,
+                                     hipModule_t mod);
 
 /**
  * @brief Returns information about a kernel.
@@ -7189,7 +7291,7 @@ hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library);
  * @param [in]  library Input hip library handle.
  * @param [in]  name   Name of the global symbol to look up.
  * @return #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle,
- *         #hipErrorNotFound
+ *         #hipErrorNotFound, #hipErrorInvalidSymbol
  */
 hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library,
                                const char* name);
@@ -7212,6 +7314,26 @@ hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library,
  */
 hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library,
                                 const char* name);
+
+/**
+ * @brief Get the module handle backing a library.
+ *
+ * Returns the #hipModule_t that @p library was loaded into, so a library can be
+ * consumed by the module-based APIs
+ *
+ * @param [out] pMod    Pointer to receive the module handle.
+ * @param [in]  library Input hip library handle to retrieve module from.
+ * @return #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle,
+ *         #hipErrorNotFound
+ *
+ * @note The returned module is owned by @p library and stays valid until
+ * hipLibraryUnload(). Do not release it with hipModuleUnload(), which returns
+ * #hipErrorNotPermitted for such a handle.
+ *
+ * @see hipLibraryLoadData, hipLibraryLoadFromFile, hipLibraryUnload,
+ * hipModuleGetFunction, hipModuleUnload
+ */
+hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library);
 
 /**
  * @brief Retrieve kernel handles within a library
@@ -8779,9 +8901,10 @@ hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
  * @brief Ends capture on a stream, returning the captured graph.
  *
  * @param [in] stream - Stream to end capture.
- * @param [out] pGraph - Captured graph.
+ * @param [out] pGraph - Captured graph. Set to NULL on every error.
  *
- * @returns #hipSuccess, #hipErrorInvalidValue
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorStreamCaptureInvalidated,
+ * #hipErrorStreamCaptureUnjoined
  *
  */
 hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph);
@@ -8838,7 +8961,8 @@ hipError_t hipStreamIsCapturing(hipStream_t stream, hipStreamCaptureStatus* pCap
  * @param [in] numDependencies  Size of the dependencies array.
  * @param [in] flags  Flag to update dependency set. Should be one of the values
  * in enum #hipStreamUpdateCaptureDependenciesFlags.
- * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorIllegalState
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorIllegalState,
+ * #hipErrorStreamCaptureInvalidated
  *
  */
 hipError_t hipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_t* dependencies,

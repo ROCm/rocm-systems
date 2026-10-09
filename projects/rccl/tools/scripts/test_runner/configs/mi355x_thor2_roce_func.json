@@ -60,11 +60,6 @@
       },
       "tests": [
         {
-          "name": "SHM_ComprehensiveWorkflow",
-          "description": "Comprehensive workflow test for shared memory transport",
-          "test_filter": "ShmMPITest.ShmWorkflow"
-        },
-        {
           "name": "SHM_CEMemcpy_SendSide",
           "description": "Shared memory test with compute engine memcpy on send side",
           "test_filter": "ShmMPITest.ShmWithMemcpyTest",
@@ -122,16 +117,6 @@
           }
         },
         {
-          "name": "P2P_WithMemcpy",
-          "description": "Peer-to-peer test with CUDA memcpy and legacy buffer registration",
-          "test_filter": "P2pMPITest.P2pWithMemcpyTest"
-        },
-        {
-          "name": "P2P_SendRecvRegistration",
-          "description": "Test peer-to-peer send/receive buffer registration mechanisms",
-          "test_filter": "P2pMPITest.P2pSendRecvRegistrationTest"
-        },
-        {
           "name": "P2P_IpcReg_VerySmallBuffer",
           "description": "Test P2P IPC buffer registration with very small buffer sizes and SHM disabled",
           "test_filter": "P2pMPITest.P2pIpcBufferRegistration_VerySmallBuffer",
@@ -168,12 +153,6 @@
           "timeout": 600
         },
         {
-          "name": "NET_MultipleBufferSizes_2Nodes",
-          "description": "Network transport test with multiple buffer sizes across two nodes",
-          "test_filter": "NetTransportMPITest.MultipleBufferSizesTest",
-          "timeout": 180
-        },
-        {
           "name": "NET_NetGraphRegister_2Nodes",
           "description": "Network transport test with graph buffer registration across two nodes",
           "test_filter": "NetTransportMPITest.NetGraphRegisterBufferTest",
@@ -195,6 +174,65 @@
       "env_variables": {
         "NCCL_DMABUF_ENABLE": "1"
       }
+    },
+    "net_ib_multithread_independent": {
+      "extends": "net_ib_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "tests": [
+        {
+          "name": "NetIB_MultiThread_IndependentSimpleSendRecv",
+          "description": "Concurrent workers each transfer on an independent NET/IB context and connection",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "NetIB_MultiThread_IndependentSequentialTransfers",
+          "description": "Concurrent workers each run repeated transfers on an independent connection",
+          "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        },
+        {
+          "name": "NetIB_MultiThread_MultipleSizes",
+          "description": "Concurrent workers sweep the size ladder into the shared per-device MR cache",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "NetIB_MultiThread_MemoryRegistrationStorm",
+          "description": "Concurrent register/deregister storms race the per-device MR cache",
+          "test_filter": "NetIbMPITest.MemoryRegistrationStorm"
+        },
+        {
+          "name": "NetIB_MultiThread_MrCacheRefCount",
+          "description": "All workers register the same address, contending on one cache entry's refcount",
+          "test_filter": "NetIbMPITest.MrCacheRefCount"
+        },
+        {
+          "name": "NetIB_MultiThread_LongRunningEndurance",
+          "description": "Sustained concurrent traffic with the RDMA leak check around the whole run",
+          "test_filter": "NetIbMPITest.LongRunningEndurance"
+        }
+      ]
+    },
+    "cast_multithread": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "10000000"
+      },
+      "tests": [
+        {
+          "name": "Cast_MultiThread_StressMultiRound",
+          "description": "Concurrent IB-CAST connections, each auditing its own WRR token ledger",
+          "test_filter": "NetIbMPITest.CastStressMultiRoundTwoConns"
+        },
+        {
+          "name": "Cast_MultiThread_SendRecvMultipleSizes",
+          "description": "Concurrent schedulers sweep both sides of the WRR/split boundary",
+          "test_filter": "NetIbMPITest.CastSendRecvMultipleSizes"
+        }
+      ]
     },
     "net_ib_gdr_flush": {
       "extends": "net_ib_base",
@@ -612,6 +650,20 @@
         }
       ]
     },
+    "cast_subnet_routing": {
+      "extends": "cast_base",
+      "timeout": 60,
+      "env_variables": {
+        "NCCL_IB_SUBNET_AWARE_ROUTING": "1"
+      },
+      "tests": [
+        {
+          "name": "Cast_SubnetAwareRoutingSameSubnet",
+          "description": "NCCL_IB_SUBNET_AWARE_ROUTING=1 smoke test on single-subnet hardware: exercises the default-device-matches-peer-subnet fast path plus a data-integrity send/recv",
+          "test_filter": "NetIbMPITest.CastSubnetAwareRoutingSameSubnet"
+        }
+      ]
+    },
     "cast_four_qp": {
       "extends": "cast_base",
       "timeout": 120,
@@ -785,6 +837,11 @@
           "name": "Resiliency_RecoveryUdTimeoutExhaustsAttempts",
           "description": "UD recovery timeout exhausts max attempts, device stays failed",
           "test_filter": "NetIbMPITest.RecoveryUdTimeoutExhaustsAttempts"
+        },
+        {
+          "name": "Resiliency_GidChangeRefresh",
+          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
+          "test_filter": "Transport/NetIbGidChangeTest.*"
         }
       ]
     },
@@ -1115,41 +1172,6 @@
       },
       "tests": [
         {
-          "name": "BitOps",
-          "description": "Bit operation utility tests",
-          "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash:BitOpsTemplate*"
-        },
-        {
-          "name": "MiscTests",
-          "description": "Miscellaneous header-level unit tests (e.g. task coll sorter)",
-          "test_filter": "MiscTests.*"
-        },
-        {
-          "name": "EnqueueCountTests",
-          "description": "Enqueue count operation tests",
-          "test_filter": "EnqueueCountTests.*"
-        },
-        {
-          "name": "DdaCollCommonTests",
-          "description": "Dda collective tests",
-          "test_filter": "DdaCollCommon.*"
-        },
-        {
-          "name": "DeviceOp128_PtrLoadStore",
-          "description": "Pointer-based volatile, relaxed, and acquire/release global load/store roundtrips",
-          "test_filter": "PackRoundtripTest.LdStVolatileGlobalPtr:PackRoundtripTest.LdStRelaxedSysGlobal:PackRoundtripTest.LdStAcquireReleaseSysGlobal:PackRoundtripTest.L2_VolatileGlobalPtr_MultiElement:PackRoundtripTest.CvtaFromGlobal"
-        },
-        {
-          "name": "DeviceOp128_SharedMem",
-          "description": "Shared memory pointer cast, 128-bit load/store, and misaligned load paths",
-          "test_filter": "PackRoundtripTest.ShmemCvtPtr:PackRoundtripTest.LoadStoreShmem128:PackRoundtripTest.LoadShmemMisaligned128_*"
-        },
-        {
-          "name": "DeviceOp128_LoadStorePack",
-          "description": "loadPack/storePack three internal paths (direct cast, funnel-shift, element-by-element) and boundary",
-          "test_filter": "PackRoundtripTest.LoadStorePack_*:PackRoundtripTest.L2_StorePackBoundary:PackRoundtripTest.Store16Load16Global_Direct"
-        },
-        {
           "name": "Fixtures_All",
           "description": "All release fixture tests"
         }
@@ -1192,7 +1214,12 @@
         {
           "name": "ParameterApiTests",
           "description": "Public ncclParam C API tests",
-          "test_filter": "ParameterApiTests.*"
+          "test_filter": "ParameterApiTests.*:ParameterApiTypedTests*"
+        },
+        {
+          "name": "CollConfigTests",
+          "description": "Per-collective ncclCollConfig_t validation tests",
+          "test_filter": "CollConfigTests.*:CollConfigTypedTests*"
         },
         {
           "name": "ArgCheck",
@@ -1243,6 +1270,61 @@
           "name": "CeAlltoAllEligibilityTest",
           "description": "CE AlltoAll eligibility gating tests matching taskAppend (CTA_POLICY_ZERO, sysmem, capture, group depth)",
           "test_filter": "CeAlltoAllEligibilityTest.*"
+        },
+        {
+          "name": "RcclAlltoAllDecision",
+          "description": "AlltoAll dispatch decision unit tests (DDA, CE, pivot selection)",
+          "test_filter": "RcclAlltoAllDecision.*"
+        },
+        {
+          "name": "RcclCeAr2ShotMax",
+          "description": "CE AllReduce 2-shot arch threshold upper-bound tests",
+          "test_filter": "RcclCeAr2ShotMax.*"
+        },
+        {
+          "name": "RcclCeArGrownBuffer",
+          "description": "CE AllReduce grown-buffer (ceRegMax) eligibility tests",
+          "test_filter": "RcclCeArGrownBuffer.*"
+        },
+        {
+          "name": "SkipPresetTopoMatching",
+          "description": "SkipPreset arch topology matching and threshold lookup tests",
+          "test_filter": "SkipPresetTopoMatching.*"
+        },
+        {
+          "name": "GetPlaneIndexDedup",
+          "description": "IbCastGetPlaneIndex dedups plane IDs into a compact index space",
+          "test_filter": "NetIbCastPlaneRail.GetPlaneIndexDedup"
+        },
+        {
+          "name": "GetPlaneIndexRejectsVirtBit",
+          "description": "IbCastGetPlaneIndex rejects plane IDs with the VIRT_BIT set",
+          "test_filter": "NetIbCastPlaneRail.GetPlaneIndexRejectsVirtBit"
+        },
+        {
+          "name": "GetPlaneIndexNullArgs",
+          "description": "IbCastGetPlaneIndex rejects null count/planes/idx arguments",
+          "test_filter": "NetIbCastPlaneRail.GetPlaneIndexNullArgs"
+        },
+        {
+          "name": "GidSameSubnetIPv4",
+          "description": "gidSameSubnet IPv4 prefix-length matching",
+          "test_filter": "NetIbCastSubnet.GidSameSubnetIPv4"
+        },
+        {
+          "name": "GidSameSubnetIPv6",
+          "description": "gidSameSubnet IPv6 prefix-length matching",
+          "test_filter": "NetIbCastSubnet.GidSameSubnetIPv6"
+        },
+        {
+          "name": "GidSameSubnetFamilyMismatch",
+          "description": "gidSameSubnet rejects AF_INET vs AF_INET6 comparisons",
+          "test_filter": "NetIbCastSubnet.GidSameSubnetFamilyMismatch"
+        },
+        {
+          "name": "SubnetMatchesAny",
+          "description": "subnetMatchesAny skips invalid/zero GIDs and matches against the remaining set",
+          "test_filter": "NetIbCastSubnet.SubnetMatchesAny"
         }
       ]
     },
@@ -1802,6 +1884,16 @@
           "test_filter": "Recorder.VerifyMultithread"
         },
         {
+          "name": "Recorder.RedOpRecordJson",
+          "description": "Recorder RedOp record JSON output",
+          "test_filter": "Recorder.RedOpRecordJson"
+        },
+        {
+          "name": "Recorder.RedOpRecordBinary",
+          "description": "Recorder RedOp record binary output",
+          "test_filter": "Recorder.RedOpRecordBinary"
+        },
+        {
           "name": "ProxyTrace.nonEmptySingleton",
           "description": "Proxy trace non-empty singleton",
           "test_filter": "ProxyTraceTestFixture.nonEmptySingleton"
@@ -1898,6 +1990,114 @@
         }
       ]
     },
+    "unit_tests_amdsmi": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsAmdSmi",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 180,
+      "tests": [
+        {
+          "name": "AmdSmi_AllTests",
+          "description": "All amdsmi_wrap fabric and wrapper tests",
+          "test_filter": "*"
+        }
+      ]
+    },
+    "unit_tests_dev_runtime": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsDevRuntime",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 180,
+      "tests": [
+        {
+          "name": "DevRuntime_AllTests",
+          "description": "All host micro-tests for src/dev_runtime.cc",
+          "test_filter": "*"
+        }
+      ]
+    },
+    "unit_tests_gdr": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGdr",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "Gdr_AllTests",
+          "description": "All net_ib peer-memory detection tests",
+          "test_filter": "*"
+        }
+      ]
+    },
+    "unit_tests_gin_sdma_policy": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGinSdmaPolicy",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "GinSdmaPolicy_AllTests",
+          "description": "All GIN-SDMA AllReduce/put policy unit tests",
+          "test_filter": "*"
+        }
+      ]
+    },
+    "unit_tests_gin_sdma_allgather_policy": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGinSdmaAllGatherPolicy",
+      "skip_if_missing": true,
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "GinSdmaAllGatherPolicy_AllTests",
+          "description": "All GIN-SDMA AllGather policy unit tests",
+          "test_filter": "*"
+        }
+      ]
+    },
+    "unit_tests_gin_sdma_broadcast_policy": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGinSdmaBroadcastPolicy",
+      "skip_if_missing": true,
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "GinSdmaBroadcastPolicy_AllTests",
+          "description": "All GIN-SDMA Broadcast policy unit tests",
+          "test_filter": "*"
+        }
+      ]
+    },
+    "unit_tests_gin_sdma_allgather_gpu": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGinSdmaAllGatherGpu",
+      "skip_if_missing": true,
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 180,
+      "tests": [
+        {
+          "name": "GinSdmaAllGatherGpu_AllTests",
+          "description": "All GIN-SDMA AllGather GPU unit tests",
+          "test_filter": "*"
+        }
+      ]
+    },
     "implicit_launch_order": {
       "extends": "default",
       "is_gtest": true,
@@ -1963,7 +2163,8 @@
           "test_filter": "GinTrafficClassMPITest.DeviceHostPrecedence",
           "env_variables": {
             "NCCL_IB_SL": "",
-            "NCCL_IB_TC": ""
+            "NCCL_IB_TC": "",
+            "NCCL_GIN_IB_TC": ""
           }
         },
         {
@@ -1972,7 +2173,58 @@
           "test_filter": "GinTrafficClassMPITest.ExplicitIbEnvironmentOverrides",
           "env_variables": {
             "NCCL_IB_SL": "5",
-            "NCCL_IB_TC": "96"
+            "NCCL_IB_TC": "96",
+            "NCCL_GIN_IB_TC": ""
+          }
+        },
+        {
+          "name": "GIN_TrafficClass_GinIbTcOverridesIbTc",
+          "description": "NCCL_GIN_IB_TC overrides NCCL_IB_TC on GIN QPs only; collective network-transport QPs keep NCCL_IB_TC and both keep NCCL_IB_SL at RoCE QP RTR programming",
+          "test_filter": "GinTrafficClassMPITest.GinIbTcOverridesIbTc",
+          "env_variables": {
+            "NCCL_IB_SL": "5",
+            "NCCL_IB_TC": "96",
+            "NCCL_GIN_IB_TC": "104"
+          }
+        },
+        {
+          "name": "GIN_TrafficClass_GinIbTcOverridesDeviceHost",
+          "description": "NCCL_GIN_IB_TC alone overrides GIN devComm and host traffic classes on GIN QPs; collective network-transport QPs keep the host value at RoCE QP RTR programming",
+          "test_filter": "GinTrafficClassMPITest.GinIbTcOverridesDeviceAndHost",
+          "env_variables": {
+            "NCCL_IB_SL": "",
+            "NCCL_IB_TC": "",
+            "NCCL_GIN_IB_TC": "104"
+          }
+        }
+      ]
+    },
+    "gin_signal_reset": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_SignalReset",
+          "description": "GIN proxy resetSignal/resetCounter semantics: reset snapshots the signal cell into an offset instead of zeroing it; read, wait, shadow and 32-bit wrap are relative to that offset",
+          "test_filter": "GinMPIDeviceTests.SignalReset_*:GinMPIDeviceTests.CounterReset_*-GinMPIDeviceTests.*_MultiContext"
+        },
+        {
+          "name": "GIN_SignalReset_MultiContext",
+          "description": "resetSignal on one GIN context leaves the other contexts' reads and offsets intact (NCCL_GIN_NCONTEXTS=4)",
+          "test_filter": "GinMPIDeviceTests.SignalReset_IsPerContext_MultiContext",
+          "env_variables": {
+            "NCCL_GIN_NCONTEXTS": "4"
           }
         }
       ]
@@ -2041,32 +2293,6 @@
           "description": "Concurrent AlltoAll on multiple communicators with separate streams",
           "test_filter": "UBR_AllToAllStress.ConcurrentMultiComm_MultiNode",
           "timeout": 300
-        },
-        {
-          "name": "UBR_ConcurrentRegHang_ContiguousBuffer_Grouped",
-          "description": "Grouped send/recv with contiguous buffer views (should pass)",
-          "test_filter": "UBR_ConcurrentRegHang.ContiguousBuffer_Grouped_SHOULD_WORK"
-        },
-        {
-          "name": "UBR_ConcurrentRegHang_AlltoAll_Contiguous",
-          "description": "ncclAlltoAll with contiguous registered buffers (should pass)",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_SHOULD_WORK"
-        },
-        {
-          "name": "UBR_ConcurrentRegHang_AlltoAll_Stress",
-          "description": "Stress test: 50 iterations of ncclAlltoAll with contiguous buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_Stress_SHOULD_WORK",
-          "timeout": 300
-        },
-        {
-          "name": "UBR_ConcurrentRegHang_Comparison",
-          "description": "Side-by-side comparison of contiguous vs separate buffer patterns",
-          "test_filter": "UBR_ConcurrentRegHang.ContiguousVsSeparate_Comparison_SHOULD_WORK"
-        },
-        {
-          "name": "UBR_ConcurrentRegHang_NoRegistration",
-          "description": "Baseline: separate buffers without UBR registration (should pass)",
-          "test_filter": "UBR_ConcurrentRegHang.SeparateBuffers_NoRegistration_SHOULD_WORK"
         }
       ]
     },
@@ -2094,35 +2320,10 @@
           "timeout": 30
         },
         {
-          "name": "UBR_ContiguousBuffer_Success",
-          "description": "Demonstrates fix: Grouped send/recv with contiguous buffer views",
-          "test_filter": "UBR_ConcurrentRegHang.ContiguousBuffer_Grouped_SHOULD_WORK"
-        },
-        {
-          "name": "UBR_AlltoAll_Contiguous_Success",
-          "description": "ncclAlltoAll with contiguous registered buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_SHOULD_WORK"
-        },
-        {
-          "name": "UBR_AlltoAll_Stress_Success",
-          "description": "Stress test: 50 iterations of ncclAlltoAll with contiguous buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_Stress_SHOULD_WORK",
-          "timeout": 300
-        },
-        {
-          "name": "UBR_ContiguousVsSeparate_Comparison",
-          "description": "Side-by-side comparison showing contiguous pattern works",
-          "test_filter": "UBR_ConcurrentRegHang.ContiguousVsSeparate_Comparison_SHOULD_WORK"
-        },
-        {
-          "name": "UBR_NoRegistration_Baseline",
-          "description": "Baseline: separate buffers work when not registered",
-          "test_filter": "UBR_ConcurrentRegHang.SeparateBuffers_NoRegistration_SHOULD_WORK"
-        },
-        {
           "name": "UBR_ConcurrentRegHang_AllWorkingTests",
           "description": "Run all tests that should work (excludes the hang test)",
-          "test_filter": "UBR_ConcurrentRegHang.*SHOULD_WORK"
+          "test_filter": "UBR_ConcurrentRegHang.*SHOULD_WORK",
+          "timeout": 300
         }
       ]
     },
@@ -2357,6 +2558,11 @@
           "test_filter": "CeMPI_AlltoAll.TwoRanks"
         },
         {
+          "name": "CE_AlltoAllv_2Ranks",
+          "description": "AlltoAllv CE correctness and 'Init CE' log marker (2 ranks)",
+          "test_filter": "CeMPI_AlltoAllv.TwoRanks"
+        },
+        {
           "name": "CE_Fallback_AllReduce",
           "description": "AllReduce must NOT take CE path; verifies SM fallback",
           "test_filter": "CeMPI_Fallback.AllReduceNeverUsesCE"
@@ -2395,6 +2601,11 @@
           "name": "CE_AlltoAll_3Ranks",
           "description": "AlltoAll CE correctness with odd (non-power-of-two) rank count",
           "test_filter": "CeMPI_AlltoAll.ThreeRanks"
+        },
+        {
+          "name": "CE_AlltoAllv_3Ranks",
+          "description": "AlltoAllv CE correctness with odd (non-power-of-two) rank count",
+          "test_filter": "CeMPI_AlltoAllv.ThreeRanks"
         }
       ]
     },
@@ -2413,6 +2624,11 @@
           "name": "CE_AlltoAll_4Ranks",
           "description": "AlltoAll CE correctness and 'Init CE' log marker (4 ranks)",
           "test_filter": "CeMPI_AlltoAll.FourRanks"
+        },
+        {
+          "name": "CE_AlltoAllv_4Ranks",
+          "description": "AlltoAllv CE correctness and 'Init CE' log marker (4 ranks)",
+          "test_filter": "CeMPI_AlltoAllv.FourRanks"
         },
         {
           "name": "CE_Scatter_4Ranks_Root0",
@@ -2453,6 +2669,11 @@
           "test_filter": "CeMPI_AlltoAll.EightRanks"
         },
         {
+          "name": "CE_AlltoAllv_8Ranks",
+          "description": "AlltoAllv CE correctness \u2014 default production topology (8 ranks)",
+          "test_filter": "CeMPI_AlltoAllv.EightRanks"
+        },
+        {
           "name": "CE_Scatter_8Ranks",
           "description": "Scatter CE correctness, root=0 \u2014 default production topology (8 ranks)",
           "test_filter": "CeMPI_Scatter.EightRanksRoot0"
@@ -2461,6 +2682,31 @@
           "name": "CE_Gather_8Ranks",
           "description": "Gather CE correctness, root=0 \u2014 default production topology (8 ranks)",
           "test_filter": "CeMPI_Gather.EightRanksRoot0"
+        }
+      ]
+    },
+    "ce_hier_alltoallv": {
+      "extends": "ce_base",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "CE_AlltoAllv_MultiNodeHierarchical",
+          "description": "Hierarchical CE AlltoAllv on 2 nodes (2 ranks/node): intra-node CE plus inter-node RMA",
+          "test_filter": "CeMPI_AlltoAllv.MultiNodeHierarchical"
+        },
+        {
+          "name": "CE_AlltoAllv_MultiNodeHierarchicalChunkBoundary",
+          "description": "Hierarchical CE AlltoAllv with a 68 MiB pair that crosses the 64 MiB chunk boundary",
+          "test_filter": "CeMPI_AlltoAllv.MultiNodeHierarchicalChunkBoundary",
+          "timeout": 600
+        },
+        {
+          "name": "CE_AlltoAllv_MultiNodeHierarchicalSparse",
+          "description": "Hierarchical CE AlltoAllv with zero-byte remote and local pairs",
+          "test_filter": "CeMPI_AlltoAllv.MultiNodeHierarchicalSparse"
         }
       ]
     },
@@ -2478,7 +2724,7 @@
         {
           "name": "CE_Internal_Init",
           "description": "ncclCeInit lifecycle: allocates sync window; ncclCeFinalize tears it down; double-fini is safe; independent state per comm",
-          "test_filter": "CeInternalMPITest.InitSetsWindowPointers:CeInternalMPITest.FiniNullsPointers:CeInternalMPITest.DoubleFiniIsSafe:CeInternalMPITest.IndependentCeStatePerComm:CeInternalMPITest.FiniAfterZeroCollectives"
+          "test_filter": "CeInternalMPITest.InitSetsWindowPointers:CeInternalMPITest.FiniNullsPointers:CeInternalMPITest.DoubleFiniIsSafe:CeInternalMPITest.IndependentCeStatePerComm:CeInternalMPITest.FiniAfterZeroCollectives:CeInternalMPITest.FreeBatchOpsParamsIsIdempotent"
         },
         {
           "name": "CE_Internal_Sync",
@@ -2772,6 +3018,39 @@
           "test_filter": "ALL"
         }
       ]
+    },
+    "gin_device_get_flush": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_GetFlush_Visibility",
+          "description": "gin.flush makes prior gets visible in the same kernel (8 B - 4 MiB)",
+          "test_filter": "GinMPIDeviceTests.GetFlush_Visibility"
+        },
+        {
+          "name": "GIN_GetFlushAsyncWait_Visibility",
+          "description": "gin.flushAsync + gin.wait makes prior gets visible in the same kernel",
+          "test_filter": "GinMPIDeviceTests.GetFlushAsyncWait_Visibility"
+        },
+        {
+          "name": "GIN_GetFlush_ConcurrentBlocks",
+          "description": "8 CTAs get + flush concurrently on one GIN context",
+          "test_filter": "GinMPIDeviceTests.GetFlush_ConcurrentBlocks"
+        }
+      ]
     }
   },
   "test_suites": [
@@ -2791,6 +3070,18 @@
       "name": "NET Transport - Ethernet (Multi-Node)",
       "description": "Network transport tests over Ethernet",
       "config": "net_transport_eth_multinode",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multithread Independent Connections (4)",
+      "description": "4 worker threads/rank, each on an independent NET/IB context and connection",
+      "config": "net_ib_multithread_independent",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Multithread (4)",
+      "description": "4 worker threads/rank driving independent IB-CAST connections and WRR schedulers",
+      "config": "cast_multithread",
       "enabled": true
     },
     {
@@ -2881,6 +3172,12 @@
       "name": "NET IB - CAST Single QP (QPS=1)",
       "description": "WRR bypass path: single-QP connection must skip scheduler initialisation",
       "config": "cast_single_qp",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Subnet-Aware Routing (same subnet)",
+      "description": "NCCL_IB_SUBNET_AWARE_ROUTING=1 smoke test: default-device-matches-peer-subnet fast path plus data-integrity send/recv",
+      "config": "cast_subnet_routing",
       "enabled": true
     },
     {
@@ -3100,6 +3397,48 @@
       "enabled": true
     },
     {
+      "name": "Unit Tests - AmdSmi",
+      "description": "All rccl-UnitTestsAmdSmi cases",
+      "config": "unit_tests_amdsmi",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - DevRuntime",
+      "description": "All rccl-UnitTestsDevRuntime cases",
+      "config": "unit_tests_dev_runtime",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - GDR peer memory",
+      "description": "All rccl-UnitTestsGdr cases",
+      "config": "unit_tests_gdr",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - GIN-SDMA policy",
+      "description": "All rccl-UnitTestsGinSdmaPolicy cases",
+      "config": "unit_tests_gin_sdma_policy",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - GIN-SDMA AllGather policy",
+      "description": "All rccl-UnitTestsGinSdmaAllGatherPolicy cases",
+      "config": "unit_tests_gin_sdma_allgather_policy",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - GIN-SDMA Broadcast policy",
+      "description": "All rccl-UnitTestsGinSdmaBroadcastPolicy cases",
+      "config": "unit_tests_gin_sdma_broadcast_policy",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - GIN-SDMA AllGather GPU",
+      "description": "All rccl-UnitTestsGinSdmaAllGatherGpu cases",
+      "config": "unit_tests_gin_sdma_allgather_gpu",
+      "enabled": true
+    },
+    {
       "name": "Implicit Launch Order Tests",
       "description": "Test NCCL_LAUNCH_ORDER_IMPLICIT for multi-communicator serialization",
       "config": "implicit_launch_order",
@@ -3115,6 +3454,12 @@
       "name": "GIN Traffic Class - RoCE QP Precedence",
       "description": "GIN device, host, default, and explicit IB traffic-class precedence observed at RoCE QP RTR programming",
       "config": "gin_traffic_class",
+      "enabled": true
+    },
+    {
+      "name": "GIN Signal Reset - Proxy",
+      "description": "GIN proxy reset-without-zeroing for signals and counters over IB across two nodes",
+      "config": "gin_signal_reset",
       "enabled": true
     },
     {
@@ -3178,6 +3523,12 @@
       "enabled": true
     },
     {
+      "name": "CE Tests - Hierarchical AlltoAllv (multi-node)",
+      "description": "Hierarchical CE AlltoAllv on 2 nodes (2 ranks/node): MultiNodeHierarchical, ChunkBoundary, and Sparse. Skips when scale-out CE prerequisites are absent.",
+      "config": "ce_hier_alltoallv",
+      "enabled": true
+    },
+    {
       "name": "CE Internal Tests (white-box, Debug build only)",
       "description": "White-box CE internal function tests (ncclCeInit, ncclPrepUCSync, ncclCeLaunchBatchOps). Requires Debug build for symbol visibility. Skips on unsupported driver version.",
       "config": "ce_internal",
@@ -3217,6 +3568,12 @@
       "name": "IR Device Tests",
       "description": "librccl_device.bc (IR) device-API tests via pytest harness; builds artifacts on demand and self-skips when prerequisites are missing",
       "config": "ir_device",
+      "enabled": true
+    },
+    {
+      "name": "GIN Device MPI - Get/Flush Visibility",
+      "description": "GIN proxy device-side get + flush / flushAsync + wait visibility over RoCE across two nodes",
+      "config": "gin_device_get_flush",
       "enabled": true
     }
   ]

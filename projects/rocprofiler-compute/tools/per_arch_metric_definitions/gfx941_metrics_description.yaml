@@ -4,8 +4,8 @@ System Speed-of-Light:
     rst: 'The total floating-point operations executed per second on the :ref:`VALU <desc-valu>`. This is also presented as a percent of the peak theoretical FLOPs achievable on the specific accelerator. Note: this does not include any floating-point operations from :ref:`MFMA <desc-mfma>` instructions.'
     unit: GFLOP/s
   MFMA FLOPs (F8):
-    plain: The total number of 8-bit brain floating point MFMA operations executed per second. This does not include any 16-bit brain floating point operations from VALU instructions. This is also presented as a percent of the peak theoretical F8 MFMA operations achievable on the specific accelerator. It is supported on AMD Instinct MI300 series and later only.
-    rst: The total number of 8-bit brain floating point MFMA operations executed per second. This does not include any 16-bit brain floating point operations from VALU instructions. This is also presented as a percent of the peak theoretical F8 MFMA operations achievable on the specific accelerator. It is supported on AMD Instinct MI300 series and later only.
+    plain: The total number of 8-bit floating point MFMA operations executed per second. This is also presented as a percent of the peak theoretical F8 MFMA operations achievable on the specific accelerator. It is supported on AMD Instinct MI300 series and later only.
+    rst: The total number of 8-bit floating point MFMA operations executed per second. This is also presented as a percent of the peak theoretical F8 MFMA operations achievable on the specific accelerator. It is supported on AMD Instinct MI300 series and later only.
     unit: GFLOPs
   MFMA FLOPs (BF16):
     plain: 'The total number of 16-bit brain floating point MFMA operations executed per second. Note: this does not include any 16-bit brain floating point operations from VALU instructions. This is also presented as a percent of the peak theoretical BF16 MFMA operations achievable on the specific accelerator.'
@@ -27,10 +27,6 @@ System Speed-of-Light:
     plain: 'The total number of 8-bit integer MFMA operations executed per second. Note: this does not include any 8-bit integer operations from VALU instructions. This is also presented as a percent of the peak theoretical INT8 MFMA operations achievable on the specific accelerator.'
     rst: 'The total number of 8-bit integer MFMA operations executed per second. Note: this does not include any 8-bit integer operations from VALU instructions. This is also presented as a percent of the peak theoretical INT8 MFMA operations achievable on the specific accelerator.'
     unit: GIOP/s
-  Active CUs (deprecated):
-    plain: Total number of active compute units (CUs) on the accelerator during the kernel execution. (Deprecated - See CU Utilization instead)
-    rst: Total number of active compute units (CUs) on the accelerator during the kernel execution. (Deprecated - See CU Utilization instead)
-    unit: CUs
   SALU Utilization:
     plain: Indicates what percent of the kernel's duration the SALU was busy executing instructions. Computed as the ratio of the total number of cycles spent by the scheduler issuing SALU or SMEM instructions over the total CU cycles.
     rst: Indicates what percent of the kernel's duration the :ref:`SALU <desc-salu>` was busy executing instructions. Computed as the ratio of the total number of cycles spent by the :ref:`scheduler <desc-scheduler>` issuing SALU / :ref:`SMEM <desc-smem>` instructions over the :ref:`total CU cycles <total-cu-cycles>`.
@@ -141,8 +137,8 @@ Roofline Performance Rates:
     rst: 'The total 64-bit floating-point operations executed per second on the VALU. This is presented with the value of the peak empirical F64 FLOPs achievable on the specific accelerator. Note: this does not include any F64 operations from MFMA instructions.'
     unit: GFLOP/s
   MFMA FLOPs (F8):
-    plain: The total number of 8-bit brain floating point MFMA operations executed per second. This does not include any 16-bit brain floating point operations from VALU instructions. The peak empirically measured F8 MFMA operations achievable on the specific accelerator is displayed alongside for comparison. It is supported on AMD Instinct MI300 series and later only.
-    rst: The total number of 8-bit brain floating point MFMA operations executed per second. This does not include any 16-bit brain floating point operations from VALU instructions. The peak empirically measured F8 MFMA operations achievable on the specific accelerator is displayed alongside for comparison. It is supported on AMD Instinct MI300 series and later only.
+    plain: The total number of 8-bit floating point MFMA operations executed per second. This is also presented as a percent of the peak theoretical F8 MFMA operations achievable on the specific accelerator. It is supported on AMD Instinct MI300 series and later only.
+    rst: The total number of 8-bit floating point MFMA operations executed per second. This is also presented as a percent of the peak theoretical F8 MFMA operations achievable on the specific accelerator. It is supported on AMD Instinct MI300 series and later only.
     unit: GFLOP/s
   MFMA FLOPs (BF16):
     plain: 'The total number of 16-bit brain floating point MFMA operations executed per second. Note: this does not include any 16-bit brain floating point operations from VALU instructions. The peak empirically measured BF16 MFMA operations achievable on the specific accelerator is displayed alongside for comparison.'
@@ -527,6 +523,10 @@ Compute Speed-of-Light:
     plain: 'The total floating-point operations executed per second on the VALU. This is also presented as a percent of the peak theoretical FLOPs achievable on the specific accelerator. Note: this does not include any floating-point operations from MFMA instructions.'
     rst: 'The total floating-point operations executed per second on the :ref:`VALU <desc-valu>`. This is also presented as a percent of the peak theoretical FLOPs achievable on the specific accelerator. Note: this does not include any floating-point operations from :ref:`MFMA <desc-mfma>` instructions.'
     unit: GFLOPs
+  MFMA FLOPs (F8):
+    plain: The total number of 8-bit floating point MFMA operations executed per second. This is also presented as a percent of the peak theoretical F8 MFMA operations achievable on the specific accelerator. It is supported on AMD Instinct MI300 series and later only.
+    rst: The total number of 8-bit floating point MFMA operations executed per second. This is also presented as a percent of the peak theoretical F8 MFMA operations achievable on the specific accelerator. It is supported on AMD Instinct MI300 series and later only.
+    unit: GFLOPs
   MFMA FLOPs (BF16):
     plain: 'The total number of 16-bit brain floating point MFMA operations executed per second. Note: this does not include any 16-bit brain floating point operations from VALU instructions. This is also presented as a percent of the peak theoretical BF16 MFMA operations achievable on the specific accelerator.'
     rst: 'The total number of 16-bit brain floating point :ref:`MFMA <desc-mfma>` operations executed per second. Note: this does not include any 16-bit brain floating point operations from :ref:`VALU <desc-valu>` instructions. This is also presented as a percent of the peak theoretical BF16 MFMA operations achievable on the specific accelerator.'
@@ -600,6 +600,10 @@ Arithmetic operations:
   IOPs (Total):
     plain: The total number of integer operations executed on either the VALU or MFMA units, per normalization unit.
     rst: The total number of integer operations executed on either the :ref:`VALU <desc-valu>` or :ref:`MFMA <desc-mfma>` units, per :ref:`normalization unit <normalization-units>`.
+    unit: FLOPs per Normalization Unit
+  F8 OPs:
+    plain: The total number of 8-bit floating-point operations executed on the MFMA units, per normalization unit.
+    rst: The total number of 8-bit floating-point operations executed on the MFMA units, per normalization unit.
     unit: FLOPs per Normalization Unit
   F16 OPs:
     plain: The total number of 16-bit floating-point operations executed on either the VALU or MFMA units, per normalization unit.

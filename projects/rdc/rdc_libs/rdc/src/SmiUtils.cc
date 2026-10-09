@@ -24,6 +24,7 @@ THE SOFTWARE.
 
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <vector>
 
@@ -393,6 +394,39 @@ uint64_t count_pending_bad_pages(const amdsmi_retired_page_record_t* records, ui
     }
   }
   return pending;
+}
+
+double derive_mem_activity_percent(double umc_activity_pct, bool have_prev,
+                                   uint64_t prev_mem_activity_acc, uint64_t prev_firmware_ts,
+                                   uint64_t cur_mem_activity_acc, uint64_t cur_firmware_ts) {
+  // In gpu_metrics the max value of the type means "not supported"; never treat the
+  // sentinel as real accumulator/timestamp data (a huge unsigned delta would otherwise
+  // clamp to 100%).
+  constexpr uint64_t kNotSupported = std::numeric_limits<uint64_t>::max();
+  // Bound the averaging window: a stale cached sample (for example a watcher that
+  // paused for minutes or hours) would otherwise spread a recent burst across the
+  // whole gap and dilute it to nearly zero. Beyond this the accumulator is ignored
+  // and the caller re-primes the cache so the next sample uses a fresh, bounded
+  // window. 60s comfortably exceeds common monitoring intervals (1-10s) while
+  // rejecting multi-minute gaps.
+  constexpr double kMaxSampleWindowMs = 60000.0;
+  double activity_pct = umc_activity_pct;
+  if (have_prev && cur_mem_activity_acc != kNotSupported && cur_firmware_ts != kNotSupported &&
+      prev_mem_activity_acc != kNotSupported && prev_firmware_ts != kNotSupported &&
+      cur_firmware_ts > prev_firmware_ts && cur_mem_activity_acc >= prev_mem_activity_acc) {
+    // Firmware timestamps are 10ns units; the accumulator advances by the
+    // activity percentage every firmware millisecond (1ms == 100000 units).
+    const double elapsed_ms = static_cast<double>(cur_firmware_ts - prev_firmware_ts) / 100000.0;
+    if (elapsed_ms > 0.0 && elapsed_ms <= kMaxSampleWindowMs) {
+      double acc_pct =
+          static_cast<double>(cur_mem_activity_acc - prev_mem_activity_acc) / elapsed_ms;
+      if (acc_pct < 0.0) acc_pct = 0.0;
+      if (acc_pct > 100.0) acc_pct = 100.0;
+      // Never report below the instantaneous UMC-activity reading.
+      if (acc_pct > activity_pct) activity_pct = acc_pct;
+    }
+  }
+  return activity_pct;
 }
 
 }  // namespace rdc
