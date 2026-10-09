@@ -2231,7 +2231,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           // Without a sleep this loop monopolizes a CPU core re-scanning the
           // signal values for the whole lifetime of the async-events thread,
           // idle or not; the two async-events threads cost ~2 cores in every
-          // process that has merely touched the GPU 
+          // process that has merely touched the GPU
           // (https://github.com/ROCm/librocdxg/issues/60). Nap between scans,
           // doubling from 20us up to poll_nap_ceiling_us (2ms when the whole
           // runtime is polling-only, so a wait that completes quickly keeps low
