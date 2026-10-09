@@ -29,9 +29,10 @@ from cuda.core import Device, system  # noqa: E402
 
 _NRANKS = 2
 _NBYTES = 1 << 21
-# Per call, so both tests together stay inside the 300 s the nccl4py build-smoke harness gives this module.
+# Per call, so both tests together stay inside the 300 s the build-smoke harness gives this module.
 _TIMEOUT_S = 120
-# The unique id goes through the environment: a child's argv is world-readable in /proc, its environment is not.
+# The unique id goes through the environment: a child's argv is world-readable in /proc,
+# its environment is not.
 _UID_ENV = "NCCL4PY_TEST_GROUP_WINDOW_UID"
 
 if system.get_num_devices() < _NRANKS:  # pragma: no cover - host with fewer GPUs
@@ -52,22 +53,28 @@ def _rank_main(rank: int, uid_hex: str, grouped: bool, out_path: str) -> None:
         # A file, not stdout: RCCL's C-level logging shares stdout and can split lines.
         with open(out_path, "w") as f:
             json.dump({"handle": None if win is None else win.handle}, f)
-    finally:
-        comm.destroy()
+    except BaseException:
+        # destroy() would wait in a barrier for a peer that may be stuck in register_window.
+        comm.abort()
+        raise
+    comm.destroy()
 
 
 def _register_windows(grouped: bool) -> list[int | None]:
     env = dict(os.environ, **{_UID_ENV: bytes(nccl.get_unique_id()).hex()})
     with tempfile.TemporaryDirectory() as tmp:
         outs = [os.path.join(tmp, f"rank{r}.json") for r in range(_NRANKS)]
-        procs = [subprocess.Popen([sys.executable, __file__, str(r), str(int(grouped)), outs[r]], env=env)
-                 for r in range(_NRANKS)]
+        procs = [
+            subprocess.Popen([sys.executable, __file__, str(r), str(int(grouped)), out], env=env)
+            for r, out in enumerate(outs)
+        ]
         deadline = time.monotonic() + _TIMEOUT_S
         try:
             for p in procs:
                 p.wait(timeout=max(0.0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
-            pytest.fail(f"ranks still running after {_TIMEOUT_S} s; exit codes so far: {[p.poll() for p in procs]}")
+            codes = [p.poll() for p in procs]
+            pytest.fail(f"ranks still running after {_TIMEOUT_S} s; exit codes so far: {codes}")
         finally:
             for p in procs:
                 if p.poll() is None:
