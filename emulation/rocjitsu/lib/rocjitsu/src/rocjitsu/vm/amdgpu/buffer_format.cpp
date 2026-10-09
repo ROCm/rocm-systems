@@ -194,6 +194,10 @@ uint32_t pack(uint32_t value, uint32_t width, Number n) {
 }
 } // namespace
 
+util::FailureOr<Format> decode_buffer_format(uint32_t format, BufferFormatEncoding encoding) {
+  return decode(format, encoding);
+}
+
 util::FailureOr<uint32_t> buffer_format_bytes(uint32_t format, BufferFormatEncoding encoding) {
   const auto decoded = decode(format, encoding);
   if (decoded.failed())
