@@ -82,9 +82,7 @@ class FabricMemHandlerTest : public ::testing::Test {
 
   void TearDown() override {
     handler_.reset();
-    EXPECT_TRUE(ledger_.Clean()) << ledger_.reserved.size() << " reservations, " << ledger_.liveHandles.size()
-                                 << " handles, " << ledger_.liveBuffers.size() << " buffers live; "
-                                 << ledger_.rejected.size() << " calls refused";
+    EXPECT_TRUE(ledger_.Clean()) << ledger_.Summary();
     ncclCuMemHandleType = savedHandleType_;
     ResetBootstrapStubs();
     ResetHipFakes();
@@ -242,9 +240,9 @@ TEST_F(FabricMemHandlerTest, ExchangeMemPtrs_MapsEachPeerToItsImportedHandleAtIt
     if (r == kRank) continue;
     void* p = PeerPtr(r);
     ASSERT_EQ(ledger_.mappedHandle.count(p), 1u) << "peer " << r;
-    ASSERT_EQ(ledger_.reserved.count(p), 1u) << "peer " << r;
+    ASSERT_EQ(ledger_.mappedSize.count(p), 1u) << "peer " << r;
     EXPECT_EQ(ledger_.mappedHandle.at(p), HandleForDesc(PeerDesc(r))) << "peer " << r;
-    EXPECT_EQ(ledger_.reserved.at(p), PeerSize(r)) << "peer " << r;
+    EXPECT_EQ(ledger_.mappedSize.at(p), PeerSize(r)) << "peer " << r;
   }
 }
 

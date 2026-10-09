@@ -229,6 +229,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   under `test/host/algorithms/`. See `test_categories_micro_dda.yaml`.
   - `fabric/fabric_mem_handler.cc` (`FABRIC_MEM_HANDLER_CC_PATH`, from
     `fabric-mem-handler-test.cc`); suite `FabricMemHandlerTest.*`.
+  - `fabric/fabric_gpu_barrier.cu` (`FABRIC_GPU_BARRIER_CC_PATH`, from
+    `fabric-gpu-barrier-test.cc`); suites `FabricGpuBarrierTest.*`,
+    `Geometry/FabricGpuBarrier*GeometryTest.*`.
 
 Everything below (seams, fakes, coverage) applies to all of them; the concrete examples
 use `p2p.cc`.

@@ -442,6 +442,7 @@ ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* /*system*/,
 // pure no-ops, except ncclMemTrack / ncclMemUntrackDynamic, which the DDA tests drive as seams.
 // ---------------------------------------------------------------------------
 
+// --- Controllable seam: ncclMemTrack ------------------------------------
 static ncclResult_t DefaultMemTrack(struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,
                                     hipMemAllocationHandleType, ncclMemType_t)
 {
@@ -499,6 +500,7 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* /*manager*/,
     return ncclSuccess;
 }
 
+// --- Controllable seam: ncclMemUntrackDynamic ---------------------------
 static ncclResult_t DefaultMemUntrackDynamic(struct ncclMemManager*, void*, struct ncclMemUntrackInfo* info)
 {
     if (info) {
