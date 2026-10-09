@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Qualified same-device GTT DMA-BUF attachment with an independent DRM owner.
