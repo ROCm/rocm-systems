@@ -8712,3 +8712,38 @@ def test_sdwa_conversion_result_formats():
         assert CodeGenerator._sdwa_result_format(semantics) == (
             f'amdgpu::sdwa::ResultFormat::{expected}'
         )
+
+
+@pytest.mark.parametrize(
+    ('name', 'opcode', 'lines'),
+    [('S_DCACHE_DISCARD', 40, 1), ('S_DCACHE_DISCARD_X2', 41, 2)],
+)
+def test_dcache_discard_drops_one_or_two_aligned_lines(
+    name: str, opcode: int, lines: int
+):
+    sem = derive_semantics(name, 'ENC_SMEM')
+    assert sem.semantic_class == 'dcache_discard'
+    assert sem.num_elems == lines
+
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='cdna4',
+        profile=Cdna4Profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    body = codegen._gen_execute_body(
+        Instruction(name, 'ENC_SMEM', opcode, []), sem, 'ENC_SMEM'
+    )
+
+    unit = 'amdgpu::L1ScalarCache::DISCARD_LINE_BYTES'
+    assert f'~uint64_t{{{unit} - 1}}' in body
+    assert body.count('discard_line(') == lines
+    assert 'discard_line(line, wf.process_id())' in body
+    assert (f'discard_line(line + {unit}, wf.process_id())' in body) == (lines == 2)
+
+    issue = codegen._dcache_discard_issue_initializer(sem)
+    assert 'amdgpu::WaitCounterType::LGKMCNT' in issue
+    assert 'amdgpu::MemoryCompletionClass::UNORDERED' in issue
+    assert ('UNORDERED, 2}' in issue) == (lines == 2)
+    assert issue.endswith(', false, /*memory_op=*/false);')

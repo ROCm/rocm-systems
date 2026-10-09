@@ -3714,6 +3714,59 @@ TEST(MemoryWaitExecutionTest, DecodedScalarIssueUsesArchitecturalWaitDomain) {
   }
 }
 
+TEST(MemoryWaitExecutionTest, DcacheDiscardIssuesOneLgkmUnitPerLine) {
+  using namespace waitcheck_detail;
+  struct Case {
+    std::string_view mnemonic;
+    std::array<uint32_t, 2> words; // Immediate offset zero, SBASE=s[0:1].
+    uint8_t units;
+  };
+  constexpr std::array<Case, 2> cases{
+      {{"s_dcache_discard", {0xc0a20000u, 0}, 1}, {"s_dcache_discard_x2", {0xc0a60000u, 0}, 2}}};
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (const auto &c : cases) {
+      SCOPED_TRACE(std::string(c.mnemonic) + " arch " +
+                   std::to_string(static_cast<unsigned>(arch)));
+      GpuMemory memory("discard_issue_memory");
+      L2Cache l2("discard_issue_l2");
+      ComputeUnitCore::Config config{};
+      config.arch = arch;
+      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 106;
+      config.vgprs_per_wf = 32;
+      config.lds_size_kb = 64;
+      auto cu = ComputeUnitCore::create("discard_issue_cu", config, &memory, &l2);
+      auto *wf = cu->dispatch_wf(0, 0x100, 106, 32);
+      ASSERT_NE(wf, nullptr);
+      auto decoder = Decoder::create(arch);
+      util::StringDiagnostic error;
+      auto decoded = decoder->decode_window(c.words, 0, error.emitter());
+      ASSERT_TRUE(decoded.succeeded()) << error.message();
+      auto &inst = *decoded.value();
+      EXPECT_EQ(inst.mnemonic(), c.mnemonic);
+      EXPECT_FALSE(inst.is_memory_op());
+      EXPECT_TRUE(inst.is_memory_wait_producer());
+      const auto *issue = inst.amdgpu_memory_issue_info();
+      ASSERT_NE(issue, nullptr);
+      EXPECT_FALSE(issue->exec_masked);
+      const auto obligations = issue->counter_obligations();
+      ASSERT_EQ(obligations.size(), 1u);
+      EXPECT_EQ(obligations[0].wait_counter_type(), WaitCounterType::LGKMCNT);
+      EXPECT_EQ(obligations[0].completion_class(), MemoryCompletionClass::UNORDERED);
+      EXPECT_EQ(obligations[0].counter_increment(), c.units);
+      const auto expected = WaitcheckTarget::classify_events(inst, arch);
+      ASSERT_TRUE(expected.succeeded());
+      ASSERT_FALSE(expected.value().empty());
+      const auto &event = expected.value().front();
+      EXPECT_EQ(MemoryWaitScoreboard::issue_units(inst, event, arch), c.units);
+      cu->track_memory_wait(inst, *wf);
+      EXPECT_EQ(wf->ensure_memory_wait_scoreboard().outstanding(event.counter), c.units);
+    }
+  }
+}
+
 TEST(MemoryWaitFootprintTest, ScalarRelativeAccessesMatchExecution) {
   class ScalarObserver final : public ExecutionPlugin {
   public:
