@@ -641,6 +641,50 @@ TEST(SdmaPacketProcessorTest, LinearRectUsesZOriginWhenTheCopyIsOneSlice) {
   }
 }
 
+TEST(SdmaPacketProcessorTest, LinearRectScalesXOriginsByTheElementSize) {
+  for (const auto &test_case : kRectLayouts) {
+    SCOPED_TRACE(static_cast<int>(test_case.dialect));
+    PacketProcessorFixture fixture;
+    ASSERT_TRUE(fixture.access);
+    constexpr uint64_t kSource = 0x1000;
+    constexpr uint64_t kDestination = 0x1800;
+    constexpr uint32_t kSrcPitch = 16;
+    constexpr uint32_t kDstPitch = 24;
+    constexpr uint32_t kSrcOffset = 2;
+    constexpr uint32_t kDstOffset = 6;
+    constexpr uint32_t kRowBytes = 4;
+    constexpr uint32_t kRows = 2;
+    constexpr uint8_t kGap = 0x5a;
+    for (uint32_t i = 0; i < kSrcPitch * kRows; ++i)
+      fixture.memory->store<uint8_t>(kSource + i, static_cast<uint8_t>(i + 1));
+    for (uint32_t i = 0; i < kDstPitch * kRows; ++i)
+      fixture.memory->store<uint8_t>(kDestination + i, kGap);
+
+    // 2-byte elements: X origins of 1 and 3 elements are byte offsets 2 and 6.
+    const std::array<uint32_t, 13> packet = linear_rect_packet(
+        test_case.gfx12_rect, kSource, kDestination, /*element=*/1, /*rect_x=*/kRowBytes / 2,
+        /*rect_y=*/kRows, /*rect_z=*/1, kSrcPitch, kDstPitch, /*src_slice_bytes=*/0,
+        /*dst_slice_bytes=*/0, /*src_off_x=*/1, /*dst_off_x=*/3);
+    SdmaPacketProcessor processor(test_case.dialect);
+    const SdmaPacketProcessResult result =
+        processor.process({.available_dwords = packet,
+                           .access = *fixture.access,
+                           .continuation = fixture.continuation});
+
+    ASSERT_EQ(result.packet.status, PacketProcessStatus::Complete);
+    for (uint32_t i = 0; i < kDstPitch * kRows; ++i) {
+      const uint32_t row = i / kDstPitch;
+      const uint32_t column = i % kDstPitch;
+      const bool copied = column >= kDstOffset && column < kDstOffset + kRowBytes;
+      const uint8_t expected =
+          copied ? static_cast<uint8_t>(row * kSrcPitch + kSrcOffset + (column - kDstOffset) + 1)
+                 : kGap;
+      EXPECT_EQ(fixture.memory->load<uint8_t>(kDestination + i), expected)
+          << "row " << row << " column " << column;
+    }
+  }
+}
+
 TEST(SdmaPacketProcessorTest, LinearRectAppliesSourceAndDestinationYOrigins) {
   for (const auto &test_case : kRectLayouts) {
     SCOPED_TRACE(static_cast<int>(test_case.dialect));
