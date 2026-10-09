@@ -69,7 +69,7 @@ fn validate_command(command: KernelCommand) -> Result<u32, Error> {
     Ok(byte_length)
 }
 
-/// One private native context, completion fence, and atomic submission slot.
+/// One private DRM submission context, completion fence, and atomic slot.
 pub(crate) struct KfdKernelQueue {
     vm: Shared<DeviceVm>,
     process: u32,
@@ -230,7 +230,7 @@ impl KfdKernelQueue {
                 ));
             }
         }
-        if self.vm.has_observed_loss() {
+        if self.vm.has_latched_loss() {
             self.observe_terminal(ErrorKind::DeviceLost);
         }
         if let Some(kind) = self.terminal_kind() {
@@ -313,7 +313,7 @@ impl KfdKernelQueue {
             retired_submission: self.retired.load(Ordering::Acquire),
             terminal: self
                 .terminal_kind()
-                .or_else(|| self.vm.has_observed_loss().then_some(ErrorKind::DeviceLost)),
+                .or_else(|| self.vm.has_latched_loss().then_some(ErrorKind::DeviceLost)),
         }
     }
 
@@ -407,7 +407,7 @@ impl KfdKernelQueue {
                         self.retire(submission);
                     }
                 }
-                if source.raw_os_error() == Some(19) || self.vm.has_observed_loss() {
+                if source.raw_os_error() == Some(19) || self.vm.has_latched_loss() {
                     self.observe_terminal(ErrorKind::DeviceLost);
                 } else if matches!(source.raw_os_error(), Some(5 | 22)) {
                     self.observe_terminal(ErrorKind::Driver);
@@ -488,16 +488,16 @@ mod tests {
             allocator,
         )
         .unwrap();
-        let node = sysfs::NativeNode {
+        let node = sysfs::KfdNode {
             node: 1,
             gpu_id: 42,
             render_minor: Some(128),
             unique_id: Some(123),
             identity: [0; 16],
-            queues: sysfs::NativeQueueProperties {
+            queues: sysfs::KfdQueueProperties {
                 gfx_target: 120_001,
                 xcc_count: 1,
-                ..sysfs::NativeQueueProperties::default()
+                ..sysfs::KfdQueueProperties::default()
             },
             local_memory_bytes: 1 << 30,
             public_memory_bytes: 0,

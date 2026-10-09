@@ -10,7 +10,7 @@
 mod types;
 pub use types::*;
 
-use crate::driver::{self, QueueDriver};
+use crate::driver::{self, CachedInfo, UserQueueDriver};
 use crate::gpu::GpuDevice;
 use crate::host_storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
@@ -41,18 +41,18 @@ pub unsafe fn ring_doorbell(address: usize, value: u64) {
     unsafe { (address as *mut u64).write_volatile(value) };
 }
 
-/// Provider-owned queue transport and cleanup state, independent of the
-/// selected GPU backend's native queue representation.
-pub(crate) struct ProviderQueue<D: QueueDriver> {
-    // Drop the native queue before its provider connection on final release.
+/// Driver-owned queue transport and cleanup state, independent of the
+/// selected GPU driver's queue representation.
+pub(crate) struct DriverQueue<D: UserQueueDriver> {
+    // Drop the queue resource before its shared driver instance.
     inner: Owned<D::Queue>,
     driver: Shared<D>,
     info: QueueTransport,
 }
 
-impl<D: QueueDriver> ProviderQueue<D> {
+impl<D: UserQueueDriver> DriverQueue<D> {
     pub(crate) fn new(driver: Shared<D>, inner: Owned<D::Queue>) -> Self {
-        let info = driver::QueueOwnerInfo::cached_info(&*inner);
+        let info = inner.cached_info();
         Self {
             inner,
             driver,
@@ -124,7 +124,7 @@ impl<D: QueueDriver> ProviderQueue<D> {
 /// Dropping a live queue without explicit destruction retains its native
 /// backing through process teardown because producers may still publish.
 pub struct Queue {
-    inner: ProviderQueue<driver::PlatformDriver>,
+    inner: DriverQueue<driver::KfdDriver>,
 }
 
 /// Keep externally supplied backing alive if native queue creation may have
@@ -185,8 +185,7 @@ impl Queue {
     /// aperture cannot contain the queue. Native peer attachment can report an
     /// unsupported route, allocation failure, device loss, or ambiguous state.
     pub fn map_device(&self, device: GpuDevice<'_>) -> Result<QueueTransport, Error> {
-        self.inner
-            .map_device(&device.device.driver, &device.device.state)
+        self.inner.map_device(device.driver, device.state)
     }
     /// Observes native loss, then acquire-loads the consumed and producer indices
     /// from the queue's control mapping. The pair uses PM4 dword counts, AQL
@@ -309,7 +308,7 @@ impl GpuDevice<'_> {
     /// responsible for the selected format's publication protocol.
     ///
     /// # Errors
-    /// Rejects unsupported formats, priorities, placement, or native context
+    /// Rejects unsupported formats, priorities, placement, or queue context
     /// sizes before acquisition. Allocation and native queue setup can fail;
     /// cleanup preserves the exact acquired state, including backing that a
     /// CREATE copy fault may have left reachable without a trustworthy ID.
@@ -325,9 +324,9 @@ impl GpuDevice<'_> {
     pub unsafe fn create_queue(&self, desc: QueueRequest) -> Result<Queue, Error> {
         // SAFETY: The caller retains every raw address in the request, even
         // when native creation has an ambiguous result.
-        let inner = unsafe { self.device.driver.create_queue(&self.device.state, desc) }?;
+        let inner = unsafe { self.driver.create_queue(self.state, desc) }?;
         Ok(Queue {
-            inner: ProviderQueue::new(self.device.driver.clone(), inner),
+            inner: DriverQueue::new(self.driver.clone(), inner),
         })
     }
 
@@ -360,21 +359,15 @@ impl GpuDevice<'_> {
 
 #[cfg(test)]
 #[allow(unsafe_code)]
-mod provider_contract_tests {
+mod driver_contract_tests {
     use super::*;
-    use crate::driver::{DeviceStateInfo, ProviderTypes, QueueOwnerInfo, QueueTypes};
+    use crate::driver::{CachedInfo, DeviceStateType};
     use crate::host_storage::Allocator;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     #[derive(Clone)]
     struct FakeDevice;
-
-    impl DeviceStateInfo for FakeDevice {
-        fn has_observed_loss(&self) -> bool {
-            false
-        }
-    }
 
     struct FakeGpu {
         dropped: Arc<AtomicBool>,
@@ -389,7 +382,7 @@ mod provider_contract_tests {
 
     struct FakeQueue {
         info: QueueTransport,
-        provider_dropped: Arc<AtomicBool>,
+        driver_dropped: Arc<AtomicBool>,
         queue_drops: Arc<AtomicUsize>,
         fail_destroy: bool,
         released: bool,
@@ -397,23 +390,20 @@ mod provider_contract_tests {
 
     impl Drop for FakeQueue {
         fn drop(&mut self) {
-            assert!(!self.provider_dropped.load(Ordering::Relaxed));
+            assert!(!self.driver_dropped.load(Ordering::Relaxed));
             self.queue_drops.fetch_add(1, Ordering::Relaxed);
         }
     }
 
-    impl QueueOwnerInfo for FakeQueue {
+    impl CachedInfo for FakeQueue {
+        type Info = QueueTransport;
         fn cached_info(&self) -> QueueTransport {
             self.info
         }
     }
 
-    impl ProviderTypes for FakeGpu {
+    impl DeviceStateType for FakeGpu {
         type DeviceState = FakeDevice;
-    }
-
-    impl QueueTypes for FakeGpu {
-        type Queue = FakeQueue;
     }
 
     fn transport() -> QueueTransport {
@@ -443,7 +433,9 @@ mod provider_contract_tests {
         }
     }
 
-    impl QueueDriver for FakeGpu {
+    impl UserQueueDriver for FakeGpu {
+        type Queue = FakeQueue;
+
         fn supports_expert_scheduling(&self, _: &FakeDevice) -> Result<bool, Error> {
             Ok(false)
         }
@@ -497,7 +489,7 @@ mod provider_contract_tests {
             Owned::new(
                 FakeQueue {
                     info: transport(),
-                    provider_dropped: self.dropped.clone(),
+                    driver_dropped: self.dropped.clone(),
                     queue_drops: self.queue_drops.clone(),
                     fail_destroy: true,
                     released: false,
@@ -514,13 +506,12 @@ mod provider_contract_tests {
     }
 
     #[test]
-    fn provider_queue_retains_native_owner_and_driver_through_failed_cleanup() -> Result<(), Error>
-    {
-        let provider_dropped = Arc::new(AtomicBool::new(false));
+    fn driver_queue_retains_native_owner_and_driver_through_failed_cleanup() -> Result<(), Error> {
+        let driver_dropped = Arc::new(AtomicBool::new(false));
         let queue_drops = Arc::new(AtomicUsize::new(0));
         let driver = Shared::new(
             FakeGpu {
-                dropped: provider_dropped.clone(),
+                dropped: driver_dropped.clone(),
                 queue_drops: queue_drops.clone(),
             },
             Allocator::system(),
@@ -533,8 +524,8 @@ mod provider_contract_tests {
             device_producer: false,
         };
         // SAFETY: This PM4 request contains no raw external GPU addresses.
-        let native = unsafe { driver.create_queue(&state, request) }?;
-        let mut queue = ProviderQueue::new(driver.clone(), native);
+        let driver_queue = unsafe { driver.create_queue(&state, request) }?;
+        let mut queue = DriverQueue::new(driver.clone(), driver_queue);
         assert_eq!(queue.info(), transport());
         let foreign = Shared::new(
             FakeGpu {
@@ -555,12 +546,12 @@ mod provider_contract_tests {
         // SAFETY: No producer or public mapping was created by this fake.
         assert!(unsafe { queue.destroy() }.is_err());
         assert_eq!(queue_drops.load(Ordering::Relaxed), 0);
-        assert!(!provider_dropped.load(Ordering::Relaxed));
+        assert!(!driver_dropped.load(Ordering::Relaxed));
         // SAFETY: No producer or public mapping was created by this fake.
         unsafe { queue.destroy() }?;
         drop(queue);
         assert_eq!(queue_drops.load(Ordering::Relaxed), 1);
-        assert!(provider_dropped.load(Ordering::Relaxed));
+        assert!(driver_dropped.load(Ordering::Relaxed));
         Ok(())
     }
 }

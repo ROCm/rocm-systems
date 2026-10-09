@@ -837,8 +837,8 @@ fn explicit_endpoint_close_consumes_descriptor_once() {
 #[test]
 fn process_lifetime_never_selects_a_secondary_context() {
     let mut kfd = endpoint(Arc::new(|_| panic!("process policy issued a KFD ioctl")));
-    kfd.prepare_context(SessionLifetime::Process).unwrap();
-    kfd.prepare_context(SessionLifetime::Process).unwrap();
+    kfd.prepare_context(DriverContextLifetime::Process).unwrap();
+    kfd.prepare_context(DriverContextLifetime::Process).unwrap();
     kfd.close().unwrap();
 }
 
@@ -863,7 +863,7 @@ fn concurrent_instance_activation_selects_one_secondary_context() {
     }));
     std::thread::scope(|scope| {
         let threads = (0..8)
-            .map(|_| scope.spawn(|| kfd.prepare_context(SessionLifetime::Session).unwrap()))
+            .map(|_| scope.spawn(|| kfd.prepare_context(DriverContextLifetime::Session).unwrap()))
             .collect::<Vec<_>>();
         for thread in threads {
             thread.join().unwrap();
@@ -899,13 +899,13 @@ fn unsupported_version_leaves_context_selection_retryable() {
         Ok(())
     }));
     assert_eq!(
-        kfd.prepare_context(SessionLifetime::Session)
+        kfd.prepare_context(DriverContextLifetime::Session)
             .unwrap_err()
             .kind(),
         io::ErrorKind::Unsupported
     );
     assert_eq!(selections.load(Ordering::Relaxed), 0);
-    kfd.prepare_context(SessionLifetime::Session).unwrap();
+    kfd.prepare_context(DriverContextLifetime::Session).unwrap();
     assert_eq!(selections.load(Ordering::Relaxed), 1);
     kfd.close().unwrap();
 }
@@ -927,13 +927,13 @@ fn ambiguous_secondary_selection_requires_descriptor_teardown() {
         _ => panic!("ambiguous selection replayed or touched runtime"),
     }));
     assert_eq!(
-        kfd.prepare_context(SessionLifetime::Session)
+        kfd.prepare_context(DriverContextLifetime::Session)
             .unwrap_err()
             .raw_os_error(),
         Some(5)
     );
     assert_eq!(
-        kfd.prepare_context(SessionLifetime::Session)
+        kfd.prepare_context(DriverContextLifetime::Session)
             .unwrap_err()
             .kind(),
         io::ErrorKind::InvalidData

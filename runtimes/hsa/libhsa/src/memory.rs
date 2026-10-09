@@ -36,7 +36,7 @@ use rocddi::memory::{
     Allocation, DeviceAccess, HostCachePolicy, MemoryKind, VirtualAddress, VirtualDeviceMapping,
     VirtualHostMapping, VirtualMemory,
 };
-use rocddi::session::{Session, SessionLifetime};
+use rocddi::session::{DriverContextLifetime, Session};
 use rocddi::topology::{MemoryLinkInfo, MemoryLinkType};
 
 use crate::ffi::*;
@@ -451,8 +451,12 @@ fn cpu_pool(pool: HsaMemoryPool) -> bool {
     )
 }
 
-fn cpu_pool_memory_kind(pool: HsaMemoryPool, lifetime: SessionLifetime, flags: u32) -> MemoryKind {
-    if pool.handle == CPU_POOL_KERNARG || lifetime == SessionLifetime::Session {
+fn cpu_pool_memory_kind(
+    pool: HsaMemoryPool,
+    lifetime: DriverContextLifetime,
+    flags: u32,
+) -> MemoryKind {
+    if pool.handle == CPU_POOL_KERNARG || lifetime == DriverContextLifetime::Session {
         MemoryKind::System
     } else {
         MemoryKind::OwnedHost {
@@ -6964,7 +6968,11 @@ mod tests {
             (CPU_POOL_COARSE, HostCachePolicy::Coarse),
         ] {
             assert_eq!(
-                cpu_pool_memory_kind(HsaMemoryPool { handle: pool }, SessionLifetime::Process, 0),
+                cpu_pool_memory_kind(
+                    HsaMemoryPool { handle: pool },
+                    DriverContextLifetime::Process,
+                    0
+                ),
                 MemoryKind::OwnedHost { cache }
             );
         }
@@ -6973,14 +6981,18 @@ mod tests {
                 HsaMemoryPool {
                     handle: CPU_POOL_KERNARG,
                 },
-                SessionLifetime::Process,
+                DriverContextLifetime::Process,
                 0
             ),
             MemoryKind::System
         );
         for pool in [CPU_POOL_FINE, CPU_POOL_EXTENDED, CPU_POOL_COARSE] {
             assert_eq!(
-                cpu_pool_memory_kind(HsaMemoryPool { handle: pool }, SessionLifetime::Session, 0),
+                cpu_pool_memory_kind(
+                    HsaMemoryPool { handle: pool },
+                    DriverContextLifetime::Session,
+                    0
+                ),
                 MemoryKind::System
             );
         }

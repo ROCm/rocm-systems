@@ -19,7 +19,7 @@ use crate::queue::{
     QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority, QueueProducerMode,
     QueueRequest, QueueRingMemory, QueueScratch, QueueTransport, SdmaEngineSelection,
 };
-use crate::session::SessionLifetime;
+use crate::session::DriverContextLifetime;
 
 use crate::{Error, ErrorKind};
 
@@ -748,7 +748,7 @@ struct ScratchControl {
 struct AqlControl {
     producer_mode: QueueProducerMode,
     global_work_sync: bool,
-    properties: sysfs::NativeQueueProperties,
+    properties: sysfs::KfdQueueProperties,
     inactive_signal: Option<u64>,
     error_event: Option<QueueErrorEvent>,
     scratch: Option<ScratchControl>,
@@ -763,7 +763,7 @@ struct Pm4Control {
 }
 
 fn validate_pm4(
-    native: &sysfs::NativeNode,
+    native: &sysfs::KfdNode,
     desc: QueueRequest,
     ring_size: u32,
 ) -> Result<Pm4Control, Error> {
@@ -794,7 +794,7 @@ fn validate_pm4(
 }
 
 fn validate_aql(
-    properties: sysfs::NativeQueueProperties,
+    properties: sysfs::KfdQueueProperties,
     desc: QueueRequest,
 ) -> Result<AqlControl, Error> {
     let QueueParameters::Aql {
@@ -843,10 +843,7 @@ fn validate_aql(
     })
 }
 
-fn validate_sdma(
-    properties: sysfs::NativeQueueProperties,
-    desc: QueueRequest,
-) -> Result<(), Error> {
+fn validate_sdma(properties: sysfs::KfdQueueProperties, desc: QueueRequest) -> Result<(), Error> {
     if !properties.sdma_qualified {
         return Err(error(
             ErrorKind::Unsupported,
@@ -869,7 +866,7 @@ fn validate_sdma(
 }
 
 impl Request {
-    fn validate(native: &sysfs::NativeNode, desc: QueueRequest) -> Result<Self, Error> {
+    fn validate(native: &sysfs::KfdNode, desc: QueueRequest) -> Result<Self, Error> {
         let properties = native.queues;
         // These generations share eight-byte doorbells, the pointer protocol,
         // and the 32-waves-per-CU debugger tail. Other generations need their
@@ -973,7 +970,7 @@ impl Request {
 }
 
 fn validate_scratch(
-    properties: sysfs::NativeQueueProperties,
+    properties: sysfs::KfdQueueProperties,
     scratch: Option<QueueScratch>,
 ) -> Result<Option<ScratchControl>, Error> {
     let Some(scratch) = scratch else {
@@ -1206,7 +1203,7 @@ fn initialize_aql_control(
     storage.write_bytes(0, &bytes)
 }
 
-fn compute_storage(properties: sysfs::NativeQueueProperties) -> Result<ComputeStorage, Error> {
+fn compute_storage(properties: sysfs::KfdQueueProperties) -> Result<ComputeStorage, Error> {
     let xcc_count = properties.xcc_count;
     let context_size = properties.context_size;
     let control_stack_size = properties.control_stack_size;
@@ -1252,7 +1249,7 @@ fn compute_storage(properties: sysfs::NativeQueueProperties) -> Result<ComputeSt
     })
 }
 
-fn pm4_control(native: &sysfs::NativeNode) -> Option<Pm4Control> {
+fn pm4_control(native: &sysfs::KfdNode) -> Option<Pm4Control> {
     let properties = native.queues;
     if !cfg!(target_arch = "x86_64")
         || properties.gfx_target != 120_001
@@ -1276,21 +1273,21 @@ fn pm4_control(native: &sysfs::NativeNode) -> Option<Pm4Control> {
     })
 }
 
-pub(super) fn supports_aql(native: &sysfs::NativeNode) -> bool {
+pub(super) fn supports_aql(native: &sysfs::KfdNode) -> bool {
     (100_100..=120_001).contains(&native.queues.gfx_target)
         && native.queues.compute_queues != 0
         && compute_storage(native.queues).is_ok()
 }
 
-pub(super) fn supports_pm4(native: &sysfs::NativeNode) -> bool {
+pub(super) fn supports_pm4(native: &sysfs::KfdNode) -> bool {
     native.gpu_id != 0 && pm4_control(native).is_some()
 }
 
 pub(super) fn create(
     vm: Shared<DeviceVm>,
-    native: &sysfs::NativeNode,
+    native: &sysfs::KfdNode,
     desc: QueueRequest,
-    lifetime: SessionLifetime,
+    lifetime: DriverContextLifetime,
 ) -> Result<Owned<KfdQueue>, Error> {
     let request = Request::validate(native, desc)?;
     vm.kfd()
@@ -1450,7 +1447,7 @@ impl KfdQueue {
     fn create(
         vm: Shared<DeviceVm>,
         request: &Request,
-        lifetime: SessionLifetime,
+        lifetime: DriverContextLifetime,
     ) -> Result<Owned<Self>, Error> {
         vm.check()?;
         if vm.version.major != 1 || vm.version.minor < 17 {
@@ -1487,7 +1484,7 @@ impl KfdQueue {
                 uncached: true,
                 contiguous: false,
             }
-        } else if request.aql.is_some() && lifetime == SessionLifetime::Process {
+        } else if request.aql.is_some() && lifetime == DriverContextLifetime::Process {
             BufferKind::OwnedUserptr {
                 cache: crate::memory::HostCachePolicy::Uncached,
             }

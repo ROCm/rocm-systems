@@ -52,8 +52,8 @@ pub enum KernelQueueWait {
 
 /// Owns one native submission context and its retryable teardown state.
 pub struct KernelQueue {
-    inner: Owned<driver::NativeKernelQueue>,
-    _driver: Shared<driver::PlatformDriver>,
+    inner: Owned<driver::KfdKernelQueue>,
+    _driver: Shared<driver::KfdDriver>,
     format: KernelQueueFormat,
 }
 
@@ -85,13 +85,13 @@ impl KernelQueue {
     pub unsafe fn submit(&self, command: KernelCommand) -> Result<u64, Error> {
         // SAFETY: The public caller retains and synchronizes the command range
         // until the native retirement frontier advances.
-        unsafe { driver::PlatformDriver::submit_kernel_queue(&self.inner, command) }
+        unsafe { driver::KfdDriver::submit_kernel_queue(&self.inner, command) }
     }
 
     /// Reads cached retirement and terminal state without entering the driver.
     #[must_use]
     pub fn status(&self) -> KernelQueueStatus {
-        driver::PlatformDriver::kernel_queue_status(&self.inner)
+        driver::KfdDriver::kernel_queue_status(&self.inner)
     }
 
     /// Checks native completion once without waiting and returns the checked
@@ -101,10 +101,11 @@ impl KernelQueue {
     /// Reports a native observation failure. Earlier checked retirement remains
     /// available through [`Self::status`].
     pub fn refresh_status(&self) -> Result<KernelQueueStatus, Error> {
-        driver::PlatformDriver::refresh_kernel_queue(&self.inner)
+        driver::KfdDriver::refresh_kernel_queue(&self.inner)
     }
 
-    /// Waits through the native context under one caller-supplied deadline.
+    /// Waits through the queue's private submission context under one
+    /// caller-supplied deadline.
     ///
     /// # Errors
     /// Reports an invalid submission, native wait failure, or device loss.
@@ -114,7 +115,7 @@ impl KernelQueue {
         timeout_nanoseconds: u64,
         poll_duration_nanoseconds: u64,
     ) -> Result<KernelQueueWait, Error> {
-        driver::PlatformDriver::wait_kernel_queue(
+        driver::KfdDriver::wait_kernel_queue(
             &self.inner,
             submission,
             timeout_nanoseconds,
@@ -122,7 +123,8 @@ impl KernelQueue {
         )
     }
 
-    /// Releases the native context after all submissions retire.
+    /// Releases the queue's private submission context after all submissions
+    /// retire.
     ///
     /// A failed release retains this owner for a later destruction attempt.
     ///
@@ -130,7 +132,7 @@ impl KernelQueue {
     /// Returns `Busy` while command storage may still be in use, or a native
     /// teardown error while retaining every unreleased dependency.
     pub fn destroy(&mut self) -> Result<(), Error> {
-        driver::PlatformDriver::destroy_kernel_queue(&mut self.inner)
+        driver::KfdDriver::destroy_kernel_queue(&mut self.inner)
     }
 }
 
@@ -141,21 +143,19 @@ impl GpuDevice<'_> {
     /// # Errors
     /// Reports an unqualified target or a native ring-query failure.
     pub fn available_sdma_rings(&self) -> Result<u32, Error> {
-        self.device.driver.available_sdma_rings(&self.device.state)
+        self.driver.available_sdma_rings(self.state)
     }
 
     /// Creates a kernel-mediated queue with all bounded resources ready.
     ///
     /// # Errors
-    /// Rejects an unqualified format, native context failure, or exhaustion.
+    /// Rejects an unqualified format, failure to create a submission context,
+    /// or resource exhaustion.
     pub fn create_kernel_queue(&self, format: KernelQueueFormat) -> Result<KernelQueue, Error> {
-        let inner = self
-            .device
-            .driver
-            .create_kernel_queue(&self.device.state, format)?;
+        let inner = self.driver.create_kernel_queue(self.state, format)?;
         Ok(KernelQueue {
             inner,
-            _driver: self.device.driver.clone(),
+            _driver: self.driver.clone(),
             format,
         })
     }

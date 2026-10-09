@@ -1,11 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Linux allocation owner selected by the native backing mechanism.
+//! Linux allocation owner selected by KFD or DRM backing.
 //!
 //! The core sees one allocation contract. KFD and DRM retain separate
-//! lifecycle records so neither native cleanup mechanism contaminates the
-//! other's state machine.
+//! lifecycle records so each cleanup path resumes only its own unfinished
+//! work.
 
 use super::imported_system::DrmImportedSystem;
 use super::memory::{self, DeviceVm, KfdAllocation, error};
@@ -15,13 +15,13 @@ use crate::memory::interop::linux::{AisFileOperation, AisFileResult, DmaBuf, Kfd
 use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess};
 use crate::{Error, ErrorKind};
 
-pub(crate) enum NativeAllocation {
+pub(crate) enum LinuxAllocation {
     Kfd(Owned<KfdAllocation>),
     DrmRegisteredHost(Owned<DrmRegisteredHost>),
     DrmImportedSystem(Owned<DrmImportedSystem>),
 }
 
-impl NativeAllocation {
+impl LinuxAllocation {
     fn from_kfd(allocation: Owned<KfdAllocation>) -> Result<Owned<Self>, Error> {
         let allocator = allocation.allocator();
         Ok(Owned::new(Self::Kfd(allocation), allocator)?)

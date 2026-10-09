@@ -8,7 +8,6 @@
 //! transport details, not requirements of the platform-neutral device model.
 
 use crate::driver;
-use crate::driver::linux_interop::LinuxGpuEventDriver;
 use crate::gpu::GpuDevice;
 use crate::host_storage::Owned;
 use crate::memory::Allocation;
@@ -52,7 +51,7 @@ pub struct SignalEventInfo {
 /// Owns one process-local KFD signal event.
 #[doc(hidden)]
 pub struct SignalEvent {
-    pub(crate) inner: Owned<driver::NativeSignalEvent>,
+    pub(crate) inner: Owned<driver::KfdSignalEvent>,
     pub(crate) info: SignalEventInfo,
 }
 
@@ -79,7 +78,7 @@ impl SignalEvent {
     /// Reports the native destruction failure and retains the event identity
     /// when retrying is safe.
     pub fn destroy(&mut self) -> Result<(), Error> {
-        driver::PlatformDriver::destroy_kfd_signal_event(&mut self.inner)
+        driver::KfdDriver::destroy_kfd_signal_event(&mut self.inner)
     }
 }
 
@@ -129,7 +128,7 @@ impl SignalEventPage {
             kind: ErrorKind::Internal,
             detail: "attempted signal event page lost its allocation",
         })?;
-        driver::PlatformDriver::retain_kfd_signal_event_page(allocation.inner.native_mut())?;
+        driver::KfdDriver::retain_kfd_signal_event_page(allocation.inner.driver_state_mut())?;
         self.attempted = false;
         self.allocation = None;
         Ok(())
@@ -154,10 +153,7 @@ impl Drop for SignalEventPage {
 /// Returns a native KFD error, or `DeviceLost` when terminal loss was already
 /// observed.
 pub fn poll_memory_fault(device: GpuDevice<'_>) -> Result<Option<GpuMemoryFault>, Error> {
-    device
-        .device
-        .driver
-        .poll_kfd_memory_fault(&device.device.state)
+    device.driver.poll_kfd_memory_fault(device.state)
 }
 
 /// Creates an auto-reset KFD signal event. The first event in a process supplies
@@ -176,16 +172,15 @@ pub fn create_signal_event(
                 kind: ErrorKind::Internal,
                 detail: "signal event page lost its allocation",
             })?;
-            Some(allocation.inner.native())
+            Some(allocation.inner.driver_state())
         }
         None => None,
     };
     let mut page_offered = false;
-    let result = device.device.driver.create_kfd_signal_event(
-        &device.device.state,
-        native_page,
-        &mut page_offered,
-    );
+    let result =
+        device
+            .driver
+            .create_kfd_signal_event(device.state, native_page, &mut page_offered);
     if let Some(page) = event_page {
         // KFD can install a page even when CREATE_EVENT reports an error.
         // Validation and metadata allocation before dispatch do not offer it.

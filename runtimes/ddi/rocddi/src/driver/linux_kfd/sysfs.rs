@@ -22,22 +22,22 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Read as _};
 use std::path::Path;
 
-/// Stable native identity and capabilities captured for one topology node.
+/// Stable KFD and DRM identity and capabilities for one topology node.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct NativeNode {
+pub(crate) struct KfdNode {
     pub node: u32,
     pub gpu_id: u32,
     pub render_minor: Option<u32>,
     pub unique_id: Option<u64>,
     pub identity: [u8; 16],
-    pub queues: NativeQueueProperties,
+    pub queues: KfdQueueProperties,
     pub local_memory_bytes: u64,
     pub public_memory_bytes: u64,
 }
 
-/// Queue and shader properties required to qualify native transports.
+/// Queue and shader properties required to qualify KFD transports.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) struct NativeQueueProperties {
+pub(crate) struct KfdQueueProperties {
     pub gfx_target: u32,
     pub compute_units: u32,
     pub maximum_wave_count_per_compute_unit: u32,
@@ -221,7 +221,7 @@ fn cache_properties(text: &str) -> Result<CacheInfo, Error> {
     let _ = properties.u32("cache_lines_per_tag")?;
     let _ = properties.u32("association")?;
     let _ = properties.u32("latency")?;
-    // KFD reports cache capacity in KiB; provider facts use bytes.
+    // KFD reports cache capacity in KiB; driver facts use bytes.
     Ok(CacheInfo {
         level: properties.u32("level")?,
         size_bytes: u64::from(properties.u32("size")?) * 1024,
@@ -703,7 +703,7 @@ fn read_node(
     if context.is_some() != stack.is_some() {
         return Err(error(
             ErrorKind::InvalidData,
-            "incomplete native context metadata",
+            "incomplete KFD queue context metadata",
         ));
     }
     let sdma = p.optional_u32("num_sdma_engines")?;
@@ -737,7 +737,7 @@ fn read_node(
     }
     let local = if integrated { 0 } else { total };
     let public = if integrated { 0 } else { visible };
-    let queues = NativeQueueProperties {
+    let queues = KfdQueueProperties {
         gfx_target: gfx,
         compute_units: simds / per_cu,
         maximum_wave_count_per_compute_unit: waves,
@@ -764,7 +764,7 @@ fn read_node(
         ));
     }
     name[..text.len()].copy_from_slice(text.as_bytes());
-    let native = NativeNode {
+    let native = KfdNode {
         node,
         gpu_id,
         render_minor: Some(render),
@@ -883,8 +883,8 @@ fn read_node(
             group: node,
             member: gpu_id,
         },
-        provider_instance: 0,
-        native: crate::driver::EndpointSelector::LinuxKfd(native),
+        driver_instance: 0,
+        selector: crate::driver::EndpointSelector::LinuxKfd(native),
     }))
 }
 
@@ -1132,7 +1132,7 @@ mod tests {
         std::fs::write(fixture.0.join("topology/nodes/2/gpu_id"), "not a number").unwrap();
         let opened = open_endpoint(&root, &drm, endpoint.id, Allocator::default()).unwrap();
         assert_eq!(opened.id, endpoint.id);
-        assert_eq!(opened.native, endpoint.native);
+        assert_eq!(opened.selector, endpoint.selector);
         assert!(enumerate(&root, &drm, Allocator::default(), &mut |_| Ok(())).is_err());
         let mut stale = endpoint.id;
         stale[8] ^= 1;
@@ -1191,9 +1191,9 @@ mod tests {
         .unwrap();
         let mut owner = endpoint.clone();
         assert!(endpoint.can_access_local_memory(&owner));
-        owner.provider_instance = 1;
+        owner.driver_instance = 1;
         assert!(!endpoint.can_access_local_memory(&owner));
-        owner.provider_instance = endpoint.provider_instance;
+        owner.driver_instance = endpoint.driver_instance;
         owner.topology_key.member += 1;
         assert!(!endpoint.can_access_local_memory(&owner));
         owner.topology_key = TopologyKey {
@@ -1224,8 +1224,8 @@ mod tests {
     }
 
     #[test]
-    fn endpoint_from_one_provider_cannot_activate_in_another_session() {
-        use crate::driver::ProviderDriver;
+    fn endpoint_from_one_driver_cannot_activate_in_another_session() {
+        use crate::driver::Driver;
 
         let fixture = Fixture::new();
         let (root, drm) = fixture.roots();
@@ -1236,10 +1236,11 @@ mod tests {
             Allocator::default(),
         )
         .unwrap();
-        let first = crate::session::Session::new(crate::session::SessionLifetime::Process).unwrap();
+        let first =
+            crate::session::Session::new(crate::session::DriverContextLifetime::Process).unwrap();
         let second =
-            crate::session::Session::new(crate::session::SessionLifetime::Process).unwrap();
-        endpoint.provider_instance = first.driver().provider_instance();
+            crate::session::Session::new(crate::session::DriverContextLifetime::Process).unwrap();
+        endpoint.driver_instance = first.linux_kfd().unwrap().driver_instance();
         assert_eq!(
             second.activate(&endpoint).err().unwrap().kind(),
             ErrorKind::InvalidArgument
@@ -1550,7 +1551,7 @@ mod tests {
         assert_eq!(callbacks.allocations.load(Ordering::Relaxed), 1);
         assert_eq!(callbacks.frees.load(Ordering::Relaxed), 1);
         let session =
-            crate::session::Session::new(crate::session::SessionLifetime::Session).unwrap();
+            crate::session::Session::new(crate::session::DriverContextLifetime::Session).unwrap();
         assert_eq!(
             session.activate(&endpoint.unwrap()).err().unwrap().kind(),
             ErrorKind::InvalidArgument

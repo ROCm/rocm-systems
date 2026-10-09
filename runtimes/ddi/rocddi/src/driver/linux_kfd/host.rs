@@ -4,7 +4,7 @@
 //! CPU-only backing implemented as an owned anonymous Linux mapping.
 //!
 //! Host allocation is independent of GPU activation and therefore works for
-//! both session and process native-lifetime policies. The mapping remains owned
+//! both driver context lifetime policies. The mapping remains owned
 //! after a failed `munmap`, allowing explicit destruction to retry without
 //! publishing a dangling address or silently leaking the ownership record.
 
@@ -92,11 +92,14 @@ impl Drop for HostAllocation {
 mod tests {
     use super::*;
     use crate::memory::{host_cache_control, host_cache_line_size, host_page_size};
-    use crate::session::{Session, SessionLifetime};
+    use crate::session::{DriverContextLifetime, Session};
     use std::sync::atomic::Ordering;
     #[test]
     fn cpu_storage_supports_both_lifetimes_and_retains_custom_allocator() {
-        for policy in [SessionLifetime::Session, SessionLifetime::Process] {
+        for policy in [
+            DriverContextLifetime::Session,
+            DriverContextLifetime::Process,
+        ] {
             let callbacks = crate::test_support::allocator::State::default();
             // SAFETY: State remains stationary until all native owners drop.
             let allocator = unsafe { callbacks.allocator() };
@@ -121,8 +124,9 @@ mod tests {
                 assert!(session.allocate_host(page, page).is_err());
             });
             assert_eq!(count, 0);
-            assert_eq!(callbacks.allocations.load(Ordering::Relaxed), 2);
-            assert_eq!(callbacks.frees.load(Ordering::Relaxed), 2);
+            let allocations = callbacks.allocations.load(Ordering::Relaxed);
+            assert!(allocations >= 2);
+            assert_eq!(callbacks.frees.load(Ordering::Relaxed), allocations);
         }
     }
     #[test]

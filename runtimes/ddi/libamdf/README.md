@@ -118,11 +118,15 @@ destruction fails and preserves the remaining native owners. The caller keeps
 its allocator and library alive; no allocation registry or recovery service is
 introduced to conceal that failure.
 
-PROCESS native lifetime permits kernel-owned process state to survive instance
-destruction. INSTANCE requires library-owned native state to be released with
-the instance. On KFD UAPI 1.19 or newer, this provider selects an
-instance-owned secondary KFD context and supports GPU activation under both
-lifetimes. Secondary KFD contexts do not use KFD USERPTR registration;
+AMDF's `native_lifetime` field selects rocddi's driver context lifetime:
+PROCESS maps to `DriverContextLifetime::Process`, and INSTANCE maps to
+`DriverContextLifetime::Session`.
+
+PROCESS permits the process-owned KFD context and its VM bindings to survive
+instance destruction. INSTANCE requires the instance-owned driver context and
+its bindings to be released with the instance. On KFD UAPI 1.19 or newer,
+this provider selects an instance-owned secondary KFD context and supports GPU
+activation under both lifetimes. Secondary KFD contexts do not use KFD USERPTR.
 INSTANCE GPU registration maps DRM GEM USERPTR in the acquired render VM.
 
 On the KFD provider, first-device activation acquires and publishes the retained
@@ -229,9 +233,9 @@ indirect dependencies live until the accepted submission retires. Cached
 status is syscall-free; explicit refresh polls checked progress without
 waiting, and an explicit wait can prove retirement before storage reuse. The
 requested pending count, or the default 4096, is reported as an admission
-bound, while the current native context admits one unretired command and checks
-progress once before rejecting an occupied slot. Native
-event notification is unavailable and reported as a zero type mask. An
+bound, while the queue's private DRM context admits one unretired command and
+checks progress once before rejecting an occupied slot. Native event
+notification is unavailable and reported as a zero type mask. An
 uncertain native submission becomes a failed accepted submission so its
 storage cannot be reused prematurely.
 

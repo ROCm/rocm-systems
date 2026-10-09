@@ -11,16 +11,16 @@
 
 mod access;
 pub use access::DeviceAccess;
-pub mod interop;
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
-mod provider_virtual_tests;
+mod driver_virtual_tests;
+pub mod interop;
 mod types;
 pub(crate) use types::{AllocationDesc, AllocationLimits};
 
 use crate::device::Device;
 use crate::driver::{
-    self, AddressSpaceInfo, AllocationDriver, DeviceDriver, GpuAuxAllocationDriver, HostDriver,
+    self, AddressSpaceInfo, AllocationDriver, CachedInfo, GpuQueueResourceDriver, HostMemoryDriver,
     VirtualMemoryDriver,
 };
 use crate::gpu::GpuDevice;
@@ -259,7 +259,7 @@ pub struct VirtualAddressInfo {
     pub mapping_granularity: u64,
 }
 
-/// One checked placement request for a provider virtual-memory mapping.
+/// One checked placement request for a driver virtual-memory mapping.
 #[derive(Clone, Copy)]
 struct VirtualMapRequest {
     address: u64,
@@ -268,12 +268,12 @@ struct VirtualMapRequest {
     permissions: DeviceAccess,
 }
 
-/// Shared reservation ownership for any provider with virtual-memory support.
-pub(crate) struct ProviderVirtualAddress<D: VirtualMemoryDriver>
+/// Shared reservation ownership for any driver with virtual-memory support.
+pub(crate) struct DriverVirtualAddress<D: VirtualMemoryDriver>
 where
     D::DeviceState: AddressSpaceInfo,
 {
-    // The native owner is dropped before the provider connection.
+    // The reservation owner is dropped before the shared driver instance.
     pub(crate) inner: Shared<Owned<D::VirtualAddress>>,
     host_intervals: Shared<HostIntervals>,
     device_intervals: Shared<DeviceIntervals<D::DeviceState>>,
@@ -281,7 +281,7 @@ where
     info: VirtualAddressInfo,
 }
 
-impl<D: VirtualMemoryDriver> ProviderVirtualAddress<D>
+impl<D: VirtualMemoryDriver> DriverVirtualAddress<D>
 where
     D::DeviceState: AddressSpaceInfo,
 {
@@ -291,7 +291,7 @@ where
         host_intervals: Shared<HostIntervals>,
         device_intervals: Shared<DeviceIntervals<D::DeviceState>>,
     ) -> Self {
-        let info = driver::VirtualAddressOwnerInfo::cached_info(&**inner);
+        let info = inner.cached_info();
         Self {
             inner,
             host_intervals,
@@ -316,7 +316,7 @@ where
 
 /// Owns a process virtual-address reservation used by detached memory mappings.
 pub struct VirtualAddress {
-    pub(crate) inner: ProviderVirtualAddress<driver::PlatformDriver>,
+    pub(crate) inner: DriverVirtualAddress<driver::KfdDriver>,
 }
 
 impl VirtualAddress {
@@ -336,20 +336,20 @@ impl VirtualAddress {
     }
 }
 
-/// Shared detached-backing ownership for any virtual-memory provider.
-pub(crate) struct ProviderVirtualMemory<D: VirtualMemoryDriver> {
-    // Keep the provider alive until native backing cleanup completes.
+/// Shared detached-backing ownership for any virtual-memory driver.
+pub(crate) struct DriverVirtualMemory<D: VirtualMemoryDriver> {
+    // Keep the driver instance alive until backing cleanup completes.
     pub(crate) inner: Shared<Owned<D::VirtualMemory>>,
     driver: Shared<D>,
     info: VirtualMemoryInfo,
 }
 
-impl<D: VirtualMemoryDriver> ProviderVirtualMemory<D>
+impl<D: VirtualMemoryDriver> DriverVirtualMemory<D>
 where
     D::DeviceState: AddressSpaceInfo,
 {
     pub(crate) fn new(driver: Shared<D>, inner: Shared<Owned<D::VirtualMemory>>) -> Self {
-        let info = driver::VirtualMemoryOwnerInfo::cached_info(&**inner);
+        let info = inner.cached_info();
         Self {
             inner,
             driver,
@@ -361,18 +361,18 @@ where
         self.info
     }
 
-    pub(crate) fn native(&self) -> &D::VirtualMemory {
+    pub(crate) fn driver_state(&self) -> &D::VirtualMemory {
         &self.inner
     }
 
     fn map_host(
         &self,
-        reservation: &ProviderVirtualAddress<D>,
+        reservation: &DriverVirtualAddress<D>,
         address: u64,
         offset: u64,
         size: u64,
         permissions: DeviceAccess,
-    ) -> Result<ProviderVirtualHostMapping<D>, Error> {
+    ) -> Result<DriverVirtualHostMapping<D>, Error> {
         if !Shared::ptr_eq(&self.driver, &reservation.driver) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
@@ -387,7 +387,7 @@ where
                 detail: "virtual-address range already has a host mapping",
             });
         }
-        // Reserve metadata before the provider can replace host page tables.
+        // Reserve metadata before the driver can replace host page tables.
         ranges.try_push(HostInterval { address, size })?;
         let inner = match D::map_virtual_host(
             &self.inner,
@@ -405,7 +405,7 @@ where
             }
         };
         drop(ranges);
-        Ok(ProviderVirtualHostMapping {
+        Ok(DriverVirtualHostMapping {
             inner,
             driver: Some(self.driver.clone()),
             reservation: Some(reservation.inner.clone()),
@@ -420,9 +420,9 @@ where
         &self,
         device_driver: &Shared<D>,
         state: &D::DeviceState,
-        reservation: &ProviderVirtualAddress<D>,
+        reservation: &DriverVirtualAddress<D>,
         request: VirtualMapRequest,
-    ) -> Result<ProviderVirtualDeviceMapping<D>, Error> {
+    ) -> Result<DriverVirtualDeviceMapping<D>, Error> {
         let VirtualMapRequest {
             address,
             offset,
@@ -460,14 +460,14 @@ where
         ) {
             Ok(inner) => inner,
             Err(error) => {
-                // The provider must make an ambiguous result unavailable before
+                // The driver must make an ambiguous result unavailable before
                 // this tentative occupancy record can be released.
                 DeviceIntervals::release(&mut ranges, state, address, size);
                 return Err(error);
             }
         };
         drop(ranges);
-        Ok(ProviderVirtualDeviceMapping {
+        Ok(DriverVirtualDeviceMapping {
             inner,
             driver: Some(self.driver.clone()),
             reservation: Some(reservation.inner.clone()),
@@ -490,7 +490,7 @@ where
 
 /// Owns detached physical backing used by virtual-memory mappings.
 pub struct VirtualMemory {
-    pub(crate) inner: ProviderVirtualMemory<driver::PlatformDriver>,
+    pub(crate) inner: DriverVirtualMemory<driver::KfdDriver>,
 }
 
 impl VirtualMemory {
@@ -531,7 +531,7 @@ impl VirtualMemory {
 }
 
 /// Shared device-mapping ownership, including retryable native cleanup.
-pub(crate) struct ProviderVirtualDeviceMapping<D: VirtualMemoryDriver>
+pub(crate) struct DriverVirtualDeviceMapping<D: VirtualMemoryDriver>
 where
     D::DeviceState: AddressSpaceInfo,
 {
@@ -545,7 +545,7 @@ where
     size: u64,
 }
 
-impl<D: VirtualMemoryDriver> ProviderVirtualDeviceMapping<D>
+impl<D: VirtualMemoryDriver> DriverVirtualDeviceMapping<D>
 where
     D::DeviceState: AddressSpaceInfo,
 {
@@ -569,7 +569,7 @@ where
     }
 }
 
-impl<D: VirtualMemoryDriver> Drop for ProviderVirtualDeviceMapping<D>
+impl<D: VirtualMemoryDriver> Drop for DriverVirtualDeviceMapping<D>
 where
     D::DeviceState: AddressSpaceInfo,
 {
@@ -593,7 +593,7 @@ where
 
 /// Owns one virtual-memory mapping in an activated device VM.
 pub struct VirtualDeviceMapping {
-    inner: ProviderVirtualDeviceMapping<driver::PlatformDriver>,
+    inner: DriverVirtualDeviceMapping<driver::KfdDriver>,
 }
 
 impl VirtualDeviceMapping {
@@ -608,7 +608,7 @@ impl VirtualDeviceMapping {
 }
 
 /// Shared host-mapping ownership, including retryable native cleanup.
-pub(crate) struct ProviderVirtualHostMapping<D: VirtualMemoryDriver> {
+pub(crate) struct DriverVirtualHostMapping<D: VirtualMemoryDriver> {
     inner: Owned<D::VirtualHostMapping>,
     driver: Option<Shared<D>>,
     reservation: Option<Shared<Owned<D::VirtualAddress>>>,
@@ -618,7 +618,7 @@ pub(crate) struct ProviderVirtualHostMapping<D: VirtualMemoryDriver> {
     size: u64,
 }
 
-impl<D: VirtualMemoryDriver> ProviderVirtualHostMapping<D> {
+impl<D: VirtualMemoryDriver> DriverVirtualHostMapping<D> {
     fn free(&mut self) -> Result<(), Error> {
         let mut ranges = self
             .host_intervals
@@ -638,7 +638,7 @@ impl<D: VirtualMemoryDriver> ProviderVirtualHostMapping<D> {
     }
 }
 
-impl<D: VirtualMemoryDriver> Drop for ProviderVirtualHostMapping<D> {
+impl<D: VirtualMemoryDriver> Drop for DriverVirtualHostMapping<D> {
     fn drop(&mut self) {
         if self.free().is_err() {
             if let Some(intervals) = self.host_intervals.take() {
@@ -659,7 +659,7 @@ impl<D: VirtualMemoryDriver> Drop for ProviderVirtualHostMapping<D> {
 
 /// Owns one virtual-memory mapping in the process host page tables.
 pub struct VirtualHostMapping {
-    inner: ProviderVirtualHostMapping<driver::PlatformDriver>,
+    inner: DriverVirtualHostMapping<driver::KfdDriver>,
 }
 
 impl VirtualHostMapping {
@@ -728,24 +728,24 @@ pub(crate) fn validate_virtual_mapping(
     Ok(())
 }
 
-/// Native allocation owner and cached facts shared by providers that can
+/// Allocation owner and cached facts shared by drivers that can
 /// allocate device-accessible backing.
-pub(crate) struct ProviderAllocation<D: AllocationDriver> {
+pub(crate) struct DriverAllocation<D: AllocationDriver> {
     inner: Owned<D::Allocation>,
     info: AllocationInfo,
 }
 
-impl<D: AllocationDriver> ProviderAllocation<D> {
+impl<D: AllocationDriver> DriverAllocation<D> {
     pub(crate) fn new(inner: Owned<D::Allocation>) -> Self {
-        let info = driver::AllocationOwnerInfo::cached_info(&*inner);
+        let info = inner.cached_info();
         Self { inner, info }
     }
 
-    pub(crate) fn native(&self) -> &D::Allocation {
+    pub(crate) fn driver_state(&self) -> &D::Allocation {
         &self.inner
     }
 
-    pub(crate) fn native_mut(&mut self) -> &mut D::Allocation {
+    pub(crate) fn driver_state_mut(&mut self) -> &mut D::Allocation {
         &mut self.inner
     }
 
@@ -778,18 +778,15 @@ impl<D: AllocationDriver> ProviderAllocation<D> {
 /// Explicit free reports failures. If final Drop cannot complete cleanup, it
 /// retains potentially reachable native backing instead of recycling its VA.
 pub struct Allocation {
-    pub(crate) inner: ProviderAllocation<driver::PlatformDriver>,
-    pub(crate) provider_instance: u64,
+    pub(crate) inner: DriverAllocation<driver::KfdDriver>,
+    pub(crate) driver_instance: u64,
 }
 
 impl Allocation {
-    pub(crate) fn from_native(
-        inner: Owned<driver::NativeAllocation>,
-        provider_instance: u64,
-    ) -> Self {
+    pub(crate) fn from_native(inner: Owned<driver::KfdAllocation>, driver_instance: u64) -> Self {
         Self {
-            inner: ProviderAllocation::new(inner),
-            provider_instance,
+            inner: DriverAllocation::new(inner),
+            driver_instance,
         }
     }
 
@@ -818,13 +815,14 @@ impl Allocation {
     /// device has no mapping, `DeviceLost` for a latched native loss, or the
     /// native error from the availability check.
     pub fn device_address(&self, device: &Device) -> Result<u64, Error> {
-        if self.provider_instance != device.endpoint.provider_instance {
+        if self.driver_instance != device.endpoint.driver_instance {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
                 detail: "device belongs to another allocation session",
             });
         }
-        self.inner.device_address(&device.state)
+        let (_, state) = device.linux_kfd()?;
+        self.inner.device_address(state)
     }
 
     /// Replaces the GPU access set of a live allocation. `origin` identifies the
@@ -852,7 +850,7 @@ impl Allocation {
                 detail: "device access list is exhausted",
             })?;
         for device in devices {
-            if self.provider_instance != device.endpoint.provider_instance {
+            if self.driver_instance != device.endpoint.driver_instance {
                 return Err(Error::Operation {
                     kind: ErrorKind::InvalidArgument,
                     detail: "access device belongs to another allocation session",
@@ -866,10 +864,11 @@ impl Allocation {
                     detail: "access device has no qualified route to local memory",
                 });
             }
-            states.push(&device.state);
+            let (_, state) = device.linux_kfd()?;
+            states.push(state);
         }
-        <driver::PlatformDriver as AllocationDriver>::set_allocation_access(
-            self.inner.native_mut(),
+        <driver::KfdDriver as AllocationDriver>::set_allocation_access(
+            self.inner.driver_state_mut(),
             &states,
         )
     }
@@ -878,16 +877,18 @@ impl Allocation {
     /// supplied device. Devices from another session never match.
     #[must_use]
     pub fn originates_from(&self, device: &Device) -> bool {
-        self.provider_instance == device.endpoint.provider_instance
-            && self.inner.originates_from(&device.state)
+        self.driver_instance == device.endpoint.driver_instance
+            && device
+                .linux_kfd()
+                .is_ok_and(|(_, state)| self.inner.originates_from(state))
     }
 
-    /// Returns opaque provider metadata retained with an imported native
+    /// Returns opaque driver metadata retained with an imported native
     /// resource. Its format is defined by the interop operation that created
     /// the allocation; ordinary allocations return an empty slice.
     #[must_use]
     pub fn metadata(&self) -> &[u8] {
-        self.inner.native().metadata()
+        self.inner.driver_state().metadata()
     }
     /// Releases device mappings, the native allocation, and then its virtual
     /// address reservation.
@@ -913,15 +914,15 @@ pub struct HostAllocationInfo {
     /// Requested mapped bytes.
     pub size: u64,
 }
-/// Native host owner and cached facts shared by any provider with host storage.
-pub(crate) struct ProviderHostAllocation<D: HostDriver> {
+/// Host allocation owner and cached facts supplied by a host-memory driver.
+pub(crate) struct DriverHostAllocation<D: HostMemoryDriver> {
     inner: Owned<D::HostAllocation>,
     info: HostAllocationInfo,
 }
 
-impl<D: HostDriver> ProviderHostAllocation<D> {
+impl<D: HostMemoryDriver> DriverHostAllocation<D> {
     pub(crate) fn new(inner: Owned<D::HostAllocation>) -> Self {
-        let info = driver::HostOwnerInfo::cached_info(&*inner);
+        let info = inner.cached_info();
         Self { inner, info }
     }
 
@@ -937,10 +938,10 @@ impl<D: HostDriver> ProviderHostAllocation<D> {
 /// Owns host-only storage and the allocator used for its ownership record.
 /// It has no activated-device or session-connection dependency. The adapter
 /// still enforces its public scope and mapping lifetimes, and callback state
-/// must outlive this owner. Both native lifetime policies use the same host
-/// cleanup path.
+/// must outlive this owner. Host cleanup is the same under both driver context
+/// lifetime policies.
 pub struct HostAllocation {
-    pub(crate) inner: ProviderHostAllocation<driver::PlatformDriver>,
+    pub(crate) inner: DriverHostAllocation<driver::KfdDriver>,
 }
 
 impl HostAllocation {
@@ -970,7 +971,7 @@ impl HostAllocation {
 /// # Errors
 /// Returns a native error if the platform does not report a valid page size.
 pub fn host_page_size() -> Result<u64, Error> {
-    driver::PlatformDriver::host_page_size()
+    driver::KfdDriver::host_page_size()
 }
 
 /// Qualifies explicit host-cache maintenance and returns its line granularity.
@@ -983,7 +984,7 @@ pub fn host_page_size() -> Result<u64, Error> {
 /// required instruction and valid line size. Callers must not advertise a cache
 /// operation using an unqualified nominal hardware line size.
 pub fn host_cache_line_size() -> Result<u32, Error> {
-    driver::PlatformDriver::host_cache_line_size()
+    driver::KfdDriver::host_cache_line_size()
 }
 /// Executes the qualified host-cache maintenance recipe over a nonempty host
 /// range. The backend provides the writeback, invalidation, and ordering
@@ -1006,14 +1007,17 @@ pub fn host_cache_line_size() -> Result<u32, Error> {
 pub unsafe fn host_cache_control(pointer: usize, length: u64, line_size: u32) -> Result<(), Error> {
     // SAFETY: The public caller provides the live mapped range required by the
     // private native boundary; the backend validates the numeric extent.
-    unsafe { driver::PlatformDriver::host_cache_control(pointer, length, line_size) }
+    unsafe { driver::KfdDriver::host_cache_control(pointer, length, line_size) }
 }
 
 impl Device {
-    /// Returns the current bytes available for allocation on this device.
+    /// Returns the current bytes available for allocation on this GPU device.
+    ///
+    /// This compatibility entry point requires a GPU endpoint. New GPU callers
+    /// can use [`GpuDevice::available_memory`] directly.
     #[doc(hidden)]
     pub fn available_memory(&self) -> Result<u64, Error> {
-        self.driver.available_memory(&self.state)
+        self.gpu()?.available_memory()
     }
 
     /// Creates owned backing and establishes its device mapping before
@@ -1037,12 +1041,11 @@ impl Device {
         permissions: DeviceAccess,
     ) -> Result<Allocation, Error> {
         let kind = OwnedMemoryKind::try_from(kind)?;
-        let inner =
-            self.driver
-                .allocate_owned(&self.state, &[], kind, size, alignment, permissions)?;
+        let (driver, state) = self.linux_kfd()?;
+        let inner = driver.allocate_owned(state, &[], kind, size, alignment, permissions)?;
         Ok(Allocation::from_native(
             inner,
-            self.endpoint.provider_instance,
+            self.endpoint.driver_instance,
         ))
     }
 
@@ -1070,9 +1073,10 @@ impl Device {
     ) -> Result<Allocation, Error> {
         // SAFETY: The caller owns the complete page cover through successful
         // free or process teardown, as required by this public raw contract.
+        let (driver, state) = self.linux_kfd()?;
         let inner = unsafe {
-            self.driver.register_host(
-                &self.state,
+            driver.register_host(
+                state,
                 &[],
                 HostRegistration {
                     address,
@@ -1085,7 +1089,7 @@ impl Device {
         };
         Ok(Allocation::from_native(
             inner,
-            self.endpoint.provider_instance,
+            self.endpoint.driver_instance,
         ))
     }
 
@@ -1097,20 +1101,22 @@ impl Device {
     /// Rejects invalid extents or unavailable local storage. Native scratch-base
     /// programming, allocation, mapping, and loss checks may also fail.
     pub(crate) fn allocate_queue_scratch(&self, size: u64) -> Result<Allocation, Error> {
-        let inner = self.driver.allocate_queue_scratch(&self.state, size)?;
+        let (driver, state) = self.linux_kfd()?;
+        let inner = driver.allocate_queue_scratch(state, size)?;
         Ok(Allocation::from_native(
             inner,
-            self.endpoint.provider_instance,
+            self.endpoint.driver_instance,
         ))
     }
 
     /// Maps the device's process-level MMIO remap page.
     #[doc(hidden)]
     pub(crate) fn map_mmio_remap(&self) -> Result<Allocation, Error> {
-        let inner = self.driver.map_mmio_remap(&self.state)?;
+        let (driver, state) = self.linux_kfd()?;
+        let inner = driver.map_mmio_remap(state)?;
         Ok(Allocation::from_native(
             inner,
-            self.endpoint.provider_instance,
+            self.endpoint.driver_instance,
         ))
     }
 
@@ -1135,12 +1141,11 @@ impl Device {
             });
         }
         let kind = OwnedMemoryKind::try_from(kind)?;
-        let owner = Shared::try_new_uninit(self.driver.allocator())?;
-        let inner = self
-            .driver
-            .create_virtual_memory(&self.state, kind, size, pinned, uncached)?;
+        let (driver, state) = self.linux_kfd()?;
+        let owner = Shared::try_new_uninit(driver.allocator())?;
+        let inner = driver.create_virtual_memory(state, kind, size, pinned, uncached)?;
         Ok(VirtualMemory {
-            inner: ProviderVirtualMemory::new(self.driver.clone(), owner.write(inner)),
+            inner: DriverVirtualMemory::new(driver.clone(), owner.write(inner)),
         })
     }
 
@@ -1159,10 +1164,11 @@ impl Device {
         size: u64,
         permissions: DeviceAccess,
     ) -> Result<VirtualDeviceMapping, Error> {
+        let (driver, state) = self.linux_kfd()?;
         Ok(VirtualDeviceMapping {
             inner: memory.inner.map_device(
-                &self.driver,
-                &self.state,
+                driver,
+                state,
                 &reservation.inner,
                 VirtualMapRequest {
                     address,
@@ -1199,17 +1205,12 @@ impl Device {
     ) -> Result<Allocation, Error> {
         let kind = OwnedMemoryKind::try_from(kind)?;
         let states = self.peer_states(peers, kind.get())?;
-        let inner = self.driver.allocate_owned(
-            &self.state,
-            states.as_slice(),
-            kind,
-            size,
-            alignment,
-            permissions,
-        )?;
+        let (driver, state) = self.linux_kfd()?;
+        let inner =
+            driver.allocate_owned(state, states.as_slice(), kind, size, alignment, permissions)?;
         Ok(Allocation::from_native(
             inner,
-            self.endpoint.provider_instance,
+            self.endpoint.driver_instance,
         ))
     }
 
@@ -1239,9 +1240,10 @@ impl Device {
         let states = self.peer_states(peers, MemoryKind::RegisteredHost { address, cache })?;
         // SAFETY: The caller retains the complete page cover through successful
         // free or process teardown across every requested peer VM.
+        let (driver, state) = self.linux_kfd()?;
         let inner = unsafe {
-            self.driver.register_host(
-                &self.state,
+            driver.register_host(
+                state,
                 states.as_slice(),
                 HostRegistration {
                     address,
@@ -1254,7 +1256,7 @@ impl Device {
         };
         Ok(Allocation::from_native(
             inner,
-            self.endpoint.provider_instance,
+            self.endpoint.driver_instance,
         ))
     }
 
@@ -1262,9 +1264,11 @@ impl Device {
         &self,
         peers: &'a [&Self],
         kind: MemoryKind,
-    ) -> Result<Buffer<&'a driver::DeviceState>, Error> {
+    ) -> Result<Buffer<&'a driver::KfdDeviceState>, Error> {
+        let (driver, state) = self.linux_kfd()?;
         for peer in peers {
-            if !Shared::ptr_eq(&self.driver, &peer.driver) {
+            let (peer_driver, _) = peer.linux_kfd()?;
+            if !Shared::ptr_eq(driver, peer_driver) {
                 return Err(Error::Operation {
                     kind: ErrorKind::InvalidArgument,
                     detail: "peer devices must belong to one session",
@@ -1279,16 +1283,17 @@ impl Device {
                 });
             }
         }
-        let mut states = Buffer::try_with_capacity(peers.len(), self.driver.allocator())?;
+        let mut states = Buffer::try_with_capacity(peers.len(), driver.allocator())?;
         for peer in peers {
-            if driver::AddressSpaceInfo::shares_address_domain(&self.state, &peer.state)
-                || states.iter().any(|state: &&driver::DeviceState| {
-                    driver::AddressSpaceInfo::shares_address_domain(*state, &peer.state)
+            let (_, peer_state) = peer.linux_kfd()?;
+            if driver::AddressSpaceInfo::shares_address_domain(state, peer_state)
+                || states.iter().any(|state: &&driver::KfdDeviceState| {
+                    driver::AddressSpaceInfo::shares_address_domain(*state, peer_state)
                 })
             {
                 continue;
             }
-            states.try_push(&peer.state)?;
+            states.try_push(peer_state)?;
         }
         Ok(states)
     }
@@ -1325,16 +1330,9 @@ impl GpuDevice<'_> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::driver::DeviceStateInfo;
 
     #[derive(Clone)]
     struct FakeDeviceState(u8);
-
-    impl DeviceStateInfo for FakeDeviceState {
-        fn has_observed_loss(&self) -> bool {
-            false
-        }
-    }
 
     impl AddressSpaceInfo for FakeDeviceState {
         fn address_range(&self) -> (u64, u64) {
@@ -1347,7 +1345,7 @@ mod tests {
     }
 
     #[test]
-    fn device_intervals_scope_occupancy_to_provider_vm() -> Result<(), Error> {
+    fn device_intervals_scope_occupancy_to_driver_vm() -> Result<(), Error> {
         let intervals =
             DeviceIntervals::<FakeDeviceState>::new(crate::host_storage::Allocator::system());
         let mut ranges = intervals.lock()?;
@@ -1386,12 +1384,12 @@ mod tests {
     #[test]
     #[ignore = "requires a qualified GPU and live DRM virtual-memory mapping"]
     fn live_device_mapping_rejects_overlap_and_reuses_freed_interval() {
-        use crate::session::{Session, SessionLifetime};
+        use crate::session::{DriverContextLifetime, Session};
 
         // Each ignored GPU test runs in the same Rust test process. Use a
         // separate KFD context so one test cannot retain the primary VM that
         // another test would try to acquire.
-        let mut session = Session::new(SessionLifetime::Session).unwrap();
+        let mut session = Session::new(DriverContextLifetime::Session).unwrap();
         let mut endpoint = None;
         session
             .enumerate(&mut |candidate| {
@@ -1471,9 +1469,9 @@ mod tests {
     #[test]
     #[ignore = "requires a qualified GPU and live KFD virtual-memory mapping"]
     fn live_host_mapping_rejects_overlap_and_reuses_freed_interval() {
-        use crate::session::{Session, SessionLifetime};
+        use crate::session::{DriverContextLifetime, Session};
 
-        let mut session = Session::new(SessionLifetime::Session).unwrap();
+        let mut session = Session::new(DriverContextLifetime::Session).unwrap();
         let mut endpoint = None;
         session
             .enumerate(&mut |candidate| {

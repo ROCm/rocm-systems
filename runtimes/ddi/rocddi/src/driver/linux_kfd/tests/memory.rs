@@ -43,14 +43,14 @@ struct Fixture {
     vm: Shared<DeviceVm>,
 }
 
-fn node() -> sysfs::NativeNode {
-    sysfs::NativeNode {
+fn node() -> sysfs::KfdNode {
+    sysfs::KfdNode {
         node: 1,
         gpu_id: 42,
         render_minor: Some(128),
         unique_id: Some(123),
         identity: [0; 16],
-        queues: sysfs::NativeQueueProperties::default(),
+        queues: sysfs::KfdQueueProperties::default(),
         local_memory_bytes: 1 << 30,
         public_memory_bytes: 0,
     }
@@ -65,10 +65,10 @@ fn desc() -> AllocationDesc {
 
 fn scratch_pool() -> Mutex<ScratchPool> {
     Mutex::new(ScratchPool::new(
-        sysfs::NativeQueueProperties {
+        sysfs::KfdQueueProperties {
             gfx_target: 120_001,
             xcc_count: 1,
-            ..sysfs::NativeQueueProperties::default()
+            ..sysfs::KfdQueueProperties::default()
         },
         Allocator::default(),
     ))
@@ -418,13 +418,13 @@ impl Fixture {
 
     fn allocate_with_lifetime(
         &self,
-        lifetime: crate::session::SessionLifetime,
+        lifetime: crate::session::DriverContextLifetime,
         kind: MemoryKind,
         permissions: DeviceAccess,
-    ) -> Result<Owned<super::super::NativeAllocation>, Error> {
+    ) -> Result<Owned<super::super::LinuxAllocation>, Error> {
         let device = super::super::DeviceState {
             vm: self.vm.clone(),
-            native: sysfs::NativeNode {
+            native: sysfs::KfdNode {
                 public_memory_bytes: 1 << 28,
                 ..node()
             },
@@ -627,7 +627,7 @@ fn secondary_context_rejects_owned_userptr_before_native_allocation() {
     assert_eq!(
         fixture
             .allocate_with_lifetime(
-                crate::session::SessionLifetime::Session,
+                crate::session::DriverContextLifetime::Session,
                 MemoryKind::OwnedHost {
                     cache: HostCachePolicy::Fine,
                 },
@@ -647,14 +647,14 @@ fn secondary_extended_registration_reaches_drm_only_for_gfx1201() {
     let fixture = Fixture::new([]);
     let make_device = |gfx_target| super::super::DeviceState {
         vm: fixture.vm.clone(),
-        native: sysfs::NativeNode {
-            queues: sysfs::NativeQueueProperties {
+        native: sysfs::KfdNode {
+            queues: sysfs::KfdQueueProperties {
                 gfx_target,
-                ..sysfs::NativeQueueProperties::default()
+                ..sysfs::KfdQueueProperties::default()
             },
             ..node()
         },
-        lifetime: crate::session::SessionLifetime::Session,
+        lifetime: crate::session::DriverContextLifetime::Session,
         gpu_counter_frequency_hz: 0,
     };
     let driver = super::super::LinuxKfdDriver::new(Allocator::default());
@@ -2020,14 +2020,14 @@ fn native_loss_latches_without_preventing_explicit_cleanup() {
         Reply::Free(None),
     ]);
     let mut allocation = fixture.create().unwrap();
-    assert!(!fixture.vm.has_observed_loss());
+    assert!(!fixture.vm.has_latched_loss());
     fixture.lost.store(true, Ordering::Relaxed);
-    assert!(!fixture.vm.has_observed_loss());
+    assert!(!fixture.vm.has_latched_loss());
     assert_eq!(
         allocation.device_address(&fixture.vm).unwrap_err().kind(),
         ErrorKind::DeviceLost
     );
-    assert!(fixture.vm.has_observed_loss());
+    assert!(fixture.vm.has_latched_loss());
     fixture.lost.store(false, Ordering::Relaxed);
     assert_eq!(
         allocation.device_address(&fixture.vm).unwrap_err().kind(),
@@ -2084,7 +2084,7 @@ fn claimed_memory_fault_is_reported_without_latching_device_loss() {
         })
     );
     assert!(fixture.vm.check().is_ok());
-    assert!(!fixture.vm.has_observed_loss());
+    assert!(!fixture.vm.has_latched_loss());
     fixture.lost.store(false, Ordering::Release);
 }
 
@@ -2286,7 +2286,7 @@ fn runtime_enable_allows_recreation_and_late_distinct_device_activation() {
     let recreated = bindings
         .device_with_render(&kfd, &native, |_| panic!("reopened the bound device"))
         .unwrap();
-    let second = sysfs::NativeNode {
+    let second = sysfs::KfdNode {
         node: 2,
         gpu_id: 43,
         render_minor: Some(129),
