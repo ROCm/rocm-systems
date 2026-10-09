@@ -42,6 +42,11 @@ def _load_source_interface():
             importlib.import_module(f"{_PKG}.amdsmi_interface_utils"),
         )
     except (ModuleNotFoundError, ImportError):
+        # When the sources are present, an import failure is a real error
+        # (e.g. a broken amdsmi_interface). When py-interface is absent
+        # (installed-only test runs), skip.
+        if os.path.isfile(os.path.join(_PY_INTERFACE, "amdsmi_interface.py")):
+            raise
         for name in [n for n in list(sys.modules) if n == _PKG or n.startswith(_PKG + ".")]:
             del sys.modules[name]
         return None, None, None, None

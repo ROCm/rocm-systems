@@ -1862,8 +1862,9 @@ typedef enum {
 /**
  * @brief IFoE CPER notify type GUID
  *
- * Placeholder GUID for IFoE fabric error records. Will be replaced with
- * official GUID once provided by UALoE team.
+ * Placeholder GUID for IFoE fabric error records. The all-FF value means
+ * "N/A, not yet assigned". Will be replaced with official GUID once provided
+ * by UALoE team.
  *
  * @cond @tag{host} @endcond
  */
@@ -6254,9 +6255,7 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_ha
  *  @platform{host}
  *
  *  @details Returns CPER-formatted error records for IFoE network port link events
- *  (link down, link up, fatal errors). Uses the same CPER format and calling
- *  conventions as amdsmi_get_gpu_cper_entries() so callers can handle both GPU and
- *  fabric CPERs with identical code paths.
+ *  (link down, link up, fatal errors).
  *
  *  Records are fetched from the UALoE library and transformed into full UEFI CPER
  *  format. The notify_type field is set to AMDSMI_CPER_NOTIFY_TYPE_IFOE_GUID to
@@ -6287,8 +6286,8 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_ha
  *          ::AMDSMI_STATUS_MORE_DATA if entries returned but more remain,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if UALoE not available,
  *          ::AMDSMI_STATUS_INVAL if null pointer or out-of-range entry_count arguments,
- *          ::AMDSMI_STATUS_OUT_OF_RESOURCES if buffer too small for one entry,
- *          non-zero on other failures
+ *          ::AMDSMI_STATUS_OUT_OF_RESOURCES if buffer too small (cursor advanced, partial output
+ * may be present), or if internal allocation fails, non-zero on other failures
  */
 amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor_handle,
                                                uint32_t severity_mask, char* cper_data,

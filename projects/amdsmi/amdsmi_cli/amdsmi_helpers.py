@@ -2958,8 +2958,11 @@ class AMDSMIHelpers:
                     or e.get_error_code()
                     == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND
                 ):
-                    logging.debug("GPU CPER not supported on this device")
-                    break
+                    raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
+                        logger.format,
+                        e.get_error_code(),
+                        detail="Error accessing CPER files. This command requires CPER to be enabled.",
+                    ) from e
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_ERROR:
                     raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
                         logger.format,
@@ -2994,6 +2997,7 @@ class AMDSMIHelpers:
         while len(fabric_cursors) <= gpu_idx:
             fabric_cursors.append(0)
 
+        fabric_has_more = False
         while True:
             try:
                 fabric_entries, new_fabric_cursor, fabric_cper_data, fabric_status_code = (
@@ -3001,8 +3005,15 @@ class AMDSMIHelpers:
                         device_handle, severity_mask, buffer_size, fabric_cursors[gpu_idx]
                     )
                 )
-                logging.debug(f"fabric_cper_entries | entries: {fabric_entries}")
+                logging.debug(
+                    f"fabric_cper_entries | entries: {fabric_entries}, status: {fabric_status_code}"
+                )
                 num_entries = num_entries + len(fabric_entries)
+
+                # Check if the status indicates more data is available or if we're done
+                fabric_has_more = (
+                    fabric_status_code == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_MORE_DATA
+                )
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                     raise PermissionError(
@@ -3029,19 +3040,23 @@ class AMDSMIHelpers:
                 break
 
             fabric_cursors[gpu_idx] = new_fabric_cursor
-            if len(fabric_entries) == 0 or new_fabric_cursor == 0:
-                break
 
-            self._emit_cper_output(
-                fabric_entries,
-                fabric_cper_data,
-                device_handle,
-                args,
-                logger,
-                collected_json_rows,
-                emit_inline,
-                cper_counter,
-            )
+            # Emit output if we have entries
+            if len(fabric_entries) > 0:
+                self._emit_cper_output(
+                    fabric_entries,
+                    fabric_cper_data,
+                    device_handle,
+                    args,
+                    logger,
+                    collected_json_rows,
+                    emit_inline,
+                    cper_counter,
+                )
+
+            # Stop pagination when cursor is 0 (no more data) or no entries returned
+            if new_fabric_cursor == 0 or (len(fabric_entries) == 0 and not fabric_has_more):
+                break
 
         if num_entries == 0 and not args.follow:
             # If nothing was found, still emit the warning/header logic.

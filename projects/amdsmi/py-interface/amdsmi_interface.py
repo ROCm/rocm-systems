@@ -3623,9 +3623,10 @@ def amdsmi_get_fabric_cper_entries(
 
     buf = ctypes.create_string_buffer(buffer_size)
     buf_size = ctypes.c_uint64(buffer_size)
-    entry_count = ctypes.c_uint64(20)
+    num_cper_hdrs = 20
+    entry_count = ctypes.c_uint64(num_cper_hdrs)
     cur = ctypes.c_uint64(cursor)
-    cper_hdrs_array = (ctypes.POINTER(amdsmi_wrapper.amdsmi_cper_hdr_t) * 20)()
+    cper_hdrs_array = (ctypes.POINTER(amdsmi_wrapper.amdsmi_cper_hdr_t) * num_cper_hdrs)()
     cper_hdrs = ctypes.cast(
         cper_hdrs_array, ctypes.POINTER(ctypes.POINTER(amdsmi_wrapper.amdsmi_cper_hdr_t))
     )
