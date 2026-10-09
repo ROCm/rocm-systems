@@ -11,7 +11,7 @@ By default, the given Dockerfile uses `docker.io/rocm/dev-ubuntu-22.04:latest` a
 $ docker build -t rccl-tests -f Dockerfile.ubuntu --pull .
 ```
 
-The base docker image, rocm-systems repo (`ROCM_SYSTEMS_REPO`), branch/tag/commit (`ROCM_SYSTEMS_REF`), and GPU targets can be modified using `--build-args` in the `docker build` command above. E.g., to use a different base docker image for the MI250 GPU:
+The base docker image, rocm-systems repo (`ROCM_SYSTEMS_REPO`), branch/tag/commit (`ROCM_SYSTEMS_REF`), and GPU targets can be modified using `--build-arg` in the `docker build` command above. E.g., to use a different base docker image for the MI250 GPU:
 ```shell
 $ docker build -t rccl-tests -f Dockerfile.ubuntu --build-arg="ROCM_IMAGE_NAME=rocm/dev-ubuntu-20.04" --build-arg="ROCM_IMAGE_TAG=6.2" --build-arg="GPU_TARGETS=gfx90a" --pull .
 ```
