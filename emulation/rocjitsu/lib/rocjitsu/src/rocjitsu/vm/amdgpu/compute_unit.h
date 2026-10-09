@@ -1451,6 +1451,9 @@ protected:
   /// @brief Fault a dispatch for an exhausted GWS inactivity budget or a barrier before INIT.
   void fail_gws_wait(Wavefront &wf, std::string_view reason);
 
+  /// @brief Cancel an unhandled decode or execution failure without successful completion.
+  void handle_instruction_failure(Wavefront &wf, const std::string &failure);
+
   mutable std::recursive_mutex wave_state_mutex_;
   /// @brief Recursion depth of WaveStateGuard on the thread holding the mutex.
   /// @details Only ever touched under @ref wave_state_mutex_, so the value
