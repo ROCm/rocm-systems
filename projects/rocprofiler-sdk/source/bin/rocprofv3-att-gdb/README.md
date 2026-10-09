@@ -1,0 +1,124 @@
+# rocprofv3-att-gdb prototype
+
+Trigger ATT from CPU breakpoints without adding ROCTx calls to an application:
+
+```sh
+rocprofv3-att-gdb --start begin_iteration --stop end_iteration \
+    --att-shader-engine-mask 0x3 --att-buffer-size 16777216 -d traces -- ./application
+```
+
+Use your usual rocprofv3 ATT settings. `--timeout 50ms` can replace or supplement
+the end breakpoint. Add `--skip 100` to ignore the first 100 start-breakpoint hits
+and capture on hit 101:
+
+```sh
+rocprofv3-att-gdb --start begin_iteration --skip 100 --stop end_iteration \
+    -d traces -- ./application
+```
+
+This counts CPU breakpoint hits across threads and resolved locations. It selects
+dispatch 101 only if the location executes once per desired dispatch. The end
+breakpoint stays disabled during warmup, and the start breakpoint is removed
+before capture starts. Skipped hits can still incur debugger overhead during
+warmup, but do not call the profiler.
+
+With no `--start`, the launcher opens ROCgdb: use
+`att arm --start LOCATION --skip 100 --stop LOCATION`, then `run`. `att status`
+reports the capture state and remaining skip count; `att cancel` cancels it.
+Add `--batch` for unattended scripts: the debugger exits when the application
+finishes, returning nonzero if capture does not finish or the application fails.
+Without `--batch`, ROCgdb stays open for inspection. This option does not select
+dispatch batches or end the application when capture stops. Source locations
+need debug information; place the start after GPU/kernel initialization.
+
+You can also let the application run before choosing the capture locations:
+
+```text
+$ rocprofv3-att-gdb -d traces -- ./application
+(gdb) run
+... press Ctrl+C when ready to choose the triggers ...
+(gdb) att arm --start begin_iteration --stop end_iteration
+(gdb) continue
+```
+
+In the prototype's non-stop mode, Ctrl+C stops the selected thread and
+`continue` resumes it; other threads, including the profiler worker, keep
+running. Arming creates the breakpoints without starting capture immediately.
+If supplied here, `--skip N` counts future hits after arming, excluding any
+iterations that already ran. This workflow uses an application launched with
+the helper; injecting the profiler into an independently started process needs
+the planned attach support.
+
+For timed captures, a one-shot debugger watchdog reports an error if stopping
+has not completed within 10 seconds after the capture deadline. The target
+worker still uses its one-shot timer, with no periodic checks during capture.
+If a short interval expires before application continuation, the triggering
+thread stays stopped. After Pause is acknowledged, use `att cancel` to clear the
+failed capture, then rearm with a longer interval and continue when ready.
+An early stop in the loader (for example, `starti`) can delay helper setup;
+connection attempts resume on continuation or at the selected start hit.
+
+For a particular kernel, choose its CPU launch line or a host wrapper. Compiled
+HIP code may also expose a CPU launch stub, usable as, for example,
+`--start '__device_stub__my_kernel(float*)'`. This requires an actual call to
+that stub: optimization can inline the call even when the symbol still exists.
+The stub path is tested with inlining disabled; it is not a general kernel-name
+selector for optimized, JIT, or graph launches. GPU-entry breakpoints require
+future GPU support and can hit per wave rather than per dispatch.
+The kernel-specific trigger chooses the start boundary; other GPU work in the
+selected region can also be traced.
+
+The normal SDK build installs the launcher, Python extension, and helper. To
+build only this prototype against an existing ROCm installation:
+
+```sh
+cmake -S source/bin/rocprofv3-att-gdb -B build/att-gdb
+cmake --build build/att-gdb
+build/att-gdb/bin/rocprofv3-att-gdb --rocprofv3 /opt/rocm/bin/rocprofv3 \
+    --start begin_iteration --timeout 50ms -d traces -- ./application
+```
+
+You can install it to a chosen prefix with `cmake --install build/att-gdb
+--prefix /your/prefix`. The installed command discovers rocprofv3/ROCgdb from
+its installation or PATH, with `/opt/rocm` as a fallback. `--rocprofv3` and
+`--rocgdb` override those choices. No Python package installation is required
+for the launcher or extension.
+
+Developer tests require pytest and a C++ compiler. The GPU tests additionally
+need HIP, ROCgdb with Python, an ATT-capable GPU, and the trace decoder used by
+rocprofv3. Debugger state tests use ROCgdb or GDB with Python and a CPU fixture
+with controlled ROCTx calls; they are skipped if neither debugger is available:
+
+```sh
+cmake -S source/bin/rocprofv3-att-gdb -B build/att-gdb \
+    -DROCPROFV3_ATT_GDB_GPU_TESTS=ON
+cmake --build build/att-gdb
+ctest --test-dir build/att-gdb --output-on-failure
+```
+
+`ROCPROFV3_ATT_GDB_ROCM_ROOT` selects the test ROCm installation and
+`ROCPROFV3_ATT_GDB_GPU_ARCH` selects the HIP target (default `native`). Test
+coverage includes breakpoint/timeout capture, competing stop sources, literal
+application arguments, concurrent CPU trigger hits, repeated captures,
+cancellation, preservation of user breakpoints, missing triggers, duplicate/stale
+commands, disconnect cleanup, warmup skipping (including interactive use and an
+unreached selected hit), and a HIP host-stub trigger with inlining disabled.
+Regression cases cover blocked timed stops, deadline completion grace, expired
+capture recovery, preservation of new user breakpoint/signal stops while a
+control call is pending, and connection retry after a loader stop.
+GPU checks decode the traces and assert that only the inside kernel was traced.
+
+This is the single-process launch prototype. It uses a separate, preloaded
+helper to call existing ROCTx controls and does not add a maintained control API
+to the rocprofv3 tool. The helper blocks on a socket and optional one-shot timer
+during capture. The Python extension runs in ROCgdb and performs GDB operations
+only on the debugger thread, deferring breakpoint mutations through stop events.
+
+Application ROCTx Pause/Resume shares the prototype's state. Other application
+threads and GPU work remain running during trigger handling. Start/stop
+latencies and a host timer do not promise exact GPU boundaries; already running
+waves are not forced through CWSR. Prototype launch support does not implement
+production `rocprofv3 --attach`, GPU breakpoints, or multi-process coordination.
+See the [user guide](../../docs/how-to/using-thread-trace.rst) for usage and the
+[design plan](../../docs/conceptual/debugger-triggered-att-plan.md) for production
+requirements.
