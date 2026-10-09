@@ -57,6 +57,21 @@ def apply_torch_operator_glob(pattern):
     return workload
 
 
+def cli_with_two_operator_workloads(args):
+    inst = cli_analysis.__new__(cli_analysis)
+    inst._profiling_config = {}
+    inst._output = None
+    inst._runs = {
+        "/w1": workload_with_operator_forest(),
+        "/w2": workload_with_operator_forest(),
+    }
+    for workload in inst._runs.values():
+        workload.sys_info = pd.DataFrame([{"gpu_arch": "gfx950"}])
+    inst._arch_configs = {"gfx950": SimpleNamespace(dfs_expressions={})}
+    inst._OmniAnalyze_Base__args = args
+    return inst
+
+
 # -- pre_processing: membw auto-run -------------------------------------------
 
 
@@ -336,3 +351,79 @@ def test_list_operators_omits_other_backend_kernel_lines(capsys):
     captured = capsys.readouterr()
     assert "triton_matmul_kernel" in captured.out
     assert "torch_gemm_kernel" not in captured.out
+
+
+def test_pre_processing_lists_operators_for_every_path(monkeypatch):
+    args = argparse.Namespace(
+        path=[["/w1"], ["/w2"]],
+        verbose=0,
+        time_unit="ns",
+        torch_operator=None,
+        triton_operator=None,
+        list_torch_operators=True,
+        list_triton_operators=False,
+    )
+    inst = cli_with_two_operator_workloads(args)
+    listed_paths = []
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_base.OmniAnalyze_Base.pre_processing",
+        lambda self: None,
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.cli_analysis.pc_sampling_only",
+        lambda self: False,
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.cli_analysis.load_pc_sampling_tool_data",
+        lambda self, _path: None,
+    )
+    monkeypatch.setattr("utils.file_io.create_df_pmc", lambda *a, **kw: pd.DataFrame())
+    monkeypatch.setattr(
+        "utils.file_io.create_df_kernel_top_stats",
+        lambda *a, **kw: (pd.DataFrame(), pd.DataFrame()),
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.process_ml_api_trace_output",
+        lambda workload, workload_dir: None,
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.cli_analysis.list_operators",
+        lambda self, workload_path, kernel_top, backends: listed_paths.append(
+            workload_path
+        ),
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        inst.pre_processing()
+    assert excinfo.value.code == 0
+    assert listed_paths == ["/w1", "/w2"]
+
+
+def test_run_analysis_prints_matched_tree_for_every_path(monkeypatch):
+    args = argparse.Namespace(
+        path=[["/w1"], ["/w2"]],
+        torch_operator=["*addmm*"],
+        triton_operator=None,
+        list_stats=False,
+    )
+    inst = cli_with_two_operator_workloads(args)
+    handled_paths = []
+
+    def capture_handle(self, handle_args, workload, backends):
+        for workload_path, run in inst._runs.items():
+            if run is workload:
+                handled_paths.append(workload_path)
+
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_base.OmniAnalyze_Base.run_analysis",
+        lambda self: None,
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.cli_analysis.handle_operator",
+        capture_handle,
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.tty.show_all",
+        lambda *a, **kw: None,
+    )
+    inst.run_analysis()
+    assert handled_paths == ["/w1", "/w2"]
