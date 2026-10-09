@@ -203,12 +203,7 @@ __device__ __noinline__ void QueuePairIONIC::post_wqe_rma(
         // TODO why is this needed?
         wqe->common.pld.data[0] = 1;
       } else {
-        // Always read/write 8B to emit a single load+store instruction;
-        // overread is safe (heap page), NIC uses wqe length for actual size.
-        static_assert(Traits::InlineThreshold <= sizeof(uint64_t));
-        uint64_t val;
-        __builtin_memcpy(&val, reinterpret_cast<const void*>(laddr), sizeof(val));
-        *reinterpret_cast<uint64_t*>(wqe->common.pld.data) = val;
+        copy_inline_payload(wqe->common.pld.data, laddr, size);
       }
     } else {
       wqe->common.pld.sgl[0].va   = endian::to_be<uint64_t>(laddr);
@@ -266,12 +261,7 @@ __device__ __noinline__ void QueuePairIONIC::post_wqe_rma_single(
         // TODO why is this needed?
         wqe->common.pld.data[0] = 1;
       } else {
-        // Always read/write 8B to emit a single load+store instruction;
-        // overread is safe (heap page), NIC uses wqe length for actual size.
-        static_assert(Traits::InlineThreshold <= sizeof(uint64_t));
-        uint64_t val;
-        __builtin_memcpy(&val, reinterpret_cast<const void*>(laddr), sizeof(val));
-        *reinterpret_cast<uint64_t*>(wqe->common.pld.data) = val;
+        copy_inline_payload(wqe->common.pld.data, laddr, size);
       }
     } else {
       wqe->common.pld.sgl[0].va   = endian::to_be<uint64_t>(laddr);
