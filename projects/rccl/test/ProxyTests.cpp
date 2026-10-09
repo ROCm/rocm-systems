@@ -15,6 +15,8 @@
 #include <assert.h>
 #include <errno.h>
 #include <arpa/inet.h>
+#include <assert.h>
+#include <errno.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <pthread.h>
