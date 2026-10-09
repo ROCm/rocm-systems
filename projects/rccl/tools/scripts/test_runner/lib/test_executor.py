@@ -1164,6 +1164,11 @@ class TestExecutor:
         self.build_config = config_processor.get_build_config()
         self.rccl_tests_build_config = config_processor.get_rccl_tests_build_config()
 
+        # Must be set before setup_directories() which calls _prepare_incremental_emit()
+        self.emit_enabled = bool(
+            getattr(args, "emit_results", False) or getattr(args, "db_push", False)
+        )
+
         # Setup directories
         self.setup_directories()
 
@@ -1193,11 +1198,8 @@ class TestExecutor:
         self.test_run_identities = []
         self.test_executed = []
 
-        # Structured result emission (dashboard). Enabling either --emit-results or
-        # --db-push turns on per-test log capture so perf output can be parsed.
-        self.emit_enabled = bool(
-            getattr(args, "emit_results", False) or getattr(args, "db_push", False)
-        )
+        # Structured result emission (dashboard). emit_enabled is set earlier in
+        # __init__ (before setup_directories) so _prepare_incremental_emit() can use it.
         self.test_records = []       # rich per-test records for the emitter
         self._emit_log_counter = 0   # keeps captured-log filenames unique
         # Incremental emission state: set by _open_incremental_writer() once
