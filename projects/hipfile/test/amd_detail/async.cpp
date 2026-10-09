@@ -167,6 +167,69 @@ TEST_F(HipFileAsyncOp, async_dispatch_runs_inline_when_submit_throws)
     ASSERT_EQ(slot_storage, 1u);
 }
 
+TEST_F(HipFileAsyncOp, submitIoAndWait_runs_io_fn_on_pool_and_signals_completion)
+{
+    StrictMock<MThreadPool> mpool;
+    auto                    tg     = std::make_unique<StrictMock<MTaskGroup>>();
+    auto                    tg_raw = tg.get();
+    EXPECT_CALL(mpool, makeTaskGroup()).WillOnce(Return(ByMove(std::move(tg))));
+    EXPECT_CALL(*tg_raw, wait());
+    StrictMock<MAsyncMonitor> mmon;
+
+    uint64_t slot_storage      = 0;
+    size_t   size              = 100;
+    hoff_t   file_offset       = 0;
+    hoff_t   buffer_offset     = 0;
+    ssize_t  bytes_transferred = 0;
+    EXPECT_CALL(*stream, signalSlot).WillRepeatedly(Return(&slot_storage));
+    auto op   = std::make_unique<AsyncOp>(IoType::Read, file, buffer, stream, &size, &file_offset,
+                                          &buffer_offset, &bytes_transferred);
+    op->io_fn = testAsyncIoFn;
+    g_test_io_fn_calls.store(0);
+
+    EXPECT_CALL(mmon, submitIoAndWait(op.get())).WillOnce([&mmon](AsyncOp *o) {
+        mmon.AsyncMonitor::submitIoAndWait(o);
+    });
+    EXPECT_CALL(*tg_raw, run(_)).WillOnce([](std::function<void()> work) { work(); });
+    mmon.submitIoAndWait(op.release());
+
+    ASSERT_EQ(g_test_io_fn_calls.load(), 1);
+    ASSERT_EQ(slot_storage, 1u);
+}
+
+TEST_F(HipFileAsyncOp, async_run_inline_delegates_to_submitIoAndWait)
+{
+    StrictMock<MAsyncMonitor> mmon;
+    size_t                    size              = 100;
+    hoff_t                    file_offset       = 0;
+    hoff_t                    buffer_offset     = 0;
+    ssize_t                   bytes_transferred = 0;
+    auto op = std::make_shared<AsyncOp>(IoType::Read, file, buffer, stream, &size, &file_offset,
+                                        &buffer_offset, &bytes_transferred);
+    EXPECT_CALL(mmon, submitIoAndWait(op.get()));
+    async_run_inline(op.get());
+}
+
+TEST_F(HipFileAsyncOp, async_run_inline_runs_inline_when_submit_throws)
+{
+    StrictMock<MAsyncMonitor> mmon;
+    uint64_t                  slot_storage      = 0;
+    size_t                    size              = 100;
+    hoff_t                    file_offset       = 0;
+    hoff_t                    buffer_offset     = 0;
+    ssize_t                   bytes_transferred = 0;
+    EXPECT_CALL(*stream, signalSlot).WillRepeatedly(Return(&slot_storage));
+    auto op   = std::make_unique<AsyncOp>(IoType::Read, file, buffer, stream, &size, &file_offset,
+                                          &buffer_offset, &bytes_transferred);
+    op->io_fn = testAsyncIoFn;
+    g_test_io_fn_calls.store(0);
+
+    EXPECT_CALL(mmon, submitIoAndWait(op.get())).WillOnce(Throw(std::runtime_error("no capacity")));
+    async_run_inline(op.release());
+    ASSERT_EQ(g_test_io_fn_calls.load(), 1);
+    ASSERT_EQ(slot_storage, 1u);
+}
+
 TEST_F(HipFileAsyncOp, enqueueAsync_supported_emits_dispatch_and_wait)
 {
     StrictMock<MAsyncMonitor> mmon;

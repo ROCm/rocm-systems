@@ -18,6 +18,7 @@ struct MAsyncMonitor : AsyncMonitor {
     {
     }
     MOCK_METHOD(void, submitIo, (AsyncOp * op), (override));
+    MOCK_METHOD(void, submitIoAndWait, (AsyncOp * op), (override));
 };
 
 }

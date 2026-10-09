@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <future>
 #include <hip/hip_runtime_api.h>
 #include <memory>
 #include <stdexcept>
@@ -60,6 +61,20 @@ AsyncMonitor::submitIo(AsyncOp *op)
         owned->io_fn(owned.get());
         signalOffloadComplete(owned.get());
     });
+}
+
+void
+AsyncMonitor::submitIoAndWait(AsyncOp *op)
+{
+    std::promise<void> done;
+    std::future<void>  fut = done.get_future();
+    task_group->run([op, &done]() {
+        std::unique_ptr<AsyncOp> owned{op};
+        owned->io_fn(owned.get());
+        signalOffloadComplete(owned.get());
+        done.set_value();
+    });
+    fut.wait();
 }
 
 AsyncOp::AsyncOp(IoType _io_type, std::shared_ptr<IFile> _file, std::shared_ptr<IBuffer> _buffer,
@@ -176,8 +191,14 @@ void
 async_run_inline(void *userargs)
 {
     using namespace hipFile;
-    std::unique_ptr<AsyncOp> owned{static_cast<AsyncOp *>(userargs)};
-    async_run_io(owned.get());
-    signalOffloadComplete(owned.get());
+    auto op = static_cast<AsyncOp *>(userargs);
+    try {
+        Context<AsyncMonitor>::get()->submitIoAndWait(op);
+    }
+    catch (...) {
+        std::unique_ptr<AsyncOp> owned{op};
+        owned->io_fn(owned.get());
+        signalOffloadComplete(owned.get());
+    }
 }
 }

@@ -60,6 +60,7 @@ public:
     AsyncMonitor();
 
     virtual void submitIo(AsyncOp *op);
+    virtual void submitIoAndWait(AsyncOp *op);
 
 private:
     std::unique_ptr<ITaskGroup> task_group;
