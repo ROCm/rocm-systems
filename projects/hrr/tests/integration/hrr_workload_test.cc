@@ -58,6 +58,17 @@
 #include <unistd.h>
 #endif
 
+// Cross-check only: the HIP headers this build sees predate hipLibraryGetModule
+// (develop #11775), so resolve it from the loaded runtime instead.
+#ifndef _WIN32
+static hipError_t hrr_xc_hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library) {
+  using Fn = hipError_t (*)(hipModule_t*, hipLibrary_t);
+  static Fn fn = reinterpret_cast<Fn>(dlsym(RTLD_DEFAULT, "hipLibraryGetModule"));
+  return fn ? fn(pMod, library) : hipErrorNotSupported;
+}
+#define hipLibraryGetModule hrr_xc_hipLibraryGetModule
+#endif
+
 // ---------------------------------------------------------------------------
 // Workload parameters
 // ---------------------------------------------------------------------------
