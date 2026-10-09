@@ -164,6 +164,10 @@ Host::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer
     return static_cast<ssize_t>(total_io_bytes);
 }
 
+#pragma GCC diagnostic push
+// Ignore missing [[noreturn]] attribute due to unimplemented exception throw.
+// This function will return as soon as the async logic is implemented.
+#pragma GCC diagnostic ignored "-Wmissing-noreturn"
 void
 Host::async_io(IoType, std::shared_ptr<IFile>, std::shared_ptr<IBuffer>, size_t *, hoff_t *, hoff_t *,
                ssize_t *, std::shared_ptr<IStream>)
@@ -177,3 +181,4 @@ Host::enqueueAsyncIo(IoType, std::shared_ptr<IFile>, std::shared_ptr<IBuffer>, s
 {
     throw std::runtime_error("Host::enqueueAsyncIo is not implemented");
 }
+#pragma GCC diagnostic pop
