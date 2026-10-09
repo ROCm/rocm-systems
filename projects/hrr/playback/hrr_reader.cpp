@@ -677,11 +677,21 @@ bool load_archive(const std::string& path, Archive& archive) {
   return true;
 }
 
+// fseek takes a long, 32 bits on Windows, and an msvcrt fseek fails once the
+// file position passes 2 GiB even for a small relative offset. events.bin can
+// be larger than that, so the walk seeks with the 64-bit call.
+static int seek64(FILE* f, int64_t offset, int origin) {
+#ifdef _WIN32
+  return _fseeki64(f, offset, origin);
+#else
+  return fseeko(f, static_cast<off_t>(offset), origin);
+#endif
+}
+
 // The framing checks are read_raw_record's, so a record the loader takes as
 // torn ends the walk here too, and like the loader the walk stops at the first
 // trailer. A payload that runs past the end of the file needs no check of its
-// own: the seek succeeds and the next header read fails. Every seek is relative
-// and at most kMaxRecordBytes, so a 32-bit long (Windows) is enough.
+// own: the seek succeeds and the next header read fails.
 bool has_clean_trailer(const std::string& archive_dir) {
   FILE* f = fopen((fs::path(archive_dir) / "events.bin").string().c_str(), "rb");
   if (!f) return false;
@@ -702,7 +712,7 @@ bool has_clean_trailer(const std::string& archive_dir) {
         break;
       }
     } else {
-      ok = fseek(f, static_cast<long>(total - hdr_size), SEEK_CUR) == 0;
+      ok = seek64(f, static_cast<int64_t>(total - hdr_size), SEEK_CUR) == 0;
     }
     ++records;
   }
