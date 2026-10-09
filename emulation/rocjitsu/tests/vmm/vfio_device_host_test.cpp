@@ -1682,6 +1682,13 @@ TEST(VfioDeviceHostLifecycle, ForgetsGuestWindowsBeforeServingAnotherClient) {
   EXPECT_EQ(served.device().mapped_regions(), 0u)
       << "the disconnected client's windows must be gone";
 
+  // The version handshake can return before the serving thread marks the
+  // client attached. A device-info reply comes from that loop, so the probe
+  // below sees Faulted rather than Unavailable.
+  uint32_t region_count = 0;
+  uint32_t irq_count = 0;
+  ASSERT_TRUE(second.device_info(region_count, irq_count));
+
   std::vector<std::byte> stale(4, std::byte{0});
   EXPECT_EQ(served.dma().read_outcome(kReconnectIova, stale), simdojo::DmaAccessOutcome::Faulted)
       << "the old window must not be readable by the new client";
