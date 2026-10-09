@@ -400,9 +400,10 @@ TEST(VfioDeviceHost, WithholdsAWindowSharedWithoutADescriptor) {
   // a transfer may not fall back to reading the region behind the transport's
   // back just because the device was never told about it.
   std::vector<std::byte> probe(4, std::byte{0});
-  EXPECT_FALSE(served.dma().read(0x200000, probe))
+  // A missing descriptor is a rejected range, not a missing transport.
+  EXPECT_EQ(served.dma().read_outcome(0x200000, probe), simdojo::DmaAccessOutcome::Faulted)
       << "the device must not read through a window shared without a descriptor";
-  EXPECT_FALSE(served.dma().write(0x200000, probe))
+  EXPECT_EQ(served.dma().write_outcome(0x200000, probe), simdojo::DmaAccessOutcome::Faulted)
       << "the device must not write through a window shared without a descriptor";
 }
 
@@ -1499,14 +1500,19 @@ TEST(VfioDeviceHostDma, RejectsTransfersThroughAnUnmappedGap) {
   std::vector<std::byte> read_destination(kGapHalfBytes * 2, std::byte{0xEE});
 
   std::vector<std::byte> buffer(kGapHalfBytes, std::byte{0});
-  EXPECT_FALSE(served.dma().read(kGapIova + page_size, buffer))
+  // An unmapped range is rejected while the transport is still attached.
+  EXPECT_EQ(served.dma().read_outcome(kGapIova + page_size, buffer),
+            simdojo::DmaAccessOutcome::Faulted)
       << "a read wholly inside the gap must fail";
-  EXPECT_FALSE(served.dma().write(kGapIova + page_size, buffer))
+  EXPECT_EQ(served.dma().write_outcome(kGapIova + page_size, buffer),
+            simdojo::DmaAccessOutcome::Faulted)
       << "a write wholly inside the gap must fail";
 
-  EXPECT_FALSE(served.dma().read(kGapIova + page_size - kGapHalfBytes, read_destination))
+  EXPECT_EQ(served.dma().read_outcome(kGapIova + page_size - kGapHalfBytes, read_destination),
+            simdojo::DmaAccessOutcome::Faulted)
       << "a read crossing into the gap must fail";
-  EXPECT_FALSE(served.dma().write(kGapIova + page_size - kGapHalfBytes, write_source))
+  EXPECT_EQ(served.dma().write_outcome(kGapIova + page_size - kGapHalfBytes, write_source),
+            simdojo::DmaAccessOutcome::Faulted)
       << "a write crossing into the gap must fail";
 
   // Nothing was copied on either rejection: the windows keep their sentinels
@@ -1546,7 +1552,8 @@ TEST(VfioDeviceHostDma, EnforcesWriteProtection) {
   EXPECT_EQ(read_back, initial) << "reading a read-only window returned wrong bytes";
 
   const std::vector<std::byte> rejected = byte_pattern(page_size, 0x66);
-  EXPECT_FALSE(served.dma().write(kProtectionIova, rejected))
+  EXPECT_EQ(served.dma().write_outcome(kProtectionIova, rejected),
+            simdojo::DmaAccessOutcome::Faulted)
       << "a write to a read-only window must fail";
 
   std::vector<std::byte> unchanged(page_size);
@@ -1631,8 +1638,12 @@ TEST(VfioDeviceHostDma, CompletesMultiSegmentTransfersAndReleasesTheWindowSet) {
   // transfer takes, is rejected in both directions at both former addresses.
   for (const uint64_t withdrawn : {kMultiSegmentIova, kMultiSegmentIova + page_size}) {
     std::vector<std::byte> probe(4, std::byte{0});
-    EXPECT_FALSE(served.dma().read(withdrawn, probe)) << "a read of a withdrawn window must fail";
-    EXPECT_FALSE(served.dma().write(withdrawn, probe)) << "a write of a withdrawn window must fail";
+    // Withdrawing a window rejects the range. Losing the transport would be
+    // Unavailable, and the boolean wrappers cannot tell the two apart.
+    EXPECT_EQ(served.dma().read_outcome(withdrawn, probe), simdojo::DmaAccessOutcome::Faulted)
+        << "a read of a withdrawn window must fail";
+    EXPECT_EQ(served.dma().write_outcome(withdrawn, probe), simdojo::DmaAccessOutcome::Faulted)
+        << "a write of a withdrawn window must fail";
   }
 }
 
@@ -1672,7 +1683,7 @@ TEST(VfioDeviceHostLifecycle, ForgetsGuestWindowsBeforeServingAnotherClient) {
       << "the disconnected client's windows must be gone";
 
   std::vector<std::byte> stale(4, std::byte{0});
-  EXPECT_FALSE(served.dma().read(kReconnectIova, stale))
+  EXPECT_EQ(served.dma().read_outcome(kReconnectIova, stale), simdojo::DmaAccessOutcome::Faulted)
       << "the old window must not be readable by the new client";
 
   BackingFile second_backing(0x1000);
