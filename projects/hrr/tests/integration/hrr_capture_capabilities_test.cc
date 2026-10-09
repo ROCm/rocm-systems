@@ -39,21 +39,80 @@
 #include <vector>
 
 #ifndef _WIN32
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
-// Every getrandom in this binary, the HIP runtime's included, comes here
-// through the dynamic list in CMakeLists.txt. With HRR_CAPS_KEYS set, each draw
-// of up to 64 bytes is appended to that file as "<pid> <hex>", which is how
-// Unit_HRR_CaptureCapabilitiesForkedChild sees the digest keys. The asm label
-// keeps the C++ name apart from the libc declaration.
+#include <cerrno>
+#include <cstdarg>
+
+// Every getrandom and open in this binary, the HIP runtime's included, comes
+// here through the dynamic list in CMakeLists.txt. The asm labels keep the C++
+// names apart from the libc declarations.
+//
+// With HRR_CAPS_KEYS set, each draw of up to 64 bytes is appended to that file
+// as "<pid> <hex>", which is how the tests below see the digest keys.
+// HRR_CAPS_RANDOM takes the random source away: "short" makes getrandom fill
+// at most 8 bytes and then fail, and "none" makes getrandom fail and
+// /dev/urandom impossible to open.
 extern "C" ssize_t hrr_caps_getrandom(void* buf, size_t len, unsigned int flags)
     __asm__("getrandom");
+extern "C" int hrr_caps_open(const char* path, int flags, ...) __asm__("open");
+extern "C" int hrr_caps_open64(const char* path, int flags, ...) __asm__("open64");
+
+namespace {
+bool random_mode(const char* mode) {
+  const char* m = getenv("HRR_CAPS_RANDOM");
+  return m && strcmp(m, mode) == 0;
+}
+
+int forward_open(const char* name, const char* path, int flags, va_list ap) {
+  if (random_mode("none") && strcmp(path, "/dev/urandom") == 0) {
+    errno = ENOENT;
+    return -1;
+  }
+  // When open() takes a mode, as glibc's __OPEN_NEEDS_MODE decides it.
+  bool needs_mode = (flags & O_CREAT) != 0;
+#ifdef O_TMPFILE
+  needs_mode = needs_mode || (flags & O_TMPFILE) == O_TMPFILE;
+#endif
+  const mode_t mode = needs_mode ? static_cast<mode_t>(va_arg(ap, int)) : 0;
+  using Fn = int (*)(const char*, int, ...);
+  auto real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, name));
+  if (real == nullptr) {
+    errno = ENOSYS;
+    return -1;
+  }
+  return real(path, flags, mode);
+}
+}  // namespace
+
+extern "C" int hrr_caps_open(const char* path, int flags, ...) {
+  va_list ap;
+  va_start(ap, flags);
+  const int fd = forward_open("open", path, flags, ap);
+  va_end(ap);
+  return fd;
+}
+
+extern "C" int hrr_caps_open64(const char* path, int flags, ...) {
+  va_list ap;
+  va_start(ap, flags);
+  const int fd = forward_open("open64", path, flags, ap);
+  va_end(ap);
+  return fd;
+}
 
 extern "C" ssize_t hrr_caps_getrandom(void* buf, size_t len, unsigned int flags) {
-  const long n = syscall(SYS_getrandom, buf, len, flags);
+  long n;
+  if (random_mode("none") || (random_mode("short") && len <= 8)) {
+    errno = random_mode("none") ? ENOSYS : EIO;
+    n = -1;
+  } else {
+    n = syscall(SYS_getrandom, buf, random_mode("short") ? 8 : len, flags);
+  }
   const char* log = getenv("HRR_CAPS_KEYS");
   if (n > 0 && n <= 64 && log) {
     char line[160];
@@ -654,6 +713,94 @@ HRR_TEST_CASE(Unit_HRR_CaptureCapabilitiesForkedChild) {
   // The child drew its own, and under it the same handle digests differently.
   REQUIRE_FALSE(draws[child].empty());
   for (const auto& k : draws[child]) CHECK(siphash128(k.data(), mem) != recorded);
+}
+#endif
+
+#ifndef _WIN32
+namespace {
+struct CapturedExports {
+  std::vector<std::vector<uint8_t>> handles;  // as the workload saw them
+  std::vector<hrr_args_hipIpcGetMemHandle> records;  // as the archive holds them
+};
+
+// Capture Unit_HRR_CaptureCapabilities_Direct with HRR_CAPS_RANDOM set to
+// `random`, and read its exports back.
+CapturedExports capture_exports(const fs::path& root, const char* random,
+                                const fs::path& keys) {
+  std::string out;
+  { hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", root.string());
+    proc.setEnv("HRR_CAPS_RANDOM", random);
+    if (!keys.empty()) proc.setEnv("HRR_CAPS_KEYS", keys.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_CaptureCapabilities_Direct\"");
+    out = proc.getOutput();
+    INFO("Capture exit: " << ret << "\n" << out);
+    REQUIRE(ret == 0); }
+  CapturedExports ex;
+  std::vector<std::string> ipc_hex;
+  (void)tagged_lines(out, &ipc_hex);
+  for (const auto& hex : ipc_hex) {
+    ex.handles.push_back(parse_hex(hex));
+    REQUIRE(ex.handles.back().size() == kHandleBytes);
+  }
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(hrr_single_process_archive(root).string(), arc));
+  for (const auto& ev : arc.events)
+    if (ev.header().event_type == HRR_API_HIPIPCGETMEMHANDLE) {
+      REQUIRE(ev.raw_payload.size() >= sizeof(hrr_args_hipIpcGetMemHandle));
+      hrr_args_hipIpcGetMemHandle a;
+      std::memcpy(&a, ev.raw_payload.data(), sizeof(a));
+      ex.records.push_back(a);
+    }
+  REQUIRE(ex.records.size() == ex.handles.size());
+  REQUIRE_FALSE(ex.handles.empty());
+  return ex;
+}
+}  // namespace
+
+// ---------------------------------------------------------------------------
+// The random source fails. A key getrandom filled only in part is not used:
+// it comes whole from /dev/urandom instead. With no source at all there is no
+// key, the calls still return, and each handle field is recorded as zeros.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_CaptureCapabilitiesWithoutRandom) {
+  ScopedDir keys_dir(fs::temp_directory_path() / "hrr_capture_capabilities_random.keys");
+  fs::create_directories(keys_dir.path);
+  const fs::path keys = keys_dir.path / "draws";
+
+  { INFO("getrandom fills 8 bytes, then fails");
+    ScopedDir cap(fs::temp_directory_path() / "hrr_capture_capabilities_short.hrr");
+    const CapturedExports ex = capture_exports(cap.path, "short", keys);
+    std::vector<std::vector<uint8_t>> partial;
+    { std::ifstream in(keys);
+      std::string pid, hex;
+      while (in >> pid >> hex) partial.push_back(parse_hex(hex));
+    }
+    REQUIRE_FALSE(partial.empty());
+    for (size_t i = 0; i < ex.records.size(); ++i) {
+      INFO("export " << i);
+      check_digest_layout(ex.records[i].handle_bytes, ex.handles[i]);
+      const Digest d = digest_of(ex.records[i].handle_bytes);
+      for (auto k : partial) {
+        k.resize(kDigestBytes, 0);
+        CHECK(siphash128(k.data(), ex.handles[i]) != d);
+      }
+    } }
+
+  { INFO("no random source");
+    ScopedDir cap(fs::temp_directory_path() / "hrr_capture_capabilities_none.hrr");
+    const CapturedExports ex = capture_exports(cap.path, "none", fs::path());
+    for (size_t i = 0; i < ex.records.size(); ++i) {
+      INFO("export " << i);
+      CHECK(ex.records[i].handle_present == 1);
+      CHECK(all_zero(ex.records[i].handle_bytes, sizeof(ex.records[i].handle_bytes)));
+    }
+    hrr::test::SpawnProc replay(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
+    set_proc_search_path(replay);
+    const int ret = replay.run(hrr_quote_path(cap.path));
+    INFO("Playback stdout:\n" << replay.getOutput());
+    CHECK(ret == 0); }
 }
 #endif
 
