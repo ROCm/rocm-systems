@@ -290,11 +290,6 @@ def parse_marker_function(function_value: object) -> dict[str, Any]:
         raw = str(function_value)
     tokens = raw.split("|") if raw else [""]
     first_token = tokens[0]
-    if ":#" in first_token or "@" in first_token:
-        console_error(
-            "analysis",
-            f"Stacked marker wire is not supported: {raw}",
-        )
     operator_name, file_name, line_number = _split_name_and_location(first_token)
     parsed_keys = {
         "seqNr": "n/a",
@@ -335,10 +330,30 @@ def parse_marker_function(function_value: object) -> dict[str, Any]:
     }
 
 
+def _stacked_marker_function_cell(function_value: object) -> Optional[str]:
+    """Return the raw cell when it uses legacy stacked wire, else None."""
+    if function_value is None or (
+        isinstance(function_value, float) and pd.isna(function_value)
+    ):
+        return None
+    raw = str(function_value)
+    first_token = raw.split("|", 1)[0] if raw else ""
+    if ":#" in first_token or "@" in first_token:
+        return raw
+    return None
+
+
 def _apply_parsed_function_columns(trace_df: pd.DataFrame) -> pd.DataFrame:
     """Add parse_marker_function columns, keeping Function and Thread_Id."""
     if trace_df.empty:
         return trace_df
+    for function_value in trace_df["Function"]:
+        stacked_cell = _stacked_marker_function_cell(function_value)
+        if stacked_cell is not None:
+            console_error(
+                "analysis",
+                f"Stacked marker wire is not supported: {stacked_cell}",
+            )
     parsed_rows = trace_df["Function"].map(parse_marker_function)
     parsed_df = pd.DataFrame(list(parsed_rows), index=trace_df.index)
     return pd.concat([trace_df, parsed_df], axis=1)
