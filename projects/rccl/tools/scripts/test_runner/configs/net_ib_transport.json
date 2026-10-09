@@ -1009,12 +1009,13 @@
     "net_ib_rma_multisegment": {
       "extends": "net_ib_base",
       "timeout": 300,
-      "description": "Multi-segment DMA-BUF RMA registration (AIRUNTIME-2351), 1 rank per node on 2 nodes. NCCL_CUMEM_ENABLE gates segment enumeration and RCCL_MPI_LOG_ALL_RANKS is what lets every rank read back the 'multi-segment buffer' INFO line; without either the tests skip instead of exercising the per-segment path.",
+      "description": "Multi-segment DMA-BUF RMA registration (AIRUNTIME-2351), 1 rank per node on 2 nodes. NCCL_CUMEM_ENABLE gates segment enumeration and RCCL_MPI_LOG_ALL_RANKS is what lets every rank read back the 'multi-segment buffer' INFO line; without either the tests would skip instead of exercising the per-segment path, so RCCL_TEST_RMA_MSEG_REQUIRE turns that skip into a failure.",
       "env_variables": {
         "NCCL_NET": "ib",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DEBUG_SUBSYS": "ALL",
-        "RCCL_MPI_LOG_ALL_RANKS": "1"
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_TEST_RMA_MSEG_REQUIRE": "1"
       },
       "tests": [
         {
@@ -1101,6 +1102,38 @@
           "name": "NetIB_RMA_MultiSeg_SingleSegmentRegression",
           "description": "Regression: an ordinary single-allocation buffer still registers and transfers on the nSeg==1 fast path",
           "test_filter": "RmaMultiSegmentMPITest.SingleSegmentRegression"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_RegisterOff_KeepsUpstreamPath",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: a multi-segment window stays on the upstream single-MR path and no rank logs the per-segment marker",
+          "test_filter": "RmaMultiSegmentMPITest.MultiSegmentRegisterOff_KeepsUpstreamPath",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "0"
+          }
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_RegisterOff_SingleSegmentRegression",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: an ordinary single-allocation buffer registers and transfers on the upstream path",
+          "test_filter": "RmaMultiSegmentMPITest.SingleSegmentRegression",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "0"
+          }
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_RegisterOff_IFlushSingleSegmentRegression",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: iflush on an ordinary single-allocation buffer fences and verifies on the upstream path",
+          "test_filter": "RmaMultiSegmentMPITest.IFlushSingleSegmentRegression",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "0"
+          }
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_RegisterOff_RmaBasics",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: the RMA put/get/signal basics (RegMr and DmaBuf) run on the upstream bodies",
+          "test_filter": "CtxAndSize/RmaMPITest.*:CtxOnly/RmaMPIFixedSizeTest.*",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "0"
+          }
         },
         {
           "name": "NetIB_RMA_MultiSeg_AsymmetricSegmentCountRejected",
@@ -1194,7 +1227,8 @@
         "NCCL_NET": "ib",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DEBUG_SUBSYS": "ALL",
-        "RCCL_MPI_LOG_ALL_RANKS": "1"
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_TEST_RMA_MSEG_REQUIRE": "1"
       },
       "tests": [
         {
@@ -1215,7 +1249,8 @@
         "NCCL_NET": "ib",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DEBUG_SUBSYS": "ALL",
-        "RCCL_MPI_LOG_ALL_RANKS": "1"
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_TEST_RMA_MSEG_REQUIRE": "1"
       },
       "tests": [
         {
@@ -1236,7 +1271,8 @@
         "NCCL_NET": "ib",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DEBUG_SUBSYS": "ALL",
-        "RCCL_MPI_LOG_ALL_RANKS": "1"
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_TEST_RMA_MSEG_REQUIRE": "1"
       },
       "tests": [
         {

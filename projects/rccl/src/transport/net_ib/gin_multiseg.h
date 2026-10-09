@@ -8,6 +8,9 @@
 // RCCL per-segment DMA-BUF MRs for the RMA proxy. Included once by gin.cc, after
 // ncclRmaIbProxyGetRecvComm, so it can use that file's static helpers.
 
+#ifndef NCCL_NET_IB_GIN_MULTISEG_H_
+#define NCCL_NET_IB_GIN_MULTISEG_H_
+
 struct rcclRmaIbProxySegMrHandle {
   int nSegments;
   // segOff[0]==0, segOff[nSegments]==size; per-segment local MRs.
@@ -69,8 +72,8 @@ static inline bool ncclRmaRangeOk(const struct rcclRmaIbProxySegMrHandle* h, int
 static ncclResult_t ncclRmaBuildSegmentedWrs(struct ibv_send_wr* wr, struct ibv_sge* sge, int maxWr, int* nWr,
                                              enum ibv_wr_opcode opcode, const struct ncclIbQp* qp,
                                              struct rcclRmaIbProxySegMrHandle* localH, int localRank, uint64_t localOff,
-                                             struct rcclRmaIbProxySegMrHandle* remoteH, int remoteRank, uint64_t remoteOff,
-                                             size_t size, const struct ibv_sge* flushSge) {
+                                             struct rcclRmaIbProxySegMrHandle* remoteH, int remoteRank,
+                                             uint64_t remoteOff, size_t size, const struct ibv_sge* flushSge) {
   int n = 0;
   uint64_t lOff = localOff, rOff = remoteOff;
   size_t rem = size;
@@ -256,9 +259,9 @@ ncclResult_t rcclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
 
   if (nSeg == 1) {
     // Single segment: reuse the caller's fd (fd==-1 falls back to ibv_reg_mr).
-    NCCLCHECKGOTO(ncclIbRegMrDmaBufInternal(cComm->recvComm, data, size, type, offset, fd, mr_flags,
-                                            (void**)&rmaMrHandle->mrHandle[0]),
-                  ret, reconcile);
+    NCCLCHECKGOTONOWARN(ncclIbRegMrDmaBufInternal(cComm->recvComm, data, size, type, offset, fd, mr_flags,
+                                                  (void**)&rmaMrHandle->mrHandle[0]),
+                        ret, reconcile, NCCL_NET);
     registered = 1;
     rmaMrHandle->segOff[1] = size;
     localVas[0] = (uintptr_t)data;
@@ -569,8 +572,8 @@ ncclResult_t rcclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff
   struct ibv_sge sge[NCCL_RMA_MAX_SIGNAL_WRS];
   int nPut = 0;
 
-  // If size is 0, we only need to send the signal. srcMrHandle must be non-NULL
-  if (size > 0 && dstMrHandle) {
+  // size 0 sends only the signal; NULL src/dst handles with a payload were rejected above.
+  if (size > 0) {
     // PUT slices carry no CQE; only the trailing signal is signaled. Same-QP RC
     // ordering guarantees all writes land before the signal.
     NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_DATA_WRS, &nPut, IBV_WR_RDMA_WRITE, qp, srcMrHandle,
@@ -676,3 +679,5 @@ ncclResult_t rcclRmaIbProxyTestFailed(struct ncclIbRequest* req, int* done) {
   NCCLCHECK(ncclIbFreeRequest(req));
   return ncclRemoteError;
 }
+
+#endif

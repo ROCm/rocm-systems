@@ -165,8 +165,8 @@ ncclResult_t rcclRmaIbProxyConnectFinish(void** collComm, int nranks);
 ncclResult_t rcclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd,
                                    uint64_t mr_flags, void** mhandle);
 ncclResult_t rcclRmaIbProxyDeregMrSym(void* collComm, void* mhandle);
-ncclResult_t rcclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size, uint64_t dstOff,
-                         void* dstMhandle, uint32_t rank, uint32_t optFlags, void** request);
+ncclResult_t rcclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
+                         uint64_t dstOff, void* dstMhandle, uint32_t rank, uint32_t optFlags, void** request);
 ncclResult_t rcclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset, void* remoteMhandle, size_t size,
                          uint64_t localOffset, void* localMhandle, uint32_t rank, uint32_t optFlags, void** request);
 ncclResult_t rcclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,

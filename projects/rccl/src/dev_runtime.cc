@@ -873,8 +873,8 @@ fail:
 static ncclResult_t symMemoryRegisterRma(struct ncclComm* comm, struct ncclDevrMemory* mem) {
   if (!ncclDevrWinRegEnabled(mem->winFlags, ncclDevrRegisterRma)) return ncclSuccess;
   NCCLCHECK(ncclRmaProxyConnectOnce(comm));
-  // RCCL registers one MR per segment unless NCCL_MULTI_SEGMENT_REGISTER=0.
-  if (mem->maxGlobalNumSegments == 1 || ncclParamMultiSegmentRegister()) {
+  // Multi-segment windows need an RMA backend that registers one MR per segment.
+  if (mem->maxGlobalNumSegments == 1 || rcclDevrRmaRegistersMultiSegment(comm)) {
     NCCLCHECK(ncclRmaProxyRegister(comm, mem->primaryAddr, mem->size, mem->rmaHostWins));
   }
   return ncclSuccess;
