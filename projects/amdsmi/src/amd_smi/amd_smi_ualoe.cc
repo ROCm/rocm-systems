@@ -23,6 +23,7 @@ extern "C" {
 }
 
 #include <algorithm>
+#include <cstdint>
 #include <limits>
 #include <unordered_map>
 #include <vector>
@@ -951,7 +952,21 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
   }
 
   const size_t max_ualoe_entries = static_cast<size_t>(*entry_count);
-  const size_t ualoe_buf_size = 1048576;  // 1 MB
+
+  // The library advances *cursor past every record it packs into our intermediate
+  // buffer, but each 24-byte ualoe header grows to a 128-byte amdsmi_cper_hdr_t in
+  // the caller's buffer. Reserve that per-record growth so the library can only
+  // return records that still fit after expansion; the rest stay behind the cursor
+  // for the next paged call instead of being silently dropped.
+  constexpr uint64_t kAmdsmiHdrExpansion = sizeof(amdsmi_cper_hdr_t) - sizeof(ualoe_cper_hdr_t);
+  const uint64_t expansion_headroom =
+      static_cast<uint64_t>(max_ualoe_entries) * kAmdsmiHdrExpansion;
+  if (*buf_size <= expansion_headroom) {
+    return AMDSMI_STATUS_OUT_OF_RESOURCES;
+  }
+  constexpr uint64_t kMaxUaloeBufSize = 1048576;  // 1 MB cap on the intermediate buffer
+  const size_t ualoe_buf_size =
+      static_cast<size_t>(std::min<uint64_t>(*buf_size - expansion_headroom, kMaxUaloeBufSize));
   std::vector<char> ualoe_buf(ualoe_buf_size);
   std::vector<ualoe_cper_hdr_t*> ualoe_hdrs(max_ualoe_entries);
 
@@ -980,6 +995,10 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
     ualoe_buf_size_var = ualoe_buf_size;
   }
 
+  // Clamp the returned count to the ualoe_hdrs capacity: a library that reports
+  // more entries than requested would otherwise drive an OOB read on ualoe_hdrs[i].
+  ualoe_entry_count = std::min<uint64_t>(ualoe_entry_count, max_ualoe_entries);
+
   uint64_t amdsmi_offset = 0;
   uint64_t transformed_entries = 0;
   bool entries_dropped = false;
@@ -991,12 +1010,19 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
       break;
     }
 
-    // Validate pointer lies within ualoe_buf before dereferencing record_length
-    const size_t ualoe_offset = reinterpret_cast<const char*>(ualoe_hdr) - ualoe_buf.data();
-    if (ualoe_offset + sizeof(ualoe_cper_hdr_t) > ualoe_buf_size_var) {
+    // Validate the header lies within ualoe_buf before dereferencing record_length.
+    // Cross-object pointer subtraction is UB, and a header below the buffer start
+    // would wrap to a huge offset that slips past a naive "+ sizeof()" check, so
+    // compare as uintptr_t with the subtraction kept on the size side to avoid both
+    // underflow and overflow.
+    const auto ualoe_buf_begin = reinterpret_cast<uintptr_t>(ualoe_buf.data());
+    const auto ualoe_hdr_addr = reinterpret_cast<uintptr_t>(ualoe_hdr);
+    if ((ualoe_buf_size_var < sizeof(ualoe_cper_hdr_t)) || (ualoe_hdr_addr < ualoe_buf_begin) ||
+        ((ualoe_hdr_addr - ualoe_buf_begin) > (ualoe_buf_size_var - sizeof(ualoe_cper_hdr_t)))) {
       entries_dropped = true;
       break;
     }
+    const size_t ualoe_offset = static_cast<size_t>(ualoe_hdr_addr - ualoe_buf_begin);
 
     if (ualoe_hdr->record_length < sizeof(ualoe_cper_hdr_t)) {
       entries_dropped = true;
@@ -1008,7 +1034,7 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
     const uint32_t amdsmi_record_length =
         static_cast<uint32_t>(sizeof(amdsmi_cper_hdr_t) + ualoe_payload_size);
 
-    if (ualoe_offset + ualoe_hdr->record_length > ualoe_buf_size_var) {
+    if (ualoe_hdr->record_length > ualoe_buf_size_var - ualoe_offset) {
       entries_dropped = true;
       break;
     }
