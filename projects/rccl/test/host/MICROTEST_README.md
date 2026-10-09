@@ -180,6 +180,23 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     chain; the rest of `src/param/*` and `src/include/param/*.h` (the typed
     registry, the remaining parsers, the C API, and env loading) are covered
     by its follow-ups.
+  - `include/param/parser_default.h`, `include/param/parser_enum.h`,
+    `include/param/parser_bitset.h`, and `include/param/parser_list.h`, from
+    `param-parsers-test.cc`; suite `ParamParsersMicrotest.*`. Header-only, no
+    `_CC_PATH` macro needed. Covers the bool/const-char*/integer
+    `ncclParamParserDefault<T>` specializations (including the unsigned
+    strtoull negative-input wraparound and narrower-type truncation, both
+    pinned as current behavior rather than bugs), the primary-template
+    unsupported-type fallback, the `ncclParamDefault<T>` factory singleton,
+    `ncclParamBounded`'s closed-range validation and single-arg overload,
+    `ncclParamOneOf`'s case-insensitive trimmed matching and per-option
+    descriptions, `ncclParamBitsetOf`'s comma-separated OR, `^`-prefixed
+    negation, `ignoreUnknown`, and its exact-alias-first/decompose-to-
+    single-bits `toString`, and `ncclParamListOf`'s trim/empty-token-skip
+    resolution into both vector and set containers. Second PR in the
+    AICOMRCCL-2820 stacked chain; see `param-utils-test.cc` for the shared
+    `ncclParamParser<T>` wrapper and option-set builders these factories
+    build on.
   - `misc/gdr_probe.cc` (`GDR_PROBE_CC_PATH`, from `gdr-probe-test.cc`); suite
     `GdrProbeTest.*`. Covers `ncclIbProbeGdrSupport`, the runtime GPU
     memory-registration fallback behind the sysfs peer-memory scan: the result
