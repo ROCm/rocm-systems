@@ -250,7 +250,7 @@ jobs:
   # neither a GPU nor the capture library and can run on any platform.
   # ---------------------------------------------------------------------------
   unit:
-    name: "Unit (${{ matrix.os }})"
+    name: ${{ github.event.inputs.gpu_only == 'true' && 'Unit (dispatch)' || format('Unit ({0})', matrix.os) }}
     needs: [gate]
     if: ${{ github.event.inputs.gpu_only != 'true' && needs.gate.outputs.run == 'true' }}
     runs-on: ${{ matrix.os }}
@@ -607,7 +607,7 @@ jobs:
   # still fails the job.
   # ---------------------------------------------------------------------------
   integration:
-    name: "Integration (${{ matrix.family }})"
+    name: ${{ github.event.inputs.gpu_only == 'true' && 'Integration (dispatch)' || format('Integration ({0})', matrix.family) }}
     needs: [gate, ci_config, build]
     if: ${{ github.event.inputs.gpu_only != 'true' && needs.gate.outputs.run == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
     runs-on: ubuntu-24.04
@@ -829,7 +829,9 @@ jobs:
   # workflow_dispatch, so its queue can be cancelled without cancelling the PR.
   # ---------------------------------------------------------------------------
   integration_gpu:
-    name: "Integration GPU (${{ inputs.family }})"
+    # inputs is empty on pull_request, so a name that uses it stays literal.
+    # The parent run is not a dispatch: keep a fixed name there.
+    name: ${{ github.event.inputs.gpu_only == 'true' && format('Integration GPU ({0})', github.event.inputs.family) || 'Integration GPU' }}
     if: ${{ github.event.inputs.gpu_only == 'true' }}
     # A pull request does not define this input. Keep a real label here so the
     # skipped job still parses; gpu_only replaces it with the family runner.
@@ -936,27 +938,24 @@ jobs:
         env:
           BUILD_WORKSPACE: ${{ inputs.build_workspace }}
         run: |
+          # Never delete a real directory. On a shared host the baked path can
+          # be another runner's checkout. Only create the link when the path
+          # is missing or is already a symlink.
+          link_into() {
+            local path="$1" target="$2"
+            if [ -e "${path}" ] && [ ! -L "${path}" ]; then
+              echo "::error::${path} exists and is not a symlink; not deleting it"
+              exit 1
+            fi
+            mkdir -p "$(dirname "${path}")"
+            ln -sfn "${target}" "${path}"
+          }
           if [ -n "${BUILD_WORKSPACE}" ] && [ "${BUILD_WORKSPACE}" != "${PWD}" ]; then
-            mkdir -p "$(dirname "${BUILD_WORKSPACE}")"
-            if [ -d "${BUILD_WORKSPACE}" ] && [ ! -L "${BUILD_WORKSPACE}" ] \
-                && [ "$(stat -c '%d:%i' "${BUILD_WORKSPACE}")" != "$(stat -c '%d:%i' "${PWD}")" ]; then
-              rm -rf "${BUILD_WORKSPACE}"
-            fi
-            if [ ! -e "${BUILD_WORKSPACE}" ] || [ -L "${BUILD_WORKSPACE}" ]; then
-              ln -sfn "${PWD}" "${BUILD_WORKSPACE}"
-            fi
+            link_into "${BUILD_WORKSPACE}" "${PWD}"
           fi
           # Build-machine SDK path -> this container's tool cache.
           if [ -d /__w/_tool ]; then
-            tool=/home/runner/_work/_tool
-            mkdir -p /home/runner/_work
-            if [ -d "${tool}" ] && [ ! -L "${tool}" ] \
-                && [ "$(stat -c '%d:%i' "${tool}")" != "$(stat -c '%d:%i' /__w/_tool)" ]; then
-              rm -rf "${tool}"
-            fi
-            if [ ! -e "${tool}" ] || [ -L "${tool}" ]; then
-              ln -sfn /__w/_tool "${tool}"
-            fi
+            link_into /home/runner/_work/_tool /__w/_tool
           fi
           exe="${BUILD_WORKSPACE:-${PWD}}/build/hrr/tests/integration/hrr-integration-tests"
           if [ ! -x "${exe}" ]; then
@@ -1042,7 +1041,7 @@ jobs:
   # runners.
   # ---------------------------------------------------------------------------
   report:
-    name: "Test results"
+    name: ${{ github.event.inputs.gpu_only == 'true' && 'Test results (dispatch)' || 'Test results' }}
     needs: [gate, unit, integration]
     if: ${{ always() && github.event.inputs.gpu_only != 'true' && needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-24.04
@@ -1097,7 +1096,7 @@ jobs:
   # on purpose, so those skips are accepted there.
   # ---------------------------------------------------------------------------
   hrr_ci_summary:
-    name: "HRR CI Summary"
+    name: ${{ github.event.inputs.gpu_only == 'true' && 'HRR CI Summary (dispatch)' || 'HRR CI Summary' }}
     if: ${{ always() && github.event.inputs.gpu_only != 'true' }}
     needs: [gate, codegen, unit, ci_config, build, integration, report]
     runs-on: ubuntu-24.04

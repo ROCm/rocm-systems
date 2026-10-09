@@ -96,6 +96,23 @@ class CompatibilityTest(ScratchHeaders):
         rc, _, _ = self.run_main()
         self.assertEqual(rc, 0)
 
+    def test_removed_name_reusing_id_requires_a_bump(self):
+        self.write(
+            header(6, [("OLD", 0), ("KEPT", 1)]),
+            header(6, [("NEW", 0), ("KEPT", 1)]),
+        )
+        rc, _, err = self.run_main()
+        self.assertEqual(rc, 1)
+        self.assertIn("HRR_API_OLD removed; HRR_API_NEW now uses 0", err)
+
+    def test_bump_covers_a_reused_id(self):
+        self.write(
+            header(6, [("OLD", 0)]),
+            header(7, [("NEW", 0)]),
+        )
+        rc, _, _ = self.run_main()
+        self.assertEqual(rc, 0)
+
     def test_version_must_not_decrease(self):
         self.write(header(7, [("API", 0)]), header(6, [("API", 0)]))
         rc, _, err = self.run_main()

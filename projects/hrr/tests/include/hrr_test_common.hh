@@ -66,12 +66,13 @@
     REQUIRE(_hrr_err == hipSuccess);                                           \
   } while (0)
 
-// HRR_SKIP replaces the hip-tests skip macro: emit a warning describing why the current
-// case is being skipped and return early.
+// Catch2 records SKIP() as a skipped testcase. WARN plus return does not, so
+// the case is missing from the JUnit report.
 #define HRR_SKIP(message)                                                       \
   do {                                                                          \
-    WARN(message);                                                             \
-    return;                                                                    \
+    std::ostringstream _hrr_skip_msg;                                          \
+    _hrr_skip_msg << message;                                                  \
+    SKIP(_hrr_skip_msg.str());                                                 \
   } while (0)
 
 // ---------------------------------------------------------------------------

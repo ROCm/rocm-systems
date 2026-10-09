@@ -6,7 +6,8 @@
 The HRR generator places runtime dispatch IDs before compiler dispatch IDs.
 Appending a runtime API therefore moves the compiler tail. Those numeric IDs
 are stored in events.bin, so retaining the old HRR_VERSION would make an old
-archive decode as the wrong APIs.
+archive decode as the wrong APIs. Reusing a removed API's ID for a new name
+is the same mistake: the old event now names the new API.
 
 Usage:
     check_hrr_api_compat.py --base-header <old> --current-header <new>
@@ -87,22 +88,39 @@ def check_compatibility(base: ApiSchema, current: ApiSchema) -> list[str]:
             f"HRR_VERSION decreased from {base.version} to {current.version}"
         ]
 
+    if current.version > base.version:
+        return []
+
     moved = sorted(
         (name, old_id, current.ids[name])
         for name, old_id in base.ids.items()
         if name in current.ids and current.ids[name] != old_id
     )
-    if not moved or current.version > base.version:
+    current_by_id = {api_id: name for name, api_id in current.ids.items()}
+    # A name present on both sides is already in `moved` when its ID changes.
+    # This is the other direction: the old name is gone and a new name owns
+    # its ID, so an old archive decodes as the new API.
+    reused = sorted(
+        (name, old_id, current_by_id[old_id])
+        for name, old_id in base.ids.items()
+        if name not in current.ids and old_id in current_by_id
+    )
+    if not moved and not reused:
         return []
 
     details = [
         f"{name}: {old_id} -> {new_id}" for name, old_id, new_id in moved[:10]
     ]
-    if len(moved) > len(details):
-        details.append(f"... and {len(moved) - len(details)} more")
+    details.extend(
+        f"{old_name} removed; {new_name} now uses {old_id}"
+        for old_name, old_id, new_name in reused[:10]
+    )
+    shown = len(moved) + len(reused)
+    if shown > len(details):
+        details.append(f"... and {shown - len(details)} more")
     return [
-        f"{len(moved)} existing HRR API ID(s) moved while HRR_VERSION remained "
-        f"{current.version}",
+        f"{shown} existing HRR API ID(s) moved or were reused while "
+        f"HRR_VERSION remained {current.version}",
         *details,
         "increment HRR_VERSION in projects/hrr/tools/gen_hrr_api_args.py and "
         "regenerate the checked-in HRR sources",
