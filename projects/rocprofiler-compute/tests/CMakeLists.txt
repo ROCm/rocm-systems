@@ -102,3 +102,30 @@ set_target_properties(
     memcopy
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
 )
+
+add_custom_target(
+    simple_net
+    ALL
+    COMMAND
+        ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/sample/simple_net.py
+        ${CMAKE_SOURCE_DIR}/tests/simple_net.py
+    COMMENT "Copying simple_net.py to tests directory"
+)
+
+add_custom_target(
+    triton_ffn
+    ALL
+    COMMAND
+        ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/sample/triton_ffn.py
+        ${CMAKE_SOURCE_DIR}/tests/triton_ffn.py
+    COMMENT "Copying triton_ffn.py to tests directory"
+)
+
+add_custom_target(
+    torch_triton_net
+    ALL
+    COMMAND
+        ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/sample/torch_triton_net.py
+        ${CMAKE_SOURCE_DIR}/tests/torch_triton_net.py
+    COMMENT "Copying torch_triton_net.py to tests directory"
+)
