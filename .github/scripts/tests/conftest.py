@@ -1,4 +1,5 @@
 """Pytest configuration: ensure pr_merge_sync_patches and siblings are importable."""
+
 import sys
 from pathlib import Path
 

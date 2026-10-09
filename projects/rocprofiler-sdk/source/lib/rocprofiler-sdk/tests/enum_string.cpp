@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -139,6 +139,11 @@ TEST(enum_string, fwd_h)
     TEST_STR(ROCPROFILER_KERNEL_DISPATCH_ENQUEUE);
     TEST_STR(ROCPROFILER_KERNEL_DISPATCH_COMPLETE);
 
+    // rocprofiler_hip_event_operation_t
+    TEST_STR(ROCPROFILER_HIP_EVENT_NONE);
+    TEST_STR(ROCPROFILER_HIP_EVENT_RECORD);
+    TEST_STR(ROCPROFILER_HIP_EVENT_WAIT);
+
     // rocprofiler_pc_sampling_method_t
     TEST_STR(ROCPROFILER_PC_SAMPLING_METHOD_NONE);
     TEST_STR(ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC);
@@ -239,6 +244,9 @@ TEST(enum_string, hsa_api_id)
 #    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x04
     TEST_API_ID_STR(ROCPROFILER_HSA_AMD_EXT_API_ID, hsa_amd_enable_logging);
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+    TEST_API_ID_STR(ROCPROFILER_HSA_AMD_EXT_API_ID, hsa_amd_queue_create);
+#    endif
 #endif
 
     TEST_API_ID_STR(ROCPROFILER_HSA_FINALIZE_EXT_API_ID, hsa_ext_program_create);
@@ -314,6 +322,13 @@ TEST(enum_string, rocjpeg_api_id)
     TEST_API_ID_STR(ROCPROFILER_ROCJPEG_API_ID, rocJpegStreamCreate);
     TEST_API_ID_STR(ROCPROFILER_ROCJPEG_API_ID, rocJpegCreate);
     TEST_API_ID_STR(ROCPROFILER_ROCJPEG_API_ID, rocJpegGetErrorName);
+}
+
+TEST(enum_string, hipfile_api_id)
+{
+    TEST_API_ID_STR(ROCPROFILER_HIPFILE_API_ID, hipFileHandleRegister);
+    TEST_API_ID_STR(ROCPROFILER_HIPFILE_API_ID, hipFileRead);
+    TEST_API_ID_STR(ROCPROFILER_HIPFILE_API_ID, hipFileSetParameterString);
 }
 
 TEST(enum_string, runtime_evaluation)

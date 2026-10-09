@@ -13,6 +13,7 @@
 
 #include "simdojo/sim/simulation.h"
 
+#include <atomic>
 #include <memory>
 
 struct rj_vm_t : rocjitsu::RefCounted {
@@ -21,6 +22,7 @@ struct rj_vm_t : rocjitsu::RefCounted {
   rocjitsu::config::LoadedConfig loaded;
   rocjitsu::SoC *soc = nullptr;
   rocjitsu::VirtualMachine *vm = nullptr;
+  std::atomic<bool> plugin_group_active{false};
 };
 
 #endif // ROCJITSU_VM_RJ_VM_IMPL_H_

@@ -15,6 +15,10 @@ on:
       - 'projects/hipfile/**/ais-check'
       - '.github/workflows/hipfile-pylint.yml'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -41,6 +45,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pylint
           python -m pip install black
+          python -m pip install pytest
           pip install -r projects/hipfile/docs/sphinx/requirements.in
 
       - name: Lint all Python files

@@ -1,7 +1,7 @@
 Hacking and Debugging RocSHMEM
 ==============================
 
-This documentation is mostly for core RocSHMEM developpers and contributors. Power users may still find it useful.
+This documentation is mostly for core RocSHMEM developers and contributors. Power users may still find it useful.
 
 How to debug parallel programs
 ------------------------------
@@ -17,17 +17,10 @@ Refer to [General documentation for ASAN on AMD GPUs][1].
 
 ### Compiling with ASAN
 
-If this is a fresh build directory, simply add `-DASAN=ON` to the `cmake` invocation.
+Add `-DASAN=ON` to the `cmake` invocation, whether configuring a fresh build directory or reconfiguring an existing one.
   `cmake . <...> -DASAN=ON`
 
-If you are enabling ASAN in a previously used build directory, use `ccmake` to alter the CMake Cache
-  `ccmake .`
-
-In the `ccmake` interface:
-1. find and toggle `ASAN` ON
-2. find and delete `COMPILING_TARGETS` (keybind `d`)
-
-Do not forget to delete `COMPILING_TARGETS` again when disabling ASAN (otherwise xnack will remain required, causing failure in production runs).
+Device ASAN needs xnack, and the compiler skips instrumenting device code for a target without it rather than failing. So with `ASAN=ON`, rocSHMEM builds gfx9 targets as `:xnack+` (keeping other features such as `:sramecc+`), builds gfx1250 as is since xnack is always on there, and drops every other target. It re-derives HIP's offload targets from the result on every configure. Simply toggling `-DASAN=ON`/`-DASAN=OFF` on an existing build directory is enough; no manual CMake cache surgery is required.
 
 ### Running with ASAN
 

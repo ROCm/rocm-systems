@@ -23,6 +23,7 @@ THE SOFTWARE.
 /// @cond
 #pragma once
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <future>
 #include <map>
@@ -101,8 +102,8 @@ IsNicExeType(ExeType e)
  */
 struct ExeDevice
 {
-    ExeType exeType;   ///< Executor type
-    int32_t exeIndex;  ///< Executor index
+    ExeType      exeType;   ///< Executor type
+    std::int32_t exeIndex;  ///< Executor index
 
     bool operator<(ExeDevice const& other) const
     {
@@ -145,8 +146,8 @@ IsGpuMemType(MemType m)
  */
 struct MemDevice
 {
-    MemType memType;   ///< Memory type
-    int32_t memIndex;  ///< Device index
+    MemType      memType;   ///< Memory type
+    std::int32_t memIndex;  ///< Device index
 
     bool operator<(MemDevice const& other) const
     {
@@ -165,7 +166,7 @@ struct Transfer
     vector<MemDevice> srcs        = {};  ///< List of source memory devices
     vector<MemDevice> dsts        = {};  ///< List of destination memory devices
     ExeDevice         exeDevice   = {};  ///< Executor to use
-    int32_t           exeSubIndex = -1;  ///< Executor subindex
+    std::int32_t      exeSubIndex = -1;  ///< Executor subindex
     int numSubExecs = 0;  ///< Number of subExecutors to use for this Transfer
 };
 
@@ -205,7 +206,7 @@ struct GfxOptions
     int blockOrder = 0;   ///< Determines how threadblocks are ordered (0=sequential,
                           ///< 1=interleaved, 2=random)
     int blockSize = 256;  ///< Size of each threadblock (must be multiple of 64)
-    vector<uint32_t>    cuMask       = {};  ///< Bit-vector representing the CU mask
+    vector<std::uint32_t> cuMask     = {};  ///< Bit-vector representing the CU mask
     vector<vector<int>> prefXccTable = {};  ///< 2D table with preferred XCD to use for a
                                             ///< specific [src][dst] GPU device
     int temporalMode =
@@ -232,10 +233,10 @@ struct DmaOptions
  */
 struct NicOptions
 {
-    vector<int> closestNics = {};     ///< Overrides the auto-detected closest NIC per GPU
-    int         ibGidIndex  = -1;     ///< GID Index for RoCE NICs (-1 is auto)
-    uint8_t     ibPort      = 1;      ///< NIC port number to be used
-    int         ipAddressFamily = 4;  ///< 4=IPv4, 6=IPv6 (used for auto GID detection)
+    vector<int>  closestNics = {};  ///< Overrides the auto-detected closest NIC per GPU
+    int          ibGidIndex  = -1;  ///< GID Index for RoCE NICs (-1 is auto)
+    std::uint8_t ibPort      = 1;   ///< NIC port number to be used
+    int          ipAddressFamily = 4;  ///< 4=IPv4, 6=IPv6 (used for auto GID detection)
     int maxRecvWorkReq  = 16;   ///< Maximum number of recv work requests per queue pair
     int maxSendWorkReq  = 16;   ///< Maximum number of send work requests per queue pair
     int queueSize       = 100;  ///< Completion queue size
@@ -559,15 +560,16 @@ operator+=(float4& a, const float4& b)
 //==========================================================================================
 
 // Macro for collecting CU/SM GFX kernel is running on
-#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) ||              \
-    defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1200__) ||              \
-    defined(__gfx1201__) || defined(__gfx1250__)
-#    define GetHwId(hwId) hwId = 0
+#if defined(__GFX9__)
+#    define GetHwId(hwId)                                                                \
+        asm volatile("s_getreg_b32 %0, hwreg(HW_REG_HW_ID)" : "=s"(hwId));
+#elif defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__)
+#    define GetHwId(hwId)                                                                \
+        asm volatile("s_getreg_b32 %0, hwreg(HW_REG_HW_ID1)" : "=s"(hwId));
 #elif defined(__NVCC__)
 #    define GetHwId(hwId) asm("mov.u32 %0, %smid;" : "=r"(hwId))
 #else
-#    define GetHwId(hwId)                                                                \
-        asm volatile("s_getreg_b32 %0, hwreg(HW_REG_HW_ID)" : "=s"(hwId));
+#    define GetHwId(hwId) hwId = 0
 #endif
 
 // Macro for collecting XCC GFX kernel is running on
@@ -901,8 +903,8 @@ GetHsaAgent(ExeDevice const& exeDevice, hsa_agent_t& agent)
         hsa_amd_pointer_info_t info;
         info.size = sizeof(info);
 
-        ErrResult err;
-        int32_t*  tempBuffer;
+        ErrResult     err;
+        std::int32_t* tempBuffer;
 
         // Index CPU agents
         cpuAgents.clear();
@@ -1362,7 +1364,7 @@ TransfersHaveErrors(ConfigOptions const& cfg, std::vector<Transfer> const& trans
                     // Skip check of engine Id mask for self copies
                     if(srcAgent.handle != dstAgent.handle)
                     {
-                        uint32_t engineIdMask = 0;
+                        std::uint32_t engineIdMask = 0;
                         err = hsa_amd_memory_copy_engine_status(dstAgent, srcAgent,
                                                                 &engineIdMask);
                         if(err.errType != ERR_NONE)
@@ -1566,12 +1568,12 @@ TransfersHaveErrors(ConfigOptions const& cfg, std::vector<Transfer> const& trans
 struct SubExecParam
 {
     // Inputs
-    size_t  N;               ///< Number of floats this subExecutor works on
-    int     numSrcs;         ///< Number of source arrays
-    int     numDsts;         ///< Number of destination arrays
-    float*  src[MAX_SRCS];   ///< Source array pointers
-    float*  dst[MAX_DSTS];   ///< Destination array pointers
-    int32_t preferredXccId;  ///< XCC ID to execute on (GFX only)
+    size_t       N;               ///< Number of floats this subExecutor works on
+    int          numSrcs;         ///< Number of source arrays
+    int          numDsts;         ///< Number of destination arrays
+    float*       src[MAX_SRCS];   ///< Source array pointers
+    float*       dst[MAX_DSTS];   ///< Destination array pointers
+    std::int32_t preferredXccId;  ///< XCC ID to execute on (GFX only)
 
     // Prepared
     int teamSize;  ///< Index of this sub executor amongst team
@@ -1580,8 +1582,8 @@ struct SubExecParam
     // Outputs
     long long startCycle;  ///< Start timestamp for in-kernel timing (GPU-GFX executor)
     long long stopCycle;   ///< Stop  timestamp for in-kernel timing (GPU-GFX executor)
-    uint32_t  hwId;        ///< Hardware ID
-    uint32_t  xccId;       ///< XCC ID
+    std::uint32_t hwId;    ///< Hardware ID
+    std::uint32_t xccId;   ///< XCC ID
 };
 
 // Internal resources allocated per Transfer
@@ -1624,7 +1626,7 @@ struct TransferResources
     vector<ibv_qp*>     dstQueuePairs;  ///< Queue pairs for DST NIC
     ibv_mr*             srcMemRegion;   ///< Memory region for SRC
     ibv_mr*             dstMemRegion;   ///< Memory region for DST
-    uint8_t             qpCount;  ///< Number of QPs to be used for transferring data
+    std::uint8_t        qpCount;  ///< Number of QPs to be used for transferring data
     vector<ibv_sge>     sgePerQueuePair;   ///< Scatter-gather elements per queue pair
     vector<ibv_send_wr> sendWorkRequests;  ///< Send work requests per queue pair
 #endif
@@ -2165,7 +2167,7 @@ CreateQueuePair(ConfigOptions const& cfg, struct ibv_pd* pd, struct ibv_cq* cq,
 
 // Initialize a queue pair
 static ErrResult
-InitQueuePair(struct ibv_qp* qp, uint8_t port, unsigned flags)
+InitQueuePair(struct ibv_qp* qp, std::uint8_t port, unsigned flags)
 {
     struct ibv_qp_attr attr = {};            // Clear all attributes
     attr.qp_state           = IBV_QPS_INIT;  // Set the QP state to INIT
@@ -2187,9 +2189,9 @@ InitQueuePair(struct ibv_qp* qp, uint8_t port, unsigned flags)
 
 // Transition QueuePair to Ready to Receive State
 static ErrResult
-TransitionQpToRtr(ibv_qp* qp, uint16_t const& dlid, uint32_t const& dqpn,
-                  ibv_gid const& gid, uint8_t const& gidIndex, uint8_t const& port,
-                  bool const& isRoCE, ibv_mtu const& mtu)
+TransitionQpToRtr(ibv_qp* qp, std::uint16_t const& dlid, std::uint32_t const& dqpn,
+                  ibv_gid const& gid, std::uint8_t const& gidIndex,
+                  std::uint8_t const& port, bool const& isRoCE, ibv_mtu const& mtu)
 {
     // Prepare QP attributes
     struct ibv_qp_attr attr = {};
@@ -2352,7 +2354,7 @@ PrepareNicTransferResources(ConfigOptions const& cfg, ExeDevice const& srcExeDev
         // Create scatter-gather element for the portion of memory assigned to this queue
         // pair
         ibv_sge sg             = {};
-        sg.addr                = (uint64_t) rss.subExecParamCpu[i].src[0];
+        sg.addr                = (std::uint64_t) rss.subExecParamCpu[i].src[0];
         sg.length              = rss.subExecParamCpu[i].N * sizeof(float);
         sg.lkey                = rss.srcMemRegion->lkey;
         rss.sgePerQueuePair[i] = sg;
@@ -2364,7 +2366,7 @@ PrepareNicTransferResources(ConfigOptions const& cfg, ExeDevice const& srcExeDev
         wr.num_sge              = 1;
         wr.opcode               = IBV_WR_RDMA_WRITE;
         wr.send_flags           = IBV_SEND_SIGNALED;
-        wr.wr.rdma.remote_addr  = (uint64_t) rss.subExecParamCpu[i].dst[0];
+        wr.wr.rdma.remote_addr  = (std::uint64_t) rss.subExecParamCpu[i].dst[0];
         wr.wr.rdma.rkey         = rss.dstMemRegion->rkey;
         rss.sendWorkRequests[i] = wr;
 
@@ -3206,7 +3208,7 @@ RunNicExecutor(int const iteration, ConfigOptions const& cfg, int const exeIndex
 
     do
     {
-        std::vector<uint8_t> receivedQPs(transferCount, 0);
+        std::vector<std::uint8_t> receivedQPs(transferCount, 0);
         // post the sends
         for(auto i = 0; i < transferCount; i++)
         {
@@ -3287,10 +3289,10 @@ RunNicExecutor(int const iteration, ConfigOptions const& cfg, int const exeIndex
 //========================================================================================
 
 // Converts register value to a CU/SM index
-static uint32_t
-GetId(uint32_t hwId)
+static std::uint32_t
+GetId(std::uint32_t hwId)
 {
-#if defined(__NVCC_)
+#if defined(__NVCC__)
     return hwId;
 #else
     // Based on instinct-mi200-cdna2-instruction-set-architecture.pdf
@@ -3302,11 +3304,11 @@ GetId(uint32_t hwId)
 }
 
 // Device level timestamp function
-__device__ int64_t
-GetTimestamp()
+__device__ std::int64_t
+           GetTimestamp()
 {
 #if defined(__NVCC__)
-    int64_t result;
+    std::int64_t result;
     asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(result));
     return result;
 #else
@@ -3454,21 +3456,21 @@ __global__ void
 __launch_bounds__(BLOCKSIZE)
     GpuReduceKernel(SubExecParam* params, int waveOrder, int numSubIterations)
 {
-    int64_t startCycle;
+    std::int64_t startCycle;
     if(threadIdx.x == 0) startCycle = GetTimestamp();
 
     SubExecParam& p = params[blockIdx.y];
 
     // Filter by XCC
 #if !defined(__NVCC__)
-    int32_t xccId;
+    std::int32_t xccId;
     GetXccId(xccId);
     if(p.preferredXccId != -1 && xccId != p.preferredXccId) return;
 #endif
 
     // Collect data information
-    int32_t const numSrcs = p.numSrcs;
-    int32_t const numDsts = p.numDsts;
+    std::int32_t const numSrcs = p.numSrcs;
+    std::int32_t const numDsts = p.numDsts;
     PACKED_FLOAT const* __restrict__ srcFloatPacked[MAX_SRCS];
     PACKED_FLOAT* __restrict__ dstFloatPacked[MAX_DSTS];
     for(int i = 0; i < numSrcs; i++)
@@ -3477,18 +3479,18 @@ __launch_bounds__(BLOCKSIZE)
         dstFloatPacked[i] = (PACKED_FLOAT*) p.dst[i];
 
     // Operate on wavefront granularity
-    int32_t const nTeams =
+    std::int32_t const nTeams =
         p.teamSize;  // Number of threadblocks working together on this subarray
-    int32_t const teamIdx = p.teamIdx;  // Index of this threadblock within the team
-    int32_t const nWaves =
+    std::int32_t const teamIdx = p.teamIdx;  // Index of this threadblock within the team
+    std::int32_t const nWaves =
         BLOCKSIZE / warpSize;  // Number of wavefronts within this threadblock
-    int32_t const waveIdx =
+    std::int32_t const waveIdx =
         threadIdx.x / warpSize;  // Index of this wavefront within the threadblock
-    int32_t const tIdx = threadIdx.x % warpSize;  // Thread index within wavefront
+    std::int32_t const tIdx = threadIdx.x % warpSize;  // Thread index within wavefront
 
     size_t const numPackedFloat = p.N / (sizeof(PACKED_FLOAT) / sizeof(float));
 
-    int32_t teamStride, waveStride, unrlStride, teamStride2, waveStride2;
+    std::int32_t teamStride, waveStride, unrlStride, teamStride2, waveStride2;
     switch(waveOrder)
     {
         case 0: /* U,W,C */
@@ -3659,28 +3661,24 @@ __launch_bounds__(BLOCKSIZE)
     }
 }
 
+// clang-format off
 #define GPU_KERNEL_TEMPORAL_DECL(BLOCKSIZE, UNROLL, DWORD)                               \
-    {                                                                                    \
-        GpuReduceKernel<DWORD, BLOCKSIZE, UNROLL, TEMPORAL_NONE>,                        \
-            GpuReduceKernel<DWORD, BLOCKSIZE, UNROLL, TEMPORAL_LOAD>,                    \
-            GpuReduceKernel<DWORD, BLOCKSIZE, UNROLL, TEMPORAL_STORE>,                   \
-            GpuReduceKernel<DWORD, BLOCKSIZE, UNROLL, TEMPORAL_BOTH>                     \
-    }
+    { GpuReduceKernel<DWORD, BLOCKSIZE, UNROLL, TEMPORAL_NONE>,                          \
+      GpuReduceKernel<DWORD, BLOCKSIZE, UNROLL, TEMPORAL_LOAD>,                          \
+      GpuReduceKernel<DWORD, BLOCKSIZE, UNROLL, TEMPORAL_STORE>,                         \
+      GpuReduceKernel<DWORD, BLOCKSIZE, UNROLL, TEMPORAL_BOTH> }
 
 #define GPU_KERNEL_DWORD_DECL(BLOCKSIZE, UNROLL)                                         \
-    {                                                                                    \
-        GPU_KERNEL_TEMPORAL_DECL(BLOCKSIZE, UNROLL, float),                              \
-            GPU_KERNEL_TEMPORAL_DECL(BLOCKSIZE, UNROLL, float2),                         \
-            GPU_KERNEL_TEMPORAL_DECL(BLOCKSIZE, UNROLL, float4)                          \
-    }
+    { GPU_KERNEL_TEMPORAL_DECL(BLOCKSIZE, UNROLL, float),                                \
+      GPU_KERNEL_TEMPORAL_DECL(BLOCKSIZE, UNROLL, float2),                               \
+      GPU_KERNEL_TEMPORAL_DECL(BLOCKSIZE, UNROLL, float4) }
 
 #define GPU_KERNEL_UNROLL_DECL(BLOCKSIZE)                                                \
-    {                                                                                    \
-        GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 1), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 2),        \
-            GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 3), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 4),    \
-            GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 5), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 6),    \
-            GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 7), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 8)     \
-    }
+    { GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 1), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 2),          \
+      GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 3), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 4),          \
+      GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 5), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 6),          \
+      GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 7), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 8) }
+// clang-format on
 
 // Table of all GPU Reduction kernel functions (templated blocksize / unroll / dword size)
 typedef void (*GpuKernelFuncPtr)(SubExecParam*, int, int);
@@ -3998,9 +3996,11 @@ RunExecutor(int const iteration, ConfigOptions const& cfg, ExeDevice const& exeD
 //========================================================================================
 /// @endcond
 
+// clang-format off
 ErrResult::ErrResult(ErrType err)
 : errType(err)
-, errMsg(""){};
+, errMsg("") {};
+// clang-format on
 
 ErrResult::ErrResult(hipError_t err)
 {

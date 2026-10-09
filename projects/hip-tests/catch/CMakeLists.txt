@@ -1,5 +1,4 @@
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-#
+# Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.20)
@@ -22,16 +21,21 @@ if (HIP_PLATFORM MATCHES "nvidia")
   set(CMAKE_HIP_COMPILER ${CUDAToolkit_NVCC_EXECUTABLE})
 endif()
 
-option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 option(BUILD_SHARED_LIBS "Option for testing shared libraries" ON)
 option(BUILD_UNIT_TESTS "Build unit tests" ON)
 option(BUILD_PERF_TESTS "Build perf tests" OFF)
 option(BUILD_STRESS_TESTS "Build stress tests" OFF)
+option(BUILD_CONTRACT_TESTS "Build semantic contract tests" ON)
 option(TEST_CLOCK_CYCLE "Option to use clock64" OFF)
 option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
 option(ENABLE_SPIRV "Build hip-tests for SPIRV" OFF)
 option(ENABLE_YAML_TAGS "Enable YAML tags for test cases" ON)
 option(STANDALONE_TESTS "Generate standalone executable per source file" OFF)
+option(ENABLE_OOB_TESTS "Build OOB tests, deliberately wrong inputs" ON)
+
+# Build tests with -Wall -Werror. Defaults to OFF
+set(_hiptests_werror_default OFF)
+option(HIP_TESTS_ENABLE_WERROR "Build tests with -Wall -Werror (Linux default ON)" ${_hiptests_werror_default})
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
@@ -117,31 +121,10 @@ if(NOT WIN32)
   endif() # end BUILD_SHARED_LIBS
 endif() # end win32
 
-# Address sanitizer options
-if(NOT DEFINED THEROCK_SANITIZER)
-  set(THEROCK_SANITIZER)
-endif()
-
-set(ASAN_CONFIG_DEF)
-if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
-  message(STATUS "Building catch tests with Address Sanitizer options")
-  # If user is building hip-tests standalone (without TheRock) and wants to turn on sanitizer
-  # We append the flags manually, otherwise we use TheRock's CXX flags which already should have
-  # `-fsanitize=address` in it.
-  if(ENABLE_ADDRESS_SANITIZER)
-    # We support clang for this
-    if (NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR NOT CMAKE_HIP_COMPILER_ID STREQUAL "Clang")
-      message(WARNING "CXX and HIP compiler are not Clang, sanitizer build might fail")
-    endif()
-
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fno-omit-frame-pointer -shared-libasan -g")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -shared-libasan -g")
-  endif()
-  set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -fsanitize=address -fno-omit-frame-pointer -shared-libasan -g")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address -shared-libasan")
-  add_compile_definitions(ENABLE_ADDRESS_SANITIZER)
-  set(ASAN_CONFIG_DEF "-DENABLE_ADDRESS_SANITIZER")
-endif()
+# Resolves ENABLE_SANITIZER, applies the sanitizer flags to this scope, and defines
+# hip_tests_sanitizer_resolve_offload_archs() and
+# hip_tests_sanitizer_drop_device_flags().
+include(cmake/hip-tests-sanitizers.cmake)
 
 string(REPLACE "." ";" VERSION_LIST ${HIP_VERSION})
 list(GET VERSION_LIST 0 HIP_VERSION_MAJOR)
@@ -250,7 +233,10 @@ if(HIP_PLATFORM STREQUAL "amd")
     # Which results in errors about missing headers etc
     set(win_cxx_standard -std=c++17)
   endif()
-  add_compile_options(${HIP_PATH_OPT} ${win_cxx_standard} -x hip -Wall -Wextra -Wvla -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter ${win_disable_warnings})
+  add_compile_options(${HIP_PATH_OPT} ${win_cxx_standard} -x hip -Wall -Wextra -Wvla -Wno-deprecated ${win_disable_warnings})
+  if(HIP_TESTS_ENABLE_WERROR AND UNIX)
+    add_compile_options(-Werror)
+  endif()
 endif()
 
 # Turn off CMAKE_HIP_ARCHITECTURES Feature if cmake version is 3.21+
@@ -273,9 +259,12 @@ if(ENABLE_SPIRV)
 elseif(DEFINED OFFLOAD_ARCH_STR)
   string(REPLACE "--offload-arch=" "" HIP_GPU_ARCH_LIST ${OFFLOAD_ARCH_STR})
 elseif(DEFINED GPU_TARGETS)
-  foreach(_hip_gpu_arch ${GPU_TARGETS})
+  set(_hip_gpu_arch_list ${GPU_TARGETS})
+  list(REMOVE_DUPLICATES _hip_gpu_arch_list)
+  foreach(_hip_gpu_arch ${_hip_gpu_arch_list})
     set(OFFLOAD_ARCH_STR "--offload-arch=${_hip_gpu_arch} ${OFFLOAD_ARCH_STR}")
   endforeach()
+  unset(_hip_gpu_arch_list)
 elseif(NOT DEFINED OFFLOAD_ARCH_STR
    AND EXISTS "${ROCM_AGENT_ENUMERATOR_EXEC}"
    AND HIP_PLATFORM STREQUAL "amd" AND UNIX)
@@ -301,6 +290,10 @@ endif()
 # Trim any trailing spaces, this trips up the cxx function call
 string(STRIP "${OFFLOAD_ARCH_STR}" OFFLOAD_ARCH_STR)
 
+if(ENABLE_SANITIZER STREQUAL "ASAN")
+  hip_tests_sanitizer_resolve_offload_archs(OFFLOAD_ARCH_STR)
+endif()
+
 message(STATUS "Using offload arch string: ${OFFLOAD_ARCH_STR}")
 if(DEFINED OFFLOAD_ARCH_STR)
   set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} ${OFFLOAD_ARCH_STR}")
@@ -310,10 +303,15 @@ string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
 separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
   "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
 list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
-if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
-  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "-fsanitize=address")
-  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "-fno-omit-frame-pointer")
-  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "-shared-libasan")
+
+# SPIR-V does not support ASan, so the ASan-related flags have to be removed.
+set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH_NO_ASAN ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH})
+if(NOT ENABLE_SANITIZER STREQUAL "OFF")
+  hip_tests_sanitizer_drop_device_flags(HIP_DEVICE_BUILD_FLAGS_NO_ARCH_NO_ASAN)
+endif()
+
+if(ENABLE_SPIRV)
+  set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_NO_ASAN})
 endif()
 
 # get hip-tests commit short hash
@@ -349,13 +347,136 @@ set(_catchInfo ${_catchInfo} "HIP_PLATFORM=${HIP_PLATFORM}\n")
 set(_catchInfo ${_catchInfo} "HIP_TESTS_GITHASH=${HIP_TESTS_GITHASH}\n")
 set(_catchInfo ${_catchInfo} "ARCHS=${HIP_GPU_ARCH_LIST}\n")
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/catchInfo.txt ${_catchInfo})
-# allows user to run ctest from catch_tests level
+
+# Let `ctest` run from catch_tests/. CMake only writes CTestTestfile.cmake and
+# DartConfiguration.tcl to the build root, so provide both under catch_tests/:
+# write a CTestTestfile.cmake that redirects to the parent, and copy
+# DartConfiguration.tcl so ctest's configuration (default timeout, etc.) applies.
 set(_subdirs ${_autogen} "subdirs(..)\n")
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/CTestTestfile.cmake ${_subdirs})
+
+if(EXISTS "${CMAKE_BINARY_DIR}/DartConfiguration.tcl")
+  configure_file(
+    "${CMAKE_BINARY_DIR}/DartConfiguration.tcl"
+    "${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/DartConfiguration.tcl"
+    COPYONLY)
+endif()
 
 set(CATCH_SCRIPT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/script)
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hip-tests.cmake
      DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
+
+# Patch CatchAddTests.cmake in-place so that catch_discover_tests_impl writes
+# an empty _tests.cmake when zero tests match the filter, instead of returning
+# early without creating the file.  The generated _include.cmake hardcodes the
+# path to CatchAddTests.cmake from Catch2's source tree, so we must patch it
+# there (not a copy) for the fix to take effect at ctest startup.
+# Without this, catch_discover_tests("[disabled]") on a binary with no
+# [disabled] tests leaves a dangling _include.cmake whose include() fails:
+#   "include could not find requested file: ..._tests.cmake"
+# This is a known Catch2 bug fixed upstream in:
+#   https://github.com/catchorg/Catch2/pull/3075
+# Remove this patch once we update to a Catch2 version that includes that fix.
+set(_catch_old_snippet "  if(num_tests STREQUAL \"0\")\n    return()\n  endif()")
+set(_catch_new_snippet "  if(num_tests STREQUAL \"0\")\n    file(WRITE \"\${_CTEST_FILE}\" \"# no tests discovered for this spec\\n\")\n    return()\n  endif()")
+file(READ "${CATCH_ADD_TESTS_SCRIPT}" _catch_content)
+string(FIND "${_catch_content}" "${_catch_new_snippet}" _catch_already_patched)
+if(_catch_already_patched EQUAL -1)
+  string(REPLACE "${_catch_old_snippet}" "${_catch_new_snippet}" _catch_patched "${_catch_content}")
+  if("${_catch_patched}" STREQUAL "${_catch_content}")
+    message(FATAL_ERROR
+      "Failed to patch CatchAddTests.cmake: expected snippet not found.\n"
+      "The Catch2 version may have changed. Check upstream fix:\n"
+      "  https://github.com/catchorg/Catch2/pull/3075")
+  endif()
+  file(WRITE "${CATCH_ADD_TESTS_SCRIPT}" "${_catch_patched}")
+endif()
+unset(_catch_old_snippet)
+unset(_catch_new_snippet)
+unset(_catch_content)
+unset(_catch_patched)
+unset(_catch_already_patched)
+
+# Patch CatchAddTests.cmake in-place so that tests tagged [exclude_amd_wsl] are
+# registered as DISABLED when test discovery runs on WSL.  The Linux package is
+# shared between native Linux and WSL, so the tag is baked into every binary at
+# build time and can only be resolved on the machine that runs ctest.
+# Detection requires both a WSL kernel signature and a WSL-specific runtime
+# artifact, so a native kernel whose release string happens to contain
+# "microsoft" is not mistaken for WSL.  It is cached in _hip_on_wsl so it runs
+# once per binary rather than once per test.  list(FIND) is used instead of
+# IN_LIST because CMP0057 is not set in the context ctest evaluates this in.
+#
+# parse_config.py emits [exclude_<reason>] for every disable reason regardless
+# of the build platform, so an amd_wsl entry also lands in nvidia binaries.  The
+# patch is therefore applied only for AMD builds, and only when the caller has
+# not asked for normally-skipped tests to run via HIP_TESTS_RUN_DISABLED.  When
+# either condition fails the patch is reversed instead, so reconfiguring an
+# existing build directory with changed options leaves Catch2's script in the
+# state those options imply.
+set(_wsl_old_snippet [==[          LABELS "${tag_list}"
+        )
+      endif()
+    endif(add_tags)]==])
+set(_wsl_new_snippet [==[          LABELS "${tag_list}"
+        )
+
+        if(NOT DEFINED _hip_on_wsl)
+          set(_hip_on_wsl FALSE)
+          if(NOT WIN32 AND EXISTS "/proc/sys/kernel/osrelease")
+            file(READ "/proc/sys/kernel/osrelease" _hip_osrelease)
+            string(TOLOWER "${_hip_osrelease}" _hip_osrelease)
+            # WSL2: "<ver>-microsoft-standard-WSL2", WSL1: "<ver>-<build>-Microsoft"
+            if(_hip_osrelease MATCHES "-microsoft" OR _hip_osrelease MATCHES "wsl[0-9]*")
+              if(EXISTS "/run/WSL"
+                 OR EXISTS "/proc/sys/fs/binfmt_misc/WSLInterop"
+                 OR EXISTS "/usr/lib/wsl/lib"
+                 OR DEFINED ENV{WSL_DISTRO_NAME}
+                 OR DEFINED ENV{WSL_INTEROP})
+                set(_hip_on_wsl TRUE)
+              endif()
+            endif()
+          endif()
+        endif()
+
+        if(_hip_on_wsl)
+          list(FIND tag_list "exclude_amd_wsl" _wsl_tag_idx)
+          if(NOT _wsl_tag_idx EQUAL -1)
+            add_command(set_tests_properties
+              "${prefix}${plain_name}${suffix}"
+              PROPERTIES
+              DISABLED TRUE
+            )
+          endif()
+        endif()
+      endif()
+    endif(add_tags)]==])
+if(HIP_PLATFORM STREQUAL "amd" AND NOT HIP_TESTS_RUN_DISABLED)
+  set(_wsl_from "${_wsl_old_snippet}")
+  set(_wsl_to "${_wsl_new_snippet}")
+else()
+  set(_wsl_from "${_wsl_new_snippet}")
+  set(_wsl_to "${_wsl_old_snippet}")
+endif()
+file(READ "${CATCH_ADD_TESTS_SCRIPT}" _wsl_content)
+string(FIND "${_wsl_content}" "${_wsl_to}" _wsl_already_patched)
+if(_wsl_already_patched EQUAL -1)
+  string(REPLACE "${_wsl_from}" "${_wsl_to}" _wsl_patched "${_wsl_content}")
+  if("${_wsl_patched}" STREQUAL "${_wsl_content}")
+    message(FATAL_ERROR
+      "Failed to patch CatchAddTests.cmake for WSL: expected snippet not found.\n"
+      "The Catch2 version may have changed.")
+  endif()
+  file(WRITE "${CATCH_ADD_TESTS_SCRIPT}" "${_wsl_patched}")
+endif()
+unset(_wsl_old_snippet)
+unset(_wsl_new_snippet)
+unset(_wsl_from)
+unset(_wsl_to)
+unset(_wsl_content)
+unset(_wsl_patched)
+unset(_wsl_already_patched)
+
 file(COPY ${CATCH_ADD_TESTS_SCRIPT}
          DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_SCRIPT_TARGETS ${CATCH_ADD_TESTS_SCRIPT})
@@ -382,11 +503,17 @@ add_custom_target(build_tests ALL)
 add_dependencies(build_tests hip_tests_config)
 
 # Tests folder
+# kernels and hipTestMain provide the KERNELS and Main_Object object libraries
+# referenced by hip_add_exe_to_target. They are required by every test
+# executable built through hip_add_exe_to_target (unit, contract, perf, and
+# stress), so add them once when any of those test groups is enabled.
+if(BUILD_UNIT_TESTS OR BUILD_CONTRACT_TESTS OR BUILD_PERF_TESTS OR BUILD_STRESS_TESTS)
+  add_subdirectory(kernels ${CATCH_BUILD_DIR}/kernels)
+  add_subdirectory(hipTestMain ${CATCH_BUILD_DIR}/hipTestMain)
+endif()
 if(BUILD_UNIT_TESTS)
   add_subdirectory(unit ${CATCH_BUILD_DIR}/unit)
   add_subdirectory(ABM ${CATCH_BUILD_DIR}/ABM)
-  add_subdirectory(kernels ${CATCH_BUILD_DIR}/kernels)
-  add_subdirectory(hipTestMain ${CATCH_BUILD_DIR}/hipTestMain)
   add_subdirectory(TypeQualifiers ${CATCH_BUILD_DIR}/TypeQualifiers)
   if(UNIX)
     add_subdirectory(multiproc ${CATCH_BUILD_DIR}/multiproc)
@@ -397,6 +524,9 @@ if(BUILD_PERF_TESTS)
 endif()
 if(BUILD_STRESS_TESTS)
   add_subdirectory(stress ${CATCH_BUILD_DIR}/stress)
+endif()
+if(BUILD_CONTRACT_TESTS)
+  add_subdirectory(contract ${CATCH_BUILD_DIR}/contract)
 endif()
 
 add_custom_target(gen_coverage

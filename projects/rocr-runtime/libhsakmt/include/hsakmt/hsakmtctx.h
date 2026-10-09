@@ -603,6 +603,18 @@ hsaKmtExportDMABufHandleCtx(
     );
 
 /**
+ Query the placement and size of an allocation from its DMA-BUF fd.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueryDmaBufInfoCtx(
+    HsaKFDContext     *ctx,               //IN
+    int               DMABufFd,           //IN
+    HsaDmaBufInfo     *Info               //OUT
+    );
+
+/**
  Export a memory buffer for sharing with other processes
 
  NOTE: for the current revision of the thunk spec, SizeInBytes
@@ -681,7 +693,7 @@ hsaKmtMapMemoryToGPUNodesCtx(
     void*             MemoryAddress,         //IN (page-aligned)
     HSAuint64         MemorySizeInBytes,     //IN (page-aligned)
     HSAuint64*        AlternateVAGPU,        //OUT (page-aligned)
-    HsaMemMapFlags    MemMapFlags,           //IN
+    HsaMemFlags       MemFlags,              //IN
     HSAuint64         NumberOfNodes,         //IN
     HSAuint32*        NodeArray              //IN
     );

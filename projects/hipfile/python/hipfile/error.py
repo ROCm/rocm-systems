@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
 """Exception type for hipFile operations."""
 
 from __future__ import annotations

@@ -29,10 +29,8 @@
 #include <atomic>
 #include <unordered_set>
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 #include "device/devurilocator.hpp"
-#endif
 #endif
 /*! \addtogroup PAL
  *  @{
@@ -138,7 +136,8 @@ class NullDevice : public amd::Device {
   virtual cl_int virtualUnmap(void* va, size_t size) override { return CL_INVALID_OPERATION; }
 
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                            VmmLocationType = VmmLocationType::kDevice) {
+                            VmmLocationType = VmmLocationType::kDevice,
+                            int numaNode = -1) {
     return true;
   }
 
@@ -165,10 +164,8 @@ class NullDevice : public amd::Device {
                             cl_set_device_clock_mode_output_amd* pSetClockModeOutput) {
     return true;
   }
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const { return nullptr; }
-#endif
 #endif
  protected:
   static Util::GenericAllocator allocator_;  //!< Generic memory allocator in PAL
@@ -583,7 +580,8 @@ class Device : public NullDevice {
 
   //! Set/Get memory access set by the app
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                            VmmLocationType = VmmLocationType::kDevice);
+                            VmmLocationType = VmmLocationType::kDevice,
+                            int numaNode = -1);
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const;
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const;
 
@@ -684,10 +682,8 @@ class Device : public NullDevice {
                                   amd::ExternalSemaphoreHandleType sem_handle_type) override;
 
   virtual void DestroyExtSemaphore(void* extSemaphore);
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUrilocator() const { return nullptr; }
-#endif
 #endif
   //! Allocates hidden heap for device memory allocations
   void HiddenHeapAlloc(const VirtualGPU& gpu);

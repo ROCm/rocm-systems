@@ -22,7 +22,6 @@ THE SOFTWARE.
 
 #include <iostream>
 #include <iomanip>
-#include <unistd.h>
 #include <vector>
 #include <string>
 #include <chrono>
@@ -32,9 +31,12 @@ THE SOFTWARE.
 #include <atomic>
 #include <thread>
 #include <functional>
+#ifndef _WIN32
+#include <unistd.h>
 #include <sys/stat.h>
 #include <libgen.h>
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#endif
+#if (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L && __has_include(<filesystem>))
     #include <filesystem>
 #else
     #include <experimental/filesystem>
@@ -207,7 +209,7 @@ void ParseCommandLine(std::string &input_folder_path, std::string &output_folder
                 ShowHelpAndExit("-o");
             }
             output_folder_path = argv[i];
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#if (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L && __has_include(<filesystem>))
             if (std::filesystem::is_directory(output_folder_path)) {
                 std::filesystem::remove_all(output_folder_path);
             }
@@ -249,16 +251,17 @@ int main(int argc, char **argv) {
     bool b_extract_sei_messages = false;
     OutputSurfaceMemoryType mem_type = OUT_SURFACE_MEM_DEV_INTERNAL;        // set to decode only for performance
     bool b_force_zero_latency = false, b_dump_output_frames = false;
+    bool b_unsupported_codec = false;
     std::vector<std::string> input_file_names;
     ParseCommandLine(input_folder_path, output_folder_path, device_id, n_thread, b_dump_output_frames, mem_type, disp_delay, argc, argv);
 
     try {
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#if (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L && __has_include(<filesystem>))
         for (const auto& entry : std::filesystem::directory_iterator(input_folder_path)) {
 #else
         for (const auto& entry : std::experimental::filesystem::directory_iterator(input_folder_path)) {
 #endif
-            input_file_names.push_back(entry.path());
+            input_file_names.push_back(entry.path().string());
             num_files++;
         }
 
@@ -327,7 +330,7 @@ int main(int argc, char **argv) {
         for (int i = 0; i < num_files; i++) {
             std::unique_ptr<VideoDemuxer> demuxer(new VideoDemuxer(input_file_names[i].c_str()));
             v_demuxer[i] = std::move(demuxer);
-            std::size_t found_file = input_file_names[i].find_last_of('/');
+            std::size_t found_file = input_file_names[i].find_last_of("/\\");
             input_file_names[i] = input_file_names[i].substr(found_file + 1);
             if (b_dump_output_frames) {
                 std::size_t found_ext = input_file_names[i].find_last_of('.');
@@ -462,8 +465,9 @@ int main(int argc, char **argv) {
                 std::right << std::hex << pci_domain_id << "." << pci_device_id << std::dec << std::endl;
             }
             if (!v_dec_info[thread_idx]->viddec->CodecSupported(v_dec_info[thread_idx]->dec_device_id, v_dec_info[thread_idx]->rocdec_codec_id, v_dec_info[thread_idx]->bit_depth)) {
-                std::cerr << "Codec not supported on GPU, skipping this file!" << std::endl;
+                std::cerr << "Error: Codec not supported on GPU for " << input_file_names[j] << "!" << std::endl;
                 v_dec_info[thread_idx]->decoding_complete = true;
+                b_unsupported_codec = true;
                 continue;
             }
             thread_pool.ExecuteJob(std::bind(DecProc, v_dec_info[thread_idx]->viddec.get(), v_demuxer[j].get(), &v_frame[j], &v_fps[j], std::ref(v_dec_info[thread_idx]->decoding_complete), b_dump_output_frames, output_file_names[j], mem_type));
@@ -473,6 +477,10 @@ int main(int argc, char **argv) {
         for (int i = 0; i < num_files; i++) {
             total_fps += v_fps[i] * static_cast<double>(n_thread) / static_cast<double>(num_files);
             n_total += v_frame[i];
+        }
+        if (n_total == 0) {
+            std::cerr << "Error: No frames were decoded!" << std::endl;
+            return 1;
         }
         if (!b_dump_output_frames) {
             std::cout << "info: Total frame decoded: " << n_total  << std::endl;
@@ -490,8 +498,9 @@ int main(int argc, char **argv) {
 
     } catch (const std::exception &ex) {
       std::cout << ex.what() << std::endl;
+      exit(1);
     }
 
-    return 0;
+    return b_unsupported_codec ? 1 : 0;
 }
 

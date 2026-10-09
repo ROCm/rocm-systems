@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 /*
  * Detail Description:
@@ -499,7 +480,12 @@ void ROCmLogging::Logger::initialize_resources() {
   if (m_File.fail()) {
     std::cout << "WARNING: Failed opening log file." << std::endl;
   }
-  chmod(logFileName, S_IRUSR | S_IRGRP | S_IROTH | S_IWUSR | S_IWGRP | S_IWOTH);
+  // 0664 to match the mode the package postinst sets and avoid churn on the
+  // first root-run. The log is root-owned, so the group-write bit has no
+  // practical effect; the security-relevant part is withholding world-write
+  // (S_IWOTH), which would let any local user tamper with a root-owned log
+  // (CWE-732).
+  chmod(logFileName, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
 }
 
 void ROCmLogging::Logger::destroy_resources() { m_File.close(); }

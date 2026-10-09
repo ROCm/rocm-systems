@@ -70,15 +70,21 @@ struct QueueSemaphoreCreateInfo
             /// For DX12 native fence, the flag needs to be consistent with
             /// D3DDDI_SYNCHRONIZATIONOBJECT_FLAGS.NoSignalMaxValueOnTdr given by DX runtime.
             uint32 noSignalOnDeviceLost   :  1;
-            /// For native fence only. If it's 0x0, the native fence type is D3DDDI_NATIVEFENCE_TYPE_DEFAULT.
-            /// If it's 0x1, native fence type is D3DDDI_NATIVEFENCE_TYPE_INTRA_GPU.
-            /// For DX12, the value is determined by runtime. DXCP needs to set it by reading D3DDDI_NATIVEFENCEINFO.
+            /// gpuOnly is an optimization hint that a semaphore will never need to be synchronized with the CPU.
+            /// Restricted to DX12 native fence and/or gpuFence semaphore creation.
+            /// For native fences, determines if the fence is created with D3DDDI_NATIVEFENCE_TYPE_INTRA_GPU.
+            /// For gpu fences, skips any overhead for synchronizing the gpuFence to the CPU.
             uint32 gpuOnly                :  1;
             /// This queue semaphore will be a monitored fence if this flag set, even if OS supports native fence.
             uint32 forceUseMonitoredFence :  1;
             /// This queue semaphore can be shared across adapters
             uint32 crossAdapter           :  1;
-            uint32 reserved               : 24;  ///< Reserved for future use.
+            /// This queue semaphore is a gpu fence. Gpu fences have a 64-bit unsigned integer payload whose value is
+            /// directly controlled by clients to sychronize workloads between hardware engines or the CPU.
+            /// Having an engine wait on a value will block the engine until the value has been signaled.
+            /// Clients are responsible for avoiding deadlocks when using gpu fences.
+            uint32 gpuFence               :  1;
+            uint32 reserved               : 23;  ///< Reserved for future use.
         };
         uint32 u32All;              ///< Flags packed as 32-bit uint.
     } flags;                        ///< Queue semaphore creation flags.
@@ -93,6 +99,9 @@ struct QueueSemaphoreCreateInfo
                                     ///  Must not be larger than maxCount for counting semaphores.
                                     ///  For DX12 native fence, DXCP needs to pass InitialFenceValue from
                                     ///  D3DDDI_NATIVEFENCEINFO.
+
+    gpusize counterGpuVa;           ///< Address of an externally-owned monitored fence to use as a gpuFence.
+                                    ///  Only valid when forceUseMonitoredFence=1 and gpuFence=1.
 
 };
 
@@ -139,7 +148,7 @@ struct QueueSemaphoreExportInfo
             uint32 isReference        :  1;   ///< If set, then the semaphore exporting a handle that reference the
                                               ///< same sync object in the kernel.  Otherwise, the object is copied
                                               ///< to the new Semaphore.
-            uint32 reserved           : 31;   ///< Reserved for future use.
+            uint32 reserved           : 31;   ///< Resevered for future use.
         };
         uint32 u32All;                        ///< Flags packed as 32-bit uint.
     } flags;                                  ///< External queue semaphore export flags.

@@ -172,7 +172,50 @@
   X(HostIntAmoFAdd,            127)  \
   X(HostIntAmoFCswap,          128)  \
   X(HostAmoAllPes,             129)  \
-  X(HostAmoSelf,               130)
+  X(HostAmoSelf,               130)  \
+  X(HostAmoAdd,                131)  \
+  X(TileBroadcast,             132)  \
+  X(TileBroadcastWave,         133)  \
+  X(TileBroadcastWG,           134)  \
+  X(TileAllgather,             135)  \
+  X(TileAllgatherWave,         136)  \
+  X(TileAllgatherWG,           137)  \
+  X(HostWaitUntil,             138)  \
+  X(HostTest,                  139)  \
+  X(HostWaitUntilAll,          140)  \
+  X(HostWaitUntilAny,          141)  \
+  X(HostWaitUntilSome,         142)  \
+  X(HostWaitUntilAllVector,    143)  \
+  X(HostWaitUntilAnyVector,    144)  \
+  X(HostWaitUntilSomeVector,   145)  \
+  X(HostWaitUntilAllStatus,    146)  \
+  X(HostWaitUntilAnyStatus,    147)  \
+  X(HostWaitUntilSomeStatus,   148)  \
+  X(TeamReduceScatter,         149)  \
+  X(BroadcastWave,             150)  \
+  X(AllToAllWave,              151)  \
+  X(FcollectWave,              152)  \
+  X(ReduceWave,                153)  \
+  X(TeamReduceScatterWave,     154)  \
+  X(TileReduce,                155)  \
+  X(TileReduceWave,            156)  \
+  X(TileReduceWG,              157)  \
+  X(QpPingPong,                158)  \
+  X(QpPutNbi,                  159)  \
+  X(SdmaPingPong,              160)  \
+  X(SdmaPutNbi,                161)  \
+  X(BufferRegisterSymmetric,   162)  \
+  X(TilePutWaveRowMajor,       163)  \
+  X(TilePutWaveColumnMajor,    164)  \
+  X(TileGetWaveRowMajor,       165)  \
+  X(TileGetWaveColumnMajor,    166)  \
+  X(TilePutWGRowMajor,         167)  \
+  X(TilePutWGColumnMajor,      168)  \
+  X(TileGetWGRowMajor,         169)  \
+  X(TileGetWGColumnMajor,      170)  \
+  X(SignalAdd,                 171)  \
+  X(SignalSet,                 172)  \
+  X(SignalWaitUntil,           173)
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {

@@ -13,6 +13,10 @@ on:
       - 'projects/hipfile/**.sh'
       - '.github/workflows/hipfile-shellcheck.yml'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

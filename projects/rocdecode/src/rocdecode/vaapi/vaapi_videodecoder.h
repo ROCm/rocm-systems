@@ -27,19 +27,39 @@ THE SOFTWARE.
 #include <sstream>
 #include <vector>
 #include <string>
+#include <cstring>
+#include <memory>
+#include <mutex>
+#include <algorithm>
+#include <unordered_map>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <d3d12.h>
+#include <dxgi1_2.h>
+#include <va/va_win32.h>
+#include "d3d12_interop.h"
+#else
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
 #include <sys/stat.h>
-#include <cstring>
-#include <mutex>
-#include <algorithm>
-#include <unordered_map>
 #include <libdrm/amdgpu_drm.h>
 #include <libdrm/amdgpu.h>
-#include <va/va.h>
 #include <va/va_drm.h>
+#endif
+
+#include <va/va.h>
 #include <va/va_drmcommon.h>
+#ifdef ROCDECODE_USE_DLOPEN_VA
+#include "vaapi_loader.h"
+#endif
 #include "../../commons.h"
 #include "../../../api/rocdecode/rocdecode.h"
 
@@ -61,6 +81,7 @@ THE SOFTWARE.
 
 #define INIT_SLICE_PARAM_LIST_NUM 16 // initial slice parameter buffer list size
 
+#ifndef _WIN32
 typedef enum {
     kSpx = 0, // Single Partition Accelerator
     kDpx = 1, // Dual Partition Accelerator
@@ -68,11 +89,48 @@ typedef enum {
     kQpx = 3, // Quad Partition Accelerator
     kCpx = 4, // Core Partition Accelerator
 } ComputePartition;
+#endif
+
+/**
+ * @brief Capabilities of a single VLD-capable VA profile.
+ *
+ * Filled by DecodeSurfaceAttribs() from the VASurfaceAttrib list of a VLD config, so that
+ * both platforms share one VA_FOURCC_* -> rocDecVideoSurfaceFormat mapping. On Linux the
+ * record is transient, probed on demand by CheckDecCapForCodecType(). On Windows the probe
+ * VADisplay is terminated as soon as GetVaContext() has finished enumerating profiles, so
+ * the record is cached and every later capability query is answered from it rather than
+ * from the VA driver. See VaContext::ProbeAllProfileCaps().
+ */
+typedef struct {
+    uint32_t rt_format_attrib;
+    // rocDecVideoSurfaceFormat bitmask derived from the VA_FOURCC_* values reported by
+    // VASurfaceAttribPixelFormat.
+    uint32_t output_format_mask;
+    uint32_t max_width;
+    uint32_t max_height;
+    uint32_t min_width;
+    uint32_t min_height;
+} VaProfileCaps;
+
+/**
+ * @brief Decodes the VASurfaceAttrib list of a VLD config into a VaProfileCaps record.
+ *
+ * Fields with no matching attribute in the list are left untouched, so pass a value-
+ * initialized record to get zeros for anything the driver does not report.
+ */
+void DecodeSurfaceAttribs(const VASurfaceAttrib *attr_list, unsigned int attr_count, VaProfileCaps &caps);
 
 typedef struct {
     int device_id;
     std::string gpu_uuid;
+    std::string gpu_pci_bdf;
+#ifndef _WIN32
     int drm_fd;
+#else
+    LUID adapter_luid;
+    // Capabilities of every VLD-capable profile, probed once while the probe display was alive.
+    std::unordered_map<VAProfile, VaProfileCaps> profile_caps;
+#endif
     VADisplay va_display;
     hipDeviceProp_t hip_dev_prop;
     uint32_t num_dec_engines;
@@ -96,7 +154,14 @@ public:
     rocDecStatus InitializeDecoder();
     rocDecStatus SubmitDecode(RocdecPicParams *pPicParams);
     rocDecStatus GetDecodeStatus(int pic_idx, RocdecDecodeStatus* decode_status);
+#ifndef _WIN32
     rocDecStatus ExportSurface(int pic_idx, VADRMPRIMESurfaceDescriptor &va_drm_prime_surface_desc);
+#else
+    // Interop path (forwarders into D3D12Interop): tiled D3D12 decode texture ->
+    // linear staging buffer -> HIP import. Implementation lives in d3d12_interop.cpp.
+    rocDecStatus CopyToStagingBuffer(int pic_idx);
+    rocDecStatus ExportStagingInterop(int pic_idx, D3D12Interop::StagingInteropInfo &out);
+#endif
     rocDecStatus SyncSurface(int pic_idx);
     rocDecStatus ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconfig_params);
 
@@ -110,6 +175,10 @@ private:
     VAContextID va_context_id_;
     std::vector<VASurfaceID> va_surface_ids_;
     bool supports_modifiers_;
+#ifdef _WIN32
+    // All D3D12 device/resource/staging state lives in this helper (see d3d12_interop.h).
+    std::unique_ptr<D3D12Interop> d3d12_interop_;
+#endif
 
     VABufferID pic_params_buf_id_;
     VABufferID iq_matrix_buf_id_;
@@ -140,26 +209,57 @@ public:
     rocDecStatus GetVaContext(int device_id, uint32_t *va_ctx_id);
     rocDecStatus GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display);
     rocDecStatus CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap);
+#ifdef _WIN32
+    rocDecStatus GetAdapterLuid(int device_id, LUID *adapter_luid);
+#endif
 
 private:
     std::mutex mutex;
+#ifndef _WIN32
     /**
      * @brief A map that associates GPU UUIDs with their corresponding render node indices.
-     * 
-     * This unordered map uses GPU UUIDs as keys (std::string) and maps them to their 
-     * respective render node indices (int). It provides a fast lookup mechanism to 
+     *
+     * This unordered map uses GPU UUIDs as keys (std::string) and maps them to their
+     * respective render node indices (int). It provides a fast lookup mechanism to
      * retrieve the render node index for a given GPU UUID.
      */
     std::unordered_map<std::string, int> gpu_uuids_to_render_nodes_map_;
     std::unordered_map<std::string, ComputePartition> gpu_uuids_to_compute_partition_map_;
+
+    // GPU PCI BDF -> render node index / compute partition (primary match key).
+    std::unordered_map<std::string, int> gpu_pci_bdf_to_render_nodes_map_;
+    std::unordered_map<std::string, ComputePartition> gpu_pci_bdf_to_compute_partition_map_;
+#else
+    // Probes the capabilities of every VLD-capable profile into profile_caps. Must be called
+    // with the probe display still alive and the mutex held; a failure on an individual profile
+    // is skipped rather than propagated, leaving that profile reported as unsupported.
+    void ProbeAllProfileCaps(uint32_t va_ctx_idx);
+#endif
     VaContext();
     VaContext(const VaContext&) = delete;
     VaContext& operator = (const VaContext) = delete;
     ~VaContext();
 
+#ifdef ROCDECODE_USE_DLOPEN_VA
+    // Exclusively owns the dlopen handle and VA function pointer table.
+    // VaContext is a singleton so there is exactly one instance; unique_ptr
+    // is correct here. Outlives all VADisplay handles.
+    std::unique_ptr<VaapiLoader> va_loader_;
+#endif
+
     rocDecStatus InitHIP(int device_id, hipDeviceProp_t& hip_dev_prop);
+#ifndef _WIN32
     rocDecStatus InitVAAPI(int va_ctx_idx, std::string drm_node);
     void GetVisibleDevices(std::vector<int>& visible_devices_vetor);
     void GetDrmNodeOffset(std::string device_name, uint8_t device_id, std::vector<int>& visible_devices, ComputePartition current_compute_partition, int &offset);
     void GetGpuUuids();
+
+    // Returns the lowercased PCI BDF (function suffix stripped) for a render node, or "" if not a PCI device.
+    std::string GetRenderNodeBusId(const std::string& render_node_name);
+
+    // Returns the lowest-numbered /dev/dri/renderD* node, or "" if none.
+    std::string GetFirstAvailableDrmNode();
+#else
+    rocDecStatus InitVAAPI(int va_ctx_idx, const LUID* adapter_luid);
+#endif
 };

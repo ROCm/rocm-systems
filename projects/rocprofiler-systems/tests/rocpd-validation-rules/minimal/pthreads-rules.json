@@ -1,0 +1,42 @@
+{
+    "required_tables": [
+        {
+            "name": "regions",
+            "required_columns": [
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than_or_equal",
+                    "description": "The pthread_create region was recorded",
+                    "error_message": "Expected at least one 'pthread_create' region from the pthread gotcha.",
+                    "expected_result": 1,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name = 'pthread_create'"
+                }
+            ]
+        },
+        {
+            "name": "region_args",
+            "required_columns": [
+                "name",
+                "value"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than_or_equal",
+                    "description": "The pthread_create region carries a return trace-arg of 0",
+                    "error_message": "Expected the pthread_create region to record a 'return' trace-arg equal to 0.",
+                    "expected_result": 1,
+                    "query": "SELECT COUNT(*) FROM region_args A INNER JOIN regions R ON R.id = A.id AND R.guid = A.guid WHERE R.name = 'pthread_create' AND A.name = 'return' AND A.value = '0'"
+                },
+                {
+                    "comparison": "greater_than_or_equal",
+                    "description": "The pthread_create region carries an arg0 annotation trace-arg",
+                    "error_message": "Expected the pthread_create region to record an 'arg0-*' trace-arg.",
+                    "expected_result": 1,
+                    "query": "SELECT COUNT(*) FROM region_args A INNER JOIN regions R ON R.id = A.id AND R.guid = A.guid WHERE R.name = 'pthread_create' AND A.name LIKE 'arg0%'"
+                }
+            ]
+        }
+    ]
+}

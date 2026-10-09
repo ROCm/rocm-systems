@@ -59,8 +59,8 @@ puts the python `sitecustomize` on `PYTHONPATH`, and sets the `HSA_HOTSWAP_*`
 variables — `HSA_HOTSWAP_SOURCE_TARGET`
 (default `gfx1250:32`), `HSA_HOTSWAP_ISA_OVERRIDE` (the physical GPU detected on
 this host), `HSA_HOTSWAP_BACKEND_ADAPTER_POLICY` (default `compile`),
-`HSA_HOTSWAP_IR_RAISER`, `HSA_HOTSWAP_STRICT`, the `HSA_HOTSWAP_CACHE_DIR` /
-framework cache redirects, and the policy-driven source-arch overrides
+`HSA_HOTSWAP_IR_RAISER`, `HSA_HOTSWAP_STRICT`, and the policy-driven
+source-arch overrides
 (`PYTORCH_ROCM_ARCH`, `TRITON_OVERRIDE_ARCH`, …). `HSA_HOTSWAP_SOURCE_TARGET` and
 `HSA_HOTSWAP_BACKEND_ADAPTER_POLICY` can be overridden from the exec
 environment.

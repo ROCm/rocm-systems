@@ -221,6 +221,23 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
+  // Regression test for FP8 avg scaling by 1/(2*nRanks) wherever the device fp8 type is
+  // FNUZ (AICOMRCCL-1945). It discriminates on gfx942 and the software fallback; where host
+  // and device are both OCP it only guards the float scalar, whose host half is pinned in
+  // test/host/enqueue-test.cc. One rank runs the separate oneRankReduce kernel.
+  //
+  // E5M2 is left out: ExpectedReduceFp8 (test/common/DeviceDataOps.hpp) sums in fp8 and
+  // divides last, which disagrees with RCCL's pre-scale for a 2-bit mantissa on unpatched
+  // builds too (AICOMRCCL-2321).
+  TEST(AllReduce, Fp8Avg)
+  {
+    TestBed testBed;
+    testBed.RunSimpleSweep({ncclCollAllReduce}, {ncclFloat8e4m3}, {ncclAvg},
+                           /*roots=*/{0}, /*numElements=*/{384, 1024}, /*inPlaceList=*/{false},
+                           /*managedMemList=*/{false}, /*useHipGraphList=*/{false});
+    testBed.Finalize();
+  }
+
   TEST(AllReduce, UserBufferRegistration)
   {
     const int nranks = 8;
@@ -249,6 +266,53 @@ namespace RcclUnitTesting
         expected[i] = i * nranks;
     }
     callCollectiveForked(nranks, ncclCollAllReduce, sendBuff, recvBuff, expected, use_managed_mem);
+  }
+
+  // Out-of-place AllReduce on ncclCommRegister'd buffers driven through TestBed, so the
+  // separate input and output registrations and their deregistration are exercised.
+  TEST(AllReduce, UserBufferRegistrationTestBed)
+  {
+    TestBed testBed;
+    std::vector<ncclDataType_t> dataTypes;
+    testBed.GetSupportedDataTypes(dataTypes, {ncclInt32, ncclFloat32});
+    if (dataTypes.empty())
+      GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
+
+    std::vector<int> const numElements    = {1048576, 1024};
+    bool             const inPlace        = false;
+    bool             const useManagedMem  = false;
+    bool             const userRegistered = true;
+    int              const totalRanks     = testBed.ev.maxGpus;
+    OptionalColArgs options;
+    options.redOp = ncclSum;
+
+    bool isCorrect = true;
+    for (int isMultiProcess = 0; isMultiProcess <= 1 && isCorrect; ++isMultiProcess)
+    {
+      if (!(testBed.ev.processMask & (1 << isMultiProcess))) continue;
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks,
+                                                  testBed.ev.GetGpuPriorityOrder()));
+
+      for (size_t dtIdx = 0; dtIdx < dataTypes.size() && isCorrect; ++dtIdx)
+      for (size_t neIdx = 0; neIdx < numElements.size() && isCorrect; ++neIdx)
+      {
+        if (testBed.ev.showNames)
+          TEST_INFO("%s AllReduce UserBufferRegistration %s [%d elements]",
+                    isMultiProcess ? "MP" : "SP", ncclDataTypeNames[dataTypes[dtIdx]],
+                    numElements[neIdx]);
+        testBed.SetCollectiveArgs(ncclCollAllReduce, dataTypes[dtIdx],
+                                  numElements[neIdx], numElements[neIdx], options);
+        testBed.AllocateMem(inPlace, useManagedMem, -1, -1, -1, userRegistered);
+        testBed.PrepareData();
+        testBed.ExecuteCollectives();
+        testBed.ValidateResults(isCorrect);
+        testBed.DeallocateMem();
+      }
+      testBed.DestroyComms();
+    }
+    EXPECT_TRUE(isCorrect);
+    testBed.Finalize();
   }
 
   TEST(AllReduce, ROCTX)
@@ -281,6 +345,10 @@ namespace RcclUnitTesting
   constexpr std::initializer_list<int> STANDARD_ELEM_COUNTS    = {2048, 384}; // For Sum/Max/Min
   constexpr std::initializer_list<int> PROD_ELEM_COUNTS_MEDIUM = {32}; // For Int32/Uint32 Prod
   constexpr std::initializer_list<int> PROD_ELEM_COUNTS_LARGE  = {64}; // For Int8/Uint8/Int64/Uint64/Float Prod
+  // gfx1250 uses at most 256 worker threads (four 64-lane warps). With the capped
+  // scalar unroll of 64, 16384 f16 elements make one full pass. Exercise two
+  // full passes and a 17-element partial tail.
+  constexpr int GFX1250_CAPPED_CHUNK_TAIL_COUNT = 2 * 16384 + 17;
 
   // Bias and input pattern constants
   constexpr int BIAS_CONSTANT_ONE = 1; // Use constant bias value of 1 (prevents overflow)
@@ -303,13 +371,19 @@ namespace RcclUnitTesting
                    ncclRedOp_t      redOp,
                    std::vector<int> numElements,
                    int              biasConstVal  = BiasTestConstants::BIAS_INCREMENTAL_PATTERN,
-                   int              inputConstVal = BiasTestConstants::INPUT_RANK_BASED_PATTERN)
+                   int              inputConstVal = BiasTestConstants::INPUT_RANK_BASED_PATTERN,
+                   bool             gfx1250Only   = false)
   {
       // Create TestBed first (doesn't create child processes yet)
       TestBed testBed;
 
-      // Check if architecture is gfx94 (covers gfx942) or gfx95 (covers gfx950)
-      if (!testBed.ev.isGfx94 && !testBed.ev.isGfx95)
+      if (gfx1250Only && !testBed.ev.isGfx1250)
+      {
+          GTEST_SKIP() << "This AllReduce with Bias test requires gfx1250.";
+      }
+      // Existing bias coverage runs on gfx942 and gfx950. gfx1250 coverage is
+      // opt-in per test so unrelated cases are not enabled on a new architecture.
+      if (!gfx1250Only && !testBed.ev.isGfx94 && !testBed.ev.isGfx95)
       {
           TEST_INFO("SKIPPED: AllReduce with Bias is only supported on gfx942 or gfx950 architectures.");
           return;
@@ -372,6 +446,17 @@ namespace RcclUnitTesting
           testBed.DestroyComms();
       }
       testBed.Finalize();
+  }
+
+  TEST(AllReduce, BiasGfx1250CappedChunksAndTail)
+  {
+      using namespace BiasTestConstants;
+      RunBiasTest(ncclFloat16,
+                  ncclMax,
+                  {GFX1250_CAPPED_CHUNK_TAIL_COUNT},
+                  BIAS_INCREMENTAL_PATTERN,
+                  INPUT_RANK_BASED_PATTERN,
+                  true);
   }
 
   // Int8 Tests
@@ -710,4 +795,70 @@ namespace RcclUnitTesting
       return;
   }
 #endif
+
+  // Regression test for "one-rank avg reduction missing elements"
+  // (NVIDIA/nccl GitHub issue #1950, fixed upstream in NCCL v2.29.7-1; AICOMRCCL-1110).
+  //
+  // On a single-rank communicator, ncclAvg on floating-point types lowers to a
+  // PreMulSum reduction (scalar 1/nRanks), which is the only out-of-place path
+  // that is serviced by the oneRankReduce kernel (src/device/onerank.cu) rather
+  // than a plain memcpy. The kernel divided work across blocks using floor
+  // division (nElts/bn) instead of divUp(nElts, bn); when the element count was
+  // not a multiple of the launched block count, the trailing (nElts % bn)
+  // elements were never written, silently corrupting the tail of the output.
+  //
+  // Each count below is constructed so that floor(count/numBlocks) is already
+  // pack-aligned and the buffer is large enough to launch the maximum of 32
+  // blocks. This guarantees the pre-fix kernel under-covers the output by a
+  // fixed, non-zero remainder, so ValidateResults observes the corrupted tail.
+  // The test fails on the pre-fix kernel and passes once divUp is used.
+  TEST(AllReduce, OneRankAvgTailElements)
+  {
+    TestBed testBed;
+
+    if (testBed.numDevicesAvailable < 1)
+      GTEST_SKIP() << "Requires at least 1 GPU";
+
+    ncclFunc_t                  const funcType      = ncclCollAllReduce;
+    // At one rank the avg scalar is exactly 1.0, so the harness reference and RCCL agree
+    // for both fp8 types. On gfx942 these also launch oneRankReduce on an fp8 type, whose
+    // name differs between the host and device passes unless onerank.cu keeps it stable.
+    std::vector<ncclDataType_t> const dataTypes     = {ncclFloat32, ncclFloat64, ncclBfloat16,
+                                                       ncclFloat8e4m3, ncclFloat8e5m2};
+    bool                        const inPlace       = false; // out-of-place: tail of separate output buffer must be written
+    bool                        const useManagedMem = false;
+
+    // oneRankReduce only executes for a single-rank communicator.
+    testBed.InitComms(1);
+
+    OptionalColArgs options;
+    options.redOp = ncclAvg;
+
+    bool isCorrect = true;
+    for (int dataIdx = 0; dataIdx < dataTypes.size() && isCorrect; ++dataIdx)
+    {
+      ncclDataType_t const dataType  = dataTypes[dataIdx];
+      size_t         const eltSize   = DataTypeToBytes(dataType);
+      // Mirror the kernel: EltPerPack = 16 / sizeof(T), grid.x capped at 32 blocks.
+      size_t         const eltPerPack = 16 / eltSize;
+      size_t         const numBlocks  = 32;
+      // Pack-aligned per-block segment, then add a remainder that is not a
+      // multiple of numBlocks so the pre-fix floor division drops the tail.
+      size_t         const perBlock   = eltPerPack * 4096;
+      size_t         const numElems   = numBlocks * perBlock + 17;
+
+      if (testBed.ev.showNames)
+        TEST_INFO("SP 1-rank AllReduce (avg) %s count %zu",
+                  ncclDataTypeNames[dataType], numElems);
+
+      testBed.SetCollectiveArgs(funcType, dataType, numElems, numElems, options);
+      testBed.AllocateMem(inPlace, useManagedMem);
+      testBed.PrepareData();
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
+    }
+    testBed.DestroyComms();
+    testBed.Finalize();
+  }
 }

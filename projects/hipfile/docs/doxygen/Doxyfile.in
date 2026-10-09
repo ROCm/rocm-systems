@@ -48,7 +48,7 @@ PROJECT_NAME           = "hipFile"
 # could be handy for archiving the generated documentation or if some version
 # control system is used.
 
-PROJECT_NUMBER         = @AIS_LIBRARY_VERSION@
+PROJECT_NUMBER         = @HIPFILE_LIBRARY_VERSION@
 
 # Using the PROJECT_BRIEF tag one can provide an optional one line description
 # for a project that appears at the top of each page and should give viewer a
@@ -284,12 +284,12 @@ TAB_SIZE               = 4
 # @} or use a double escape (\\{ and \\})
 
 ALIASES =  hipfile_error_return="A hipFileError_t struct that holds both hipFile and HIP error values"
-ALIASES += hipfile_handle_param="Opaque file handle for GPU IO operations"
+ALIASES += hipfile_handle_param="Opaque file handle for GPU I/O operations"
 ALIASES += buffer_base_param="Base address of the GPU buffer"
 ALIASES += batch_handle_param="Opaque handle for batch operations"
-ALIASES += hipstream_param="The stream used for async IO requests"
+ALIASES += hipstream_param="The stream used for async I/O requests"
 ALIASES += hipstream_if_null="If NULL, this request will be synchronous"
-ALIASES += max_io_size_note="@note The maximum IO size is determined by the Linux kernel and is currently 2^31 - the system page size"
+ALIASES += max_io_size_note="@note The maximum I/O size is determined by the Linux kernel and is currently 2^31 - the system page size"
 ALIASES += warn_not_implemented="@warning This function is only a stub on AMD and will always return an error (typically `hipFileInternalError` with `hip_drv_err` set to `hipSuccess`)"
 ALIASES += warn_not_implemented_void="@warning This function is only a stub on AMD and has no effect"
 
@@ -951,7 +951,7 @@ WARN_LOGFILE           =
 # spaces. See also FILE_PATTERNS and EXTENSION_MAPPING
 # Note: If this tag is empty the current directory is searched.
 
-INPUT                  = "@AIS_DOXYFILE_INPUT@"
+INPUT                  = "@HIPFILE_DOXYFILE_INPUT@"
 
 # This tag can be used to specify the character encoding of the source files
 # that doxygen parses. Internally doxygen uses the UTF-8 encoding. Doxygen uses

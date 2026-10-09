@@ -1,21 +1,5 @@
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 """Internal utility helpers for amdsmi_interface.
 
@@ -374,6 +358,73 @@ def _NA_amdsmi_get_gpu_metrics_info() -> Dict[str, str]:
         "current_uclk_aid": "N/A",
         "current_socclks_mid": "N/A",
         "xcp_stats.temperature_xcd": "N/A",
+        "apu_metrics.temperature_gfx": "N/A",
+        "apu_metrics.temperature_soc": "N/A",
+        "apu_metrics.temperature_core": "N/A",
+        "apu_metrics.temperature_l3": "N/A",
+        "apu_metrics.temperature_skin": "N/A",
+        "apu_metrics.average_gfx_activity": "N/A",
+        "apu_metrics.average_mm_activity": "N/A",
+        "apu_metrics.average_vcn_activity": "N/A",
+        "apu_metrics.average_ipu_activity": "N/A",
+        "apu_metrics.average_core_c0_activity": "N/A",
+        "apu_metrics.average_dram_reads": "N/A",
+        "apu_metrics.average_dram_writes": "N/A",
+        "apu_metrics.average_ipu_reads": "N/A",
+        "apu_metrics.average_ipu_writes": "N/A",
+        "apu_metrics.average_socket_power": "N/A",
+        "apu_metrics.average_cpu_power": "N/A",
+        "apu_metrics.average_soc_power": "N/A",
+        "apu_metrics.average_gfx_power": "N/A",
+        "apu_metrics.average_core_power": "N/A",
+        "apu_metrics.average_ipu_power": "N/A",
+        "apu_metrics.average_apu_power": "N/A",
+        "apu_metrics.average_dgpu_power": "N/A",
+        "apu_metrics.average_all_core_power": "N/A",
+        "apu_metrics.average_sys_power": "N/A",
+        "apu_metrics.stapm_power_limit": "N/A",
+        "apu_metrics.current_stapm_power_limit": "N/A",
+        "apu_metrics.average_gfxclk_frequency": "N/A",
+        "apu_metrics.average_socclk_frequency": "N/A",
+        "apu_metrics.average_uclk_frequency": "N/A",
+        "apu_metrics.average_fclk_frequency": "N/A",
+        "apu_metrics.average_vclk_frequency": "N/A",
+        "apu_metrics.average_dclk_frequency": "N/A",
+        "apu_metrics.average_vpeclk_frequency": "N/A",
+        "apu_metrics.average_ipuclk_frequency": "N/A",
+        "apu_metrics.average_mpipu_frequency": "N/A",
+        "apu_metrics.current_gfxclk": "N/A",
+        "apu_metrics.current_socclk": "N/A",
+        "apu_metrics.current_uclk": "N/A",
+        "apu_metrics.current_fclk": "N/A",
+        "apu_metrics.current_vclk": "N/A",
+        "apu_metrics.current_dclk": "N/A",
+        "apu_metrics.current_coreclk": "N/A",
+        "apu_metrics.current_l3clk": "N/A",
+        "apu_metrics.current_core_maxfreq": "N/A",
+        "apu_metrics.current_gfx_maxfreq": "N/A",
+        "apu_metrics.throttle_status": "N/A",
+        "apu_metrics.indep_throttle_status": "N/A",
+        "apu_metrics.throttle_residency_prochot": "N/A",
+        "apu_metrics.throttle_residency_spl": "N/A",
+        "apu_metrics.throttle_residency_fppt": "N/A",
+        "apu_metrics.throttle_residency_sppt": "N/A",
+        "apu_metrics.throttle_residency_thm_core": "N/A",
+        "apu_metrics.throttle_residency_thm_gfx": "N/A",
+        "apu_metrics.throttle_residency_thm_soc": "N/A",
+        "apu_metrics.fan_pwm": "N/A",
+        "apu_metrics.average_temperature_gfx": "N/A",
+        "apu_metrics.average_temperature_soc": "N/A",
+        "apu_metrics.average_temperature_core": "N/A",
+        "apu_metrics.average_temperature_l3": "N/A",
+        "apu_metrics.average_cpu_voltage": "N/A",
+        "apu_metrics.average_soc_voltage": "N/A",
+        "apu_metrics.average_gfx_voltage": "N/A",
+        "apu_metrics.average_cpu_current": "N/A",
+        "apu_metrics.average_soc_current": "N/A",
+        "apu_metrics.average_gfx_current": "N/A",
+        "apu_metrics.time_filter_alphavalue": "N/A",
+        "is_apu": False,
     }
     return na_gpu_metrics_info
 

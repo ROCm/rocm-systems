@@ -15,8 +15,9 @@ namespace rocjitsu {
 namespace {
 
 /// Per-class hardware bound. Indices >= this are not representable in
-/// RegisterSet's bitsets and indicate either a programming error or a class
-/// that RegisterSet doesn't track (EXEC, VCC, etc.).
+/// RegisterSet's per-index bitsets and indicate either a programming error or a
+/// special singleton class (EXEC, VCC, ...) that has no scratch slot; those
+/// return 0 so every index is rejected.
 [[nodiscard]] size_t per_class_max(RegClass cls) {
   switch (cls) {
   case RegClass::SGPR:
@@ -33,8 +34,8 @@ namespace {
 } // namespace
 
 SpillManager::SpillManager(uint32_t original_private_bytes, uint32_t per_lane_scratch_limit)
-    : base_offset_(util::align_up(original_private_bytes, kDbiZoneAlignment)),
-      total_bytes_(base_offset_), limit_(per_lane_scratch_limit), next_offset_(base_offset_) {}
+    : limit_(per_lane_scratch_limit),
+      slots_(util::align_up(original_private_bytes, kDbiZoneAlignment)) {}
 
 std::optional<uint32_t> SpillManager::allocate_slot(RegisterRef reg) {
   // Reject indices past the per-class hardware bound (or unsupported classes
@@ -50,13 +51,10 @@ std::optional<uint32_t> SpillManager::allocate_slot(RegisterRef reg) {
     return std::nullopt;
   }
   // Overflow-safe equivalent of `next_offset_ + kSlotBytes > limit_`.
-  if (static_cast<uint64_t>(next_offset_) + kSlotBytes > limit_) {
+  auto offset = slots_.allocate(kSlotBytes, kSlotBytes, limit_);
+  if (!offset)
     return std::nullopt;
-  }
-  const uint32_t offset = next_offset_;
-  next_offset_ += kSlotBytes;
-  total_bytes_ = next_offset_;
-  reg_to_offset_.emplace(key, offset);
+  reg_to_offset_.emplace(key, *offset);
   return offset;
 }
 
@@ -88,21 +86,28 @@ std::optional<uint32_t> SpillManager::allocate_slots(RegisterRef reg, unsigned w
 }
 
 bool SpillManager::reserve(const RegisterSet &set) {
+  // Special singletons (EXEC/VCC/...) have no scratch slot. Reject the whole
+  // request up front rather than letting one reach allocate_slot's bounds
+  // rejection and trip the post-capacity-check assert below. Special-register
+  // preservation is out of scope for this allocator.
+  if (set.has_specials())
+    return false;
+
   // Count NEW registers (cache misses) so we can size-check upfront.
   unsigned num_new = 0;
-  set.for_each([&](RegisterRef reg) {
+  set.for_each_ordinary([&](RegisterRef reg) {
     const std::pair<RegClass, uint16_t> key{reg.cls, reg.index};
     if (!reg_to_offset_.contains(key))
       ++num_new;
   });
-  if (num_new > 0 && static_cast<uint64_t>(next_offset_) + kSlotBytes * num_new > limit_) {
+  if (num_new > 0 && !slots_.preview(kSlotBytes * num_new, kSlotBytes, limit_)) {
     return false;
   }
 
   // Capacity check passed — no failure possible from here. Every reg from
-  // for_each is within per-class bounds (the bitset itself enforces that),
-  // and we just verified there's enough room.
-  set.for_each([this](RegisterRef reg) {
+  // for_each_ordinary is within per-class bounds (the bitset itself enforces
+  // that), and we just verified there's enough room.
+  set.for_each_ordinary([this](RegisterRef reg) {
     [[maybe_unused]] auto off = allocate_slot(reg);
     assert(off.has_value() && "allocate_slot failed after capacity check");
   });

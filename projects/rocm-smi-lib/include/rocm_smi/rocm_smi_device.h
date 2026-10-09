@@ -43,6 +43,12 @@
 #ifndef INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_
 #define INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_
 
+// NOTICE: ROCm-SMI is fully deprecated as of ROCm 10.1; only critical bug
+// fixes will be applied. Please switch to AMD-SMI
+// (https://github.com/ROCm/amdsmi) for continued support.
+#pragma message( \
+    " ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).")
+
 #include <pthread.h>
 
 #include <cstdint>
@@ -265,7 +271,7 @@ class Device {
   int readDevInfoStr(DevInfoTypes type, std::string* retStr);
   int readDevInfoMultiLineStr(DevInfoTypes type, std::vector<std::string>* retVec);
   int readDevInfoBinary(DevInfoTypes type, std::size_t b_size, void* p_binary_data);
-  int writeDevInfoStr(DevInfoTypes type, std::string valStr);
+  int writeDevInfoStr(DevInfoTypes type, std::string valStr, bool returnWriteErr = false);
   rsmi_status_t run_amdgpu_property_reinforcement_query(
       const AMDGpuPropertyQuery_t& amdgpu_property_query);
 

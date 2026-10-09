@@ -9,7 +9,7 @@
 #include <hip_test_common.hh>
 #include <hip/hip_cooperative_groups.h>
 #include <hip/cooperative_groups/hip_reduce.h>
-#include <cmd_options.hh>
+#include <hip/cooperative_groups/hip_scan.h>
 #include "../math/math_common.hh"
 namespace {
 constexpr int kMaxGPUs = 8;

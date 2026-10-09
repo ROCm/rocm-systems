@@ -712,6 +712,26 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemDiscardAndPrefetchBatchAsync, hipMemDiscardAndPrefetchBatchAsync, hipMemDiscardAndPrefetchBatchAsync_fn, dptrs, sizes, count, prefetchLocs, prefetchLocIdxs, numPrefetchLocs, flags, stream);
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvMemDiscardAndPrefetchBatchAsync, hipDrvMemDiscardAndPrefetchBatchAsync, hipDrvMemDiscardAndPrefetchBatchAsync_fn, dptrs, sizes, count, prefetchLocs, prefetchLocIdxs, numPrefetchLocs, flags, stream);
 #endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 31
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemGetDefaultMemPool, hipMemGetDefaultMemPool, hipMemGetDefaultMemPool_fn, memPool, location, type);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 32
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipDeviceGetLuid, hipDeviceGetLuid, hipDeviceGetLuid_fn, luid, deviceNodeMask, device);
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 33
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipInitDevice, hipInitDevice, hipInitDevice_fn, device, deviceFlags, flags);
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 34
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipModuleEnumerateFunctions, hipModuleEnumerateFunctions, hipModuleEnumerateFunctions_fn, functions, numFunctions, mod);
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 35
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipDeviceFlushGPUDirectRDMAWrites, hipDeviceFlushGPUDirectRDMAWrites, hipDeviceFlushGPUDirectRDMAWrites_fn, target, scope);
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 36
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipLibraryGetModule, hipLibraryGetModule, hipLibraryGetModule_fn, pMod, library);
+#endif
 // clang-format on
 
 #else

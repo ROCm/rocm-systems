@@ -1,19 +1,20 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_AMDGPU_L1_VECTOR_CACHE_H_
-#define ROCJITSU_VM_AMDGPU_L1_VECTOR_CACHE_H_
+#pragma once
 
-#include "rocjitsu/vm/amdgpu/mtype.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "simdojo/components/cache.h"
 
 #include <cstdint>
+#include <span>
 
 namespace rocjitsu {
 namespace amdgpu {
 
 class GpuMemory;
 class L2Cache;
+class RequestMtypeResolver;
 
 /// @brief L1 Vector Cache (V$) controller for FLAT/MUBUF/MTBUF instructions.
 ///
@@ -31,18 +32,49 @@ public:
   using CacheStore = simdojo::Cache<LINE_SIZE_BITS, NUM_SETS, ASSOCIATIVITY>;
   static constexpr uint32_t LINE_SIZE = CacheStore::LINE_SIZE;
 
-  explicit L1VectorCache(L2Cache *l2 = nullptr) : l2_(l2) {}
+  explicit L1VectorCache(L2Cache *l2 = nullptr);
+  ~L1VectorCache();
 
-  void set_l2(L2Cache *l2) { l2_ = l2; }
-  void set_memory(GpuMemory *mem) { memory_ = mem; }
-  void load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size, uint32_t num_elems,
-            uint8_t *dst, Mtype mtype, bool non_temporal, uint32_t vmid = 0);
+  L1VectorCache(const L1VectorCache &) = delete;
+  L1VectorCache &operator=(const L1VectorCache &) = delete;
+  L1VectorCache(L1VectorCache &&) = delete;
+  L1VectorCache &operator=(L1VectorCache &&) = delete;
 
-  void store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size, uint32_t num_elems,
-             const uint8_t *src, Mtype mtype, bool non_temporal, uint32_t vmid = 0);
+  void set_l2(L2Cache *l2);
+  void set_gpu_vm(GpuVm *gpu_vm);
 
-  void invalidate(uint64_t addr) { cache_.invalidate(addr); }
-  void invalidate_all() { cache_.invalidate_all(); }
+  /// @param addr_base_offset Low bits of a uniform address contribution applied after
+  /// swizzling. This does not change the first-byte addresses in @p addrs; it only keeps the
+  /// contribution from moving logical swizzle-unit boundaries.
+  /// @param swizzle_unit Bytes per swizzle unit (4 or 16).
+  /// @param element_lane_masks Empty when every element uses @p lane_mask;
+  /// otherwise contains exactly @p num_elems masks. In the latter form,
+  /// @p lane_mask is the union of lanes valid for at least one element.
+  VmAccessOutcome load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
+                       uint32_t num_elems, uint8_t *dst, Mtype mtype, bool non_temporal,
+                       bool request_l1_bypass, uint32_t wf_size, uint32_t vmid = 0,
+                       uint32_t addr_stride = 0, uint32_t addr_base_offset = 0,
+                       std::span<const uint64_t> element_lane_masks = {},
+                       uint32_t swizzle_unit = 4);
+
+  /// @param addr_base_offset Low bits of a uniform address contribution applied after
+  /// swizzling. This does not change the first-byte addresses in @p addrs; it only keeps the
+  /// contribution from moving logical swizzle-unit boundaries.
+  /// @param swizzle_unit Bytes per swizzle unit (4 or 16).
+  /// @param element_lane_masks Empty when every element uses @p lane_mask;
+  /// otherwise contains exactly @p num_elems masks. In the latter form,
+  /// @p lane_mask is the union of lanes valid for at least one element.
+  /// Private batching is opt-in for unobserved functional requests whose source
+  /// data remain in instruction-owned storage until the operation completes.
+  VmAccessOutcome store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
+                        uint32_t num_elems, const uint8_t *src, Mtype mtype, bool non_temporal,
+                        uint32_t wf_size, uint32_t vmid = 0, uint32_t addr_stride = 0,
+                        uint32_t addr_base_offset = 0,
+                        std::span<const uint64_t> element_lane_masks = {},
+                        uint32_t swizzle_unit = 4, bool allow_private_batch = false);
+
+  void invalidate(uint64_t addr, uint32_t vmid = 0);
+  void invalidate_all();
   void flush_all();
 
   uint64_t store_count() const { return store_count_; }
@@ -50,15 +82,28 @@ public:
   uint64_t store_l2_writes() const { return store_l2_writes_; }
 
 private:
-  void read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, bool non_temporal,
-                  uint32_t vmid);
-  void write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype, bool non_temporal,
-                   uint32_t vmid);
-  void ensure_line(uint64_t addr, uint32_t vmid);
+  void invalidate_all_lines();
+  void synchronize_epoch();
+  VmAccessOutcome read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, bool non_temporal,
+                             bool request_l1_bypass, uint32_t vmid, RequestMtypeResolver &mtypes);
+  VmAccessOutcome write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, bool non_temporal,
+                              uint32_t vmid, RequestMtypeResolver &mtypes);
+  VmAccessOutcome store_swizzled(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
+                                 uint32_t num_elems, const uint8_t *src, Mtype mtype,
+                                 bool non_temporal, uint32_t vmid, uint32_t addr_stride,
+                                 uint32_t addr_base_offset,
+                                 std::span<const uint64_t> element_lane_masks,
+                                 uint32_t swizzle_unit, bool allow_private_batch,
+                                 RequestMtypeResolver &mtypes);
+  void cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid);
+  // Store allocation leaves untouched bytes absent instead of reading backing.
+  VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on_miss = true);
 
   CacheStore cache_;
   L2Cache *l2_;
-  GpuMemory *memory_ = nullptr;
+  GpuVm *gpu_vm_ = nullptr;
+  VmMtypeCache mtype_cache_;
+  uint64_t coherence_epoch_ = 0;
   uint64_t store_count_ = 0;
   uint64_t store_active_count_ = 0;
   uint64_t store_l2_writes_ = 0;
@@ -66,5 +111,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_L1_VECTOR_CACHE_H_

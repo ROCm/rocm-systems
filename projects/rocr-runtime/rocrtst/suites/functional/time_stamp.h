@@ -35,6 +35,14 @@ class TimeStamp : public TestBase {
 
   void TimeStampTest (void);
 
+  void BarrierPacketTimestampValidationTest(void);
+private:
+  void FreeResources();  // Helper to clean up queue and signals
+
+  const static uint32_t NUM_BARRIERS = 100;
+  hsa_signal_t completion_signals[NUM_BARRIERS] = {0};
+  hsa_queue_t *queue = NULL;
+  bool resources_free = false;  // Track if cleanup happened
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_TIME_STAMP_H_

@@ -7,17 +7,17 @@
 
 #include "core.h"
 
-#include <stdio.h>      
-#include <stdlib.h>     
-#include <stdint.h>    
-#include <string.h> 
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
 
 void dumpLine(int* values, int nranks, const char* prefix) {
   constexpr int line_length = 128;
   char line[line_length];
-  int num_width = snprintf(nullptr, 0, "%d", nranks-1);  // safe as per "man snprintf"
+  int num_width = snprintf(nullptr, 0, "%d", nranks - 1);  // safe as per "man snprintf"
   int n = snprintf(line, line_length, "%s", prefix);
-  for (int i = 0; i < nranks && n < line_length-1; i++) {
+  for (int i = 0; i < nranks && n < line_length - 1; i++) {
     n += snprintf(line + n, line_length - n, " %*d", num_width, values[i]);
     // At this point n may be more than line_length-1, so don't use it
     // for indexing into "line".
@@ -26,7 +26,7 @@ void dumpLine(int* values, int nranks, const char* prefix) {
     // Sprintf wanted to write more than would fit in the buffer. Assume
     // line_length is at least 4 and replace the end with "..." to
     // indicate that it was truncated.
-    snprintf(line+line_length-4, 4, "...");
+    snprintf(line + line_length - 4, 4, "...");
   }
   INFO(NCCL_INIT, "%s", line);
 }
@@ -37,7 +37,7 @@ ncclResult_t ncclBuildRings(int nrings, int* rings, int rank, int nranks, int* p
   int rankFoundSize = DIVUP(nranks, 64);
   NCCLCHECK(ncclCalloc(&rankFound, rankFoundSize));
 
-  for (int r=0; r<nrings; r++) {
+  for (int r = 0; r < nrings; r++) {
     char prefix[40];
     /*sprintf(prefix, "[%d] Channel %d Prev : ", rank, r);
     dumpLine(prev+r*nranks, nranks, prefix);
@@ -45,30 +45,33 @@ ncclResult_t ncclBuildRings(int nrings, int* rings, int rank, int nranks, int* p
     dumpLine(next+r*nranks, nranks, prefix);*/
 
     int current = rank;
-    for (int i=0; i<nranks; i++) {
-      rankFound[current/64] |= (1ULL<<(current%64));
-      rings[r*nranks+i] = current;
-      current = next[r*nranks+current];
+    for (int i = 0; i < nranks; i++) {
+      rankFound[current / 64] |= (1ULL << (current % 64));
+      rings[r * nranks + i] = current;
+      current = next[r * nranks + current];
     }
     snprintf(prefix, sizeof(prefix), "Channel %02d/%02d :", r, nrings);
-    if (rank == 0) dumpLine(rings+r*nranks, nranks, prefix);
+    if (rank == 0) dumpLine(rings + r * nranks, nranks, prefix);
     if (current != rank) {
       WARN("Error : ring %d does not loop back to start (%d != %d)", r, current, rank);
       ret = ncclInternalError;
       goto end;
     }
     // Check that all ranks are there
-    for (int i=0; i<nranks; i++) {
-      uint64_t bits = rankFound[i/64], mask = 1ULL<<(i%64);
+    for (int i = 0; i < nranks; i++) {
+      uint64_t bits = rankFound[i / 64], mask = 1ULL << (i % 64);
       // Fast check 64 ranks at a time
-      if (mask == 1 && bits == 0xffffffffffffffff) { i += 63; continue; }
+      if (mask == 1 && bits == 0xffffffffffffffff) {
+        i += 63;
+        continue;
+      }
       if ((bits & mask) == 0) {
         WARN("Error : ring %d does not contain rank %d", r, i);
         ret = ncclInternalError;
         goto end;
       }
     }
-    memset(rankFound, 0, rankFoundSize*sizeof(uint64_t));
+    memset(rankFound, 0, rankFoundSize * sizeof(uint64_t));
   }
 end:
   free(rankFound);
@@ -77,30 +80,31 @@ end:
 
 /**
  * rcclBuildRings: Functionally same as ncclBuildRings, Linearizes linked-list neighbor pointers into a rank array.
- * This function converts 'next' and 'prev' adjacency arrays into a flat list 
+ * This function converts 'next' and 'prev' adjacency arrays into a flat list
  * of ranks (a ring) for each communication channel.
  *
  * PRE-CONDITIONS & ASSUMPTIONS:
- * 1. Global Connectivity: It assumes that 'next' and 'prev' arrays represent 
+ * 1. Global Connectivity: It assumes that 'next' and 'prev' arrays represent
  * a complete graph of all 'nranks' global participants.
- * 2. Array Sizing: 
+ * 2. Array Sizing:
  * - 'rings' must be allocated to at least (nrings * nranks * sizeof(int)).
  * - 'prev' and 'next' must be (nrings * nranks) in size.
- * 3. Identity: 'rank' must be the global rank of the local process, and 
+ * 3. Identity: 'rank' must be the global rank of the local process, and
  * 0 <= rank < nranks.
- * 4. Path Discovery: It assumes the caller has already performed topology search 
+ * 4. Path Discovery: It assumes the caller has already performed topology search
  * to populate 'next' and 'prev' such that they form a Hamiltonian cycle.
  *
  * DESCRIPTION:
  * - Loop-back: Ensures the ring returns to the starting rank after exactly 'nranks' steps.
  * - Full Coverage: Ensures no rank is skipped or duplicated (O(N) check).
  * - Bi-directional: Verifies that 'prev' and 'next' are perfect mirrors.
- * - O( nRings * nRanks ) Algorithmic complexity 
+ * - O( nRings * nRanks ) Algorithmic complexity
  */
 ncclResult_t rcclBuildRings(int nrings, int* rings, int rank, int nranks, int* prev, int* next) {
   // Use a stack-allocated buffer for O(N) validation.
   // If nranks > 1024, consider using malloc/free
-  if( (nrings < 0) || (rank < 0) ||  (nranks < 0) || ( rings == NULL) || (prev == NULL) || (next == NULL)) return ncclInvalidArgument;
+  if ((nrings < 0) || (rank < 0) || (nranks < 0) || (rings == NULL) || (prev == NULL) || (next == NULL))
+    return ncclInvalidArgument;
   ncclResult_t res = ncclSuccess;
   uint8_t* found = (uint8_t*)malloc(nranks * sizeof(uint8_t));
   if (found == NULL) return ncclInternalError;
@@ -135,11 +139,11 @@ ncclResult_t rcclBuildRings(int nrings, int* rings, int rank, int nranks, int* p
       // --- The Consistency Check ---
       int next_rank = current_next[current];
       if (next_rank >= 0 && next_rank < nranks) {
-        // Verify that if I think 'next_rank' is my next, 
+        // Verify that if I think 'next_rank' is my next,
         // 'next_rank' must think I am its previous.
         if (current_prev[next_rank] != current) {
-          WARN("Ring %d: Asymmetric link! Rank %d -> %d, but %d -> %d", 
-               r, current, next_rank, next_rank, current_prev[next_rank]);
+          WARN("Ring %d: Asymmetric link! Rank %d -> %d, but %d -> %d", r, current, next_rank, next_rank,
+               current_prev[next_rank]);
           res = ncclInternalError;
           goto exit;
         }
@@ -176,6 +180,6 @@ ncclResult_t rcclBuildRings(int nrings, int* rings, int rank, int nranks, int* p
     }
   }
 exit:
-  if(found) free(found);
+  if (found) free(found);
   return res;
 }

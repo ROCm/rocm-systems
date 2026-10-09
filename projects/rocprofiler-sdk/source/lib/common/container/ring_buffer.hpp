@@ -65,6 +65,9 @@ struct ring_buffer
     /// Returns whether the buffer has been allocated
     bool is_initialized() const { return m_init; }
 
+    /// Base address of the allocation
+    const void* data() const { return m_ptr; }
+
     /// Get the total number of bytes supported
     size_t capacity() const { return m_size; }
 

@@ -73,8 +73,8 @@ main(int argc, char *argv[])
             fprintf(stderr, "Could not stat %s (%s)\n", in_path, strerror(errno));
             return EXIT_FAILURE;
         }
-        file_size  = (size_t)statbuf.st_size;
-        block_size = (size_t)statbuf.st_blksize;
+        file_size  = static_cast<size_t>(statbuf.st_size);
+        block_size = static_cast<size_t>(statbuf.st_blksize);
         if (!is_power_of_two(block_size)) {
             fprintf(stderr, "Block size is not a power of two (%zu)\n", block_size);
             return EXIT_FAILURE;
@@ -161,7 +161,7 @@ main(int argc, char *argv[])
                 IS_HIPFILE_ERR(nbytes) ? HIPFILE_ERRSTR(nbytes) : strerror(errno));
         goto deregister_buf;
     }
-    if ((size_t)nbytes < payload_size) {
+    if (static_cast<size_t>(nbytes) < payload_size) {
         fprintf(stderr, "Short read on %s: got %zd bytes, expected at least %zu\n", in_path, nbytes,
                 payload_size);
         goto deregister_buf;
@@ -178,7 +178,7 @@ main(int argc, char *argv[])
      * lands at OUTPUT[0 .. write_xfer). The trailing bytes past write_size
      * (alignment padding read past payload_size) are removed by ftruncate. */
     nbytes = hipFileWrite(out_handle, devbuf, write_xfer, /*file_offset=*/0,
-                          /*buf_offset=*/(hoff_t)sub_offset);
+                          /*buf_offset=*/static_cast<hoff_t>(sub_offset));
     if (nbytes < 0) {
         fprintf(stderr, "Could not write to %s (%zd) (%s)\n", out_path, nbytes,
                 IS_HIPFILE_ERR(nbytes) ? HIPFILE_ERRSTR(nbytes) : strerror(errno));
@@ -186,7 +186,7 @@ main(int argc, char *argv[])
     }
 
     /* 6. ftruncate to logical sub-region size + hash verify */
-    if (-1 == ftruncate(out_fd, (off_t)write_size)) {
+    if (-1 == ftruncate(out_fd, static_cast<off_t>(write_size))) {
         fprintf(stderr, "Could not truncate %s (%s)\n", out_path, strerror(errno));
         goto close_out;
     }
@@ -201,7 +201,7 @@ main(int argc, char *argv[])
         uint64_t hash_in_tail, hash_out;
 
         /* Hash bytes [sub_offset, payload_size) of INPUT vs all of OUTPUT. */
-        if (hash_file_range(in_path, (off_t)sub_offset, write_size, &hash_in_tail))
+        if (hash_file_range(in_path, static_cast<off_t>(sub_offset), write_size, &hash_in_tail))
             goto deregister_buf;
         if (hash_file_range(out_path, 0, write_size, &hash_out))
             goto deregister_buf;

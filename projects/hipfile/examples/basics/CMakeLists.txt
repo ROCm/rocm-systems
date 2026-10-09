@@ -2,10 +2,15 @@
 #
 # SPDX-License-Identifier: MIT
 
-# These examples use the hipFile C API directly from C++ (matching the
-# style of the standalone aiscp/offsetcp/read-write-check programs).
-# They deliberately bypass ais_add_executable and wire the dependencies
-# in by hand.
+# These examples use the hipFile C API directly from C++. They build with the
+# hipFile CMake infrastructure (hipfile_add_executable) and link the shared
+# helpers from the examples_common target defined in examples/common; the parent
+# CMakeLists adds examples/common before examples/basics, so the target is in
+# scope here.
+# examples_common is PUBLIC-linked against hipfile and exports its own include
+# dir, so DEPS examples_common transitively supplies the library and headers.
+
+include(HipFileAddExecutable)
 
 set(BASICS_EXAMPLES
     bufregister-write
@@ -19,35 +24,20 @@ set(BASICS_EXAMPLES
 )
 
 foreach(example ${BASICS_EXAMPLES})
-    add_executable(${example} "${example}.cpp")
-    target_compile_features(${example} PRIVATE cxx_std_17)
-    set_target_properties(${example} PROPERTIES CXX_EXTENSIONS OFF)
-    target_compile_options(${example} PRIVATE -Wall -Wextra -fno-sanitize=all)
-
-    if(CMAKE_HIP_PLATFORM STREQUAL "amd")
-        target_compile_definitions(${example} PRIVATE __HIP_PLATFORM_AMD__)
-    elseif(CMAKE_HIP_PLATFORM STREQUAL "nvidia")
-        target_compile_definitions(${example} PRIVATE __HIP_PLATFORM_NVIDIA__)
-        target_include_directories(${example} SYSTEM PRIVATE ${HIP_INCLUDE_DIRS})
-        target_include_directories(
-            ${example}
-            SYSTEM
-            BEFORE
-            PRIVATE ${CUDAToolkit_INCLUDE_DIRS}
-        )
-        target_link_libraries(${example} PRIVATE CUDA::cuda_driver CUDA::cudart)
-    endif()
-
-    target_include_directories(${example} SYSTEM PRIVATE ${HIPFILE_INCLUDE_PATH})
-    target_link_libraries(${example} PRIVATE examples_common)
+    hipfile_add_executable(
+        NAME ${example}
+        DEPS examples_common
+        SRCS "${example}.cpp"
+        SYSINCLS ${HIPFILE_INCLUDE_PATH}
+    )
 endforeach()
 
 # CTest wrappers: run each example as a hipFile system test.
-# Gated on BUILD_TESTING; AIS_INSTALL_EXAMPLES is already enforced by the
+# Gated on BUILD_TESTING; HIPFILE_INSTALL_EXAMPLES is already enforced by the
 # parent CMakeLists which only adds this subdirectory when examples are built.
 if(BUILD_TESTING)
     # Unique-per-configure scratch dir so concurrent ctest runs / multiple
-    # checkouts don't collide on a shared path. Kept under AIS_CAPABLE_DIR
+    # checkouts don't collide on a shared path. Kept under HIPFILE_CAPABLE_DIR
     # because the e2e tests need an O_DIRECT-capable local FS — the build
     # tree may live on overlay/nfs and isn't a safe default.
     execute_process(
@@ -56,7 +46,7 @@ if(BUILD_TESTING)
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
     set(BASICS_TEST_DIR
-        "${AIS_CAPABLE_DIR}/hipfile_basics_tests_${_basics_scratch_token}"
+        "${HIPFILE_CAPABLE_DIR}/hipfile_basics_tests_${_basics_scratch_token}"
     )
     set(BASICS_INPUT "${BASICS_TEST_DIR}/input.bin")
 

@@ -9,6 +9,7 @@ This module provides functionality to split TheRock build artifacts into:
 """
 
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional, Set
@@ -26,7 +27,11 @@ from rocm_kpack.binutils import BundledBinary, Toolchain
 from rocm_kpack.database_handlers import DatabaseHandler
 from rocm_kpack.kpack import PackedKernelArchive
 from rocm_kpack.compression import ZstdCompressor
-from rocm_kpack.kpack_transform import kpack_offload_binary, NotFatBinaryError
+from rocm_kpack.kpack_transform import (
+    is_kpack_processed,
+    kpack_offload_binary,
+    NotFatBinaryError,
+)
 
 
 def strip_target_features(target: str) -> str:
@@ -35,14 +40,30 @@ def strip_target_features(target: str) -> str:
     return target[:colon_pos] if colon_pos >= 0 else target
 
 
+# Known LLVM AMDGPU target features that ride on a base arch, in either the
+# colon form (gfx942:xnack+) or the Tensile kernel-filename hyphen form
+# (gfx90a-xnack-). Normalizing the hyphen form to colon lets one colon-split
+# drop every feature variant regardless of how many features are present.
+_HYPHEN_FEATURE_RE = re.compile(r"-(xnack|sramecc)")
+
+
+def base_arch(arch: str) -> str:
+    """Strip known feature suffixes in colon or hyphen form (e.g. 'gfx90a-xnack-' -> 'gfx90a')."""
+    return strip_target_features(_HYPHEN_FEATURE_RE.sub(r":\1", arch))
+
+
 @dataclass
 class ExtractedKernel:
     """Represents a kernel extracted from a fat binary."""
 
-    target_name: str  # Target identifier from bundler (e.g., "hip-amdgcn-amd-amdhsa-gfx1100")
+    target_name: (
+        str  # Target identifier from bundler (e.g., "hip-amdgcn-amd-amdhsa-gfx1100")
+    )
     kernel_data: bytes  # The actual kernel binary data
     source_binary_relpath: str  # Path to the original fat binary relative to prefix
-    source_prefix: str  # The prefix this kernel came from (e.g., "math-libs/BLAS/rocBLAS/stage")
+    source_prefix: (
+        str  # The prefix this kernel came from (e.g., "math-libs/BLAS/rocBLAS/stage")
+    )
     architecture: str  # Architecture (e.g., "gfx1100")
 
 
@@ -81,9 +102,10 @@ class FileClassificationVisitor:
 
         # Accumulated results
         self.fat_binaries: List[Path] = []
-        self.database_files_by_arch: Dict[
-            str, List[Tuple[Path, DatabaseHandler]]
-        ] = defaultdict(list)
+        self.kpack_processed_binaries: List[Path] = []
+        self.database_files_by_arch: Dict[str, List[Tuple[Path, DatabaseHandler]]] = (
+            defaultdict(list)
+        )
         self.exclude_from_generic: Set[Path] = set()
 
     def visit_file(self, file_path: Path, prefix_path: Path) -> None:
@@ -103,6 +125,10 @@ class FileClassificationVisitor:
         for handler in self.database_handlers:
             arch = handler.detect(file_path, prefix_path)
             if arch:
+                # detect() returns the Tensile hyphen form ('gfx90a-xnack-');
+                # collapse onto the bare base arch used by gpu_targets and the
+                # shard key so xnack variants are not dropped (ROCM-25535).
+                arch = base_arch(arch)
                 if self.gpu_targets is not None and arch not in self.gpu_targets:
                     if self.verbose:
                         print(
@@ -123,6 +149,12 @@ class FileClassificationVisitor:
                         f"  Found {handler.name()} database file for {arch}: {file_path.relative_to(prefix_path)}"
                     )
                 return  # First matching handler wins
+
+        # Keep processed binaries distinct from ordinary host-only files so
+        # the splitter can reject partial rebuilds before replacing archives.
+        if is_kpack_processed(file_path):
+            self.kpack_processed_binaries.append(file_path)
+            return
 
         # Check if it's a fat binary
         if is_fat_binary(file_path, self.toolchain):
@@ -235,23 +267,32 @@ class ArtifactSplitter:
         self.database_handlers = database_handlers or []
         self.verbose = verbose
         self.gpu_targets: Optional[Set[str]] = (
-            {strip_target_features(t) for t in gpu_targets} if gpu_targets else None
+            {base_arch(t) for t in gpu_targets} if gpu_targets else None
         )
 
-    def compute_kpack_search_pattern(self, binary_path: Path, prefix_root: Path) -> str:
+    def compute_kpack_search_paths(
+        self, binary_path: Path, prefix_root: Path
+    ) -> list[str]:
         """
-        Compute the @GFXARCH@ search pattern from a binary to its kpack files.
+        Compute the @GFXARCH@ search patterns from a binary to its kpack files.
 
-        The pattern uses @GFXARCH@ as a placeholder that the runtime expands
+        The patterns use @GFXARCH@ as a placeholder that the runtime expands
         with the requested GPU architecture at load time. This eliminates the
         need for .kpm manifest files that enumerate architectures at build time.
+
+        The first pattern points to the .kpack/ directory at the prefix root.
+        For binaries in subdirectories, a second pattern points to a .kpack/
+        directory next to the binary, so applications that bundle the libraries
+        next to their executable can place .kpack/ in the same directory.
 
         Args:
             binary_path: Path to the binary
             prefix_root: Root of the prefix (where .kpack/ directory will be)
 
         Returns:
-            Relative path pattern like .kpack/{artifact_prefix}_@GFXARCH@.kpack
+            Relative path patterns in search order, like
+            ["../.kpack/{artifact_prefix}_@GFXARCH@.kpack",
+             ".kpack/{artifact_prefix}_@GFXARCH@.kpack"]
         """
         # Get the relative path from prefix root to binary
         rel_path = binary_path.relative_to(prefix_root)
@@ -263,17 +304,17 @@ class ArtifactSplitter:
         kpack_pattern = f".kpack/{self.artifact_prefix}_@GFXARCH@.kpack"
         if depth == 0:
             # Binary is at prefix root
-            search_pattern = kpack_pattern
+            search_paths = [kpack_pattern]
         else:
-            # Binary is in subdirectories
+            # Binary is in subdirectories: prefix root first, then next to the binary
             up_path = "/".join([".."] * depth)
-            search_pattern = f"{up_path}/{kpack_pattern}"
+            search_paths = [f"{up_path}/{kpack_pattern}", kpack_pattern]
 
         if self.verbose:
             print(f"  Binary at: {rel_path}")
-            print(f"  Search pattern: {search_pattern}")
+            print(f"  Search paths: {search_paths}")
 
-        return search_pattern
+        return search_paths
 
     def scan_prefix(
         self, prefix_path: Path, visitor: FileClassificationVisitor
@@ -549,18 +590,16 @@ class ArtifactSplitter:
         for prefix, binary_paths in fat_binaries_by_prefix.items():
             prefix_dir = generic_artifact_dir / prefix
 
-            # Inject kpack search pattern in each binary
+            # Inject kpack search patterns in each binary
             for binary_path in binary_paths:
-                # Compute @GFXARCH@ search pattern from binary to .kpack directory
-                search_pattern = self.compute_kpack_search_pattern(
-                    binary_path, prefix_dir
-                )
+                # Compute @GFXARCH@ search patterns from binary to .kpack directory
+                search_paths = self.compute_kpack_search_paths(binary_path, prefix_dir)
 
                 if self.verbose:
                     print(
                         f"  Processing {binary_path.relative_to(generic_artifact_dir)}"
                     )
-                    print(f"    Search pattern: {search_pattern}")
+                    print(f"    Search paths: {search_paths}")
 
                 # Create temporary output file
                 temp_output = binary_path.with_suffix(binary_path.suffix + ".kpacked")
@@ -575,12 +614,12 @@ class ArtifactSplitter:
                     binary_relpath = binary_path.relative_to(prefix_dir).as_posix()
                     kernel_name = f"{prefix}/{binary_relpath}"
 
-                    # Add kpack search pattern and transform binary in one pass
+                    # Add kpack search patterns and transform binary in one pass
                     # (adds .rocm_kpack_ref, maps to PT_LOAD, rewrites magic, zero-pages .hip_fatbin)
                     kpack_offload_binary(
                         input_path=binary_path,
                         output_path=temp_output,
-                        kpack_search_paths=[search_pattern],
+                        kpack_search_paths=search_paths,
                         kernel_name=kernel_name,
                         verbose=self.verbose,
                     )
@@ -683,15 +722,16 @@ class ArtifactSplitter:
         Args:
             input_dir: Input artifact directory
             output_dir: Output directory for split artifacts
+
+        Raises:
+            RuntimeError: The artifact mixes already kpack-processed binaries
+                with unprocessed fat binaries. No output is written in this case.
         """
         input_dir = Path(input_dir)
         output_dir = Path(output_dir)
 
         if not input_dir.exists():
             raise FileNotFoundError(f"Input directory does not exist: {input_dir}")
-
-        # Create output directory
-        output_dir.mkdir(parents=True, exist_ok=True)
 
         # Read artifact manifest
         prefixes = read_artifact_manifest(input_dir)
@@ -700,16 +740,10 @@ class ArtifactSplitter:
             for prefix in prefixes:
                 print(f"  - {prefix}")
 
-        # Accumulate all kernels from all prefixes
-        all_kernels_by_arch: Dict[str, List[ExtractedKernel]] = defaultdict(list)
-
-        # Track fat binaries by prefix for later processing
-        fat_binaries_by_prefix: Dict[str, List[Path]] = {}
-
-        # Track prefixes that were actually processed (for manifest)
-        processed_prefixes: List[str] = []
-
-        # Process each prefix
+        # Classify the entire artifact before copying or extracting anything.
+        # Prefixes share archives, so a check within each prefix is insufficient:
+        # a rebuilt subproject can coexist with a prebuilt, already-split one.
+        classified_prefixes: List[Tuple[str, FileClassificationVisitor]] = []
         for prefix in prefixes:
             prefix_path = input_dir / prefix
 
@@ -730,6 +764,45 @@ class ArtifactSplitter:
                 gpu_targets=self.gpu_targets,
             )
             self.scan_prefix(prefix_path, classifier)
+            classified_prefixes.append((prefix, classifier))
+
+        processed_binary = next(
+            (
+                path
+                for _, c in classified_prefixes
+                for path in c.kpack_processed_binaries
+            ),
+            None,
+        )
+        fat_binary = next(
+            (path for _, c in classified_prefixes for path in c.fat_binaries),
+            None,
+        )
+        if processed_binary is not None and fat_binary is not None:
+            raise RuntimeError(
+                f"Cannot split artifact '{self.artifact_prefix}': it contains both "
+                "already kpack-processed and unprocessed fat binaries "
+                f"(processed: {processed_binary.relative_to(input_dir).as_posix()}; "
+                f"unprocessed: {fat_binary.relative_to(input_dir).as_posix()}). "
+                "Regenerating archives from only the unprocessed binaries would "
+                "lose kernels needed by the processed binaries. Rebuild all "
+                "subprojects contributing to this artifact from source, then "
+                "regenerate the artifact into a clean output directory."
+            )
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Accumulate all kernels from all prefixes
+        all_kernels_by_arch: Dict[str, List[ExtractedKernel]] = defaultdict(list)
+
+        # Track fat binaries by prefix for later processing
+        fat_binaries_by_prefix: Dict[str, List[Path]] = {}
+
+        # Track prefixes that were actually processed (for manifest)
+        processed_prefixes: List[str] = []
+
+        for prefix, classifier in classified_prefixes:
+            prefix_path = input_dir / prefix
 
             # Phase 2: Process database files (move to arch-specific artifacts)
             if self.database_handlers and classifier.database_files_by_arch:
@@ -780,6 +853,21 @@ class ArtifactSplitter:
         if all_kernels_by_arch:
             kpack_info_by_arch = self.create_kpack_files(
                 all_kernels_by_arch, output_dir
+            )
+
+        if (
+            fat_binaries_by_prefix
+            and self.gpu_targets is not None
+            and not kpack_info_by_arch
+        ):
+            target_list = ", ".join(sorted(self.gpu_targets))
+            fat_binary_count = sum(
+                len(paths) for paths in fat_binaries_by_prefix.values()
+            )
+            raise RuntimeError(
+                f"Found {fat_binary_count} fat binaries, but no device code objects "
+                f"matched --gpu-targets ({target_list}). Refusing to emit an "
+                "untransformed generic artifact."
             )
 
         # Phase 6: Inject kpack references and strip device code from fat binaries

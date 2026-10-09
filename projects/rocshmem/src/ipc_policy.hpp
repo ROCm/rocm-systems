@@ -28,6 +28,7 @@
 #include <hip/hip_runtime.h>
 
 #include <atomic>
+#include <cassert>
 #include <vector>
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
@@ -44,6 +45,36 @@ namespace rocshmem {
 class Backend;
 class Context;
 
+/**
+ * @brief A single symmetrically-registered user buffer (VMM memory).
+ *
+ * peer_bases is a device-resident array (indexed by local PE) holding the
+ * address at which the registering PE's buffer is mapped in each peer's
+ * address space.
+ */
+struct IpcSymmRegion {
+  uintptr_t local_base;   // this PE's registered buffer base address
+  size_t    length;       // registered length in bytes
+  char**    peer_bases;   // device array[shm_size] of peer-mapped bases
+};
+
+/**
+ * @brief Device-visible table of symmetric IPC registrations.
+ *
+ * Allocated once in host+device accessible memory; its contents are mutated
+ * by (collective) register/unregister calls. The pointer is shared by all
+ * contexts so updates are observed without re-propagation.
+ *
+ * @c regions points to a device-visible array of @c capacity entries. The
+ * capacity is configured at init time via the ROCSHMEM_MAX_SYMM_REGIONS
+ * environment variable (see envvar::max_symm_regions).
+ */
+struct IpcSymmTable {
+  int count;
+  int capacity;
+  IpcSymmRegion *regions;
+};
+
 class IpcOnImpl {
  protected:
   using HEAP_BASES_T = std::vector<char *, StdAllocatorHIP<char *>>;
@@ -55,7 +86,21 @@ class IpcOnImpl {
 
   char **ipc_bases{nullptr};
 
+  /**
+   * @brief Size in bytes of the local symmetric heap.
+   *
+   * The heap occupies [ipc_bases[my_pe], ipc_bases[my_pe] + heap_size).
+   * ipcPeerPtr() uses this to recognize heap addresses (the common case) and
+   * translate them directly, before searching the registered-buffer table.
+   */
+  size_t heap_size{0};
+
   int *pes_with_ipc_avail{nullptr};
+
+  /**
+   * @brief Device-visible table of symmetric user-buffer registrations.
+   */
+  IpcSymmTable *symm_table{nullptr};
 
   /**
    * @brief Fast O(1) IPC availability check.
@@ -115,9 +160,50 @@ class IpcOnImpl {
 
   void initFrom(const IpcOnImpl &other) {
     ipc_bases = other.ipc_bases;
+    heap_size = other.heap_size;
     shm_size = other.shm_size;
     shm_rank = other.shm_rank;
     pes_with_ipc_avail = other.pes_with_ipc_avail;
+    symm_table = other.symm_table;
+  }
+
+  /**
+   * @brief Return the address of a symmetric object on a target PE.
+   *
+   * The common case is an address in the symmetric heap, which is translated
+   * directly from the local heap base. Only addresses outside the heap are
+   * matched against the symmetrically-registered user buffers.
+   *
+   * @param[in] sym_addr Symmetric address (valid in the local address space)
+   * @param[in] pe       Target PE id
+   * @return Address of the corresponding data in PE 'pe'
+   */
+  __device__ __forceinline__ char *ipcPeerPtr(const void *sym_addr, int pe) {
+    uintptr_t addr = reinterpret_cast<uintptr_t>(sym_addr);
+    uintptr_t heap_base = constmem.heap_base;
+
+    /*
+     * Common case: the address lives in the symmetric heap. Translate it
+     * directly and skip the registered-buffer search. The single unsigned
+     * compare also rejects addresses below the heap base (they wrap large).
+     */
+    if (addr - heap_base < constmem.heap_size) {
+      return ipc_bases[pe] + (addr - heap_base);
+    }
+
+    /* Otherwise it may belong to a symmetrically-registered user buffer. */
+    if (symm_table != nullptr) {
+      int n = symm_table->count;
+      for (int i = 0; i < n; ++i) {
+        IpcSymmRegion &r = symm_table->regions[i];
+        if (addr >= r.local_base && addr < r.local_base + r.length) {
+          return r.peer_bases[pe] + (addr - r.local_base);
+        }
+      }
+    }
+
+    /* Not a heap address and not in any registered region: invalid input. */
+    return nullptr;
   }
 
   void assignSdmaChannel([[maybe_unused]] unsigned int ctx_id) {}
@@ -185,100 +271,93 @@ class IpcOnImpl {
     memcpy_wave<Kind>(dst, src, size);
   }
 
-  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
+  template <atomic::memory_scope scope = atomic::memory_scope::system,
+            atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence() {
-    detail::atomic::threadfence<scope, order>();
+    atomic::threadfence<scope, order>();
   }
 
-  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
+  template <atomic::memory_scope scope = atomic::memory_scope::system,
+            atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence([[maybe_unused]] int local_pe) {
-    detail::atomic::threadfence<scope, order>();
+    atomic::threadfence<scope, order>();
   }
 
   __device__ void ipcQuiet() {
-    detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                detail::atomic::memory_order_release>();
+    atomic::threadfence<atomic::memory_scope::system,
+                        atomic::memory_order::release>();
   }
 
   __device__ void ipcQuiet([[maybe_unused]] int local_pe) {
-    detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                detail::atomic::memory_order_release>();
+    atomic::threadfence<atomic::memory_scope::system,
+                        atomic::memory_order::release>();
   }
 
   template <typename T>
   __device__ void ipcAMOAdd(T *val, T value) {
-    __hip_atomic_fetch_add(val, value, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_SYSTEM);
+    atomic::fetch_add(val, value);
   }
 
   template <typename T>
   __device__ T ipcAMOFetchAdd(T *val, T value) {
-    return __hip_atomic_fetch_add(val, value, __ATOMIC_SEQ_CST,
-                                  __HIP_MEMORY_SCOPE_SYSTEM);
+    return atomic::fetch_add(val, value);
   }
 
   template <typename T>
   __device__ void ipcAMOCas(T *val, T cond, T value) {
-    __hip_atomic_compare_exchange_strong(val, &cond, value, __ATOMIC_SEQ_CST,
-                                         __ATOMIC_SEQ_CST,
-                                         __HIP_MEMORY_SCOPE_SYSTEM);
+    atomic::compare_exchange_strong(val, cond, value);
   }
 
   template <typename T>
   __device__ T ipcAMOFetchCas(T *val, T cond, T value) {
-    __hip_atomic_compare_exchange_strong(val, &cond, value, __ATOMIC_SEQ_CST,
-                                         __ATOMIC_SEQ_CST,
-                                         __HIP_MEMORY_SCOPE_SYSTEM);
+    atomic::compare_exchange_strong(val, cond, value);
     return cond;
   }
 
   template <typename T>
   __device__ void ipcAMOSet(T *val, T value) {
-    __hip_atomic_store(val, value, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+    atomic::store(val, value);
   }
 
   template <typename T>
   __device__ T ipcAMOSwap(T *val, T value) {
-    return __hip_atomic_exchange(val, value, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+    return atomic::exchange(val, value);
   }
 
   template <typename T>
   __device__ void ipcAMOAnd(T *val, T value) {
-    __hip_atomic_fetch_and(val, value, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+    atomic::fetch_and(val, value);
   }
 
   template <typename T>
   __device__ T ipcAMOFetchAnd(T *val, T value) {
-    return __hip_atomic_fetch_and(val, value, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+    return atomic::fetch_and(val, value);
   }
 
   template <typename T>
   __device__ void ipcAMOOr(T *val, T value) {
-    __hip_atomic_fetch_or(val, value, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+    atomic::fetch_or(val, value);
   }
 
   template <typename T>
   __device__ T ipcAMOFetchOr(T *val, T value) {
-    return __hip_atomic_fetch_or(val, value, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+    return atomic::fetch_or(val, value);
   }
 
   template <typename T>
   __device__ void ipcAMOXor(T *val, T value) {
-    __hip_atomic_fetch_xor(val, value, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+    atomic::fetch_xor(val, value);
   }
 
   template <typename T>
   __device__ T ipcAMOFetchXor(T *val, T value) {
-    return __hip_atomic_fetch_xor(val, value, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+    return atomic::fetch_xor(val, value);
   }
 
   __device__ void zero_byte_read(int pe) {
     int local_pe = pe % shm_size;
     uint32_t *pe_ipc_base = reinterpret_cast<uint32_t *>(ipc_bases[local_pe]);
-    [[maybe_unused]] volatile uint32_t read_value = __hip_atomic_load(
-        pe_ipc_base, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+    [[maybe_unused]] volatile uint32_t read_value = atomic::load(pe_ipc_base);
   }
 };
 
@@ -316,7 +395,7 @@ class IpcSdmaImpl : public IpcOnImpl {
   __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe) {
     if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
       auto* handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
-      assert(nullptr != handle /* Assuming sdma is available to all pes uniformely */);
+      assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
       if constexpr (is_blocking(Kind)) handle->quietAll();
       return;
     }
@@ -326,10 +405,10 @@ class IpcSdmaImpl : public IpcOnImpl {
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe) {
     if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
-      anvil::SdmaQueueDeviceHandle* handle = nullptr;
+      sdma_anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_block()) {
         handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
-        assert(nullptr != handle /* Assuming sdma is available to all pes uniformely */);
+        assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
         if constexpr (is_blocking(Kind)) handle->quietAll();
       }
       return;
@@ -340,10 +419,10 @@ class IpcSdmaImpl : public IpcOnImpl {
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe) {
     if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
-      anvil::SdmaQueueDeviceHandle* handle = nullptr;
+      sdma_anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_wave()) {
         handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
-        assert(nullptr != handle /* Assuming sdma is available to all pes uniformely */);
+        assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
         if constexpr (is_blocking(Kind)) handle->quietAll();
       }
       return;
@@ -351,48 +430,51 @@ class IpcSdmaImpl : public IpcOnImpl {
     memcpy_wave<Kind>(dst, src, size);
   }
 
-  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
+  template <atomic::memory_scope scope = atomic::memory_scope::system,
+            atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence() {
     if (sdmaImpl_.sdmaEnabled &&
-        __hip_atomic_load(&sdmaImpl_.sdmaDirty, __ATOMIC_RELAXED,
-                          __HIP_MEMORY_SCOPE_AGENT) != 0)
+        atomic::load<atomic::memory_scope::device,
+                     atomic::memory_order::relaxed>(&sdmaImpl_.sdmaDirty) != 0)
       sdmaImpl_.sdmaQuietAll();
-    detail::atomic::threadfence<scope, order>();
+    atomic::threadfence<scope, order>();
   }
 
-  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
+  template <atomic::memory_scope scope = atomic::memory_scope::system,
+            atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence(int local_pe) {
     if (sdmaImpl_.sdmaEnabled) {
       uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
                          (local_pe * sdmaImpl_.numChannels);
-      if (__hip_atomic_load(&sdmaImpl_.sdmaDirty, __ATOMIC_RELAXED,
-                            __HIP_MEMORY_SCOPE_AGENT) & pe_mask)
+      if (atomic::load<atomic::memory_scope::device,
+                       atomic::memory_order::relaxed>(
+                        &sdmaImpl_.sdmaDirty) & pe_mask)
         sdmaImpl_.sdmaQuiet(local_pe);
     }
-    detail::atomic::threadfence<scope, order>();
+    atomic::threadfence<scope, order>();
   }
 
   __device__ void ipcQuiet() {
     if (sdmaImpl_.sdmaEnabled &&
-        __hip_atomic_load(&sdmaImpl_.sdmaDirty, __ATOMIC_RELAXED,
-                          __HIP_MEMORY_SCOPE_AGENT) != 0)
+          atomic::load<atomic::memory_scope::device,
+                       atomic::memory_order::relaxed>(
+                         &sdmaImpl_.sdmaDirty) != 0)
       sdmaImpl_.sdmaQuietAll();
-    detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                detail::atomic::memory_order_acq_rel>();
+    atomic::threadfence<atomic::memory_scope::system,
+                        atomic::memory_order::acq_rel>();
   }
 
   __device__ void ipcQuiet(int local_pe) {
     if (sdmaImpl_.sdmaEnabled) {
       uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
                          (local_pe * sdmaImpl_.numChannels);
-      if (__hip_atomic_load(&sdmaImpl_.sdmaDirty, __ATOMIC_RELAXED,
-                            __HIP_MEMORY_SCOPE_AGENT) & pe_mask)
+      if (atomic::load<atomic::memory_scope::device,
+                       atomic::memory_order::relaxed>(
+                         &sdmaImpl_.sdmaDirty) & pe_mask)
         sdmaImpl_.sdmaQuiet(local_pe);
     }
-    detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                detail::atomic::memory_order_acq_rel>();
+    atomic::threadfence<atomic::memory_scope::system,
+                        atomic::memory_order::acq_rel>();
   }
 };
 #endif  // USE_SDMA
@@ -409,10 +491,19 @@ class IpcOffImpl {
 
   char **ipc_bases{nullptr};
 
+  size_t heap_size{0};
+
   int *pes_with_ipc_avail{nullptr};
+
+  IpcSymmTable *symm_table{nullptr};
 
   int ipc_first_pe{0};
   int ipc_stride{0};
+
+  __device__ __forceinline__ char *ipcPeerPtr(
+      [[maybe_unused]] const void *sym_addr, [[maybe_unused]] int pe) {
+    return nullptr;
+  }
 
   __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                             MPI_Comm thread_comm) {}
@@ -448,12 +539,12 @@ class IpcOffImpl {
 
   __device__ void ipcQuiet(int) {}
 
-  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
+  template <atomic::memory_scope scope = atomic::memory_scope::system,
+            atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence() {}
 
-  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
+  template <atomic::memory_scope scope = atomic::memory_scope::system,
+            atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence(int) {}
 
   template <typename T>

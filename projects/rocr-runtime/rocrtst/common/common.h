@@ -142,6 +142,30 @@ public:
 /// \returns true if emulator mode is detected
 bool isEmuModeEnabled();
 
+/// Check if running under Windows Subsystem for Linux (WSL / DXG backend).
+/// \returns true if a WSL environment is detected
+bool isWslEnvironment();
+
+/// Record the current test as skipped: register it with SkippedTestTracker
+/// (end-of-run summary) and print a "[ SKIPPED ]" line. Use for runtime skip
+/// conditions that the platform filter doesn't cover, since the vendored gtest
+/// predates GTEST_SKIP().
+/// \param reason Why the test is skipped
+/// \returns true (so callers can `return` in one line)
+bool SkipCurrentTest(const char* reason);
+
+/// If running on WSL/DXG, print a "[ SKIPPED ]" line with the reason and return
+/// true so the caller can return early; returns false otherwise.
+/// \param reason Why the test is skipped on WSL
+/// \returns true if the test should be skipped (WSL detected)
+bool SkipOnWsl(const char* reason);
+
+/// The inverse of SkipOnWsl, for tests that only mean something on the DXG
+/// backend: skips everywhere that is not WSL.
+/// \param reason Why the test only applies to WSL
+/// \returns true if the test should be skipped (i.e. this is NOT WSL)
+bool SkipIfNotWsl(const char* reason);
+
 /// Fill in the pool_info_t structure for the provided pool.
 /// \param[in] pool Pool for which information will be retrieved
 /// \param[out] pool_i Pointer to structure where pool info will be stored

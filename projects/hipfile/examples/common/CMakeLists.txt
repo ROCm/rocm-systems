@@ -2,14 +2,14 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Shared helpers (open/close/hash/etc.) used by the basics/ and async/
-# examples. Pulled out of the per-example sources to remove verbatim
+# Shared helpers (open/close/hash/etc.) used by the basics/, batch/, and
+# async/ examples. Pulled out of the per-example sources to remove verbatim
 # duplication; each example still drives the hipFile API directly in main()
 # so the example flow stays readable.
 add_library(examples_common STATIC examples_common.cpp)
-target_compile_features(examples_common PRIVATE cxx_std_${AIS_CXX_STANDARD})
+target_compile_features(examples_common PRIVATE cxx_std_${HIPFILE_CXX_STANDARD})
 set_target_properties(examples_common PROPERTIES CXX_EXTENSIONS OFF)
-target_compile_options(examples_common PRIVATE -Wall -Wextra -fno-sanitize=all)
+target_compile_options(examples_common PRIVATE -Wall -Wextra)
 target_include_directories(examples_common PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 
 if(CMAKE_HIP_PLATFORM STREQUAL "amd")

@@ -12,164 +12,224 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 endif()
 
 # Find HIP
-find_package(hip HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm QUIET)
+find_package(
+    hip
+    QUIET
+    HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm
+    PATHS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm
+)
 if(NOT hip_FOUND)
-    message(AUTHOR_WARNING "${PROJECT_NAME} skipped. Missing HIP...")
+    message(AUTHOR_WARNING "rccl-tests skipped. Missing HIP...")
     return()
 endif()
 
 # Find RCCL
-find_package(rccl HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm QUIET)
+find_package(
+    rccl
+    QUIET
+    HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm
+    PATHS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm
+)
 if(NOT rccl_FOUND)
     message(AUTHOR_WARNING "rccl-tests skipped. Missing RCCL...")
     return()
-else()
-    message(STATUS "RCCL found: ${RCCL_INCLUDE_DIRS}")
-    message(STATUS "RCCL library: ${RCCL_LIBRARIES}")
-    message(STATUS "RCCL version: ${RCCL_VERSION}")
 endif()
 
-# Build rccl-tests
-if(hip_FOUND AND rccl_FOUND)
-    # Setup source and build directories
-    set(rccl-tests_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/rccl-tests")
-    set(rccl-tests_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/rccl-tests")
+# rccl-tests sources are written against the CUDA/NCCL API and must be converted
+# to HIP with hipify-perl before they can be compiled.
+find_program(
+    HIPIFY_PERL_EXECUTABLE
+    NAMES hipify-perl
+    HINTS ${ROCmVersion_DIR} ${ROCM_PATH} $ENV{ROCM_PATH} /opt/rocm
+    PATH_SUFFIXES bin
+)
+mark_as_advanced(HIPIFY_PERL_EXECUTABLE)
+if(NOT HIPIFY_PERL_EXECUTABLE)
+    message(AUTHOR_WARNING "rccl-tests skipped. hipify-perl could not be found.")
+    return()
+endif()
 
-    if(NOT EXISTS "${rccl-tests_SOURCE_DIR}")
-        message(
-            AUTHOR_WARNING
-            "rccl-tests skipped. Missing rccl-tests source at ${rccl-tests_SOURCE_DIR}"
-        )
-        return()
-    endif()
+# HIP compiler detection (mirrors the other GPU examples, e.g. transpose). We
+# avoid enable_language(HIP) and instead compile the HIP sources through hipcc
+# via rocprofiler_systems_custom_compilation().
+find_program(
+    HIPCC_EXECUTABLE
+    NAMES hipcc
+    HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
+    ENV ROCM_PATH
+    /opt/rocm
+    PATHS ${ROCmVersion_DIR} ${ROCM_PATH}
+    ENV ROCM_PATH
+    /opt/rocm
+    NO_CACHE
+)
+mark_as_advanced(HIPCC_EXECUTABLE)
 
-    # Parse comment describing supported gfx targets from rccl src/Makefile
-    execute_process(
-        COMMAND grep "Currently, supports" ${rccl-tests_SOURCE_DIR}/src/Makefile
-        OUTPUT_VARIABLE _supported_line
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _rccl_grep_ret
+if(NOT HIPCC_EXECUTABLE)
+    message(AUTHOR_WARNING "hipcc could not be found. Cannot build rccl-tests")
+    return()
+endif()
+
+if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
+    if(
+        CMAKE_CXX_COMPILER STREQUAL HIPCC_EXECUTABLE
+        OR "${CMAKE_CXX_COMPILER}" MATCHES "hipcc"
     )
-    if(NOT _rccl_grep_ret EQUAL 0)
-        message(
-            FATAL_ERROR
-            "This grep should never fail unless rccl-tests/src/Makefile was modified in an incompatible way"
-        )
+        set(CMAKE_CXX_COMPILER_IS_HIPCC 1 CACHE BOOL "HIP compiler")
     endif()
+endif()
 
-    # Extract just the gfx architectures
-    string(REGEX MATCHALL "gfx[0-9a-z]+" RCCL_SUPPORTED_TARGETS "${_supported_line}")
-    set(RCCL_GPU_TARGETS "")
-    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
-        if(arch IN_LIST RCCL_SUPPORTED_TARGETS)
-            list(APPEND RCCL_GPU_TARGETS ${arch})
-        endif()
-    endforeach()
-    if(RCCL_GPU_TARGETS STREQUAL "")
-        message(AUTHOR_WARNING "rccl-tests skipped. No supported GPU targets found.")
-        return()
-    endif()
+find_package(Threads REQUIRED)
 
-    # Convert CMake list (;-separated) to space-separated string for make
-    list(JOIN RCCL_GPU_TARGETS " " RCCL_GPU_TARGETS_STR)
+# ----------------------------------------------------------------------------
+# Source layout
+#
+set(_rccl_src_dir "${CMAKE_CURRENT_SOURCE_DIR}/rccl-tests/src")
+set(_rccl_verifiable_dir "${CMAKE_CURRENT_SOURCE_DIR}/rccl-tests/verifiable")
+set(_rccl_hipify_dir "${CMAKE_CURRENT_BINARY_DIR}/hipify")
+file(MAKE_DIRECTORY ${_rccl_hipify_dir})
 
-    # Copy source to build directory
-    file(COPY ${rccl-tests_SOURCE_DIR}/ DESTINATION ${rccl-tests_BUILD_DIR})
+# rccl-tests perf binaries. This is trimmed to the minimal set that still
+# exercises every distinct RCCL (nccl*) API entry point: scatter/gather/sendrecv
+# only add ncclSend/ncclRecv, which is already covered by alltoallv_perf, so they
+# are omitted for API-tracing coverage purposes.
+set(_rccl_tests
+    all_reduce
+    all_gather
+    broadcast
+    reduce_scatter
+    reduce
+    alltoall
+    alltoallv
+)
 
-    # Get RCCL root directory
-    get_filename_component(rccl_ROOT_DIR "${rccl_INCLUDE_DIRS}" DIRECTORY)
+# Sources compiled into every perf binary (shared object library below)
+set(_rccl_common_sources
+    ${_rccl_src_dir}/common.cpp
+    ${_rccl_src_dir}/timer.cc
+    ${_rccl_verifiable_dir}/verifiable.cpp
+)
 
-    # Build rccl-tests at build-time (using add_custom_command with OUTPUT so
-    # CMake can skip the step when outputs are already up-to-date)
+# Headers needed by the sources (hipified so quoted includes resolve locally)
+set(_rccl_headers
+    ${_rccl_src_dir}/common.h
+    ${_rccl_src_dir}/timer.h
+    ${_rccl_src_dir}/git_version.h
+    ${_rccl_src_dir}/rccl_compat.h
+    ${_rccl_src_dir}/nccl1_compat.h
+    ${_rccl_src_dir}/rccl_float8.h
+    ${_rccl_verifiable_dir}/verifiable.h
+)
+
+# ----------------------------------------------------------------------------
+# hipify step: convert each source/header to HIP and place the result (by base
+# name) in a single directory so quoted includes resolve against the hipified
+# copies.
+#
+set(_rccl_hipify_inputs ${_rccl_common_sources} ${_rccl_headers})
+foreach(_test IN LISTS _rccl_tests)
+    list(APPEND _rccl_hipify_inputs ${_rccl_src_dir}/${_test}.cpp)
+endforeach()
+
+set(_rccl_hipified_outputs)
+foreach(_input IN LISTS _rccl_hipify_inputs)
+    get_filename_component(_name ${_input} NAME)
+    set(_output "${_rccl_hipify_dir}/${_name}")
     add_custom_command(
-        OUTPUT
-            ${rccl-tests_BUILD_DIR}/build/all_gather_perf
-            ${rccl-tests_BUILD_DIR}/build/all_reduce_perf
-            ${rccl-tests_BUILD_DIR}/build/alltoall_perf
-            ${rccl-tests_BUILD_DIR}/build/alltoallv_perf
-            ${rccl-tests_BUILD_DIR}/build/broadcast_perf
-            ${rccl-tests_BUILD_DIR}/build/gather_perf
-            ${rccl-tests_BUILD_DIR}/build/reduce_perf
-            ${rccl-tests_BUILD_DIR}/build/reduce_scatter_perf
-            ${rccl-tests_BUILD_DIR}/build/scatter_perf
-            ${rccl-tests_BUILD_DIR}/build/sendrecv_perf
-        COMMAND
-            make HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR}
-            "GPU_TARGETS=${RCCL_GPU_TARGETS_STR}" -j
-        WORKING_DIRECTORY ${rccl-tests_BUILD_DIR}
-        COMMENT
-            "Building rccl-tests with HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR} ..."
+        OUTPUT ${_output}
+        COMMAND ${HIPIFY_PERL_EXECUTABLE} -quiet-warnings ${_input} -o ${_output}
+        MAIN_DEPENDENCY ${_input}
+        COMMENT "Hipifying ${_name}"
+        VERBATIM
     )
+    list(APPEND _rccl_hipified_outputs ${_output})
+endforeach()
 
-    # Thin custom target so other targets can depend on the rccl-tests build
-    add_custom_target(
-        build-rccl-tests
-        ALL
-        DEPENDS
-            ${rccl-tests_BUILD_DIR}/build/all_gather_perf
-            ${rccl-tests_BUILD_DIR}/build/all_reduce_perf
-            ${rccl-tests_BUILD_DIR}/build/alltoall_perf
-            ${rccl-tests_BUILD_DIR}/build/alltoallv_perf
-            ${rccl-tests_BUILD_DIR}/build/broadcast_perf
-            ${rccl-tests_BUILD_DIR}/build/gather_perf
-            ${rccl-tests_BUILD_DIR}/build/reduce_perf
-            ${rccl-tests_BUILD_DIR}/build/reduce_scatter_perf
-            ${rccl-tests_BUILD_DIR}/build/scatter_perf
-            ${rccl-tests_BUILD_DIR}/build/sendrecv_perf
+add_custom_target(rccl-tests-hipify DEPENDS ${_rccl_hipified_outputs})
+
+# ----------------------------------------------------------------------------
+# git_version.cpp defines rcclTestsGitHash (referenced by common.cpp). It is
+# plain host C++, so it does not go through hipify.
+#
+if(NOT GIT_EXECUTABLE)
+    find_package(Git QUIET)
+endif()
+set(_rccl_git_rev "unknown")
+if(GIT_EXECUTABLE)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} log --pretty=format:%h -n 1
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE _rccl_git_rev_out
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _rccl_git_ret
+        ERROR_QUIET
     )
+    if(_rccl_git_ret EQUAL 0 AND NOT _rccl_git_rev_out STREQUAL "")
+        set(_rccl_git_rev "${_rccl_git_rev_out}")
+    endif()
+endif()
+set(_rccl_git_version_cpp "${CMAKE_CURRENT_BINARY_DIR}/git_version.cpp")
+file(
+    WRITE ${_rccl_git_version_cpp}
+    "const char* rcclTestsGitHash = \"rccl-tests:${_rccl_git_rev}\";\n"
+)
 
-    # Define the expected test executables
-    set(RCCL_TEST_NAMES
-        all_gather_perf
-        all_reduce_perf
-        alltoall_perf
-        alltoallv_perf
-        broadcast_perf
-        gather_perf
-        reduce_perf
-        reduce_scatter_perf
-        scatter_perf
-        sendrecv_perf
-    )
-
-    set(_RCCL_TEST_TARGETS)
-    foreach(_EXE_NAME ${RCCL_TEST_NAMES})
-        set(_EXE_SRC_PATH "${rccl-tests_BUILD_DIR}/build/${_EXE_NAME}")
-        set(_EXE_DEST_PATH "${CMAKE_CURRENT_BINARY_DIR}/${_EXE_NAME}")
-
-        # Copy executable from build dir to binary dir at build-time
-        add_custom_command(
-            OUTPUT ${_EXE_DEST_PATH}
-            COMMAND
-                ${CMAKE_COMMAND} -E copy_if_different ${_EXE_SRC_PATH} ${_EXE_DEST_PATH}
-            DEPENDS build-rccl-tests
-            COMMENT "Copying ${_EXE_NAME} to ${CMAKE_CURRENT_BINARY_DIR}"
-        )
-
-        # Create a target for this specific executable that gets built with ALL
-        add_custom_target(copy-${_EXE_NAME} ALL DEPENDS ${_EXE_DEST_PATH})
-        add_dependencies(copy-${_EXE_NAME} build-rccl-tests)
-
-        # Create imported executable target
-        add_executable(rccl-tests::${_EXE_NAME} IMPORTED GLOBAL)
-        set_property(
-            TARGET rccl-tests::${_EXE_NAME}
-            PROPERTY IMPORTED_LOCATION ${_EXE_DEST_PATH}
-        )
-
-        # Make sure the imported target depends on the copy operation
-        add_dependencies(rccl-tests::${_EXE_NAME} copy-${_EXE_NAME})
-
-        list(APPEND _RCCL_TEST_TARGETS "rccl-tests::${_EXE_NAME}")
-
-        if(ROCPROFSYS_INSTALL_EXAMPLES)
-            install(
-                PROGRAMS ${_EXE_DEST_PATH}
-                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
-                COMPONENT rocprofiler-systems-examples
-            )
-        endif()
+# ----------------------------------------------------------------------------
+# Apply the HIP compile/link settings used by the other GPU examples.
+#
+function(rccl_tests_setup_hip_target _target)
+    foreach(_arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+        target_compile_options(${_target} PRIVATE --offload-arch=${_arch})
+        target_link_options(${_target} PRIVATE --offload-arch=${_arch})
     endforeach()
 
-    set(RCCL_TEST_TARGETS "${_RCCL_TEST_TARGETS}" CACHE INTERNAL "rccl-test targets")
-endif()
+    # HIPCC_EXECUTABLE is guaranteed to be set (early return otherwise), so the
+    # sources are compiled through hipcc unless the main C++ compiler already is
+    # hipcc.
+    if(NOT CMAKE_CXX_COMPILER_IS_HIPCC)
+        # defined in MacroUtilities.cmake (or standalone-helpers.cmake)
+        rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET ${_target})
+    endif()
+endfunction()
+
+# ----------------------------------------------------------------------------
+# Object library with the sources shared by every perf binary.
+#
+add_library(
+    rccl-tests-common
+    OBJECT
+    ${_rccl_hipify_dir}/common.cpp
+    ${_rccl_hipify_dir}/timer.cc
+    ${_rccl_hipify_dir}/verifiable.cpp
+    ${_rccl_git_version_cpp}
+)
+add_dependencies(rccl-tests-common rccl-tests-hipify)
+target_include_directories(rccl-tests-common PRIVATE ${_rccl_hipify_dir})
+target_link_libraries(
+    rccl-tests-common
+    PRIVATE Threads::Threads roc::rccl ${CMAKE_DL_LIBS}
+)
+rccl_tests_setup_hip_target(rccl-tests-common)
+
+# ----------------------------------------------------------------------------
+# One executable per collective, linking the shared object library.
+#
+foreach(_test IN LISTS _rccl_tests)
+    set(_target "${_test}_perf")
+    add_executable(${_target} ${_rccl_hipify_dir}/${_test}.cpp)
+    add_dependencies(${_target} rccl-tests-hipify)
+    target_include_directories(${_target} PRIVATE ${_rccl_hipify_dir})
+    target_link_libraries(
+        ${_target}
+        PRIVATE rccl-tests-common Threads::Threads roc::rccl ${CMAKE_DL_LIBS}
+    )
+    rccl_tests_setup_hip_target(${_target})
+
+    if(ROCPROFSYS_INSTALL_EXAMPLES)
+        install(
+            TARGETS ${_target}
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+            COMPONENT rocprofiler-systems-examples
+        )
+    endif()
+endforeach()

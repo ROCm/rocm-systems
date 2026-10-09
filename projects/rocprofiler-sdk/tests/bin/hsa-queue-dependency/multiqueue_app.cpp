@@ -41,7 +41,11 @@ main()
     MQDependencyTest obj;
 
     // Get Agent info
-    obj.device_discovery();
+    if(!obj.device_discovery() || obj.gpu.empty())
+    {
+        fprintf(stderr, "No GPU agent found; cannot run test.\n");
+        return EXIT_FAILURE;
+    }
 
     char agent_name[64];
     status = hsa_agent_get_info(obj.gpu[0].agent, HSA_AGENT_INFO_NAME, agent_name);

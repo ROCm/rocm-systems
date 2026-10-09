@@ -64,6 +64,7 @@ set(TEST_SRC
   hipGraphExecBatchMemOpNodeSetParams.cc
   hipGraphAddBatchMemOpNode.cc
   hipGraphBatchMemOpNodeSetParams.cc
+  hipGraphBatchMemOpNodeCapture.cc
   hipDrvGraphExecMemcpyNodeSetParams.cc
   hipDrvGraphAddMemFreeNode.cc
   hipGraphAddNodeConcurrent.cc)
@@ -89,6 +90,40 @@ endif()
 hip_add_exe_to_target(NAME GraphsTest1
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
+
+# Collapse tests need scheduling flags set before HIP init.  They live in
+# their own binary built directly (bypassing hip_add_exe_to_target) so that
+# catch_discover_tests is NOT called — avoiding duplicate env-less entries
+# that would fail.  Env vars are wired via cmake -E env in add_test instead.
+set_source_files_properties(hipGraphCollapseSmallKernels.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+add_executable(GraphsCollapseTest EXCLUDE_FROM_ALL
+  hipGraphCollapseSmallKernels.cc
+  $<TARGET_OBJECTS:Main_Object>
+  $<TARGET_OBJECTS:KERNELS>)
+set_target_properties(GraphsCollapseTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(GraphsCollapseTest Catch2::Catch2 ${GPGPU_LINKER_LIBRARIES})
+if(UNIX)
+  target_link_libraries(GraphsCollapseTest stdc++fs -ldl pthread rt)
+endif()
+add_dependencies(build_tests GraphsCollapseTest)
+add_dependencies(GraphsCollapseTest hip_tests_config)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS GraphsCollapseTest)
+
+add_test(NAME Unit_hipGraph_CollapseSmallKernels_SingleStream
+  COMMAND ${CMAKE_COMMAND} -E env
+    "DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=0"
+    "DEBUG_HIP_GRAPH_MIN_OVERLAP=2"
+    "DEBUG_HIP_GRAPH_DOT_PRINT=2"
+    $<TARGET_FILE:GraphsCollapseTest>
+    "Unit_hipGraph_CollapseSmallKernels_SingleStream")
+
+add_test(NAME Unit_hipGraph_CollapseSmallKernels_MultiStream_Mode2
+  COMMAND ${CMAKE_COMMAND} -E env
+    "DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=2"
+    "DEBUG_HIP_GRAPH_MIN_OVERLAP=2"
+    "DEBUG_HIP_GRAPH_DOT_PRINT=2"
+    $<TARGET_FILE:GraphsCollapseTest>
+    "Unit_hipGraph_CollapseSmallKernels_MultiStream_Mode2")
 
 set(TEST_SRC
   hipStreamGetCaptureInfo.cc
@@ -130,6 +165,8 @@ set(TEST_SRC
   hipGraphNodeGetEnabled.cc
   hipGraphExecDestroy.cc
   hipGraphUpload.cc
+  hipGraphCrossDeviceLaunch.cc
+  hipGraphStreamPoolFootprint.cc
   hipGraphKernelNodeCopyAttributes.cc
   hipGraphCycle.cc
   hipGraphPerf.cc
@@ -145,10 +182,13 @@ set(TEST_SRC
   hipDeviceGetGraphMemAttribute.cc
   hipDeviceGraphMemTrim.cc
   hipDrvGraphExecMemsetNodeSetParams.cc
+  hipGraphMultiDevice.cc
 )
 
 if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
+    # hipLaunchAttributePriority not available on older CUDA versions
+    hipGraphKernelNodePriority.cc
     # hipGraphAddNode, hipGraphNodeParams, hipMemcpyNodeParams are not mapped to Nvidia
     hipGraphAddNode.cc
     # hipDrvGraphAddMemsetNode, HIP_MEMSET_NODE_PARAMS are not mapped to Nvidia
@@ -157,19 +197,25 @@ if(HIP_PLATFORM MATCHES "amd")
     hipDrvGraphAddMemcpyNode.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
-  add_custom_target(add_Kernel.code COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST}
-  --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
-  -o ${CMAKE_CURRENT_BINARY_DIR}/../graph/add_Kernel.code
-  -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-  add_custom_target(hipMatMul COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST}
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code
+    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST}
+    --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
+    -o ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code
+    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
+    COMMENT "Compiling add_Kernel.code")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/hipMatMul.code
+    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST}
     --cuda-device-only
     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipMatMul.cc
-    -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/graph/hipMatMul.code
+    -o ${CMAKE_CURRENT_BINARY_DIR}/hipMatMul.code
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../../../include/
     -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-  add_dependencies(build_tests hipMatMul)
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hipMatMul.cc
+    COMMENT "Compiling hipMatMul.code")
+  add_custom_target(hipMatMul DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/hipMatMul.code)
   set_property(GLOBAL APPEND PROPERTY
                G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/hipMatMul.code)
   if(UNIX)
@@ -180,12 +226,16 @@ if(HIP_PLATFORM MATCHES "amd")
     set_target_properties(GraphsKernelArgPrefetchTest PROPERTIES COMPILE_FLAGS "-DKERNEL_ARG_PREFETCH -mllvm -amdgpu-kernarg-preload-count=16")
   endif()
 else()
-  add_custom_target(add_Kernel.code COMMAND ${CMAKE_HIP_COMPILER}
-  --fatbin ${OFFLOAD_ARCH_LIST} -x cu ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
-  -o ${CMAKE_CURRENT_BINARY_DIR}/../graph/add_Kernel.code
-  -I${HIP_INCLUDE_DIR}
-  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code
+    COMMAND ${CMAKE_HIP_COMPILER}
+    --fatbin ${OFFLOAD_ARCH_LIST} -x cu ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
+    -o ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code
+    -I${HIP_INCLUDE_DIR}
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
+    COMMENT "Compiling add_Kernel.code")
 endif()
+add_custom_target(add_Kernel DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code)
 
 set_property(GLOBAL APPEND PROPERTY
                G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code)
@@ -195,4 +245,15 @@ hip_add_exe_to_target(NAME GraphsTest2
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 
-add_dependencies(build_tests add_Kernel.code)
+# Wire kernel artifacts to the consuming test exes so `make GraphsTest1` /
+# `make GraphsTest2` builds all their dependencies. The kernels are loaded at
+# runtime by tests in either binary, so wire to both.
+add_dependencies(GraphsTest1 add_Kernel)
+add_dependencies(GraphsTest2 add_Kernel)
+if(HIP_PLATFORM MATCHES "amd")
+  add_dependencies(GraphsTest1 hipMatMul)
+  add_dependencies(GraphsTest2 hipMatMul)
+  if(UNIX)
+    add_dependencies(GraphsKernelArgPrefetchTest add_Kernel)
+  endif()
+endif()

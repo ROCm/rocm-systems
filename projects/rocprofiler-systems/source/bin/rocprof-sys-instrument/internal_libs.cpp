@@ -8,19 +8,20 @@
 #include "binary/scope_filter.hpp"
 #include "binary/symbol.hpp"
 #include "common/defines.h"
+#include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
+#include "common/path.hpp"
 #include "core/demangler.hpp"
 #include "core/utility.hpp"
 #include "fwd.hpp"
 #include "log.hpp"
 
+#include <fmt/format.h>
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/environment/types.hpp>
 #include <timemory/log/macros.hpp>
-#include <timemory/utility/filepath.hpp>
-#include <timemory/utility/join.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <algorithm>
@@ -32,19 +33,10 @@
 
 namespace
 {
-namespace filepath = ::tim::filepath;
 using rocprofsys::get_env;
-using ::tim::delimit;
-using ::timemory::join::join;
 using strview_init_t   = std::initializer_list<std::string_view>;
 using strview_set_t    = std::set<std::string_view>;
 using open_modes_vec_t = std::vector<int>;
-
-auto
-get_exe_realpath()
-{
-    return filepath::realpath("/proc/self/exe", nullptr, false);
-}
 
 auto&
 get_symtab_file_cache()
@@ -56,13 +48,16 @@ get_symtab_file_cache()
 symtab_t*
 get_symtab_file(const std::string& _name)
 {
-    auto& _cache = get_symtab_file_cache();
-    auto  itr    = _cache.find(_name);
+    auto&      _cache = get_symtab_file_cache();
+    auto const itr    = _cache.find(_name);
     if(itr == _cache.end())
     {
-        symtab_t* _v        = SymTab::Symtab::findOpenSymtab(_name);
-        bool      _closable = (_v == nullptr);
-        if(!_v) SymTab::Symtab::openFile(_v, _name);
+        symtab_t*  _v        = SymTab::Symtab::findOpenSymtab(_name);
+        const bool _closable = (_v == nullptr);
+        if(!_v)
+        {
+            SymTab::Symtab::openFile(_v, _name);
+        }
 
         TIMEMORY_PREFER(_v != nullptr)
             << "Warning! Dyninst could not open a Symtab instance for file '" << _name
@@ -76,13 +71,16 @@ get_symtab_file(const std::string& _name)
 bool
 close_symtab_file(const std::string& _name)
 {
-    auto& _cache = get_symtab_file_cache();
-    auto  itr    = _cache.find(_name);
+    auto&      _cache = get_symtab_file_cache();
+    auto const itr    = _cache.find(_name);
     if(itr != _cache.end())
     {
-        symtab_t* _symtab   = itr->second.first;
-        bool      _closable = itr->second.second;
-        if(_symtab && _closable) SymTab::Symtab::closeSymtab(_symtab);
+        symtab_t*  _symtab   = itr->second.first;
+        const bool _closable = itr->second.second;
+        if(_symtab && _closable)
+        {
+            SymTab::Symtab::closeSymtab(_symtab);
+        }
         _cache.erase(itr);
         return true;
     }
@@ -95,8 +93,15 @@ check_regex_restrictions(const ContainerT<std::string, TailT...>& _names,
                          const regexvec_t&                        _regexes)
 {
     for(const auto& nitr : _names)
+    {
         for(const auto& ritr : _regexes)
-            if(std::regex_search(nitr, ritr)) return true;
+        {
+            if(std::regex_search(nitr, ritr))
+            {
+                return true;
+            }
+        }
+    }
     return false;
 }
 
@@ -105,16 +110,23 @@ get_linked_path(const char*        _name,
                 open_modes_vec_t&& _open_modes = { (RTLD_LAZY | RTLD_NOLOAD) })
 {
     void* _handle = nullptr;
-    bool  _noload = false;
-    for(auto _mode : _open_modes)
+    // NOLINTNEXTLINE(misc-const-correctness)
+    bool _noload = false;
+    for(auto const _mode : _open_modes)
     {
         _handle = dlopen(_name, _mode);
         _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
-        if(_handle) break;
+        if(_handle)
+        {
+            break;
+        }
     }
 
-    tim::scope::destructor _dtor{ [&_noload, &_handle]() {
-        if(_noload == false) dlclose(_handle);
+    const tim::scope::destructor _dtor{ [&_noload, &_handle]() {
+        if(!_noload)
+        {
+            dlclose(_handle);
+        }
     } };
 
     if(_handle)
@@ -123,7 +135,7 @@ get_linked_path(const char*        _name,
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
         {
-            return filepath::realpath(_link_map->l_name, nullptr, false);
+            return rocprofsys::path::realpath(_link_map->l_name);
         }
     }
 
@@ -136,11 +148,14 @@ get_link_map(const std::string& _lib,
 {
     void* _handle = nullptr;
     bool  _noload = false;
-    for(auto _mode : _open_modes)
+    for(auto const _mode : _open_modes)
     {
         _handle = dlopen(_lib.c_str(), _mode);
         _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
-        if(_handle) break;
+        if(_handle)
+        {
+            break;
+        }
     }
 
     auto _chain = std::set<std::string>{};
@@ -148,18 +163,21 @@ get_link_map(const std::string& _lib,
     {
         struct link_map* _link_map = nullptr;
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
-        struct link_map* _next = _link_map;
+        struct link_map const* _next = _link_map;
         while(_next)
         {
             if(!std::string_view{ _next->l_name }.empty() &&
                std::string_view{ _next->l_name } != _lib)
             {
-                _chain.emplace(filepath::realpath(_next->l_name, nullptr, false));
+                _chain.emplace(rocprofsys::path::realpath(_next->l_name));
             }
             _next = _next->l_next;
         }
 
-        if(_noload == false) dlclose(_handle);
+        if(!_noload)
+        {
+            dlclose(_handle);
+        }
     }
     return _chain;
 }
@@ -169,28 +187,36 @@ get_library_search_paths_impl()
 {
     auto _paths = std::vector<std::string>{};
 
-    auto _path_exists = [](const std::string& _filename) {
+    auto const _path_exists = [](const std::string& _filename) {
         struct stat dummy;
-        return (_filename.empty()) ? false : (stat(_filename.c_str(), &dummy) == 0);
+        return _filename.empty() ? false : (stat(_filename.c_str(), &dummy) == 0);
     };
 
-    auto _emplace_if_exists = [&_paths, _path_exists](const std::string& _directory) {
-        if(_path_exists(_directory)) _paths.emplace_back(_directory);
+    auto const _emplace_if_exists = [&_paths,
+                                     _path_exists](const std::string& _directory) {
+        if(_path_exists(_directory))
+        {
+            _paths.emplace_back(_directory);
+        }
     };
 
     // search paths from environment variables
-    for(const auto& itr : delimit(get_env("LD_LIBRARY_PATH", std::string{}), ":"))
-        _emplace_if_exists(itr);
-
-    for(const auto& itr : { get_env<std::string>(rocprofsys::env_vars::ROCM_PATH, ""),
-                            get_env<std::string>("ROCM_PATH", ""),
-                            std::string{ ROCPROFSYS_DEFAULT_ROCM_PATH } })
+    for(const auto& path :
+        rocprofsys::delimit(get_env("LD_LIBRARY_PATH", std::string{}), ":"))
     {
-        if(!itr.empty())
+        _emplace_if_exists(path);
+    }
+
+    for(const auto& rocm_path :
+        { get_env<std::string>(rocprofsys::env_vars::ROCM_PATH, ""),
+          get_env<std::string>("ROCM_PATH", ""),
+          std::string{ ROCPROFSYS_DEFAULT_ROCM_PATH } })
+    {
+        if(!rocm_path.empty())
         {
-            for(const auto& ditr : delimit(itr, ":"))
+            for(const auto& path : rocprofsys::delimit(rocm_path, ":"))
             {
-                _emplace_if_exists(join('/', ditr, "lib"));
+                _emplace_if_exists(fmt::format("{}/lib", path));
             }
         }
     }
@@ -210,15 +236,20 @@ get_library_search_paths_impl()
             //      <LIBRARY_BASENAME> (...) => <RESOLVED_ABSOLUTE_PATH>
             // example:
             //      libz.so (libc6,x86-64) => /lib/x86_64-linux-gnu/libz.so
-            auto _get_entry = [](const std::string& _inp) {
-                auto _paren_pos = _inp.find('(');
-                auto _arrow_pos = _inp.find("=>", _paren_pos);
+            auto const _get_entry = [](const std::string& _inp) {
+                auto const _paren_pos = _inp.find('(');
+                auto const _arrow_pos = _inp.find("=>", _paren_pos);
                 if(_arrow_pos == std::string::npos || _paren_pos == std::string::npos)
+                {
                     return std::string{};
+                }
                 if(_arrow_pos + 2 < _inp.length())
                 {
-                    auto _pos = _inp.find_first_not_of(" \t", _arrow_pos + 2);
-                    if(_pos < _inp.length()) return _inp.substr(_pos);
+                    auto const _pos = _inp.find_first_not_of(" \t", _arrow_pos + 2);
+                    if(_pos < _inp.length())
+                    {
+                        return _inp.substr(_pos);
+                    }
                 }
                 return std::string{};
             };
@@ -227,7 +258,7 @@ get_library_search_paths_impl()
             while(fgets(buffer, buffer_size, ldconfig) != nullptr)
             {
                 _data << buffer;
-                auto _len = strnlen(buffer, buffer_size);
+                auto const _len = strnlen(buffer, buffer_size);
                 if(_len > 0 && buffer[_len - 1] == '\n')
                 {
                     auto _v = _data.str();
@@ -236,8 +267,11 @@ get_library_search_paths_impl()
                         _v = _v.substr(_v.find_first_not_of(" \t"));
                         if(_v.length() > 1)
                         {
-                            auto _entry = _get_entry(_v.substr(0, _v.length() - 1));
-                            if(!_entry.empty()) _emplace_if_exists(_entry);
+                            auto const _entry = _get_entry(_v.substr(0, _v.length() - 1));
+                            if(!_entry.empty())
+                            {
+                                _emplace_if_exists(_entry);
+                            }
                         }
                     }
                     _data = std::stringstream{};
@@ -280,19 +314,10 @@ get_internal_basic_libs_impl()
                                            LIBTHREAD_DB_SO,    LIBUTIL_SO };
 
     // shared libraries used by or provided by dyninst
-    const auto _dyn_libs = strview_init_t{ "libdyninstAPI_RT.so",
-                                           "libcommon.so",
-                                           "libbfd.so",
-                                           "libelf.so",
-                                           "libdwarf.so",
-                                           "libdw.so",
-                                           "libtbb.so",
-                                           "libtbbmalloc.so",
-                                           "libtbbmalloc_proxy.so",
-                                           "libz.so",
-                                           "libzstd.so",
-                                           "libbz2.so",
-                                           "liblzma.so" };
+    const auto dyn_libs =
+        strview_init_t{ "libdyninstAPI_RT.so", "libcommon.so", "libbfd.so", "libelf.so",
+                        "libdwarf.so",         "libdw.so",     "libz.so",   "libzstd.so",
+                        "libbz2.so",           "liblzma.so" };
 
     // shared libraries used by rocprof-sys
     const auto _rocprof_sys_libs = strview_init_t{ "libstdc++.so.6",
@@ -319,18 +344,24 @@ get_internal_basic_libs_impl()
 
     const auto _3rdparty_libs = strview_init_t{
         // shared libs potentially used by timemory
-        "libcaliper.so", "liblikwid.so", "libprofiler.so", "libtcmalloc.so",
-        "libtcmalloc_and_profiler.so", "libtcmalloc_debug.so", "libtcmalloc_minimal.so",
+        "libcaliper.so",
+        "liblikwid.so",
+        "libprofiler.so",
+        "libtcmalloc.so",
+        "libtcmalloc_and_profiler.so",
+        "libtcmalloc_debug.so",
+        "libtcmalloc_minimal.so",
         "libtcmalloc_minimal_debug.so",
-        // shared libs that Dyninst will fail to instrument correctly
-        "libclang-cpp.so", "libLLVM.so"
     };
 
-    for(const auto& gitr : { _gnu_libs, _dyn_libs, _rocprof_sys_libs, _3rdparty_libs })
+    for(const auto& gitr : { _gnu_libs, dyn_libs, _rocprof_sys_libs, _3rdparty_libs })
     {
-        for(auto itr : gitr)
+        for(auto const itr : gitr)
         {
-            if(!itr.empty() && _exclude.count(itr) == 0) _libs.emplace(itr);
+            if(!itr.empty() && !_exclude.contains(itr))
+            {
+                _libs.emplace(itr);
+            }
         }
     }
 
@@ -349,9 +380,9 @@ get_internal_libs_impl()
     {
         if(!itr.empty())
         {
-            if(parse_all_modules)
+            if(exclude_internal_lib_paths)
             {
-                auto _lib_v = find_libraries(itr);
+                auto const _lib_v = find_libraries(itr);
                 if(!_lib_v.empty())
                 {
                     for(const auto& litr : _lib_v)
@@ -403,46 +434,51 @@ get_internal_libs_data_impl()
     _wc.start();
     _pr.start();
 
-    auto _libs_v = get_internal_libs();
-    auto _libs   = std::vector<std::string>{};
+    auto const _libs_v = get_internal_libs();
+    auto       _libs   = std::vector<std::string>{};
     _libs.assign(_libs_v.begin(), _libs_v.end());
 
-    auto _rocprofsys_base_path = filepath::dirname(
-        filepath::dirname(filepath::realpath("/proc/self/exe", nullptr, false)));
-    auto _rocprofsys_lib_path = std::string{};
-
-    for(const auto* itr : { "lib", "lib64" })
+    auto rocprofsys_root = rocprofsys::path::get_rocprofsys_root();
+    for(const auto* lib_dir : { "lib", "lib64" })
     {
-        for(const auto* litr :
-            { "librocprof-sys-dl.so", "librocprof-sys-user.so", "librocprof-sys-rt.so" })
+        for(const auto* lib_fname :
+            { "librocprof-sys-dl.so", "librocprof-sys-causal-api.so",
+              "librocprof-sys-rt.so" })
         {
-            auto _libpath = join('/', _rocprofsys_base_path, itr, litr);
-            if(filepath::exists(_libpath))
+            auto const libpath =
+                fmt::format("{}/{}/{}", rocprofsys_root, lib_dir, lib_fname);
+            if(rocprofsys::path::is_regular_file(libpath))
             {
-                _libs.emplace_back(filepath::realpath(_libpath, nullptr, false));
+                _libs.emplace_back(rocprofsys::path::realpath(libpath));
             }
         }
     }
 
-    rocprofsys::utility::filter_sort_unique(
-        _libs, [](const auto& itr) { return itr.empty() || !filepath::exists(itr); });
+    rocprofsys::utility::filter_sort_unique(_libs, [](const auto& itr) {
+        return itr.empty() || !rocprofsys::path::is_regular_file(itr);
+    });
 
     auto _data = library_module_map_t{};
     for(const auto& itr : _libs)
     {
-        auto _fpath = filepath::realpath(itr, nullptr, false);
+        auto const _fpath = rocprofsys::path::realpath(itr);
         // allow the user to request this library be considered for instrumentation
         if(check_regex_restrictions(strvec_t{ itr, _fpath }, file_internal_include))
+        {
             continue;
+        }
 
         _data.emplace(_fpath, module_func_map_t{});
     }
 
-    auto _odata = ordered(_data);
+    auto const _odata = ordered(_data);
     for(const auto& itr : _odata)
     {
         symtab_t* _symtab = get_symtab_file(itr.first);
-        if(!_symtab) continue;
+        if(!_symtab)
+        {
+            continue;
+        }
 
         verbprintf(0, "[internal] parsing library: '%s'...\n", itr.first.c_str());
 
@@ -461,20 +497,22 @@ get_internal_libs_data_impl()
             // allow the user to request this library be considered for instrumentation
             if(check_regex_restrictions(strvec_t{ _mname, _mpath },
                                         file_internal_include))
+            {
                 continue;
+            }
 
             verbprintf(3, "[internal]     parsing module: '%s' (via '%s')...\n",
-                       _mname.c_str(), filepath::basename(itr.first));
+                       _mname.c_str(), rocprofsys::path::filename(itr.first).c_str());
 
             _data[itr.first].emplace(_mpath, func_set_t{});
             _data[itr.first].emplace(_mname, func_set_t{});
 
-            auto _funcs = mitr->getAllFunctions();
+            auto const _funcs = mitr->getAllFunctions();
 
             for(const auto& fitr : _funcs)
             {
-                auto _fname = fitr->getName();
-                auto _dname = rocprofsys::utility::demangle(_fname);
+                auto const _fname = fitr->getName();
+                auto const _dname = rocprofsys::utility::demangle(_fname);
 
                 _data[itr.first][_mpath].emplace(_fname);
                 _data[itr.first][_mpath].emplace(_dname);
@@ -506,7 +544,9 @@ ordered(const std::unordered_set<Tp, TailT...>& _unordered)
 {
     auto _ordered = std::set<Tp>{};
     for(const auto& itr : _unordered)
+    {
         _ordered.emplace(itr);
+    }
     return _ordered;
 }
 
@@ -516,7 +556,9 @@ ordered(const std::unordered_map<KeyT, MappedT, TailT...>& _unordered)
 {
     auto _ordered = std::map<KeyT, MappedT>{};
     for(const auto& itr : _unordered)
+    {
         _ordered.emplace(itr.first, itr.second);
+    }
     return _ordered;
 }
 
@@ -524,12 +566,18 @@ std::optional<std::string>
 find_library(std::string_view _lib_v)
 {
     auto _lib = get_linked_path(_lib_v.data(), { (RTLD_LAZY | RTLD_NOLOAD) });
-    if(_lib) return _lib;
+    if(_lib)
+    {
+        return _lib;
+    }
 
     for(const auto& itr : get_library_search_paths())
     {
-        auto _path = join('/', itr, _lib_v);
-        if(filepath::exists(_path)) return std::optional<std::string>{ _path };
+        auto _path = fmt::format("{}/{}", itr, _lib_v);
+        if(rocprofsys::path::is_regular_file(_path))
+        {
+            return std::optional<std::string>{ _path };
+        }
     }
 
     return std::optional<std::string>{};
@@ -541,12 +589,18 @@ find_libraries(std::string_view _lib_v)
     auto _libs = std::vector<std::string>{};
 
     auto _lib = get_linked_path(_lib_v.data(), { (RTLD_LAZY | RTLD_NOLOAD) });
-    if(_lib) _libs.emplace_back(*_lib);
+    if(_lib)
+    {
+        _libs.emplace_back(*_lib);
+    }
 
     for(const auto& itr : get_library_search_paths())
     {
-        auto _path = join('/', itr, _lib_v);
-        if(filepath::exists(_path)) _libs.emplace_back(_path);
+        auto const _path = fmt::format("{}/{}", itr, _lib_v);
+        if(rocprofsys::path::is_regular_file(_path))
+        {
+            _libs.emplace_back(_path);
+        }
     }
 
     return _libs;
@@ -555,7 +609,7 @@ find_libraries(std::string_view _lib_v)
 const std::vector<std::string>&
 get_library_search_paths()
 {
-    static auto _v = get_library_search_paths_impl();
+    static auto const _v = get_library_search_paths_impl();
     return _v;
 }
 
@@ -576,7 +630,7 @@ get_internal_libs()
 const library_module_map_t&
 get_internal_libs_data()
 {
-    static auto _v = get_internal_libs_data_impl();
+    static auto const _v = get_internal_libs_data_impl();
     return _v;
 }
 

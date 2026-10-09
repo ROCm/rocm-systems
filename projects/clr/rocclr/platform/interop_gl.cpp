@@ -363,6 +363,20 @@ bool amd::GLFunctions::init(intptr_t hdc, intptr_t hglrc) {
     Drawable_ = glXGetCurrentDrawable_();
     origCtx_ = (GLXContext)hglrc;
 
+    // init() is re-entered when the GL context is re-associated (e.g. on a context switch, via
+    // Context::create -> glenv_->init on an already-allocated glenv_). Release any X display
+    // connection / GLX context from a previous init() before opening new ones; otherwise each
+    // re-association leaks an X11 client connection and a long-running process eventually hits the
+    // X server's client limit ("Maximum number of clients reached").
+    if (intDpy_) {
+      if (intCtx_) {
+        glXDestroyContext_(intDpy_, intCtx_);
+        intCtx_ = nullptr;
+      }
+      XCloseDisplay_(intDpy_);
+      intDpy_ = nullptr;
+    }
+
     int attribList[] = {GLX_RGBA, None};
     if (!(intDpy_ = XOpenDisplay_(DisplayString(Dpy_)))) {
 #if defined(ATI_ARCH_X86)

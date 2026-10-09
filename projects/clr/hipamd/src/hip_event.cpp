@@ -367,7 +367,7 @@ hipError_t hipEventCreateWithFlags(hipEvent_t* event, unsigned flags) {
   HIP_INIT_API(hipEventCreateWithFlags, event, flags);
 
   if (event == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   HIP_RETURN(ihipEventCreateWithFlags(event, flags), *event);
@@ -378,7 +378,7 @@ hipError_t hipEventCreate(hipEvent_t* event) {
   HIP_INIT_API(hipEventCreate, event);
 
   if (event == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   HIP_RETURN(ihipEventCreateWithFlags(event, 0), *event);
@@ -394,7 +394,7 @@ hipError_t hipEventDestroy(hipEvent_t event) {
 
   std::unique_lock lock(hip::eventSetLock);
   if (hip::eventSet.erase(event) == 0) {
-    return hipErrorContextIsDestroyed;
+    HIP_RETURN(hipErrorContextIsDestroyed);
   }
 
   auto* e = reinterpret_cast<hip::Event*>(event);
@@ -513,9 +513,10 @@ static hipError_t checkEventCaptureRestrictions(hipEvent_t event) {
     return hipSuccess;
   }
   // Case 1: Event was recorded during an active stream capture and is part of an active capture.
+  // The whole sequence is invalidated, not just the stream the query names.
   auto* s = reinterpret_cast<hip::Stream*>(hip_stream);
   if (s->GetCaptureStatus() == hipStreamCaptureStatusActive && s->IsEventCaptured(event)) {
-    s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+    s->InvalidateCapture();
     return hipErrorCapturedEvent;
   }
   // Case 2: The event was recorded on a stream that is neither actively capturing nor part of an
@@ -531,7 +532,7 @@ static hipError_t checkEventCaptureRestrictions(hipEvent_t event) {
     amd::ScopedLock lock(g_captureStreamsLock);
     if (!g_captureStreams.empty()) {
       for (auto stream : g_captureStreams) {
-        stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+        stream->InvalidateCapture();
       }
       return hipErrorStreamCaptureUnsupported;
     }
@@ -540,7 +541,7 @@ static hipError_t checkEventCaptureRestrictions(hipEvent_t event) {
   // Block if calling thread itself is capturing (both GLOBAL and THREAD_LOCAL)
   if (!hip::tls.capture_streams_.empty()) {
     for (auto stream : hip::tls.capture_streams_) {
-      stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+      stream->InvalidateCapture();
     }
     return hipErrorStreamCaptureUnsupported;
   }

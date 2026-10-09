@@ -23,16 +23,20 @@
  *****************************************************************************/
 
 #include <hip/hip_runtime.h>
+#include <hip/hip_version.h>
+#include <unistd.h>
 #include <cstring>
 #include <cctype>
 #include <cstdlib>
 #include <cassert>
 #include <algorithm>
+#include <vector>
 
 #include "backend_gda.hpp"
 #include "debug_gda.hpp"
 #include "ibv_wrapper.hpp"
 #include "envvar.hpp"
+#include "gda_enums.hpp"
 #include "gda_team.hpp"
 #include "log.hpp"
 #include "mpi_instance.hpp"
@@ -78,8 +82,16 @@ void GDABackend::init() {
 
   type = BackendType::GDA_BACKEND;
 
-  // Initialize QP allocator to finegrained allocator
-  qp_allocator_ = new HIPAllocatorFinegrained();
+  // dmabuf mode: use host-pinned memory for QP/CQ control buffers.
+  // bnxt and mlx5 DV umem_reg only accepts host-accessible memory for these
+  // structures when dmabuf is enabled; device memory (finegrained) causes EIO
+  // from the kernel driver on create_cq/create_qp ioctls.
+  // Legacy peermem mode: retain finegrained device memory as before.
+  if (ibv.is_dmabuf_supported()) {
+    qp_allocator_ = new HIPAllocator(hipHostMalloc, hipFree, hipHostMallocDefault);
+  } else {
+    qp_allocator_ = new HIPAllocatorFinegrained();
+  }
 
   select_nics();
 
@@ -96,7 +108,7 @@ void GDABackend::init() {
   configure_nic_policy();
 
   LOG_TRACE("PE %d QP config: num_nics=%d, qps_per_pe_default_ctx=%zu, "
-            "qps_per_pe_usr_ctx=%zu, num_qps_per_pe=%zu, num_qps=%u, "
+            "qps_per_pe_usr_ctx=%zu, num_qps_per_pe=%zu, num_qps=%zu, "
             "nic_policy=%s",
             my_pe, num_nics_, qps_per_pe_default_ctx_, qps_per_pe_usr_ctx_,
             num_qps_per_pe, num_qps,
@@ -115,24 +127,40 @@ void GDABackend::init() {
                                                      &heap);
 
   setup_wrk_sync_buffer();
-  setup_fence_buffer();
   setup_collectives();
 
   setup_teams();
-  setup_team_world();
-  rte_barrier();
-
-  setup_ipc();
 
   /*
-   * setup_team_shared() must follow setup_ipc() because it uses
-   * ipcImpl.pes_with_ipc_avail to determine shared-memory membership.
+   * Carve the fence region last. Its size (sizeof(int) * num_pes) is not a
+   * multiple of wrk_sync_pool_alignment for odd num_pes, so allocating it after
+   * every 64-bit-atomic region keeps those regions aligned.
    */
-  setup_team_shared();
+  setup_fence_buffer();
+
+  setup_team_world();
+  rte_barrier();
 
   setup_ibv();
   setup_heap_memory_rkey();
   setup_gpu_qps();
+
+  /*
+   * setup_ipc() exchanges IPC handles and creates SDMA queues for
+   * node-local peers. Skip when mixed IPC is disabled since GDA will
+   * use the NIC for all traffic.
+   * setup_team_shared() must follow setup_ipc() because it uses
+   * ipcImpl.pes_with_ipc_avail to determine shared-memory membership.
+   */
+  if (!envvar::disable_mixed_ipc)
+    setup_ipc();
+  setup_team_shared();
+
+  /*
+   * Allocate the symmetric-registration table before contexts are created so
+   * they capture its (stable) device pointer.
+   */
+  setup_symm_registration();
 
   setup_ctxs();
   rte_barrier();
@@ -140,6 +168,12 @@ void GDABackend::init() {
 
 GDABackend::~GDABackend() {
   cleanup_ctxs();
+
+  /*
+   * Release symmetric registrations (and the table) while the NIC protection
+   * domains are still valid, since it deregisters per-NIC MRs.
+   */
+  cleanup_symm_registration();
 
   cleanup_teams();
 
@@ -155,7 +189,8 @@ GDABackend::~GDABackend() {
 
   cleanup_wrk_sync_buffer();
 
-  cleanup_ipc();
+  if (!envvar::disable_mixed_ipc)
+    cleanup_ipc();
 
   cleanup_gpu_qps();
   cleanup_heap_memory_rkey();
@@ -266,6 +301,8 @@ void GDABackend::setup_ipc() {
     ipcImpl.ipcHostInit(my_pe, heap_bases, backend_comm);
   else
     ipcImpl.ipcHostInit(my_pe, heap_bases, backend_bootstr);
+
+  ipcImpl.heap_size = heap.get_size();
 }
 
 void GDABackend::cleanup_ipc() {
@@ -323,7 +360,7 @@ void GDABackend::setup_ctxs() {
 
   for (size_t i = 0; i < envvar::max_num_contexts; i++) {
     rocshmem_ctx_array_device[i].ctx_opaque  = &ctx_array[i];
-    rocshmem_ctx_array_device[i].team_opaque = team_tracker.get_team_world()->tinfo_wrt_world;
+    rocshmem_ctx_array_device[i].team_opaque = nullptr;
   }
 
   CHECK_HIP(hipGetSymbolAddress(reinterpret_cast<void**>(&rocshmem_ctx_array_ptr),
@@ -580,7 +617,7 @@ int GDABackend::buffer_register(void *addr, size_t length) {
 
   /* Register with QPs */
   for (size_t i = 0; i < num_qps; i++) {
-    err = host_qps[i].buffer_register((uintptr_t)addr, length);
+    err = host_qps[i].buffer_register(addr, length);
     if (ROCSHMEM_SUCCESS != err) {
       qp_registration_failed = true;
     }
@@ -605,13 +642,22 @@ int GDABackend::buffer_unregister(void *addr) {
 
   /* Deregister with QPs */
   for (size_t i = 0; i < num_qps; i++) {
-    err = host_qps[i].buffer_unregister((uintptr_t)addr);
+    err = host_qps[i].buffer_unregister(addr);
     if (ROCSHMEM_SUCCESS != err) {
       return ROCSHMEM_ERROR;
     }
   }
 
   return err;
+}
+
+void GDABackend::accumulate_ctx_device_stats() {
+  ROCStats tmp;
+  for (size_t i = 0; i < envvar::max_num_contexts; i++) {
+    CHECK_HIP(hipMemcpy(&tmp, &ctx_array[i].ctxStats, sizeof(ROCStats),
+                        hipMemcpyDeviceToHost));
+    globalStats.hostAccumulateStats(tmp);
+  }
 }
 
 void GDABackend::buffer_unregister_all() {
@@ -624,13 +670,439 @@ void GDABackend::buffer_unregister_all() {
   Backend::buffer_unregister_all();
 }
 
-void GDABackend::reset_backend_stats() {
-  assert(false);
+void GDABackend::setup_symm_registration() {
+#if HIP_VERSION >= 70200000
+  /*
+   * The GDA device-side registration state (the flat per-QP entry table and
+   * the shared count) is allocated in setup_gpu_qps() so every QP captures a
+   * stable slice pointer. Nothing to do for the NIC path here.
+   *
+   * When IPC is enabled at runtime (node-local peers detected; controlled by
+   * ROCSHMEM_DISABLE_MIXED_IPC / compile-time USE_IPC), also allocate the
+   * device-visible IPC registration table so node-local peers can reach
+   * registered buffers through the IPC fast path instead of the NIC. When IPC
+   * is disabled, pes_with_ipc_avail is null and this stays unallocated, so all
+   * registered-buffer traffic falls back to the NIC.
+   */
+  if (ipcImpl.pes_with_ipc_avail != nullptr) {
+    alloc_ipc_symm_table();
+  }
+#endif
 }
 
-void GDABackend::dump_backend_stats() {
-  assert(false);
+void GDABackend::cleanup_symm_registration() {
+#if HIP_VERSION >= 70200000
+  /* Unregister anything the user left registered. */
+  symmetric_buffer_unregister_all();
+
+  /* Free the shared IPC registration table (no-op if never allocated). */
+  free_ipc_symm_table();
+#endif
 }
+
+#if HIP_VERSION >= 70200000
+struct ibv_mr *GDABackend::register_symm_buffer_mr(
+    struct ibv_pd *pd, hipMemGenericAllocationHandle_t gen_handle,
+    bool use_dmabuf, void *iova, size_t length, int *out_fd) {
+  *out_fd = -1;
+  int access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
+               IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC;
+  if (envvar::gda::pcie_relaxed_ordering) {
+    access |= IBV_ACCESS_RELAXED_ORDERING;
+  }
+
+  /*
+   * The buffer is HIP VMM (GPUDirect-RDMA-capable) memory. When dmabuf is
+   * available, register through the dmabuf path (matching the symmetric heap
+   * MR). The buffer is not tracked in the allocator's internal map, so export
+   * the caller-retained generic handle directly rather than via
+   * GetDmabufHandle.
+   *
+   * The caller keeps @p gen_handle retained for the whole MR lifetime: the
+   * heap MR keeps its allocation handle alive similarly, and releasing the
+   * retained handle before the MR is torn down leaves the user unable to
+   * later hipMemUnmap the buffer.
+   *
+   * The exported fd likewise must remain open for the MR's lifetime (mirroring
+   * the ibv_reg_mr wrapper); it is returned via out_fd and closed by the
+   * caller only after the MR is deregistered.
+   */
+  if (use_dmabuf) {
+    int fd = -1;
+    hipError_t err = hipMemExportToShareableHandle(
+        &fd, gen_handle, hipMemHandleTypePosixFileDescriptor, 0);
+    if (err != hipSuccess) {
+      return nullptr;
+    }
+    struct ibv_mr *mr = ibv.reg_dmabuf_mr(pd, 0, length,
+                                          reinterpret_cast<uint64_t>(iova),
+                                          fd, access);
+    if (mr == nullptr) {
+      close(fd);
+      return nullptr;
+    }
+    *out_fd = fd;
+    return mr;
+  }
+
+  return ibv.reg_mr(pd, iova, length, access);
+}
+#endif
+
+int GDABackend::buffer_register_symmetric([[maybe_unused]] void *addr,
+                                          [[maybe_unused]] size_t length,
+                                          [[maybe_unused]] void **registered_addr) {
+#if HIP_VERSION >= 70200000
+  if (registered_addr == nullptr || symm_buffers_ == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /*
+   * Symmetric size check first: registration is collective, so every PE must
+   * call with the same length. Doing this before any host-side setup lets a
+   * mismatch fail out uniformly with nothing to unwind.
+   */
+  if (!symm_lengths_match(length)) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /*
+   * Stage 1: base-class host-side setup. Validates the user buffer (VMM checks)
+   * maps it to a rocSHMEM-owned alias, runs capacity/overlap checks, and
+   * records it keyed by the alias. The alias is the symmetric address the
+   * caller uses for RMA and unregistration.
+   */
+  void *alias = nullptr;
+  int register_ok = (Backend::buffer_register_symmetric(addr, length, &alias) ==
+                     ROCSHMEM_SUCCESS) ? 1 : 0;
+  if (!all_pes_succeeded(register_ok)) {
+    if (register_ok) {
+      Backend::buffer_unregister_symmetric(alias);
+    }
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t key = reinterpret_cast<uintptr_t>(alias);
+
+  /*
+   * Stage 2: register the alias with every NIC's protection domain. Registered
+   * buffers are reached over the NIC (including for node-local peers), so this
+   * mirrors the per-NIC heap MR registration in setup_heap_memory_rkey().
+   */
+  /*
+   * Retain the backing VMM handle once and keep it alive for the whole MR
+   * lifetime (released in buffer_unregister_symmetric). This mirrors how the
+   * symmetric heap keeps its allocation handle alive around its
+   * dmabuf-registered MR. The alias and the original map the same physical
+   * allocation.
+   */
+  bool use_dmabuf = ibv.is_dmabuf_supported();
+  hipMemGenericAllocationHandle_t gen_handle{};
+  bool has_gen_handle = false;
+  if (use_dmabuf) {
+    if (hipMemRetainAllocationHandle(&gen_handle, addr) != hipSuccess) {
+      use_dmabuf = false;
+    } else {
+      has_gen_handle = true;
+    }
+  }
+
+  std::vector<struct ibv_mr *> mrs(num_nics_, nullptr);
+  std::vector<int> mr_fds(num_nics_, -1);
+  int reg_mr_ok = 1;
+  for (int n = 0; n < num_nics_; n++) {
+    mrs[n] = register_symm_buffer_mr(nic_devices_[n].pd_orig, gen_handle,
+                                     use_dmabuf, alias, length, &mr_fds[n]);
+    if (mrs[n] == nullptr) {
+      reg_mr_ok = 0;
+      break;
+    }
+  }
+  if (!all_pes_succeeded(reg_mr_ok)) {
+    for (int n = 0; n < num_nics_; n++) {
+      if (mrs[n]) {
+        (void)ibv.dereg_mr(mrs[n]);
+      }
+      if (mr_fds[n] != -1) {
+        close(mr_fds[n]);
+      }
+    }
+    if (has_gen_handle) {
+      (void)hipMemRelease(gen_handle);
+    }
+    Backend::buffer_unregister_symmetric(alias);
+    return ROCSHMEM_ERROR;
+  }
+
+  /*
+   * Stage 3: exchange the per-PE alias base and per-PE/per-NIC remote keys.
+   */
+  std::vector<uintptr_t> bases(num_pes, 0);
+  bases[my_pe] = key;
+  symm_allgather(bases.data(), sizeof(uintptr_t));
+
+  std::vector<uint32_t> rkeys(static_cast<size_t>(num_pes) * num_nics_, 0);
+  for (int n = 0; n < num_nics_; n++) {
+    rkeys[flat_pe_nic_idx(my_pe, n)] = mrs[n]->rkey;
+  }
+  symm_allgather(rkeys.data(), sizeof(uint32_t) * num_nics_);
+
+  std::vector<uint32_t> lkeys(num_nics_, 0);
+  for (int n = 0; n < num_nics_; n++) {
+    lkeys[n] = mrs[n]->lkey;
+  }
+
+  /*
+   * Publish the registration into the device-visible flat entry table. Each QP
+   * reads only the slice specialized to its (dest_pe, nic_idx), so fill one
+   * pre-resolved entry per (pe, nic) at this registration's slot. The entry
+   * carries the peer base and per-NIC keys directly, so the device lookup does
+   * no pointer chasing.
+   */
+  int slot = symm_count_host_;
+  if (slot >= symm_capacity_) {
+    /* Bound guard; base class already enforces max_symm_regions_. */
+    for (int n = 0; n < num_nics_; n++) {
+      (void)ibv.dereg_mr(mrs[n]);
+      if (mr_fds[n] != -1) {
+        close(mr_fds[n]);
+      }
+    }
+    if (has_gen_handle) {
+      (void)hipMemRelease(gen_handle);
+    }
+    Backend::buffer_unregister_symmetric(alias);
+    return ROCSHMEM_ERROR;
+  }
+
+  for (int pe = 0; pe < num_pes; pe++) {
+    for (int n = 0; n < num_nics_; n++) {
+      SymmBufferInfo &e = host_symm_buffers_[flat_pe_nic_idx(pe, n) * symm_capacity_ + slot];
+      e.local_base = key;
+      e.remote_base = bases[pe];
+      e.length = length;
+      e.lkey = QueuePair::to_provider_endianness(lkeys[n]);
+      e.rkey = QueuePair::to_provider_endianness(rkeys[flat_pe_nic_idx(pe, n)]);
+    }
+  }
+
+  /*
+   * Registration is a rare collective, so re-upload the whole (small) mirror
+   * for simplicity, then publish by bumping the shared count last so a device
+   * reader never observes count > populated entries.
+   */
+  CHECK_HIP(hipMemcpy(symm_buffers_, host_symm_buffers_.data(),
+                      host_symm_buffers_.size() * sizeof(SymmBufferInfo),
+                      hipMemcpyHostToDevice));
+  symm_count_host_ = slot + 1;
+  CHECK_HIP(hipMemcpy(symm_count_, &symm_count_host_, sizeof(int),
+                      hipMemcpyHostToDevice));
+
+  GdaSymmRecord rec;
+  rec.slot = slot;
+  rec.mrs = std::move(mrs);
+  rec.mr_fds = std::move(mr_fds);
+  rec.gen_handle = gen_handle;
+  rec.has_gen_handle = has_gen_handle;
+  gda_symm_records_[key] = std::move(rec);
+
+  /*
+   * Stage 4 (IPC fast path): when IPC is enabled at runtime, also expose the
+   * buffer to node-local peers over IPC so their accesses avoid the NIC. This
+   * reuses the same handle-exchange machinery as the IPC backend. The peer
+   * index is the node-local shm index (matching how the device indexes
+   * ipc_bases / peer_bases via isIpcAvailable), so peer_global maps the local
+   * index to the global PE via pes_with_ipc_avail. All PEs run this in lockstep
+   * (the enabled state is global), keeping the collectives aligned.
+   *
+   * When IPC is disabled (ROCSHMEM_DISABLE_MIXED_IPC or USE_IPC=OFF), the table
+   * is not allocated and this is skipped, so node-local peers fall back to the
+   * NIC path just like remote peers.
+   */
+  if (ipcImpl.symm_table != nullptr && ipcImpl.pes_with_ipc_avail != nullptr) {
+    int shm_size = ipcImpl.shm_size;
+    std::vector<int> peer_global(shm_size, 0);
+    CHECK_HIP(hipMemcpy(peer_global.data(), ipcImpl.pes_with_ipc_avail,
+                        shm_size * sizeof(int), hipMemcpyDeviceToHost));
+
+    if (register_ipc_symm_region(alias, addr, length, peer_global,
+                                 ipcImpl.shm_rank) != ROCSHMEM_SUCCESS) {
+      /* Collective failure: unwind NIC + base state on all PEs. */
+      gda_nic_unregister(key);
+      Backend::buffer_unregister_symmetric(alias);
+      return ROCSHMEM_ERROR;
+    }
+  }
+
+  *registered_addr = alias;
+  return ROCSHMEM_SUCCESS;
+#else
+  return ROCSHMEM_ERROR;
+#endif
+}
+
+int GDABackend::gda_nic_unregister([[maybe_unused]] uintptr_t key) {
+#if HIP_VERSION >= 70200000
+  auto it = gda_symm_records_.find(key);
+  if (it == gda_symm_records_.end()) {
+    return ROCSHMEM_ERROR;
+  }
+
+  int slot = it->second.slot;
+
+  /*
+   * Unpublish the region from the device-visible table BEFORE tearing down any
+   * NIC resources, so no QP can resolve an address to a registration whose MRs
+   * (and rkeys) are about to be invalidated. This is the reverse of the publish
+   * order used at registration.
+   *
+   * Compact the flat entry table by moving the last registration's row into the
+   * freed slot for every (pe, nic) slice (in the host mirror). Upload the
+   * compacted entries first, then shrink the shared count: while count is still
+   * unshrunk the moved region is briefly duplicated (at both its old and new
+   * slot, which resolve identically), so every live region stays reachable
+   * throughout; the removed region disappears as soon as the entries land.
+   */
+  int last = symm_count_host_ - 1;
+  if (slot != last && last >= 0) {
+    for (int pe = 0; pe < num_pes; pe++) {
+      for (int n = 0; n < num_nics_; n++) {
+        size_t base = flat_pe_nic_idx(pe, n) * symm_capacity_;
+        host_symm_buffers_[base + slot] = host_symm_buffers_[base + last];
+      }
+    }
+    for (auto &kv : gda_symm_records_) {
+      if (kv.second.slot == last) {
+        kv.second.slot = slot;
+        break;
+      }
+    }
+  }
+  CHECK_HIP(hipMemcpy(symm_buffers_, host_symm_buffers_.data(),
+                      host_symm_buffers_.size() * sizeof(SymmBufferInfo),
+                      hipMemcpyHostToDevice));
+  symm_count_host_ = (last >= 0) ? last : 0;
+  CHECK_HIP(hipMemcpy(symm_count_, &symm_count_host_, sizeof(int),
+                      hipMemcpyHostToDevice));
+
+  /*
+   * Now that the region is no longer advertised, release its NIC resources
+   * (per-NIC MRs, dmabuf fds, and the retained VMM handle). Done before the
+   * base-class alias unmap so the retained reference is dropped before the
+   * alias mapping is torn down.
+   */
+  release_symm_record_nic_resources(it->second);
+
+  gda_symm_records_.erase(it);
+  return ROCSHMEM_SUCCESS;
+#else
+  return ROCSHMEM_ERROR;
+#endif
+}
+
+void GDABackend::release_symm_record_nic_resources(
+    [[maybe_unused]] GdaSymmRecord &rec) {
+#if HIP_VERSION >= 70200000
+  /*
+   * Deregister the per-NIC MRs, then close their dmabuf fds. The fd must
+   * outlive the MR (the NIC references the dmabuf), so it is closed only after
+   * dereg_mr, mirroring the ibv_reg_mr wrapper's teardown order.
+   */
+  for (size_t n = 0; n < rec.mrs.size(); n++) {
+    if (rec.mrs[n]) {
+      (void)ibv.dereg_mr(rec.mrs[n]);
+    }
+    if (n < rec.mr_fds.size() && rec.mr_fds[n] != -1) {
+      close(rec.mr_fds[n]);
+    }
+  }
+
+  /* Release the backing VMM handle retained at registration. */
+  if (rec.has_gen_handle) {
+    (void)hipMemRelease(rec.gen_handle);
+  }
+#endif
+}
+
+void GDABackend::symmetric_buffer_unregister_all() {
+#if HIP_VERSION >= 70200000
+  if (gda_symm_records_.empty()) {
+    return;
+  }
+
+  /*
+   * Unpublish the whole device-visible table up front, before tearing down any
+   * NIC resources, so no QP can resolve an address to a registration whose MRs
+   * are about to be invalidated.
+   */
+  symm_count_host_ = 0;
+  if (symm_count_ != nullptr) {
+    CHECK_HIP(hipMemcpy(symm_count_, &symm_count_host_, sizeof(int),
+                        hipMemcpyHostToDevice));
+  }
+
+  /*
+   * Now tear down each registration's transport resources and host bookkeeping,
+   * mirroring buffer_unregister_symmetric (IPC exposure, NIC resources, common
+   * base-class bookkeeping).
+   */
+  for (auto &[key, rec] : gda_symm_records_) {
+    void *addr = reinterpret_cast<void *>(key);
+    if (ipcImpl.symm_table != nullptr &&
+        ipc_symm_records_.find(key) != ipc_symm_records_.end()) {
+      (void)unregister_ipc_symm_region(addr);
+    }
+    release_symm_record_nic_resources(rec);
+    (void)Backend::buffer_unregister_symmetric(addr);
+  }
+
+  gda_symm_records_.clear();
+#endif
+}
+
+int GDABackend::buffer_unregister_symmetric([[maybe_unused]] void *addr) {
+#if HIP_VERSION >= 70200000
+  if (addr == nullptr || symm_buffers_ == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t key = reinterpret_cast<uintptr_t>(addr);
+
+  /*
+   * Unregister in the reverse order of registration, unwinding the most
+   * specialized state first:
+   *   1. IPC exposure (only present if this buffer was also mapped for
+   *      node-local peers via the mixed IPC path),
+   *   2. NIC state (device table entry, per-NIC MRs, dmabuf fds, VMM handle),
+   *   3. common host-side bookkeeping (alias unmap + region maps) in the base
+   *      class.
+   */
+  if (ipcImpl.symm_table != nullptr &&
+      ipc_symm_records_.find(key) != ipc_symm_records_.end()) {
+    (void)unregister_ipc_symm_region(addr);
+  }
+
+  if (gda_nic_unregister(key) != ROCSHMEM_SUCCESS) {
+    return ROCSHMEM_ERROR;
+  }
+
+  return Backend::buffer_unregister_symmetric(addr);
+#else
+  return ROCSHMEM_ERROR;
+#endif
+}
+
+void GDABackend::accumulate_default_host_ctx_stats() {
+  globalHostStats.accumulateStats(default_host_ctx->ctxHostStats);
+}
+
+void GDABackend::reset_backend_stats() {
+  for (size_t i = 0; i < envvar::max_num_contexts; i++) {
+    CHECK_HIP(hipMemset(&ctx_array[i].ctxStats, 0, sizeof(ROCStats)));
+  }
+  default_host_ctx->ctxHostStats.resetStats();
+}
+
 
 __host__ void GDABackend::global_exit(int status) {
   if (backend_comm != MPI_COMM_NULL)
@@ -657,7 +1129,7 @@ void GDABackend::setup_wrk_sync_buffer() {
 
   /**
    * Size of sync arrays for the teams
-  */
+   */
   wrk_sync_pool_size_ += sizeof(long) * max_num_teams *
                            (ROCSHMEM_BARRIER_SYNC_SIZE +
                             ROCSHMEM_REDUCE_SYNC_SIZE +
@@ -667,7 +1139,7 @@ void GDABackend::setup_wrk_sync_buffer() {
   /**
    * Size of work arrays for the teams
    * Accommodate largest possible data type for pWrk
-  */
+   */
   wrk_sync_pool_size_ += sizeof(double) * max_num_teams *
                            ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
 
@@ -676,10 +1148,14 @@ void GDABackend::setup_wrk_sync_buffer() {
    */
   wrk_sync_pool_size_ += sizeof(int) * num_pes; //TODO: do we need a fence array?
 
+  /* Round up so the alignment guards in the carve functions cannot overflow it. */
+  wrk_sync_pool_size_ =
+      __builtin_align_up(wrk_sync_pool_size_, wrk_sync_pool_alignment);
+
   /**
    * Allocate a buffer of size wrk_sync_pool_size_, using heap memory
    * (should be uncached fine-grained ideally)
-  */
+   */
   heap.malloc((void**)&wrk_sync_pool_, wrk_sync_pool_size_);
   assert(wrk_sync_pool_);
   wrk_sync_pool_top_ = wrk_sync_pool_;
@@ -690,9 +1166,7 @@ void GDABackend::cleanup_wrk_sync_buffer() {
 }
 
 void GDABackend::setup_fence_buffer() { //TODO is this used?
-  /*
-   * Reserve memory for fence
-   */
+  /* Must be carved last (see init()); do not add pool regions after this. */
   fence_pool = reinterpret_cast<int *>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sizeof(int) * num_pes;
 }
@@ -704,6 +1178,9 @@ void GDABackend::setup_collectives() {
   size_t one_sync_size_bytes {sizeof(*barrier_sync)};
   size_t sync_size_bytes {one_sync_size_bytes * ROCSHMEM_BARRIER_SYNC_SIZE};
 
+  /* Guard: barrier_sync is accessed with 64-bit atomics; keep it 8-byte aligned. */
+  wrk_sync_pool_top_ =
+      __builtin_align_up(wrk_sync_pool_top_, wrk_sync_pool_alignment);
   barrier_sync = reinterpret_cast<int64_t*>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sync_size_bytes;
 
@@ -727,6 +1204,9 @@ void GDABackend::setup_teams() {
    */
   auto max_num_teams{team_tracker.get_max_num_teams()};
 
+  /* Guard: the pSync pools are accessed with 64-bit atomics; keep them 8-byte aligned. */
+  wrk_sync_pool_top_ =
+      __builtin_align_up(wrk_sync_pool_top_, wrk_sync_pool_alignment);
   barrier_pSync_pool = reinterpret_cast<long *>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sizeof(long) * ROCSHMEM_BARRIER_SYNC_SIZE
                             * max_num_teams;
@@ -845,15 +1325,15 @@ bool GDABackend::device_matches_provider_vendor(GDAProvider provider,
 
   switch (provider) {
     case GDAProvider::BNXT:
-      expected_vendor_id = GDA_BNXT_VENDOR_ID;
+      expected_vendor_id = static_cast<uint32_t>(gda::vendor_id::BNXT);
       vendor_name = "BNXT/Broadcom";
       break;
     case GDAProvider::IONIC:
-      expected_vendor_id = GDA_IONIC_VENDOR_ID;
+      expected_vendor_id = static_cast<uint32_t>(gda::vendor_id::IONIC);
       vendor_name = "IONIC/Pensando";
       break;
     case GDAProvider::MLX5:
-      expected_vendor_id = GDA_MLX5_VENDOR_ID;
+      expected_vendor_id = static_cast<uint32_t>(gda::vendor_id::MLX5);
       vendor_name = "MLX5/Mellanox";
       break;
     case GDAProvider::UNSET:
@@ -936,12 +1416,6 @@ bool GDABackend::has_active_ib_interface(GDAProvider provider) {
 int GDABackend::backend_can_run() {
   void *handle{nullptr};
   GDAProvider requested = requested_provider();
-
-  /* Libnuma ? */
-  if (!numa.is_available()) {
-    LOG_WARN("GDA backend unavailable: libnuma support is missing");
-    return ROCSHMEM_ERROR;
-  }
 
   /* Basic verbs? */
   if (!ibv.is_initialized) return ROCSHMEM_ERROR;
@@ -1198,7 +1672,7 @@ void GDABackend::setup_heap_memory_rkey() {
 
   CHECK_HIP(hipHostMalloc(&heap_rkey, rkeys_size));
   for (int n = 0; n < num_nics_; n++) {
-    heap_rkey[my_pe * num_nics_ + n] = nic_devices_[n].heap_mr->rkey;
+    heap_rkey[flat_pe_nic_idx(my_pe, n)] = nic_devices_[n].heap_mr->rkey;
   }
 
   hipStream_t stream;
@@ -1235,38 +1709,69 @@ void GDABackend::cleanup_heap_memory_rkey() {
 }
 
 void GDABackend::setup_gpu_qps() {
-  size_t qp_objs_count;
-  size_t qp_objs_mem_size;
-
-  qp_objs_count    = num_qps;
-  qp_objs_mem_size = sizeof(QueuePair) * qp_objs_count;
+  size_t qp_objs_mem_size = sizeof(QueuePair) * num_qps;
 
   CHECK_HIP(hipMalloc(&gpu_qps, qp_objs_mem_size));
 
-  host_qps = (QueuePair*) malloc(qp_objs_mem_size);
-  CHECK_NNULL(host_qps, "malloc (host_qps)");
+  QueuePair *host_gpu_qps =
+      static_cast<QueuePair*>(aligned_alloc(alignof(QueuePair), qp_objs_mem_size));
+  CHECK_NNULL(host_gpu_qps, "aligned_alloc (host_gpu_qps)");
 
-  for (size_t i = 0; i < qp_objs_count; i++) {
-    new (&host_qps[i]) QueuePair(nic_for_qp(i).pd_orig, gda_provider);
-    CHECK_HIP(hipMemcpy(&gpu_qps[i], &host_qps[i], sizeof(QueuePair), hipMemcpyDefault));
+  host_qps.reserve(num_qps);
 
-    initialize_gpu_qp(&gpu_qps[i], i);
+#if HIP_VERSION >= 70200000
+  /*
+   * Allocate the device-side symmetric-registration state shared by every QP:
+   * a flat entry table pre-sliced per (dest_pe, nic_idx) plus a shared count.
+   * Allocated here (before QPs are wired) so each QP captures a stable slice
+   * pointer; register/unregister only mutate the contents, never the pointers.
+   * Each QP reads only its own slice, so the RMA hot path needs no pointer
+   * chasing.
+   */
+  int symm_capacity = static_cast<int>(max_symm_regions_);
+  if (symm_capacity <= 0) {
+    symm_capacity = 1;
   }
+  symm_capacity_ = symm_capacity;
+  size_t num_symm_buffers = static_cast<size_t>(num_pes) * num_nics_ * symm_capacity_;
+  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&symm_buffers_),
+                      num_symm_buffers * sizeof(SymmBufferInfo)));
+  CHECK_HIP(hipMemset(symm_buffers_, 0, num_symm_buffers * sizeof(SymmBufferInfo)));
+  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&symm_count_), sizeof(int)));
+  CHECK_HIP(hipMemset(symm_count_, 0, sizeof(int)));
+  host_symm_buffers_.assign(num_symm_buffers, SymmBufferInfo{});
+  symm_count_host_ = 0;
+#endif
+
+  for (size_t i = 0; i < num_qps; i++) {
+    initialize_gpu_qp(&host_gpu_qps[i], i);
+  }
+
+  CHECK_HIP(hipMemcpy(gpu_qps, host_gpu_qps, qp_objs_mem_size, hipMemcpyDefault));
+  free(host_gpu_qps);
 }
 
 void GDABackend::cleanup_gpu_qps() {
-  size_t qp_objs_count;
+  /* Calls QueuePairHost::~QueuePairHost on all elements in host_qps */
+  host_qps.clear();
 
-  qp_objs_count = num_qps;
-
-  for (size_t i = 0; i < qp_objs_count; i++) {
-    host_qps[i].~QueuePair();
-  }
-
-  free(host_qps);
-
+  /* QueuePair is trivially destructible, can just free it */
   CHECK_HIP(hipFree(gpu_qps));
   gpu_qps = nullptr;
+
+#if HIP_VERSION >= 70200000
+  if (symm_buffers_ != nullptr) {
+    CHECK_HIP(hipFree(symm_buffers_));
+    symm_buffers_ = nullptr;
+  }
+  if (symm_count_ != nullptr) {
+    CHECK_HIP(hipFree(symm_count_));
+    symm_count_ = nullptr;
+  }
+  host_symm_buffers_.clear();
+  symm_capacity_ = 0;
+  symm_count_host_ = 0;
+#endif
 }
 
 void GDABackend::open_ib_device() {
@@ -1353,7 +1858,7 @@ void GDABackend::validate_ib_device(NicDevice &nic) {
     const std::set<uint32_t> supported_bnxt_part_ids = { 0x1760 /* BCM57608 */};
     const char min_supported_bnxt_fw_ver[12] = "233.2.104.0";
 
-    if (nic.device_attr.vendor_id != GDA_BNXT_VENDOR_ID) {
+    if (nic.device_attr.vendor_id != static_cast<uint32_t>(gda::vendor_id::BNXT)) {
       LOG_ERROR_EXIT("%s GDAProvider::BNXT requested but an invalid device is selected", debug_str.c_str());
     }
 
@@ -1540,15 +2045,29 @@ void GDABackend::create_queues() {
 
   mlx5_qps.resize(num_qps);
 
-  if (gda_provider == GDAProvider::BNXT) {
-    bnxt_create_cqs(ncqes);
-    bnxt_create_qps(sq_size);
-  } else if (gda_provider == GDAProvider::IONIC) {
+  switch (gda_provider) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
     ionic_create_cqs(ncqes);
     create_qps(sq_size);
-  } else if (gda_provider == GDAProvider::MLX5) {
+    break;
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    bnxt_create_cqs(ncqes);
+    bnxt_create_qps(sq_size);
+    break;
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
     // mlx5_create_qps also creates the associated CQs
     mlx5_create_qps(sq_size);
+    break;
+#endif
+  default:
+    create_cqs(ncqes);
+    create_qps(sq_size);
+    break;
   }
 
   alternate_qp_ports();
@@ -1644,9 +2163,11 @@ void GDABackend::create_parent_domain(NicDevice &nic) {
   CHECK_NNULL(nic.pd_parent, "ibv_alloc_parent_domain");
   dump_ibv_pd(nic.pd_parent);
 
+#if defined(GDA_IONIC)
   if (gda_provider == GDAProvider::IONIC) {
     ionic_setup_parent_domain(nic, &pattr);
   }
+#endif // defined(GDA_IONIC)
 }
 
 void GDABackend::create_cqs(int cqe) {
@@ -1663,18 +2184,6 @@ void GDABackend::create_cqs(int cqe) {
   cq_attr.comp_vector   = 0;
   cq_attr.flags         = 0;
   cq_attr.comp_mask     = IBV_CQ_INIT_ATTR_MASK_PD;
-  /* enable mlx5 CQ collapsing by setting CQ length to 1 and enabling CQ overrun ignore:
-   *  - mlx5 driver sets mlx5_ifc_cqc_bits::oi bit when IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN is set
-   *    this has the hardware ignore CQ overruns; CQ consumer counter doorbells should not be rung
-   *  - see Mellanox Adapters Programmer’s Reference Manual Rev 0.40, §7.12.8, Tables 75-76
-   *    and linux/include/linux/mlx5/mlx5_ifc.h for Completion Queue Context definition
-   *  - see also rdma-core/libibverbs/cmd_cq.c and linux/drivers/infiniband/hw/mlx5/cq.c
-   *    for how this flag sets the bit */
-  if (gda_provider == GDAProvider::MLX5) {
-    cq_attr.cqe         = 1;
-    cq_attr.comp_mask  |= IBV_CQ_INIT_ATTR_MASK_FLAGS;
-    cq_attr.flags      |= IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN;
-  }
 
   for (size_t i = 0; i < qps.size(); i++) {
     NicDevice &nic = nic_for_qp(i);
@@ -1689,20 +2198,51 @@ void GDABackend::create_cqs(int cqe) {
 
 void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   switch (gda_provider) {
+#if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     ionic_initialize_gpu_qp(gpu_qp, conn_num);
     dump_ibv_qp(qps[conn_num], conn_num);
     break;
+#endif
+#if defined(GDA_BNXT)
   case GDAProvider::BNXT:
     bnxt_initialize_gpu_qp(gpu_qp, conn_num);
     dump_ibv_qp(qps[conn_num], conn_num);
     break;
+#endif
+#if defined(GDA_MLX5)
   case GDAProvider::MLX5:
     mlx5_initialize_gpu_qp(gpu_qp, conn_num);
+    mlx5_qps[conn_num].dump(conn_num);
     break;
+#endif
   default:
     assert(false /* GDAProvider initialize_gpu_qp */);
   }
+}
+
+QueuePairInitInfo GDABackend::gpu_qp_init_info(int conn_num) {
+  int pe = conn_num % num_pes;
+  int nic_idx = nic_idx_for_qp(conn_num);
+  const NicDevice& nic = nic_for_qp(conn_num);
+
+  host_qps.emplace_back(nic.pd_orig);
+  const QueuePairHost &host_qp = host_qps.back();
+
+  return {.heap_laddr = reinterpret_cast<uintptr_t>(heap.get_local_heap_base()),
+          .heap_raddr = reinterpret_cast<uintptr_t>(heap.get_heap_bases()[pe]),
+          .heap_size  = heap.get_size(),
+          .heap_lkey  = nic.heap_mr->lkey,
+          .heap_rkey  = heap_rkey[flat_pe_nic_idx(pe, nic_idx)],
+          .fetching_atomic          = host_qp.fetching_atomic,
+          .nonfetching_atomic       = host_qp.nonfetching_atomic,
+          .fetching_atomic_lkey     = host_qp.fetching_atomic_mr->lkey,
+          .nonfetching_atomic_lkey  = host_qp.nonfetching_atomic_mr->lkey,
+          .fetching_atomic_freelist = host_qp.fetching_atomic_freelist,
+          .local_buffers    = host_qp.buffer_info,
+          .num_user_buffers = host_qp.num_user_buffers,
+          .symm_buffers = get_symm_buffers_slice(pe, nic_idx),
+          .symm_count   = symm_count_};
 }
 
 void GDABackend::create_qps(int sq_length) {
@@ -1711,13 +2251,32 @@ void GDABackend::create_qps(int sq_length) {
   memset(&attr, 0, sizeof(struct ibv_qp_init_attr_ex));
   attr.cap.max_send_wr     = sq_length;
   attr.cap.max_send_sge    = 1;
-  attr.cap.max_inline_data = inline_threshold;
   attr.sq_sig_all          = 0;
   attr.qp_type             = IBV_QPT_RC;
   attr.comp_mask           = IBV_QP_INIT_ATTR_PD;
 
-  if (gda_provider == GDAProvider::IONIC) {
+  /* Set provider-specific QP creation attibutes
+   * Note that only ionic actually uses this code path currently */
+  switch (gda_provider) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    attr.cap.max_inline_data = QueuePairTraits<QueuePairIONIC>::InlineThreshold;
     attr.cap.max_recv_sge    = 1; // TODO allow zero sges in the driver
+    break;
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    attr.cap.max_inline_data = QueuePairTraits<QueuePairBNXT>::InlineThreshold;
+    break;
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    attr.cap.max_inline_data = QueuePairTraits<QueuePairMLX5>::InlineThreshold;
+    break;
+#endif
+  default:
+    assert(false /* invalid GDAProvider */);
+    break;
   }
 
   for (size_t i = 0; i < qps.size(); i++) {

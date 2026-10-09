@@ -23,7 +23,6 @@ from rocm_bootstrap.targets import (
 )
 from rocm_bootstrap.tests.conftest import FakePlatform, clinfo_output
 
-
 # ---------------------------------------------------------------------------
 # KFD properties parser unit tests
 # ---------------------------------------------------------------------------
@@ -69,7 +68,9 @@ class TestKfdDetectionPerTarget:
         gpus = detect_gpus()
         assert len(gpus) == 1
         gpu = gpus[0]
-        assert gpu.target is target
+        assert gpu.target.name == (
+            "gfx1250" if target.name == "gfx1250-strict" else target.name
+        )
         assert gpu.node_id == 1
         assert gpu.pci_id is not None
 
@@ -83,7 +84,9 @@ class TestKfdDetectionPerTarget:
         gpus = detect_gpus()
         assert len(gpus) == 1
         assert gpus[0].target.gfx_target_version == gtv
-        assert gpus[0].target.name == target.name
+        assert gpus[0].target.name == (
+            "gfx1250" if target.name == "gfx1250-strict" else target.name
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +281,7 @@ class TestCliHierarchy:
     def test_single_gpu(self, fake_platform: FakePlatform, capsys):
         fake_platform.add_gpu_node(1, lookup_target("gfx1151"))
         main(["--hierarchy"])
-        assert capsys.readouterr().out == "gfx1151 gfx11_5 gfx11\n"
+        assert capsys.readouterr().out == "gfx1151 gfx115x gfx11\n"
 
     def test_no_gpus(self, fake_platform: FakePlatform, capsys):
         main(["--hierarchy"])
@@ -310,7 +313,7 @@ class TestCliVerbose:
         main(["-v"])
         out = capsys.readouterr().out
         assert "gfx1151" in out
-        assert "gfx11_5" in out
+        assert "gfx115x" in out
         assert "gfx11" in out
         assert "sub-family" in out
         assert "family" in out
@@ -383,16 +386,12 @@ class TestParseClinfo:
         assert _parse_clinfo_output(text) == []
 
     def test_cpu_device_skipped(self):
-        text = (
-            "  Device Type:\t\t CL_DEVICE_TYPE_CPU\n"
-            "  Name:\t\t\t not_a_gpu\n"
-        )
+        text = "  Device Type:\t\t CL_DEVICE_TYPE_CPU\n" "  Name:\t\t\t not_a_gpu\n"
         assert _parse_clinfo_output(text) == []
 
     def test_unknown_target_skipped(self):
         text = (
-            "  Device Type:\t\t CL_DEVICE_TYPE_GPU\n"
-            "  Name:\t\t\t gfx_unknown_9999\n"
+            "  Device Type:\t\t CL_DEVICE_TYPE_GPU\n" "  Name:\t\t\t gfx_unknown_9999\n"
         )
         assert _parse_clinfo_output(text) == []
 
@@ -456,9 +455,7 @@ class TestClinfoFallback:
 
     def test_clinfo_with_env_disable(self, fake_platform: FakePlatform):
         """Disable flag takes precedence over clinfo."""
-        fake_platform.set_clinfo(
-            clinfo_output(lookup_target("gfx1100"))
-        )
+        fake_platform.set_clinfo(clinfo_output(lookup_target("gfx1100")))
         fake_platform.set_env("ROCM_BOOTSTRAP_DISABLE_DETECTION", "1")
         assert detect_gpus() == []
 

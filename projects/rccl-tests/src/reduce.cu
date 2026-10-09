@@ -41,7 +41,7 @@ testResult_t  ReduceGetAlgoProtoChannels(ncclComm_t comm, size_t count, ncclData
 }
 
 
-void ReduceGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
+void ReduceGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
   double baseBw = (double)(count * typesize) / 1.0E9 / sec;
   *algBw = baseBw;
   *busBw = baseBw;
@@ -111,7 +111,7 @@ testResult_t ReduceRunTest(struct threadArgs* args, int root, ncclDataType_t typ
   for (int i=0; i<type_count; i++) {
     for (int j=0; j<op_count; j++) {
 #if defined(RCCL_FLOAT8)
-if((run_types[i] == ncclFloat8e4m3 || run_types[i] == ncclFloat8e5m2) && (run_ops[j] == ncclProd || run_ops[j] == ncclAvg || strcmp(run_opnames[j],"mulsum") == 0))
+if((run_types[i] == ncclFloat8e4m3 || run_types[i] == ncclFloat8e5m2) && (run_ops[j] == ncclProd || strcmp(run_opnames[j],"mulsum") == 0))
     continue;
 #endif
       for (int k=begin_root; k<=end_root; k++) {
@@ -122,7 +122,7 @@ if((run_types[i] == ncclFloat8e4m3 || run_types[i] == ncclFloat8e5m2) && (run_op
   return testSuccess;
 }
 
-struct testEngine ncclTestEngine = {
-  .getBuffSize = ReduceGetBuffSize,
-  .runTest = ReduceRunTest
+NCCL_WEAK struct testEngine ncclTestEngine = {
+  /* .getBuffSize = */ ReduceGetBuffSize,
+  /* .runTest = */ ReduceRunTest
 };

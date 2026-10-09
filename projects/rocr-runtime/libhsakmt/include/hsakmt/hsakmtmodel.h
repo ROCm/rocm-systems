@@ -31,6 +31,27 @@
 
 extern bool hsakmt_use_model;
 extern char *hsakmt_model_topology;
+
+/**
+ * Model-mode environment variables (developer/emulation use only):
+ *   HSA_MODEL_TOPOLOGY - Enables model mode when set.
+ *   HSA_MODEL_LIB      - Path to the FFM model shared library, resolved as:
+ *                          - A relative name or path is always anchored under
+ *                            the ROCm install lib directory configured at
+ *                            build time (HSAKMT_INSTALL_LIBDIR), e.g.
+ *                            "libfoo.so" -> "<HSAKMT_INSTALL_LIBDIR>/libfoo.so".
+ *                            It is NOT resolved via the dynamic loader search
+ *                            path (LD_LIBRARY_PATH), so a bare soname is taken
+ *                            relative to the install dir, not searched.
+ *                          - An absolute path under HSAKMT_INSTALL_LIBDIR is
+ *                            used as-is.
+ *                          - Any other absolute path is honored only in normal
+ *                            (unprivileged) processes. Under elevated
+ *                            privileges (AT_SECURE, e.g. setuid/setgid or file
+ *                            capabilities) it is rejected, preventing arbitrary
+ *                            dlopen() across a privilege boundary.
+ *                        Paths containing ".." components are always rejected.
+ */
 void model_init_env_vars(void);
 void model_init(void);
 int model_kfd_ioctl(unsigned long request, void *arg);

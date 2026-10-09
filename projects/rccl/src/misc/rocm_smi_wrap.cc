@@ -26,25 +26,28 @@ THE SOFTWARE.
 
 static int is_wsl2 = -1;
 
-#define ROCMSMICHECK(cmd) do {               \
-  rsmi_status_t ret = cmd;                   \
-  if( ret != RSMI_STATUS_SUCCESS ) {         \
-    const char *err;                         \
-    rsmi_status_string(ret, &err);           \
-    WARN("ROCm SMI init failure %s", err);   \
-    return ncclInternalError;                \
-  }                                          \
-} while(false)
+#define ROCMSMICHECK(cmd) \
+  do { \
+    rsmi_status_t ret = cmd; \
+    if (ret != RSMI_STATUS_SUCCESS) { \
+      const char* err; \
+      rsmi_status_string(ret, &err); \
+      WARN("ROCm SMI init failure %s", err); \
+      return ncclInternalError; \
+    } \
+  } while (false)
 
-#define ARSMICHECK(cmd) do {         \
-  int ret = cmd;                     \
-  if( ret != 0 ) {		     \
-    WARN("ARSMI failure %d", ret);   \
-    return ncclInternalError;        \
-  }                                  \
-} while(false)
+#define ARSMICHECK(cmd) \
+  do { \
+    int ret = cmd; \
+    if (ret != 0) { \
+      WARN("ARSMI failure %d", ret); \
+      return ncclInternalError; \
+    } \
+  } while (false)
 
-RCCL_PARAM(UseRocmSmiLib, "USE_ROCM_SMI_LIB", 0); // Opt-in environment variable for enabling using rocm_smi_lib instead of internal code
+RCCL_PARAM(UseRocmSmiLib, "USE_ROCM_SMI_LIB",
+           0); // Opt-in environment variable for enabling using rocm_smi_lib instead of internal code
 
 ncclResult_t rocm_smi_init() {
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE) == -1)
@@ -71,14 +74,12 @@ ncclResult_t rocm_smi_init() {
 }
 
 ncclResult_t rocm_smi_getNumDevice(uint32_t* num_devs) {
-  if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE))
-    CUDACHECK(cudaGetDeviceCount((int *)num_devs));
-  else
-    if (rcclParamUseRocmSmiLib()) {
-      ROCMSMICHECK(rsmi_num_monitor_devices(num_devs));
-    } else {
-      ARSMICHECK(ARSMI_get_num_devices(num_devs));
-    }
+  if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE)) CUDACHECK(cudaGetDeviceCount((int*)num_devs));
+  else if (rcclParamUseRocmSmiLib()) {
+    ROCMSMICHECK(rsmi_num_monitor_devices(num_devs));
+  } else {
+    ARSMICHECK(ARSMI_get_num_devices(num_devs));
+  }
 
   return ncclSuccess;
 }
@@ -107,10 +108,9 @@ ncclResult_t rocm_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* busId,
   return ncclSuccess;
 }
 
-
 ncclResult_t rocm_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* deviceIndex) {
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE)) {
-    CUDACHECK(hipDeviceGetByPCIBusId((int *)deviceIndex, pciBusId));
+    CUDACHECK(hipDeviceGetByPCIBusId((int*)deviceIndex, pciBusId));
     return ncclSuccess;
   } else {
     uint32_t i, num_devs = 0;
@@ -126,7 +126,7 @@ ncclResult_t rocm_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* d
      *  | Device   | [ 7: 3] |
      *  | Function | [ 2: 0] |
      **/
-    busid = ((busid&0xffff00000L)<<12)+((busid&0xff000L)>>4)+((busid&0xff0L)>>1)+(busid&0x7L);
+    busid = ((busid & 0xffff00000L) << 12) + ((busid & 0xff000L) >> 4) + ((busid & 0xff0L) >> 1) + (busid & 0x7L);
 
     if (rcclParamUseRocmSmiLib()) {
       ROCMSMICHECK(rsmi_num_monitor_devices(&num_devs));
@@ -136,9 +136,9 @@ ncclResult_t rocm_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* d
     for (i = 0; i < num_devs; i++) {
       uint64_t bdfid;
       if (rcclParamUseRocmSmiLib()) {
-	ROCMSMICHECK(rsmi_dev_pci_id_get(i, &bdfid));
+        ROCMSMICHECK(rsmi_dev_pci_id_get(i, &bdfid));
       } else {
-	ARSMICHECK(ARSMI_dev_pci_id_get(i, &bdfid));
+        ARSMICHECK(ARSMI_dev_pci_id_get(i, &bdfid));
       }
 
       if (bdfid == busid) break;
@@ -147,19 +147,18 @@ ncclResult_t rocm_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* d
     if (i < num_devs) {
       *deviceIndex = i;
       return ncclSuccess;
-    }
-    else {
+    } else {
       if (rcclParamUseRocmSmiLib()) {
-	WARN("rocm_smi_lib: %s device index not found", pciBusId);
+        WARN("rocm_smi_lib: %s device index not found", pciBusId);
       } else {
-	WARN("ARSMI_lib: %s device index not found", pciBusId);
+        WARN("ARSMI_lib: %s device index not found", pciBusId);
       }
       return ncclInternalError;
     }
   }
 }
 
-ncclResult_t rocm_smi_getLinkInfo(int srcIndex, int dstIndex, RSMI_IO_LINK_TYPE* rsmi_type, int *hops, int *count) {
+ncclResult_t rocm_smi_getLinkInfo(int srcIndex, int dstIndex, RSMI_IO_LINK_TYPE* rsmi_type, int* hops, int* count) {
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE)) {
     *rsmi_type = RSMI_IOLINK_TYPE_PCIEXPRESS;
     *hops = 1;
@@ -172,29 +171,24 @@ ncclResult_t rocm_smi_getLinkInfo(int srcIndex, int dstIndex, RSMI_IO_LINK_TYPE*
     if (rcclParamUseRocmSmiLib()) {
       ROCMSMICHECK(rsmi_topo_get_link_type(srcIndex, dstIndex, &rsmi_hops, rsmi_type));
       ROCMSMICHECK(rsmi_topo_get_link_weight(srcIndex, dstIndex, &rsmi_weight));
-      if (*rsmi_type == RSMI_IOLINK_TYPE_XGMI && (rsmi_weight == 15 ||
-        rsmi_weight == 41 || rsmi_weight == 13)) {
-  *hops = 1;
+      if (*rsmi_type == RSMI_IOLINK_TYPE_XGMI && (rsmi_weight == 15 || rsmi_weight == 41 || rsmi_weight == 13)) {
+        *hops = 1;
 #if defined HAVE_ROCM_SMI64CONFIG && rocm_smi_VERSION_MAJOR >= 5
-  uint64_t min_bw = 0, max_bw = 0;
-  rsmi_version_t version;
-  ROCMSMICHECK(rsmi_version_get(&version));
-  if (version.major >= 5)
-    ROCMSMICHECK(rsmi_minmax_bandwidth_get(srcIndex, dstIndex, &min_bw, &max_bw));
-  if (max_bw && min_bw)
-    *count = max_bw/min_bw;
+        uint64_t min_bw = 0, max_bw = 0;
+        rsmi_version_t version;
+        ROCMSMICHECK(rsmi_version_get(&version));
+        if (version.major >= 5) ROCMSMICHECK(rsmi_minmax_bandwidth_get(srcIndex, dstIndex, &min_bw, &max_bw));
+        if (max_bw && min_bw) *count = max_bw / min_bw;
 #endif
       }
     } else {
       ARSMI_linkInfo tinfo;
       ARSMICHECK(ARSMI_topo_get_link_info(srcIndex, dstIndex, &tinfo));
 
-      *rsmi_type  = (RSMI_IO_LINK_TYPE) tinfo.type;
-      if (*rsmi_type == RSMI_IOLINK_TYPE_XGMI && (tinfo.weight == 15 ||
-        tinfo.weight == 41 || tinfo.weight == 13)) {
-	*hops = 1;
-	if (tinfo.max_bandwidth && tinfo.min_bandwidth)
-	  *count = tinfo.max_bandwidth/tinfo.min_bandwidth;
+      *rsmi_type = (RSMI_IO_LINK_TYPE)tinfo.type;
+      if (*rsmi_type == RSMI_IOLINK_TYPE_XGMI && (tinfo.weight == 15 || tinfo.weight == 41 || tinfo.weight == 13)) {
+        *hops = 1;
+        if (tinfo.max_bandwidth && tinfo.min_bandwidth) *count = tinfo.max_bandwidth / tinfo.min_bandwidth;
       }
     }
   }

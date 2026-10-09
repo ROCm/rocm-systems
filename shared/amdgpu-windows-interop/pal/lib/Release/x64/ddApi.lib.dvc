@@ -1,0 +1,5 @@
+outs:
+- md5: c37f3fa14e0bf3575c2b1f3289cbef1f
+  size: 2490
+  hash: md5
+  path: ddApi.lib

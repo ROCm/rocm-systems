@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
 """hipFile driver lifecycle management."""
 
 from __future__ import annotations

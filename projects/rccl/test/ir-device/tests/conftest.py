@@ -29,6 +29,7 @@ and GoogleTest are all present.
 import glob
 import logging
 import os
+import shutil
 import subprocess
 from types import SimpleNamespace
 
@@ -58,6 +59,17 @@ HIPIFY_INC = os.path.join(RCCL_BUILD, "hipify", "src", "include")
 GENERATED_INC = os.path.join(RCCL_BUILD, "include")
 HIPCC = os.path.join(ROCM_PATH, "bin", "hipcc")
 TEST_EXE = os.path.join(IR_OUTDIR, "IR_test.exe")
+
+# --- Multi-rank GIN/composite barrier functional test (separate MPI binary) ---
+# This one needs the host RCCL library + MPI in addition to the bitcode, so it
+# is gated independently and skipped (not failed) when those are absent.
+GIN_MPI_TEST_SRC = os.path.join(IR_DIR, "test", "IR_gin_mpi_test.cpp")
+GIN_MPI_TEST_EXE = os.path.join(IR_OUTDIR, "IR_gin_mpi_test.exe")
+NRANKS = int(os.environ.get("IR_GIN_NRANKS", "2"))
+# Devices the MPI run may use, one per rank. Defaults to the first NRANKS GPUs
+# (0,1,...) so each rank's in-binary hipSetDevice(localRank) lands on its own
+# GPU. Override with IR_GIN_GPUS="2,3" to target specific devices.
+IR_GIN_GPUS = os.environ.get("IR_GIN_GPUS", ",".join(str(i) for i in range(NRANKS)))
 
 LOGDIR = os.path.join(WORKDIR, "logs")
 os.makedirs(LOGDIR, exist_ok=True)
@@ -94,6 +106,9 @@ def _missing_prerequisite():
         return f"IR_test.cpp not found at {IR_TEST_SRC}"
     if not os.path.isfile(HIPCC):
         return f"hipcc not found at {HIPCC} (set ROCM_PATH)"
+    llvm_dis = os.path.join(ROCM_PATH, "llvm", "bin", "llvm-dis")
+    if not os.path.isfile(llvm_dis):
+        return f"llvm-dis not found at {llvm_dis} (install ROCm llvm tools for IR device tests)"
     if not os.path.isdir(HIPIFY_INC):
         return (
             f"hipify staging dir not found at {HIPIFY_INC} "
@@ -162,6 +177,9 @@ def _build_test_binary():
         HIPCC,
         f"--offload-arch={ARCH}", "-O0",
         "-D__HIP_PLATFORM_AMD__=1",
+        # Source wrapper first: cmake -DEMIT_LLVM_IR=OFF does not restage
+        # build/include/nccl_device_wrapper.h, so a generated copy can be stale.
+        f"-I{IR_DIR}",
         f"-I{HIPIFY_INC}",
         f"-I{os.path.join(HIPIFY_INC, 'nccl_device')}",
         f"-I{GENERATED_INC}",
@@ -185,9 +203,155 @@ def _build_test_binary():
     return build_log
 
 
+def _find_rccl_libdir():
+    """Return the dir holding the host librccl.so under RCCL_BUILD, or None."""
+    candidates = [
+        RCCL_BUILD,
+        os.path.join(RCCL_BUILD, "lib"),
+        os.path.join(RCCL_BUILD, "lib64"),
+    ]
+    for d in candidates:
+        if glob.glob(os.path.join(d, "librccl.so*")):
+            return d
+    return None
+
+
+def _missing_mpi_prerequisite():
+    """Reason string if the MPI GIN functional test cannot be built/run.
+
+    Builds on _missing_prerequisite() (hipcc / hipify / gtest / GPU nodes) and
+    adds the host-library + MPI requirements unique to the multi-rank test. The
+    GIN-runtime gates (>=2 GPUs, IB GIN, NCCL_GIN_TYPE/CUMEM/INTRANET env) are
+    enforced inside the test itself via GTEST_SKIP, so they are not duplicated
+    here — this only covers what is needed to *build and launch* the binary.
+    """
+    base = _missing_prerequisite()
+    if base:
+        return base
+    if not os.path.isfile(GIN_MPI_TEST_SRC):
+        return f"IR_gin_mpi_test.cpp not found at {GIN_MPI_TEST_SRC}"
+    if shutil.which("mpirun") is None or shutil.which("mpicxx") is None:
+        return "MPI not found (mpirun/mpicxx not in PATH)"
+    if _find_rccl_libdir() is None:
+        return (
+            f"host librccl.so not found under {RCCL_BUILD} "
+            "(build RCCL's host library, not just -DEMIT_LLVM_IR=ON)"
+        )
+    return None
+
+
+def _build_gin_mpi_binary():
+    """Compile IR_gin_mpi_test.cpp into an MPI GoogleTest binary.
+
+    Same device-side bitcode link as IR_test (-Xoffload-linker librccl_device.bc
+    + amdgpu-internalize-symbols=false), plus the host RCCL library and MPI.
+    Returns the build log path; raises on failure.
+    """
+    os.makedirs(IR_OUTDIR, exist_ok=True)
+    gtest_inc = os.path.join(GTEST_ROOT, "include")
+    gtest_libdir = _find_gtest_libdir()
+    rccl_libdir = _find_rccl_libdir()
+    mpi_cxx = shutil.which("mpicxx")
+    args = [
+        mpi_cxx,
+        f"--offload-arch={ARCH}", "-O0",
+        "-D__HIP_PLATFORM_AMD__=1",
+        f"-I{IR_DIR}",
+        f"-I{HIPIFY_INC}",
+        f"-I{os.path.join(HIPIFY_INC, 'nccl_device')}",
+        f"-I{GENERATED_INC}",
+        f"-I{gtest_inc}",
+        GIN_MPI_TEST_SRC,
+        "-Xoffload-linker", BITCODE,
+        "-Xoffload-linker", "-plugin-opt=-amdgpu-internalize-symbols=false",
+        # Resolve main here before librccl exposes the RAS client's main symbol.
+        f"-L{gtest_libdir}", "-lgtest_main", "-lgtest", "-lpthread",
+        f"-L{rccl_libdir}", f"-Wl,-rpath,{rccl_libdir}", "-lrccl",
+        "-o", GIN_MPI_TEST_EXE,
+    ]
+    env = os.environ.copy()
+    env.update({"OMPI_CXX": HIPCC, "MPICH_CXX": HIPCC})
+    build_log = os.path.join(LOGDIR, "ir_gin_mpi_build.log")
+    with open(build_log, "w") as log:
+        log.write("$ " + " ".join(args) + "\n\n")
+        log.flush()
+        proc = subprocess.run(
+            args, env=env, stdout=log,
+            stderr=subprocess.STDOUT, universal_newlines=True,
+        )
+    assert proc.returncode == 0, (
+        f"Failed to compile IR_gin_mpi_test (see {build_log})"
+    )
+    assert os.path.isfile(GIN_MPI_TEST_EXE), (
+        f"MPI test binary not produced at {GIN_MPI_TEST_EXE}"
+    )
+    return build_log
+
+
+@pytest.fixture(scope="session")
+def ir_gin_mpi_binary():
+    """Build the bitcode if needed, then compile the MPI GIN test once.
+
+    Skips the whole multi-rank suite when its build/launch prerequisites
+    (host librccl.so, MPI, hipify staging, GoogleTest, GPU nodes) are missing.
+    """
+    reason = _missing_mpi_prerequisite()
+    if reason:
+        pytest.skip(f"IR GIN multi-rank tests skipped: {reason}")
+
+    if not os.path.isfile(BITCODE):
+        logger.info("librccl_device.bc MISSING — building it (arch=%s)...", ARCH)
+        _build_bitcode()
+    logger.info("Compiling IR_gin_mpi_test.cpp -> %s ...", GIN_MPI_TEST_EXE)
+    _build_gin_mpi_binary()
+    return GIN_MPI_TEST_EXE
+
+
+@pytest.fixture(scope="session")
+def run_gin_mpi_gtest(ir_gin_mpi_binary):
+    """Return a helper that launches the MPI GIN test under `mpirun -np N`.
+
+    The helper returns (subprocess.CompletedProcess, log_file_path). GIN env
+    defaults (NCCL_GIN_TYPE=2, NCCL_CUMEM_ENABLE=1, RCCL_ENABLE_INTRANET=1) are
+    seeded if unset so a single-node 2-GPU run can establish GIN; the binary
+    itself GTEST_SKIPs cleanly if GIN still cannot initialize. HIP_VISIBLE_DEVICES
+    is pinned to IR_GIN_GPUS (default the first NRANKS devices) so each rank gets
+    its own GPU regardless of any ambient single-GPU restriction.
+    """
+
+    def _run(gtest_filter, log_name):
+        env = os.environ.copy()
+        env.setdefault("NCCL_GIN_ENABLE", "1")
+        env.setdefault("NCCL_GIN_TYPE", "2")
+        env.setdefault("NCCL_CUMEM_ENABLE", "1")
+        env.setdefault("RCCL_ENABLE_INTRANET", "1")
+        env.setdefault("HSA_NO_SCRATCH_RECLAIM", "1")
+        # Pin GPUs per rank: expose NRANKS distinct devices to the whole run so
+        # each rank's hipSetDevice(localRank) selects its own. Set explicitly
+        # (not setdefault) so a restrictive ambient HIP_VISIBLE_DEVICES=0 from
+        # the shell doesn't collapse every rank onto one GPU and force a skip.
+        env["HIP_VISIBLE_DEVICES"] = IR_GIN_GPUS
+        args = [
+            "mpirun", "-np", str(NRANKS),
+            ir_gin_mpi_binary,
+            f"--gtest_filter={gtest_filter}", "--gtest_color=no",
+        ]
+        log_file = os.path.join(LOGDIR, log_name)
+        with open(log_file, "w") as log:
+            log.write("$ " + " ".join(args) + "\n\n")
+            log.flush()
+            proc = subprocess.run(
+                args, env=env, stdout=log, stderr=subprocess.STDOUT,
+                universal_newlines=True, timeout=300,
+            )
+        return proc, log_file
+
+    return _run
+
+
 @pytest.fixture(scope="session")
 def ir_test_binary():
-    """Build the bitcode if needed, then compile IR_test.cpp against it once.
+    """Update the bitcode, then compile IR_test.cpp against it once.
 
     Skips the entire suite if prerequisites are missing. Returns the path to
     the compiled GoogleTest executable.
@@ -196,15 +360,13 @@ def ir_test_binary():
     if reason:
         pytest.skip(f"IR device tests skipped: {reason}")
 
-    # Emit librccl_device.bc on demand (the EMIT_LLVM_IR step) when absent.
-    if os.path.isfile(BITCODE):
-        logger.info("librccl_device.bc PRESENT at %s — reusing it", BITCODE)
-    else:
-        logger.info(
-            "librccl_device.bc MISSING at %s — building it (EMIT_LLVM_IR step, "
-            "arch=%s)...", BITCODE, ARCH)
-        bc_log = _build_bitcode()
-        logger.info("librccl_device.bc BUILT at %s (log: %s)", BITCODE, bc_log)
+    # Always invoke make so dependency timestamps decide whether the artifact
+    # is current. Merely checking that BITCODE exists can reuse an artifact
+    # from before a wrapper/implementation edit when RCCL itself was rebuilt
+    # with EMIT_LLVM_IR=OFF.
+    logger.info("Updating librccl_device.bc at %s (arch=%s)...", BITCODE, ARCH)
+    bc_log = _build_bitcode()
+    logger.info("librccl_device.bc READY at %s (log: %s)", BITCODE, bc_log)
 
     logger.info(
         "Compiling IR_test.cpp -> %s (hipcc -O0, arch=%s)...", TEST_EXE, ARCH)

@@ -15,6 +15,10 @@ on:
       - 'projects/hipfile/**'
       - '.github/workflows/hipfile-*.yml'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -32,3 +36,4 @@ jobs:
         with:
           ignore_words_file: |
             projects/hipfile/.codespellignore
+          skip: "./projects/hipfile/third-party,./projects/hipfile/third-party/*"

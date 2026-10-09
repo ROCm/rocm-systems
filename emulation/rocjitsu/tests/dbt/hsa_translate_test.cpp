@@ -12,6 +12,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include <hsa/hsa_ext_amd.h>
 RJ_DIAGNOSTIC_POP
 
+#include "../test_paths.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
@@ -29,9 +30,17 @@ RJ_DIAGNOSTIC_POP
 #ifdef HAS_HOST_AMDGPU
 using namespace rocjitsu;
 
+// ROCR serializes its async-event pool with an uninstrumented HybridMutex.
+// TSan cannot observe that lock and can report the pool's allocator reuse as a
+// race. Ignore only accesses originating in the external runtime while keeping
+// rocjitsu and this raw-HSA test fully instrumented.
+extern "C" RJ_API_EXPORT const char *__tsan_default_suppressions() {
+  return "called_from_lib:libhsa-runtime64.so\n";
+}
+
 namespace {
 
-std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
+using test::kernel_path;
 
 hsa_agent_t find_gpu_agent() {
   hsa_agent_t gpu{};

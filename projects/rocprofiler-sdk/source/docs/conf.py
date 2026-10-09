@@ -75,6 +75,7 @@ breathe_default_project = "rocprofiler-sdk"
 doxyfile = "rocprofiler-sdk.dox"
 
 external_projects_current_project = "rocprofiler-sdk"
+external_projects_remote_repository = ""
 external_projects = []
 
 master_doc = "index"
@@ -97,7 +98,14 @@ nitpick_ignore = [
 # a list of builtin themes.
 
 html_theme = "rocm_docs_theme"
-html_theme_options = {"flavor": "rocm"}
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-systems",
+    "path_to_docs": "projects/rocprofiler-sdk/source/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+}
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

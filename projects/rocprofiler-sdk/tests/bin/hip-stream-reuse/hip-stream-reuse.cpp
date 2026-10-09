@@ -21,8 +21,10 @@
 // THE SOFTWARE.
 
 #include <hip/hip_runtime.h>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
 
 #define HIP_ASSERT(call)                                                                           \
@@ -141,12 +143,15 @@ main(int argc, char** argv)
     const char* ptr_file = argc > 1 ? argv[1] : "stream_pointers.txt";
 
     FILE* fp = fopen(ptr_file, "w");
-    if(fp)
+    if(!fp)
     {
-        for(auto* ptr : g_stream_ptrs)
-            fprintf(fp, "%p\n", ptr);
-        fclose(fp);
+        fprintf(stderr, "Failed to open '%s' for writing: %s\n", ptr_file, strerror(errno));
+        return 1;
     }
+
+    for(auto* ptr : g_stream_ptrs)
+        fprintf(fp, "%p\n", ptr);
+    fclose(fp);
 
     return 0;
 }

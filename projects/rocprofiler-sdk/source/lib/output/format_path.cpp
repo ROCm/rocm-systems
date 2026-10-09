@@ -35,7 +35,7 @@
 
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 #include <linux/limits.h>
 #include <unistd.h>
@@ -61,7 +61,7 @@ namespace
 const auto env_regexes =
     new std::array<std::string, 3>{std::string{"(.*)%(env|ENV)\\{([A-Z0-9_]+)\\}%(.*)"},
                                    std::string{"(.*)\\$(env|ENV)\\{([A-Z0-9_]+)\\}(.*)"},
-                                   std::string{"(.*)%q\\{([A-Z0-9_]+)\\}(.*)"}};
+                                   std::string{"(.*)%(q)\\{([A-Z0-9_]+)\\}%?(.*)"}};
 // env regex examples:
 //  - %env{USER}%       Consistent with other output key formats (start+end with %)
 //  - $ENV{USER}        Similar to CMake
@@ -87,6 +87,16 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
         return _fpath;
 
     auto _replace = [](auto& _v, const output_key& pitr) {
+        // a value containing its own key, such as %argv% when the key was
+        // typed on the command line, would be substituted forever
+        if(pitr.value.find(pitr.key) != std::string::npos)
+        {
+            ROCP_WARNING_IF(_v.find(pitr.key) != std::string::npos) << fmt::format(
+                "[rocprofiler] output key {} expands to a value containing itself and is left "
+                "unexpanded",
+                pitr.key);
+            return;
+        }
         auto pos = std::string::npos;
         while((pos = _v.find(pitr.key)) != std::string::npos)
             _v.replace(pos, pitr.key.length(), pitr.value);
@@ -122,7 +132,18 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
                 _val             = strip_leading_and_replace(_val, {'\t', ' ', '/'}, "_");
                 auto _beg        = rocprofiler::common::regex::regex_replace(_fpath, _re, "$1");
                 auto _end        = rocprofiler::common::regex::regex_replace(_fpath, _re, "$4");
-                _fpath           = fmt::format("{}{}{}", _beg, _val, _end);
+                // a value containing the token it replaces would be substituted forever
+                auto _token =
+                    _fpath.substr(_beg.length(), _fpath.length() - _beg.length() - _end.length());
+                if(_val.find(_token) != std::string::npos)
+                {
+                    ROCP_WARNING << fmt::format("[rocprofiler] environment variable {} expands to "
+                                                "a value containing {} and is left unexpanded",
+                                                _var,
+                                                _token);
+                    break;
+                }
+                _fpath = fmt::format("{}{}{}", _beg, _val, _end);
             }
         }
     } catch(std::exception& _e)

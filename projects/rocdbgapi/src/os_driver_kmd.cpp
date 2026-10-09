@@ -101,7 +101,7 @@ kmd_exception (os_exception_code_t ec_code)
   switch (ec_code)
     {
     case os_exception_code_t::none:
-      return KMD_DBGR_EXCP_QUEUE_WAVE_NONE;
+      return static_cast<KMD_DBGR_EXCEPTIONS> (0);
     case os_exception_code_t::queue_wave_abort:
       return KMD_DBGR_EXCP_QUEUE_WAVE_ABORT;
     case os_exception_code_t::queue_wave_trap:
@@ -158,8 +158,6 @@ os_exception_code (KMD_DBGR_EXCEPTIONS code)
 {
   switch (code)
     {
-    case KMD_DBGR_EXCP_QUEUE_WAVE_NONE:
-      return os_exception_code_t::none;
     case KMD_DBGR_EXCP_QUEUE_WAVE_ABORT:
       return os_exception_code_t::queue_wave_abort;
     case KMD_DBGR_EXCP_QUEUE_WAVE_TRAP:
@@ -307,13 +305,8 @@ os_exception_mask (ULONG64 kmd_mask)
 {
   os_exception_mask_t mask{};
 
-  if (kmd_mask == 0)
-    return mask;
-
-  while (kmd_mask != 0)
+  utils::for_each_flag (kmd_mask, [&] (ULONG64 one_bit)
     {
-      ULONG64 one_bit = kmd_mask ^ (kmd_mask & (kmd_mask - 1));
-
       auto code = os_exception_code (
         excp_mask_to_excp_code<KMD_DBGR_EXCEPTIONS> (one_bit));
 
@@ -322,9 +315,7 @@ os_exception_mask (ULONG64 kmd_mask)
       else
         warning ("Unknown KMD exception code %" PRIx64,
                  static_cast<uint64_t> (one_bit));
-
-      kmd_mask ^= one_bit;
-    }
+    });
 
   return mask;
 }
@@ -336,20 +327,11 @@ kmd_exception_mask (os_exception_mask_t mask)
 {
   ULONG64 kmd_mask = 0;
 
-  if (mask == os_exception_mask_t::none)
-    return kmd_mask;
-
-  while (mask != os_exception_mask_t::none)
+  utils::for_each_flag (mask, [&] (os_exception_mask_t one_bit)
     {
-      os_exception_mask_t one_bit = mask ^ (mask & (mask - 1));
-
       kmd_mask |= kmd_code_to_mask (
         kmd_exception (excp_mask_to_excp_code<os_exception_code_t> (one_bit)));
-
-      mask ^= one_bit;
-    }
-
-  dbgapi_assert (mask == 0);
+    });
 
   return kmd_mask;
 }
@@ -675,8 +657,9 @@ to_string (KMDDBGRIF_DBGR_CMDS_OUTPUT o)
                             o.getRuntimeInfoOut.rocRuntimeInfo.ttmpSetup);
 
     case KMD_DBGR_CMD_OP_ENABLE_TRAPS_FOR_EXCEPTIONS:
-      return string_printf ("{.trapSupportMask=%ld}",
-                            o.enableTrapsForExceptionsOut.trapSupportMask);
+      return string_printf ("{.trapSupportMask=%ld, .prevTrapEnabledMask=%ld}",
+                            o.enableTrapsForExceptionsOut.trapSupportMask,
+                            o.enableTrapsForExceptionsOut.prevTrapEnabledMask);
 
     case KMD_DBGR_CMD_OP_GET_EXCEPTIONS:
       return string_printf (
@@ -836,7 +819,7 @@ struct agent_t
   agent_handle_t handle;
 
   /* The KMD version this agent is running.  */
-  version_t kmd_version;
+  version_t kmd_version{ 0, 0 };
 };
 
 struct queue_handle_t
@@ -907,6 +890,31 @@ nt_status_to_dbgapi_status (NTSTATUS status)
     case STATUS_UNSUCCESSFUL:
     default:
       return AMD_DBGAPI_STATUS_ERROR;
+    }
+}
+
+static NTSTATUS
+lhescape_code_to_ntstatus (ULONG code)
+{
+  switch (code)
+    {
+    case LHESCAPE_OK:
+      return STATUS_SUCCESS;
+    case LHESCAPE_NOTSUPPORTED:
+      return STATUS_NOT_SUPPORTED;
+    case LHESCAPE_PROCESS_NOT_FOUND:
+      return STATUS_DRIVER_PROCESS_TERMINATED;
+    case LHESCAPE_RESOURCE_IN_USE:
+      return STATUS_RESOURCE_IN_USE;
+    case LHESCAPE_NO_MEMORY:
+      return STATUS_NO_MEMORY;
+    case LHESCAPE_INVALID_PARAMETER:
+      return STATUS_INVALID_PARAMETER;
+    case LHESCAPE_RETRY:
+      return STATUS_RETRY;
+    case LHESCAPE_ERROR:
+    default:
+      return STATUS_UNSUCCESSFUL;
     }
 }
 
@@ -1315,6 +1323,15 @@ kmd_driver_t::send_escape (const kmd::agent_t &agent, KMDDBGRIF_DBGR_CMDS &arg,
   auto status = m_d3d.api.escape (&escape_info);
 
   arg = payload.dbgcmd;
+
+  /* Starting version 2.0, KMD returns an escape code through the header.  The
+     status returned is always success, unless the escape call is not
+     supported.  In this case, do not inspect the header.  The agent version
+     must always be set through a first escape call (which may not return an
+     error using the header).  */
+  if (agent.kmd_version >= kmd::version_t{ 2, 0 } && status == STATUS_SUCCESS)
+    status = lhescape_code_to_ntstatus (arg.Header.ulEscapeReturnCode);
+
   return status;
 
   TRACE_DRIVER_END (param_out (arg.Output));
@@ -1324,7 +1341,7 @@ amd_dbgapi_status_t
 kmd_driver_t::check_version () const
 {
   constexpr kmd::version_t min_version = { 1, 0 };
-  constexpr kmd::version_t max_version = { 2, 0 };
+  constexpr kmd::version_t max_version = { 3, 0 };
 
   for (const auto &agent : m_agents)
     {
@@ -1337,6 +1354,14 @@ kmd_driver_t::check_version () const
                    max_version.second);
           return AMD_DBGAPI_STATUS_ERROR_RESTRICTION;
         }
+    }
+
+  /* Multi-GPU configurations are not supported on Windows.  */
+  if (m_agents.size () > 1)
+    {
+      warning ("Multi-AMDGPU configurations are not supported for debugging "
+	       "(%zu AMD GPUs detected)", m_agents.size ());
+      return AMD_DBGAPI_STATUS_ERROR_RESTRICTION;
     }
 
   return AMD_DBGAPI_STATUS_SUCCESS;
@@ -2079,9 +2104,21 @@ kmd_driver_t::set_wave_launch_trap_override (
         return nt_status_to_dbgapi_status (status);
 
       /* TODO, what to do?.  */
-      if (previous_value != nullptr)
-        *previous_value = static_cast<os_wave_launch_trap_mask_t> (
-          cmd.Output.enableTrapsForExceptionsOut.trapSupportMask);
+      if (agent.kmd_version < kmd::version_t{ 2, 0 })
+        {
+          if (previous_value != nullptr)
+            *previous_value = static_cast<os_wave_launch_trap_mask_t> (
+              cmd.Output.enableTrapsForExceptionsOut.trapSupportMask);
+        }
+      else
+        {
+          if (previous_value != nullptr)
+            *previous_value = static_cast<os_wave_launch_trap_mask_t> (
+              cmd.Output.enableTrapsForExceptionsOut.prevTrapEnabledMask);
+          if (supported_mask != nullptr)
+            *supported_mask = static_cast<os_wave_launch_trap_mask_t> (
+              cmd.Output.enableTrapsForExceptionsOut.trapSupportMask);
+        }
     }
   return AMD_DBGAPI_STATUS_SUCCESS;
   TRACE_DRIVER_END (make_ref (param_out (previous_value)),

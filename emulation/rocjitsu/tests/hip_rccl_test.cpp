@@ -9,7 +9,7 @@
 /// ncclCommInitRank. Each test validates the RCCL result against a
 /// single-threaded host-computed golden reference using random fuzz inputs.
 ///
-/// Compiled with hipcc, linked with -lrccl. Requires LD_PRELOAD=librocjitsu_kmd.so.
+/// Compiled with hipcc, linked with -lrccl. Requires LD_PRELOAD=librocjitsu.so.
 /// Arguments: --rank=N --world-size=M --shared-dir=DIR [--seed=S]
 
 #include <hip/hip_runtime.h>
@@ -102,7 +102,7 @@ static std::vector<float> all_ranks_input(uint32_t iter_seed, int n) {
   std::vector<float> all(n * g_world_size);
   for (int r = 0; r < g_world_size; ++r) {
     auto v = random_floats(iter_seed + r, n);
-    std::copy(v.begin(), v.end(), all.begin() + r * n);
+    std::ranges::copy(v, all.begin() + r * n);
   }
   return all;
 }

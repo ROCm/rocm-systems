@@ -228,12 +228,6 @@ class DmaBlitManager : public device::HostBlitManager {
                              size_t& partial       //!< Extra offset for memory alignment
   ) const;
 
-  //! Resolves the real HSA agents for a src/dst memory pair.
-  //! Handles IPC shared memory where dev() may not reflect the true owning agent.
-  inline void resolveAgents(const Memory& srcMem, const Memory& dstMem,
-                            address srcAddr, address dstAddr,
-                            hsa_agent_t& srcAgent, hsa_agent_t& dstAgent) const;
-
   //! Assits in transferring data from Host to Local or vice versa
   //! taking into account the Hsail profile supported by Hsa Agent
   bool hsaCopy(const Memory& srcMemory, const Memory& dstMemory, const amd::Coord3D& srcOrigin,
@@ -294,7 +288,7 @@ class DmaBlitManager : public device::HostBlitManager {
 class KernelBlitManager : public DmaBlitManager {
  public:
   enum {
-    FillBufferAligned = 0,
+    FillBufferUnAligned = 0,
     FillBufferAligned2D,
     BlitCopyBuffer,
     BlitCopyBufferAligned,
@@ -386,6 +380,16 @@ class KernelBlitManager : public DmaBlitManager {
   virtual bool copyBufferBatch(
       const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
   ) const;
+
+  //! Copies pageable host-to-device operations in a batch
+  bool WriteBufferBatch(
+      const std::vector<amd::BatchWriteMemoryOp>& write_ops  //!< Batch of write operations
+  ) const override;
+
+  //! Copies device-to-pageable-host operations in a batch
+  bool ReadBufferBatch(
+      const std::vector<amd::BatchReadMemoryOp>& read_ops  //!< Batch of read operations
+  ) const override;
 
   //! Copies a buffer object to an image object
   virtual bool copyBuffer(
@@ -548,6 +552,15 @@ class KernelBlitManager : public DmaBlitManager {
   static constexpr uint TransferSplitSize = 1;
   static constexpr uint MaxNumIssuedTransfers = 3;
 
+  struct BatchRawCopyOp {
+    address src;
+    address dst;
+    size_t size;
+    amd::CopyMetadata metadata;
+    bool needs_system_scope;
+    bool attach_signal;
+  };
+
   //! Copies a buffer object to an image object
   bool copyBufferToImageKernel(
       device::Memory& srcMemory,                            //!< Source memory object
@@ -612,6 +625,9 @@ class KernelBlitManager : public DmaBlitManager {
   //! Copies a batch of buffers using a single/multiple shader dispatch
   bool ShaderCopyBufferBatch(const std::vector<amd::BatchCopyOp>& copy_ops) const;
 
+  //! Copies a batch of raw virtual-address ranges using the shader path
+  bool ShaderCopyBufferBatchRaw(const std::vector<BatchRawCopyOp>& copy_ops) const;
+
   //! Atomically updates a memory location (i.e. writes, increments or decrements the memory).
   bool streamOpsUpdate(uint blitType, device::Memory& memory, uint64_t value, size_t offset,
                        size_t sizeBytes) const;
@@ -629,7 +645,7 @@ class KernelBlitManager : public DmaBlitManager {
 };
 
 static const char* BlitName[KernelBlitManager::BlitTotal] = {
-    "__amd_rocclr_fillBufferAligned",  "__amd_rocclr_fillBufferAligned2D",
+    "__amd_rocclr_fillBufferUnAligned",  "__amd_rocclr_fillBufferAligned2D",
     "__amd_rocclr_copyBuffer",         "__amd_rocclr_copyBufferAligned",
     "__amd_rocclr_copyBufferRect",     "__amd_rocclr_copyBufferRectAligned",
     "__amd_rocclr_streamOpsWrite",     "__amd_rocclr_streamOpsWait",

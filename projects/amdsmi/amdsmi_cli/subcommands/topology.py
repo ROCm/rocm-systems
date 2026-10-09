@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import logging
 
@@ -149,7 +132,7 @@ class TopologyCommands:
                 if self.logger.is_human_readable_format():
                     header_row[f"GPU BDF_{gpu_bdf}"] = f"{gpu_bdf}".rjust(20)
                 else:
-                    header_row[f"GPU{gpu_id}"] = f"{gpu_bdf}"
+                    header_row[f"gpu_{gpu_id}"] = f"{gpu_bdf}"
                 gpu_bdfs.append(gpu_bdf)  # Store GPU BDF for later reference
 
             # Add the header row
@@ -179,7 +162,7 @@ class TopologyCommands:
                     if self.logger.is_human_readable_format():
                         nic_row[f"GPU{gpu_idx} Status"] = status.ljust(20)
                     else:
-                        nic_row[f"GPU{gpu_idx}_Topo"] = status
+                        nic_row[f"gpu_{gpu_idx}_topo"] = status
                 # Add the NIC row to the table
                 tabular_output.append(nic_row)
 
@@ -247,9 +230,7 @@ class TopologyCommands:
                     gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(gpu_dest)
                     CPU_Affinity = amdsmi_interface.amdsmi_get_gpu_topo_cpu_affinity(gpu_dest)
                     numa_node = amdsmi_interface.amdsmi_get_gpu_topo_numa_affinity(gpu_dest)
-                    switch_bdf = amdsmi_interface.amdsmi_get_root_switch(
-                        amdsmi_interface.amdsmi_get_gpu_device_bdf_bdf(gpu_dest)
-                    )
+                    switch_bdf = amdsmi_interface.amdsmi_get_root_switch(gpu_bdf)
 
                     # Add GPU row to the table
                     if self.logger.is_human_readable_format():
@@ -280,9 +261,7 @@ class TopologyCommands:
                         nic_bdf = nic_info["bdf"]
                     CPU_Affinity = amdsmi_interface.amdsmi_get_nic_topo_cpu_affinity(nic_dest)
                     numa_node = amdsmi_interface.amdsmi_get_nic_topo_numa_affinity(nic_dest)
-                    switch_bdf = amdsmi_interface.amdsmi_get_root_switch(
-                        amdsmi_interface.amdsmi_get_nic_device_bdf_bdf(nic_dest)
-                    )
+                    switch_bdf = amdsmi_interface.amdsmi_get_root_switch(nic_bdf)
 
                     # Add NIC row to the table
                     if self.logger.is_human_readable_format():

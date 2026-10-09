@@ -8,6 +8,7 @@
 
 #include "utils/options.hpp"
 #include "rockernel.hpp"
+#include "rocurilocator.hpp"
 
 #include <string>
 #include <vector>
@@ -279,6 +280,10 @@ bool Program::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
     buildLog_ += "\n";
     return false;
   }
+
+#if DEVICE_ADDRESS_SANITIZER
+  UriLocator::recordCodeObjects(hsaExecutable_);
+#endif
 
   for (auto& kit : kernels()) {
     Kernel* kernel = static_cast<Kernel*>(kit.second);

@@ -428,6 +428,18 @@ hsa_status_t CpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS:
       *((uint32_t*)value) = 0;
       break;
+    case HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED: {
+      /* CPU agents support host memory DMA-BUF allocations if:
+        - Virtual memory APIs are supported
+        - At least one GPU agent exists (needed for drm ops) */
+      bool supported = false;
+      if (core::Runtime::runtime_singleton_->VirtualMemApiSupported()) {
+        const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
+        supported = !gpus.empty();
+      }
+      *static_cast<bool*>(value) = supported;
+      break;
+    }
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;

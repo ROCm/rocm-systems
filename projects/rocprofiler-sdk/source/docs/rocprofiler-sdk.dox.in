@@ -153,7 +153,8 @@ EXCLUDE_PATTERNS       = */.git/* \
                          @SOURCE_DIR@/**/rocprofiler-sdk/ompt/omp-tools.h \
                          @SOURCE_DIR@/**/rocprofiler-sdk/rccl/details/* \
                          @SOURCE_DIR@/**/rocprofiler-sdk/rocdecode/details/* \
-                         @SOURCE_DIR@/**/rocprofiler-sdk/rocjpeg/details/*
+                         @SOURCE_DIR@/**/rocprofiler-sdk/rocjpeg/details/* \
+                         @SOURCE_DIR@/**/rocprofiler-sdk/rocshmem/details/*
 EXCLUDE_SYMBOLS        = "std::*" \
                          "ROCPROFILER_ATTRIBUTE" \
                          "ROCPROFILER_API" \

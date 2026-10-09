@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <functional>
 #include <iomanip>
 #include <memory>
 #include <numeric>
@@ -18,6 +19,7 @@
 
 #include <cmd_options.hh>
 #include <hip_test_common.hh>
+#include <hip_test_params.hh>
 #include <resource_guards.hh>
 
 #pragma clang diagnostic ignored "-Wunused-but-set-variable"
@@ -113,8 +115,8 @@ class CpuTimer : public Timer {
 template <typename Derived> class Benchmark {
  public:
   Benchmark()
-      : iterations_(cmd_options.iterations),
-        warmups_(cmd_options.warmups),
+      : iterations_(TestParameterStore::instance().getIterationsForCurrentLevel()),
+        warmups_(TestParameterStore::instance().getWarmupsForCurrentLevel()),
         display_output_(!cmd_options.no_display),
         progress_bar_(cmd_options.progress) {
     benchmark_name_ = Catch::getResultCapture().getCurrentTestName();
@@ -135,7 +137,14 @@ template <typename Derived> class Benchmark {
   using ModifierSignature = std::function<float(float)>;
   void RegisterModifier(const ModifierSignature& modifier) { modifier_ = modifier; }
 
+  using StatsSuffixSignature = std::function<std::string(float)>;
+  void RegisterStatsSuffix(const StatsSuffixSignature& stats_suffix) {
+    stats_suffix_ = stats_suffix;
+  }
+
   void RegisterBandwidth(size_t bytes) { bandwidth_bytes_ = bytes; }
+
+  void SetDisplayOutput(bool display_output) { display_output_ = display_output; }
 
   template <typename... Args> std::tuple<float, float, float, float> Run(Args&&... args) {
     AddSectionName(std::to_string(iterations_));
@@ -205,6 +214,7 @@ template <typename Derived> class Benchmark {
   size_t bandwidth_bytes_ = 0;
 
   ModifierSignature modifier_;
+  StatsSuffixSignature stats_suffix_;
 
   void Print(const std::string& out = "") {
     if (!display_output_) return;
@@ -225,6 +235,9 @@ template <typename Derived> class Benchmark {
                         " ms, Slowest: " + std::to_string(worst) + " ms";
     if (bandwidth_bytes_ != 0) {
       stats += ", Bandwidth: " + FormatGigabytesPerSecond(bandwidth_bytes_, mean) + " GB/s";
+    }
+    if (stats_suffix_) {
+      stats += stats_suffix_(mean);
     }
     Print(stats + "\n");
   }

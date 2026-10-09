@@ -1,0 +1,10 @@
+# LeakSanitizer suppressions for hipFile
+#
+# These suppress leak reports whose stack traces include frames from ROCm
+# runtime libraries that allocate process-lifetime state once and do not
+# free it on exit.
+#
+# Note: matching is a substring search against stack frames (incl. module names),
+# so these rules may also hide leaks that pass through these libraries.
+leak:libhsa-runtime64.so
+leak:libamdhip64.so

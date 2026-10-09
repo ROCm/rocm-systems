@@ -18,7 +18,8 @@ namespace rocprofsys::pmc::collectors::nic
  * @tparam DeviceProvider Type providing NIC device enumeration and management
  * @tparam Config Configuration policy providing settings and output policies
  */
-template <typename DeviceProvider, typename Config>
-using collector = base::collector<nic_traits<DeviceProvider>, DeviceProvider, Config>;
+template <typename DeviceProvider, typename DeviceType, typename Config>
+using collector =
+    base::collector<nic_traits<DeviceProvider, DeviceType>, DeviceProvider, Config>;
 
 }  // namespace rocprofsys::pmc::collectors::nic

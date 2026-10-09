@@ -15,9 +15,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace common_utils
+namespace rocprofsys::common_utils
 {
 /**
  * Result of translating command-line arguments for the argument parser.
@@ -40,7 +38,7 @@ struct translated_args
  */
 [[nodiscard]] translated_args
 translate_arguments(
-    int argc, char** argv, preset_registry& registry,
+    int argc, char* const* argv, preset_registry const& registry,
     const std::unordered_map<std::string, std::string>& deprecated_flags = {});
 
 /**
@@ -79,6 +77,15 @@ get_domain_help_map();
 
 void
 print_compact_help(std::string_view tool_name, std::ostream& out = std::cout);
+
+/**
+ * Print the "Group topics"/"Domain topics" listing for @p tool_name.
+ * Topics carrying a tool allowlist (e.g. the run-only "execution" topic)
+ * are shown only for the tools they target. Shared by print_compact_help()
+ * and the unknown-topic fallback in dispatch_help() so both stay in sync.
+ */
+void
+print_topic_listing(std::string_view tool_name, std::ostream& out = std::cout);
 
 [[nodiscard]] bool
 print_help_for_topic(const std::string& captured_help, std::string_view topic,
@@ -167,7 +174,10 @@ template <typename ParserT>
 dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
 {
     std::string topic;
-    if(parser.exists("help")) topic = parser.template get<std::string>("help");
+    if(parser.exists("help"))
+    {
+        topic = parser.template get<std::string>("help");
+    }
 
     if(topic.empty())
     {
@@ -179,7 +189,7 @@ dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
     }
     else
     {
-        auto captured = capture_help_text(parser);
+        auto const captured = capture_help_text(parser);
 
         if(print_help_for_domain(captured, topic, tool_name) ||
            print_help_for_topic(captured, topic, tool_name))
@@ -189,15 +199,9 @@ dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
         else
         {
             std::cerr << "[rocprof-sys] Unknown help topic '" << topic << "'.\n\n"
-                      << "Available topics (use --help=<topic>):\n";
+                      << "Available topics (use --help=<topic>):\n\n";
 
-            std::cerr << "\n  Group topics:\n";
-            for(const auto& [name, groups] : get_help_topic_map())
-                std::cerr << "    " << name << "\n";
-
-            std::cerr << "\n  Domain topics:\n";
-            for(const auto& [name, info] : get_domain_help_map())
-                std::cerr << "    " << name << "  - " << info.description << "\n";
+            print_topic_listing(tool_name, std::cerr);
 
             std::cerr << "\n  --help=all  Show all options\n";
         }
@@ -205,5 +209,4 @@ dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
     return exit_code;
 }
 
-}  // namespace common_utils
-}  // namespace rocprofsys
+}  // namespace rocprofsys::common_utils

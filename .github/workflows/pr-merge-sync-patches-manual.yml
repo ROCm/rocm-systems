@@ -36,6 +36,9 @@ on:
         description: 'Pull request number to rerun patch logic for'
         required: true
 
+permissions:
+  contents: read
+
 jobs:
   rerun-patch:
     runs-on: ubuntu-24.04

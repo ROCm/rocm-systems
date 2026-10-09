@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import csv
 import json
@@ -348,7 +331,10 @@ class AMDSMILogger:
         for key, value in tabbed_dictionary.items():
             del capitalized_json[key]
 
-        capitalized_json["AMDSMI_SPACING_REMOVAL"] = tabbed_dictionary
+        # Only set when non-empty: an empty dict now renders "KEY: N/A", which the
+        # literal strip below would miss, leaking the marker into the output.
+        if tabbed_dictionary:
+            capitalized_json["AMDSMI_SPACING_REMOVAL"] = tabbed_dictionary
 
         # Convert the capitalized JSON to a YAML-like string
         yaml_output = self.custom_dump(capitalized_json)
@@ -381,7 +367,10 @@ class AMDSMILogger:
         yaml_string = ""
         for key, value in data.items():
             if isinstance(value, dict):
-                yaml_string += "  " * indent + f"{key}:\n" + self.custom_dump(value, indent + 1)
+                if not value:
+                    yaml_string += "  " * indent + f"{key}: N/A\n"
+                else:
+                    yaml_string += "  " * indent + f"{key}:\n" + self.custom_dump(value, indent + 1)
             elif isinstance(value, list):
                 if not value:
                     yaml_string += "  " * indent + f"{key}: N/A\n"
@@ -704,6 +693,7 @@ class AMDSMILogger:
         tabular=False,
         dual_csv_output=False,
         dynamic=False,
+        emit_empty=False,
     ):
         """Print current output according to format and then destination
         params:
@@ -712,12 +702,17 @@ class AMDSMILogger:
             watching_output (bool) - True if printing watch output
             dynamic (bool) - Defaults to False. True turns on dynamic resizing for
                 left justified table output
+            emit_empty (bool) - JSON stdout only. If True, emit `[]` even when
+                there are no records, so consumers parsing stdout as JSON always
+                get a valid document instead of empty output
         return:
             Nothing
         """
         if self.is_json_format():
             self._print_json_output(
-                multiple_device_enabled=multiple_device_enabled, watching_output=watching_output
+                multiple_device_enabled=multiple_device_enabled,
+                watching_output=watching_output,
+                emit_empty=emit_empty,
             )
         elif self.is_csv_format():
             if dual_csv_output:
@@ -741,14 +736,18 @@ class AMDSMILogger:
                     multiple_device_enabled=multiple_device_enabled, watching_output=watching_output
                 )
 
-    def _print_json_output(self, multiple_device_enabled=False, watching_output=False):
+    def _print_json_output(
+        self, multiple_device_enabled=False, watching_output=False, emit_empty=False
+    ):
         if multiple_device_enabled:
             json_output = self.multiple_device_output
         else:
             json_output = [self.output]
 
         if self.destination == "stdout":
-            if json_output:
+            # Callers parsing stdout as JSON need a valid document even with no
+            # records; emit_empty renders that as `[]` instead of nothing.
+            if json_output or emit_empty:
                 json_std_output = json.dumps(json_output, indent=4)
                 print(json_std_output)
         else:  # Write output to file
@@ -1189,6 +1188,44 @@ class AMDSMILogger:
                     output_file.write(primary_table + "\n")
                     output_file.write(secondary_table)
 
+    # Header and row share one set of column widths so the labels stay above
+    # their right-justified values inside the fixed 80-character box.
+    PROCESS_TABLE_HEADER = (
+        "|  GPU      PID  Process Name     GTT_MEM  VRAM_MEM  MEM_USAGE   CU %     SDMA |"
+    )
+
+    @staticmethod
+    def _format_process_row(process):
+        gpu_id = str(process["gpu"]).rjust(4)
+        pid = str(process["pid"]).rjust(7)
+        if str(process["name"]) == "N/A":
+            process_name = "N/A".ljust(14)
+        else:
+            process_name = str(process["name"]).split("/")[-1][:14].ljust(14)
+        gtt_mem = str(process["gtt"]).rjust(8)
+        vram_mem = str(process["vram"]).rjust(8)
+        mem_usage = str(process["mem_usage"]).rjust(9)
+        if (
+            process["cu_occupancy"]["total_num_cu"] != "N/A"
+            and process["cu_occupancy"]["current_cu"] != "N/A"
+        ):
+            # Unit is conveyed by the "CU %" header; keep the value numeric so
+            # it fits its column and stays aligned with the "N/A" case.
+            cu_occupancy = str(
+                round(
+                    process["cu_occupancy"]["current_cu"]
+                    / process["cu_occupancy"]["total_num_cu"]
+                    * 100,
+                    1,
+                )
+            ).rjust(5)
+        else:
+            cu_occupancy = "N/A".rjust(5)
+        sdma_usage = str(process["sdma_usage"]).rjust(7)
+        return "| {0:4.4s}  {1:7.7s}  {2:14.14s}  {3:8.8s}  {4:8.8s}  {5:9.9s}  {6:5.5s}  {7:7.7s} |".format(
+            gpu_id, pid, process_name, gtt_mem, vram_mem, mem_usage, cu_occupancy, sdma_usage
+        )
+
     def print_default_output(self, output: Dict):
         # some template lines
         default_line_1 = (
@@ -1212,21 +1249,11 @@ class AMDSMILogger:
         rocm_version = "N/A"
         if output["version_info"]["rocm version"][0]:
             rocm_version = str(output["version_info"]["rocm version"][1]).ljust(8)
-        driver_version = output["version_info"]["amdgpu version"]
-        if driver_version == "N/A":
-            amdgpu_version = "N/A".ljust(8)
+        driver_info = output["version_info"]["amdgpu version"]
+        if driver_info == "N/A":
+            amdgpu_version = "N/A"
         else:
-            # Example driver version string for amdgpu: 6.8.0-60 : 'Linuxversion6.8.0-60-generic(buildd@lcy02-amd64-098)(x86_64-linux-gnu-gcc-12(Ubuntu12.3.0-1ubuntu1~22.04)12.3.0,GNUld(GNUBinutilsforUbuntu)2.38)#63~22.04.1-UbuntuSMPPREEMPT_DYNAMICTueApr2219:00:15UTC2'
-            # Extract version before "-generic" if it exists
-            if "-generic" in driver_version["driver_version"]:
-                # Extract version using regex to find pattern like "6.8.0-60"
-                match = re.search(r"(\d+\.\d+\.\d+-\d+)", driver_version["driver_version"])
-                if match:
-                    amdgpu_version = match.group(1)[:80]
-                else:
-                    amdgpu_version = "N/A"
-            else:
-                amdgpu_version = str(driver_version["driver_version"])[:80]
+            amdgpu_version = str(driver_info["driver_full_version"])
         fw_pldm_version = str(output["version_info"]["fw pldm version"])
         vbios_version = str(output["version_info"]["vbios version"])
         kernel_version = str(output["version_info"]["kernel version"])
@@ -1253,10 +1280,9 @@ class AMDSMILogger:
         print(default_line_1)
         print("| AMD-SMI            {0:<{w}s} |".format(amd_smi_version, w=_COL_WIDTH))
 
-        # Print amdgpu or kernel version based on availability, if neither then don't print
-        if amdgpu_version.strip() != "N/A":
+        if amdgpu_version != "N/A":
             print("| amdgpu Version:    {0:<{w}s} |".format(amdgpu_version, w=_COL_WIDTH))
-        elif kernel_version.strip() != "N/A":
+        elif kernel_version != "N/A":
             print("| OS kernel Version: {0:<{w}s} |".format(kernel_version, w=_COL_WIDTH))
 
         if rocm_version != "N/A":
@@ -1360,50 +1386,12 @@ class AMDSMILogger:
         # print process list of all GPUs last
         print(default_line_1)
         print("| Processes:                                                                   |")
-        print("|  GPU      PID  Process Name       GTT_MEM  VRAM_MEM  MEM_USAGE  CU %  SDMA   |")
+        print(self.PROCESS_TABLE_HEADER)
         print(default_line_5)
         elevated_permission_error = False
         if len(output["processes"]) != 0:
             for process in output["processes"]:
-                gpu_id = str(process["gpu"]).rjust(4)
-                pid = str(process["pid"]).rjust(7)
-                if str(process["name"]) == "N/A":
-                    process_name = "N/A".ljust(16)
-                else:
-                    process_name = str(process["name"]).split("/")[-1][:16].ljust(16)
-                gtt_mem = str(process["gtt"]).rjust(8)
-                vram_mem = str(process["vram"]).rjust(8)
-                mem_usage = str(process["mem_usage"]).rjust(9)
-                if (
-                    process["cu_occupancy"]["total_num_cu"] != "N/A"
-                    and process["cu_occupancy"]["current_cu"] != "N/A"
-                ):
-                    cu_occupancy = (
-                        str(
-                            round(
-                                process["cu_occupancy"]["current_cu"]
-                                / process["cu_occupancy"]["total_num_cu"]
-                                * 100,
-                                1,
-                            )
-                        )
-                        + " %"
-                    ).rjust(5)
-                else:
-                    cu_occupancy = "N/A".rjust(5)
-                sdma_usage = str(process["sdma_usage"]).rjust(5)
-                print(
-                    "| {0:4.4s}  {1:7.7s}  {2:16.16s}  {3:8.8s}  {4:8.8s}  {5:9.9s}  {6:5.5s}  {7:5.5s} |".format(
-                        gpu_id,
-                        pid,
-                        process_name,
-                        gtt_mem,
-                        vram_mem,
-                        mem_usage,
-                        cu_occupancy,
-                        sdma_usage,
-                    )
-                )
+                print(self._format_process_row(process))
                 if process["name"] == "N/A":
                     elevated_permission_error = True
         else:

@@ -1,13 +1,23 @@
 # Race Detector
 
-Detects synchronization hazards in AMD GPU kernels. Tracks in-flight
-memory events (loads, stores) and reports races when a register or LDS
-byte is accessed before the operation that produced it has been properly
-synchronized.
+Detects synchronization hazards in AMD GPU kernels. Tracks in-flight memory
+events (loads, stores) and reports races when a register or LDS memory is
+accessed before the operation that produced it has been properly synchronized.
 
-Currently detects intra-workgroup races — cases where the value read
-from a register or LDS location is ambiguous due to missing `s_waitcnt`
-or `s_barrier` instructions.
+Currently detects intra-workgroup races — cases where the value read from a
+register or LDS is not deterministic due to missing `s_waitcnt` or `s_barrier`
+instructions.
+
+## Target scope
+
+The race detector focuses on pre-GFX12 architectures. Its current end-to-end
+coverage exercises gfx950 (GFX9/CDNA4) and gfx1151 (GFX11.5/RDNA3.5). GFX12
+and later architectures are not supported. Some GFX12 split-counter behavior
+is already modeled and covered by plugin tests, including partial load waits
+and address-dependent FLAT counter participation. This partial
+coverage does not establish complete counter, scheduling, or writeback support;
+issue-time counter-capacity backpressure remains limited to CDNA1 through CDNA4
+and GFX11.
 
 ## Quick start
 
@@ -16,8 +26,8 @@ detection. For general rocjitsu build and usage instructions, see the
 [README](../README.md). For an overview of the plugin system and sink
 configuration, see [plugins.md](plugins.md).
 
-Build rocjitsu (see [building.md](building.md) for details). You don't
-need a physical GPU — the emulator runs entirely on the CPU.
+Build rocjitsu (see [building.md](building.md) for details). You don't need a
+physical GPU — the emulator runs entirely on the CPU.
 
 ```bash
 cd emulation/rocjitsu
@@ -27,9 +37,9 @@ cmake --build build
 
 ### Example: detecting a missing barrier
 
-Here's a small HIP kernel with a missing `__syncthreads()`. Each thread
-writes to shared memory and then reads from another thread's slot —
-without a barrier, those reads race with the writes.
+Here's a small HIP kernel with a missing `__syncthreads()`. Each thread writes
+to shared memory (LDS) and then reads from where another thread wrote — without
+a barrier. The reads race with the writes.
 
 ```c++
 // race_example.hip
@@ -57,27 +67,34 @@ int main() {
 }
 ```
 
-Compile it with `hipcc` or `amdclang++` (the `--offload-arch` must match
-the emulated GPU, which is gfx950 by default). If using `amdclang++`,
-pass `-O1` or higher — the emulator does not currently support
-unoptimized (`-O0`) GPU code objects. `hipcc` defaults to `-O3` so this
-isn't an issue there.
+Compile it with `hipcc` or `amdclang++`. The `--offload-arch` must match the
+emulated GPU, which depends on the config file you pass to rocjitsu (e.g.
+`gfx950_mi355x.json` emulates gfx950). If using `amdclang++`, pass `-O1` or
+higher — the emulator does not currently support unoptimized (`-O0`) GPU code
+objects. `hipcc` defaults to `-O3` so this isn't an issue there.
 
 ```bash
 hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
 # or: amdclang++ -O2 -o /tmp/race_example race_example.hip --offload-arch=gfx950
 ```
 
-Run it under the emulator with `RJ_RACE=1` to enable the race detector:
+Enable the race detector by adding it to the `plugins` section of your
+rocjitsu config file (`my_config.json`):
+
+```json
+{ "plugins": { "race": {} } }
+```
+
+Run it under the emulator:
 
 ```bash
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu -- /tmp/race_example
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 ```
 
-You should see output like:
+You should see output:
 
 ```
-RACE type=LDS reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
+RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
 Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
   ==>  ds_write_b32 v0, v1  ; <-- wave 1
        v_sub_u32_e32 v1, 0, v0
@@ -85,79 +102,266 @@ Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
 END_RACE
 ```
 
-This tells you that wave 1 wrote to LDS (`ds_write_b32`) and wave 0
-read from the same address (`ds_read_b32`) without a barrier in between.
-The fix is to add `__syncthreads()` between the write and the read.
+This tells you that dispatch 1 of `transpose_lds` reported a race: wave 1 wrote
+to LDS (`ds_write_b32`) and wave 0 read from the same address (`ds_read_b32`)
+without a barrier in between. The `kernel` field is a compact display name, and
+`symbol` is the exact ELF symbol when rocjitsu can resolve it. If a name cannot
+be resolved, rocjitsu reports `?` for the unresolved field. The fix is to add
+`__syncthreads()` between the write and the read.
 
 ### Running your own application
 
-Replace the binary path with your application. This works with any
-ROCm workload — compiled HIP/HSA binaries, Python scripts using PyTorch
-or JAX, multi-process launchers like `torchrun`, etc.
+Replace the binary path with your application. This works with any ROCm workload
+— compiled HIP/HSA binaries, Python scripts using PyTorch or JAX, multi-process
+launchers like `torchrun`, etc.
 
 ```bash
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu -- ./my_app
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu -- python my_script.py
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- python my_script.py
 ```
 
 To capture reports to a file instead of stderr (useful for CI or
-scripted workflows), set `RJ_SINKS=file` and `RJ_SINK_DIR`:
+scripted workflows), add a `sinks` section to your config:
+
+```json
+{
+  "plugins": { "race": {} },
+  "sinks": { "types": ["file"], "dir": "/tmp/output" }
+}
+```
 
 ```bash
-RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
-  build/tools/rocjitsu/rocjitsu -- ./my_app
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
 # Reports are written to /tmp/output/race.log
 ```
 
-## What is a race condition?
+## What is a race?
 
-A race occurs when the value read from a register or LDS byte is
-ambiguous due to unsynchronized access. On AMD GPUs, correct use of
-`s_waitcnt` (to wait for a wave's own memory operations to complete)
-and `s_barrier` (to synchronize waves within a workgroup) is required
-to avoid races. Some examples:
+A race occurs when the value read from a register or LDS memory is 'ambiguous'
+due to unsynchronized access. By 'ambiguous' we mean that it is theoretically
+possible to observe different values on different runs. On AMD GPUs, correct use
+of `s_waitcnt` (to wait for a wave's own memory operations to complete) and
+`s_barrier` (to synchronize waves within a workgroup) is required to avoid
+races. Some examples:
 
-1. A wave issues a global load into a VGPR, then reads that VGPR
-   before issuing `s_waitcnt vmcnt(0)`. The load may not have completed,
-   so the read value is undefined.
-2. Two waves in the same workgroup write to the same LDS address without
-   an intervening `s_barrier`. A subsequent read of that address produces
-   an ambiguous value because the order of the writes is unspecified.
+1. A wave issues a global load into a VGPR, then reads that VGPR before issuing
+   `s_waitcnt vmcnt(0)`. The load may not have completed, so the read value is
+   undefined.
+1. A wave issues a load into a VGPR, then an instruction overwrites that VGPR
+   before the load completes. The load may complete later and clobber the
+   instruction result.
+1. One wave in a workgroup writes to an LDS address. Another wave reads from
+   the same address without an intervening `s_barrier`. The read may see stale
+   data because the write may not have completed from the reader's perspective.
 
-## What it detects
+## What this plugin detects
 
-- **VGPR races**: a vector register is read before a pending global or
-  LDS load has completed (`s_waitcnt vmcnt` / `s_waitcnt lgkmcnt`
-  insufficient).
-- **SGPR races**: a scalar register is read before a pending scalar load
-  has completed (`s_waitcnt lgkmcnt` insufficient).
-- **LDS races**: an LDS byte is read or written by one wave while
-  another wave has an outstanding write to the same byte, without an
-  intervening `s_barrier`.
+- **VGPR races**: a vector register is read or overwritten by an instruction
+  before a pending global or LDS load has completed (`s_waitcnt vmcnt` /
+  `s_waitcnt lgkmcnt` insufficient).
+- **Scalar-register races**: an SGPR or TTMP is read or overwritten before a
+  pending scalar-memory load has completed. A later scalar load to the same
+  destination is also checked because scalar-memory results can complete out
+  of order.
+- **LDS races**: an LDS byte is read by one wave while another wave has an
+  outstanding write to the same byte, or written by one wave while another
+  wave has an outstanding read of the same byte, without an intervening
+  `s_barrier`;
+  or a wave reads bytes targeted by its own outstanding direct-to-LDS operation
+  before the required `s_waitcnt vmcnt`.
 
-Detection is at byte granularity: D16 (half-register) loads only flag
-races on the affected bytes, and LDS races are tracked per byte.
+Detection is at byte granularity: D16 (half-register) loads only flag races on
+the affected bytes, and LDS races are tracked per byte.
 
 ## How it works
 
-Each in-flight memory operation creates an **event** with a lifecycle:
+Every in-flight memory operation has an **event** that goes through the
+following lifecycle:
 
-1. **ACTIVE** — the operation is in flight. Accessing the destination
-   register or LDS byte is a race.
-2. **WAVE_COMPLETE** — `s_waitcnt` has retired the event for the owning
-   wave. Safe for the owning wave, but still a race if another wave
-   accesses the same LDS byte.
-3. **RETIRED** — `s_barrier` has synchronized all waves. The event is
-   fully retired and safe for everyone.
+1. **ACTIVE** — the operation is in flight. Ordinary DS operations issued by
+   the same wave remain ordered with respect to each other, so a later
+   same-wave DS read or write does not race solely because the earlier DS event
+   is still active. Direct-to-LDS VMEM writes still require the owning wave to
+   wait for `vmcnt` before reading the destination bytes.
+1. **WAVE_COMPLETE** — waits have satisfied every counter obligation for the
+   event. This means the event is no longer in flight from the perspective of
+   the wave that issued the operation, but is still in flight from the
+   perspective of other waves in the same workgroup.
+1. **RETIRED** — `s_barrier` has synchronized all waves. The event is fully
+   retired and, from the perspective of all threads in all wavefronts, the
+   operation is complete.
 
-**LDS race detection** uses per-byte counters for fast-path checks, with
-interval-based overlap scanning as a fallback. Live events are split by
-direction so that RAW and WAR hazards are checked independently.
+Generic `FLAT_*` instructions select counter domains from their resolved memory
+requests. Global and scratch requests use the vector-memory counter; LDS
+requests use the LDS counter. An instruction with requests in both domains uses
+both counters. The runtime applies this conditional-participation model across
+AMD GPU targets, for loads, stores and atomics. Validation on every physical GPU
+architecture is not established.
 
-**VGPR race detection** tracks events per register, using the stored
-exec mask to determine which lanes are affected. Tracking is at byte
-granularity within each 32-bit VGPR so that D16 instructions do not
-cause false positives when the other half is accessed independently.
+For uniform requests, the race detector uses only the selected memory domain.
+For example, on gfx950 with global addresses in every requesting lane, this use
+of `v8` has a sufficient wait:
+
+```asm
+flat_load_dword v8, v[0:1]
+s_waitcnt vmcnt(0)
+flat_store_dword v[2:3], v8
+```
+
+LDS-only loads instead require `lgkmcnt(0)`. Newer targets use their corresponding
+split counters. Routing preserves decoded completion ordering and independent
+obligations such as EXPCNT. In particular, CDNA4 FLAT completion stays unordered;
+a nonzero wait cannot prove a result ready.
+
+Functional counter acquisition and both runtime checkers use the selected memory
+domains. FLAT capacity constraints are applied after addresses are resolved.
+Before reading the address operands, neither domain is guaranteed to need a
+counter slot. A full LDS counter followed by a global-only FLAT therefore cannot
+prove an older LDS result complete.
+
+A mixture of global and scratch lanes uses the same VMEM domain. Mixed LDS/global
+observations still attach both obligations to the whole race-plugin event, so a
+consumer restricted to an already-completed lane group can still get a false
+report. `TODO(newling)` regression cases track this remaining #12237 gap. The
+core checker's [FLAT register-readiness policy](memory-wait-counter-coverage.md#flat-register-readiness)
+tracks the groups separately. Mixed LDS/global functional execution remains
+limited by first-request-lane routing, tracked separately in #11456.
+
+An all-ones wait-count field is the architectural “do not wait” value. CDNA's
+four-bit `lgkmcnt(15)` and six-bit `vmcnt(63)` therefore retire no events;
+`lgkmcnt(14)` and `vmcnt(62)` are the largest values that can impose an
+explicit wait. Hardware also prevents counter overflow by stalling issue.
+
+The physical LGKMCNT capacity is shared by every event accounted to LGKMCNT,
+including LDS, GDS, scalar-memory, and message operations. Sharing that counter
+does not mean those event classes complete in order with each other. The
+detector therefore retires only the oldest prefix that is provably complete in
+an ordered class. For example, a new LGKM-counted instruction issued after 15
+pending local-LDS operations proves that the oldest LDS operation completed,
+even when the new instruction is scalar memory or GDS. Mixed-class pressure
+that does not identify a completed event remains conservatively pending. VMCNT
+is handled the same way for its 63-entry ordered non-FLAT VMEM class.
+
+The detector's persistent counter accounting is limited to operations routed
+through rocJITsu's memory pipelines. A narrow `s_sendmsg*` fallback applies one
+token of issue-time LGKMCNT pressure, but message occupancy and returning
+message results are not retained as pending events. Timestamp-query operations
+such as `s_memtime` and `s_memrealtime` are not accounted for. These operations
+therefore remain unsupported rather than being treated as complete message or
+timestamp modeling.
+
+For example, CDNA cannot issue the final scalar load below while all 15 earlier
+LGKM tokens remain outstanding:
+
+```asm
+ds_read_b32 v0, v16
+ds_read_b32 v1, v16
+; ... 13 more ordered LDS reads, through v14 ...
+s_load_dword s4, s[2:3], 0
+```
+
+The scalar load can issue only after the LGKMCNT value drops below its
+four-bit capacity. Because all preceding operations are ordered LDS reads, this
+proves that the oldest read into `v0` completed. If those pending operations
+belonged to different or unordered classes, the capacity stall would not prove
+which individual event completed.
+
+The detector records the target-specific wait-counter family on every event.
+It handles both the combined wait fields and the standalone counter forms on
+supported targets, for example:
+
+```asm
+s_waitcnt vmcnt(0) lgkmcnt(0)  ; combined fields
+s_waitcnt_vmcnt null, 0        ; standalone VMCNT form
+s_waitcnt_lgkmcnt null, 0      ; standalone LGKMCNT form
+```
+
+Counter-capacity backpressure is modeled for the VMCNT and LGKMCNT domains on
+CDNA1 through CDNA4 and GFX11. CDNA uses a four-bit LGKMCNT and six-bit VMCNT;
+GFX11 uses six-bit fields for both. GFX11 vector stores use the separate VSCNT
+domain and therefore do not create VMCNT pressure. Generic FLAT contributes to
+both modeled domains, so both capacity constraints are applied before operand
+reads.
+
+The same completion-order distinction is used for nonzero partial waits; a
+zero wait still completes every event on the selected counter. The detector
+also uses these classes to determine whether two asynchronous writes to the
+same VGPR are ordered.
+
+The plugin keeps track, for all registers and LDS memory bytes, of which memory
+operations are in flight. When an instruction in the emulator accesses an LDS
+byte, there is a check to see what memory events are still in flight that
+read/write that byte, from the perspective of the accessing thread. In this way,
+RAW (read-after-write) and WAR (write-after-read) hazards can be detected.
+For VGPRs and scalar registers, the detector also flags WAW when an instruction
+write can be clobbered by a pending asynchronous load. The detector also reports
+WAW between scalar loads targeting the same SGPR or TTMP.
+
+On architectures where scalar-memory and data-share operations use a combined
+`lgkmcnt`, a nonzero partial wait cannot identify which scalar destination has
+completed. Those scalar destinations remain pending until `lgkmcnt(0)`. The
+same partial wait can still retire older data-share operations that are provably
+complete from their in-order completion rule.
+
+**LDS race detection** uses coarse-grained counters (one per 16-byte chunk) for
+fast-path checks, with interval-based overlap scanning as a fallback. Live
+events are split by direction so that RAW and WAR hazards are checked
+independently.
+
+**VGPR race detection** tracks events per register, using the stored exec mask
+to determine which lanes are affected. Tracking is at byte granularity within
+each 32-bit VGPR so that D16 instructions do not cause false positives when the
+other half is accessed independently.
+
+### Worked example
+
+The transpose kernel above compiles to something like this (simplified):
+
+```asm
+ds_write_b32 ...                ; tile[tid] = in[tid]
+s_waitcnt lgkmcnt(0)            ; wait for own LDS write
+                                ; BUG: no s_barrier here
+ds_read_b32 ...                 ; out[tid] = tile[127 - tid]
+```
+
+Two waves in the same workgroup execute this code. Each wave's write address
+overlaps the other wave's read address (because `127 - tid` crosses the wave
+boundary). Below is one possible interleaving — the detector will find the race
+regardless of the order the waves execute in:
+
+1. **Wave 0 executes `ds_write_b32`.** The detector allocates an event for the
+   LDS write. Status: **ACTIVE**. The event records the byte range written
+   (lane 0 writes bytes 0–3 for `tile[0]`) and is added to the live write list.
+   Coarse-grained write counts (one counter per 16-byte chunk) for the affected
+   region are incremented.
+
+1. **Wave 0 executes `s_waitcnt lgkmcnt(0)`.** This drains wave 0's lgkmcnt
+   counter. The write event transitions from **ACTIVE** to **WAVE_COMPLETE**. It
+   is now safe for wave 0 to access those bytes, but the event remains in the
+   live write list — other waves have not synchronized yet.
+
+1. **Wave 1 executes `ds_write_b32`.** A separate event is allocated for wave
+   1's write (lane 63 writes bytes 508–511 for `tile[127]`). Status: **ACTIVE**.
+
+1. **Wave 1 executes `s_waitcnt lgkmcnt(0)`.** Wave 1's event transitions to
+   **WAVE_COMPLETE**.
+
+1. **Wave 0 executes `ds_read_b32`.** Lane 0 reads `tile[127 - 0]` = bytes
+   508–511, the address wave 1 wrote. The detector validates that no live writes
+   overlap:
+
+    - *Fast path*: the write count for the 16-byte chunk containing byte 508 is
+      non-zero (wave 1's write is still live). Falls through to slow path.
+    - *Slow path*: scans live write events. Finds wave 1's event covering bytes
+      508–511. The event is **WAVE_COMPLETE**, not **RETIRED**, and the accessing
+      wave (0) differs from the owning wave (1).
+    - **Race reported.**
+
+1. **What `s_barrier` would fix.** If an `s_barrier` had appeared between steps
+   4 and 5, the detector would flush all **WAVE_COMPLETE** events to
+   **RETIRED**: they are removed from the live write list and the chunk-level
+   write counts are decremented back to zero. The subsequent read validation
+   finds no live writes — no race.
 
 ## Directory layout
 
@@ -165,66 +369,71 @@ Source files are under `lib/rocjitsu/src/rocjitsu/vm/plugins/race_detector/`:
 
 ```
 race_detector/
-├── plugin.h/.cpp          rocjitsu plugin adapter (translates hooks to core API)
-└── core/                  detection algorithm (does not depend on rocjitsu types)
-    ├── race_detector.h/.cpp   main detector: event allocation, validation, retirement
-    ├── wave_race_state.h/.cpp per-wave state: register tracking, waitcnt resolution
-    ├── event_registry.h       append-only event store with prefix trimming
-    ├── interval_set.h         half-open byte range tracking for LDS
-    ├── types.h                core enum types and structs
-    ├── common_register.h      SGPR/VGPR classification helpers
-    ├── dim3d.h                3D coordinate helpers
-    └── profiler_interface.h   optional hook profiling
+├── plugin.h/.cpp            rocjitsu plugin adapter (translates hooks to core API)
+└── core/                    detection algorithm (does not depend on rocjitsu types)
+    ├── race_detector.h/.cpp  main detector: event allocation, validation, retirement
+    ├── wave_race_state.h/.cpp  per-wave state: register tracking, waitcnt resolution
+    ├── event_registry.h      append-only event store with prefix trimming
+    ├── interval_set.h        half-open byte range tracking for LDS
+    ├── types.h               core enum types and structs
+    ├── common_register.h     SGPR/VGPR classification helpers
+    ├── dim3d.h               3D coordinate helpers
+    └── profiler_interface.h  optional hook profiling
 ```
 
 ## Tests
 
 Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
 
-- `race_detector_tests.cpp` — drives `RaceDetector` and `WaveRaceState`
-  directly via `race_test_builder.h`, covering VGPR, SGPR, LDS, D16,
-  DTL, exec mask, multi-workgroup, and mixed counter scenarios.
+- `race_detector_tests.cpp` — drives `RaceDetector` and `WaveRaceState` directly
+  via `race_test_builder.h`, covering VGPR, SGPR, LDS, D16, DTL, exec mask,
+  multi-workgroup, and mixed counter scenarios.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
-- `hip_race_tests.hip` — end-to-end HIP kernel tests run under the
-  emulator with `RJ_RACE=1`.
+- `hip_race_gfx950_test.hip` and `hip_race_gfx1151_test.hip` — end-to-end HIP
+  kernel tests run under the emulator with the `race` plugin enabled in the
+  config file.
 
 ```bash
 # Core detection tests
 ctest --test-dir build -R "RaceDetector|IntervalSet"
 
-# End-to-end HIP tests (RJ_RACE=1 is set automatically by ctest)
-ctest --test-dir build -R "RaceTest"
+# End-to-end HIP tests (the test config enables the race plugin)
+ctest --test-dir $BUILD_DIR -R "RaceTest"
 ```
 
 ## Limitations
 
-- **Performance**: rocjitsu emulates GPU execution on the CPU, which is
-  orders of magnitude slower than running on actual hardware. Race
-  detection adds further overhead on top of emulation. This is a
-  correctness tool, not a performance tool — use small inputs and
-  targeted test cases rather than full production workloads.
+- **Performance**: rocjitsu emulates GPU execution on the CPU, which is orders
+  of magnitude slower than running on actual hardware. Race detection adds
+  further overhead on top of emulation. This is a correctness tool, not a
+  performance tool — use small inputs and targeted test cases rather than full
+  production workloads.
 
-- **Intra-workgroup only**: the detector tracks races within a single
-  workgroup (missing `s_waitcnt` and `s_barrier`). It does not detect
-  inter-workgroup races, races between dispatches, or host-device
-  synchronization issues.
+- **Intra-workgroup only**: the detector tracks races within a single workgroup
+  (missing `s_waitcnt` and `s_barrier`). It does not detect inter-workgroup
+  races, races between dispatches, or host-device synchronization issues.
 
-- **No WAW detection**: write-after-write hazards are not currently
-  flagged. This includes both LDS WAW (two waves writing to the same
-  LDS byte without a barrier) and VGPR WAW (an ALU instruction
-  overwriting a register that has a pending global load).
+- **Limited WAW detection**: VGPR WAW covers instruction writes and
+  asynchronous memory writes that overlap a pending load. Scalar-register WAW
+  covers instruction writes and scalar loads that overlap pending scalar-memory
+  destinations. LDS WAW is not currently reported.
 
-- **Kernel name resolution**: kernel names in race reports may show as
-  `"?"` if symbol information is not available in the code object.
+- **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
+  plugin's instruction-write lane and byte masks. DPP destinations can currently
+  report all active lanes, and SDWA preserve-mode destinations can report a full
+  dword, so writes to architecturally preserved lanes or bytes may be
+  conservatively reported as races.
+
+- **Kernel name resolution**: kernel names in race reports may show as `"?"` if
+  symbol information is not available in the code object.
 
 ## History
 
-The race detection logic was originally developed as part of
-**race-emulator**, a standalone CPU-side GPU assembly emulator that
-parsed `.s` assembly text files.
+The race detection logic was originally developed as part of **race-emulator**,
+a standalone CPU-side GPU assembly emulator that parsed `.s` assembly text
+files.
 
-The detection logic is independent of any particular emulation
-approach — it operates on abstract memory events (register loads, LDS
-accesses, waitcnt, barrier) regardless of how those events are produced.
-The emulation part of race-emulator is no longer under development;
-rocjitsu is used for emulation.
+The detection logic is independent of any particular emulation approach — it
+operates on abstract memory events (register loads, LDS accesses, waitcnt,
+barrier) regardless of how those events are produced. The emulation part of
+race-emulator is no longer under development; rocjitsu is used for emulation.

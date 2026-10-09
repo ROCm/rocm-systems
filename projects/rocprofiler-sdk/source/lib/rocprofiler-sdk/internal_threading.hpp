@@ -31,6 +31,7 @@
 #include <PTL/TaskManager.hh>
 #include <PTL/ThreadPool.hh>
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -69,9 +70,18 @@ private:
     std::deque<std::shared_ptr<task_type>> m_tasks           = {};
     std::deque<std::shared_ptr<task_type>> m_completed_tasks = {};
     std::atomic<bool>                      m_async_only      = true;
+    // Fork generation the pool was constructed in. ~TaskGroup() leaks m_pool
+    // rather than joining vanished workers when this is stale (see fork_stale).
+    uint64_t m_fork_generation = 0;
 };
 
 using task_group_t = TaskGroup;
+
+// True in a fork child: g_fork_generation != 0. The inline interposition pool
+// and its gate are never legitimately recreated in a child, so a nonzero
+// generation is conclusive (see D4/D6).
+bool
+fork_stale();
 
 void notify_pre_internal_thread_create(rocprofiler_runtime_library_t);
 void notify_post_internal_thread_create(rocprofiler_runtime_library_t);

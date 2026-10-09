@@ -145,6 +145,45 @@ declare -A TEST_NUMBERS=(
   ["host_int_amo_fcswap"]="128"
   ["host_amo_all_pes"]="129"
   ["host_amo_self"]="130"
+  ["host_amo_add"]="131"
+  ["tile_broadcast"]="132"
+  ["tile_broadcast_wave"]="133"
+  ["tile_broadcast_wg"]="134"
+  ["tile_allgather"]="135"
+  ["tile_allgather_wave"]="136"
+  ["tile_allgather_wg"]="137"
+  ["host_wait_until"]="138"
+  ["host_test"]="139"
+  ["host_wait_until_all"]="140"
+  ["host_wait_until_any"]="141"
+  ["host_wait_until_some"]="142"
+  ["host_wait_until_all_vector"]="143"
+  ["host_wait_until_any_vector"]="144"
+  ["host_wait_until_some_vector"]="145"
+  ["host_wait_until_all_status"]="146"
+  ["host_wait_until_any_status"]="147"
+  ["host_wait_until_some_status"]="148"
+  ["teamreducescatter"]="149"
+  ["broadcast_wave"]="150"
+  ["alltoall_wave"]="151"
+  ["fcollect_wave"]="152"
+  ["reduce_wave"]="153"
+  ["reducescatter_wave"]="154"
+  ["tile_reduce"]="155"
+  ["tile_reduce_wave"]="156"
+  ["tile_reduce_wg"]="157"
+  ["buffer_register_symmetric"]="162"
+  ["tile_put_wave_rowmajor"]="163"
+  ["tile_put_wave_colmajor"]="164"
+  ["tile_get_wave_rowmajor"]="165"
+  ["tile_get_wave_colmajor"]="166"
+  ["tile_put_wg_rowmajor"]="167"
+  ["tile_put_wg_colmajor"]="168"
+  ["tile_get_wg_rowmajor"]="169"
+  ["tile_get_wg_colmajor"]="170"
+  ["signaladd"]="171"
+  ["signalset"]="172"
+  ["signalwaituntil"]="173"
 )
 
 # Detect which runtime to use
@@ -158,8 +197,84 @@ else
   USE_SLR=0
 fi
 
+# Detect wavefront size and grid-sync residency limits based on GPU architecture.
+# gfx1100/gfx1201/gfx1250 have wavefront size 32, most others have 64.
+# GRID_SYNC_MAX_THREADS applies only to functional tests whose kernels use the
+# software grid_barrier occupancy guard. A value of 0 disables driver-side adjustment.
+# It can be overridden with ROCSHMEM_TEST_GRID_SYNC_MAX_THREADS.
+WAVE_SIZE=64
+GPU_ARCH=""
+GRID_SYNC_MAX_THREADS=0
+if command -v rocminfo >/dev/null 2>&1; then
+  GPU_ARCH=$(rocminfo 2>/dev/null | grep -m1 -Eo "gfx[0-9a-z]+" || true)
+  if [[ "$GPU_ARCH" =~ ^(gfx1100|gfx1201|gfx1250)$ ]]; then
+    WAVE_SIZE=32
+  fi
+  if [[ "$GPU_ARCH" =~ ^(gfx1100|gfx1201)$ ]]; then
+    GRID_SYNC_MAX_THREADS=$((32 * 1024))
+  fi
+fi
+GRID_SYNC_MAX_THREADS=${ROCSHMEM_TEST_GRID_SYNC_MAX_THREADS:-$GRID_SYNC_MAX_THREADS}
+
+IsGridBarrierOccupancyLimitedTest() {
+  case "$1" in
+    get|getnbi|put|putnbi|p|g|\
+    defaultctxget|defaultctxgetnbi|defaultctxput|defaultctxputnbi|defaultctxp|defaultctxg|\
+    teamctxget|teamctxgetnbi|teamctxput|teamctxputnbi|\
+    waveget|wavegetnbi|waveput|waveputnbi|\
+    wgget|wggetnbi|wgput|wgputnbi|\
+    flood_add|flood_fadd|flood_waitadd)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+AdjustGridBarrierProblemSize() {
+  local test_name=$1
+  local num_wg=$2
+  local num_threads=$3
+
+  if (( GRID_SYNC_MAX_THREADS <= 0 )); then
+    echo "$num_wg"
+    return
+  fi
+
+  if ! IsGridBarrierOccupancyLimitedTest "$test_name"; then
+    echo "$num_wg"
+    return
+  fi
+
+  local requested_threads=$((num_wg * num_threads))
+  if (( requested_threads <= GRID_SYNC_MAX_THREADS )); then
+    echo "$num_wg"
+    return
+  fi
+
+  local adjusted_wg=$((GRID_SYNC_MAX_THREADS / num_threads))
+  if (( adjusted_wg < 1 )); then
+    adjusted_wg=1
+  fi
+
+  echo "Adjust: $test_name workgroups $num_wg -> $adjusted_wg for ${GPU_ARCH:-unknown GPU} grid_barrier residency limit (${GRID_SYNC_MAX_THREADS} threads, -z $num_threads)" >&2
+  echo "$adjusted_wg"
+}
+
 # Router function - dispatches to appropriate implementation
 ExecTest() {
+  if [[ "$1" == "buffer_register_symmetric" ]]; then
+    local selected_backend="${ROCSHMEM_BACKEND:-${ROCSHMEM_BACKEND_TYPE:-$TEST}}"
+    local heap_allocator="${ROCSHMEM_HEAP_ALLOCATOR_TYPE:-}"
+    heap_allocator="${heap_allocator,,}"
+    if [[ "$heap_allocator" != "vmm_posix" &&
+          "$heap_allocator" != "vmm_fabric" ]]; then
+      echo "Skip:   buffer_register_symmetric (set ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix or vmm_fabric)"
+      return
+    fi
+  fi
+
   if [ $USE_SLR -eq 1 ]; then
     ExecTest_SLR "$@"
   else
@@ -174,7 +289,8 @@ ExecTest_SLR() {
   NUM_WG=$3
   NUM_THREADS=$4
   MAX_MSG_SIZE=$5
-  IS_RETRY=${6:-0}  # Optional 6th parameter to indicate if this is a retry
+  NUM_WF=${6:-0}    # Optional 6th parameter: number of wavefronts (0 = use NUM_THREADS directly)
+  IS_RETRY=${7:-0}  # Optional 7th parameter to indicate if this is a retry
 
   if [[ "" == "$NOTIMEOUT" ]]; then
     TIMEOUT=$((5 * 60)) # Timeout in seconds
@@ -201,10 +317,9 @@ ExecTest_SLR() {
     return
   fi
 
-  if [[ "" == "$ROCSHMEM_MAX_NUM_CONTEXTS" ]]
-  then
-    ROCSHMEM_MAX_NUM_CONTEXTS=$NUM_WG
-  fi
+  NUM_WG=$(AdjustGridBarrierProblemSize "$TEST_NAME" "$NUM_WG" "$NUM_THREADS")
+
+  local max_num_contexts="${ROCSHMEM_MAX_NUM_CONTEXTS:-$NUM_WG}"
 
   # Build command as an array using SLR instead of MPI
   local -a cmd
@@ -213,7 +328,7 @@ ExecTest_SLR() {
   # Build environment variable list
   env_vars=(
     "ROCSHMEM_SLR_NP=$NUM_RANKS"
-    "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
+    "ROCSHMEM_MAX_NUM_CONTEXTS=$max_num_contexts"
     "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
   )
 
@@ -224,10 +339,18 @@ ExecTest_SLR() {
   if [[ -n "${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}" ]]; then
     env_vars+=("ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM")
   fi
+  if [[ "$TEST_NAME" == "buffer_register_symmetric" &&
+        "${selected_backend:-}" == gda* ]]; then
+    env_vars+=("ROCSHMEM_DISABLE_MIXED_IPC=1")
+  fi
   # Note: ROCSHMEM_TEST_UUID not needed - SLR always uses uniqueid approach
 
   # Construct Test Command
-  TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
+  if (( NUM_WF > 0 )); then
+    TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_wf"$NUM_WF"
+  else
+    TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
+  fi
 
   # Build the command with timeout if specified
   if [[ -n "$TIMEOUT" ]]; then
@@ -237,7 +360,11 @@ ExecTest_SLR() {
   fi
 
   # Add environment variables and application
-  cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap})
+  if (( NUM_WF > 0 )); then
+    cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" --num-wf "$NUM_WF" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap})
+  else
+    cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap})
+  fi
 
   if [[ "" != "$MAX_MSG_SIZE" ]]
   then
@@ -282,7 +409,7 @@ ExecTest_SLR() {
       # Track failed tests with their parameters for potential retry
       # Capture environment/config state to ensure retry runs under same conditions
       FAILED_LIST="$FAILED_LIST $TEST_LOG_NAME"
-      FAILED_TESTS+=("$TEST_NAME|$NUM_RANKS|$NUM_WG|$NUM_THREADS|$MAX_MSG_SIZE|${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}|${ROCSHMEM_MAX_NUM_CONTEXTS:-}|${NOTIMEOUT:-}|${NOVERIF:-}")
+      FAILED_TESTS+=("$TEST_NAME|$NUM_RANKS|$NUM_WG|$NUM_THREADS|$MAX_MSG_SIZE|${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}|${ROCSHMEM_MAX_NUM_CONTEXTS:-}|${NOTIMEOUT:-}|${NOVERIF:-}|$NUM_WF")
     else
       # Track tests that failed even after retry
       RETRY_FAILED_LIST="$RETRY_FAILED_LIST $TEST_LOG_NAME"
@@ -305,7 +432,8 @@ ExecTest_MPI() {
   NUM_WG=$3
   NUM_THREADS=$4
   MAX_MSG_SIZE=$5
-  IS_RETRY=${6:-0}  # Optional 6th parameter to indicate if this is a retry
+  NUM_WF=${6:-0}    # Optional 6th parameter: number of wavefronts (0 = use NUM_THREADS directly)
+  IS_RETRY=${7:-0}  # Optional 7th parameter to indicate if this is a retry
 
   if [[ "" == "$NOTIMEOUT" ]]; then
     TIMEOUT=$((5 * 60)) # Timeout in seconds
@@ -331,10 +459,9 @@ ExecTest_MPI() {
     return
   fi
 
-  if [[ "" == "$ROCSHMEM_MAX_NUM_CONTEXTS" ]]
-  then
-    ROCSHMEM_MAX_NUM_CONTEXTS=$NUM_WG
-  fi
+  NUM_WG=$(AdjustGridBarrierProblemSize "$TEST_NAME" "$NUM_WG" "$NUM_THREADS")
+
+  local max_num_contexts="${ROCSHMEM_MAX_NUM_CONTEXTS:-$NUM_WG}"
 
   # MPI Parameters
   LAUNCHER=mpirun
@@ -351,23 +478,41 @@ ExecTest_MPI() {
 
   # Build command as an array to avoid command injection with eval
   local -a cmd
+  local -a test_env_args
+  test_env_args=()
+  if [[ "$TEST_NAME" == "buffer_register_symmetric" ]]; then
+    test_env_args+=(
+      -x "ROCSHMEM_TEST_UUID=1"
+      -x "ROCSHMEM_HEAP_ALLOCATOR_TYPE=$ROCSHMEM_HEAP_ALLOCATOR_TYPE"
+    )
+    if [[ "${selected_backend:-}" == gda* ]]; then
+      test_env_args+=(-x "ROCSHMEM_DISABLE_MIXED_IPC=1")
+    fi
+  fi
+
   cmd=( "$LAUNCHER"
         -n "$NUM_RANKS"
         -mca pml "${OMPI_MCA_pml:-ucx}"
         -mca osc "${OMPI_MCA_osc:-ucx}"
-        -x "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
+        -x "ROCSHMEM_MAX_NUM_CONTEXTS=$max_num_contexts"
         -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
         -x "ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-$HEAP_SIZE}"
         ${ROCSHMEM_MAX_NUM_HOST_CONTEXTS:+-x "ROCSHMEM_MAX_NUM_HOST_CONTEXTS=$ROCSHMEM_MAX_NUM_HOST_CONTEXTS"}
         ${ROCSHMEM_TEST_USE_DEFAULT_STREAM:+-x "ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM"}
         ${ROCSHMEM_TEST_UUID:+-x "ROCSHMEM_TEST_UUID=$ROCSHMEM_TEST_UUID"}
+        "${test_env_args[@]}"
         ${TIMEOUT:+--timeout "$TIMEOUT"}
         ${HOSTFILE:+--hostfile "$HOSTFILE"}
         --map-by numa
       )
   # Construct Test Command
-  TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
-  cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} ${ROCSHMEM_TEST_ARGS:-} )
+  if (( NUM_WF > 0 )); then
+    TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_wf"$NUM_WF"
+    cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" --num-wf "$NUM_WF" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} ${ROCSHMEM_TEST_ARGS:-} )
+  else
+    TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
+    cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} ${ROCSHMEM_TEST_ARGS:-} )
+  fi
   if [[ "" != "$MAX_MSG_SIZE" ]]
   then
     # Check if in volume mode
@@ -408,7 +553,7 @@ ExecTest_MPI() {
       # Track failed tests with their parameters for potential retry
       # Capture environment/config state to ensure retry runs under same conditions
       FAILED_LIST="$FAILED_LIST $TEST_LOG_NAME"
-      FAILED_TESTS+=("$TEST_NAME|$NUM_RANKS|$NUM_WG|$NUM_THREADS|$MAX_MSG_SIZE|${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}|${ROCSHMEM_MAX_NUM_CONTEXTS:-}|${NOTIMEOUT:-}|${NOVERIF:-}")
+      FAILED_TESTS+=("$TEST_NAME|$NUM_RANKS|$NUM_WG|$NUM_THREADS|$MAX_MSG_SIZE|${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}|${ROCSHMEM_MAX_NUM_CONTEXTS:-}|${NOTIMEOUT:-}|${NOVERIF:-}|$NUM_WF")
     else
       # Track tests that failed even after retry
       RETRY_FAILED_LIST="$RETRY_FAILED_LIST $TEST_LOG_NAME"
@@ -492,9 +637,13 @@ TestRMAPut() {
   ExecTest  "putnbi"           2       32           128       512
   unset LOCALBUFTYPE
 
-  export LOCALBUFTYPE=managed
-  ExecTest  "putnbi"           2       32           128       512
-  unset LOCALBUFTYPE
+  if [[ "$GPU_ARCH" != "gfx1100" ]]; then
+    export LOCALBUFTYPE=managed
+    ExecTest  "putnbi"           2       32           128       512
+    unset LOCALBUFTYPE
+  else
+    echo "Skip:   putnbi_localbuftype=managed (gfx1100: hipMallocManaged not supported)"
+  fi
 }
 
 TestRMAGet() {
@@ -570,9 +719,13 @@ TestRMAGet() {
     ExecTest  "getnbi"           2       32           128       512
     unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=managed
-    ExecTest  "getnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+    if [[ "$GPU_ARCH" != "gfx1100" ]]; then
+      export LOCALBUFTYPE=managed
+      ExecTest  "getnbi"           2       32           128       512
+      unset LOCALBUFTYPE
+    else
+      echo "Skip:   getnbi_localbuftype=managed (gfx1100: hipMallocManaged not supported)"
+    fi
   fi
 }
 
@@ -647,6 +800,10 @@ TestSigOps() {
   ExecTest  "wgsignalfetch"    2       2            32
   ExecTest  "wavesignalfetch"  2       1            32
   ExecTest  "wavesignalfetch"  2       1            64
+
+  ExecTest  "signaladd"        2       2            32
+  ExecTest  "signalset"        2       2            32
+  ExecTest  "signalwaituntil"  2       1            1
 }
 
 TestColl() {
@@ -654,6 +811,8 @@ TestColl() {
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
   ExecTest  "syncall"          2       1            1
+  ExecTest  "syncall"          3       1            1
+  ExecTest  "syncall"          5       1            1
 
   ExecTest  "wavesyncall"      2       1            1
 
@@ -663,6 +822,8 @@ TestColl() {
   ExecTest  "teamsync"         2       16           64
   ExecTest  "teamsync"         2       32           256
   ExecTest  "teamsync"         2       39           1024
+  ExecTest  "teamsync"         3       16           64
+  ExecTest  "teamsync"         5       16           64
 
   ExecTest  "teamwavesync"     2       1            1
   ExecTest  "teamwavesync"     2       16           64
@@ -675,6 +836,8 @@ TestColl() {
   ExecTest  "teamwgsync"       2       39           1024
 
   ExecTest  "barrierall"       2       1            1
+  ExecTest  "barrierall"       3       1            1
+  ExecTest  "barrierall"       5       1            1
 
   ExecTest  "wavebarrierall"   2       1            1
 
@@ -684,6 +847,8 @@ TestColl() {
   ExecTest  "teambarrier"      2       16           64
   ExecTest  "teambarrier"      2       32           256
   ExecTest  "teambarrier"      2       39           1024
+  ExecTest  "teambarrier"      3       16           64
+  ExecTest  "teambarrier"      5       16           64
 
   ExecTest  "teamwavebarrier"  2       1            1
   ExecTest  "teamwavebarrier"  2       16           64
@@ -696,12 +861,38 @@ TestColl() {
   ExecTest  "teamwgbarrier"    2       39           1024
 
   ExecTest  "alltoall"         2       1            64        512
+  ExecTest  "alltoall"         3       1            64        512
+  ExecTest  "alltoall"         5       1            64        512
 
   ExecTest  "teambroadcast"    2       1            64        32768
+  ExecTest  "teambroadcast"    3       1            64        32768
+  ExecTest  "teambroadcast"    5       1            64        32768
 
   ExecTest  "fcollect"         2       1            64        32768
+  ExecTest  "fcollect"         3       1            64        32768
+  ExecTest  "fcollect"         5       1            64        32768
 
   ExecTest  "teamreduction"    2       1            64        32768
+  ExecTest  "teamreduction"    3       1            64        32768
+  ExecTest  "teamreduction"    4       1            64        32768
+  ExecTest  "teamreduction"    8       1            64        32768
+
+  ExecTest  "teamreducescatter" 2      1            64        32768
+  ExecTest  "teamreducescatter" 4      1            64        32768
+  ExecTest  "teamreducescatter" 8      1            64        32768
+
+  if [[ $TEST != ro* ]]; then #AIROCSHMEM-409: wave tests not supported on RO
+    #       | Name                | Ranks | Workgroups | Threads    | Max Message Size #
+    ExecTest  "broadcast_wave"      2       1            $WAVE_SIZE   32768
+    ExecTest  "alltoall_wave"       2       1            $WAVE_SIZE   512
+    ExecTest  "fcollect_wave"       2       1            $WAVE_SIZE   32768
+    ExecTest  "reduce_wave"         2       1            $WAVE_SIZE   32768
+    ExecTest  "reduce_wave"         4       1            $WAVE_SIZE   32768
+    ExecTest  "reduce_wave"         8       1            $WAVE_SIZE   32768
+    ExecTest  "reducescatter_wave"  2       1            $WAVE_SIZE   32768
+    ExecTest  "reducescatter_wave"  4       1            $WAVE_SIZE   32768
+    ExecTest  "reducescatter_wave"  8       1            $WAVE_SIZE   32768
+  else echo "Skip:   *_wave (AIROCSHMEM-409: wave tests not supported on RO)"; fi
 }
 
 TestOnStream() {
@@ -757,6 +948,18 @@ TestHostRma() { #AIROCSHMEM-419
   # Int (32-bit) AMOs: rocshmem_int_atomic_fetch_add/cas (exercises 32-bit kernel path)
   ExecTest  "host_int_amo_fadd"   2        1      1
   ExecTest  "host_int_amo_fcswap" 2        1      1
+  ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2 ExecTest "host_amo_add" 2 1 1
+  ExecTest  "host_wait_until"            2        1      1
+  ExecTest  "host_test"                  2        1      1
+  ExecTest  "host_wait_until_all"        2        1      1
+  ExecTest  "host_wait_until_any"        2        1      1
+  ExecTest  "host_wait_until_some"       2        1      1
+  ExecTest  "host_wait_until_all_vector" 2        1      1
+  ExecTest  "host_wait_until_any_vector" 2        1      1
+  ExecTest  "host_wait_until_some_vector" 2       1      1
+  ExecTest  "host_wait_until_all_status" 2        1      1
+  ExecTest  "host_wait_until_any_status" 2        1      1
+  ExecTest  "host_wait_until_some_status" 2       1      1
   # Concurrency tests — configurable PE count (IPC_HOST_NPES, default 4)
   ExecTest  "host_amo_all_pes"    $npes    1      1
   ExecTest  "host_amo_self"       $npes    1      1
@@ -769,6 +972,9 @@ TestOther() {
   ##############################################################################
   ExecTest  "init"             2       1            1
   ExecTest  "library_info"     2       1            1
+  ExecTest  "buffer_register_symmetric" 2  1         1       64
+  ExecTest  "buffer_register_symmetric" 2  2        64       64
+  ExecTest  "buffer_register_symmetric" 4  2        64       64
   ExecTest  "hipmodule_init"   2       1            1
   ExecTest  "device_bitcode"   2       1            1
   ExecTest  "device_bitcode"   2       32           1024
@@ -790,13 +996,12 @@ TestOther() {
   ExecTest  "flood_putnbi"     8       64           1024
   ExecTest  "flood_p"          8       64           1024
 
-  # Temporarily disabled flood_get tests
-  # ExecTest  "flood_get"        2       64           1024
-  # ExecTest  "flood_get"        8       64           1024
-  # ExecTest  "flood_getnbi"     8       64           1024
-  # if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
-  # ExecTest  "flood_g"          8       64           1024
-  # else echo "Skip:   flood_g (AIROCSHMEM-162: GDA _g not implemented)"; fi
+  ExecTest  "flood_get"        2       64           1024
+  ExecTest  "flood_get"        8       64           1024
+  ExecTest  "flood_getnbi"     8       64           1024
+  if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
+  ExecTest  "flood_g"          8       64           1024
+  else echo "Skip:   flood_g (AIROCSHMEM-162: GDA _g not implemented)"; fi
 
   ExecTest  "flood_add"        2       64           1024
   ExecTest  "flood_add"        8       64           1024
@@ -825,9 +1030,9 @@ TestOther() {
   else echo "Skip:   hostteamsyncbarrier (host team sync/barrier hangs on RO)"; fi
   unset ROCSHMEM_MAX_NUM_CONTEXTS
   unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
-  
+
   ExecTest  "teamsplit2d"              4  1            1
-  
+
   ExecTest  "shmemptr"         2       1            1         8
   ExecTest  "shmemptr"         2       1            1024      8
   ExecTest  "shmemptr"         2       8            1         8
@@ -853,31 +1058,60 @@ TestTiles() {
   #       | Name                      | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
 
-  # Detect wavefront size based on GPU architecture
-  # gfx1100 and gfx1201 have wavefront size 32, most others have 64
-  WAVE_SIZE=64
-  if command -v rocminfo >/dev/null 2>&1; then
-    if rocminfo | grep -qE "Name:.*(gfx1100|gfx1201)"; then
-      WAVE_SIZE=32
-    fi
-  fi
-
-  ExecTest  "tile_put_contiguous"       2       1            1
-  ExecTest  "tile_put_rowmajor"         2       1            1
-  ExecTest  "tile_put_colmajor"         2       1            1
-  ExecTest  "tile_put_arbitrary"        2       1            1
-  ExecTest  "tile_put_wave_contiguous"  2       1            $WAVE_SIZE
-  ExecTest  "tile_put_wg_contiguous"    2       1            $((WAVE_SIZE * 16))
-  ExecTest  "tile_put_wg_contiguous"    2       4            $((WAVE_SIZE * 16))
-  ExecTest  "tile_get_contiguous"       2       1            1
-  ExecTest  "tile_get_rowmajor"         2       1            1
-  ExecTest  "tile_get_colmajor"         2       1            1
-  ExecTest  "tile_get_arbitrary"        2       1            1
-  ExecTest  "tile_get_wg_contiguous"    2       1            $((WAVE_SIZE * 16))
-  ExecTest  "tile_get_wg_contiguous"    2       4            $((WAVE_SIZE * 16))
-  ExecTest  "tile_put_1d"               2       1            1
-  ExecTest  "tile_get_1d"               2       1            1
-  ExecTest  "tile_get_wave_contiguous"  2       1            $WAVE_SIZE
+  ExecTest  "tile_put_contiguous"       2       1            1            1048576
+  ExecTest  "tile_put_rowmajor"         2       1            1            1048576
+  ExecTest  "tile_put_colmajor"         2       1            1            1048576
+  ExecTest  "tile_put_arbitrary"        2       1            1            1048576
+  ExecTest  "tile_put_wave_contiguous"  2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_put_wave_rowmajor"    2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_put_wave_colmajor"    2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_put_wg_contiguous"    2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_put_wg_rowmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_put_wg_colmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_put_wg_contiguous"    2       4            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_get_contiguous"       2       1            1            1048576
+  ExecTest  "tile_get_rowmajor"         2       1            1            1048576
+  ExecTest  "tile_get_colmajor"         2       1            1            1048576
+  ExecTest  "tile_get_arbitrary"        2       1            1            1048576
+  ExecTest  "tile_get_wg_contiguous"    2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_get_wg_rowmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_get_wg_colmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_get_wg_contiguous"    2       4            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_put_1d"               2       1            1            1048576
+  ExecTest  "tile_get_1d"               2       1            1            1048576
+  ExecTest  "tile_get_wave_contiguous"  2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_get_wave_rowmajor"    2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_get_wave_colmajor"    2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_broadcast"            2       1            1            1048576
+  ExecTest  "tile_broadcast"            4       1            1            1048576
+  # tile_broadcast_wave: each wave uses its own context; set MAX_NUM_CONTEXTS = NUM_WGS * NUM_WF
+  #       | Name                      | Ranks | Workgroups | Threads    | Max Msg   | NUM_WF #
+  export ROCSHMEM_MAX_NUM_CONTEXTS=$((1 * 4))
+  ExecTest  "tile_broadcast_wave"       2       1            $WAVE_SIZE   1048576    4
+  ExecTest  "tile_broadcast_wave"       4       1            $WAVE_SIZE   1048576    4
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
+  ExecTest  "tile_broadcast_wg"         2       4            $WAVE_SIZE   1048576
+  ExecTest  "tile_broadcast_wg"         4       4            $WAVE_SIZE   1048576
+  ExecTest  "tile_allgather"            2       1            1            1048576
+  ExecTest  "tile_allgather"            4       1            1            1048576
+  # tile_allgather_wave: each wave uses its own context; set MAX_NUM_CONTEXTS = NUM_WGS * NUM_WF
+  #       | Name                      | Ranks | Workgroups | Threads    | Max Msg   | NUM_WF #
+  export ROCSHMEM_MAX_NUM_CONTEXTS=$((1 * 4))
+  ExecTest  "tile_allgather_wave"       2       1            $WAVE_SIZE   1048576    4
+  ExecTest  "tile_allgather_wave"       4       1            $WAVE_SIZE   1048576    4
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
+  ExecTest  "tile_allgather_wg"         2       4            $WAVE_SIZE   1048576
+  ExecTest  "tile_allgather_wg"         4       4            $WAVE_SIZE   1048576
+  ExecTest  "tile_reduce"               2       1            1            1048576
+  ExecTest  "tile_reduce"               4       1            1            65536
+  # tile_reduce_wave: each wave uses its own context; set MAX_NUM_CONTEXTS = NUM_WGS * NUM_WF
+  #       | Name                      | Ranks | Workgroups | Threads    | Max Msg   | NUM_WF #
+  export ROCSHMEM_MAX_NUM_CONTEXTS=$((1 * 4))
+  ExecTest  "tile_reduce_wave"          2       1            $WAVE_SIZE   1048576    4
+  ExecTest  "tile_reduce_wave"          4       1            $WAVE_SIZE   65536      4
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
+  ExecTest  "tile_reduce_wg"            2       4            $WAVE_SIZE   1048576
+  ExecTest  "tile_reduce_wg"            4       4            $WAVE_SIZE   65536
 }
 
 TestHeatMapRMA() {
@@ -972,7 +1206,7 @@ RerunFailedTests() {
 
   # Rerun each failed test with the same environment/config state
   for test_params in "${FAILED_TESTS[@]}"; do
-    IFS='|' read -r test_name num_ranks num_wg num_threads max_msg_size use_default_stream max_contexts notimeout noverif <<< "$test_params"
+    IFS='|' read -r test_name num_ranks num_wg num_threads max_msg_size use_default_stream max_contexts notimeout noverif num_wf <<< "$test_params"
 
     # Restore environment state from original test run
     if [[ -n "$use_default_stream" ]]; then
@@ -988,7 +1222,7 @@ RerunFailedTests() {
       NOVERIF="$noverif"
     fi
 
-    ExecTest "$test_name" "$num_ranks" "$num_wg" "$num_threads" "$max_msg_size" 1
+    ExecTest "$test_name" "$num_ranks" "$num_wg" "$num_threads" "$max_msg_size" "${num_wf:-0}" 1
 
     # Clean up environment state after retry
     unset ROCSHMEM_TEST_USE_DEFAULT_STREAM
@@ -1079,8 +1313,8 @@ case $TEST in
     TestColl
     TestOther
     TestOnStream
-    # Tile tests are only supported on IPC backend
-    if [[ ! "$TEST" =~ ^(gda|ro) ]]; then
+    # Tile tests are only supported on IPC and GDA backend
+    if [[ ! "$TEST" =~ ^(ro) ]]; then
       TestTiles
     fi
     # Host non-MPI IPC tests are only supported on IPC backend

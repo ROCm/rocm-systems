@@ -7,7 +7,6 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/argparse.cpp
     ${CMAKE_CURRENT_LIST_DIR}/categories.cpp
     ${CMAKE_CURRENT_LIST_DIR}/config.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/constraint.cpp
     ${CMAKE_CURRENT_LIST_DIR}/cpu.cpp
     ${CMAKE_CURRENT_LIST_DIR}/dynamic_library.cpp
     ${CMAKE_CURRENT_LIST_DIR}/exception.cpp
@@ -18,9 +17,8 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/output_file_registry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/state.cpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/track_registry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.cpp
 )
 
@@ -35,7 +33,6 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/common_types.hpp
     ${CMAKE_CURRENT_LIST_DIR}/concepts.hpp
     ${CMAKE_CURRENT_LIST_DIR}/config.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/constraint.hpp
     ${CMAKE_CURRENT_LIST_DIR}/cpu.hpp
     ${CMAKE_CURRENT_LIST_DIR}/demangler.hpp
     ${CMAKE_CURRENT_LIST_DIR}/dynamic_library.hpp
@@ -49,9 +46,9 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/output_file_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp
     ${CMAKE_CURRENT_LIST_DIR}/state.hpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/track_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.hpp
 )
 
@@ -64,9 +61,12 @@ add_library(
 target_sources(rocprofiler-systems-core-library PRIVATE ${core_sources} ${core_headers})
 add_subdirectory(binary)
 add_subdirectory(components)
+add_subdirectory(config)
 add_subdirectory(containers)
+add_subdirectory(control)
+add_subdirectory(perfetto)
 add_subdirectory(progress)
-add_subdirectory(rocpd)
+add_subdirectory(sdk)
 add_subdirectory(trace_cache)
 
 target_include_directories(
@@ -86,6 +86,10 @@ target_link_libraries(
 )
 target_link_libraries(
     rocprofiler-systems-core-library
+    PUBLIC rocprofiler-systems::rocprofiler-systems-containers
+)
+target_link_libraries(
+    rocprofiler-systems-core-library
     PRIVATE
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-headers>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-threading>
@@ -93,7 +97,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-definitions>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-perfetto>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sqlite3>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-profiler-hub>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-json>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-timemory>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-mpi>

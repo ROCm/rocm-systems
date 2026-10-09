@@ -1,0 +1,290 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+// Test doubles for gin_plugin_anvil_sdma.cc (bootstrap, devr, factory, debug).
+
+#include "gin_anvil_plugin_test_stubs.h"
+
+#include "gin/gin_anvil_sdma_factory.h"
+
+#include "bootstrap.h"
+#include "debug.h"
+#include "dev_runtime.h"
+#include <hip/hip_runtime.h>
+#include <cstdlib>
+#include <cstring>
+#include <vector>
+
+namespace GinAnvilPluginStubs {
+
+struct IntraNodeBootstrapCall {
+  std::vector<int> ranks;
+  int rank = -1;
+  int nranks = 0;
+  int tag = -1;
+};
+
+struct State {
+  int probeResult = 1;
+  bool bootstrapFail = false;
+  int bootstrapNranks = 1;
+  std::vector<std::vector<int>> bootstrapIntResults;
+  IntraNodeBootstrapCall lastIntraNodeAllGather;
+  IntraNodeBootstrapCall lastIntraNodeBarrier;
+  bool factoryCreateFail = false;
+  bool factoryNullHandles = false;
+  bool lsaAddrFail = false;
+  int connCheckMissingCalls = 0;
+  int connCheckWriteCalls = 0;
+  int connCheckVerifyCalls = 0;
+  std::vector<unsigned long long> connCheckWriteStamps;
+  void* lsaSelfAddr = reinterpret_cast<void*>(0x70001000ULL);
+};
+
+struct FakeSdmaOpaque {
+  int nRanks;
+  int numChannels;
+  int sdmaChannelStride;
+  void** deviceHandles_d;
+  uint64_t* sdmaDirty_d;
+};
+
+static State g;
+
+void Reset() { g = State{}; }
+
+void SetProbeResult(int result) { g.probeResult = result; }
+void SetBootstrapFail(bool fail) { g.bootstrapFail = fail; }
+void SetBootstrapNranks(int nranks) { g.bootstrapNranks = nranks; }
+void SetBootstrapIntResult(const int* values, int count) {
+  g.bootstrapIntResults.emplace_back(values, values + count);
+}
+void SetFactoryCreateFail(bool fail) { g.factoryCreateFail = fail; }
+void SetFactoryNullHandles(bool nullHandles) { g.factoryNullHandles = nullHandles; }
+void SetLsaAddrFail(bool fail) { g.lsaAddrFail = fail; }
+void SetLsaSelfAddr(void* addr) { g.lsaSelfAddr = addr; }
+void SetConnCheckMissingCalls(int calls) { g.connCheckMissingCalls = calls; }
+int GetConnCheckWriteCalls() { return g.connCheckWriteCalls; }
+int GetConnCheckVerifyCalls() { return g.connCheckVerifyCalls; }
+unsigned long long GetConnCheckWriteStamp(int call) {
+  return call >= 0 && static_cast<size_t>(call) < g.connCheckWriteStamps.size()
+             ? g.connCheckWriteStamps[static_cast<size_t>(call)]
+             : 0;
+}
+const std::vector<int>& GetLastIntraNodeAllGatherRanks() { return g.lastIntraNodeAllGather.ranks; }
+int GetLastIntraNodeAllGatherRank() { return g.lastIntraNodeAllGather.rank; }
+int GetLastIntraNodeAllGatherNranks() { return g.lastIntraNodeAllGather.nranks; }
+const std::vector<int>& GetLastIntraNodeBarrierRanks() { return g.lastIntraNodeBarrier.ranks; }
+int GetLastIntraNodeBarrierRank() { return g.lastIntraNodeBarrier.rank; }
+int GetLastIntraNodeBarrierTag() { return g.lastIntraNodeBarrier.tag; }
+
+}  // namespace GinAnvilPluginStubs
+
+uint32_t ncclDebugLevelMask = (1u << NCCL_LOG_ERROR) | (1u << NCCL_LOG_VERSION);
+uint64_t ncclDebugMask = NCCL_INIT;
+thread_local int ncclDebugNoWarn = 0;
+
+void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* filefunc, int line,
+                  const char* fmt, ...) {
+  (void)level;
+  (void)flags;
+  (void)filefunc;
+  (void)line;
+  (void)fmt;
+}
+
+static ncclResult_t stubIntAllGather(void* allData, int nranks, int size) {
+  if (GinAnvilPluginStubs::g.bootstrapFail) return ncclInternalError;
+  if (size != static_cast<int>(sizeof(int)) || nranks < 1) return ncclSuccess;
+  int* devs = static_cast<int*>(allData);
+  if (!GinAnvilPluginStubs::g.bootstrapIntResults.empty()) {
+    const std::vector<int>& vals = GinAnvilPluginStubs::g.bootstrapIntResults.front();
+    for (int i = 0; i < nranks; ++i) {
+      devs[i] = static_cast<size_t>(i) < vals.size() ? vals[static_cast<size_t>(i)] : 0;
+    }
+    GinAnvilPluginStubs::g.bootstrapIntResults.erase(GinAnvilPluginStubs::g.bootstrapIntResults.begin());
+    return ncclSuccess;
+  }
+  int known = -1;
+  int maxv = 0;
+  for (int i = 0; i < nranks; ++i) {
+    if (devs[i] >= 0) known = devs[i];
+    if (devs[i] > maxv) maxv = devs[i];
+  }
+  for (int i = 0; i < nranks; ++i) {
+    if (devs[i] < 0 && known >= 0) devs[i] = known;
+    if (devs[i] < 0) devs[i] = 0;
+  }
+  // Conn-check allgather: replicate the max missing count (single-process sim).
+  if (maxv > 0) {
+    for (int i = 0; i < nranks; ++i) devs[i] = maxv;
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
+  (void)commState;
+  return stubIntAllGather(allData, GinAnvilPluginStubs::g.bootstrapNranks, size);
+}
+
+ncclResult_t bootstrapBarrier(void* commState, int rank, int nranks, int tag) {
+  (void)commState;
+  (void)rank;
+  (void)nranks;
+  (void)tag;
+  if (GinAnvilPluginStubs::g.bootstrapFail) return ncclInternalError;
+  return ncclSuccess;
+}
+
+ncclResult_t bootstrapIntraNodeAllGather(void* commState, int* ranks, int rank, int nranks, void* allData,
+                                         int size) {
+  (void)commState;
+  GinAnvilPluginStubs::g.lastIntraNodeAllGather.ranks.assign(ranks, ranks + nranks);
+  GinAnvilPluginStubs::g.lastIntraNodeAllGather.rank = rank;
+  GinAnvilPluginStubs::g.lastIntraNodeAllGather.nranks = nranks;
+  return stubIntAllGather(allData, nranks, size);
+}
+
+ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, int nranks, int tag) {
+  GinAnvilPluginStubs::g.lastIntraNodeBarrier.ranks.assign(ranks, ranks + nranks);
+  GinAnvilPluginStubs::g.lastIntraNodeBarrier.rank = rank;
+  GinAnvilPluginStubs::g.lastIntraNodeBarrier.nranks = nranks;
+  GinAnvilPluginStubs::g.lastIntraNodeBarrier.tag = tag;
+  return bootstrapBarrier(commState, rank, nranks, tag);
+}
+
+ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void** outAddr) {
+  (void)devr;
+  (void)addr;
+  if (GinAnvilPluginStubs::g.lsaAddrFail) {
+    *outAddr = nullptr;
+    return ncclSuccess;
+  }
+  *outAddr = GinAnvilPluginStubs::g.lsaSelfAddr;
+  return ncclSuccess;
+}
+
+extern "C" int gin_anvil_sdma_probe(void) { return GinAnvilPluginStubs::g.probeResult; }
+
+extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
+                                     int (*allgather)(void*, void*, size_t), void* allgather_ctx,
+                                     int num_channels, gin_anvil_sdma_handle_t* out_handle,
+                                     void** out_gpu_handles, uint64_t** out_sdma_dirty) {
+  if (!out_handle || !out_gpu_handles || !out_sdma_dirty || !allgather || nRanks < 1 || myRank < 0 ||
+      myRank >= nRanks)
+    return -1;
+  if (GinAnvilPluginStubs::g.factoryCreateFail) return -1;
+
+  std::vector<int> devs(static_cast<size_t>(nRanks), -1);
+  devs[static_cast<size_t>(myRank)] = my_device_id;
+  if (allgather(allgather_ctx, devs.data(), sizeof(int)) != 0) return -1;
+  for (int i = 0; i < nRanks; ++i) {
+    if (devs[static_cast<size_t>(i)] < 0) return -1;
+  }
+
+  const int numChannels = num_channels < 1 ? 1 : (num_channels > 8 ? 8 : num_channels);
+  auto* impl = new GinAnvilPluginStubs::FakeSdmaOpaque{};
+  impl->nRanks = nRanks;
+  impl->numChannels = numChannels;
+  impl->sdmaChannelStride = 1;
+
+  if (GinAnvilPluginStubs::g.factoryNullHandles) {
+    impl->deviceHandles_d = nullptr;
+    impl->sdmaDirty_d = nullptr;
+    *out_handle = reinterpret_cast<gin_anvil_sdma_handle_t>(impl);
+    *out_gpu_handles = nullptr;
+    *out_sdma_dirty = nullptr;
+    return 0;
+  }
+
+  void** row = nullptr;
+  uint64_t* dirty = nullptr;
+  if (hipMalloc(&row, static_cast<size_t>(nRanks * numChannels) * sizeof(void*)) != hipSuccess) {
+    delete impl;
+    return -1;
+  }
+  if (hipExtMallocWithFlags(reinterpret_cast<void**>(&dirty), sizeof(uint64_t),
+                            hipDeviceMallocFinegrained) != hipSuccess) {
+    if (hipFree(row) != hipSuccess) fprintf(stderr, "hipFree(row) failed in stub cleanup\n");
+    delete impl;
+    return -1;
+  }
+  if (hipMemset(dirty, 0, sizeof(uint64_t)) != hipSuccess) {
+    if (hipFree(row) != hipSuccess) fprintf(stderr, "hipFree(row) failed in stub cleanup\n");
+    if (hipFree(dirty) != hipSuccess) fprintf(stderr, "hipFree(dirty) failed in stub cleanup\n");
+    delete impl;
+    return -1;
+  }
+  impl->deviceHandles_d = row;
+  impl->sdmaDirty_d = dirty;
+
+  *out_handle = reinterpret_cast<gin_anvil_sdma_handle_t>(impl);
+  *out_gpu_handles = row;
+  *out_sdma_dirty = dirty;
+  return 0;
+}
+
+extern "C" void gin_anvil_sdma_destroy(gin_anvil_sdma_handle_t handle) {
+  if (!handle) return;
+  auto* impl = reinterpret_cast<GinAnvilPluginStubs::FakeSdmaOpaque*>(handle);
+  if (impl->deviceHandles_d && hipFree(impl->deviceHandles_d) != hipSuccess)
+    fprintf(stderr, "hipFree(deviceHandles_d) failed in stub destroy\n");
+  if (impl->sdmaDirty_d && hipFree(impl->sdmaDirty_d) != hipSuccess)
+    fprintf(stderr, "hipFree(sdmaDirty_d) failed in stub destroy\n");
+  delete impl;
+}
+
+extern "C" int gin_anvil_sdma_get_n_ranks(gin_anvil_sdma_handle_t handle) {
+  return handle ? reinterpret_cast<GinAnvilPluginStubs::FakeSdmaOpaque*>(handle)->nRanks : 0;
+}
+
+extern "C" int gin_anvil_sdma_get_num_channels(gin_anvil_sdma_handle_t handle) {
+  return handle ? reinterpret_cast<GinAnvilPluginStubs::FakeSdmaOpaque*>(handle)->numChannels : 0;
+}
+
+extern "C" int gin_anvil_sdma_get_channel_stride(gin_anvil_sdma_handle_t handle) {
+  return handle ? reinterpret_cast<GinAnvilPluginStubs::FakeSdmaOpaque*>(handle)->sdmaChannelStride : 0;
+}
+
+// [GIN-CONN-CHECK] Host stubs for gin_plugin_anvil_sdma.cc when this TU is linked
+// into rccl-UnitTestsGinAnvilPlugin without gin_anvil_conn_check_device.cc (compiled
+// as plain C++). Production librccl resolves these from the HIP device TU instead.
+extern "C" int ginAnvilConnWrite(void* remoteAddrsDev, int nRanks, int selfRank,
+                                 unsigned long long stamp, hipStream_t stream) {
+  (void)remoteAddrsDev;
+  (void)nRanks;
+  (void)selfRank;
+  (void)stream;
+  ++GinAnvilPluginStubs::g.connCheckWriteCalls;
+  GinAnvilPluginStubs::g.connCheckWriteStamps.push_back(stamp);
+  return 0;
+}
+
+extern "C" int ginAnvilConnCheck(void* localSignals, int nRanks, unsigned long long stamp,
+                                 int* missingDev, hipStream_t stream) {
+  (void)localSignals;
+  (void)stamp;
+  (void)stream;
+  ++GinAnvilPluginStubs::g.connCheckVerifyCalls;
+  if (missingDev && nRanks > 0) {
+    const bool alwaysMissing = GinAnvilPluginStubs::g.connCheckMissingCalls < 0;
+    bool missingForRetry = GinAnvilPluginStubs::g.connCheckMissingCalls > 0;
+    if (missingForRetry) --GinAnvilPluginStubs::g.connCheckMissingCalls;
+    bool injectMissing = false;
+#ifdef ENABLE_FAULT_INJECTION
+    if (const char* injEnv = getenv("NCCL_GIN_ANVIL_SDMA_CONN_INJECT_FAIL_RANK")) {
+      injectMissing = atoi(injEnv) >= 0;
+    }
+#endif
+    const bool simulateMissing = alwaysMissing || missingForRetry || injectMissing;
+    std::vector<int> missing(static_cast<size_t>(nRanks), simulateMissing ? 1 : 0);
+    if (hipMemcpy(missingDev, missing.data(), sizeof(int) * static_cast<size_t>(nRanks),
+                  hipMemcpyHostToDevice) != hipSuccess) {
+      return -1;
+    }
+  }
+  return 0;
+}

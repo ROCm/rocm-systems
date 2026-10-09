@@ -27,8 +27,8 @@ _HAS_SEMA_XML = os.path.isfile(SEMA_XML_PATH)
 
 
 class TestHelperRegistry:
-    def test_registry_has_135_entries(self):
-        assert len(HELPER_REGISTRY) == 135
+    def test_registry_has_137_entries(self):
+        assert len(HELPER_REGISTRY) == 137
 
     def test_address_calc_entries_are_inline_cpp(self):
         for name in [

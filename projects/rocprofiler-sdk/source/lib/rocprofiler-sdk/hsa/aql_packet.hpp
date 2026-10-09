@@ -39,6 +39,12 @@
 
 namespace rocprofiler
 {
+namespace kfd
+{
+class kfd_copy_queue_t;
+class kfd_memory_pool_t;
+}  // namespace kfd
+
 namespace spm
 {
 /**
@@ -181,15 +187,20 @@ struct TraceMemoryPool
 {
     using desc_t = aqlprofile_buffer_desc_flags_t;
 
-    hsa_agent_t                             gpu_agent;
-    hsa_amd_memory_pool_t                   cpu_pool_;
-    hsa_amd_memory_pool_t                   gpu_pool_;
-    decltype(hsa_amd_memory_pool_allocate)* allocate_fn;
-    decltype(hsa_amd_agents_allow_access)*  allow_access_fn;
-    decltype(hsa_amd_memory_pool_free)*     free_fn;
-    decltype(hsa_memory_copy)*              api_copy_fn;
+    hsa_agent_t                             gpu_agent{};
+    rocprofiler_agent_id_t                  agent_id{};
+    aqlprofile_agent_handle_t               aql_agent{};
+    hsa_amd_memory_pool_t                   cpu_pool_{};
+    hsa_amd_memory_pool_t                   gpu_pool_{};
+    decltype(hsa_amd_memory_pool_allocate)* allocate_fn{};
+    decltype(hsa_amd_agents_allow_access)*  allow_access_fn{};
+    decltype(hsa_amd_memory_pool_free)*     free_fn{};
+    decltype(hsa_memory_copy)*              api_copy_fn{};
 
-    aqlprofile_handle_t handle;
+    std::shared_ptr<kfd::kfd_memory_pool_t> kfd_memory{};
+    std::shared_ptr<kfd::kfd_copy_queue_t>  kfd_copy_queue{};
+
+    aqlprofile_handle_t handle{};
     ~TraceMemoryPool() { aqlprofile_att_delete_packets(this->handle); };
 
     static hsa_status_t Alloc(void** ptr, size_t size, desc_t flags, void* data);
@@ -214,7 +225,6 @@ public:
     void populate_after() override{};
 
     aqlprofile_handle_t GetHandle() const { return tracepool.handle; }
-    hsa_agent_t         GetAgent() const { return tracepool.gpu_agent; }
 
     hsa_ext_amd_aql_pm4_packet_t packet;
 
@@ -237,11 +247,14 @@ public:
     {
         this->tracepool      = other.tracepool;
         this->packets        = other.packets;
+        this->owner          = other.owner;
         this->loaded_codeobj = other.loaded_codeobj;
     }
 
-    aqlprofile_handle_t GetHandle() const { return tracepool->handle; }
-    hsa_agent_t         GetAgent() const { return tracepool->gpu_agent; }
+    aqlprofile_handle_t    GetHandle() const { return tracepool->handle; }
+    rocprofiler_agent_id_t GetAgent() const { return tracepool->agent_id; }
+    uint64_t               GetOwner() const { return owner; }
+    void                   SetOwner(uint64_t value) { owner = value; }
 
     void populate_before() override
     {
@@ -261,6 +274,7 @@ public:
 protected:
     std::shared_ptr<TraceMemoryPool>     tracepool;
     aqlprofile_att_control_aql_packets_t packets;
+    uint64_t                             owner = 0;
 
     std::unordered_map<code_object_id_t, std::shared_ptr<CodeobjMarkerAQLPacket>> loaded_codeobj;
 };
@@ -269,9 +283,13 @@ struct sqtt_buffer_status_t
 {
     void*                        data{};
     uint64_t                     size{};
+    uint64_t                     read_offset{};
     hsa_ext_amd_aql_pm4_packet_t packet{};
     bool                         gpu_full{};
 };
+
+aqlprofile_att_gpu_clock_t
+get_gpu_clock(aqlprofile_handle_t handle, int shader_engine_id);
 
 // Virtual members for mocking in tests
 class SQTTBufferingPackets
@@ -282,6 +300,11 @@ public:
 
     hsa_ext_amd_aql_pm4_packet_t                query_status{};
     virtual std::optional<sqtt_buffer_status_t> query_buffer_status();
+    virtual aqlprofile_att_gpu_clock_t          get_gpu_clock() const;
+    virtual hsa_status_t iterate_data(aqlprofile_att_data_callback_t callback, void* data)
+    {
+        return aqlprofile_att_iterate_data(handle, callback, data);
+    }
 
     void reset_current_buffer() { current_buffer = 0; };
 

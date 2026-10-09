@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <hwloc.h>
-#include <hwloc/linux-libnuma.h>
-#include <numa.h>
-
 #include <vector>
 #include <algorithm>
 
@@ -152,7 +148,7 @@ void MemoryAsyncCopyOnEngine::RunBenchmarkWithVerification(Transaction *t) {
     return;
   }
 
-  err = hsa_amd_memory_async_copy(ptr_src, *cpy_ag, host_ptr_src, *cpy_ag,
+  err = hsa_amd_memory_async_copy(ptr_src, src_agent, host_ptr_src, cpu_agent_,
                                                             size, 0, NULL, s);
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 

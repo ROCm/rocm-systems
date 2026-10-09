@@ -1,41 +1,17 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file vop3p_fma_mix_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs scalar body) for the six VOP3P
-/// fma_mix / mad_mix mixed-precision ops. Each case runs TWICE in the same
-/// process -- once forcing the scalar body, once the SIMD fast path, with
-/// identical inputs/EXEC -- and the results are asserted equal per active,
-/// non-skipped lane (util::set_force_scalar_for_testing flips the gate
-/// in-process). NaN-input lanes carry an accepted NaN-payload divergence and are
-/// excluded from the comparison — the skip condition is computed from the
-/// inputs, identical in both runs, so both skip the same lanes. In-process
-/// inactive lanes must keep the dst seed. The six ops:
-///   - RDNA3+ : v_fma_mix_f32 / v_fma_mixlo_f16 / v_fma_mixhi_f16
-///   - CDNA1-4: v_mad_mix_f32 / v_mad_mixlo_f16 / v_mad_mixhi_f16
-///
-/// All six implement the same scalar formula (`a * b + c` plain, no std::fma,
-/// then optional clamp to [0, 1]) and differ only in (a) the per-source f16
-/// widening shape selected by `op_sel_hi` + `op_sel_hi_2` (widen f16 half to
-/// f32 vs read raw f32) and the f16-half pick selected by `op_sel`, and
-/// (b) the destination narrowing shape (f32 / f16-lo / f16-hi). VOP3P does
-/// not carry abs or omod; only `neg` (per-source xor of the sign bit) and
-/// `clamp` (saturate result to [0, 1]) apply.
-///
-/// The test covers every per-source neg combination, several op_sel /
-/// op_sel_hi patterns (so all four widen-modes per source are exercised),
-/// clamp on/off, full and partial EXEC masks. Input lanes carry an f32 edge
-/// list packed both as raw f32 (when read in the no-widen mode) and as two
-/// f16 halves (when the corresponding op_sel_hi bit is set), so every
-/// per-source data fetch path is hit. NaN-input lanes are skipped because
-/// the scalar `a * b + c` and the SIMD chain can quiet sNaN to qNaN with
-/// different payloads (accepted divergence, mirroring the existing VOP3
-/// ternary tests).
+/// Compare decoded MIX instructions with SIMD enabled and forced scalar,
+/// including source selectors, modifiers, sparse EXEC and destination aliasing.
+/// RDNA uses fused arithmetic; CDNA1-4 retains the legacy MAD implementation.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -52,6 +28,7 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
+#include <random>
 #include <string>
 
 namespace {
@@ -192,17 +169,19 @@ const std::array<uint32_t, 16> kSrcB_f16 = kSrcA_f16;
 const std::array<uint32_t, 16> kSrcC_f16 = kSrcA_f16;
 
 // Modifier combinations swept per op. (neg, op_sel, op_sel_hi, op_sel_hi_2,
-// clamp). op_sel only matters when the matching op_sel_hi[i] bit is set.
-// Eight neg patterns × handful of op_sel / widen-mode combos × clamp on/off.
+// clamp, abs). op_sel only matters when the matching op_sel_hi[i] bit is set.
+// Eight neg patterns × handful of op_sel / widen-mode combos × clamp on/off,
+// plus abs-only and abs+neg cases.
 struct ModCombo {
   uint32_t neg;         // bit0=src0, bit1=src1, bit2=src2
   uint32_t op_sel;      // bit0=src0 lo/hi, bit1=src1 lo/hi, bit2=src2 lo/hi
   uint32_t op_sel_hi;   // bit0=src0 widen, bit1=src1 widen
   uint32_t op_sel_hi_2; // 0/1: src2 widen
   uint32_t clamp;       // 0/1
+  uint32_t abs = 0;     // bit0=src0, bit1=src1, bit2=src2
 };
 
-constexpr std::array<ModCombo, 32> kModCombos = {{
+constexpr std::array<ModCombo, 36> kModCombos = {{
     // All-defaults: read every src as raw f32, no neg, no clamp.
     {0b000, 0b000, 0b00, 0, 0},
     // Per-source neg.
@@ -249,6 +228,11 @@ constexpr std::array<ModCombo, 32> kModCombos = {{
     {0b011, 0b010, 0b11, 1, 1},
     {0b110, 0b110, 0b10, 1, 1},
     {0b101, 0b101, 0b01, 1, 1},
+    // Mix-family abs modifiers are encoded in the shared field named neg_hi.
+    {0b000, 0b000, 0b00, 0, 0, 0b001},
+    {0b000, 0b000, 0b00, 0, 0, 0b110},
+    {0b101, 0b000, 0b00, 0, 0, 0b101},
+    {0b011, 0b111, 0b11, 1, 1, 0b111},
 }};
 
 template <uint32_t WF_SIZE, int ArchTag> struct Fixture {
@@ -267,7 +251,7 @@ template <uint32_t WF_SIZE, int ArchTag> struct Fixture {
     cfg.lds_size_kb = 64;
     cu = amdgpu::ComputeUnitCore::create("cu_vop3p_fma_mix", cfg, &gpu_mem, &l2);
     decoder = Decoder::create(cfg.arch);
-    wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
+    wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF, WF_SIZE);
   }
 
   void seed_vgprs(uint32_t rot, bool widen0, bool widen1, bool widen2, uint64_t exec,
@@ -288,7 +272,7 @@ template <uint32_t WF_SIZE, int ArchTag> struct Fixture {
   std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint32_t rot, bool widen0, bool widen1,
                                     bool widen2, uint64_t exec, uint32_t dst_seed) {
     seed_vgprs(rot, widen0, widen1, widen2, exec, dst_seed);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -337,13 +321,13 @@ void check_combo(uint32_t opcode, const ModCombo &mc, uint64_t exec, uint32_t ds
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     if constexpr (ArchTag == 0) {
-      vop3p_encode_rdna3(opcode, kDstVgpr, /*neg_hi=*/0, mc.op_sel, mc.op_sel_hi_2, mc.clamp,
+      vop3p_encode_rdna3(opcode, kDstVgpr, /*neg_hi=*/mc.abs, mc.op_sel, mc.op_sel_hi_2, mc.clamp,
                          /*src0=*/256, /*src1=*/257, /*src2=*/258, mc.op_sel_hi, mc.neg, words);
     } else {
-      vop3p_encode_cdna4(opcode, kDstVgpr, /*neg_hi=*/0, mc.op_sel, mc.op_sel_hi_2, mc.clamp,
+      vop3p_encode_cdna4(opcode, kDstVgpr, /*neg_hi=*/mc.abs, mc.op_sel, mc.op_sel_hi_2, mc.clamp,
                          /*src0=*/256, /*src1=*/257, /*src2=*/258, mc.op_sel_hi, mc.neg, words);
     }
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << label << " decode failed";
     auto out = fx.run(inst, rot, widen0, widen1, widen2, exec, dst_seed);
     delete inst;
@@ -487,6 +471,160 @@ TEST(Vop3pFmaMixSimdCorrectness, CdnaMadMixHiF16_PartialExec) {
     return;
   }
   check_op<64, 1>(kVop3pOpMadMixHiF16, kPartialExecCdna, DST_SENTINEL, "v_mad_mixhi_f16");
+}
+
+TEST(Vop3pFmaMixSimdCorrectness, FusedHalfRoundingMatchesScalar) {
+  using F = util::native<float>;
+  // Exact ties with tiny addends, cancellation, overflow, denormals and NaNs.
+  constexpr std::array<std::array<uint32_t, 3>, 12> boundaries{{
+      {0x3f801000, 0x3f800000, 0x17800000},
+      {0x3f801000, 0x3f800000, 0x97800000},
+      {0x33000000, 0x3f800000, 0x00000001},
+      {0x33000000, 0x3f800000, 0x80000001},
+      {0x477ff000, 0x3f800000, 0x97800000},
+      {0xc77ff000, 0x3f800000, 0x17800000},
+      {0x80000000, 0x3f800000, 0x80000000},
+      {0x00000000, 0x3f800000, 0x80000000},
+      {0x3f800000, 0x3f800000, 0xbf800000},
+      {0x00000001, 0x00000001, 0x80000000},
+      {0x7f800000, 0x00000000, 0x3f800000},
+      {0x7fc12345, 0x7fc54321, 0x7f823456},
+  }};
+  std::mt19937 random(0x164fa);
+  for (uint32_t round = 0; round < 4; ++round)
+    for (bool clamp : {false, true})
+      for (bool overflow : {false, true}) {
+        for (unsigned batch = 0; batch < boundaries.size() + 128; ++batch) {
+          const auto source = [&](unsigned index) {
+            return F([&](auto lane) {
+              return std::bit_cast<float>(
+                  batch < boundaries.size() ? boundaries[(batch + lane) % boundaries.size()][index]
+                                            : static_cast<uint32_t>(random()));
+            });
+          };
+          const F a = source(0), b = source(1), c = source(2);
+          const auto actual =
+              amdgpu::mixed_fma_f16_simd<true>(a, b, c, round, clamp, overflow, true);
+          amdgpu::fp_mode::ScopedEnvironment environment(0);
+          for (std::size_t lane = 0; lane < F::size(); ++lane)
+            ASSERT_EQ(actual[lane], amdgpu::fp_mode::detail::fma_f32_to_f16_nearest_environment(
+                                        a[lane], b[lane], c[lane], round, clamp, overflow, true))
+                << "round=" << round << " clamp=" << clamp << " overflow=" << overflow
+                << " batch=" << batch << " lane=" << lane;
+        }
+      }
+}
+
+template <bool High, int ArchTag, bool F32 = false>
+void check_direct_mix_modes(uint32_t denorm = 3) {
+  constexpr auto destination = F32    ? amdgpu::FmaMixDst::F32
+                               : High ? amdgpu::FmaMixDst::F16_HI
+                                      : amdgpu::FmaMixDst::F16_LO;
+  using HalfInst = std::conditional_t<
+      ArchTag == 0, std::conditional_t<High, rdna3::VFmaMixhiF16Vop3p, rdna3::VFmaMixloF16Vop3p>,
+      std::conditional_t<High, cdna4::VMadMixhiF16Vop3p, cdna4::VMadMixloF16Vop3p>>;
+  using Inst = std::conditional_t<F32, rdna3::VFmaMixF32Vop3p, HalfInst>;
+  Fixture<32, ArchTag> fixture;
+  ForceScalarGuard guard;
+  util::set_force_scalar_for_testing(false);
+  for (uint32_t round = 0; round < 4; ++round)
+    for (bool alias : {false, true}) {
+      uint32_t words[2];
+      const auto encode = ArchTag == 0 ? vop3p_encode_rdna3 : vop3p_encode_cdna4;
+      encode(F32    ? 32
+             : High ? 34
+                    : 33,
+             kDstVgpr, 0, 0, 0, 0, alias ? 256 + kDstVgpr : 256, 257, 258, 0, 0, words);
+      std::unique_ptr<Instruction> instruction(decode_valid(*fixture.decoder, words));
+      auto *typed = dynamic_cast<Inst *>(instruction.get());
+      ASSERT_NE(typed, nullptr);
+      fixture.wf->set_mode_raw((round << (F32 ? 0 : 2)) | (denorm << 4) | 0xc0u);
+      const auto seed = [&] {
+        fixture.seed_vgprs(1, false, false, false, kPartialExecRdna, 0x3f801000u);
+      };
+      seed();
+      util::set_force_scalar_for_testing(true);
+      ASSERT_TRUE(fixture.cu->execute_instruction(instruction.get(), *fixture.wf).succeeded());
+      std::array<uint32_t, 32> expected;
+      const uint32_t base = fixture.wf->vgpr_alloc().base + kDstVgpr;
+      for (uint32_t lane = 0; lane < 32; ++lane)
+        expected[lane] = fixture.cu->read_vgpr(base, lane);
+      seed();
+      util::set_force_scalar_for_testing(false);
+      ASSERT_TRUE(
+          (amdgpu::try_execute_vop3p_fma_mix_simd<destination, ArchTag == 0>(*typed, *fixture.wf)));
+      for (uint32_t lane = 0; lane < 32; ++lane)
+        EXPECT_EQ(fixture.cu->read_vgpr(base, lane), expected[lane])
+            << "round=" << round << " alias=" << alias << " lane=" << lane;
+    }
+}
+
+TEST(Vop3pFmaMixSimdCorrectness, HalfResultsStayVectorizedInEveryRoundingMode) {
+  check_direct_mix_modes<false, 0>();
+  check_direct_mix_modes<true, 0>();
+  check_direct_mix_modes<false, 1>();
+  check_direct_mix_modes<true, 1>();
+}
+
+TEST(Vop3pFmaMixSimdCorrectness, F32ResultsStayVectorizedAcrossModes) {
+  for (uint32_t denorm = 0; denorm < 4; ++denorm)
+    check_direct_mix_modes<false, 0, true>(denorm);
+}
+
+// Directly require admission: result parity alone would also pass if the new
+// vector path declined every directed-rounding wave.
+TEST(Vop3pFmaMixSimdCorrectness, DirectedSimdPreservesModifiersAndWave64Aliases) {
+  ForceScalarGuard guard;
+  auto check = []<uint32_t Size>() {
+    Fixture<Size, 0> fx;
+    const uint64_t all = util::mask<uint64_t>(Size);
+    for (uint32_t round = 1; round < 4; ++round) {
+      for (bool high : {false, true}) {
+        for (uint32_t destination : {0u, kDstVgpr}) {
+          for (uint64_t mask :
+               {all, all & uint64_t{0x8000000180000004}, uint64_t{1} << (Size - 1)}) {
+            uint32_t words[4]{};
+            vop3p_encode_rdna3(high ? kVop3pOpFmaMixHiF16 : kVop3pOpFmaMixLoF16, destination, 2, 5,
+                               1, 0, 256, 257, 258, 1, 4, words);
+            std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words));
+            ASSERT_NE(inst, nullptr);
+            auto seed = [&] {
+              fx.seed_vgprs(round, true, false, true, mask, DST_SENTINEL);
+              fx.wf->set_mode_raw(0xc0 | (round << 2));
+            };
+            seed();
+            util::set_force_scalar_for_testing(true);
+            ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+            std::array<uint32_t, Size> expected{};
+            for (uint32_t lane = 0; lane < Size; ++lane)
+              expected[lane] = fx.cu->read_vgpr(fx.wf->vgpr_alloc().base + destination, lane);
+            seed();
+            util::set_force_scalar_for_testing(false);
+            bool admitted;
+            if (high) {
+              auto *typed = dynamic_cast<rdna3::VFmaMixhiF16Vop3p *>(inst.get());
+              ASSERT_NE(typed, nullptr);
+              admitted = amdgpu::try_execute_vop3p_fma_mix_simd<amdgpu::FmaMixDst::F16_HI, true>(
+                  *typed, *fx.wf);
+            } else {
+              auto *typed = dynamic_cast<rdna3::VFmaMixloF16Vop3p *>(inst.get());
+              ASSERT_NE(typed, nullptr);
+              admitted = amdgpu::try_execute_vop3p_fma_mix_simd<amdgpu::FmaMixDst::F16_LO, true>(
+                  *typed, *fx.wf);
+            }
+            ASSERT_TRUE(admitted);
+            for (uint32_t lane = 0; lane < Size; ++lane)
+              EXPECT_EQ(fx.cu->read_vgpr(fx.wf->vgpr_alloc().base + destination, lane),
+                        expected[lane])
+                  << "round=" << round << " high=" << high << " destination=" << destination
+                  << " lane=" << lane;
+          }
+        }
+      }
+    }
+  };
+  check.template operator()<32>();
+  check.template operator()<64>();
 }
 
 } // namespace

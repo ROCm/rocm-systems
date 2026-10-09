@@ -6,16 +6,24 @@
  *************************************************************************/
 
 #include "sym_kernels.h"
+#if defined(__HIP_PLATFORM_AMD__)
+#include "symmetric/kernel.h"
+#include "symmetric/primitives.h"
+#include "symmetric/gin_scratch__types.h"
+#else
 #include "kernel.cuh"
 #include "primitives.cuh"
 #include "gin_scratch__types.h"
+#endif
 
+template <bool EnableProfiler>
 __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct ncclSymkDevWorkArgs const* args) {
   ncclCoopCta cta;
   ncclSymkArgsHandler handler(args);
   ncclTeam rail = ncclTeamRail(handler.comm);
   ncclGin gin(handler.comm, (int)(blockIdx.x % handler.comm.ginContextCount));
   constexpr int chunkSize = ncclSymkAllGather_RailRing_ChunkSize;
+  uint32_t lsaRank = ncclTeamLsa(handler.comm).rank;
   ncclGinSignal_t railSignals = handler.ginSyncHandle.railSignals + blockIdx.x * rail.nRanks;
   ncclBarrierSession<ncclCoopCta> bar(cta, ncclTeamTagWorld(), gin, blockIdx.x, /*multimem=*/true);
   int nextPeer = (rail.rank + 1) % rail.nRanks;
@@ -24,78 +32,85 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
   uint64_t localSignalValue = *localSignalPtr;
   const int ringThreads = WARP_SIZE;
 
-  bar.sync(cta, cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  bar.sync(cta, cuda::memory_order_acquire, ncclGinFenceLevel::None);
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
 
-  handler.template forEachWorkNoFusion<uint8_t>(
-    [&]__device__(size_t nElts, size_t nAllElts, ncclSymPtr<uint8_t> input, ncclSymPtr<uint8_t> output) {
-      if (threadIdx.x < ringThreads) {
-        ncclCoopWarpSpan warps(0, 1, 0);
-        for (int step = 0; step < rail.nRanks - 1; step++) {
-          int dataPeer = (rail.rank - step + rail.nRanks) % rail.nRanks;
-          int dgrank = ncclTeamRankToWorld(handler.comm, rail, dataPeer);
-          size_t remainingElts = nElts;
-          size_t offset = 0;
-          if (dataPeer == rail.rank) {
-            while (remainingElts) {
-              size_t chunkElts = min(remainingElts, size_t(chunkSize));
+  handler.template forEachWorkNoFusion<uint8_t>([&] __device__(size_t nElts, size_t nAllElts, ncclSymPtr<uint8_t> input,
+                                                               ncclSymPtr<uint8_t> output) {
+    // Rotate by LSA rank with pattern 0 1 3 2 4 5 7 6 to diversify addresses.
+    uint32_t startOffsetMultiplier = lsaRank ^ ((lsaRank >> 1) & 1);
+    size_t startOffset =
+      nElts > 0 ? ((size_t)startOffsetMultiplier * ncclSymkMcPerRankOffsetBytes % nElts) / chunkSize * chunkSize : 0;
+    auto advanceOffset = [&](size_t chunkElts, size_t& offset, size_t& remainingElts) {
+      offset += chunkElts;
+      if (offset == nElts) offset = 0;
+      remainingElts -= chunkElts;
+    };
+
+    if (threadIdx.x < ringThreads) {
+      ncclCoopWarpSpan warps(0, 1, 0);
+      for (int step = 0; step < rail.nRanks - 1; step++) {
+        int dataPeer = (rail.rank - step + rail.nRanks) % rail.nRanks;
+        int dgrank = ncclTeamRankToWorld(handler.comm, rail, dataPeer);
+        size_t remainingElts = nElts;
+        size_t offset = startOffset;
+        if (dataPeer == rail.rank) {
+          while (remainingElts) {
+            size_t chunkElts = min(min(remainingElts, size_t(chunkSize)), nElts - offset);
               // Send data chunk to next peer in ring
-              gin.put(rail, nextPeer, output + dgrank * nAllElts + offset,
-                input + offset, chunkElts,
-                ncclGin_SignalInc{ railSignals + rail.rank }, ncclGin_None{}, warps);
-              offset += chunkElts;
-              remainingElts -= chunkElts;
-            }
-          } else {
-            while (remainingElts) {
-              size_t chunkElts = min(remainingElts, size_t(chunkSize));
+            gin.put(rail, nextPeer, output + dgrank * nAllElts + offset, input + offset, chunkElts,
+                    ncclGin_SignalInc{railSignals + rail.rank}, ncclGin_None{}, warps);
+            advanceOffset(chunkElts, offset, remainingElts);
+          }
+        } else {
+          while (remainingElts) {
+            size_t chunkElts = min(min(remainingElts, size_t(chunkSize)), nElts - offset);
               // Wait for ready signal from next peer before sending
-              gin.waitSignal(warps, railSignals + prevPeer, localSignalValue + 1, 32);
+            gin.waitSignal(warps, railSignals + prevPeer, localSignalValue + 1, 32);
               // Send data chunk to next peer in ring
-              gin.put(rail, nextPeer, output + dgrank * nAllElts + offset,
-                output + dgrank * nAllElts + offset, chunkElts,
-                ncclGin_SignalInc{ railSignals + rail.rank }, ncclGin_None{}, warps);
-              offset += chunkElts;
-              remainingElts -= chunkElts;
-              localSignalValue++;
-            }
+            gin.put(rail, nextPeer, output + dgrank * nAllElts + offset, output + dgrank * nAllElts + offset, chunkElts,
+                    ncclGin_SignalInc{railSignals + rail.rank}, ncclGin_None{}, warps);
+            advanceOffset(chunkElts, offset, remainingElts);
+            localSignalValue++;
           }
         }
-        gin.flush(warps);
-      } else {
-        ncclCoopWarpSpan warps(1, blockDim.x / WARP_SIZE - 1, 1);
+      }
+      gin.flush(warps);
+    } else {
+      ncclCoopWarpSpan warps(1, blockDim.x / WARP_SIZE - 1, 1);
         // Loop through rail ranks starting from itself
-        for (int step = 0; step < rail.nRanks; step++) {
-          int dataPeer = (rail.rank - step + rail.nRanks) % rail.nRanks;
-          int dgrank = ncclTeamRankToWorld(handler.comm, rail, dataPeer);
-          size_t remainingElts = nElts;
-          size_t offset = 0;
-          if (dataPeer == rail.rank) {
-            while (remainingElts) {
-              size_t chunkElts = min(remainingElts, size_t(chunkSize));
+      for (int step = 0; step < rail.nRanks; step++) {
+        int dataPeer = (rail.rank - step + rail.nRanks) % rail.nRanks;
+        int dgrank = ncclTeamRankToWorld(handler.comm, rail, dataPeer);
+        size_t remainingElts = nElts;
+        size_t offset = startOffset;
+        if (dataPeer == rail.rank) {
+          while (remainingElts) {
+            size_t chunkElts = min(min(remainingElts, size_t(chunkSize)), nElts - offset);
               // Put self rank's data
-              bcastMultimem(handler, warps.num_threads(), warps.thread_rank(), input + offset, output + dgrank * nAllElts + offset, chunkElts);
-              offset += chunkElts;
-              remainingElts -= chunkElts;
-            }
-          } else {
-            while (remainingElts) {
-              size_t chunkElts = min(remainingElts, size_t(chunkSize));
+            bcastMultimem(handler, warps.num_threads(), warps.thread_rank(), input + offset,
+                          output + dgrank * nAllElts + offset, chunkElts);
+            advanceOffset(chunkElts, offset, remainingElts);
+          }
+        } else {
+          while (remainingElts) {
+            size_t chunkElts = min(min(remainingElts, size_t(chunkSize)), nElts - offset);
               // Wait for signal from other peers before putting their data
-              gin.waitSignal(warps, railSignals + prevPeer, localSignalValue + 1, 32);
-              bcastMultimem(handler, warps.num_threads(), warps.thread_rank(), output + dgrank * nAllElts + offset, output + dgrank * nAllElts + offset, chunkElts);
-              offset += chunkElts;
-              remainingElts -= chunkElts;
-              localSignalValue++;
-            }
+            gin.waitSignal(warps, railSignals + prevPeer, localSignalValue + 1, 32);
+            bcastMultimem(handler, warps.num_threads(), warps.thread_rank(), output + dgrank * nAllElts + offset,
+                          output + dgrank * nAllElts + offset, chunkElts);
+            advanceOffset(chunkElts, offset, remainingElts);
+            localSignalValue++;
           }
         }
       }
     }
-  );
+  });
 
   // update the shadow signal value
   if (threadIdx.x == ringThreads) {
     *localSignalPtr = localSignalValue;
   }
-  bar.sync(cta, cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_BEFORE_CLOSE);
+  bar.sync(cta, cuda::memory_order_release, ncclGinFenceLevel::None);
 }

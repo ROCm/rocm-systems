@@ -12,11 +12,10 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, List
 
-
 # Compile regex patterns once at module level
 # Matches architecture IDs like gfx908, gfx90a, gfx942-xnack+, gfx90a-xnack-
 # Note: Tensile filenames use hyphens (gfx90a-xnack+), not colons (gfx90a:xnack+)
-_GFX_ARCH_PATTERN = re.compile(r"gfx\d+[a-z]*(?:-xnack[+-])?")
+_GFX_ARCH_PATTERN = re.compile(r"gfx\d+[a-z]*(?:-strict)?(?:-xnack[+-])?")
 
 # MIOpen-specific arch pattern. MIOpen filenames concatenate arch ID + CU count
 # without a separator (e.g., gfx90878 = gfx908 + 78 CUs, gfx942130 = gfx942 + 130).
@@ -28,7 +27,7 @@ _GFX_ARCH_PATTERN = re.compile(r"gfx\d+[a-z]*(?:-xnack[+-])?")
 _MIOPEN_ARCH_PATTERN = re.compile(
     r"gfx(?:"
     r"90a|900|906|908|940|941|942|950"
-    r"|1010|1030|1100|1101|1102|1150|1151|1200|1201"
+    r"|1010|1030|1100|1101|1102|1150|1151|1200|1201|1250(?:-strict)?"
     r")"
 )
 
@@ -36,6 +35,28 @@ _MIOPEN_ARCH_PATTERN = re.compile(
 # Matches libMIOpenCK<name>_<arch>.so (Linux) and MIOpenCK<name>_<arch>.dll (Windows).
 _MIOPEN_CK_SO_PATTERN = re.compile(
     r"^(?:lib)?MIOpenCK\w+_(" + _GFX_ARCH_PATTERN.pattern + r")\.(?:so|dll)"
+)
+
+# Composable Kernel per-target convolution libraries and their CMake exports.
+# <token> is the target id sanitized by ck_sanitize_arch, which mirrors MIOpen's
+# miopen_sanitize_arch (":"->"_", "+"->"p", "-"->"_"). Group "arch" is the bare
+# arch and group "strict" the sanitized "-strict"; xnack/sramecc are dropped.
+# Generic (gfx11_generic) and SPIR-V (amdgcnspirv) tokens do not match and stay
+# in the generic artifact.
+_CK_CONV_TOKEN = (
+    r"(?P<arch>gfx\d+[a-z]?)(?P<strict>_strict)?(?:_(?:xnack|sramecc)[p_])*"
+)
+_CK_CONV_PATTERNS = (
+    # libdevice_conv_operations_<token>.a (Linux),
+    # device_conv_operations_<token>.lib (Windows).
+    re.compile(r"(?:lib)?device_conv_operations_" + _CK_CONV_TOKEN + r"\.(?:a|lib)"),
+    # composable_kerneldevice_conv_operations_<token>Targets.cmake and its
+    # per-configuration companion, e.g. ...Targets-release.cmake.
+    re.compile(
+        r"composable_kerneldevice_conv_operations_"
+        + _CK_CONV_TOKEN
+        + r"Targets(?:-[a-z]+)?\.cmake"
+    ),
 )
 
 
@@ -178,19 +199,21 @@ class AotritonHandler(DatabaseHandler):
     AOTriton ships precompiled kernel images in per-architecture directories:
         lib/aotriton.images/amd-gfx942/flash/attn_fwd/kernel.aks2
         lib/aotriton.images/amd-gfx11xx/flash/bwd_kernel_dk_dv/kernel.aks2
+        lib/aotriton.images/amd-gfx110x/flash/bwd_kernel_dk_dv/kernel.aks2
 
-    Architecture directories use family names (gfx11xx, gfx120x) for ISA
-    families, and specific chip names (gfx942, gfx90a, gfx950) for others.
+    Architecture directories use family/sub-family names (gfx11xx, gfx110x,
+    gfx115x, gfx120x) for shared ISA assets, and specific chip names
+    (gfx942, gfx90a, gfx950) for others.
 
     Returns bundle keys from the rocm-bootstrap hierarchy:
-        gfx11xx → gfx11 (family), gfx120x → gfx12_0 (sub-family),
-        gfx942 → gfx942 (target), etc.
+        gfx11xx → gfx11 (family), gfx110x → gfx110x (sub-family),
+        gfx120x → gfx12_0 (sub-family), gfx942 → gfx942 (target), etc.
     """
 
     # Mapping from aotriton directory suffixes to rocm-bootstrap bundle keys.
-    # Entries are only needed for family/sub-family patterns that differ from
-    # the raw directory name. Target-level names (gfx942, gfx90a, etc.) pass
-    # through unchanged since they are already valid bundle keys.
+    # Entries are only needed for patterns that differ from the raw directory
+    # name. Already-valid keys (gfx110x, gfx942, gfx90a, etc.) pass through
+    # unchanged.
     _BUNDLE_MAP = {
         "gfx11xx": "gfx11",
         "gfx120x": "gfx12_0",
@@ -206,7 +229,7 @@ class AotritonHandler(DatabaseHandler):
         Pattern: */aotriton.images/amd-gfx*/...
 
         Returns:
-            Bundle key (e.g., 'gfx11', 'gfx12_0', 'gfx942') or None.
+            Bundle key (e.g., 'gfx11', 'gfx110x', 'gfx12_0', 'gfx942') or None.
         """
         path_str = self._relative_path(path, prefix_root)
         path_parts = Path(path_str).parts
@@ -279,6 +302,120 @@ class MIOpenHandler(DatabaseHandler):
         return None
 
 
+class ComposableKernelHandler(DatabaseHandler):
+    """Handler for Composable Kernel per-target convolution libraries.
+
+    CK emits one copy of its unified archive per target, each with its own
+    CMake export, and both belong in that target's artifact:
+        lib/libdevice_conv_operations_gfx950_xnackp.a
+        lib/cmake/composable_kernel/
+            composable_kerneldevice_conv_operations_gfx950_xnackpTargets.cmake
+            composable_kerneldevice_conv_operations_gfx950_xnackpTargets-release.cmake
+    composable_kernelConfig.cmake discovers the installed exports, so it and
+    the unsuffixed libdevice_conv_operations.a are not matched and stay generic.
+    Contents are opaque; classification is by filename only.
+    """
+
+    def name(self) -> str:
+        return "composablekernel"
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        """Return the bare arch (e.g. gfx1250-strict) for a CK per-target file."""
+        filename = Path(self._relative_path(path, prefix_root)).name
+        for pattern in _CK_CONV_PATTERNS:
+            match = pattern.fullmatch(filename)
+            if match:
+                return match["arch"] + ("-strict" if match["strict"] else "")
+        return None
+
+
+class HipKernelProviderArchContentHandler(DatabaseHandler):
+    """Handler for hipKernelProvider per-architecture kernel content.
+
+    Content lives under a container in the plugin engines dir: ``arch_content``
+    for runtime, ``test_arch_content`` for the test component. The container is
+    the anchor -- the bundle key is the first arch directory at any depth beneath
+    it, and the producer segment in between is a convention this handler does not
+    inspect, so a new producer needs no handler change. Example paths:
+        .../engines/arch_content/hip-kernel-provider/<arch>/...
+        .../engines/arch_content/rocke/<arch>/...
+        .../engines/test_arch_content/hip-kernel-provider/unit/shared/<arch>/...
+        .../engines/arch_content/<arch>/...
+
+    Both containers split per arch. Content that is not detected here stays generic,
+    where the last per-arch build to upload overwrites same-named content from
+    the others.
+    """
+
+    #: Containers under ``engines/`` whose arch subdirectories are split per arch.
+    _ARCH_CONTAINERS = ("arch_content", "test_arch_content")
+
+    def name(self) -> str:
+        return "hipkernelprovider"
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        """
+        Detect per-arch content by its arch directory.
+
+        Pattern: */engines/<container>/[.../]<arch>/... for each container in
+        ``_ARCH_CONTAINERS``.  In an installed tree that dir is hipDNN's plugin
+        engine dir, ``lib/hipdnn_plugins/engines/``, but only the immediate
+        ``engines`` parent is required -- ``hipdnn_plugins`` is not matched, so
+        any engines dir qualifies. TheRock's ``**/engines/arch_content/**`` and
+        ``**/engines/test_arch_content/**`` includes are anchored the same way.
+
+        Returns:
+            Bundle key (the gfx arch directory, e.g. 'gfx942') or None.
+        """
+        parts = Path(self._relative_path(path, prefix_root)).parts
+        root = next(
+            (
+                i
+                for i in range(1, len(parts))
+                if parts[i] in self._ARCH_CONTAINERS and parts[i - 1] == "engines"
+            ),
+            None,
+        )
+        if root is None:
+            return None
+        # First arch dir under the container with a file beneath it is the key.
+        for i in range(root + 1, len(parts) - 1):
+            if _GFX_ARCH_PATTERN.fullmatch(parts[i]):
+                return parts[i]
+        return None
+
+
+class HotswapCacheHandler(DatabaseHandler):
+    """Handler for packaged RocJitsu ahead-of-time translations.
+
+    RocJitsu owns the directory-domain spelling. Keep the mapping explicit so
+    a new translator profile cannot accidentally be assigned to an architecture
+    merely because its directory happens to contain a gfx-looking substring.
+    """
+
+    _DOMAIN_TO_BUNDLE = {
+        "gfx1250-b0-a0": "gfx1250",
+    }
+    _ENTRY_PATTERN = re.compile(r"^[0-9a-f]{64}\.(?:man|obj)$")
+
+    def name(self) -> str:
+        return "hotswap_cache"
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        parts = Path(self._relative_path(path, prefix_root)).parts
+        if len(parts) != 6 or parts[:3] != (
+            "share",
+            "rocjitsu",
+            "translations",
+        ):
+            return None
+
+        domain, schema, filename = parts[3:]
+        if schema != "v1" or not self._ENTRY_PATTERN.fullmatch(filename):
+            return None
+        return self._DOMAIN_TO_BUNDLE.get(domain)
+
+
 # Registry of available handlers
 AVAILABLE_HANDLERS = {
     "rocblas": RocBLASHandler,
@@ -286,6 +423,9 @@ AVAILABLE_HANDLERS = {
     "hipsparselt": HipSparseLtHandler,
     "aotriton": AotritonHandler,
     "miopen": MIOpenHandler,
+    "composablekernel": ComposableKernelHandler,
+    "hipkernelprovider": HipKernelProviderArchContentHandler,
+    "hotswap_cache": HotswapCacheHandler,
 }
 
 

@@ -12,10 +12,8 @@
 
 /* Plurality vote on romeTopoModelIdx across ranks; all ranks must match the winner.
  * Callers supply getters so this stays independent of ncclComm / allGatherInfo. */
-ncclResult_t rcclCheckRomeTopoModelIdxConsensus(
-  int nranks,
-  std::function<int(int /*rank*/)> getRomeTopoModelIdx,
-  std::function<const char*(int /*rank*/)> getHostname,
-  std::function<uint64_t(int /*rank*/)> getHostHash);
+ncclResult_t rcclCheckRomeTopoModelIdxConsensus(int nranks, std::function<int(int /*rank*/)> getRomeTopoModelIdx,
+                                                std::function<const char*(int /*rank*/)> getHostname,
+                                                std::function<uint64_t(int /*rank*/)> getHostHash);
 
 #endif

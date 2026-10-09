@@ -193,6 +193,20 @@ template <> struct numeric_limits<char> {
   static constexpr char lowest() noexcept { return min(); }
 };
 
+template <> struct numeric_limits<float> {
+  static constexpr bool is_specialized = true;
+  static constexpr bool is_signed = true;
+  static constexpr float min() noexcept {
+    return __builtin_bit_cast(float, 0x00800000);
+  }
+  static constexpr float lowest() noexcept { return -max(); };
+  static constexpr float max() noexcept {
+    return __builtin_bit_cast(float, 0x7F7FFFFF);
+  }
+  static constexpr float quiet_NaN() noexcept { return __builtin_nanf(""); }
+  static constexpr float infinity() noexcept { return __builtin_huge_valf(); }
+};
+
 #if defined(_WIN32)
 #pragma pop_macro("max")
 #pragma pop_macro("min")
@@ -309,6 +323,41 @@ template <size_t... Ints>
 constexpr index_sequence<Ints...> make_index_sequence_value(index_sequence<Ints...>) {
   return {};
 }
+
+// Allows to calculate the max() and lowest() of each type. Uses __hip_internal::numeric_limits()
+// most of the time, but gets specialized for some floating point types
+template <typename T>
+struct ExclusiveScanIdentity {
+  static constexpr T maximum() { return (__hip_internal::numeric_limits<T>::max)(); }
+  static constexpr T minimum() { return (__hip_internal::numeric_limits<T>::min)(); }
+};
+
+template <>
+struct ExclusiveScanIdentity<float> {
+  static constexpr float maximum() { return __builtin_bit_cast(float, 0x7f800000); }
+  static constexpr float minimum() { return -maximum(); }
+};
+
+template <>
+struct ExclusiveScanIdentity<double> {
+  static constexpr double maximum() { return __builtin_bit_cast(double, 0x7FF0000000000000LL); }
+  static constexpr double minimum() { return -maximum(); }
+};
+
+#if defined(_MSC_VER) && !defined(__clang__)
+// MSVC lacks __builtin_copysignf. Copy the sign bit of y onto x bit-for-bit;
+// this matches the behavior of the GCC/Clang intrinsic exactly.
+inline float copysign(float x, float y) {
+  union { float f; unsigned int u; } ux, uy;
+  ux.f = x;
+  uy.f = y;
+  ux.u = (ux.u & 0x7FFFFFFFu) | (uy.u & 0x80000000u);
+  return ux.f;
+}
+#else
+inline constexpr float copysign(float x, float y) { return __builtin_copysignf(x, y); }
+#endif
+
 }  // namespace __hip_internal
 typedef __hip_internal::uint8_t __hip_uint8_t;
 typedef __hip_internal::uint16_t __hip_uint16_t;

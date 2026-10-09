@@ -1,7 +1,7 @@
 # nccl4py: Python Bindings for RCCL
 
 Python bindings for the [ROCm Communication Collectives Library
-(RCCL)](https://github.com/ROCm/rccl), AMD's drop-in replacement for
+(RCCL)](https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl), AMD's drop-in replacement for
 NVIDIA NCCL on ROCm. This package is a fork of the upstream NVIDIA
 [nccl4py](https://github.com/NVIDIA/nccl/tree/master/bindings/nccl4py)
 v0.2.0 and provides both low-level Cython bindings and a high-level
@@ -53,6 +53,20 @@ Pythonic API for RCCL collective operations.
 pip install .
 ```
 
+Verify the installation and inspect the loaded component versions:
+
+```python
+import nccl.core as nccl
+
+nccl.show_versions()
+```
+
+`nccl.core` ships inline type information for
+[PEP 561](https://peps.python.org/pep-0561/)-compatible type checkers.
+
+See [`examples/01_basic`](examples/01_basic) for MPI-based collective and
+point-to-point examples.
+
 > **Note:** The `Makefile` and `CMakeLists.txt` shipped in this
 > directory are inherited from upstream NVIDIA `nccl4py` and target
 > NVIDIA hardware (they require `CUDA_HOME` / `nvcc` and pull
@@ -98,6 +112,17 @@ self-contained scripts:
 mpirun -np 4 python examples/01_basic/01_allreduce.py
 mpirun -np 2 python examples/01_basic/02_send_recv.py
 ```
+
+## Experimental Cython Support
+
+The package includes `nccl/bindings/cynccl.pxd` as an experimental Cython API:
+
+```cython
+from nccl.bindings cimport cynccl
+```
+
+This allows Cython extensions to call NCCL functions with minimal Python
+overhead.
 
 ## Layout
 

@@ -1,11 +1,43 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
-project(profiler-hub VERSION 0.1.0)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
+
+# Version lives in VERSION file.
+file(
+    STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION"
+    FULL_VERSION_STRING
+    LIMIT_COUNT 1
+)
+
+# file(STRINGS) does not register its input as a configure dependency, so editing
+# VERSION alone would leave the old version baked into an existing build tree.
+set_property(
+    DIRECTORY
+    APPEND
+    PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION"
+)
+# Only MAJOR.MINOR.PATCH is passed to project(); any trailing pre-release suffix
+# stays in FULL_VERSION_STRING for reporting.
+if(NOT FULL_VERSION_STRING MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+    message(
+        FATAL_ERROR
+        "VERSION must begin with MAJOR.MINOR.PATCH (found '${FULL_VERSION_STRING}')"
+    )
+endif()
+
+set(PROFILER_HUB_VERSION "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}")
+
+project(profiler-hub VERSION ${PROFILER_HUB_VERSION})
+
+message(
+    STATUS
+    "[${PROJECT_NAME}] version ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH} (${FULL_VERSION_STRING})"
+)
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -18,9 +50,14 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # ------------------------------------------------------------ #
 
 option(PROFILER_HUB_BUILD_TESTS "Build unit tests" ON)
-option(PROFILER_HUB_BUILD_BENCHMARKS "Build performance benchmarks" ON)
+option(PROFILER_HUB_BUILD_BENCHMARKS "Build performance benchmarks" OFF)
 option(PROFILER_HUB_ENABLE_LOGGING "Enable logging" OFF)
 option(PROFILER_HUB_ENABLE_COVERAGE "Enable code coverage" OFF)
+option(
+    PROFILER_HUB_FETCH_DEPENDENCIES
+    "Download missing or unsuitable dependencies at configure time"
+    OFF
+)
 
 if(PROFILER_HUB_BUILD_TESTS)
     enable_testing()
@@ -32,9 +69,9 @@ include(GNUInstallDirs)
 # Version
 # ------------------------------------------------------------ #
 
-# Version is the single source of truth in `project(profiler-hub VERSION ...)`
-# above. CMake automatically populates profiler-hub_VERSION_{MAJOR,MINOR,PATCH}
-# and profiler-hub_VERSION from it.
+# The VERSION file is the single source of truth for the library version.
+# project() above is populated from that file, and CMake then sets
+# profiler-hub_VERSION_{MAJOR,MINOR,PATCH} and profiler-hub_VERSION.
 
 # ------------------------------------------------------------ #
 # Object Library (compiled once, used by both shared and static)
@@ -131,6 +168,20 @@ if(PROFILER_HUB_ENABLE_COVERAGE)
 endif()
 
 # ------------------------------------------------------------ #
+# Schema from rocprofiler-sdk-rocpd
+# ------------------------------------------------------------ #
+
+set(SQL_SCHEMA_DIR ${CMAKE_CURRENT_LIST_DIR}/source/data_storage/schema)
+set(SQL_SCHEMA_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/source/data_storage/)
+
+include(rocprofiler-sdk-rocpd)
+
+target_include_directories(
+    profiler-hub-objects
+    PRIVATE ${SQL_SCHEMA_BINARY_DIR}
+)
+
+# ------------------------------------------------------------ #
 # SQLite3
 # ------------------------------------------------------------ #
 
@@ -159,40 +210,6 @@ include(nlohmann_json)
 target_link_libraries(profiler-hub-objects PRIVATE nlohmann_json::nlohmann_json)
 
 # ------------------------------------------------------------ #
-# Schema from rocprofiler-sdk-rocpd
-# ------------------------------------------------------------ #
-
-set(SQL_SCHEMA_DIR ${CMAKE_CURRENT_LIST_DIR}/source/data_storage/schema)
-set(SQL_SCHEMA_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/source/data_storage/)
-
-include(rocm)
-include(rocprofiler-sdk-rocpd)
-
-if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
-    target_link_libraries(
-        profiler-hub-objects
-        PRIVATE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
-    )
-
-    target_compile_definitions(
-        profiler-hub-objects
-        PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1>
-    )
-else()
-    target_include_directories(
-        profiler-hub-objects
-        PRIVATE ${SQL_SCHEMA_BINARY_DIR}
-    )
-
-    target_compile_definitions(
-        profiler-hub-objects
-        PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0>
-    )
-endif()
-
-# ------------------------------------------------------------ #
 # Logging
 # ------------------------------------------------------------ #
 
@@ -216,6 +233,10 @@ add_library(profiler-hub SHARED $<TARGET_OBJECTS:profiler-hub-objects>)
 add_library(profiler-hub-static STATIC $<TARGET_OBJECTS:profiler-hub-objects>)
 set_target_properties(profiler-hub-static PROPERTIES OUTPUT_NAME profiler-hub)
 
+if(TARGET profiler-hub-sqlite3-shared)
+    set_target_properties(profiler-hub PROPERTIES INSTALL_RPATH "$ORIGIN")
+endif()
+
 # Embed semantic version + ABI version on the shared library so that
 # libprofiler-hub.so.<MAJOR> is the SONAME and libprofiler-hub.so.<MAJOR>.<MINOR>.<PATCH>
 # is the actual file, with both symlinks installed alongside libprofiler-hub.so.
@@ -223,18 +244,6 @@ set_target_properties(
     profiler-hub
     PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR}
 )
-
-# fmt is the one third-party dependency exported in the install interface: the
-# static library calls into it and cannot resolve it on its own. Exporting a
-# link requirement is only valid when fmt is an imported package - a
-# FetchContent-built fmt target is not part of our export set and cannot be
-# referenced by the installed targets file. When fmt is vendored, keep it
-# build-only.
-if(fmt_FOUND)
-    set(profiler_hub_fmt_link fmt::fmt)
-else()
-    set(profiler_hub_fmt_link $<BUILD_INTERFACE:fmt::fmt>)
-endif()
 
 foreach(_target profiler-hub profiler-hub-static)
     target_include_directories(
@@ -244,23 +253,23 @@ foreach(_target profiler-hub profiler-hub-static)
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
 
+    # Link against the object library itself (not just its
+    # $<TARGET_OBJECTS:>) so its PRIVATE dependencies (fmt, spdlog,
+    # nlohmann_json, sqlite3, queries, rocprofiler-sdk-rocpd) are inherited
+    # as usage requirements of profiler-hub-objects instead of being
+    # re-declared here. $<BUILD_INTERFACE:> keeps that reference out of
+    # ${_target}'s own link requirements in the installed export: for a
+    # STATIC library, an un-guarded PRIVATE dependency is copied into
+    # INTERFACE_LINK_LIBRARIES (the well-known reason install(EXPORT) needs
+    # $<BUILD_INTERFACE:> for in-tree-only deps), and the same guard is
+    # required for the SHARED target too, because install(EXPORT)'s
+    # export-set validation for a SHARED library inspects its raw PRIVATE
+    # link dependencies directly rather than the (normally unpopulated)
+    # INTERFACE_LINK_LIBRARIES property.
     target_link_libraries(
         ${_target}
-        PRIVATE
-            $<BUILD_INTERFACE:profiler-hub_queries>
-            $<BUILD_INTERFACE:profiler-hub-sqlite3>
-            $<BUILD_INTERFACE:spdlog::spdlog>
-            ${profiler_hub_fmt_link}
-            $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>
+        PRIVATE $<BUILD_INTERFACE:profiler-hub-objects>
     )
-
-    if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
-        target_link_libraries(
-            ${_target}
-            PRIVATE
-                $<BUILD_INTERFACE:rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd>
-        )
-    endif()
 
     if(PROFILER_HUB_ENABLE_COVERAGE)
         target_link_options(
@@ -269,6 +278,83 @@ foreach(_target profiler-hub profiler-hub-static)
         )
     endif()
 endforeach()
+
+# profiler-hub-static's own link requirements no longer come from
+# target_link_libraries() above (that only supplies the $<BUILD_INTERFACE:>
+# object library), so consumers of the *installed* static package would
+# otherwise get no transitive link requirements at all. Explicitly restore
+# the ones that are genuinely resolvable by real consumers; queries and
+# profiler-hub-objects itself are always in-tree-only and never belong here.
+# sqlite3 is omitted, as it has always been: listing it would change the
+# installed static contract. nlohmann_json is deliberately excluded too: it is a
+# PRIVATE, header-only dependency of profiler-hub-objects that never appears
+# in the installed public headers, so it carries no link symbols a static
+# consumer needs. profiler-hub (SHARED) needs no such list: its dependencies
+# are already fully baked into the .so.
+#
+# Each dependency added here must also get a matching entry accumulated below
+# into profiler_hub_static_find_dependencies: the installed config resolves it
+# via conditional find_package() and records the result in
+# profiler-hub_static_FOUND (see profiler-hub-config.cmake.in). A shared-only
+# consumer is unaffected if one is missing on its prefix - CMake tolerates an
+# unresolvable INTERFACE_LINK_LIBRARIES entry on an IMPORTED target as long as
+# nothing actually links that target (verified empirically, CMake 3.28).
+#
+# Deliberately not keyed off ${_dep}_FOUND: that variable just reflects the
+# most recent find_package(${_dep}) call in this directory scope, and can
+# flip to TRUE later on (e.g. a nested FetchContent'd dependency probing for
+# its own external ${_dep}) even though the actual ${_dep}::${_dep} target
+# still refers to the FIRST definition - which, when the initial
+# find_package() failed and we fell back to FetchContent, is our own
+# in-tree, non-IMPORTED build target (aliased, not exported). Superbuild
+# environments that redirect find_package() to a super-project package
+# (e.g. TheRock) can legitimately fail a version-pinned find_package() while
+# a later, unversioned one for the same package succeeds elsewhere in this
+# scope, so check the target's actual IMPORTED-ness instead of the latching
+# _FOUND variable.
+set(profiler_hub_static_iface_libs "")
+set(profiler_hub_static_find_dependencies "")
+foreach(_dep fmt spdlog)
+    set(_profiler_hub_dep_target "${_dep}::${_dep}")
+    if(TARGET ${_profiler_hub_dep_target})
+        get_target_property(
+            _profiler_hub_dep_aliased
+            ${_profiler_hub_dep_target}
+            ALIASED_TARGET
+        )
+        if(_profiler_hub_dep_aliased)
+            set(_profiler_hub_dep_target "${_profiler_hub_dep_aliased}")
+        endif()
+        get_target_property(
+            _profiler_hub_dep_is_imported
+            ${_profiler_hub_dep_target}
+            IMPORTED
+        )
+        if(_profiler_hub_dep_is_imported)
+            list(
+                APPEND profiler_hub_static_iface_libs
+                "$<INSTALL_INTERFACE:${_dep}::${_dep}>"
+            )
+            # QUIET, not find_dependency(): a miss on the consumer's prefix
+            # must set profiler-hub_static_MISSING_DEPENDENCIES, not abort
+            # the whole config for consumers who never touch the static lib.
+            string(
+                APPEND profiler_hub_static_find_dependencies
+                "find_package(${_dep} QUIET)\n"
+                "if(NOT TARGET ${_dep}::${_dep})\n"
+                "    list(APPEND profiler-hub_static_MISSING_DEPENDENCIES \"${_dep}\")\n"
+                "endif()\n"
+            )
+        endif()
+    endif()
+endforeach()
+unset(_profiler_hub_dep_target)
+unset(_profiler_hub_dep_aliased)
+unset(_profiler_hub_dep_is_imported)
+set_target_properties(
+    profiler-hub-static
+    PROPERTIES INTERFACE_LINK_LIBRARIES "${profiler_hub_static_iface_libs}"
+)
 
 # ------------------------------------------------------------ #
 # Install package support
@@ -312,12 +398,22 @@ install(
 set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 set(LIB_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR})
 
-if(fmt_FOUND)
-    set(PROFILER_HUB_FMT_FIND_DEPENDENCY
-        "include(CMakeFindDependencyMacro)\nfind_dependency(fmt)"
+# Built from profiler_hub_static_iface_libs's accompanying
+# profiler_hub_static_find_dependencies (see the comment above that loop): a
+# conditional find_package(... QUIET) per real, IMPORTED target that
+# profiler-hub-static's INTERFACE_LINK_LIBRARIES references, resolving each
+# before profiler-hub-targets.cmake is included so the static target links if
+# requested. A miss records the dependency name and clears
+# profiler-hub_static_FOUND instead of aborting - profiler-hub_FOUND (the
+# shared/default component) is untouched either way.
+if(NOT profiler_hub_static_find_dependencies STREQUAL "")
+    set(PROFILER_HUB_FIND_DEPENDENCIES
+        "set(profiler-hub_static_MISSING_DEPENDENCIES \"\")\n${profiler_hub_static_find_dependencies}if(profiler-hub_static_MISSING_DEPENDENCIES)\n    set(profiler-hub_static_FOUND 0)\nelse()\n    set(profiler-hub_static_FOUND 1)\nendif()\n"
     )
 else()
-    set(PROFILER_HUB_FMT_FIND_DEPENDENCY "")
+    set(PROFILER_HUB_FIND_DEPENDENCIES
+        "set(profiler-hub_static_MISSING_DEPENDENCIES \"\")\nset(profiler-hub_static_FOUND 1)\n"
+    )
 endif()
 
 configure_package_config_file(

@@ -12,7 +12,9 @@ include_guard(GLOBAL)
 
 set(ROCPROFSYS_PYTEST_PACKAGE_FILES
     ${CMAKE_CURRENT_LIST_DIR}/rocprofsys/__init__.py
+    ${CMAKE_CURRENT_LIST_DIR}/rocprofsys/cache.py
     ${CMAKE_CURRENT_LIST_DIR}/rocprofsys/config.py
+    ${CMAKE_CURRENT_LIST_DIR}/rocprofsys/environment.py
     ${CMAKE_CURRENT_LIST_DIR}/rocprofsys/gpu.py
     ${CMAKE_CURRENT_LIST_DIR}/rocprofsys/runners.py
     ${CMAKE_CURRENT_LIST_DIR}/rocprofsys/validators.py

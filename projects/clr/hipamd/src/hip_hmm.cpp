@@ -7,6 +7,7 @@
 #include <hip/hip_runtime.h>
 #include "hip_internal.hpp"
 #include "hip_conversions.hpp"
+#include "hip_platform.hpp"
 #include "platform/context.hpp"
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
@@ -630,14 +631,27 @@ hipError_t ihipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t coun
       amd::Memory* mem_obj = mem_objs[op_idx];
       size_t offset = offsets[op_idx];
 
-      if ((mem_obj == nullptr) || (size > (mem_obj->getSize() - offset))) {
-        return hipErrorInvalidValue;
+      if (mem_obj == nullptr) {
+        hip::Var* deferred_var = PlatformState::Instance().StatCO().FindDeferredManagedVar(dev_ptr);
+        if (deferred_var != nullptr) {
+          hipError_t status = deferred_var->AllocateManagedVarPtr();
+          if (status != hipSuccess) {
+            return status;
+          }
+          mem_obj = getMemoryObject(hip::getCurrentDevice(), dev_ptr, offset);
+        }
       }
 
-      const bool is_managed_memory =
-          (mem_obj->getMemFlags() & (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR)) != 0;
-
-      requires_pageable_support |= !is_managed_memory;
+      if (mem_obj != nullptr) {
+        if (size > (mem_obj->getSize() - offset)) {
+          return hipErrorInvalidValue;
+        }
+        if (!IsManagedMemory(mem_obj->getMemFlags())) {
+          return hipErrorInvalidValue;
+        }
+      } else {
+        requires_pageable_support = true;
+      }
 
       if (current_loc + 1 < num_prefetch_locs && op_idx >= prefetch_loc_idxs[current_loc + 1]) {
         current_loc++;

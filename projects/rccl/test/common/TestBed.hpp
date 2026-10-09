@@ -30,7 +30,14 @@ namespace RcclUnitTesting
     int                        numActiveChildren;     // List of active children (with usable RCCL comms)
     int                        numActiveRanks;        // Current # of ranks in use
     bool                       useBlocking;           // RCCL communication with blocking or non-blocking option
+    MemAllocType               memAllocType = MEM_ALLOC_HIP; // Allocation mode of the current config
     EnvVars                    ev;                    // Environment variables
+
+    // Comm process pool: poolChildren[d] is pinned to device d; Finalize() is
+    // the pool-reset boundary (re-forks the pool with the current env).
+    bool                       poolMode;              // reuse workers across configs (UT_COMM_POOL != 0)
+    std::vector<TestBedChild*> poolChildren;          // persistent pool, index == pinned device id
+    bool                       configUsedPool;        // last InitComms served from the pool (skip Finalize in DestroyComms)
 
     // Constructor - Creates one child process per detected GPU device that waits for further commands
     TestBed();
@@ -40,21 +47,24 @@ namespace RcclUnitTesting
                    std::vector<int>              const& numCollectivesInGroup,
                    std::vector<int>              const& numStreamsPerGroup,
                    int                           const  numGroupCalls = 1,
-                   bool                          const  useBlocking   = true);
+                   bool                          const  useBlocking   = true,
+                   MemAllocType                  const  memAllocType  = MEM_ALLOC_HIP);
 
     // Prepare TestBed for use with GPUs across multiple child processes
     void InitComms(std::vector<std::vector<int>> const& deviceIdsPerChild,
                    int  const numCollectivesInGroup = 1,
                    int  const numStreamsPerGroup    = 1,
                    int  const numGroupCalls         = 1,
-                   bool const useBlocking           = true);
+                   bool const useBlocking           = true,
+                   MemAllocType const memAllocType  = MEM_ALLOC_HIP);
 
     // Prepare TestBed for use with GPUs on a single child process
     void InitComms(int  const numGpus,
                    int  const numCollectivesInGroup = 1,
                    int  const numStreamsPerGroup    = 1,
                    int  const numGroupCalls         = 1,
-                   bool const useBlocking           = true);
+                   bool const useBlocking           = true,
+                   MemAllocType const memAllocType  = MEM_ALLOC_HIP);
 
     // Set collectives arguments for specified collective / rank
     // Setting scalarsPerRank to non-null will create custom reduction operator
@@ -75,6 +85,8 @@ namespace RcclUnitTesting
     // Using collId = -1 (default) applies settings to all collectives in group
     // Using rank = -1 (default) applies settings to all ranks
     // Using groupIdx = -1 (default) applies setting to all groups
+    // With MEM_ALLOC_SYMMETRIC_WIN, rank must be -1: window registration is
+    // collective over the whole communicator.
     void AllocateMem(bool   const inPlace = false,
                      bool   const useManagedMem = false,
                      int    const groupId  = -1,
@@ -111,12 +123,21 @@ namespace RcclUnitTesting
     // Release the RCCL comms
     void DestroyComms();
 
+    // Query whether every active rank's comm supports symmetric kernels (requires InitComms)
+    void QuerySymmetricSupport(bool& isSupported);
+
     // Release created graphs
     void DestroyGraphs();
 
     // Explicit TestBed destructor that releases all child processes
     // No further calls to TestBed should be performed after this call
     void Finalize();
+
+    // Teardown helpers. TeardownOwnedChildList reaps the per-config fork-fresh children
+    // that childList owns (classic / pool-fallback path). TeardownPool reaps the
+    // persistent pool workers. Finalize() is the pool-reset boundary and runs both.
+    void TeardownOwnedChildList();
+    void TeardownPool();
 
     // Destructor - Calls Finalize() to release all child processes
     ~TestBed();
@@ -172,7 +193,8 @@ namespace RcclUnitTesting
                         std::vector<bool>           const& inPlaceList,
                         std::vector<bool>           const& managedMemList,
                         std::vector<bool>           const& useHipGraphList,
-                        bool                        const& enableSweep = true);
+                        bool                        const& enableSweep = true,
+                        MemAllocType                       memAllocType = MEM_ALLOC_HIP);
 
     // Wait for user-input if in interactive mode
     void InteractiveWait(std::string message);
@@ -180,8 +202,27 @@ namespace RcclUnitTesting
     // Used to track total number of calls to ExecuteCollectives()
     static int& NumTestsRun();
 
-  protected:
-    // Ends the specified child process
-    void StopChild(int const childId);
+  private:
+    // Starts a worker in a fresh process image so it never inherits HIP/HSA
+    // runtime state from the test parent.
+    bool SpawnChildProcess(TestBedChild* child, MemAllocType memAllocType);
+
+    // Reads one acknowledgement from each listed child (a child may appear once
+    // per command it was sent), then fails if any reported failure.
+    void CollectAcks(std::vector<int> const& childIds, bool* allSucceeded = nullptr);
+
+    // AllocateMem is split into AllocateMemInternal + RegisterMemInternal to maintain
+    // compatibility with existing tests, and extend registration for symmetric memory.
+    // Returns false if any child failed, so registration can be skipped.
+    bool AllocateMemInternal(bool   const inPlace = false,
+                             bool   const useManagedMem = false,
+                             int    const groupId  = -1,
+                             int    const collId   = -1,
+                             int    const rank     = -1,
+                             bool   const userRegistered = false);
+
+    void RegisterMemInternal(int    const groupId,
+                             int    const collId,
+                             int    const rank);
   };
 }

@@ -19,6 +19,7 @@
 #define CUDA_10000 10000
 #define CUDA_10010 10010
 #define CUDA_10020 10020
+#define CUDA_11000 11000
 #define CUDA_11010 11010
 #define CUDA_11020 11020
 #define CUDA_11030 11030
@@ -27,6 +28,7 @@
 #define CUDA_12000 12000
 #define CUDA_12020 12020
 #define CUDA_12030 12030
+#define CUDA_12080 12080
 #define CUDA_13000 13000
 
 #ifdef __cplusplus
@@ -125,6 +127,7 @@ typedef enum hipMemoryAdvise {
 #define hipStreamWaitValueEq CU_STREAM_WAIT_VALUE_EQ
 #define hipStreamWaitValueAnd CU_STREAM_WAIT_VALUE_AND
 #define hipStreamWaitValueNor CU_STREAM_WAIT_VALUE_NOR
+#define hipStreamWriteValueDefault CU_STREAM_WRITE_VALUE_DEFAULT
 
 // hipLibraryPropertyType
 #define hipLibraryPropertyType libraryPropertyType
@@ -287,6 +290,11 @@ typedef enum CUmemRangeHandleType_enum hipMemRangeHandleType;
 #define hipMemRangeHandleTypeMax CU_MEM_RANGE_HANDLE_TYPE_MAX
 #endif
 
+#if CUDA_VERSION >= CUDA_12080
+typedef enum CUmemRangeFlags_enum hipMemRangeFlags;
+#define hipMemRangeFlagDmaBufMappingTypePcie CU_MEM_RANGE_FLAG_DMA_BUF_MAPPING_TYPE_PCIE
+#endif
+
 #define hipSurfaceBoundaryMode cudaSurfaceBoundaryMode
 #define hipBoundaryModeZero cudaBoundaryModeZero
 #define hipBoundaryModeTrap cudaBoundaryModeTrap
@@ -367,6 +375,7 @@ typedef enum cudaResourceViewFormat hipResourceViewFormat;
 #define hipHostMallocWriteCombined cudaHostAllocWriteCombined
 #define hipHostMallocCoherent 0x0
 #define hipHostMallocNonCoherent 0x0
+#define hipMallocSignalMemory 0x0
 
 #define hipHostAllocDefault cudaHostAllocDefault
 #define hipHostAllocPortable cudaHostAllocPortable
@@ -923,6 +932,9 @@ typedef cudaSurfaceObject_t hipSurfaceObject_t;
 #define hipDeviceScheduleMask cudaDeviceScheduleMask
 #define hipDeviceMapHost cudaDeviceMapHost
 #define hipDeviceLmemResizeToMax cudaDeviceLmemResizeToMax
+#if CUDA_VERSION >= CUDA_12000
+#define hipInitDeviceFlagsAreValid cudaInitDeviceFlagsAreValid
+#endif
 
 #define hipCpuDeviceId cudaCpuDeviceId
 #define hipInvalidDeviceId cudaInvalidDeviceId
@@ -1424,6 +1436,8 @@ inline static CUresult hipErrorToCUResult(hipError_t hError) {
       return CUDA_ERROR_LAUNCH_FAILED;
     case hipErrorCooperativeLaunchTooLarge:
       return CUDA_ERROR_COOPERATIVE_LAUNCH_TOO_LARGE;
+    case hipErrorNotPermitted:
+      return CUDA_ERROR_NOT_PERMITTED;
     case hipErrorNotSupported:
       return CUDA_ERROR_NOT_SUPPORTED;
     case hipErrorStreamCaptureUnsupported:
@@ -1632,6 +1646,8 @@ inline static cudaError_t hipErrorToCudaError(hipError_t hError) {
       return cudaErrorStreamCaptureWrongThread;
     case hipErrorGraphExecUpdateFailure:
       return cudaErrorGraphExecUpdateFailure;
+    case hipErrorNotPermitted:
+      return cudaErrorNotPermitted;
     case hipErrorNotSupported:
       return cudaErrorNotSupported;
     case hipErrorInvalidChannelDescriptor:
@@ -2042,6 +2058,12 @@ typedef void(HIPRT_CB* hipStreamCallback_t)(hipStream_t stream, hipError_t statu
 inline static hipError_t hipInit(unsigned int flags) {
   return hipCUResultTohipError(cuInit(flags));
 }
+
+#if CUDA_VERSION >= CUDA_12000
+inline static hipError_t hipInitDevice(int device, unsigned int deviceFlags, unsigned int flags) {
+  return hipCUDAErrorTohipError(cudaInitDevice(device, deviceFlags, flags));
+}
+#endif
 
 inline static hipError_t hipDeviceReset() { return hipCUDAErrorTohipError(cudaDeviceReset()); }
 
@@ -3097,9 +3119,25 @@ inline static hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
     case hipDeviceAttributeDmaBufSupported:
       return hipCUResultTohipError(
           cuDeviceGetAttribute(pi, CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED, device));
+#if CUDA_VERSION >= CUDA_13000
+    case hipDeviceAttributeHostAllocDmaBufSupported:
+      return hipCUResultTohipError(
+          cuDeviceGetAttribute(pi, CU_DEVICE_ATTRIBUTE_HOST_ALLOC_DMA_BUF_SUPPORTED, device));
+#endif
     case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
       return hipCUResultTohipError(cuDeviceGetAttribute(
           pi, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED, device));
+#if CUDA_VERSION >= CUDA_11000
+    case hipDeviceAttributeGPUDirectRDMASupported:
+      cdattr = cudaDevAttrGPUDirectRDMASupported;
+      break;
+    case hipDeviceAttributeGPUDirectRDMAFlushWritesOptions:
+      cdattr = cudaDevAttrGPUDirectRDMAFlushWritesOptions;
+      break;
+    case hipDeviceAttributeGPUDirectRDMAWritesOrdering:
+      cdattr = cudaDevAttrGPUDirectRDMAWritesOrdering;
+      break;
+#endif  // CUDA_VERSION >= CUDA_11000
 #if CUDA_VERSION >= CUDA_12040
     case hipDeviceAttributeHandleTypeFabricSupported:
       return hipCUResultTohipError(cuDeviceGetAttribute(
@@ -3789,6 +3827,16 @@ inline static hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device) {
   return err;
 }
 
+#if CUDA_VERSION >= CUDA_10000
+inline static hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask,
+                                          hipDevice_t device) {
+  if (luid == NULL || deviceNodeMask == NULL) {
+    return hipErrorInvalidValue;
+  }
+  return hipCUResultTohipError(cuDeviceGetLuid(luid, deviceNodeMask, device));
+}
+#endif
+
 inline static hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
                                                   int dstDevice) {
   return hipCUDAErrorTohipError(cudaDeviceGetP2PAttribute(value, attr, srcDevice, dstDevice));
@@ -3800,6 +3848,40 @@ inline static hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, hipDevice
 
 inline static hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId) {
   return hipCUDAErrorTohipError(cudaDeviceGetByPCIBusId(device, pciBusId));
+}
+
+inline static hipError_t hipDeviceFlushGPUDirectRDMAWrites(
+    enum hipFlushGPUDirectRDMAWritesTarget target, enum hipFlushGPUDirectRDMAWritesScope scope) {
+  // Validate here rather than deferring to CUDA: cudaDeviceFlushGPUDirectRDMAWrites documents
+  // only cudaSuccess and cudaErrorNotSupported, so it is not specified to reject an
+  // out-of-domain target or scope. Checking first keeps the hipErrorInvalidValue contract
+  // identical on both backends.
+  if (target != hipFlushGPUDirectRDMAWritesTargetCurrentDevice) {
+    return hipErrorInvalidValue;
+  }
+
+#if CUDA_VERSION >= CUDA_11000
+  enum cudaFlushGPUDirectRDMAWritesScope cudaScope;
+  switch (scope) {
+    case hipFlushGPUDirectRDMAWritesToOwner:
+      cudaScope = cudaFlushGPUDirectRDMAWritesToOwner;
+      break;
+    case hipFlushGPUDirectRDMAWritesToAllDevices:
+      cudaScope = cudaFlushGPUDirectRDMAWritesToAllDevices;
+      break;
+    default:
+      return hipErrorInvalidValue;
+  }
+
+  return hipCUDAErrorTohipError(cudaDeviceFlushGPUDirectRDMAWrites(
+      cudaFlushGPUDirectRDMAWritesTargetCurrentDevice, cudaScope));
+#else
+  if (scope != hipFlushGPUDirectRDMAWritesToOwner &&
+      scope != hipFlushGPUDirectRDMAWritesToAllDevices) {
+    return hipErrorInvalidValue;
+  }
+  return hipErrorNotSupported;
+#endif  // CUDA_VERSION >= CUDA_11000
 }
 
 inline static hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* config) {
@@ -3853,7 +3935,13 @@ inline static hipError_t hipModuleLoadFatBinary(hipModule_t* module, const void*
 }
 
 inline static hipError_t hipModuleUnload(hipModule_t hmod) {
-  return hipCUResultTohipError(cuModuleUnload(hmod));
+  CUresult err = cuModuleUnload(hmod);
+  // A module obtained from hipLibraryGetModule() is owned by its library, and
+  // CUDA reports CUDA_ERROR_NOT_PERMITTED for releasing it here.
+  if (err == CUDA_ERROR_NOT_PERMITTED) {
+    return hipErrorNotPermitted;
+  }
+  return hipCUResultTohipError(err);
 }
 
 inline static hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module,
@@ -3863,6 +3951,11 @@ inline static hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule
 
 inline static hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod) {
   return hipCUResultTohipError(cuModuleGetFunctionCount(count, mod));
+}
+
+inline static hipError_t hipModuleEnumerateFunctions(hipFunction_t* functions,
+                                                     unsigned int numFunctions, hipModule_t mod) {
+  return hipCUResultTohipError(cuModuleEnumerateFunctions(functions, numFunctions, mod));
 }
 
 inline static hipError_t hipModuleGetTexRef(hipTexRef* pTexRef, hipModule_t hmod,
@@ -3943,6 +4036,10 @@ inline static hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes,
                                               hipLibrary_t library, const char* name) {
   return hipCUDAErrorTohipError(
       cudaLibraryGetManaged(dptr, bytes, reinterpret_cast<cudaLibrary_t>(library), name));
+}
+
+inline static hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library) {
+  return hipCUResultTohipError(cuLibraryGetModule(pMod, library));
 }
 
 inline static hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary_t library) {
@@ -4351,6 +4448,13 @@ inline static hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* lo
   CUmemLocation cu_location = cudaMemLocationToCUmemLocation(location);
   CUmemAllocationType cu_allocation_type = cudaMemAllocationTypeToCUmemAllocationType(type);
   return hipCUResultTohipError(cuMemGetMemPool(pool, &cu_location, cu_allocation_type));
+}
+
+inline static hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
+                                                 hipMemAllocationType type) {
+  CUmemLocation cu_location = cudaMemLocationToCUmemLocation(location);
+  CUmemAllocationType cu_allocation_type = cudaMemAllocationTypeToCUmemAllocationType(type);
+  return hipCUResultTohipError(cuMemGetDefaultMemPool(memPool, &cu_location, cu_allocation_type));
 }
 #endif // CUDA_VERSION >= CUDA_13000
 

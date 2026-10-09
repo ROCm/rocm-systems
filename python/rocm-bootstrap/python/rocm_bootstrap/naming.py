@@ -29,10 +29,10 @@ class PackageNames:
     Attributes:
         dist_name: Name safe for Python distribution/wheel usage.
             Lowercase, uses hyphens as separators.
-            E.g., ``"gfx11-5"``, ``"gfx942"``.
+            E.g., ``"gfx12-5"``, ``"gfx942"``.
         module_name: Name safe for Python identifiers/modules.
             Uses underscores, no hyphens, no leading digits.
-            E.g., ``"gfx11_5"``, ``"gfx942"``.
+            E.g., ``"gfx12_5"``, ``"gfx942"``.
     """
 
     dist_name: str
@@ -63,8 +63,8 @@ def device_dist_name(prefix: str, bundle: TargetBundle) -> str:
 
     Examples::
 
-        device_dist_name("rocm-sdk-device", bundle_gfx11_5)
-        # -> "rocm-sdk-device-gfx11-5"
+        device_dist_name("rocm-sdk-device", bundle_gfx12_5)
+        # -> "rocm-sdk-device-gfx12-5"
 
         device_dist_name("amd-torch-device", bundle_gfx942)
         # -> "amd-torch-device-gfx942"
@@ -87,8 +87,8 @@ def device_module_name(prefix: str, bundle: TargetBundle) -> str:
 
     Examples::
 
-        device_module_name("rocm_sdk_device", bundle_gfx11_5)
-        # -> "rocm_sdk_device_gfx11_5"
+        device_module_name("rocm_sdk_device", bundle_gfx12_5)
+        # -> "rocm_sdk_device_gfx12_5"
 
     Args:
         prefix: Module name prefix (e.g., ``"rocm_sdk_device"``).

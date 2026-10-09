@@ -9,10 +9,7 @@ from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
 
-pytestmark = [
-    pytest.mark.time_window,
-    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
-]
+pytestmark = [pytest.mark.time_window]
 
 # ============================================================================
 # Time Window Fixtures
@@ -33,18 +30,18 @@ def time_window_env() -> dict[str, str]:
 # ============================================================================
 
 
+@pytest.mark.parametrize(
+    "mode",
+    [
+        pytest.param("binary_rewrite", marks=pytest.mark.timeout(120)),
+        "runtime_instrument",
+    ],
+)
 @pytest.mark.class_name("trace-time-window")
 class TestTraceTimeWindow(RocprofsysTest):
     BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--caller-include", "inner", "-i", "4096"]
     RUNTIME_INSTRUMENT_ARGS = ["-e", "-v", "1", "--caller-include", "inner", "-i", "4096"]
 
-    @pytest.mark.parametrize(
-        "mode",
-        [
-            pytest.param("binary_rewrite", marks=pytest.mark.timeout(120)),
-            pytest.param("runtime_instrument", marks=pytest.mark.timeout(300)),
-        ],
-    )
     def test(self, mode, time_window_env):
 
         env = time_window_env.copy()
@@ -80,17 +77,10 @@ class TestTraceTimeWindow(RocprofsysTest):
             fail_regex=["outer_d"],  # time window should exclude this
         )
 
-    @pytest.mark.parametrize(
-        "mode",
-        [
-            pytest.param("binary_rewrite", marks=pytest.mark.timeout(120)),
-            pytest.param("runtime_instrument", marks=pytest.mark.timeout(300)),
-        ],
-    )
     def test_delay(self, mode, time_window_env):
         env = time_window_env.copy()
         env.update(
-            {"ROCPROFSYS_TRACE_DELAY": "0.75", "ROCPROFSYS_TRACE_DURATION": "0.75"}
+            {"ROCPROFSYS_TRACE_DELAY": "0.75", "ROCPROFSYS_TRACE_DURATION": "0.85"}
         )
         result = self.run_test(
             mode,
@@ -115,3 +105,31 @@ class TestTraceTimeWindow(RocprofsysTest):
             counts=[1, 1],
             depths=[0, 0],
         )
+
+    def test_delay_cputime_clock(self, mode, time_window_env):
+        """Regression test: --trace-clock-id used to crash the profiled process
+        for every value (numeric clock id written to the settings string that
+        only ever matched "realtime"/"cputime").
+
+        Uses a small process-CPU-time budget rather than test_delay's
+        wall-clock values: this app is dominated by sleep_for() and only
+        generates ~500ms of real CPU time total across its 5 calls, so a
+        larger cputime budget can starve indefinitely (clock_nanosleep on
+        CLOCK_PROCESS_CPUTIME_ID never returns once nothing in the process
+        is left consuming CPU)."""
+        env = time_window_env.copy()
+        env.update(
+            {
+                "ROCPROFSYS_TRACE_DELAY": "0.05",
+                "ROCPROFSYS_TRACE_DURATION": "0.1",
+                "ROCPROFSYS_TRACE_PERIOD_CLOCK_ID": "cputime",
+            }
+        )
+        result = self.run_test(
+            mode,
+            "trace-time-window",
+            env=env,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
+        )
+        self.assert_regex(result)

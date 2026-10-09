@@ -55,6 +55,7 @@
 namespace rocr {
 namespace core {
 
+class Driver;
 class Queue;
 
 enum class DriverQuery { GET_DRIVER_VERSION };
@@ -68,18 +69,43 @@ enum class DriverType {
   NUM_DRIVER_TYPES
 };
 
-/// @brief Handle for exported / imported memory.
+/// @brief Handle for a driver memory allocation and export / import.
 struct DriverMemoryHandle {
+  /// @brief Driver-native allocation id
+  /// - allocation address / thunk buffer handle for @ref KfdDriver
+  /// - XDNA BO handle for @ref XdnaDriver
   uint64_t handle{};
+  /// @brief Virtual address of this allocation, or nullptr if the driver exposes none.
+  /// Whether FreeMemory unmaps it is driver-defined: an allocation may borrow a
+  /// mapping owned by something else, in which case FreeMemory leaves it intact.
+  void* vaddr{};
   int dmabuf_fd{-1};
   uint64_t mmap_offset{0};
   size_t size{0};
   hsa_fabric_handle_t fabric_handle{};
+  /// @brief Driver that created this handle.
+  ///
+  /// Native ids are only meaningful to their own driver and are not unique across drivers, so
+  /// this is what lets a driver recognize one of its own handles when one is passed back to it.
+  const Driver* owner{nullptr};
+  /// @brief False when the allocation is borrowed from the handle that owns it and so
+  /// must not be released when this handle is destroyed.
+  ///
+  /// Only @ref Driver::ImportMemoryHandle can produce a borrowed handle, and only when the
+  /// import resolves to an allocation the importing driver already owns.
+  bool owns_allocation{true};
+};
 
-  bool IsValid() const { return handle != 0; }
-
-  bool operator<(const DriverMemoryHandle& b) const { return handle < b.handle; }
-  bool operator==(const DriverMemoryHandle& b) const { return handle == b.handle; }
+/// @brief Placement of a dmabuf-backed allocation as reported by the kernel driver.
+struct DmaBufInfo {
+  /// @brief Allocation size in bytes.
+  uint64_t size{0};
+  /// @brief Driver id of the node owning the buffer object. For host memory this is
+  /// the GPU that performed the DRM import, not a CPU node, so it must not be used
+  /// to infer host-vs-device.
+  uint32_t node_id{0};
+  /// @brief True when the buffer is device-local (VRAM); false for host (GTT/USERPTR).
+  bool is_device_memory{false};
 };
 
 /// @brief Format of a shareable memory handle for export and import.
@@ -91,14 +117,6 @@ enum ShareType {
   DMABUF_FD,
   /// @brief Globally unique fabric handle for multi-node / cross-domain sharing.
   FABRIC_HANDLE,
-};
-
-/// @brief Flags for @ref ExportMemoryHandle.
-enum ExportMemoryFlags : uint32_t {
-  EXPORT_MEMORY_FLAGS_NONE = 0,
-  /// Export a KFD allocation via @c hsaKmtExportDMABufHandle. @p handle.handle is the
-  /// allocation address and @p handle.size is the allocation size. @p export_offset is required.
-  EXPORT_MEMORY_FLAGS_KFD_DMABUF = 1,
 };
 
 /// @brief Kernel driver interface.
@@ -164,16 +182,39 @@ public:
                                           std::vector<HsaCacheProperties>& cache_props) const = 0;
 
   /// @brief Allocate agent-accessible memory (system or agent-local memory).
-  /// @param[out] mem pointer to newly allocated memory.
+  /// @param[out] handle driver identity for this allocation. The handle word and
+  /// size are populated; export-only fields (dmabuf_fd/mmap_offset/fabric_handle)
+  /// are left unset and filled lazily by ExportMemoryHandle/CreateShareableHandle.
+  /// The handle must be passed to @ref FreeMemory to release the allocation.
   /// @retval HSA_STATUS_SUCCESS if memory was successfully allocated or
   /// hsa_status_t error code if the memory allocation failed.
-  virtual hsa_status_t AllocateMemory(const MemoryRegion &mem_region,
-                                      MemoryRegion::AllocateFlags alloc_flags,
-                                      void **mem, size_t size,
-                                      uint32_t node_id) = 0;
+  virtual hsa_status_t AllocateMemory(const MemoryRegion& mem_region,
+                                      MemoryRegion::AllocateFlags alloc_flags, size_t size,
+                                      uint32_t node_id, DriverMemoryHandle* handle) = 0;
 
   /// @brief Free memory allocated by @ref AllocateMemory.
-  virtual hsa_status_t FreeMemory(void *mem, size_t size) = 0;
+  /// @param[in] handle driver identity returned by @ref AllocateMemory.
+  virtual hsa_status_t FreeMemory(const DriverMemoryHandle& handle) = 0;
+
+  /// @brief Describes the allocation containing @p ptr, for @c hsa_amd_pointer_info.
+  ///
+  /// @c GPUAddress is the address the agent uses for the allocation, which need not equal its
+  /// host address. @c MappedNodes may point into @p info.
+  ///
+  /// @param[in] ptr address to describe.
+  /// @param[in] region region the allocation was made from, or nullptr if the runtime has no
+  /// record of the allocation.
+  /// @param[in] alloc_flags flags the allocation was made with.
+  /// @param[in] handle handle @ref AllocateMemory returned for the allocation, or nullptr if
+  /// @p region is.
+  /// @param[out] info the allocation, in the thunk's terms.
+  /// @retval HSA_STATUS_ERROR_INVALID_ALLOCATION if the driver cannot describe @p ptr.
+  virtual hsa_status_t QueryPointerInfo(const void* ptr, const MemoryRegion* region,
+                                        MemoryRegion::AllocateFlags alloc_flags,
+                                        const DriverMemoryHandle* handle,
+                                        HsaPointerInfo* info) const {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
 
   /// @brief Create an agent dispatch queue with user-mode access rights.
   /// @param[in] node_id Node ID of the agent on which the queue is being created.
@@ -229,34 +270,41 @@ public:
   /// @param[in] agent agent that owns the memory
   /// @param[in] handle driver memory handle to export
   /// @param[in] type @ref ShareType to export
-  /// @param[in] flags @ref ExportMemoryFlags
   /// @param[out] export_handle output handle; @p int* for @p DMABUF_FD,
   ///             @p hsa_fabric_handle_t* for @p FABRIC_HANDLE
-  /// @param[out] export_offset allocation offset; required when @p EXPORT_MEMORY_FLAGS_KFD_DMABUF
-  ///             is set in @p flags
-  virtual hsa_status_t ExportMemoryHandle(const core::Agent& agent, const DriverMemoryHandle& handle,
-                                          ShareType type, uint32_t flags, void* export_handle,
-                                          uint64_t* export_offset = nullptr) = 0;
+  virtual hsa_status_t ExportMemoryHandle(const core::Agent& agent,
+                                          const DriverMemoryHandle& handle, ShareType type,
+                                          void* export_handle) = 0;
 
   /// @brief Imports a memory object from a shareable handle.
   ///
-  /// @note The handle must be destroyed with @ref DestroyImportedMemoryHandle.
+  /// @note The handle must be destroyed with @ref DestroyMemoryHandle.
   ///
   /// @param[in] agent agent to import the memory for
   /// @param[out] handle handle to the imported memory; @p handle->size is set to the
   ///             imported allocation size in bytes
   /// @param[in] type @ref ShareType to import
-  /// @param[in] import_handle input handle; @p int* for @p DMABUF_FD,
-  ///             @p hsa_fabric_handle_t* for @p FABRIC_HANDLE
+  /// @param[in] import_handle input handle; @p DriverMemoryHandle* whose
+  ///             @p dmabuf_fd field is read for @p DMABUF_FD and whose
+  ///             @p fabric_handle field is read for @p FABRIC_HANDLE
   /// @param[in] mem address of existing buffer, used to bypass import
   virtual hsa_status_t ImportMemoryHandle(const core::Agent& agent, DriverMemoryHandle* handle,
                                           ShareType type, void* import_handle,
                                           void* mem = nullptr) = 0;
 
-  /// @brief Destroys the handle created during @ref ImportMemoryHandle.
+  /// @brief Queries the placement of an allocation from its dmabuf fd alone.
   ///
-  /// @param[in] handle handle of the object to release
-  virtual hsa_status_t DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) = 0;
+  /// Used to recover the properties of an imported allocation, which carries no
+  /// region of its own. Deliberately takes only an fd: the per-GPU import stays
+  /// deferred until set-access time.
+  ///
+  /// @param[in] dmabuf_fd fd to query; not consumed
+  /// @param[out] info placement of the underlying allocation
+  /// @retval HSA_STATUS_ERROR_INVALID_ARGUMENT driver cannot describe this fd;
+  ///         callers leave the placement unresolved and keep legacy behaviour.
+  virtual hsa_status_t QueryDmaBufInfo(int dmabuf_fd, DmaBufInfo* info) const {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   /// @brief Maps the memory associated with the handle.
   ///
@@ -265,9 +313,10 @@ public:
   /// @param[in] offset memory offset in bytes
   /// @param[in] size memory size in bytes
   /// @param[out] perms new permissions
+  /// @param[in] node_id driver node id of the target GPU
   virtual hsa_status_t Map(const core::DriverMemoryHandle& handle, void *mem,
                            size_t offset, size_t size,
-                           hsa_access_permission_t perms) = 0;
+                           hsa_access_permission_t perms, uint32_t node_id) = 0;
 
   /// @brief Unmaps the memory associated with the handle.
   ///
@@ -275,23 +324,22 @@ public:
   /// @param[in] mem virtual address associated with the handle
   /// @param[in] offset memory offset in bytes
   /// @param[in] size memory size in bytes
+  /// @param[in] node_id driver node id of the target GPU
   virtual hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void *mem,
-                             size_t offset, size_t size) = 0;
+                             size_t offset, size_t size, uint32_t node_id) = 0;
 
   /// @brief Maps the virtual address to the physical address and creates a handle to share this
   /// mapping.
   ///
   /// @note The handle must be destroyed with @ref DestroyMemoryHandle.
   ///
-  /// @param[in] va virtual address
-  /// @param[in] mem physical memory handle
-  /// @param[in] size memory size in bytes
-  /// @param[in] agent agent associated with @p mem
-  /// @param[out] handle handle of the memory object
+  /// @param[in,out] handle on input, the allocation handle from @ref AllocateMemory whose native id
+  /// and size identify the memory to share; on success, transformed in place into the shareable
+  /// memory handle (which must be destroyed with @ref DestroyMemoryHandle). Left unchanged on
+  /// failure.
+  /// @param[in] agent agent associated with the allocation
   /// @param[out] offset memory offset in bytes
-  virtual hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size,
-                                             const core::Agent& agent,
-                                             core::DriverMemoryHandle* handle,
+  virtual hsa_status_t CreateShareableHandle(DriverMemoryHandle* handle, const core::Agent& agent,
                                              uint64_t* offset) = 0;
 
   /// @brief Destroys the handle created during @ref CreateShareableHandle.
@@ -316,7 +364,6 @@ public:
   virtual hsa_status_t SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t size_bytes,
                                         uint32_t* timeout, uint32_t* size_copied,
                                         void* dest_mem_addr, bool* is_spm_data_loss) const = 0;
-
   /// @brief Open anonymous file descriptor to enable events and read SMI events.
   /// @param[in] node_id Node ID to receive the SMI event from.
   /// @param[out] fd Anonymous file descriptor.
@@ -349,6 +396,32 @@ public:
   /// external semaphores.
   virtual hsa_status_t DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const {
     return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Submits a GPU-side signal of an imported external semaphore on
+  /// the given KMD queue.
+  /// @param[in] queue_id KMD queue id (HSA_QUEUEID) the signal is appended to.
+  /// @param[in] sem Semaphore from @ref ImportExternalSemaphore.
+  /// @param[in] value Payload for timeline semaphores (ignored for binary).
+  /// @retval HSA_STATUS_ERROR_NOT_SUPPORTED if the driver does not support
+  /// external semaphores.
+  virtual hsa_status_t SignalExternalSemaphore(uint64_t queue_id,
+                                               hsa_amd_external_semaphore_t sem,
+                                               uint64_t value) const {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+  }
+
+  /// @brief Submits a GPU-side wait on an imported external semaphore on the
+  /// given KMD queue.
+  /// @param[in] queue_id KMD queue id (HSA_QUEUEID) the wait is appended to.
+  /// @param[in] sem Semaphore from @ref ImportExternalSemaphore.
+  /// @param[in] value Payload for timeline semaphores (ignored for binary).
+  /// @retval HSA_STATUS_ERROR_NOT_SUPPORTED if the driver does not support
+  /// external semaphores.
+  virtual hsa_status_t WaitExternalSemaphore(uint64_t queue_id,
+                                             hsa_amd_external_semaphore_t sem,
+                                             uint64_t value) const {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
   }
 
   /// @brief Sets trap handler and trap buffer to be used for all queues associated
@@ -442,7 +515,7 @@ public:
   /// @param[in] nodes nodes to be used can be null
   /// @return HSA_STATUS_SUCCESS if the driver successfully makes the memory
   virtual hsa_status_t MakeMemoryResident(const void* mem, size_t size, uint64_t* alternate_va,
-                                          const HsaMemMapFlags* mem_flags = nullptr,
+                                          const HsaMemFlags* mem_flags = nullptr,
                                           uint32_t num_nodes = 0,
                                           const uint32_t* nodes = nullptr) const = 0;
 
@@ -457,6 +530,18 @@ public:
   /// @param[out] size Size of the used queue save area in bytes
   /// @return HSA_STATUS_SUCCESS if the driver successfully returns the queue save area information
   virtual hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const = 0;
+
+  /// @brief Sets the persisting GL2 cache size for a GPU node.
+  /// @param[in] node_id Node ID of the agent.
+  /// @param[in] cache_size The requested cache size in bytes.
+  /// @return HSA_STATUS_SUCCESS if the driver successfully sets the persisting cache size.
+  virtual hsa_status_t SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) = 0;
+
+  /// @brief Checks if the accelerator is ready to be used.
+  /// @param[in] agent Agent to check the readiness of.
+  /// @param[out] ready True if the accelerator is ready, false otherwise.
+  /// @return HSA_STATUS_SUCCESS if the driver successfully checks the accelerator readiness.
+  virtual hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const = 0;
 
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;

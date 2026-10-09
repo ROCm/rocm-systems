@@ -32,7 +32,10 @@ option(CMAKE_VERBOSE_MAKEFILE "Enable verbose output" ON)
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile commands for linters and autocompleters" ON)
 
 # Set compile flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64 -msse -msse2")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+    string(APPEND CMAKE_CXX_FLAGS " -m64 -msse -msse2")
+endif()
 set(CMAKE_CXX_FLAGS_DEBUG
     "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ggdb -DDEBUG"
     CACHE STRING
