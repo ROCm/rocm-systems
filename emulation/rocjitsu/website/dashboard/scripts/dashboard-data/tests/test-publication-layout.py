@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 """Publication layout, legacy-history and containment contracts."""
 
 import copy

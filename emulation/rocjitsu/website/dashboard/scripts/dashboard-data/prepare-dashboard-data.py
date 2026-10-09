@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 """Build one schema-2 run file and its catalog from recorded benchmark executions.
 
 This does not create or modify index.json or metadata.json.

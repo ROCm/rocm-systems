@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 """Append one built dashboard run to a publication snapshot.
 
 prepare-dashboard-data.py writes the run and catalog only. This copies those
