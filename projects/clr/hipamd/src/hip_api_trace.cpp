@@ -889,6 +889,7 @@ hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const
 hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary_t library);
 hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library, const char* name);
 hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library, const char* name);
+hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library);
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
                                       hipLibrary_t library);
 hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
@@ -940,11 +941,9 @@ hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event);
 hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
                                    hipMemAllocationType type);
 hipError_t hipModuleEnumerateFunctions(hipFunction_t* functions, unsigned int numFunctions,
-                                         hipModule_t mod);
+                                    hipModule_t mod);
 hipError_t hipDeviceFlushGPUDirectRDMAWrites(hipFlushGPUDirectRDMAWritesTarget target,
                                              hipFlushGPUDirectRDMAWritesScope scope);
-hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr, int value,
-                                          int device);
 }  // namespace hip
 
 namespace hip {
@@ -1335,6 +1334,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
       hip::hipOccupancyMaxPotentialClusterSize;
   ptrDispatchTable->hipLibraryGetGlobal_fn = hip::hipLibraryGetGlobal;
   ptrDispatchTable->hipLibraryGetManaged_fn = hip::hipLibraryGetManaged;
+  ptrDispatchTable->hipLibraryGetModule_fn = hip::hipLibraryGetModule;
   ptrDispatchTable->hipPeekAtLastError_fn = hip::hipPeekAtLastError;
   ptrDispatchTable->hipPointerGetAttribute_fn = hip::hipPointerGetAttribute;
   ptrDispatchTable->hipPointerGetAttributes_fn = hip::hipPointerGetAttributes;
@@ -1513,7 +1513,6 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipMemGetMemPool_fn = hip::hipMemGetMemPool;
   ptrDispatchTable->hipKernelGetAttribute_fn = hip::hipKernelGetAttribute;
   ptrDispatchTable->hipKernelSetAttribute_fn = hip::hipKernelSetAttribute;
-  ptrDispatchTable->hipKernelSetAttributeForDevice_fn = hip::hipKernelSetAttributeForDevice;
   ptrDispatchTable->hipKernelGetFunction_fn = hip::hipKernelGetFunction;
   ptrDispatchTable->hipGreenCtxCreate_fn = hip::hipGreenCtxCreate;
   ptrDispatchTable->hipExecutionCtxDestroy_fn = hip::hipExecutionCtxDestroy;
@@ -2278,7 +2277,7 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipModuleEnumerateFunctions_fn, 544);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 35
 HIP_ENFORCE_ABI(HipDispatchTable, hipDeviceFlushGPUDirectRDMAWrites_fn, 545);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 36
-HIP_ENFORCE_ABI(HipDispatchTable, hipKernelSetAttributeForDevice_fn, 546);
+HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetModule_fn, 546);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //

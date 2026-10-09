@@ -146,6 +146,10 @@ int64_t g_rcclParamHierarchicalAllGather = 1;      // RCCL_PARAM(HierarchicalAll
 int64_t rcclParamHierarchicalAllGather() { return g_rcclParamHierarchicalAllGather; }
 int64_t g_rcclParamHierarchicalReduceScatter = 0;  // RCCL_PARAM(HierarchicalReduceScatter) default
 int64_t rcclParamHierarchicalReduceScatter() { return g_rcclParamHierarchicalReduceScatter; }
+int64_t g_rcclParamCeAllReduce = -1;               // rccl_wrap.cc:65 RCCL_PARAM default
+int64_t rcclParamCeAllReduce() { return g_rcclParamCeAllReduce; }
+int64_t g_rcclParamCeArStagingBytes = -1;          // rccl_wrap.cc:70 RCCL_PARAM default
+int64_t rcclParamCeArStagingBytes() { return g_rcclParamCeArStagingBytes; }
 
 void ResetRcclWrapFakes() {
   g_rcclUpdateCollectiveProtocol = DefaultNoOpTune;
@@ -157,6 +161,8 @@ void ResetRcclWrapFakes() {
   g_rcclHierarchicalTempBufferSize = DefaultHierarchicalTempBufferSize;
   g_rcclParamHierarchicalAllGather = 1;
   g_rcclParamHierarchicalReduceScatter = 0;
+  g_rcclParamCeAllReduce = -1;
+  g_rcclParamCeArStagingBytes = -1;
   g_rcclUpdateCollectiveProtocolCalls = 0;
   g_rcclSetPipeliningCalls = 0;
   g_rcclUpdateThreadThresholdCalls = 0;

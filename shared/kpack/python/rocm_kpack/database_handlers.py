@@ -37,6 +37,28 @@ _MIOPEN_CK_SO_PATTERN = re.compile(
     r"^(?:lib)?MIOpenCK\w+_(" + _GFX_ARCH_PATTERN.pattern + r")\.(?:so|dll)"
 )
 
+# Composable Kernel per-target convolution libraries and their CMake exports.
+# <token> is the target id sanitized by ck_sanitize_arch, which mirrors MIOpen's
+# miopen_sanitize_arch (":"->"_", "+"->"p", "-"->"_"). Group "arch" is the bare
+# arch and group "strict" the sanitized "-strict"; xnack/sramecc are dropped.
+# Generic (gfx11_generic) and SPIR-V (amdgcnspirv) tokens do not match and stay
+# in the generic artifact.
+_CK_CONV_TOKEN = (
+    r"(?P<arch>gfx\d+[a-z]?)(?P<strict>_strict)?(?:_(?:xnack|sramecc)[p_])*"
+)
+_CK_CONV_PATTERNS = (
+    # libdevice_conv_operations_<token>.a (Linux),
+    # device_conv_operations_<token>.lib (Windows).
+    re.compile(r"(?:lib)?device_conv_operations_" + _CK_CONV_TOKEN + r"\.(?:a|lib)"),
+    # composable_kerneldevice_conv_operations_<token>Targets.cmake and its
+    # per-configuration companion, e.g. ...Targets-release.cmake.
+    re.compile(
+        r"composable_kerneldevice_conv_operations_"
+        + _CK_CONV_TOKEN
+        + r"Targets(?:-[a-z]+)?\.cmake"
+    ),
+)
+
 
 class DatabaseHandler(ABC):
     """Base class for kernel database handlers."""
@@ -280,6 +302,33 @@ class MIOpenHandler(DatabaseHandler):
         return None
 
 
+class ComposableKernelHandler(DatabaseHandler):
+    """Handler for Composable Kernel per-target convolution libraries.
+
+    CK emits one copy of its unified archive per target, each with its own
+    CMake export, and both belong in that target's artifact:
+        lib/libdevice_conv_operations_gfx950_xnackp.a
+        lib/cmake/composable_kernel/
+            composable_kerneldevice_conv_operations_gfx950_xnackpTargets.cmake
+            composable_kerneldevice_conv_operations_gfx950_xnackpTargets-release.cmake
+    composable_kernelConfig.cmake discovers the installed exports, so it and
+    the unsuffixed libdevice_conv_operations.a are not matched and stay generic.
+    Contents are opaque; classification is by filename only.
+    """
+
+    def name(self) -> str:
+        return "composablekernel"
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        """Return the bare arch (e.g. gfx1250-strict) for a CK per-target file."""
+        filename = Path(self._relative_path(path, prefix_root)).name
+        for pattern in _CK_CONV_PATTERNS:
+            match = pattern.fullmatch(filename)
+            if match:
+                return match["arch"] + ("-strict" if match["strict"] else "")
+        return None
+
+
 class HipKernelProviderArchContentHandler(DatabaseHandler):
     """Handler for hipKernelProvider per-architecture kernel content.
 
@@ -374,6 +423,7 @@ AVAILABLE_HANDLERS = {
     "hipsparselt": HipSparseLtHandler,
     "aotriton": AotritonHandler,
     "miopen": MIOpenHandler,
+    "composablekernel": ComposableKernelHandler,
     "hipkernelprovider": HipKernelProviderArchContentHandler,
     "hotswap_cache": HotswapCacheHandler,
 }
