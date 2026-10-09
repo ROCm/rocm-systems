@@ -81,7 +81,7 @@ def main(argv=None):
         except ImportError:
             print("ROCTX Python is required for --user-range")
             sys.exit(1)
-        roctx_module.rangePush("training_loop")
+        roctx_module.rangePush("TrainingLoop_UserDefinedMarker")
 
     try:
         model = SimpleNet(same_line_linear=args.same_line_linear).cuda()
