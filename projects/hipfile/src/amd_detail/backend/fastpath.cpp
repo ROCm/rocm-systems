@@ -37,6 +37,17 @@ fastpathFallbackEligibleErrno(int err)
     return err == ENODEV || err == EREMOTEIO || err == ENOTTY;
 }
 
+// ENOTTY means the GPU driver has no AIS ioctl at all, which can't change
+// while the process is running, so stop trying the fastpath. ENODEV and
+// EREMOTEIO are per device or file and must not disable it globally.
+static void
+markAisUnsupportedOnENOTTY(int err)
+{
+    if (err == ENOTTY) {
+        Context<Configuration>::get()->markAisUnsupported();
+    }
+}
+
 /* The fastpath backend is used when:
  *  - The file has been opened with the O_DIRECT flag
  *  - if statx contains direct io information
@@ -219,6 +230,11 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
                 throw std::runtime_error("Invalid IoType");
         }
     }
+    catch (const std::system_error &e) {
+        Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size);
+        markAisUnsupportedOnENOTTY(e.code().value());
+        throw;
+    }
     catch (...) {
         Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size);
         throw;
@@ -331,6 +347,7 @@ async_fastpath_copy(void *userArgs)
     }
     catch (const std::system_error &sys_err) {
         op->bytes_transferred_internal = -hipFileInternalError;
+        markAisUnsupportedOnENOTTY(sys_err.code().value());
         if (op->failover && fastpathFallbackEligibleErrno(sys_err.code().value())) {
             op->failover->fallback_needed = true;
         }

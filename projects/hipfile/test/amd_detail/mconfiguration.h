@@ -19,6 +19,7 @@ struct MConfiguration : Configuration {
     }
     MOCK_METHOD(bool, fastpath, (), (const, noexcept, override));
     MOCK_METHOD(void, fastpath, (bool), (noexcept, override));
+    MOCK_METHOD(void, markAisUnsupported, (), (noexcept, override));
     MOCK_METHOD(bool, fallback, (), (const, noexcept, override));
     MOCK_METHOD(void, fallback, (bool), (noexcept, override));
     MOCK_METHOD(unsigned int, statsLevel, (), (const, noexcept, override));

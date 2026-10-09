@@ -8,6 +8,7 @@
 
 * The hipFile CMake options have been renamed from `AIS_*` to `HIPFILE_*` (e.g., `AIS_CXX_STANDARD` is now `HIPFILE_CXX_STANDARD`). The old `AIS_*` names still work but are deprecated and emit a CMake deprecation warning.
 * The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now defaults to `OFF` .
+* When the amdgpu kernel driver doesn't support AIS (the AIS ioctl fails with `ENOTTY`), hipFile now stops trying the fastpath for the rest of the process and sends all I/O directly to the compatibility path. Previously, every I/O first attempted the fastpath and was recorded as a fastpath error in the statistics.
 
 ### Resolved issues
 

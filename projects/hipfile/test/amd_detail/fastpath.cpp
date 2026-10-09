@@ -853,6 +853,7 @@ TEST_P(FastpathIoParam, IoThrowsAFallbackEligibleENOTTY)
 
     expect_io();
     EXPECT_CALL(mstats, error).Times(1);
+    EXPECT_CALL(mcfg, markAisUnsupported).Times(1);
 
     switch (GetParam()) {
         case IoType::Read:

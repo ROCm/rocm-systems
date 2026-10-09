@@ -40,6 +40,7 @@ The fallback backend uses POSIX ``pread`` and ``pwrite`` system calls combined w
 I/O fails when both backends reject the request, or when a fastpath runtime error isn't eligible for automatic fallback retry. Fastpath rejects a request when:
 
 - ``HIPFILE_FORCE_COMPAT_MODE`` is ``true``, which disables the fastpath entirely.
+- An earlier fastpath I/O in the process failed with ``ENOTTY``, which means the amdgpu kernel driver doesn't support AIS. hipFile then disables the fastpath for the rest of the process.
 - The HIP runtime doesn't expose ``hipAmdFileRead()`` or ``hipAmdFileWrite()``.
 - The file doesn't have an ``O_DIRECT`` file descriptor. hipFile tries to open one at registration, but if the file or file system doesn't support ``O_DIRECT``, fastpath can't service any requests for that file.
 - The file isn't a regular file or block device.

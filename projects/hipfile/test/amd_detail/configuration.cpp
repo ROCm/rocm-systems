@@ -94,6 +94,19 @@ TEST_F(HipFileConfiguration, OverrideEnabledFastpathBackend)
     ASSERT_FALSE(config.fastpath());
 }
 
+TEST_F(HipFileConfiguration, MarkAisUnsupportedDisablesFastpathBackend)
+{
+    Configuration config{};
+    expect_configuration_fastpath("false");
+    ASSERT_TRUE(config.fastpath());
+
+    config.markAisUnsupported();
+    ASSERT_FALSE(config.fastpath());
+
+    config.fastpath(true);
+    ASSERT_FALSE(config.fastpath());
+}
+
 TEST_F(HipFileConfiguration, FastpathDisabledIfForceCompatModeEnvironmentVariableIsTrue)
 {
     expect_configuration_fastpath("true");

@@ -19,6 +19,7 @@
 #include "masyncmonitor.h"
 #include "mbackend.h"
 #include "mbuffer.h"
+#include "mconfiguration.h"
 #include "mfile.h"
 #include "mhip.h"
 #include "mstate.h"
@@ -1284,6 +1285,25 @@ TEST_P(AsyncFastpathCopyOp, eligibleSystemErrorSetsFallbackNeeded)
     else {
         EXPECT_CALL(mhip, hipAmdFileWrite)
             .WillOnce(Throw(std::system_error(EREMOTEIO, std::generic_category())));
+    }
+    async_fastpath_copy(op.get());
+    ASSERT_EQ(op->bytes_transferred_internal, -hipFileInternalError);
+    ASSERT_TRUE(op->failover->fallback_needed);
+}
+
+TEST_P(AsyncFastpathCopyOp, ENOTTYMarksAisUnsupportedAndSetsFallbackNeeded)
+{
+    StrictMock<MConfiguration> mcfg;
+    op->failover = std::make_shared<AsyncFailoverState>();
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_CALL(*mfile, unbufferedFd).WillOnce(Return(42));
+    EXPECT_CALL(mcfg, markAisUnsupported).Times(1);
+    if (io_type == IoType::Read) {
+        EXPECT_CALL(mhip, hipAmdFileRead).WillOnce(Throw(std::system_error(ENOTTY, std::generic_category())));
+    }
+    else {
+        EXPECT_CALL(mhip, hipAmdFileWrite)
+            .WillOnce(Throw(std::system_error(ENOTTY, std::generic_category())));
     }
     async_fastpath_copy(op.get());
     ASSERT_EQ(op->bytes_transferred_internal, -hipFileInternalError);
