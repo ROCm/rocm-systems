@@ -839,11 +839,11 @@ Display all PyTorch operators captured during profiling:
 
    main.py:60 (dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
    └─ nn.Module.Net.forward (calls: 10, dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
-      ├─ torch.nn.functional.conv2d (calls: 20)
+      ├─ aten::convolution (calls: 20)
       |  └─ conv2d_fwd (dispatches: 40, total: 27.08 ms)
-      ├─ torch.nn.functional.linear (calls: 20)
+      ├─ aten::addmm (calls: 20)
       |  └─ gemm (dispatches: 20, total: 15.41 ms)
-      └─ torch.nn.functional.relu (calls: 40)
+      └─ aten::relu (calls: 40)
          └─ relu_kernel (dispatches: 30, total: 0.31 ms)
 
    Operator summary (Min/Max/Mean are per-dispatch over the subtree; sorted by Total):
@@ -852,11 +852,11 @@ Display all PyTorch operators captured during profiling:
    ╞══════════════════════════════════════════════════╪═════════╪══════════════╪══════════╪═══════════╪═════════════╪═════════╪═════════╪═════════╡
    │ nn.Module.Net.forward                            │      10 │           90 │ 42.80 ms │    100.00 │     4.28 ms │ 0.48 ms │ 0.01 ms │ 2.10 ms │
    ├──────────────────────────────────────────────────┼─────────┼──────────────┼──────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
-   │ nn.Module.Net.forward/torch.nn.functional.conv2d │      20 │           40 │ 27.08 ms │     63.27 │     1.35 ms │ 0.68 ms │ 0.21 ms │ 2.10 ms │
+   │ nn.Module.Net.forward/aten::convolution          │      20 │           40 │ 27.08 ms │     63.27 │     1.35 ms │ 0.68 ms │ 0.21 ms │ 2.10 ms │
    ├──────────────────────────────────────────────────┼─────────┼──────────────┼──────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
-   │ nn.Module.Net.forward/torch.nn.functional.linear │      20 │           20 │ 15.41 ms │     36.00 │     0.77 ms │ 0.77 ms │ 0.13 ms │ 1.82 ms │
+   │ nn.Module.Net.forward/aten::addmm                │      20 │           20 │ 15.41 ms │     36.00 │     0.77 ms │ 0.77 ms │ 0.13 ms │ 1.82 ms │
    ├──────────────────────────────────────────────────┼─────────┼──────────────┼──────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
-   │ nn.Module.Net.forward/torch.nn.functional.relu   │      40 │           30 │  0.31 ms │      0.72 │     7.70 us │ 0.01 ms │ 0.01 ms │ 0.02 ms │
+   │ nn.Module.Net.forward/aten::relu                 │      40 │           30 │  0.31 ms │      0.72 │     7.70 us │ 0.01 ms │ 0.01 ms │ 0.02 ms │
    ╘══════════════════════════════════════════════════╧═════════╧══════════════╧══════════╧═══════════╧═════════════╧═════════╧═════════╧═════════╛
 
 The printed call tree is sorted by GPU duration. Identical sibling subtrees
