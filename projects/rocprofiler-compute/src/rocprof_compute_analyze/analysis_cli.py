@@ -240,7 +240,10 @@ class cli_analysis(OmniAnalyze_Base):
             if getattr(args, framework_flags["filter_attr"], None) is not None
         ]
         if active_operator_filters:
-            self.handle_operator(args, workload, active_operator_filters)
+            for path_info in args.path:
+                self.handle_operator(
+                    args, self._runs[path_info[0]], active_operator_filters
+                )
 
         if args.list_stats:
             tty.show_kernel_stats(
@@ -326,7 +329,8 @@ class cli_analysis(OmniAnalyze_Base):
                 self._profiling_config,
                 roof_plot=roof_plot,
             )
-        _warn_ml_api_trace_errors(workload)
+        for path_info in args.path:
+            _warn_ml_api_trace_errors(self._runs[path_info[0]])
 
     def list_operators(
         self,
