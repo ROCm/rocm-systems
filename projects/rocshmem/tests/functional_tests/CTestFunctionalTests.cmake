@@ -185,6 +185,7 @@ set(TEST_tile_get_wg_colmajor 170)
 set(TEST_signaladd 171)
 set(TEST_signalset 172)
 set(TEST_signalwaituntil 173)
+set(TEST_defaultctxfadd 174)
 
 # MPI should already be found by the parent CMakeLists.txt
 # Use standard CMake MPI variables set by find_package(MPI)
@@ -995,6 +996,9 @@ function(add_amo_tests)
         add_rocshmem_functional_test(NAME amo_finc RANKS 2 WORKGROUPS 1 THREADS 1024)
         add_rocshmem_functional_test(NAME amo_finc RANKS 2 WORKGROUPS 8 THREADS 1)
         add_rocshmem_functional_test(NAME amo_finc RANKS 2 WORKGROUPS 32 THREADS 128)
+
+        # Default-context fetch_add from 8 WGs: more fetching AMOs in flight on one QP than there are fetch slots
+        add_rocshmem_functional_test(NAME defaultctxfadd RANKS 2 WORKGROUPS 8 THREADS 1024)
     end_test_group()
 
     # Other AMO tests - work with all backends
