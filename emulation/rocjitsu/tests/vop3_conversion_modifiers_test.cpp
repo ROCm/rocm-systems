@@ -385,11 +385,10 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedRoundsOnceAndSaturatesSymmetr
     uint16_t unorm, snorm, unorm_negated = 0;
   };
   // Physical RDNA3/4 witnesses: false FP32 midpoint ties, signed saturation,
-  // exact midpoints, infinities and NaN. Rounding ignores MODE.FP_ROUND. Both
-  // MODE values here flush F16 input denormals, and the only subnormal source
-  // (0x33800000 as F16 0x0001) gives 0 with or without that flush, which the
-  // emulator does not model. GFX9 and RDNA1-2 F16 results reuse these RDNA3/4
-  // witnesses and are not verified on hardware.
+  // exact midpoints, infinities and NaN. Rounding ignores MODE.FP_ROUND. The
+  // only subnormal source (0x33800000 as F16 0x0001) gives 0 with or without
+  // the MODE.FP_DENORM flush tested below. GFX9 and RDNA1-2 F16 results reuse
+  // these RDNA3/4 witnesses and are not verified on hardware.
   constexpr Case second_source{0x3f000000, 0x8000, 0x4000};
   constexpr Case f32_only_cases[] = {
       {0x37c000c0, 0x0001, 0x0001},         {0x386000e0, 0x0003, 0x0002},
@@ -547,25 +546,24 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedHalfReadsOpSelSelectedHalves)
   }
 }
 
-TEST_P(Vop3ConversionModifierTest, PackedNormalizedHalfScalesSubnormalSourcesWhenModeAllows) {
+TEST_P(Vop3ConversionModifierTest, PackedNormalizedHalfFlushesSubnormalSourcesUnderMode) {
   struct Case {
     bool signed_result;
     uint32_t neg_mask;
     uint16_t src0, src1;
     uint32_t mode, expected;
   };
-  // MODE.FP_DENORM[6] allows F16 input denormals in 0xc0 and 0xf0, so a
-  // subnormal half is widened and scaled. The signed cases are gfx1201
-  // captures; the unsigned ones apply the same scale. CDNA and RDNA1-2 reuse
-  // these gfx1201-derived results and are not verified on hardware.
-  //
-  // gfx1201 flushes these sources to 0 when MODE disables F16 input denormals.
-  // The emulator does not apply that flush, so this test covers only MODE
-  // values that allow F16 input denormals.
-  constexpr Case cases[] = {{true, 0, 0x3c00, 0x83ff, 0xc0, 0xfffe7fff},
-                            {true, 2, 0x0000, 0x83ff, 0xf0, 0x00020000},
-                            {false, 0, 0x3c00, 0x03ff, 0xc0, 0x0004ffff},
-                            {false, 1, 0x83ff, 0x3c00, 0xc0, 0xffff0004}};
+  // MODE[6] allows F16 input denormals. 0x30 allows only F32 denormals and
+  // 0xc0 only F16/F64 ones, so reading the wrong MODE field changes the result.
+  // Source modifiers precede the flush. The signed cases are gfx1201 captures;
+  // the unsigned ones apply the same source policy. CDNA1-4 and RDNA1/2 reuse
+  // these results without hardware verification.
+  constexpr Case cases[] = {
+      {true, 0, 0x3c00, 0x83ff, 0x30, 0x00007fff},  {true, 0, 0x3c00, 0x83ff, 0xc0, 0xfffe7fff},
+      {true, 0, 0x3c00, 0x83ff, 0x00, 0x00007fff},  {true, 0, 0x3c00, 0x83ff, 0x0f, 0x00007fff},
+      {true, 2, 0x0000, 0x83ff, 0x00, 0x00000000},  {true, 2, 0x0000, 0x83ff, 0xf0, 0x00020000},
+      {false, 0, 0x3c00, 0x03ff, 0x30, 0x0000ffff}, {false, 0, 0x3c00, 0x03ff, 0xc0, 0x0004ffff},
+      {false, 1, 0x83ff, 0x3c00, 0x30, 0xffff0000}, {false, 1, 0x83ff, 0x3c00, 0xc0, 0xffff0004}};
   for (bool force_scalar : {false, true}) {
     ForceScalarGuard guard(force_scalar);
     amdgpu::GpuMemory memory("packed_normalized_subnormal_memory");
