@@ -626,8 +626,10 @@ bool load_archive(const std::string& path, Archive& archive) {
               static_cast<unsigned long long>(trailer_count), archive.events.size());
   }
 
-  archive.complete  = complete;
-  archive.truncated = truncated;
+  archive.complete       = complete;
+  archive.truncated      = truncated;
+  archive.trailer        = trailer;
+  archive.trailer_events = trailer_count;
   if (!trailer) {
     fprintf(stderr,
             "[HRR] Archive has no clean-shutdown trailer (capture likely crashed); "

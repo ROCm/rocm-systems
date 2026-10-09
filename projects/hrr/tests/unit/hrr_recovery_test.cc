@@ -110,8 +110,10 @@ struct TmpRootArchive {
 
   ~TmpRootArchive() { fs::remove_all(root); }
 
+  // trailer_count < 0 makes the trailer count the records written.
   fs::path add_process(uint64_t pid, uint64_t parent_pid, int records,
-                       bool trailer = true, bool manifest = true) {
+                       bool trailer = true, bool manifest = true,
+                       int trailer_count = -1) {
     fs::path proc = root / ("pid-" + std::to_string(pid));
     fs::create_directories(proc / "blobs");
     fs::create_directories(proc / "code_objects");
@@ -124,8 +126,9 @@ struct TmpRootArchive {
       events.write(reinterpret_cast<const char*>(&h), sizeof(h));
     }
     if (trailer) {
+      const int counted = trailer_count < 0 ? records : trailer_count;
       hrr_eof_record eof = hrr_make_eof_record(static_cast<uint64_t>(records),
-                                               static_cast<uint64_t>(records));
+                                               static_cast<uint64_t>(counted));
       events.write(reinterpret_cast<const char*>(&eof), sizeof(eof));
     }
     events.close();
@@ -300,6 +303,8 @@ HRR_TEST_CASE(Unit_HRR_Recovery_RecordAfterTrailer) {
  *   - N records followed by a trailer that claims a different count. The
  *     trailer still ends the stream, but the archive is not treated as a clean
  *     complete capture, so --repair rewrites it rather than trusting it.
+ *   - The archive keeps the trailer and its count, and --info reports the
+ *     mismatch instead of a missing trailer.
  */
 HRR_TEST_CASE(Unit_HRR_Recovery_TrailerCountMismatch) {
   TmpArchive arc("count_mismatch");
@@ -313,6 +318,14 @@ HRR_TEST_CASE(Unit_HRR_Recovery_TrailerCountMismatch) {
   CHECK_FALSE(a.complete);
   CHECK_FALSE(a.truncated);
   CHECK(a.skipped_after_trailer == 0);
+  CHECK(a.trailer);
+  CHECK(a.trailer_events == 4);
+
+  auto [ret, out] = run_hrr_playback(arc.root, "--info");
+  INFO("hrr-playback --info stdout:\n" << out);
+  REQUIRE(ret == 0);
+  CHECK(out.find("trailer counts 4 events; 5 precede it") != std::string::npos);
+  CHECK(out.find("no shutdown trailer") == std::string::npos);
 }
 
 /**
@@ -358,6 +371,34 @@ HRR_TEST_CASE(Unit_HRR_Recovery_RepairWritesProcessManifest) {
   CHECK(manifest.find("\"parent_pid\": 0") != std::string::npos);
   CHECK(manifest.find("\"complete\": true") != std::string::npos);
   CHECK(manifest.find("\"capture_mode\"") == std::string::npos);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A root with two sub-archives, one clean and one whose trailer sits at the
+ *     end of events.bin but counts one record too few.
+ *   - hrr-playback --repair on the root must not take the miscounting trailer
+ *     as clean: it rewrites that sub-archive, which then loads complete with a
+ *     trailer that counts its records.
+ */
+HRR_TEST_CASE(Unit_HRR_Recovery_RepairRootRewritesMiscountedTrailer) {
+  TmpRootArchive root("repair_root_miscount");
+  root.add_process(/*pid=*/111, /*parent_pid=*/0, /*records=*/2);
+  fs::path bad = root.add_process(/*pid=*/222, /*parent_pid=*/111,
+                                  /*records=*/4, /*trailer=*/true,
+                                  /*manifest=*/true, /*trailer_count=*/3);
+
+  auto [ret, out] = run_hrr_playback(root.root, "--repair");
+  INFO("hrr-playback --repair stdout:\n" << out);
+  REQUIRE(ret == 0);
+  CHECK(out.find("1 repaired, 1 already complete, 0 failed") != std::string::npos);
+
+  hrr::Archive repaired;
+  REQUIRE(hrr::load_archive(bad.string(), repaired));
+  CHECK(repaired.complete);
+  CHECK(repaired.events.size() == 4);
+  CHECK(repaired.trailer_events == 4);
 }
 
 /**

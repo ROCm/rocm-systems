@@ -95,9 +95,13 @@ runtime older than the writer fix could leave from calls still in flight at
 shutdown, are counted in `Archive::skipped_after_trailer`, reported once and
 not replayed. `Archive::complete` is set when the trailer was found and its
 `total_events` equals the number of records before it; a mismatch is reported
-and leaves the archive incomplete. `hrr-playback --info` reports both; `hrr-playback --repair` rewrites a truncated
-archive (trimmed to the last complete record, trailer + manifest added) into a
-clean one.
+and leaves the archive incomplete without setting `truncated`. The trailer and
+its count are kept in `Archive::trailer` and `Archive::trailer_events`, and
+`hrr-playback --info` says which of these cases an archive is. `hrr-playback --repair` rewrites any
+incomplete archive, whether its tail was torn, its trailer is missing or its
+trailer miscounts, into a clean one: the complete records before the tail or
+the trailer are kept, and a trailer that counts them and a manifest are
+written.
 
 ### Per-Process Archive Layout
 
@@ -149,8 +153,9 @@ sub-archive in turn and then rebuilds the root `manifest.json` from the results.
 This is the normal case for a multi-process serving stack, where the framework
 force-kills its workers at shutdown — the ranks that did all the GPU work are
 precisely the ones left without a trailer and absent from the root index, while
-the parent that exited cleanly needs no repair. Sub-archives that already carry
-a clean trailer are skipped without being read.
+the parent that exited cleanly needs no repair. A sub-archive is skipped when
+a walk of its record headers, which does not read the payloads, finds a
+trailer at the end that counts the records before it.
 
 ### Archive Format (v7)
 ```

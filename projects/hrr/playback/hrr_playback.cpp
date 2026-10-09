@@ -61,6 +61,7 @@
 #include <algorithm>
 #include <cassert>
 #include <chrono>
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -302,11 +303,16 @@ static bool print_root_info(const std::string& archive_path) {
 static void print_info(const hrr::Archive& archive, bool show_events) {
   printf("HRR Archive: %s\n", archive.path.c_str());
   printf("========================================\n");
-  printf("Complete:     %s\n",
-         archive.complete ? "yes (clean shutdown)"
-                          : (archive.truncated
-                               ? "NO (crash-truncated; trailing torn record discarded)"
-                               : "NO (no shutdown trailer; capture likely crashed)"));
+  if (archive.trailer && !archive.complete)
+    printf("Complete:     NO (shutdown trailer counts %llu events; %zu precede it)\n",
+           static_cast<unsigned long long>(archive.trailer_events),
+           archive.event_count);
+  else
+    printf("Complete:     %s\n",
+           archive.complete ? "yes (clean shutdown)"
+                            : (archive.truncated
+                                 ? "NO (crash-truncated; trailing torn record discarded)"
+                                 : "NO (no shutdown trailer; capture likely crashed)"));
   printf("Recovered:    %zu events\n", archive.event_count);
   printf("Events:       %zu\n", archive.event_count);
   printf("Kernels:      %zu\n", archive.kernel_count);
@@ -1029,26 +1035,48 @@ static int repair_archive(const hrr::Archive& archive) {
 }
 
 // Cheap completeness probe: a cleanly finalized events.bin ends with the
-// trailer record, so checking the last 44 bytes answers the question without
-// parsing the file. Used only to skip work when repairing a root that is
-// already clean — a false negative just costs a full load that repair_archive
-// then no-ops on, so this can never turn a good archive into a rewritten one.
+// trailer record, and the trailer counts the records before it. Walking the
+// record headers and seeking over the payloads checks both, the same test
+// load_archive applies, without reading the payloads. Used only to skip work
+// when repairing a root that is already clean — a false negative just costs a
+// full load that repair_archive then no-ops on, so this can never turn a good
+// archive into a rewritten one.
 static bool has_clean_trailer(const fs::path& archive_dir) {
   const fs::path events_path = archive_dir / "events.bin";
   std::error_code ec;
-  const auto size = fs::file_size(events_path, ec);
+  const uint64_t size = fs::file_size(events_path, ec);
   if (ec || size < sizeof(hrr_file_header) + sizeof(hrr_eof_record)) return false;
 
   FILE* f = fopen(events_path.string().c_str(), "rb");
   if (!f) return false;
+  // The offset is tracked here rather than asked of ftell, whose long is 32
+  // bits on Windows; every seek is relative and at most one payload long.
+  uint64_t offset  = sizeof(hrr_file_header);
+  uint64_t records = 0;
+  bool clean = false;
   hrr_eof_record rec{};
-  const bool read_ok = fseek(f, -static_cast<long>(sizeof(rec)), SEEK_END) == 0 &&
-                       fread(&rec, sizeof(rec), 1, f) == 1;
+  bool ok = fseek(f, static_cast<long>(offset), SEEK_SET) == 0;
+  while (ok && size - offset >= sizeof(rec.hdr) &&
+         fread(&rec.hdr, sizeof(rec.hdr), 1, f) == 1) {
+    const uint64_t total = rec.hdr.payload_length;
+    if (total < sizeof(rec.hdr) || total > size - offset ||
+        total - sizeof(rec.hdr) > static_cast<uint64_t>(LONG_MAX))
+      break;
+    if (rec.hdr.event_type == HRR_EOF_MARKER && total == sizeof(rec)) {
+      ok = fread(reinterpret_cast<char*>(&rec) + sizeof(rec.hdr),
+                 sizeof(rec) - sizeof(rec.hdr), 1, f) == 1;
+      if (ok && rec.eof_magic == HRR_EOF_MAGIC) {
+        clean = offset + total == size && rec.total_events == records;
+        break;
+      }
+    } else {
+      ok = fseek(f, static_cast<long>(total - sizeof(rec.hdr)), SEEK_CUR) == 0;
+    }
+    offset += total;
+    ++records;
+  }
   fclose(f);
-
-  return read_ok && rec.hdr.event_type == HRR_EOF_MARKER &&
-         rec.hdr.payload_length == static_cast<uint16_t>(sizeof(hrr_eof_record)) &&
-         rec.eof_magic == HRR_EOF_MAGIC;
+  return clean;
 }
 
 // Rebuild the root index from the per-process manifests. Mirrors the schema the

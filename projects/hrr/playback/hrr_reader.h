@@ -175,6 +175,10 @@ struct Archive {
   // have truncated=true if the final record was only partially written.
   bool complete  = false;
   bool truncated = false;
+  // The trailer was found and how many events it counts. trailer && !complete
+  // means the count disagrees with the records before it.
+  bool     trailer        = false;
+  uint64_t trailer_events = 0;
   // Whole records found after the trailer. They are not replayed, and the
   // trailer's event count must match the records before it for complete=true.
   size_t skipped_after_trailer = 0;
