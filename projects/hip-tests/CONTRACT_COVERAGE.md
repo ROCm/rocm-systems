@@ -13,20 +13,20 @@ contract tier intentionally pins only small, portable semantic guarantees.
 ## Snapshot
 
 <!-- contract-coverage-snapshot
-contract_tests: 616
+contract_tests: 623
 contract_domains: 118
-declared_apis: 501
-covered_apis: 488
+declared_apis: 502
+covered_apis: 489
 uncovered_allowlisted: 13
 coverage_pct: 97.4
 -->
 
 - Snapshot date: 2026-08-26
 - Snapshot commit: `920418c484`
-- Contract tests: 616
+- Contract tests: 623
 - Contract domains: 118
-- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 501
-- Declared HIP runtime APIs directly exercised by contract tests: 488
+- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 502
+- Declared HIP runtime APIs directly exercised by contract tests: 489
 - Intentionally uncovered, allowlisted APIs: 13
 - Approximate declared API-name coverage: 97.4%
 - Additional public macro exercised: `hipLaunchKernelGGL`

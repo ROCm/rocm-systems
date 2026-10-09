@@ -43,6 +43,8 @@ test_categories:
       - "RasDiagnosticsMicrotest.*"
       # ras/peers.cc
       - "RasPeersMicrotest.*"
+      # ras/diagnostics_env.cc
+      - "RasDiagnosticsEnvMicrotest.*"
       # ras/client.cc
       - "RasClientMicrotest.*"
       # ras/ras_param.cc

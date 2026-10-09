@@ -282,7 +282,7 @@ public:
     (void)sim_.soc->gpu_vm().unregister_address_space(address_space_);
   }
 
-  void fail_next_packet_read() { backing_->fail_next_read_at(kRingVa); }
+  void fail_next_packet_read() { backing_->fail_next_read_at(kRingVa + sizeof(uint32_t)); }
   void fail_next_read_pointer_store() { backing_->fail_next_atomic_store_at(kReadPointerVa); }
   void fail_next_write_pointer_load(amdgpu::VmAccessOutcome outcome) {
     backing_->return_next_atomic_load_at(kWritePointerVa, outcome);
@@ -318,7 +318,7 @@ public:
   }
   void
   replace_after_next_packet_read(const std::shared_ptr<TransientAqlAddressSpace> &replacement) {
-    backing_->run_after_next_read_at(kRingVa, replacement_callback(replacement));
+    backing_->run_after_next_read_at(kRingVa + sizeof(uint32_t), replacement_callback(replacement));
   }
   void
   replace_after_next_dependency_load(const std::shared_ptr<TransientAqlAddressSpace> &replacement) {

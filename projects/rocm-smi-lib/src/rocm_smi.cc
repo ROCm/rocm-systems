@@ -5119,7 +5119,7 @@ rsmi_status_t rsmi_dev_memory_partition_get(uint32_t dv_ind, char* memory_partit
     return ret;
   }
 
-  std::size_t buff_size = returning_memory_partition.copy(memory_partition, len);
+  std::size_t buff_size = returning_memory_partition.copy(memory_partition, len - 1);
   memory_partition[buff_size] = '\0';
 
   if (len < (returning_memory_partition.size() + 1)) {
