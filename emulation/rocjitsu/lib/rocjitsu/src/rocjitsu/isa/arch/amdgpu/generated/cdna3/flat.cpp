@@ -3360,6 +3360,8 @@ GlobalLoadLdsUbyteFlat::GlobalLoadLdsUbyteFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3404,6 +3406,8 @@ GlobalLoadLdsSbyteFlat::GlobalLoadLdsSbyteFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3448,6 +3452,8 @@ GlobalLoadLdsUshortFlat::GlobalLoadLdsUshortFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3492,6 +3498,8 @@ GlobalLoadLdsSshortFlat::GlobalLoadLdsSshortFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3536,6 +3544,8 @@ GlobalLoadLdsDwordFlat::GlobalLoadLdsDwordFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 

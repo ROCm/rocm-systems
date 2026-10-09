@@ -2058,6 +2058,23 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
                     name, 'global_load_async_to_lds', elem_size=esz, num_elems=ne
                 )
 
+    # CDNA3/CDNA4 direct-to-LDS global loads. These must be matched before the
+    # generic GLOBAL_LOAD_ rule below, whose suffix lookup would see
+    # 'LDS_DWORDX4' rather than 'DWORDX4', miss, and leave the instruction
+    # unclassified -- which is how the whole family came to generate
+    # unimplemented stubs.
+    if upper.startswith('GLOBAL_LOAD_LDS_'):
+        info = _FLAT_DATA_MAP.get(upper[len('GLOBAL_LOAD_LDS_') :])
+        if info:
+            esz, ne, se = info
+            return InstructionSemantics(
+                name,
+                'global_load_lds',
+                elem_size=esz,
+                num_elems=ne,
+                sign_extend=se,
+            )
+
     if upper.startswith('GLOBAL_STORE_ASYNC_FROM_LDS_'):
         info = _FLAT_DATA_MAP.get(upper[len('GLOBAL_STORE_ASYNC_FROM_LDS_') :])
         if info:
