@@ -58,8 +58,8 @@
  *     writes the blob again and leaves the archive marked incomplete (POSIX).
  *
  *   Unit_HRR_CaptureEventsWriteFails:
- *     a failed write or close of events.bin leaves the archive without the
- *     clean-shutdown trailer and marked incomplete, and a link planted at
+ *     a failed write, fsync or close of events.bin leaves the archive without
+ *     the clean-shutdown trailer and marked incomplete, and a link planted at
  *     events.bin before the failed close is not truncated through (Linux,
  *     with seccomp).
  *
@@ -455,14 +455,15 @@ TEST_CASE("Unit_HRR_CaptureTrimFails_Direct", "[.][hrr-direct]") {
 // Hidden ([.]) workload for Unit_HRR_CaptureEventsWriteFails and
 // Unit_HRR_CaptureForkAfterEventsFail: once the capture has opened its
 // archive, it finds the descriptor of events.bin and installs a seccomp filter
-// that fails, with EIO, either every write to it or closing it, as
-// HRR_TEST_FAIL_EVENTS says. Then it records a few events and exits normally,
-// so the writer meets the failure while it finishes the archive. With
-// close-link it first moves events.bin aside to events.bin.written and plants
-// a link to HRR_TEST_DECOY in its place, so a writer that cut the trailer off
-// by path would cut the decoy instead. With fork it fails writes, records,
-// and forks, so the flush before fork() fails; the child records, which opens
-// its own archive, and exits normally. Without a filter it says so.
+// that fails, with EIO, every write to it, every fsync of it, or closing it,
+// as HRR_TEST_FAIL_EVENTS says. Then it records a few events and exits
+// normally, so the writer meets the failure while it finishes the archive.
+// With close-link it first moves events.bin aside to events.bin.written and
+// plants a link to HRR_TEST_DECOY in its place, so a writer that cut the
+// trailer off by path would cut the decoy instead. With fork it fails writes,
+// records, and forks, so the flush before fork() fails; the child records,
+// which opens its own archive, and exits normally. Without a filter it says
+// so.
 // ---------------------------------------------------------------------------
 #ifdef HRR_TEST_HAVE_SECCOMP
 namespace {
@@ -485,7 +486,8 @@ TEST_CASE("Unit_HRR_CaptureEventsFail_Direct", "[.][hrr-direct]") {
   const char* mode = std::getenv("HRR_TEST_FAIL_EVENTS");
   if (mode == nullptr) HRR_SKIP("HRR_TEST_FAIL_EVENTS is not set");
   const std::string fail(mode);
-  REQUIRE((fail == "write" || fail == "close" || fail == "close-link" || fail == "fork"));
+  REQUIRE((fail == "write" || fail == "fsync" || fail == "close" || fail == "close-link" ||
+           fail == "fork"));
 
   if (fail == "fork") REQUIRE(std::atexit(events_fail_child_exit) == 0);
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -517,7 +519,9 @@ TEST_CASE("Unit_HRR_CaptureEventsFail_Direct", "[.][hrr-direct]") {
 #else
   constexpr std::uint32_t kArch = AUDIT_ARCH_AARCH64;
 #endif
-  const std::uint32_t nr = fail == "write" || fail == "fork" ? __NR_write : __NR_close;
+  const std::uint32_t nr = fail == "write" || fail == "fork" ? __NR_write
+                           : fail == "fsync"                  ? __NR_fsync
+                                                              : __NR_close;
   struct sock_filter code[] = {
       BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)),
       BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, kArch, 0, 5),
@@ -1103,11 +1107,11 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeChecksBlobBytes) {
 /**
  * Test Description
  * ----------------
- *   - Runs Unit_HRR_CaptureEventsFail_Direct three times: once with every
- *     write to events.bin failing once the archive is open, once with closing
- *     events.bin failing after the archive is finished, and once more like
- *     that with events.bin moved aside and a link to a decoy file planted in
- *     its place before the close.
+ *   - Runs Unit_HRR_CaptureEventsFail_Direct four times: once with every
+ *     write to events.bin failing once the archive is open, once with every
+ *     fsync of it failing, once with closing events.bin failing after the
+ *     archive is finished, and once more like that with events.bin moved
+ *     aside and a link to a decoy file planted in its place before the close.
  *   - Each time the file the writer wrote ends without a clean-shutdown
  *     trailer and the manifest says the archive is incomplete, so neither the
  *     reader nor the root index takes it for a whole capture. The decoy is
@@ -1119,7 +1123,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureEventsWriteFails) {
 #else
   ScopedDir work{fs::temp_directory_path() / "hrr_access_events_fail"};
   constexpr const char* kDecoyText = "not part of the archive\n";
-  for (const char* fail : {"write", "close", "close-link"}) {
+  for (const char* fail : {"write", "fsync", "close", "close-link"}) {
     DYNAMIC_SECTION("failing " << fail) {
       const std::string mode(fail);
       const fs::path base = work.path / mode;
