@@ -197,10 +197,10 @@ pointer passed to ``ncclFindWindow`` lies within that registration.
 
 ``ncclDevCommCreate`` copies the ``ncclDevCommRequirements_t`` you pass,
 including its resource and team lists, so you can free or reuse that structure
-as soon as the call returns. A rejected call, for example ``ncclInvalidArgument``
-for ``cftCaps`` that the communicator does not support, releases its copy
-before returning. You can therefore change the requirements and call it again
-without leaking memory.
+as soon as the call returns. A request that ``ncclDevCommCreate`` itself
+rejects, for example with ``ncclInvalidArgument`` for ``cftCaps`` that the
+communicator does not support, releases its copy before returning, so you can
+change the requirements and call it again without leaking memory.
 
 Ignoring CPU affinity with multi-node
 =====================================

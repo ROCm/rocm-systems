@@ -5535,9 +5535,14 @@ protected:
   static long long HeapInUse() { return static_cast<long long>(mallinfo2().uordblks); }
 
   void ExpectRejectedWithoutLeak(bool rearch, const char* warning) {
+    // ScopedHook's own counter sees every g_loadParam call, so count the reads of
+    // this param separately: each call must branch on it (dev_runtime.cc:2595).
+    int rearchReads = 0;
     auto prevLoadParam = g_loadParam;
-    ScopedHook rearchParam(g_loadParam, [rearch, prevLoadParam](const char* env, int64_t deft) {
-      return std::strcmp(env, "ENQUEUE_REARCH_ENABLE") == 0 ? int64_t(rearch) : prevLoadParam(env, deft);
+    ScopedHook rearchParam(g_loadParam, [rearch, prevLoadParam, &rearchReads](const char* env, int64_t deft) {
+      if (std::strcmp(env, "ENQUEUE_REARCH_ENABLE") != 0) return prevLoadParam(env, deft);
+      rearchReads++;
+      return int64_t(rearch);
     });
 
     // The first call names the check that fired, so the loop below is known to
@@ -5560,6 +5565,7 @@ protected:
       growth = HeapInUse() - before;
     });
     EXPECT_EQ(rejected, kCalls);
+    EXPECT_GE(rearchReads, 1 + kCalls);
     EXPECT_LT(growth, CopyBytes()) << kCalls << " rejected calls left " << growth
                                    << " heap bytes behind; one copy is " << CopyBytes();
   }

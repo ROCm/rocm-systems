@@ -535,12 +535,15 @@ static long long heapInUseBytes()
 
 // ncclDevCommCreate deep-copies the caller's requirements before it validates
 // them, so a request rejected after the copy must free it (NVIDIA/nccl#2225).
-// NCCL_CFT_MULTIMEM is rejected on every AMD communicator (no CFT, no NVLS),
-// after the copy when the communicator supports the device API and before it
-// otherwise; both outcomes must leave the heap where it was. A long resource
-// list makes each copy large, so a leak over the loop dwarfs allocator noise.
+// NCCL_CFT_MULTIMEM is rejected after the copy on every AMD communicator that
+// supports the device API (no CFT, no NVLS), and that must leave the heap where
+// it was. A long resource list makes each copy large, so a leak over the loop
+// dwarfs allocator noise.
 static void runDevCommCreateRejectedAfterCopyTest()
 {
+    if(getVisibleGpuCount() < kNegativeRanks)
+        GTEST_SKIP() << "This test requires at least 1 visible GPU.";
+
     constexpr int kResourceNodes = 256;
     constexpr int kWarmupCalls   = 16;
     constexpr int kCalls         = 2000;
@@ -551,8 +554,12 @@ static void runDevCommCreateRejectedAfterCopyTest()
 
     ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
     ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
-    // Without device API support the request is turned away before the copy.
-    const ncclResult_t expected = props.deviceApiSupport ? ncclInvalidArgument : ncclInvalidUsage;
+    // Without device API support the request is turned away before the copy
+    // (dev_runtime.cc:2584), so the loop below would prove nothing.
+    if(!props.deviceApiSupport)
+        GTEST_SKIP() << "Device API unsupported here; the request is rejected before the "
+                        "requirements are copied.";
+    const ncclResult_t expected = ncclInvalidArgument;
 
     std::vector<ncclDevResourceRequirements_t> resourceList(kResourceNodes);
     for(int i = 0; i + 1 < kResourceNodes; ++i)
@@ -581,8 +588,8 @@ static void runDevCommCreateRejectedAfterCopyTest()
     // A leaked copy per call would add kCalls * copyBytes; allow a tenth of that for
     // allocations made meanwhile by RCCL's own threads.
     EXPECT_LT(growth, kCalls * copyBytes / 10)
-        << kCalls << " rejected calls (deviceApiSupport=" << props.deviceApiSupport << ") left "
-        << growth << " heap bytes behind; one copy is " << copyBytes;
+        << kCalls << " rejected calls left " << growth << " heap bytes behind; one copy is "
+        << copyBytes;
 }
 
 // Per-test config notes:
