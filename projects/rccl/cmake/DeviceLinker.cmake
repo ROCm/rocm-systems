@@ -923,7 +923,7 @@ endif()
 # ===========================================================================
 set(GIN_ROCSHMEM_QP_BC_FLAG "")
 set(GIN_ROCSHMEM_QP_DEPS "")
-if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR AND DL_GPU_TARGETS)
+if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR AND DL_GPU_TARGETS AND GENERATE_SYM_KERNELS)
   list(GET DL_GPU_TARGETS 0 _bc_arch)
   set(_qp_bc "${DEVICE_BUILD_DIR}/rocshmem_qp_device.bc")
   find_program(_llvm_link llvm-link HINTS ${ROCM_PATH}/llvm/bin REQUIRED)

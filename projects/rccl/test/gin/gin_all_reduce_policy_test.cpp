@@ -33,7 +33,7 @@ TEST(GinAllReducePolicy, ThresholdsMatchDocumentedBands) {
   EXPECT_EQ(kGinAllReduceMaxRanks, 8);
   EXPECT_EQ(kGinAllReduceMinPutBytes, 128u);
   EXPECT_EQ(kGinAllReduceTwoShotScratchBytes, 512ull * kMiB);
-  EXPECT_EQ(kGinAllReduceGinScatterChunkBytes, 16ull * kMiB);
+  EXPECT_EQ(kGinAllReduceGinScatterChunkBytes, 64ull * kMiB);
   EXPECT_EQ(kGinAllReduceGinScatterNumSlots, 2);
 }
 
@@ -114,8 +114,8 @@ TEST(GinAllReducePolicy, TwoShotRejectsCountNotDivisibleByRanks) {
 }
 
 TEST(GinAllReducePolicy, Gfx1250ScatterMinBytesFrom64MiB) {
-  EXPECT_FALSE(
-    ginAllReduceSizePolicyEligible(countForBytes(64 * kMiB - 16), kFloat, kRanks, false, kGinAllReduceGinScatterMinBytes));
+  EXPECT_FALSE(ginAllReduceSizePolicyEligible(countForBytes(64 * kMiB - 16), kFloat, kRanks, false,
+                                              kGinAllReduceGinScatterMinBytes));
   EXPECT_TRUE(
     ginAllReduceSizePolicyEligible(countForBytes(64 * kMiB), kFloat, kRanks, false, kGinAllReduceGinScatterMinBytes));
   EXPECT_TRUE(
@@ -133,6 +133,8 @@ TEST(GinAllReducePolicy, GinScatterDispatchGfx1250From64MiB) {
   EXPECT_FALSE(ginAllReduceGinScatterDispatch(true, 64ull * kMiB - 16));
   EXPECT_TRUE(ginAllReduceGinScatterDispatch(true, 64ull * kMiB));
   EXPECT_TRUE(ginAllReduceGinScatterDispatch(true, 256ull * kMiB));
+  EXPECT_TRUE(ginAllReduceGinScatterDispatch(true, kGinAllReduceGinScatterMaxBytes));
+  EXPECT_FALSE(ginAllReduceGinScatterDispatch(true, kGinAllReduceGinScatterMaxBytes + 16));
   EXPECT_FALSE(ginAllReduceGinScatterDispatch(false, 64ull * kMiB));
   EXPECT_FALSE(ginAllReduceGinScatterDispatch(false, 256ull * kMiB));
 }
@@ -148,6 +150,8 @@ TEST(GinAllReducePolicy, GinScatterLaunchFrom64MiB) {
   EXPECT_TRUE(ginAllReduceGinScatterLaunch(512ull * kMiB, chunk512, kRanks, scratch));
   EXPECT_TRUE(ginAllReduceGinScatterLaunch(2ull * 1024ull * kMiB, 256ull * kMiB, kRanks, scratch));
   EXPECT_TRUE(ginAllReduceGinScatterLaunch(kGinAllReduceGinScatterMaxBytes, 512ull * kMiB, kRanks, scratch));
+  EXPECT_FALSE(ginAllReduceGinScatterLaunch(kGinAllReduceGinScatterMaxBytes + 16, 512ull * kMiB, kRanks, scratch));
+  EXPECT_FALSE(ginAllReduceGinScatterLaunch(64ull * kMiB, chunk64, kRanks, 0));
 }
 
 TEST(GinAllReducePolicy, GinScatterLaunchWhenMessageExceedsScratch) {
@@ -173,14 +177,16 @@ TEST(GinAllReducePolicy, GinScatterStagesWhenMessageExceedsScratch) {
   int nPhases = 0;
   size_t uniformBytes = 0;
   size_t lastBytes = 0;
-  const size_t smallSeq = ginAllReduceGinScatterStagedScratchBytes(kGinAllReduceGinScatterChunkBytes, kRanks, 1);
-  ginAllReduceGinScatterChunkPlan(32ull * kMiB, kRanks, smallSeq, &nChunks, &uniformBytes, &lastBytes, &nPhases);
+  const int seqRanks = 4;
+  const size_t smallSeq = ginAllReduceGinScatterStagedScratchBytes(kGinAllReduceGinScatterChunkBytes, seqRanks, 1);
+  ginAllReduceGinScatterChunkPlan(96ull * kMiB, seqRanks, smallSeq, &nChunks, &uniformBytes, &lastBytes, &nPhases);
   EXPECT_EQ(nChunks, 2);
   EXPECT_EQ(nPhases, 1);
   EXPECT_EQ(uniformBytes, kGinAllReduceGinScatterChunkBytes);
+  EXPECT_EQ(lastBytes, 32ull * kMiB);
   const size_t smallPipe = ginAllReduceGinScatterStagedScratchBytes(kGinAllReduceGinScatterChunkBytes, kRanks, 2);
   ginAllReduceGinScatterChunkPlan(512ull * kMiB, kRanks, smallPipe, &nChunks, &uniformBytes, &lastBytes, &nPhases);
-  EXPECT_EQ(nChunks, 32);
+  EXPECT_EQ(nChunks, 8);
   EXPECT_EQ(nPhases, 2);
   EXPECT_EQ(uniformBytes, kGinAllReduceGinScatterChunkBytes);
 }
@@ -205,14 +211,14 @@ TEST(GinAllReducePolicy, GinScatterNoPipelineBelow512MiB) {
   EXPECT_EQ(nPhases, 1);
 }
 
-TEST(GinAllReducePolicy, GinScatterChunksOverlapAt512MiB) {
+TEST(GinAllReducePolicy, GinScatterOneChunkAt512MiB) {
   int nChunks = 0;
   int nPhases = 0;
   size_t uniformBytes = 0;
   size_t lastBytes = 0;
   ginAllReduceGinScatterChunkPlan(64ull * kMiB, kRanks, kGinAllReduceTwoShotScratchBytes, &nChunks, &uniformBytes,
                                   &lastBytes, &nPhases);
-  EXPECT_EQ(nChunks, 4);
+  EXPECT_EQ(nChunks, 1);
   EXPECT_EQ(nPhases, 1);
   EXPECT_EQ(uniformBytes, kGinAllReduceGinScatterChunkBytes);
   EXPECT_EQ(lastBytes, kGinAllReduceGinScatterChunkBytes);
@@ -268,10 +274,10 @@ TEST(GinAllReducePolicy, GinScatterChunksTilePerRankBytes) {
 }
 
 TEST(GinAllReducePolicy, GinScatterScratchIsIncomingSlots) {
-  EXPECT_EQ(ginAllReduceGinScatterScratchBytes(32ull * kMiB, kRanks), 8ull * 32ull * kMiB);
+  EXPECT_EQ(ginAllReduceGinScatterStagedScratchBytes(32ull * kMiB, kRanks), 8ull * 32ull * kMiB);
   EXPECT_EQ(ginAllReduceGinScatterStagedScratchBytes(8ull * kMiB, kRanks, 2), 16ull * 8ull * kMiB);
-  EXPECT_EQ(ginAllReduceGinScatterScratchBytes(16, 1), 16u);
-  EXPECT_EQ(ginAllReduceGinScatterScratchBytes(16, 0), 0u);
+  EXPECT_EQ(ginAllReduceGinScatterStagedScratchBytes(16, 1), 16u);
+  EXPECT_EQ(ginAllReduceGinScatterStagedScratchBytes(16, 0), 0u);
   EXPECT_EQ(ginAllReduceGinScatterFitSlot(kGinAllReduceTwoShotScratchBytes, kRanks, 1), 64ull * kMiB);
   EXPECT_EQ(ginAllReduceGinScatterFitSlot(kGinAllReduceTwoShotScratchBytes, kRanks, 2), 32ull * kMiB);
 }

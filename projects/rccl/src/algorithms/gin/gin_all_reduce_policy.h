@@ -7,7 +7,7 @@
  * host+device so the GinScatter kernel splits the same way the tests do.
  *
  * gfx950 default: GIN two-shot from 256 MiB (LSA RS + GIN AG, Anvil SDMA).
- * gfx1250 + Anvil SDMA: GinScatter from 64 MiB.
+ * gfx1250 + Anvil SDMA: GinScatter from 64 MiB when NCCL_GIN_ALLREDUCE_GFX1250_ENABLE=1.
  * GinScatter scratch follows CE AllReduce (ce_reduce_impl.h / ce_coll.h):
  * 512 MiB of incoming ping-pong slots, reduced output in the user recvbuff.
  * See LICENSE.txt for license information.
@@ -61,9 +61,14 @@ GIN_AR_HD size_t ginAllReduceGinScatterAlignDown(size_t n, size_t align) {
 }
 
 // CE ceARTmpBuf: nSlots * nRanks * slotBytes. Reduced output is the user recvbuff.
+// The two-argument form is one incoming column per rank. Ping-pong passes nSlots=2.
 GIN_AR_HD size_t ginAllReduceGinScatterStagedScratchBytes(size_t slotBytes, int nRanks, int nSlots) {
   if (nRanks <= 0 || nSlots <= 0) return 0;
   return static_cast<size_t>(nSlots) * static_cast<size_t>(nRanks) * slotBytes;
+}
+
+GIN_AR_HD size_t ginAllReduceGinScatterStagedScratchBytes(size_t slotBytes, int nRanks) {
+  return ginAllReduceGinScatterStagedScratchBytes(slotBytes, nRanks, 1);
 }
 
 // Largest 16-byte-aligned per-rank slot that fits in scratch with nSlots windows.
@@ -79,7 +84,7 @@ GIN_AR_HD bool ginAllReduceGinScatterStaged(size_t perRankBytes, int nRanks, siz
   return scratchBytes < static_cast<size_t>(nRanks) * perRankBytes;
 }
 
-// Split one per-rank slice. Full-slot path: one chunk below 512 MiB, 16 MiB
+// Split one per-rank slice. Full-slot path: one chunk below 512 MiB, 64 MiB
 // stages at 512 MiB+. Staged path (message > scratch): CE ping-pong — two slots
 // and overlap at >= 512 MiB; one slot and sequential reuse below 512 MiB.
 GIN_AR_HD void ginAllReduceGinScatterChunkPlan(size_t perRankBytes, int nRanks, size_t scratchBytes, int* nChunks,
@@ -148,13 +153,6 @@ GIN_AR_HD size_t ginAllReduceGinScatterChunkSize(int chunk, int nChunks, size_t 
 
 #undef GIN_AR_HD
 
-// Full-slot incoming columns (no reduced scratch column; CE writes the reduced
-// shard to recvbuff). Used to decide whether the message fits without staging.
-inline size_t ginAllReduceGinScatterScratchBytes(size_t chunkBytes, int nRanks) {
-  if (nRanks <= 0) return 0;
-  return static_cast<size_t>(nRanks) * chunkBytes;
-}
-
 // Two-shot kernels require a whole number of elements per rank and a 16-byte
 // per-rank slice so vector loads stay aligned.
 inline bool ginAllReduceTwoShotEligible(size_t count, size_t typeSize, int nRanks) {
@@ -173,9 +171,9 @@ inline bool ginAllReduceGinTwoShotEligible(size_t count, size_t typeSize, int nR
 // ginScatter from 64 MiB when scratch holds either nRanks full incoming columns
 // or at least one 16-byte-aligned staging slot per rank.
 inline bool ginAllReduceGinScatterLaunch(size_t bytes, size_t chunkBytes, int nRanks, size_t scratchBytes) {
-  if (bytes < kGinAllReduceGinScatterMinBytes) return false;
+  if (bytes < kGinAllReduceGinScatterMinBytes || bytes > kGinAllReduceGinScatterMaxBytes) return false;
   if (nRanks <= 0) return false;
-  if (scratchBytes >= ginAllReduceGinScatterScratchBytes(chunkBytes, nRanks)) return true;
+  if (scratchBytes >= ginAllReduceGinScatterStagedScratchBytes(chunkBytes, nRanks)) return true;
   return ginAllReduceGinScatterFitSlot(scratchBytes, nRanks, 1) >= kGinAllReduceGinScatterChunkAlign;
 }
 
@@ -204,10 +202,11 @@ inline bool ginAllReduceYieldToDdaBySize(size_t count, size_t typeSize, bool for
   return count * typeSize < ginMinBytes;
 }
 
-// Host dispatch for ginAllReduceTwoShotGinScatterKernel: gfx1250 and >= 64 MiB.
-// Eligibility still requires the Anvil SDMA GIN backend before launch.
+// Host dispatch for ginAllReduceTwoShotGinScatterKernel: gfx1250 and
+// [64 MiB, 4 GiB]. Eligibility still requires the Anvil SDMA GIN backend,
+// NCCL_GIN_ALLREDUCE_GFX1250_ENABLE, and a scratch pool that can hold the message.
 inline bool ginAllReduceGinScatterDispatch(bool isGfx1250, size_t bytes) {
-  return isGfx1250 && bytes >= kGinAllReduceGinScatterMinBytes;
+  return isGfx1250 && bytes >= kGinAllReduceGinScatterMinBytes && bytes <= kGinAllReduceGinScatterMaxBytes;
 }
 
 #endif
