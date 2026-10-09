@@ -135,10 +135,11 @@ struct reader_t
     [[nodiscard]] std::optional<std::pair<size_t, size_t>> get_event_id_span(
         reader_types::event_type_t type) const;
 
-    using event_visitor_t = void (*)(void*                        context,
-                                     reader_types::timestamp_ns_t start,
-                                     reader_types::timestamp_ns_t end,
-                                     std::string_view             name);
+    using event_visitor_t = void (*)(void*                                    context,
+                                     reader_types::unique_timeline_event_id_t id,
+                                     reader_types::timestamp_ns_t             start,
+                                     reader_types::timestamp_ns_t             end,
+                                     std::string_view                         name);
 
     void visit_track_events_in_id_range(const reader_types::track_info_ptr_t& track,
                                         reader_types::event_type_t            type,

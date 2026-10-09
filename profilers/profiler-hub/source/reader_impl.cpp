@@ -496,7 +496,8 @@ reader_t::impl::visit_track_events_in_id_range(
                 }
                 name = last_name;
             }
-            visitor(context, row.start_timestamp, row.end_timestamp, name);
+            visitor(
+                context, { row.id, type }, row.start_timestamp, row.end_timestamp, name);
         });
 }
 

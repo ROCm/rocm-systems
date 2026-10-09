@@ -38,13 +38,32 @@ to_list_size(size_t size)
     return static_cast<std::uint32_t>(size);
 }
 
+ph_event_type_t
+to_ph_event_type(reader_types::event_type_t type)
+{
+    switch(type)
+    {
+        case reader_types::event_type_t::region: return PH_EVENT_TYPE_REGION;
+        case reader_types::event_type_t::kernel_dispatch:
+            return PH_EVENT_TYPE_KERNEL_DISPATCH;
+        case reader_types::event_type_t::memory_copy: return PH_EVENT_TYPE_MEMORY_COPY;
+        case reader_types::event_type_t::memory_allocate:
+            return PH_EVENT_TYPE_MEMORY_ALLOCATE;
+        case reader_types::event_type_t::sample:
+        case reader_types::event_type_t::pmc_event: break;
+    }
+    throw std::invalid_argument("event type is not a duration event");
+}
+
 ph_event_t
 to_ph_event(const reader_types::timeline_event_t& event)
 {
-    return ph_event_t{ .start = event.start_timestamp,
+    return ph_event_t{ .id    = event.unique_identifier.id,
+                       .start = event.start_timestamp,
                        .end   = event.end_timestamp,
                        .name =
-                           event.display_name.empty() ? "" : event.display_name.data() };
+                           event.display_name.empty() ? "" : event.display_name.data(),
+                       .type = to_ph_event_type(event.unique_identifier.type) };
 }
 
 ph_sample_t
@@ -236,12 +255,17 @@ cached_track_reader::read_thread_track_in_parts(
         return share + share / 8 + 16;
     };
 
-    const auto visitor = [](void*                        context,
-                            reader_types::timestamp_ns_t start,
-                            reader_types::timestamp_ns_t end,
-                            std::string_view             name) {
-        static_cast<std::vector<ph_event_t>*>(context)->push_back(ph_event_t{
-            .start = start, .end = end, .name = name.empty() ? "" : name.data() });
+    const auto visitor = [](void*                                    context,
+                            reader_types::unique_timeline_event_id_t id,
+                            reader_types::timestamp_ns_t             start,
+                            reader_types::timestamp_ns_t             end,
+                            std::string_view                         name) {
+        static_cast<std::vector<ph_event_t>*>(context)->push_back(
+            ph_event_t{ .id    = id.id,
+                        .start = start,
+                        .end   = end,
+                        .name  = name.empty() ? "" : name.data(),
+                        .type  = to_ph_event_type(id.type) });
     };
 
     std::atomic<size_t> next{ 0 };

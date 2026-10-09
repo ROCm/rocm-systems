@@ -117,7 +117,7 @@ public:
         }
         for(const auto& row : selected)
         {
-            visitor(context, row.start, row.end, row.name);
+            visitor(context, { row.id, type }, row.start, row.end, row.name);
         }
     }
 
@@ -147,12 +147,17 @@ private:
 };
 
 reader_types::timeline_event_t
-timeline_event(uint64_t start, uint64_t end, const char* name)
+timeline_event(uint64_t     start,
+               uint64_t     end,
+               const char*  name,
+               size_t       id   = 0,
+               event_type_t type = event_type_t::region)
 {
     reader_types::timeline_event_t event;
-    event.start_timestamp = start;
-    event.end_timestamp   = end;
-    event.display_name    = name;
+    event.unique_identifier = { id, type };
+    event.start_timestamp   = start;
+    event.end_timestamp     = end;
+    event.display_name      = name;
     return event;
 }
 
@@ -331,6 +336,51 @@ TEST_F(cached_track_reader_test, windowed_results_stay_valid_after_later_request
     EXPECT_EQ(second.list_size, 2U);
 }
 
+TEST_F(cached_track_reader_test, events_carry_their_id_and_type)
+{
+    auto       reader = make_reader();
+    const auto track  = make_track(1, track_kind_t::thread);
+
+    m_state.events  = { timeline_event(1, 2, "r", 7, event_type_t::region),
+                        timeline_event(3, 4, "k", 8, event_type_t::kernel_dispatch),
+                        timeline_event(5, 6, "c", 9, event_type_t::memory_copy),
+                        timeline_event(7, 8, "a", 10, event_type_t::memory_allocate) };
+    const auto list = reader.events(track, 0, 0);
+
+    ASSERT_EQ(list.list_size, 4U);
+    EXPECT_EQ(list.events[0].id, 7U);
+    EXPECT_EQ(list.events[0].type, PH_EVENT_TYPE_REGION);
+    EXPECT_EQ(list.events[1].id, 8U);
+    EXPECT_EQ(list.events[1].type, PH_EVENT_TYPE_KERNEL_DISPATCH);
+    EXPECT_EQ(list.events[2].id, 9U);
+    EXPECT_EQ(list.events[2].type, PH_EVENT_TYPE_MEMORY_COPY);
+    EXPECT_EQ(list.events[3].id, 10U);
+    EXPECT_EQ(list.events[3].type, PH_EVENT_TYPE_MEMORY_ALLOCATE);
+}
+
+TEST_F(cached_track_reader_test, a_windowed_event_carries_its_id_and_type)
+{
+    auto       reader = make_reader();
+    const auto track  = make_track(1, track_kind_t::thread);
+
+    m_state.events  = { timeline_event(1, 2, "k", 5, event_type_t::kernel_dispatch) };
+    const auto list = reader.events(track, 1, 5);
+
+    ASSERT_EQ(list.list_size, 1U);
+    EXPECT_EQ(list.events[0].id, 5U);
+    EXPECT_EQ(list.events[0].type, PH_EVENT_TYPE_KERNEL_DISPATCH);
+}
+
+TEST_F(cached_track_reader_test, an_event_that_is_not_a_duration_event_fails_the_read)
+{
+    auto       reader = make_reader();
+    const auto track  = make_track(1, track_kind_t::thread);
+
+    m_state.events = { timeline_event(1, 2, "s", 1, event_type_t::sample) };
+
+    EXPECT_THROW(std::ignore = reader.events(track, 0, 0), std::invalid_argument);
+}
+
 TEST_F(cached_track_reader_test, a_pmc_track_has_no_events_and_the_reader_is_not_used)
 {
     give_three_unsorted_events();
@@ -444,6 +494,19 @@ TEST_F(large_thread_track_test, is_read_in_parts_and_merged_in_start_order)
                     "r6", "r5", "k4", "r4", "k3", "r3", "k2", "r2", "k1", "r1"));
     EXPECT_EQ(m_state.visit_calls, 3);
     EXPECT_EQ(m_state.events_calls, 0);
+}
+
+TEST_F(large_thread_track_test, parts_carry_the_id_and_type_of_every_event)
+{
+    auto reader = make_reader(m_options);
+
+    const auto list = reader.events(make_track(1, track_kind_t::thread, 10), 0, 0);
+
+    ASSERT_EQ(list.list_size, 10U);
+    EXPECT_EQ(list.events[0].id, 6U);
+    EXPECT_EQ(list.events[0].type, PH_EVENT_TYPE_REGION);
+    EXPECT_EQ(list.events[2].id, 4U);
+    EXPECT_EQ(list.events[2].type, PH_EVENT_TYPE_KERNEL_DISPATCH);
 }
 
 TEST_F(large_thread_track_test, is_read_once_and_the_storage_is_shared)

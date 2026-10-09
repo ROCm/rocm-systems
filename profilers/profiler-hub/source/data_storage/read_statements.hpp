@@ -168,6 +168,7 @@ struct id_span_result
 
 struct event_range_result
 {
+    size_t                id{};
     size_t                start_timestamp{};
     size_t                end_timestamp{};
     std::optional<size_t> display_name_id;
@@ -1303,7 +1304,7 @@ private:
         std::string_view event_join = {})
     {
         const auto sql = fmt::format(
-            "SELECT {0}.start, {0}.end, {1} FROM {2}_{3} {0} {4} "
+            "SELECT {0}.id, {0}.start, {0}.end, {1} FROM {2}_{3} {0} {4} "
             "LEFT JOIN rocpd_sample S ON S.event_id = {0}.event_id "
             "WHERE {0}.nid = ? AND {0}.pid = ? AND {0}.tid = ? AND S.track_id IS NULL "
             "AND {0}.id >= ? AND {0}.id < ?",
@@ -1317,6 +1318,7 @@ private:
             event_range_result,
             bind_types<size_t, size_t, size_t, size_t, size_t>>(
             sql,
+            &event_range_result::id,
             &event_range_result::start_timestamp,
             &event_range_result::end_timestamp,
             &event_range_result::display_name_id);

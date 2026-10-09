@@ -23,9 +23,10 @@ using reader_types::event_type_t;
 
 struct visited_event
 {
-    uint64_t    start;
-    uint64_t    end;
-    std::string name;
+    reader_types::unique_timeline_event_id_t id;
+    uint64_t                                 start;
+    uint64_t                                 end;
+    std::string                              name;
 };
 
 class reader_id_range_test : public ::testing::Test
@@ -59,12 +60,13 @@ protected:
             type,
             begin,
             end,
-            [](void*                        context,
-               reader_types::timestamp_ns_t start,
-               reader_types::timestamp_ns_t end,
-               std::string_view             name) {
+            [](void*                                    context,
+               reader_types::unique_timeline_event_id_t id,
+               reader_types::timestamp_ns_t             start,
+               reader_types::timestamp_ns_t             end,
+               std::string_view                         name) {
                 static_cast<std::vector<visited_event>*>(context)->push_back(
-                    { start, end, std::string{ name } });
+                    { id, start, end, std::string{ name } });
             },
             &visited);
         return visited;
@@ -107,6 +109,21 @@ TEST_F(reader_id_range_test, a_range_over_the_whole_span_visits_every_event_in_i
     EXPECT_THAT(names_of(visited), ::testing::ElementsAre("region-a", "region-b"));
     EXPECT_EQ(visited[0].start, 1000U);
     EXPECT_EQ(visited[0].end, 2000U);
+}
+
+TEST_F(reader_id_range_test, visited_events_carry_the_table_id_and_type)
+{
+    const auto span = m_reader->get_event_id_span(event_type_t::region);
+    ASSERT_TRUE(span.has_value());
+
+    const auto visited =
+        visit(event_type_t::region, span->first, span->second + 1, m_track);
+
+    ASSERT_EQ(visited.size(), 2U);
+    EXPECT_EQ(visited[0].id.id, span->first);
+    EXPECT_EQ(visited[0].id.type, event_type_t::region);
+    EXPECT_EQ(visited[1].id.id, span->second);
+    EXPECT_EQ(visited[1].id.type, event_type_t::region);
 }
 
 TEST_F(reader_id_range_test, the_end_of_a_range_is_exclusive)
@@ -307,12 +324,13 @@ protected:
             type,
             span->first,
             span->second + 1,
-            [](void*                        context,
-               reader_types::timestamp_ns_t start,
-               reader_types::timestamp_ns_t end,
-               std::string_view             name) {
+            [](void*                                    context,
+               reader_types::unique_timeline_event_id_t id,
+               reader_types::timestamp_ns_t             start,
+               reader_types::timestamp_ns_t             end,
+               std::string_view                         name) {
                 static_cast<std::vector<visited_event>*>(context)->push_back(
-                    { start, end, std::string{ name } });
+                    { id, start, end, std::string{ name } });
             },
             &visited);
         return visited;

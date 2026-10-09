@@ -181,15 +181,28 @@ extern "C"
         ph_track_list_t   track_list;
     } ph_node_t;
 
+    /** @brief Kind of a duration event. */
+    typedef enum
+    {
+        PH_EVENT_TYPE_REGION,          /**< Host code region. */
+        PH_EVENT_TYPE_KERNEL_DISPATCH, /**< Kernel dispatch on a device queue. */
+        PH_EVENT_TYPE_MEMORY_COPY,     /**< Memory copy. */
+        PH_EVENT_TYPE_MEMORY_ALLOCATE, /**< Memory allocation. */
+    } ph_event_type_t;
+
     /** @brief A single duration event (region/kernel dispatch/memory
      *         copy/memory allocate).
      * @note name points into memory owned by the producing ph_ctx_t.
+     * @note id is only unique together with type: every event type has its
+     *       own id space.
      */
     typedef struct
     {
-        uint64_t    start;
-        uint64_t    end;
-        const char* name;
+        uint64_t        id;
+        uint64_t        start;
+        uint64_t        end;
+        const char*     name;
+        ph_event_type_t type;
     } ph_event_t;
 
     /** @brief A list of duration events; same lifetime rule as
