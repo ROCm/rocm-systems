@@ -45,11 +45,17 @@ if (NOT WIN32)
   find_package(Threads REQUIRED)
   target_link_libraries(ocltst PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
   # ASAN with -shared-libsan requires explicit pthread linkage
-  if(THEROCK_SANITIZER MATCHES "ASAN" OR ENABLE_ADDRESS_SANITIZER)
+  if(NOT ENABLE_SANITIZER STREQUAL "OFF")
     target_link_options(ocltst PRIVATE -lpthread)
   endif()
 endif()
 
-set_target_properties(ocltst PROPERTIES INSTALL_RPATH "$ORIGIN")
+
+if(UNIX AND NOT APPLE)
+  set_target_properties(ocltst PROPERTIES
+    INSTALL_RPATH "$ORIGIN;$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/opencl;$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+  # Use RUNPATH (not RPATH) so LD_LIBRARY_PATH can override
+  target_link_options(ocltst PRIVATE "LINKER:--enable-new-dtags")
+endif()
 
 INSTALL(TARGETS ocltst DESTINATION ${OCLTST_INSTALL_DIR} COMPONENT ocltst)

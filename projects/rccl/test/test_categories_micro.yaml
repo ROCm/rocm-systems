@@ -41,8 +41,12 @@ test_categories:
       - "RasCollectivesMicrotest.*"
       # ras/diagnostics.cc
       - "RasDiagnosticsMicrotest.*"
+      # ras/diagnostics_env.cc
+      - "RasDiagnosticsEnvMicrotest.*"
       # ras/client.cc
       - "RasClientMicrotest.*"
+      # ras/ras_param.cc
+      - "RasParamMicrotest.*"
       # rma/rma_proxy_launch.cc
       - "RmaProxyBatchMemOpTest.*"
       - "RmaProxyDescriptorTest.*"
@@ -79,6 +83,7 @@ test_categories:
       - "GroupJobAbortTest.*"
       - "GroupApiWrapperTest.*"
       - "ArgsGlobalCheckTest.*"
+      - "GroupRegisterSymmetricTest.*"
       # rccl_wrap.cc
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"
@@ -86,6 +91,8 @@ test_categories:
       - "GdrProbeTest.*"
       # transport/nvls.cc (rccl-UnitTestsMicroNvls)
       - "NvlsHipStubTest.*"
+      # ce_coll.cc (rccl-UnitTestsMicroCe)
+      - "CeCollMicrotest.*"
       # dev_runtime.cc
       - "Alloc*"
       - "Comm*"
@@ -96,6 +103,8 @@ test_categories:
       - "Nccl*"
       - "Sym*"
       - "Win*"
+      # test/common/ProcessIsolatedTestRunner.cpp
+      - "ProcessIsolatedRunnerMicrotest.*"
     exclude_windows:
       - "*"
     labels:

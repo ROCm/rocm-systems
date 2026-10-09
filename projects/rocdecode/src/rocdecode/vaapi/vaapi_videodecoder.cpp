@@ -967,7 +967,36 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
         // Probe VA profiles
         va_contexts_[va_ctx_idx].num_va_profiles = vaMaxNumProfiles(va_contexts_[va_ctx_idx].va_display);
         va_contexts_[va_ctx_idx].va_profile_list.resize(va_contexts_[va_ctx_idx].num_va_profiles);
+#ifndef _WIN32
         CHECK_VAAPI(vaQueryConfigProfiles(va_contexts_[va_ctx_idx].va_display, va_contexts_[va_ctx_idx].va_profile_list.data(), &va_contexts_[va_ctx_idx].num_va_profiles));
+#else
+        // On Windows the probe display must not survive past this function. During
+        // DLL_PROCESS_DETACH the D3D12 video interface is no longer responsive and
+        // vaTerminate() hangs indefinitely. Eagerly probe every VLD-capable profile now
+        // so that later capability queries are answered from the cache (profile_caps)
+        // without needing a display. The vaInitialize() done by InitVAAPI() above is
+        // then paired with the vaTerminate() here — strictly within this one function.
+        {
+            VAStatus va_status = vaQueryConfigProfiles(va_contexts_[va_ctx_idx].va_display,
+                va_contexts_[va_ctx_idx].va_profile_list.data(), &va_contexts_[va_ctx_idx].num_va_profiles);
+            if (va_status == VA_STATUS_SUCCESS) {
+                ProbeAllProfileCaps(va_ctx_idx);
+            } else {
+                CriticalLog(g_rocdec_logger, ROCDEC_STR("VAAPI failure: vaQueryConfigProfiles failed with 'status: ")
+                    + ROCDEC_TOSTR(va_status) + ": " + ROCDEC_STR(vaErrorStr(va_status)) + "'");
+                va_contexts_[va_ctx_idx].num_va_profiles = 0;
+            }
+            if (vaTerminate(va_contexts_[va_ctx_idx].va_display) != VA_STATUS_SUCCESS) {
+                CriticalLog(g_rocdec_logger, "Failed to terminate the VA probe display");
+            }
+            va_contexts_[va_ctx_idx].va_display = 0;
+            if (va_status != VA_STATUS_SUCCESS) {
+                va_contexts_.pop_back();
+                FunctionExitLog(g_rocdec_logger);
+                return ROCDEC_RUNTIME_ERROR;
+            }
+        }
+#endif
 
         *va_ctx_id = va_ctx_idx;
         FunctionExitLog(g_rocdec_logger);
@@ -1021,6 +1050,42 @@ rocDecStatus VaContext::GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display) 
     }
 }
 
+void DecodeSurfaceAttribs(const VASurfaceAttrib *attr_list, unsigned int attr_count, VaProfileCaps &caps) {
+    for (unsigned int k = 0; k < attr_count; k++) {
+        switch (attr_list[k].type) {
+            case VASurfaceAttribPixelFormat: {
+                switch (attr_list[k].value.value.i) {
+                    case VA_FOURCC_NV12:
+                        caps.output_format_mask |= 1 << rocDecVideoSurfaceFormat_NV12;
+                        break;
+                    case VA_FOURCC_P016:
+                    case VA_FOURCC_P012:
+                    case VA_FOURCC_P010:
+                        caps.output_format_mask |= 1 << rocDecVideoSurfaceFormat_P016;
+                        break;
+                    default:
+                        break;
+                }
+                break;
+            }
+            case VASurfaceAttribMinWidth:
+                caps.min_width = attr_list[k].value.value.i;
+                break;
+            case VASurfaceAttribMinHeight:
+                caps.min_height = attr_list[k].value.value.i;
+                break;
+            case VASurfaceAttribMaxWidth:
+                caps.max_width = attr_list[k].value.value.i;
+                break;
+            case VASurfaceAttribMaxHeight:
+                caps.max_height = attr_list[k].value.value.i;
+                break;
+            default:
+                break;
+        }
+    }
+}
+
 #ifdef _WIN32
 rocDecStatus VaContext::GetAdapterLuid(int device_id, LUID *adapter_luid) {
     FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(device_id));
@@ -1039,6 +1104,68 @@ rocDecStatus VaContext::GetAdapterLuid(int device_id, LUID *adapter_luid) {
     CriticalLog(g_rocdec_logger, "No VA context found for device_id=" + ROCDEC_TOSTR(device_id));
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_INVALID_PARAMETER;
+}
+
+void VaContext::ProbeAllProfileCaps(uint32_t va_ctx_idx) {
+    auto& ctx = va_contexts_[va_ctx_idx];
+    int max_entrypoints = vaMaxNumEntrypoints(ctx.va_display);
+    if (max_entrypoints <= 0) {
+        ErrorLog(g_rocdec_logger, "vaMaxNumEntrypoints() returned " + ROCDEC_TOSTR(max_entrypoints) +
+                 " for device_id=" + ROCDEC_TOSTR(ctx.device_id) +
+                 ". No decode profile could be probed, so every codec will be reported as unsupported.");
+        return;
+    }
+    std::vector<VAEntrypoint> entrypoints(max_entrypoints);
+
+    for (int i = 0; i < ctx.num_va_profiles; i++) {
+        VAProfile profile = ctx.va_profile_list[i];
+        if (profile == VAProfileNone) continue;
+
+        // Check whether this profile supports VLD (decode) entrypoint.
+        int num_ep = 0;
+        VAStatus st = vaQueryConfigEntrypoints(ctx.va_display, profile, entrypoints.data(), &num_ep);
+        if (st != VA_STATUS_SUCCESS) continue;
+        if (num_ep > max_entrypoints) num_ep = max_entrypoints;
+        bool has_vld = false;
+        for (int e = 0; e < num_ep; e++) {
+            if (entrypoints[e] == VAEntrypointVLD) { has_vld = true; break; }
+        }
+        if (!has_vld) continue;
+
+        // Probe config attributes for this profile.
+        VAConfigAttrib va_config_attrib;
+        va_config_attrib.type = VAConfigAttribRTFormat;
+        st = vaGetConfigAttributes(ctx.va_display, profile, VAEntrypointVLD, &va_config_attrib, 1);
+        if (st != VA_STATUS_SUCCESS) continue;
+
+        VAConfigID config_id = 0;
+        st = vaCreateConfig(ctx.va_display, profile, VAEntrypointVLD, &va_config_attrib, 1, &config_id);
+        if (st != VA_STATUS_SUCCESS) continue;
+
+        unsigned int attr_count = 0;
+        st = vaQuerySurfaceAttributes(ctx.va_display, config_id, nullptr, &attr_count);
+        std::vector<VASurfaceAttrib> attr_list(attr_count);
+        if (st == VA_STATUS_SUCCESS && attr_count > 0) {
+            st = vaQuerySurfaceAttributes(ctx.va_display, config_id, attr_list.data(), &attr_count);
+        }
+        vaDestroyConfig(ctx.va_display, config_id);
+        if (st != VA_STATUS_SUCCESS) continue;
+
+        VaProfileCaps caps = {};
+        caps.rt_format_attrib = va_config_attrib.value;
+        DecodeSurfaceAttribs(attr_list.data(), attr_count, caps);
+        ctx.profile_caps[profile] = caps;
+    }
+
+    // Individual profile failures above are skipped silently, since a driver legitimately
+    // advertises profiles it cannot decode. Probing none of them is different: the cache stays
+    // empty and every later rocDecGetDecoderCaps() reports "unsupported", which looks like a
+    // GPU without decode support rather than a failed probe. Say so once, here.
+    if (ctx.profile_caps.empty()) {
+        WarningLog(g_rocdec_logger, "No VLD-capable VA profile could be probed out of " +
+                   ROCDEC_TOSTR(ctx.num_va_profiles) + " profile(s) advertised for device_id=" +
+                   ROCDEC_TOSTR(ctx.device_id) + ". Every codec will be reported as unsupported.");
+    }
 }
 #endif
 
@@ -1119,6 +1246,7 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
         return ROCDEC_SUCCESS;
     }
 
+#ifndef _WIN32
     int i;
     for (i = 0; i < va_contexts_[va_ctx_id].num_va_profiles; i++) {
         if (va_contexts_[va_ctx_id].va_profile_list[i] == va_profile) {
@@ -1146,43 +1274,44 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
         CHECK_VAAPI(vaQuerySurfaceAttributes(va_contexts_[va_ctx_id].va_display, va_contexts_[va_ctx_id].va_config_id, 0, &attr_count));
         attr_list.resize(attr_count);
         CHECK_VAAPI(vaQuerySurfaceAttributes(va_contexts_[va_ctx_id].va_display, va_contexts_[va_ctx_id].va_config_id, attr_list.data(), &attr_count));
-        va_contexts_[va_ctx_id].output_format_mask = 0;
         CHECK_VAAPI(vaDestroyConfig(va_contexts_[va_ctx_id].va_display, va_contexts_[va_ctx_id].va_config_id));
-        for (unsigned int k = 0; k < attr_count; k++) {
-            switch (attr_list[k].type) {
-            case VASurfaceAttribPixelFormat: {
-                switch (attr_list[k].value.value.i) {
-                    case VA_FOURCC_NV12:
-                        va_contexts_[va_ctx_id].output_format_mask |= 1 << rocDecVideoSurfaceFormat_NV12;
-                        break;
-                    case VA_FOURCC_P016:
-                    case VA_FOURCC_P012:
-                    case VA_FOURCC_P010:
-                        va_contexts_[va_ctx_id].output_format_mask |= 1 << rocDecVideoSurfaceFormat_P016;
-                        break;
-                    default:
-                        break;
-                }
-            }
-                break;
-            case VASurfaceAttribMinWidth:
-                va_contexts_[va_ctx_id].min_width = attr_list[k].value.value.i;
-                break;
-            case VASurfaceAttribMinHeight:
-                va_contexts_[va_ctx_id].min_height = attr_list[k].value.value.i;
-                break;
-            case VASurfaceAttribMaxWidth:
-                va_contexts_[va_ctx_id].max_width = attr_list[k].value.value.i;
-                break;
-            case VASurfaceAttribMaxHeight:
-                va_contexts_[va_ctx_id].max_height = attr_list[k].value.value.i;
-                break;
-            default:
-                break;
-            }
-        }
+
+        // Start from a zeroed record so that an attribute the driver omits for this profile
+        // reports 0 rather than the value left behind by the previously probed profile.
+        VaProfileCaps caps = {};
+        DecodeSurfaceAttribs(attr_list.data(), attr_count, caps);
+        va_contexts_[va_ctx_id].output_format_mask = caps.output_format_mask;
+        va_contexts_[va_ctx_id].min_width = caps.min_width;
+        va_contexts_[va_ctx_id].min_height = caps.min_height;
+        va_contexts_[va_ctx_id].max_width = caps.max_width;
+        va_contexts_[va_ctx_id].max_height = caps.max_height;
         va_contexts_[va_ctx_id].config_attributes_probed = true;
     }
+#else
+    // On Windows, capabilities were probed eagerly by ProbeAllProfileCaps() during
+    // GetVaContext(). Look up the cached record; a miss means the profile is unsupported.
+    {
+        auto it = va_contexts_[va_ctx_id].profile_caps.find(va_profile);
+        if (it == va_contexts_[va_ctx_id].profile_caps.end()) {
+            dec_cap->is_supported = 0;
+            dec_cap->num_decoders = 0;
+            dec_cap->output_format_mask = 0;
+            dec_cap->max_width = 0;
+            dec_cap->max_height = 0;
+            dec_cap->min_width = 0;
+            dec_cap->min_height = 0;
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_SUCCESS;
+        }
+        const VaProfileCaps& caps = it->second;
+        va_contexts_[va_ctx_id].rt_format_attrib = caps.rt_format_attrib;
+        va_contexts_[va_ctx_id].output_format_mask = caps.output_format_mask;
+        va_contexts_[va_ctx_id].max_width = caps.max_width;
+        va_contexts_[va_ctx_id].max_height = caps.max_height;
+        va_contexts_[va_ctx_id].min_width = caps.min_width;
+        va_contexts_[va_ctx_id].min_height = caps.min_height;
+    }
+#endif
 
     // Check chroma format
     switch (dec_cap->chroma_format) {

@@ -222,10 +222,24 @@ protected:
         if(!validateTestPrerequisites(kMinProcessesForMPI))
             GTEST_SKIP() << "Need at least 2 MPI ranks";
 
-        //if(!isGfx1250Device())
-        //    GTEST_SKIP() << "DDA fabric LL requires gfx1250";
+        // Every rank must skip together, or the ones that did not would block in the next collective.
+        const std::string archSkip
+            = mpiCoordinatedSkipReason(!isGfx1250Device(), "DDA fabric LL requires gfx1250");
+        if(!archSkip.empty())
+        {
+            GTEST_SKIP() << archSkip;
+        }
 
         ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+        // Without MNNVL, or on a multi-clique comm, fabric DDA never initializes, so there is no path to assert.
+        const std::string fabricSkip
+            = mpiCoordinatedSkipReason(getActiveCommunicator()->ddaFabricBarrierState == nullptr,
+                                       "DDA fabric path did not initialize");
+        if(!fabricSkip.empty())
+        {
+            GTEST_SKIP() << fabricSkip;
+        }
 
         int rank{}, nRanks{};
         ncclCommUserRank(getActiveCommunicator(), &rank);
@@ -240,6 +254,19 @@ protected:
         void* recvBuf = nullptr;
         ASSERT_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
         DeviceBufferAutoGuard recvGuard(recvBuf);
+
+        // With fabric DDA up, RCCL must offer an LL tier for this message; a non-fabric pick is a selection regression.
+        int                algo = -1, protocol = -1, maxChannels = -1;
+        const ncclResult_t query
+            = rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, count, ncclFloat32,
+                                  ncclSum, sendBuf, recvBuf, /*graphCapturing=*/0, &algo, &protocol,
+                                  &maxChannels);
+        EXPECT_EQ(ncclSuccess, query) << "Rank " << rank << ": rcclGetCollImplInfo failed";
+        const char* algoName = nullptr;
+        rcclGetAlgoName(algo, &algoName);
+        EXPECT_TRUE(algo == RCCL_DDA_FABRIC_LL || algo == RCCL_DDA_FABRIC_LL128)
+            << "Rank " << rank << ": " << testId << " selected " << (algoName ? algoName : "?")
+            << " (algo " << algo << "), not DDA fabric LL/LL128";
 
         fillRankScalar(sendBuf, count, rank);
         ASSERT_EQ(hipSuccess, hipMemset(recvBuf, 0, bytes));

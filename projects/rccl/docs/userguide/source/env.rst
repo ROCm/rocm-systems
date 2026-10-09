@@ -2270,3 +2270,26 @@ Enable use of symmetric kernels that use GIN for network communication.
 Values accepted
 ^^^^^^^^^^^^^^^
 Default is 1 (enabled); set to 0 to disable
+
+
+NCCL_GIN_PROXY_NTHREADS
+-----------------------
+(since 2.31)
+
+Number of host progress threads for the GIN PROXY backend. Thread *t* owns GIN
+connections ``t``, ``t+N``, ``t+2N``, … across every device communicator.
+
+When the value is greater than the number of local GIN connections, RCCL raises
+the connection count to match (capped at 4) so each thread has at least one
+endpoint. ``NCCL_GIN_NCONNECTIONS`` is applied first, then this bump.
+
+The default of 1 preserves single-thread PROXY progress. Device-initiated
+backends (Anvil SDMA, rocSHMEM GDA) set ``needsProxyProgress=0`` and never
+spawn these threads.
+
+Set the same value on every rank. If ranks disagree, extra threads simply idle.
+
+Values accepted
+^^^^^^^^^^^^^^^
+Default is 1. Values ``<= 1`` keep a single thread. Values above 4 are clamped
+to ``NCCL_GIN_MAX_CONNECTIONS`` (4).

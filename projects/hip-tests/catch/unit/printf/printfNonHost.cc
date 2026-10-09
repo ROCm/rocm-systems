@@ -22,10 +22,25 @@
 // Kernel Functions
 __global__ void run_printf_basic(int* count) { *count = printf("Hello World\n"); }
 
-__global__ void kernel_printf_loop(uint iterCount, int* count) {
+// printf returns 0 on success and -1 once the buffer is full.
+constexpr uint kNoFailureIndex = ~0u;
+
+struct PrintfLoopResult {
+  uint failures;
+  uint lastFailureIndex;
+};
+
+__global__ void kernel_printf_loop(uint iterCount, PrintfLoopResult* result) {
+  uint failures = 0;
+  uint lastFailureIndex = kNoFailureIndex;
   for (uint i = 0; i < iterCount; i++) {
-    count[i] = printf("%s", CONST_STR);
+    if (printf("%s", CONST_STR) != 0) {
+      failures++;
+      lastFailureIndex = i;
+    }
   }
+  result->failures = failures;
+  result->lastFailureIndex = lastFailureIndex;
 }
 
 __global__ void kernel_printf_thread(int* count) {
@@ -130,26 +145,20 @@ HIP_TEST_CASE(Unit_NonHost_Printf_loop) {
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
-  int *count{nullptr}, *count_d{nullptr};
-  count = reinterpret_cast<int*>(malloc(ITER_COUNT * sizeof(int)));
-  HIP_CHECK(hipMalloc(&count_d, ITER_COUNT * sizeof(int)));
+  PrintfLoopResult result{};
+  PrintfLoopResult* result_d{nullptr};
+  HIP_CHECK(hipMalloc(&result_d, sizeof(*result_d)));
 
-  hipLaunchKernelGGL(kernel_printf_loop, dim3(1), dim3(1), 0, 0, ITER_COUNT, count_d);
+  hipLaunchKernelGGL(kernel_printf_loop, dim3(1), dim3(1), 0, 0, ITER_COUNT, result_d);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(&result, result_d, sizeof(result), hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipMemcpy(count, count_d, ITER_COUNT * sizeof(int), hipMemcpyDeviceToHost));
-  int test = 0;
-  for (int i = 0; i < ITER_COUNT; i++) {
-    if (count[i] == -1) {
-      test = i;
-    }
-  }
-  if (test == (ITER_COUNT - 1)) {
-    REQUIRE(true);
-  } else {
-    REQUIRE(false);
-  }
-  free(count);
-  HIP_CHECK(hipFree(count_d));
+  // ITER_COUNT is one more than the buffer holds, so exactly the last printf
+  // overflows.
+  REQUIRE(result.failures == 1);
+  REQUIRE(result.lastFailureIndex == ITER_COUNT - 1);
+
+  HIP_CHECK(hipFree(result_d));
 }
 /**
  * Test Description
@@ -215,35 +224,23 @@ HIP_TEST_CASE(Unit_NonHost_Printf_BufferAvailability) {
   if (!pcieAtomic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
-  int *count{nullptr}, *count_d{nullptr};
+  PrintfLoopResult* result_d{nullptr};
+  HIP_CHECK(hipMalloc(&result_d, sizeof(*result_d)));
 
-  count = reinterpret_cast<int*>(malloc((ITER_COUNT - 1) * sizeof(int)));
-  HIP_CHECK(hipMalloc(&count_d, (ITER_COUNT - 1) * sizeof(int)));
-  int check = 0;
   for (int i = 0; i < KERNEL_ITERATIONS; i++) {
-    hipLaunchKernelGGL(kernel_printf_loop, dim3(1), dim3(1), 0, 0, ITER_COUNT - 1, count_d);
-
-    HIP_CHECK(hipMemcpy(count, count_d, (ITER_COUNT - 1) * sizeof(int), hipMemcpyDeviceToHost));
+    PrintfLoopResult result{};
+    hipLaunchKernelGGL(kernel_printf_loop, dim3(1), dim3(1), 0, 0, VALID_COUNT, result_d);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipMemcpy(&result, result_d, sizeof(result), hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
 
-    int test = 0;
-    for (int i = 0; i < ITER_COUNT - 1; i++) {
-      if (count[i] == 0) {
-        test = test + 1;
-      }
-    }
-    if (test == (ITER_COUNT - 1)) {
-      check = check + 1;
-    }
-  }
-  if (check == KERNEL_ITERATIONS) {
-    REQUIRE(true);
-  } else {
-    REQUIRE(false);
+    // Every launch must accept VALID_COUNT records again, so a failure here
+    // means the previous launch did not release the buffer.
+    INFO("launch " << i);
+    REQUIRE(result.failures == 0);
   }
 
-  free(count);
-  HIP_CHECK(hipFree(count_d));
+  HIP_CHECK(hipFree(result_d));
 }
 
 
