@@ -336,7 +336,8 @@ set_tests_properties(
 
 # job_replay_mode: kernel. The input file's jobs are the passes of one run rather than
 # runs of their own: two counter jobs must produce the same replay structure as two --pmc
-# groups.
+# groups. The jobs generate tests run with RUN_SERIAL for the same reason as the thread
+# trace one: their validate steps compare SQ counters across a dispatch's passes.
 add_test(
     NAME rocprofv3-test-kernel-replay-jobs-generate
     COMMAND
@@ -355,6 +356,8 @@ set_tests_properties(
                "${rocprofv3-generate-env}"
                RESOURCE_LOCK
                rocprofiler_kernel_replay
+               RUN_SERIAL
+               ON
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_SETUP
@@ -403,6 +406,8 @@ set_tests_properties(
                "${rocprofv3-generate-env}"
                RESOURCE_LOCK
                rocprofiler_kernel_replay
+               RUN_SERIAL
+               ON
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_SETUP
