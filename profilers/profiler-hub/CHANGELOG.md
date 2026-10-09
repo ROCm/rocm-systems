@@ -20,6 +20,8 @@ downstream consumer of the library.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-09
+
 ### Added
 
 - `writer_t::write_sample()` inserts an `event_data_t` and a `sample_data_t` referencing it on a registered track.
