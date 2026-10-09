@@ -2095,6 +2095,20 @@ TEST_F(GinAnvilSdmaTemplateTest, FlushTimeout_ClearsOnlyDrainedPeers) {
   EXPECT_EQ(env.polls(0), 1ULL);
 }
 
+// H37: a peer whose first channel drains but whose second times out keeps both dirty bits.
+TEST_F(GinAnvilSdmaTemplateTest, FlushTimeout_PartlyDrainedPeerStaysDirty) {
+  uint64_t peer1Bits = (1ULL << 2) | (1ULL << 3);  // peer 1, channels 0 and 1
+  SdmaEnv env(peer1Bits, /*numChannels=*/2);
+  env.setQueue(/*index=*/3, /*writeIndex=*/0, /*readLag=*/0, kNeverDrains);
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+  kernelFlushTimeout<<<1, 1>>>(env.h.ptr, nullptr, kShortBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclTimeout);
+  EXPECT_EQ(env.dirty.download(), peer1Bits);
+  EXPECT_EQ(env.polls(2), 1ULL);
+}
+
 #endif  // NCCL_GIN_ANVIL_SDMA_ENABLE
 
 }  // namespace RcclUnitTesting
