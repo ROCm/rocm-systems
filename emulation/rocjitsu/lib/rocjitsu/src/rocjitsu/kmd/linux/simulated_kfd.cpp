@@ -162,14 +162,16 @@ amdgpu::Mtype SimulatedKfd::pte_mtype_for_flags(uint32_t flags) {
   return amdgpu::Mtype::RW;
 }
 
-bool SimulatedKfd::gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags) {
+bool SimulatedKfd::gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags,
+                              bool sealed_ram) {
   auto proc = find_process(local_process_id_);
   if (!proc)
     return false;
   // GEM_VA uses the interposer's private read-write dmabuf mapping, whose
   // lifetime is tied to the GEM entry. It is not the application's CPU alias.
   map_to_gpu(*proc, gpu_va, host_ptr, size, pte_mtype_for_flags(alloc_flags),
-             KfdProcess::HostExtentOwner::Driver);
+             sealed_ram ? KfdProcess::HostExtentOwner::DriverSealedRam
+                        : KfdProcess::HostExtentOwner::Driver);
   return true;
 }
 
@@ -1165,6 +1167,7 @@ bool SimulatedKfd::register_process_address_spaces(const std::shared_ptr<KfdProc
          .page_table_generation = proc->page_table_generation(),
          .request_mutex = proc->page_table_request_mutex(),
          .mutation_epoch = proc->page_table_mutation_epoch(),
+         .page_table_cache_state = proc->page_table_cache_state(),
          .client_pid = client_pid,
          .client_mem_fd = -1,
          .passthrough = passthrough,
@@ -1684,6 +1687,20 @@ int SimulatedKfd::ioctl(uint32_t process_id, unsigned long request, void *arg, i
 
 int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg,
                                  int *target_mem_fd, int target_proc_fd) {
+  // kfd_ioctl() accepts older CREATE_QUEUE payloads by zero-extending them to
+  // the current kernel structure. In particular, older 88-byte payloads omit
+  // the sdma_engine_id tail. Copy back only bytes supplied by the caller.
+  // https://github.com/torvalds/linux/blob/d24e8ac715de2e16a53c144005b1863660a5fbea/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c
+  if (ioctl_without_size(request) == ioctl_without_size(AMDKFD_IOC_CREATE_QUEUE) &&
+      request != AMDKFD_IOC_CREATE_QUEUE) {
+    kfd_ioctl_create_queue_args args{};
+    const size_t bytes = std::min(ioctl_arg_size(request), sizeof(args));
+    std::memcpy(&args, arg, bytes);
+    const int result =
+        dispatch_ioctl(proc, AMDKFD_IOC_CREATE_QUEUE, &args, target_mem_fd, target_proc_fd);
+    std::memcpy(arg, &args, bytes);
+    return result;
+  }
   util::Logger::driver("IOCTL pid=", proc.process_id(), " ", LinuxKfd::ioctl_name(request));
 
   unsigned long dispatch_request = canonical_ioctl_request(request);
@@ -2171,7 +2188,9 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
                       alloc.gpu_va, reinterpret_cast<uintptr_t>(host_ptr), length, alloc.flags,
                       bool(flags & MAP_FIXED), alloc.user_va, alloc.memfd);
   });
-  map_to_gpu(proc, alloc.gpu_va, host_ptr, length, pte_mtype_for_flags(alloc.flags));
+  // mmap and KFD BOs cover whole pages, including the last partial page.
+  const size_t mapped_bytes = std::min(alloc.size, (uint64_t(length) + 0xFFF) & ~uint64_t(0xFFF));
+  map_to_gpu(proc, alloc.gpu_va, host_ptr, mapped_bytes, pte_mtype_for_flags(alloc.flags));
 
   return host_ptr;
 }
@@ -2188,6 +2207,7 @@ int SimulatedKfd::munmap(uint32_t process_id, void *addr, size_t length) {
 }
 
 int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
+  std::lock_guard<std::mutex> op_lock(proc.op_mutex_);
   {
     uint32_t doorbell_ord = 0;
     uint64_t doorbell_gpu_va = 0;
@@ -2210,14 +2230,19 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
             gs.doorbell_views, [addr](const auto &candidate) { return candidate.page == addr; });
         if (view == gs.doorbell_views.end())
           continue;
-        if (!proc.event_state_.is_closing()) {
-          errno = EPERM;
+        if (length != gs.doorbell_page_size) {
+          errno = EINVAL;
           return -1;
         }
         doorbell_gpu_va = view->gpu_va;
         doorbell_page_size = gs.doorbell_page_size;
         gs.doorbell_views.erase(view);
-        last_doorbell_view = gs.doorbell_views.empty();
+        // KFD doorbell mappings are ordinary userspace VMAs; unmapping one
+        // does not release the process's device doorbell allocation. Retain
+        // our private CP monitor and backing until process teardown so queues
+        // and subsequent client mappings still see the same doorbell slots.
+        // Linux: drivers/gpu/drm/amd/amdkfd/kfd_doorbell.c:kfd_doorbell_mmap.
+        last_doorbell_view = gs.doorbell_views.empty() && proc.event_state_.is_closing();
         if (last_doorbell_view) {
           doorbell_memfd = gs.doorbell_memfd;
           doorbell_monitor_page = gs.doorbell_monitor_page;
@@ -2412,6 +2437,11 @@ int SimulatedKfd::unmap_memory_ioctl(void *arg) {
 
 int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(arg);
+  if (args->size == 0 || args->size > UINT64_MAX - 0xFFF)
+    return -EINVAL;
+  // The kernel creates a PAGE_ALIGN(size) BO. LLVM can legally widen a scalar
+  // load within its mapped tail page even when the logical tensor is smaller.
+  const uint64_t allocation_size = (args->size + 0xFFF) & ~uint64_t(0xFFF);
 
   std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
 
@@ -2419,12 +2449,12 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   uint64_t va = args->va_addr;
   if (va == 0) {
     va = proc.next_gpu_va_;
-    proc.next_gpu_va_ += (args->size + 0xFFF) & ~0xFFFULL;
+    proc.next_gpu_va_ += allocation_size;
   }
 
   KfdProcess::GpuAllocation alloc{};
   alloc.gpu_va = va;
-  alloc.size = args->size;
+  alloc.size = allocation_size;
   alloc.flags = args->flags;
   alloc.handle = proc.next_handle_++;
   alloc.host_ptr = nullptr;
@@ -2436,7 +2466,7 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   bool is_doorbell = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) != 0;
   if (is_userptr && !daemon_mode_) {
     alloc.host_ptr = reinterpret_cast<void *>(va);
-    map_to_gpu(proc, va, reinterpret_cast<void *>(va), args->size, alloc_mtype);
+    map_to_gpu(proc, va, reinterpret_cast<void *>(va), alloc.size, alloc_mtype);
   } else if (daemon_mode_ || !user_provided_va) {
     auto raw_fd = memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (raw_fd >= 0) {
@@ -2820,10 +2850,9 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
                                   : is_pm4_compute ? amdgpu::QueuePacketFormat::Pm4
                                                    : amdgpu::QueuePacketFormat::Aql;
     queue_request.abi = is_aql_compute ? amdgpu::QueueAbi::KfdAql : amdgpu::QueueAbi::Generic;
-    // Queue creation initializes both SDMA pointers to zero below. Preserve that
-    // device-side cursor explicitly so execution does not depend on reading the
-    // writeback destination before the first packet can retire.
-    if (is_sdma)
+    // Fresh SDMA and native PM4 MQDs start at zero; the writeback destination
+    // need not contain the initial hardware cursor before the first retirement.
+    if (is_sdma || is_pm4_compute)
       queue_request.initial_consumer_cursor = 0;
     // The topology advertises every XCD's compute units as one agent, so a
     // compute dispatch must be able to reach all of them. Without this a
@@ -2839,7 +2868,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     if (is_aql_compute)
       queue_request.queue_descriptor_address =
           args->write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);
-    if (!is_sdma && args->ctx_save_restore_address != 0) {
+    if (is_aql_compute && args->ctx_save_restore_address != 0) {
       constexpr uint32_t kErrorReasonOffset = 6 * sizeof(uint32_t);
       const std::optional<amdgpu::GpuVmAccess> access =
           gpu->soc->gpu_vm().snapshot(gs.address_space);
