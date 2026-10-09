@@ -928,6 +928,54 @@ TEST(RdnaDispatchTest, WgpLdsContentsSurviveWorkgroupAllocationReuse) {
   EXPECT_TRUE(f.se()->spi().release_wgp_workgroup(entry.dispatch_id, /*global_wg_id=*/0));
 }
 
+TEST(RdnaDispatchTest, DispatchFailureReclaimsUnlaunchedWgpReservations) {
+  for (bool vm_fault : {false, true}) {
+    SCOPED_TRACE(vm_fault);
+    VmFixture f("rdna1", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+    test::AqlQueue queue(f.mem(), f.cp());
+    auto &spi = f.se()->spi();
+
+    amdgpu::DispatchEntry failed{};
+    failed.kind = amdgpu::DispatchPacketKind::Kernel;
+    failed.queue_id = 1;
+    failed.dispatch_id = 19;
+    failed.total_wgs = 2;
+    failed.wgp_mode = true;
+    failed.wfs_per_workgroup = 2;
+    failed.group_segment_fixed_size = 32 * 1024;
+    f.cp()->accept_fanout_shard(failed);
+    f.cp()->drain_fanout_inbox_for_test();
+    ASSERT_TRUE(f.cp()->has_dispatch_for_test(1, 0, failed.dispatch_id));
+
+    // Reserve all paired-CU LDS without launching any waves. Interleave another
+    // dispatch's reservation, which cancellation must leave intact.
+    ASSERT_TRUE(spi.allocate_workgroup(failed, 0));
+    amdgpu::DispatchEntry other = failed;
+    other.queue_id = 2;
+    other.dispatch_id = 20;
+    other.group_segment_fixed_size = 64 * 1024;
+    ASSERT_TRUE(spi.allocate_workgroup(other, 0));
+    ASSERT_TRUE(spi.allocate_workgroup(failed, 1));
+    EXPECT_TRUE(f.cu(0)->is_idle());
+    EXPECT_TRUE(f.cu(1)->is_idle());
+
+    if (vm_fault)
+      f.cp()->notify_dispatch_vm_fault(1, 0, failed.dispatch_id, amdgpu::VmAccessOutcome::Faulted);
+    else
+      f.cp()->notify_dispatch_failure(1, 0, failed.dispatch_id);
+    EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
+    EXPECT_FALSE(f.cp()->has_dispatch_for_test(1, 0, failed.dispatch_id));
+
+    amdgpu::DispatchEntry next = failed;
+    next.dispatch_id = 21;
+    next.group_segment_fixed_size = 128 * 1024;
+    EXPECT_FALSE(spi.allocate_workgroup(next, 0));
+    ASSERT_TRUE(spi.release_wgp_workgroup(other.dispatch_id, 0));
+    ASSERT_TRUE(spi.allocate_workgroup(next, 0));
+    EXPECT_TRUE(spi.release_wgp_workgroup(next.dispatch_id, 0));
+  }
+}
+
 TEST(AqlDispatchTest, InitializesModeFromComputePgmRsrc1) {
   using namespace rocr::llvm::amdhsa;
 
@@ -9102,6 +9150,72 @@ TEST(Pm4DispatchTest, BooleanPredicationOrdersReadsAndOnlySuppressesFlaggedPacke
     ASSERT_TRUE(succeeded);
     for (uint32_t i = 0; i < expected.size(); ++i)
       EXPECT_EQ(f.mem()->read32(output + i * 4), expected[i]) << i;
+  }
+}
+
+TEST(Pm4DispatchTest, InstructionFailureReclaimsWgpReservationsForOtherQueues) {
+  using namespace rocr::llvm::amdhsa;
+  constexpr uint32_t kSSubvectorLoopBegin = 0xBD800000u;
+  constexpr uint32_t kWgpLdsBytes = 128 * 1024;
+  constexpr uint32_t kFirstQueue = 71;
+  for (uint32_t dispatch_threads : {1u, 2u}) {
+    for (uint32_t failed_workgroups : {1u, 3u}) {
+      SCOPED_TRACE(std::format("threads={} workgroups={}", dispatch_threads, failed_workgroups));
+      VmFixture f("rdna1", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+      f.cp()->set_dispatch_threads(dispatch_threads);
+      auto *snapshots = f.capture_halts();
+      std::array<bool, 2> completed{};
+      std::array<bool, 2> succeeded{};
+      for (uint32_t index = 0; index < 2; ++index) {
+        amdgpu::ComputeQueueConfig queue;
+        queue.queue_id = kFirstQueue + index;
+        ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
+
+        const uint64_t code = 0x8000 + index * 0x1000;
+        const uint64_t ib = 0x4000 + index * 0x1000;
+        f.mem()->write32(code, index == 0 ? kSSubvectorLoopBegin : 0xBF810000u); // s_endpgm.
+        std::vector<uint32_t> words;
+        const auto packet = [&](amdgpu::Pm4Opcode opcode, std::initializer_list<uint32_t> payload) {
+          words.push_back(0xC0000000u | ((payload.size() - 1) << 16) | (uint32_t(opcode) << 8));
+          words.insert(words.end(), payload.begin(), payload.end());
+        };
+        uint32_t rsrc1 = 0, rsrc2 = 0;
+        AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, 1);
+        AMDHSA_BITS_SET(rsrc2, COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, kWgpLdsBytes / 512);
+        packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputeNumThreadX, 64, 1, 1});
+        packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmLo, uint32_t(code >> 8), 0});
+        packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmRsrc1, rsrc1, rsrc2});
+        packet(amdgpu::Pm4Opcode::DispatchDirect,
+               {index == 0 ? failed_workgroups : 1u, 1, 1, 1u | (1u << 15)}); // Wave32.
+        for (uint32_t i = 0; i < words.size(); ++i)
+          f.mem()->write32(ib + i * 4, words[i]);
+
+        amdgpu::Pm4Submission submission;
+        submission.buffers.push_back({ib, uint32_t(words.size())});
+        // Keep the second queue pending until the first reports failure. The
+        // first grid may also have workgroups that never found LDS capacity.
+        submission.ready = [&, index] { return index == 0 || completed[0]; };
+        f.engine->register_as_primary();
+        submission.complete = [&, index](bool success) {
+          EXPECT_FALSE(completed[index]);
+          completed[index] = true;
+          succeeded[index] = success;
+          EXPECT_TRUE(f.cu(0)->is_idle());
+          EXPECT_TRUE(f.cu(1)->is_idle());
+          f.engine->primary_release();
+        };
+        ASSERT_TRUE(f.cp()->submit_pm4(kFirstQueue + index, 0, std::move(submission)));
+      }
+
+      f.engine->run();
+      EXPECT_EQ(completed, (std::array{true, true}));
+      EXPECT_EQ(succeeded, (std::array{false, true}));
+      EXPECT_TRUE(f.cp()->queue_faulted_for_test(kFirstQueue, 0));
+      EXPECT_FALSE(f.cp()->queue_faulted_for_test(kFirstQueue + 1, 0));
+      ASSERT_EQ(snapshots->snapshots().size(), 2u);
+      for (const auto &wave : snapshots->snapshots())
+        EXPECT_EQ(wave.lds_size_bytes, kWgpLdsBytes);
+    }
   }
 }
 

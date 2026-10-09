@@ -2681,6 +2681,8 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
   erase_cluster_workgroups(static_cast<uint32_t>(dispatch_id));
   for (ComputeUnitCore *cu : cus_)
     cu->abort_dispatch(static_cast<uint32_t>(dispatch_id));
+  for (auto *spi : spis_)
+    spi->release_wgp_dispatch(static_cast<uint32_t>(dispatch_id));
   return true;
 }
 
@@ -3296,6 +3298,11 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
       }
     });
   }
+  // An instruction failure can abort every wave before this CP sees it, so
+  // release SPI reservations using the dispatch records, not resident waves.
+  for (const auto &entry : qs.entries)
+    for (auto *spi : spis_)
+      spi->release_wgp_dispatch(entry.dispatch_id);
   flush_gpu_caches();
   qs.entries.clear();
   for (auto &submission : queue.commands.submissions)
