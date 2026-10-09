@@ -94,6 +94,8 @@ class RocProfCompute:
         if self.__mode == "profile":
             if not getattr(self.__args, "bench_only", False):
                 self.detect_profiler()
+        elif self.__mode == "analyze":
+            self.detect_analyze()
 
         console_debug(f"Execution mode = {self.__mode}")
 
@@ -151,9 +153,6 @@ class RocProfCompute:
             console_error(
                 "rocprof-compute requires you to pass a valid mode. Detected None."
             )
-
-        if self.__mode == "analyze":
-            self.detect_analyze()
 
         self._validate_list_option_exclusions()
 
@@ -296,6 +295,13 @@ class RocProfCompute:
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
         args = self.__args
+        if args.list_stats and args.output_format in ("csv", "db"):
+            console_error(
+                "--list-stats cannot be used with --output-format "
+                f"{args.output_format}. "
+                "Use --output-format stdout or txt, or remove --list-stats."
+            )
+
         operator_filter = (
             args.torch_operator is not None or args.triton_operator is not None
         )
@@ -604,18 +610,10 @@ class RocProfCompute:
             )
 
     def _validate_list_option_exclusions(self) -> None:
-        """Validate incompatible combinations of list/discovery options.
-
+        """Validate that list/discovery options aren't combined with --block.
         Applies to both profile and analyze mode.
         """
         args = self.__args
-        if self.__mode == "analyze" and args.list_stats and self.__analyze_mode == "db":
-            console_error(
-                "--list-stats cannot be used with --output-format "
-                f"{args.output_format}. "
-                "Use --output-format stdout or txt, or remove --list-stats."
-            )
-
         block_active = bool(
             getattr(args, "filter_blocks", None)
             or getattr(args, "filter_metrics", None)
