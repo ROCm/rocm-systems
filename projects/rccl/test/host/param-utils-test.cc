@@ -40,6 +40,9 @@ ncclResult_t ResolveDoubled(const void*, const char* input, int32_t& out) {
   out = std::atoi(input) * 2;
   return ncclSuccess;
 }
+ncclResult_t ResolveAlwaysFails(const void*, const char*, int32_t&) {
+  return ncclInvalidArgument;
+}
 bool ValidateNonNegative(const void*, const int32_t& val) {
   return val >= 0;
 }
@@ -67,6 +70,10 @@ TEST(ParamUtilsMicrotest, TypeIdOf_MapsEveryFixedWidthIntegerAndBoolAndCstr) {
 TEST(ParamUtilsMicrotest, TypeIdOf_FallsBackToRawForUnlistedTypes) {
   EXPECT_EQ(NCCL_PARAM_TYPE_RAW, ncclParamTypeIdOf<double>());
   EXPECT_EQ(NCCL_PARAM_TYPE_RAW, ncclParamTypeIdOf<std::string>());
+  // Plain char is a distinct type from both signed char (int8_t) and unsigned
+  // char (uint8_t), so it isn't matched by either is_same check and falls
+  // through the same as any other unlisted type.
+  EXPECT_EQ(NCCL_PARAM_TYPE_RAW, ncclParamTypeIdOf<char>());
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +142,7 @@ TEST(ParamUtilsMicrotest, Iequals_MatchesIgnoringAsciiCase) {
   EXPECT_TRUE(iequals("MiXeD", "mixed"));
 }
 
-TEST(ParamUtilsMicrotest, Iequals_RejectsDifferentLengthWithoutComparingChars) {
+TEST(ParamUtilsMicrotest, Iequals_RejectsDifferentLength) {
   EXPECT_FALSE(iequals("abc", "ab"));
 }
 
@@ -211,12 +218,18 @@ TEST(ParamUtilsMicrotest, Parser_DelegatesThroughTheFunctionPointerTrio) {
   EXPECT_EQ("42x", parser.toString(42));
 }
 
+TEST(ParamUtilsMicrotest, Parser_ResolvePropagatesTheCalleesFailure) {
+  ncclParamParser<int32_t> parser{ResolveAlwaysFails, ValidateNonNegative, ToStringWithSuffix, nullptr, "fails"};
+  int32_t value = 0;
+  EXPECT_EQ(ncclInvalidArgument, parser.resolve("21", value));
+}
+
 TEST(ParamUtilsMicrotest, Parser_DefaultConstructedIsFalsy) {
   ncclParamParser<int32_t> parser{};
   EXPECT_FALSE(static_cast<bool>(parser));
 }
 
-TEST(ParamUtilsMicrotest, Parser_ConstructedWithAResolveFnIsTruthy) {
+TEST(ParamUtilsMicrotest, Parser_ConstructedWithAllFieldsIsTruthy) {
   ncclParamParser<int32_t> parser{ResolveDoubled, ValidateNonNegative, ToStringWithSuffix, nullptr, "doubled"};
   EXPECT_TRUE(static_cast<bool>(parser));
 }
@@ -242,12 +255,18 @@ TEST(ParamUtilsMicrotest, MakeOptions_PreservesOrderAndSize) {
       makeOptions(makeOption<int32_t>("OFF", 0), makeOption<int32_t>("ON", 1), makeOption<int32_t>("AUTO", 2));
   ASSERT_EQ(3u, opts.size());
   EXPECT_STREQ("OFF", opts.options[0].name);
+  EXPECT_EQ(0, opts.options[0].value);
   EXPECT_STREQ("ON", opts.options[1].name);
+  EXPECT_EQ(1, opts.options[1].value);
   EXPECT_STREQ("AUTO", opts.options[2].name);
+  EXPECT_EQ(2, opts.options[2].value);
 
+  // begin()/end() walk the same backing array in the same order as indexing.
+  const std::vector<int32_t> expectedValues{0, 1, 2};
   int seen = 0;
   for (const auto& opt : opts) {
-    EXPECT_EQ(opts.options[seen].value, opt.value);
+    ASSERT_LT(seen, static_cast<int>(expectedValues.size()));
+    EXPECT_EQ(expectedValues[seen], opt.value);
     ++seen;
   }
   EXPECT_EQ(3, seen);
@@ -261,7 +280,7 @@ TEST(ParamUtilsMicrotest, MakeOptions_UniqueNamesLogNoWarning) {
   EXPECT_FALSE(LogHas(log, "Duplicate option name"));
 }
 
-TEST(ParamUtilsMicrotest, MakeOptions_DuplicateNameWarnsOnce) {
+TEST(ParamUtilsMicrotest, MakeOptions_DuplicateNameWarns) {
   std::string log = CaptureLog([&]() {
     auto opts = makeOptions(makeOption<int32_t>("ON", 1), makeOption<int32_t>("ON", 2));
     (void)opts;
