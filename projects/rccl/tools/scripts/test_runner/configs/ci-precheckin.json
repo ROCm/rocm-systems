@@ -315,7 +315,7 @@
     },
     {
       "name": "RCCL Microtests - gin_host.cc",
-      "description": "rccl-UnitTestsMicroGinHost (host-only gin/gin_host.cc microtests, no GPU/HIP/RCCL runtime)",
+      "description": "rccl-UnitTestsMicroGinHost (host-only gin/gin_host.cc and gin/gin_host_proxy.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_gin_host",
       "enabled": true
     }
