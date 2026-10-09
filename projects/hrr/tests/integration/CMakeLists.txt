@@ -36,6 +36,11 @@
 #   aim-labs/scenarios/prep/hrr-api-matrix/check_matrix.py --emit-cxx \
 #       <this dir>/hrr_api_matrix_expectations.h
 #
+# hrr_capture_capabilities_test.cc covers what capture leaves out of the archive
+# when a call hands back a capability or an address: an IPC handle is recorded
+# as a digest, a resolved entry point not at all. Contains its own hidden
+# [.][hrr-direct] workload, which calls host APIs only.
+#
 # hrr_kernel_args_test.cc covers what replay does with a pointer-typed kernel
 # argument no allocation explains: a sentinel keeps its value, an
 # address-shaped lost pointer becomes null. Contains its own hidden
@@ -88,6 +93,7 @@ add_executable(hrr-integration-tests
   hrr_api_matrix_test.cc
   hrr_capture_access_test.cc
   hrr_fatbin_header_test.cc
+  hrr_capture_capabilities_test.cc
   hrr_secure_exec_test.cc
   hrr_clock_hook.cc
 )

@@ -1130,10 +1130,20 @@ negative ordinals.
 
 IPC memory handles, external memory imports (`hipImportExternalMemory`), and
 semaphore imports (`hipImportExternalSemaphore`) are recorded as raw events, but the
-opaque handle bytes and import descriptors are never captured. At replay the shims call
-the real APIs with zeroed/stale handles (they are no longer literal no-ops), so the
-imported memory/semaphore is never validly mapped. Workloads that communicate with
-other processes via IPC handles cannot be replayed in isolation.
+opaque handle bytes and import descriptors are never captured. An IPC handle lets any
+process on the machine open the allocation while its exporter lives, so
+`hipIpcGetMemHandle`, `hipIpcOpenMemHandle` and `hipIpcOpenEventHandle` record a
+128-bit digest of the handle in the first 16 bytes of `handle_bytes`, and zeros after
+it. Replay pairs an import with an export from the same archive by that digest, and
+reports an import whose export is in another process instead of opening it. The other
+shims call the real APIs with zeroed or stale handles, so the imported memory or
+semaphore is never validly mapped. Workloads that communicate with other processes via
+IPC handles cannot be replayed in isolation.
+
+For a similar reason `hipGetProcAddress`, `hipGetDriverEntryPoint` and their `_spt`
+forms do not record the resolved function pointer, which is an address in the
+capturing process. `hipGetProcAddress` records the symbol name and flags, and replay
+looks the name up again; `hipGetDriverEntryPoint` is a no-op at replay.
 
 ### `hipStreamCaptureModeThreadLocal` Downgraded
 

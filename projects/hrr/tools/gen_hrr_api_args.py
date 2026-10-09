@@ -1061,6 +1061,13 @@ class Deref:
     # every element goes through translate_ptr, the way a ptr_member of a
     # struct does.
     elem_ptr: bool = False
+    # For a pointee that is a capability, such as an IPC handle: capture stores
+    # its 128-bit digest at the start of the bytes field, and zeros after it,
+    # instead of the bytes. The field keeps its size, so archives from before
+    # still read. Replay pairs an export with an import by comparing recorded
+    # fields, which a digest does as well as the bytes did, and the archive no
+    # longer holds the handle.
+    digest: bool = False
 
     @property
     def is_array(self) -> bool:
@@ -1102,12 +1109,13 @@ DEREF_FIELDS: Dict[str, List[Deref]] = {
     ],
     # The IPC handle is 64 bytes. Recorded as one uint64_t it was 56 bytes of
     # nothing, and replay passed a null pointer for the out buffer, which is
-    # why the call came back as invalid argument. Carrying the whole handle
-    # also gives the archive something an importer in another rank can be
-    # matched against (ipc_handle_map).
+    # why the call came back as invalid argument. The handle lets any process
+    # on the machine open the allocation while its exporter lives, so the
+    # archive carries its digest: enough for an importer to be matched against
+    # it (ipc_handle_map), and nothing anyone can open.
     "hipIpcGetMemHandle": [
         Deref("handle", "hipIpcMemHandle_t", 64, direction="out",
-              playback="manual"),
+              playback="manual", digest=True),
     ],
     # Which device's view of the mapping is being asked about, and what the
     # answer was. The location was a stale struct pointer, which is why this
@@ -1373,6 +1381,8 @@ def deref_covered_params(api: str) -> Set[str]:
 class ByValueStruct:
     size: int
     ptr_members: Tuple[str, ...] = ()
+    # The struct is a capability: record its digest, as Deref.digest does.
+    digest: bool = False
 
 
 BY_VALUE_STRUCTS: Dict[str, ByValueStruct] = {
@@ -1381,8 +1391,8 @@ BY_VALUE_STRUCTS: Dict[str, ByValueStruct] = {
     "hipPitchedPtr":       ByValueStruct(32, ptr_members=("ptr",)),
     "hipMemLocation":      ByValueStruct(8),
     "hipChannelFormatDesc": ByValueStruct(20),
-    "hipIpcMemHandle_t":   ByValueStruct(64),
-    "hipIpcEventHandle_t": ByValueStruct(64),
+    "hipIpcMemHandle_t":   ByValueStruct(64, digest=True),
+    "hipIpcEventHandle_t": ByValueStruct(64, digest=True),
 }
 
 
@@ -2108,14 +2118,16 @@ def generate_struct(entry: ApiEntry) -> str:
             elif ft == "__BYVAL__":
                 bv = by_value_struct(param.raw_type)
                 base = _get_base_type(param.raw_type)
+                kept = "digest, then zeros" if bv.digest else "inline copy"
                 lines.append(f"    uint8_t {safe}_bytes[{bv.size}];"
-                             f"  /* {base} passed by value, inline copy */")
+                             f"  /* {base} passed by value, {kept} */")
             else:
                 lines.append(f"    {ft} {safe};")
 
     # Dereferenced pointer arguments — the pointee, carried inline
     for d in deref_specs(entry.name):
         what = (f"{d.ctype}[{d.max_count}] inline copy" if d.is_array
+                else f"{d.ctype} digest, then zeros" if d.digest
                 else f"{d.ctype} inline copy")
         lines.append(f"    uint8_t {d.bytes_field}[{d.total_bytes}];  /* {what} */")
         lines.append(f"    uint8_t {d.present_field};  /* 1 when {d.param} was non-null */")
@@ -2371,7 +2383,12 @@ def _fill_param(lines: List[str], p: Param, name: str, ft: str) -> None:
         lines.append(f"    a.{name}_y = {name}.y;")
         lines.append(f"    a.{name}_z = {name}.z;")
     elif ft == "__BYVAL__":
-        lines.append(f"    std::memcpy(a.{name}_bytes, &{name}, sizeof({name}));")
+        bv = by_value_struct(t)
+        if bv is not None and bv.digest:
+            lines.append(f"    hrr_cap::writer::digest_into(a.{name}_bytes, sizeof(a.{name}_bytes),"
+                         f" &{name}, sizeof({name}));")
+        else:
+            lines.append(f"    std::memcpy(a.{name}_bytes, &{name}, sizeof({name}));")
     elif base in _NON_CASTABLE_TYPES:
         lines.append(f"    a.{name} = 0;  // non-castable type skipped")
     elif base == 'hipDevice_t':
@@ -2451,6 +2468,12 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
             lines.append(f"      a.{d.count_field}   = _n;")
             lines.append(f"      a.{d.present_field} = 1;")
             lines.append(f"    }}")
+        elif d.digest:
+            lines.append(f"    if ({d.param}) {{")
+            lines.append(f"      hrr_cap::writer::digest_into(a.{d.bytes_field}, sizeof(a.{d.bytes_field}),"
+                         f" {d.param}, sizeof({d.ctype}));")
+            lines.append(f"      a.{d.present_field} = 1;")
+            lines.append(f"    }}")
         else:
             lines.append(f"    if ({d.param}) {{")
             lines.append(f"      std::memcpy(a.{d.bytes_field}, {d.param}, sizeof({d.ctype}));")
@@ -2458,8 +2481,24 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
             lines.append(f"    }}")
 
 
-def _fill_output_param_post(lines: List[str], p: Param, name: str) -> None:
+# Output parameters whose value is an address in the capturing process that
+# replay has no use for: the resolved entry point of a symbol lookup. Replay
+# looks the name up again on its own machine, so the field stays 0 instead of
+# carrying an address that gives away where the runtime was loaded.
+UNRECORDED_OUTPUTS: Dict[str, Set[str]] = {
+    "hipGetProcAddress":          {"pfn"},
+    "hipGetProcAddress_spt":      {"pfn"},
+    "hipGetDriverEntryPoint":     {"funcPtr"},
+    "hipGetDriverEntryPoint_spt": {"funcPtr"},
+}
+
+
+def _fill_output_param_post(lines: List[str], p: Param, name: str,
+                            api: str = "") -> None:
     """Emit lines that fill a.name AFTER the real call for output pointer params."""
+    if name in UNRECORDED_OUTPUTS.get(api, ()):
+        lines.append(f"    // {name} is not recorded, see UNRECORDED_OUTPUTS in the generator.")
+        return
     t = p.raw_type.strip()
     # hipDevice_t is int — dereference gives int, use static_cast
     if 'hipDevice_t' in t and 'hipDeviceptr_t' not in t:
@@ -2607,7 +2646,7 @@ def generate_shim(entry: ApiEntry) -> str:
                     _fill_param(lines, p, name, ft)
             # Post-call output params
             for p, name, ft in output_params:
-                _fill_output_param_post(lines, p, name)
+                _fill_output_param_post(lines, p, name, entry.name)
             _fill_derefs(lines, entry)
             enum_name = "HRR_API_" + entry.name.lstrip('_').upper()
             _note_unreplayable(lines, entry)
@@ -2640,7 +2679,7 @@ def generate_shim(entry: ApiEntry) -> str:
                     _fill_param(lines, p, name, ft)
             # Post-call: fill output ptr fields from dereferenced values
             for p, name, ft in output_params:
-                _fill_output_param_post(lines, p, name)
+                _fill_output_param_post(lines, p, name, entry.name)
             _fill_derefs(lines, entry)
             enum_name = "HRR_API_" + entry.name.lstrip('_').upper()
             _note_unreplayable(lines, entry)

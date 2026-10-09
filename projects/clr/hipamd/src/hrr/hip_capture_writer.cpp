@@ -147,6 +147,15 @@ static Hash128 hash_buffer(const void* data, size_t len) {
   return {h1, h2};
 }
 
+void digest_into(void* dst, size_t dst_len, const void* src, size_t src_len) {
+  const Hash128 h = hash_buffer(src, src_len);
+  auto* out = static_cast<uint8_t*>(dst);
+  memset(out, 0, dst_len);
+  if (dst_len < sizeof(h.lo) + sizeof(h.hi)) return;
+  memcpy(out, &h.lo, sizeof(h.lo));
+  memcpy(out + sizeof(h.lo), &h.hi, sizeof(h.hi));
+}
+
 static void hash_hex(Hash128 h, char buf[33]) {
   snprintf(buf, 33, "%016llx%016llx",
            static_cast<unsigned long long>(h.lo),
