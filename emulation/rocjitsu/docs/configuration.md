@@ -92,6 +92,7 @@ The example above is intentionally minimal.
 | `cpu_dispatch_threads` | int | Inclusive functional dispatch width per SoC. Omitted/0 selects a preferred allocation; 1 forces serial dispatch. Clamped to the shared SoC pool capacity. |
 | `cpu_thread_budget` | int | Automatic selection ceiling. Omitted/0 uses CPU affinity and the target allocation table; a positive value overrides the budget. |
 | `async_helper_threads` | int | Shared MMA helpers per VM. Omitted/-1 selects the table; 0 disables; explicit values are 0–128. |
+| `wait_checking` | string | Override wait diagnostics on every CU: `on`, `off`, or `all`. Omission preserves per-CU settings and defaults. |
 | `thread_allocations` | array | Preferred `num_threads` / `cpu_dispatch_threads` / `async_helper_threads` triples, selected by total execution-thread cost. |
 | `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
 | `vm.arch` | string | ISA architecture family: `cdna3`, `cdna4`, `cdna5`, etc. |
@@ -314,13 +315,40 @@ does not select direct-CU groups; their WGP IDs still follow CU child order.
 
 ### Memory wait diagnostics
 
-With memory wait diagnostics enabled, compute units warn when an instruction reads
-or overwrites a pending memory result without a sufficient wait. Results still
-execute eagerly. See
-[memory wait diagnostics](memory-wait-diagnostics.md) for coverage and the
-`memory_wait_diagnostics` setting (`off`, the default, or `warn`).
-On gfx1250, this setting also controls XCNT replay-source warnings. Both checks
-are disabled by default and enabled together with `memory_wait_diagnostics=warn`.
+Ordinary memory wait diagnostics are enabled by default; gfx1250 XCNT replay-source
+checks are off. Compute units warn when an instruction reads or overwrites a pending
+memory result without a sufficient wait. Execution continues with eagerly computed values.
+
+If warnings appear incorrect or checking slows a workload, disable both checks:
+
+```sh
+rocjitsu --config /path/to/config.json --wait-checking=off -- <command>
+```
+
+`--wait-checking MODE` and `--wait-checking=MODE` accept:
+
+| Mode | Ordinary checks | gfx1250 XCNT checks |
+|---|---|---|
+| `on` | Enabled | Disabled |
+| `off` | Disabled | Disabled |
+| `all` | Enabled | Enabled |
+
+The flag overrides both settings on every CU and GPU for this launch. It uses the
+same config-copy mechanism as `--cpu-thread-budget`, leaving the source file unchanged.
+Omitting it preserves the JSON settings and defaults. No rebuild is needed.
+Both flags also work with `mirage run`, for profiles and explicit `--config`
+files, in daemon and in-process modes. They compose in either order.
+The native `rocjitsu` CLI refuses them with `--attach`, which joins an existing
+daemon. Both CLIs refuse these overrides when an enabled DBT guest names an
+external `dbt_guest.simulator_config`; configure the daemon or host simulator instead.
+
+For a persistent override, set top-level `"wait_checking": "off"` (or `"on"` / `"all"`).
+Without a global override, each `compute_unit` node's `config` array accepts
+`memory_wait_diagnostics` (`warn` by default) and `xcnt_diagnostics` (`off` by default),
+each with values `warn` or `off`. Invalid per-CU values are rejected even with a
+global override. Checkpoints preserve each CU's effective diagnostic settings;
+older checkpoints without these fields use the defaults. See
+[memory wait diagnostics](memory-wait-diagnostics.md) for coverage and limitations.
 
 ### KFD device sections
 

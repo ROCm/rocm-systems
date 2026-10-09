@@ -180,7 +180,7 @@ bool ncclSymkLsaBaseModel(struct ncclTuningInput_t* input, enum ncclSymkKernelId
   bool isLL = ncclSymkLLKernelMask() >> kernelId & 1;
   bool isAG = ncclSymkAGKernelMask() >> kernelId & 1;
   bool isAR = ncclSymkARKernelMask() >> kernelId & 1;
-  bool isRS = ncclSymkRSKernelMask() >> kernelId & 1;
+  [[maybe_unused]] bool isRS = ncclSymkRSKernelMask() >> kernelId & 1;
   constexpr double GBps = (1 << 30) / 1.e6;
   double baseLat, smBw, peakBw;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)

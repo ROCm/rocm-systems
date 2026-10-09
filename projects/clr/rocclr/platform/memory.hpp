@@ -706,7 +706,7 @@ class SvmBuffer : AllStatic {
 
  private:
   static void Add(uintptr_t k, uintptr_t v);
-  static bool Remove(uintptr_t k);
+  static bool Remove(uintptr_t ptr, uintptr_t* base_ptr);
   static bool Contains(uintptr_t ptr);
 
   static std::map<uintptr_t, uintptr_t> Allocated_;  // !< Allocated buffers
