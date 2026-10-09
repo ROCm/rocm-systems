@@ -73,7 +73,7 @@ def test_list_kernels(binary_handler_analyze_rocprof_compute):
 
 @pytest.mark.misc
 @pytest.mark.parametrize("output_format", ["csv", "db"])
-def test_list_stats_rejects_db_output(
+def test_list_stats_rejects_csv_and_db_output(
     binary_handler_analyze_rocprof_compute, tmp_path, monkeypatch, capsys, output_format
 ):
     """Reject CSV/DB statistics with an actionable error before exporting."""
@@ -96,8 +96,10 @@ def test_list_stats_rejects_db_output(
     assert code == 1
     captured = capsys.readouterr()
     output = captured.out + captured.err
-    assert "--list-stats cannot be used with --output-format csv or db" in output
-    assert "Use --output-format stdout or txt" in output
+    assert (
+        f"--list-stats cannot be used with --output-format {output_format}." in output
+    )
+    assert "Use --output-format stdout or txt, or remove --list-stats." in output
     assert not output_path.exists()
     assert not output_path.with_suffix(".db").exists()
 

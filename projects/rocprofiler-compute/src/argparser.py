@@ -688,8 +688,8 @@ Examples:
         "--list-stats",
         action="store_true",
         help=(
-            "\t\tList all detected kernels and kernel dispatches. "
-            "Supported only with --output-format stdout or txt."
+            "\t\tList all detected kernels and kernel dispatches.\n"
+            "\t\tCannot be used with --output-format csv or db."
         ),
     )
     analyze_group.add_argument(

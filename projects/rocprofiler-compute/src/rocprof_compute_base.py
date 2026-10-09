@@ -611,9 +611,9 @@ class RocProfCompute:
         args = self.__args
         if self.__mode == "analyze" and args.list_stats and self.__analyze_mode == "db":
             console_error(
-                "--list-stats cannot be used with --output-format csv or db. "
-                "Use --output-format stdout or txt, or omit --list-stats "
-                "to export analysis results."
+                "--list-stats cannot be used with --output-format "
+                f"{args.output_format}. "
+                "Use --output-format stdout or txt, or remove --list-stats."
             )
 
         block_active = bool(

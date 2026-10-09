@@ -417,7 +417,7 @@ More analysis options
    $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-stats
 
 ``--list-stats`` supports the default ``stdout`` output and ``--output-format txt``.
-Combining it with ``--output-format csv`` or ``--output-format db`` returns an error.
+Combining it with ``--output-format csv`` or ``--output-format db`` exits with an error.
 
 
 **List metrics**
