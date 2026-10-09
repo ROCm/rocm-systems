@@ -1008,14 +1008,12 @@ Each Function cell is one ROCTX range:
 
 ``{encoded_name}:{location}|seqNr=...|tid=...|ftid=...|ltid=...|scope=...|args=...[|backend]``
 
-``encode_marker_name`` percent-encodes only ``/`` and ``%`` in the name token.
+``/`` and ``%`` in the name token are percent-encoded.
 ``Backend`` is the trailing ``|torch`` or ``|triton`` on Function, or ``user``
 when that suffix is absent (user-defined ROCTX ranges).
 
-The across-pass stitch key keeps ``seqNr``, ``tid``, and ``ftid`` and omits
-``ltid``, plus ``function_ordinal``. The on-disk per-pass join column is
-``Correlation_Id``. Analyze canonicalizes it to ``Correlation_ID`` before
-joining a marker range to kernel dispatches.
+The on-disk per-pass join column is ``Correlation_Id``. Analyze canonicalizes
+it to ``Correlation_ID`` before joining a marker range to kernel dispatches.
 
 Analyze reads those files and prints an operator call tree and a per-operator
 summary (for example with ``--list-torch-operators`` or ``--torch-operator``).
