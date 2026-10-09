@@ -22,6 +22,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Experimental ML API analyze no longer writes `ml_api_trace/consolidated.csv`.
 
+* Workloads profiled with the previous stacked Function labels (`:#` or `@`) make `--list-*-operators` / `--*-operator` exit. Re-profile with current `--torch-trace` or `--triton-trace`.
+
 * Renamed the Memory Chart left-hand panel from "Kernel" to "Compute Units" on CDNA (gfx9) and to "WGPs" on gfx115x and gfx1250. The panel now shows resource allocation stats: Wave Occupancy as a percent of the maximum wavefronts per CU (gfx9) or per WGP (gfx115x, gfx1250), vGPRs, sGPRs, Scratch in KB per wave, LDS Allocation, and Workgroups per active CU (gfx9) or per WGP (gfx115x, gfx1250).
 
 * All Memory Chart bandwidth values now use uniform fixed-point GB/s formatting (3 decimal places) for easy cross-level comparison.
