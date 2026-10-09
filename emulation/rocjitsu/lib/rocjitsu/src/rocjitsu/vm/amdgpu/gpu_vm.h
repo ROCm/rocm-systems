@@ -619,7 +619,9 @@ public:
   [[nodiscard]] std::optional<Mtype> cached_private_ram_mtype(uint64_t address,
                                                               const VmMtypeCache &cache) const;
   [[nodiscard]] bool try_write_contiguous(uint64_t address, std::span<const std::byte> bytes) const;
+  /// Acquire load requiring read permission; unlike RMW, it never requires write permission.
   [[nodiscard]] AtomicLoadResult atomic_load(uint64_t address, uint32_t width) const;
+  /// Release store requiring write permission only.
   [[nodiscard]] VmAccessOutcome atomic_store(uint64_t address, uint32_t width,
                                              uint64_t value) const;
   [[nodiscard]] AtomicCompareExchangeResult

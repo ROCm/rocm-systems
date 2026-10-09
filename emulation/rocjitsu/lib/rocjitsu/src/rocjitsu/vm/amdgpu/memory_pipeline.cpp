@@ -716,6 +716,14 @@ VmAccessOutcome execute_translated_atomic_rmw(VectorMemState &d) {
       continue;
 
     if (!d.translated.atomic_loaded) {
+      // This load begins an RMW instruction, including a compare-swap mismatch.
+      // Pure atomic_load only checks Read permission, so authorize the RMW first.
+      const VmAccessOutcome allowed =
+          d.translated.access->probe(d.per_lane_addr[lane], width, VmAccessKind::Atomic);
+      if (allowed != VmAccessOutcome::Complete) {
+        d.translated.atomic_lane = lane;
+        return allowed;
+      }
       const AtomicLoadResult loaded =
           d.translated.access->atomic_load(d.per_lane_addr[lane], width);
       if (loaded.outcome != VmAccessOutcome::Complete) {
