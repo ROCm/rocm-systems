@@ -18,12 +18,6 @@ namespace fs = std::filesystem;
 
 namespace hrr {
 
-// payload_length is file-supplied. Without a ceiling, a corrupt header can ask
-// resize() for ~4 GiB and OOM the process. Captured kernel launches are far
-// smaller (the writer buffers 256 KiB and spills larger records to a direct
-// write); 64 MiB is well above any legitimate record.
-static constexpr uint32_t kMaxRecordBytes = 64u * 1024u * 1024u;
-
 // ---------------------------------------------------------------------------
 // Event move semantics
 // ---------------------------------------------------------------------------
@@ -681,6 +675,39 @@ bool load_archive(const std::string& path, Archive& archive) {
   }
 
   return true;
+}
+
+// The framing checks are read_raw_record's, so a record the loader takes as
+// torn ends the walk here too, and like the loader the walk stops at the first
+// trailer. A payload that runs past the end of the file needs no check of its
+// own: the seek succeeds and the next header read fails. Every seek is relative
+// and at most kMaxRecordBytes, so a 32-bit long (Windows) is enough.
+bool has_clean_trailer(const std::string& archive_dir) {
+  FILE* f = fopen((fs::path(archive_dir) / "events.bin").string().c_str(), "rb");
+  if (!f) return false;
+  const uint32_t hdr_size = static_cast<uint32_t>(sizeof(hrr_event_header));
+  hrr_file_header fh{};
+  bool ok = fread(&fh, sizeof(fh), 1, f) == 1 && fh.magic == HRR_MAGIC &&
+            fh.version == HRR_VERSION;
+  uint64_t records = 0;
+  bool clean = false;
+  hrr_eof_record rec{};
+  while (ok && fread(&rec.hdr, hdr_size, 1, f) == 1) {
+    const uint32_t total = rec.hdr.payload_length;
+    if (total < hdr_size || total > kMaxRecordBytes) break;
+    if (rec.hdr.event_type == HRR_EOF_MARKER && total == sizeof(rec)) {
+      ok = fread(reinterpret_cast<char*>(&rec) + hdr_size, sizeof(rec) - hdr_size, 1, f) == 1;
+      if (ok && rec.eof_magic == HRR_EOF_MAGIC) {
+        clean = rec.total_events == records;
+        break;
+      }
+    } else {
+      ok = fseek(f, static_cast<long>(total - hdr_size), SEEK_CUR) == 0;
+    }
+    ++records;
+  }
+  fclose(f);
+  return clean;
 }
 
 // ---------------------------------------------------------------------------

@@ -61,7 +61,6 @@
 #include <algorithm>
 #include <cassert>
 #include <chrono>
-#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -288,10 +287,13 @@ static bool print_root_info(const std::string& archive_path) {
   printf("  %-12s %-12s %-10s %-12s %-10s %s\n",
          "---", "----------", "--------", "------", "-----", "----");
   for (const auto& [path, info] : processes) {
+    // The manifest says the process finalized; the trailer must also count the
+    // records before it, as load_archive requires.
+    const bool complete = info.complete && hrr::has_clean_trailer(path.string());
     printf("  %-12llu %-12llu %-10s %-12llu %-10llu %s\n",
            static_cast<unsigned long long>(info.pid),
            static_cast<unsigned long long>(info.parent_pid),
-           info.complete ? "yes" : "NO",
+           complete ? "yes" : "NO",
            static_cast<unsigned long long>(info.event_count),
            static_cast<unsigned long long>(info.blob_count),
            path.string().c_str());
@@ -315,6 +317,9 @@ static void print_info(const hrr::Archive& archive, bool show_events) {
                                  : "NO (no shutdown trailer; capture likely crashed)"));
   printf("Recovered:    %zu events\n", archive.event_count);
   printf("Events:       %zu\n", archive.event_count);
+  if (archive.skipped_after_trailer)
+    printf("Ignored:      %zu records after the shutdown trailer (not replayed)\n",
+           archive.skipped_after_trailer);
   printf("Kernels:      %zu\n", archive.kernel_count);
   printf("Blobs:        %zu\n", archive.blob_count);
   printf("Code Objects: %zu\n", archive.code_object_count);
@@ -915,13 +920,16 @@ static bool run_pass(PlaybackContext& ctx,
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// --repair mode: rewrite a crash-truncated archive into a clean one.
+// --repair mode: rewrite an incomplete archive into a clean one.
 //
-// Loads the archive with the tolerant reader (recovering all complete records),
-// then rewrites events.bin trimmed to the last complete record, appends the
-// clean-shutdown trailer, and writes a complete manifest.json. After repair the
-// archive looks exactly like one produced by a normal process exit. Replay
-// works on truncated archives without repair too; this just "blesses" them.
+// An archive is incomplete when its tail is torn, its trailer is missing, or
+// its trailer does not count the records before it. Loads the archive with the
+// tolerant reader (recovering all complete records), then rewrites events.bin
+// with the records before the torn tail or the trailer, appends a
+// clean-shutdown trailer that counts them, and writes a complete manifest.json.
+// After repair the archive looks exactly like one produced by a normal process
+// exit. Replay works on incomplete archives without repair too; this just
+// "blesses" them.
 //
 // repair_archive() below handles one process; repair_root() fans it out across
 // every pid-<pid>/ directory when the tool is pointed at an archive root.
@@ -1034,51 +1042,6 @@ static int repair_archive(const hrr::Archive& archive) {
   return 0;
 }
 
-// Cheap completeness probe: a cleanly finalized events.bin ends with the
-// trailer record, and the trailer counts the records before it. Walking the
-// record headers and seeking over the payloads checks both, the same test
-// load_archive applies, without reading the payloads. Used only to skip work
-// when repairing a root that is already clean — a false negative just costs a
-// full load that repair_archive then no-ops on, so this can never turn a good
-// archive into a rewritten one.
-static bool has_clean_trailer(const fs::path& archive_dir) {
-  const fs::path events_path = archive_dir / "events.bin";
-  std::error_code ec;
-  const uint64_t size = fs::file_size(events_path, ec);
-  if (ec || size < sizeof(hrr_file_header) + sizeof(hrr_eof_record)) return false;
-
-  FILE* f = fopen(events_path.string().c_str(), "rb");
-  if (!f) return false;
-  // The offset is tracked here rather than asked of ftell, whose long is 32
-  // bits on Windows; every seek is relative and at most one payload long.
-  uint64_t offset  = sizeof(hrr_file_header);
-  uint64_t records = 0;
-  bool clean = false;
-  hrr_eof_record rec{};
-  bool ok = fseek(f, static_cast<long>(offset), SEEK_SET) == 0;
-  while (ok && size - offset >= sizeof(rec.hdr) &&
-         fread(&rec.hdr, sizeof(rec.hdr), 1, f) == 1) {
-    const uint64_t total = rec.hdr.payload_length;
-    if (total < sizeof(rec.hdr) || total > size - offset ||
-        total - sizeof(rec.hdr) > static_cast<uint64_t>(LONG_MAX))
-      break;
-    if (rec.hdr.event_type == HRR_EOF_MARKER && total == sizeof(rec)) {
-      ok = fread(reinterpret_cast<char*>(&rec) + sizeof(rec.hdr),
-                 sizeof(rec) - sizeof(rec.hdr), 1, f) == 1;
-      if (ok && rec.eof_magic == HRR_EOF_MAGIC) {
-        clean = offset + total == size && rec.total_events == records;
-        break;
-      }
-    } else {
-      ok = fseek(f, static_cast<long>(total - sizeof(rec.hdr)), SEEK_CUR) == 0;
-    }
-    offset += total;
-    ++records;
-  }
-  fclose(f);
-  return clean;
-}
-
 // Rebuild the root index from the per-process manifests. Mirrors the schema the
 // capture writer emits (hip_capture_writer.cpp, write_root_manifest) so a
 // repaired archive is indistinguishable from a cleanly finalized one.
@@ -1153,7 +1116,7 @@ static bool repair_root(const std::string& archive_path, int& exit_code) {
     // ahead of the whole run by block buffering when output is piped.
     fflush(stdout);
 
-    if (has_clean_trailer(dir)) {
+    if (hrr::has_clean_trailer(dir.string())) {
       printf("[HRR] Archive already complete; nothing to repair\n");
       already_clean++;
       continue;
@@ -1220,7 +1183,8 @@ static void print_usage(const char* argv0) {
     "\n"
     "Options:\n"
     "  --info                Print archive summary and exit (no GPU required)\n"
-    "  --repair              Rewrite a crash-truncated archive as a clean one and exit.\n"
+    "  --repair              Rewrite an incomplete archive (torn tail, missing or\n"
+    "                        miscounting trailer) as a clean one and exit.\n"
     "                        Given an archive root, repairs every process capture\n"
     "                        under it and rebuilds the root index.\n"
     "  --events              With --info: also print the full event log\n"
@@ -1451,7 +1415,7 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  // --repair: rewrite a crash-truncated archive as a clean one and exit
+  // --repair: rewrite an incomplete archive as a clean one and exit
   if (do_repair) {
     return repair_archive(archive);
   }

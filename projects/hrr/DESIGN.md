@@ -82,7 +82,9 @@ fault aborts the host, or a host SIGSEGV):
 - **Clean-shutdown trailer.** A normal `writer::flush` appends an
   `hrr_eof_record` (event_type `HRR_EOF_MARKER`, payload carries the final event
   count + `HRR_EOF_MAGIC`) and writes `manifest.json` with `complete:true`. The
-  trailer's **absence** is how the reader detects a crash-truncated archive.
+  reader takes an archive as complete only when the trailer is there and its
+  count matches the records before it; a missing trailer means the capture was
+  interrupted.
 
 Blobs and code objects were already crash-safe (written to a temp file then
 atomically renamed), so a crash never leaves a partial final blob.
@@ -154,8 +156,9 @@ This is the normal case for a multi-process serving stack, where the framework
 force-kills its workers at shutdown — the ranks that did all the GPU work are
 precisely the ones left without a trailer and absent from the root index, while
 the parent that exited cleanly needs no repair. A sub-archive is skipped when
-a walk of its record headers, which does not read the payloads, finds a
-trailer at the end that counts the records before it.
+`hrr::has_clean_trailer`, a walk of its record headers that does not read the
+payloads, finds it complete in the sense `load_archive` uses. `--info` on a
+root applies the same check before it shows a process as complete.
 
 ### Archive Format (v7)
 ```
@@ -425,6 +428,8 @@ Version history, so an archive written by an older runtime can be placed:
             total_events   u64   real events written before the trailer
             eof_magic      u32   HRR_EOF_MAGIC ("HEOF")
           Absent => capture was interrupted (crash); reader recovers the tail.
+          Count != records before it => incomplete as well; --repair
+          rewrites either case.
 ```
 
 ### `hrr_args_*` Struct Layout Rules

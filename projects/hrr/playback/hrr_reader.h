@@ -205,6 +205,11 @@ struct Archive {
 // Load an archive from disk. Returns false on error.
 bool load_archive(const std::string& path, Archive& archive);
 
+// Whether load_archive would find the archive in `archive_dir` complete: a
+// trailer whose total_events counts the records before it. Walks the record
+// headers and seeks over the payloads, so it costs a fraction of a load.
+bool has_clean_trailer(const std::string& archive_dir);
+
 // ---------------------------------------------------------------------------
 // Record-stream primitives
 //
@@ -213,6 +218,12 @@ bool load_archive(const std::string& path, Archive& archive);
 // self-delimiting hrr_event_header + payload records. These primitives are that
 // shared framing, so both readers get the same torn-tail recovery.
 // ---------------------------------------------------------------------------
+
+// payload_length is file-supplied. Without a ceiling, a corrupt header can ask
+// resize() for ~4 GiB and OOM the process. Captured kernel launches are far
+// smaller (the writer buffers 256 KiB and spills larger records to a direct
+// write); 64 MiB is well above any legitimate record. A longer record is torn.
+constexpr uint32_t kMaxRecordBytes = 64u * 1024u * 1024u;
 
 enum class RecordStatus {
   Ok,           // a complete record was read into the output buffer
