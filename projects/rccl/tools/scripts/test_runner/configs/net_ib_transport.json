@@ -503,6 +503,74 @@
           "name": "NetIB_MultiSeg_MultiRecvMixesSingleAndMultiSegmentHandles",
           "description": "One multi-recv mixing a single-segment handle with a boundary-crossing multi-segment one, in both orders, so per-entry side-table selection diverges within one WR chain",
           "test_filter": "NetIbMultiSegmentMPITest.MultiRecvMixesSingleAndMultiSegmentHandles"
+        },
+        {
+          "name": "NetIB_MultiSeg_ConcurrentPairs",
+          "description": "Rank r receives from r + N/2 while every other pair transfers too: chunks straddle each interior boundary of a 4-segment window, and the bytes before each chunk stay untouched",
+          "test_filter": "NetIbMultiSegmentMPITest.ConcurrentPairsMoveEverySegmentBoundary"
+        },
+        {
+          "name": "NetIB_MultiSeg_SendQueueFatChainOversubscribe",
+          "description": "Three 8-recv groups of 16-segment chains (~249 WQEs each) posted on one send QP without test(): all must fit the enlarged send queue and complete",
+          "test_filter": "NetIbMultiSegmentMPITest.SendQueueFatChainOversubscribe",
+          "env_variables": {
+            "RCCL_MSEG_SQ_STRESS": "1",
+            "NCCL_IB_QPS_PER_CONNECTION": "1"
+          }
+        },
+        {
+          "name": "NetIB_MultiSeg_ReceiverSideMatchingById",
+          "description": "Boundary-crossing transfers with ID-based receiver matching: a single receive whose chunk straddles a boundary must report the full size, not only the last slice carrying the imm",
+          "test_filter": "NetIbMultiSegmentMPITest.CrossBoundaryTransferSucceeds:NetIbMultiSegmentMPITest.WholeBufferSingleTransfer:NetIbMultiSegmentMPITest.DeepEP_AsymmetricOffsetTransfer:NetIbMultiSegmentMPITest.ConcurrentPairsMoveEverySegmentBoundary",
+          "env_variables": {
+            "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "1"
+          }
+        }
+      ]
+    },
+
+    "net_ib_multisegment_register_off": {
+      "extends": "net_ib_base",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 600,
+      "description": "Classic NET/IB with NCCL_MULTI_SEGMENT_REGISTER=0: no multi-segment capability is advertised, a multi-segment registration is declined, and single-segment registrations still transfer.",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,REG",
+        "NCCL_MULTI_SEGMENT_REGISTER": "0"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiSeg_RegisterOff_DeclinesRegistration",
+          "description": "A 4-segment window is declined with ncclInvalidUsage because neither peer advertised the CTS side table",
+          "test_filter": "NetIbMultiSegmentMPITest.MultiSegmentRegisterOff_DeclinesRegistration"
+        },
+        {
+          "name": "NetIB_MultiSeg_RegisterOff_SingleSegmentRegression",
+          "description": "Host, device and 1-segment VMM registrations still transfer with the switch off",
+          "test_filter": "NetIbMultiSegmentMPITest.HostAndDeviceSingleSegmentRegression:NetIbMultiSegmentMPITest.SingleSegmentThroughMultiSegPath"
+        }
+      ]
+    },
+
+    "net_ib_multisegment_scale_2x4": {
+      "extends": "net_ib_base",
+      "num_ranks": 8,
+      "num_nodes": 2,
+      "num_gpus": 4,
+      "timeout": 600,
+      "description": "Classic NET/IB multi-segment transfers with 4 ranks on each of 2 nodes: 4 cross-node pairs, each on its own NIC, register and move multi-segment windows at once. Extends net_ib_base so it runs only the concurrent-pairs test.",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,REG"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiSeg_ConcurrentPairs_2x4",
+          "description": "4 concurrent cross-node pairs move chunks across every segment boundary",
+          "test_filter": "NetIbMultiSegmentMPITest.ConcurrentPairsMoveEverySegmentBoundary"
         }
       ]
     },
@@ -2042,6 +2110,18 @@
       "name": "NET IB - Multi-Segment DMA-BUF",
       "description": "Classic NET/IB multi-segment registration, asymmetric offsets, boundary splitting, segment cap and single-region regressions",
       "config": "net_ib_multisegment",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multi-Segment DMA-BUF (register off)",
+      "description": "Classic NET/IB with NCCL_MULTI_SEGMENT_REGISTER=0: multi-segment registration declined, single-region paths unchanged",
+      "config": "net_ib_multisegment_register_off",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multi-Segment DMA-BUF (2 nodes x 4 ranks)",
+      "description": "Concurrent classic NET/IB multi-segment pairs on 8 ranks across 2 nodes",
+      "config": "net_ib_multisegment_scale_2x4",
       "enabled": true
     },
     {
