@@ -93,6 +93,8 @@ class WaveTrace:
     # Identifies the dispatch across files: rocprofv3 writes one .att file per shader engine,
     # each with its own record of the same dispatch.
     dispatch_key: object = None
+    # The decoder's packed queue id of the wave: (me_id << 4) | pipe_id of the dispatch that launched it.
+    dispatcher: int | None = None
 
     @property
     def lifetime(self) -> int:
@@ -178,14 +180,22 @@ def union_length(intervals: list) -> int:
 
 
 def assign_dispatches(waves: list, dispatches: list, file_key: object = None) -> None:
-    """Give each wave the last dispatch that started before it (dispatches: decoder records of
-    the same trace file, in any order). With `file_key`, the files of one dispatch on several
-    shader engines share a key, so the wave's dispatch_key is that key plus the dispatch's
-    position in its file (consecutive kernels share a file)."""
+    """Give each wave the last dispatch that started before it, among the dispatches of its own
+    queue when the decoder's records name one (dispatches: decoder records of the same trace
+    file, in any order). With `file_key`, the files of one dispatch on several shader engines
+    share a key, so the wave's dispatch_key is that key plus the dispatch's position in its
+    file (consecutive kernels share a file)."""
     ordered = sorted(dispatches, key=lambda d: d.time)
     times = [d.time for d in ordered]
     for w in waves:
         k = bisect.bisect_right(times, w.begin) - 1
+        if w.dispatcher is not None:
+            queue = [
+                j for j, d in enumerate(ordered)
+                if (d.me_id & 0x7) << 4 | (d.pipe_id & 0xF) == w.dispatcher and times[j] <= w.begin
+            ]
+            if queue:
+                k = queue[-1]
         w.dispatch = ordered[k] if k >= 0 else None
         if w.dispatch is not None:
             w.dispatch_key = (file_key, k) if file_key is not None else id(w.dispatch)
@@ -581,6 +591,7 @@ class Capture:
             w.begin_time,
             w.end_time,
             w.contexts,
+            dispatcher=w.dispatcher,
         )
         prev_end = w.begin_time
         for i in w.instructions:

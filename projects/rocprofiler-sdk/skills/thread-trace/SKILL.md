@@ -96,7 +96,7 @@ the lines that hold it, read against the source. Adapt it to the task.
 3. **Broad: what kind of time it is.** Each command decodes the capture again, which takes
    longer as the trace grows (time the first one to see what each will cost):
    - `summary`: the share of wave time in EXEC, WAIT, STALL, and IDLE, and the idle time
-     between instructions (counted inside EXEC on gfx9 and gfx12);
+     between instructions (may be counted inside EXEC, depending on the architecture);
    - `pipes`: issue and stall cycles by instruction class (VALU, matrix, LDS, memory,
      waits, barriers), the opcodes that stalled most, and the ceiling check
      ([compute.md](resources/compute.md#ceiling-check));

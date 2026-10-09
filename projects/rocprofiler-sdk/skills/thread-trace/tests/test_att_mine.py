@@ -965,6 +965,23 @@ class DispatchKeyTests(unittest.TestCase):
         mine.assign_dispatches([w0, w1], [a, b], ("53377", "1"))
         self.assertNotEqual(w0.dispatch_key, w1.dispatch_key)
 
+    def test_a_wave_takes_the_latest_dispatch_of_its_own_queue(self):
+        q0 = SimpleNamespace(time=100, me_id=1, pipe_id=0)
+        q1 = SimpleNamespace(time=150, me_id=1, pipe_id=2)
+        w0 = wave([inst(200, "v_add_f32 v0, v0, v1")])
+        w1 = wave([inst(200, "v_add_f32 v0, v0, v1")])
+        w0.dispatcher, w1.dispatcher = 1 << 4 | 0, 1 << 4 | 2
+        mine.assign_dispatches([w0, w1], [q0, q1], ("1", "1"))
+        self.assertIs(w0.dispatch, q0)
+        self.assertIs(w1.dispatch, q1)
+
+    def test_a_queue_with_no_record_falls_back_to_the_latest_dispatch(self):
+        q0 = SimpleNamespace(time=100, me_id=1, pipe_id=0)
+        w = wave([inst(200, "v_add_f32 v0, v0, v1")])
+        w.dispatcher = 3 << 4 | 5
+        mine.assign_dispatches([w], [q0], ("1", "1"))
+        self.assertIs(w.dispatch, q0)
+
 
 class PageListTests(unittest.TestCase):
     def test_a_page_named_with_a_section_is_read_from_that_section(self):
@@ -994,6 +1011,7 @@ class UnresolvedRecordTests(unittest.TestCase):
             begin_time=0,
             end_time=100,
             contexts=0,
+            dispatcher=0,
             instructions=[record],
             timeline=[],
         )
