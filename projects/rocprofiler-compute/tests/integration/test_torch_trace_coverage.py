@@ -164,7 +164,7 @@ def test_random_operator_kernel_coverage(
                 skip_op_names[category].append(op.name)
 
         print(
-            f"\n  Summary: {len(sampled)} ops — "
+            f"\n  Summary: {len(sampled)} ops - "
             f"{passed} PASS, {len(failure_detail)} FAIL, {skipped} SKIP"
         )
         breakdown_lines = format_skip_breakdown_lines(
