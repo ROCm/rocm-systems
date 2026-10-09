@@ -775,6 +775,12 @@ class AmdSmiPowerCapType(IntEnum):
     PPT1 = amdsmi_wrapper.AMDSMI_POWER_CAP_TYPE_PPT1
 
 
+class AmdSmiNpmBalancingMode(IntEnum):
+    INVALID = amdsmi_wrapper.AMDSMI_NPM_BALANCING_MODE_INVALID
+    POWER_BALANCING = amdsmi_wrapper.AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING
+    FREQUENCY_BALANCING = amdsmi_wrapper.AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING
+
+
 class AmdSmiEventReader:
     def __init__(
         self, processor_handle: processor_handle_t, event_types: List[AmdSmiEvtNotificationType]
@@ -5423,6 +5429,62 @@ def amdsmi_get_npm_info(node_handle: processor_handle_t) -> Dict[str, Any]:
     }
 
     return dict_ret
+
+
+_NPM_BALANCING_MODE_TO_STR = {
+    AmdSmiNpmBalancingMode.POWER_BALANCING: "PB",
+    AmdSmiNpmBalancingMode.FREQUENCY_BALANCING: "FB",
+    AmdSmiNpmBalancingMode.INVALID: "N/A",
+}
+
+_STR_TO_NPM_BALANCING_MODE = {
+    "PB": AmdSmiNpmBalancingMode.POWER_BALANCING,
+    "FB": AmdSmiNpmBalancingMode.FREQUENCY_BALANCING,
+}
+
+
+def amdsmi_get_npm_balancing_mode(node_handle: processor_handle_t) -> str:
+    if not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
+        raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
+
+    mode = amdsmi_wrapper.amdsmi_npm_balancing_mode_t()
+    _check_res(amdsmi_wrapper.amdsmi_get_npm_balancing_mode(node_handle, ctypes.byref(mode)))
+
+    return _NPM_BALANCING_MODE_TO_STR.get(mode.value, "N/A")
+
+
+def amdsmi_set_npm_balancing_mode(node_handle: processor_handle_t, mode: str) -> None:
+    if not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
+        raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
+
+    if mode not in _STR_TO_NPM_BALANCING_MODE:
+        raise AmdSmiParameterException(mode, str)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_npm_balancing_mode(node_handle, _STR_TO_NPM_BALANCING_MODE[mode])
+    )
+
+
+def amdsmi_get_npm_supported_balancing_modes(node_handle: processor_handle_t) -> List[str]:
+    if not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
+        raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
+
+    supported_modes = amdsmi_wrapper.amdsmi_bit_field_t()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_npm_supported_balancing_modes(
+            node_handle, ctypes.byref(supported_modes)
+        )
+    )
+
+    # Iterate the full enum range (up to AMDSMI_NPM_BALANCING_MODE_MAX) so
+    # modes added in the future decode without changing this loop.
+    modes = []
+    for mode in range(
+        AmdSmiNpmBalancingMode.POWER_BALANCING, amdsmi_wrapper.AMDSMI_NPM_BALANCING_MODE_MAX
+    ):
+        if supported_modes.value & (1 << mode):
+            modes.append(_NPM_BALANCING_MODE_TO_STR.get(mode, "N/A"))
+    return modes
 
 
 def amdsmi_get_tray_info(
