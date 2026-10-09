@@ -30,6 +30,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  
   - `amd-smi ras --cper` showed an empty `list afids` column for fatal records, `amd-smi ras --afid --cper-file` printed `-`, and `amdsmi_get_afids_from_cper()` returned no AFIDs. amdgpu writes fatal crashdump sections 32 bytes shorter than `sizeof(cper_sec_crashdump)`, and the section bounds check required the full struct, so every such section was skipped. The check now requires only the dump member the record type uses.
 
+- **Fixed `amd-smi node --tray` printing an empty section on hardware without UALoE**.  
+  - The tray output was guarded on the retrieved dictionary being non-empty, so the `N/A` defaults next to it could never be reached. `NODE:` was emitted with no body, and `--json` returned `{"node": {}}`. All three output formats now report `MAX_ACC_PER_TRAY` and `TRAY_TYPE` as `N/A`.
+
+- **Fixed `amdsmi_get_afids_from_cper()` raising `TypeError` for every caller**.  
+  - The input was validated with `isinstance()` against a subscripted generic, which Python rejects regardless of the value passed. A list of CPER records is now accepted as documented.
+
+- **Fixed a segmentation fault in the DRM example on GPUs without accelerator partition support**.  
+  - The profile configuration was read into an uninitialized structure and its return value was never checked, so an unsupported query left `num_profiles` holding indeterminate data and the loop ran past the end of the profiles array. Unprivileged callers hit this on every GPU.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added
@@ -255,18 +264,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amdsmi_get_gpu_asic_info()` reporting `rev_id` as a real revision when it is not available**.  
   - The WSL backend returned success with a zeroed structure, so `rev_id` read as `0x0`, and where it did report the not-supported value Python rendered it as the raw `0xffffffff`. Python and the CLI now render it as `N/A`.
   - `amdsmi_asic_info_t` is now reset through one shared initializer used by every backend, so a field a backend cannot supply keeps its not-supported value rather than a plausible zero.
-
-- **Fixed `amd-smi node --tray` printing an empty section on hardware without UALoE**.  
-  - The tray output was guarded on the retrieved dictionary being non-empty, so the `N/A` defaults next to it could never be reached. `NODE:` was emitted with no body, and `--json` returned `{"node": {}}`. All three output formats now report `MAX_ACC_PER_TRAY` and `TRAY_TYPE` as `N/A`.
-
-- **Fixed `amdsmi_get_afids_from_cper()` raising `TypeError` for every caller**.  
-  - The input was validated with `isinstance()` against a subscripted generic, which Python rejects regardless of the value passed. A list of CPER records is now accepted as documented.
-
-- **Fixed error output in `--json` mode not being valid JSON**.  
-  - Errors were printed with the Python exception class name in front of the JSON document, so any consumer parsing `amd-smi ... --json` failed on every error path. The class name is now omitted when the output format is JSON.
-
-- **Fixed a segmentation fault in the DRM example on GPUs without accelerator partition support**.  
-  - The profile configuration was read into an uninitialized structure and its return value was never checked, so an unsupported query left `num_profiles` holding indeterminate data and the loop ran past the end of the profiles array. Unprivileged callers hit this on every GPU.
 
 ### Upcoming Changes
 
