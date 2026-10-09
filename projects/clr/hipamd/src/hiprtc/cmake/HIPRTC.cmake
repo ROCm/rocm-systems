@@ -25,7 +25,7 @@ function(get_hiprtc_macros HIPRTC_DEFINES)
 #else\n\
 #define __hip_img_chk__\n\
 #endif\n\
-#if __clang_major__ >= 24\n\
+#if __clang_major__ >= 25\n\
 #define __launch_bounds__(...) __attribute__((launch_bounds(__VA_ARGS__)))\n\
 #else\n\
 #define launch_bounds_impl0(requiredMaxThreadsPerBlock)                                       \\\n\

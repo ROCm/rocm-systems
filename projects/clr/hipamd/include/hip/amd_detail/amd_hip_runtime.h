@@ -141,8 +141,8 @@ extern int HIP_TRACE_API;
 #endif /* Device feature flags */
 
 
-// clang < 24 accepts launch_bounds (so __has_attribute is true) but ignores it for AMD targets.
-#if __clang_major__ >= 24
+// Early clang 24 builds and older accept launch_bounds (so __has_attribute is 1) but ignore it.
+#if __clang_major__ >= 25
 #define __launch_bounds__(...) __attribute__((launch_bounds(__VA_ARGS__)))
 #else
 #define launch_bounds_impl0(requiredMaxThreadsPerBlock)                                            \

@@ -72,7 +72,7 @@ cat >$1 <<EOF
 #define __constant__ __attribute__((constant))
 #define __shared__ __attribute__((shared))
 
-#if __clang_major__ >= 24
+#if __clang_major__ >= 25
 #define __launch_bounds__(...) __attribute__((launch_bounds(__VA_ARGS__)))
 #else
 #define launch_bounds_impl0(requiredMaxThreadsPerBlock)                                            \
