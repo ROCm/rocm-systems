@@ -186,6 +186,11 @@ struct manageable_aperture {
 	vm_area_t *vm_ranges;
 	rbtree_t tree;
 	rbtree_t user_tree;
+	/* Largest page-rounded userptr extent. Bounds the leftward scan in
+	 * fmm_retire_stale_userptrs. Grows on insert and resets when user_tree
+	 * is empty.
+	 */
+	uint64_t userptr_max_extent;
 	pthread_mutex_t fmm_mutex;
 	bool is_cpu_accessible;
 	const manageable_aperture_ops_t *ops;
@@ -567,6 +572,15 @@ static void vm_remove_area(manageable_aperture_t *app, vm_area_t *area)
 	free(area);
 }
 
+/* Page-rounded span of a userptr registration. */
+static uint64_t userptr_page_extent(const vm_object_t *obj)
+{
+	uint64_t ustart = (uint64_t)obj->userptr & ~(uint64_t)(PAGE_SIZE - 1);
+	uint64_t uend = PAGE_ALIGN_UP((uint64_t)obj->userptr + obj->userptr_size);
+
+	return uend - ustart;
+}
+
 static void vm_remove_object(manageable_aperture_t *app, vm_object_t *object)
 {
 	/* Free allocations inside the object */
@@ -585,8 +599,15 @@ static void vm_remove_object(manageable_aperture_t *app, vm_object_t *object)
 		free(object->mapped_node_id_array);
 
 	hsakmt_rbtree_delete(&app->tree, &object->node);
-	if (object->userptr)
+	if (object->userptr) {
 		hsakmt_rbtree_delete(&app->user_tree, &object->user_node);
+		/* A stale bound only widens later scans. Drop it once nothing
+		 * is tracked so one large registration does not keep widening
+		 * them for the life of the process.
+		 */
+		if (app->user_tree.root == &app->user_tree.sentinel)
+			app->userptr_max_extent = 0;
+	}
 
 	free(object);
 }
@@ -1065,7 +1086,9 @@ static void aperture_release_area(manageable_aperture_t *app, void *address,
  * gone, and since userptrs are looked up first in mmap apertures it would
  * shadow the new object. Unmap and release such registrations, all
  * references at once, before the caller publishes its object.
- * Caller holds app->fmm_mutex.
+ * Any registration that can reach the range has its key at or after
+ * start - userptr_max_extent, so the walk starts there instead of at the
+ * leftmost node. Caller holds app->fmm_mutex.
  */
 static int fmm_retire_stale_userptrs(HsaKFDContext *ctx,
 				     manageable_aperture_t *app,
@@ -1073,7 +1096,14 @@ static int fmm_retire_stale_userptrs(HsaKFDContext *ctx,
 {
 	uint64_t start = (uint64_t)mem;
 	uint64_t end = PAGE_ALIGN_UP(start + size);
-	rbtree_node_t *n = rbtree_min_max(&app->user_tree, LEFT);
+	/* Size 0 selects the first in-order node at that address. LKP_ADDR
+	 * would stop on a larger duplicate and skip the smaller one to its left.
+	 */
+	uint64_t scan = start > app->userptr_max_extent ?
+			start - app->userptr_max_extent : 0;
+	rbtree_key_t key = rbtree_key(scan, 0);
+	rbtree_node_t *n = rbtree_lookup_nearest(&app->user_tree, &key,
+						 LKP_ALL, RIGHT);
 	int ret;
 
 	while (n) {
@@ -4966,12 +4996,17 @@ static HSAKMT_STATUS fmm_register_user_memory(HsaKFDContext *ctx,
 	if (exist_obj) {
 		++exist_obj->registration_count;
 	} else {
+		uint64_t extent;
+
 		obj->userptr = addr;
 		hsakmt_gpuid_to_nodeid(ctx, gpu_id, &obj->node_id);
 		obj->userptr_size = size;
 		obj->registration_count = 1;
 		obj->user_node.key = rbtree_key((unsigned long)addr, size);
 		hsakmt_rbtree_insert(&aperture->user_tree, &obj->user_node);
+		extent = userptr_page_extent(obj);
+		if (extent > aperture->userptr_max_extent)
+			aperture->userptr_max_extent = extent;
 	}
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 
