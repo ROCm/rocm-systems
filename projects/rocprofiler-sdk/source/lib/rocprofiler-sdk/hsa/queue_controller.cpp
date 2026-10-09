@@ -417,21 +417,8 @@ QueueController::add_queue(hsa_queue_t*           id,
                            bool                   is_attach)
 {
     CHECK(queue);
-    const auto agent_id = queue->get_agent().get_rocp_agent()->id;
 
-    _callback_cache.wlock([&](auto& callbacks) {
-        _queues.wlock([&](auto& map) {
-            map[id] = std::move(queue);
-            for(const auto& [cbid, cb_data] : callbacks)
-            {
-                auto& [agent, cb] = cb_data;
-                if(agent.id == default_agent.id || agent.id == agent_id)
-                {
-                    map[id]->register_callback(cbid, cb);
-                }
-            }
-        });
-    });
+    _queues.wlock([&](auto& map) { map[id] = std::move(queue); });
 
     // signal-less live-queue bookkeeping and window open. Gated on
     // is_compute -- only a compute queue's doorbell can source a CP dispatch-log
@@ -565,50 +552,6 @@ QueueController::destroy_queue(hsa_queue_t* id)
     queue->sync();
     if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);
     _queues.wlock([&](auto& map) { map.erase(id); });
-}
-
-ClientID
-QueueController::add_callback(std::optional<rocprofiler_agent_t> agent, queue_callbacks_t callbacks)
-{
-    static auto client_id = std::atomic<ClientID>{1};
-    ClientID    return_id = -1;
-    _callback_cache.wlock([&](auto& cb_cache) {
-        return_id = client_id;
-        if(agent)
-        {
-            cb_cache[client_id] = std::make_tuple(*agent, callbacks);
-        }
-        else
-        {
-            cb_cache[client_id] = std::make_tuple(default_agent, callbacks);
-        }
-        client_id++;
-
-        _queues.wlock([&](auto& map) {
-            for(auto& [_, queue] : map)
-            {
-                if(!agent || queue->get_agent().get_rocp_agent()->id.handle == agent->id.handle)
-                {
-                    queue->register_callback(return_id, callbacks);
-                }
-            }
-        });
-    });
-    return return_id;
-}
-
-void
-QueueController::remove_callback(ClientID id)
-{
-    _callback_cache.wlock([&](auto& cb_cache) {
-        cb_cache.erase(id);
-        _queues.wlock([&](auto& map) {
-            for(auto& [_, queue] : map)
-            {
-                queue->remove_callback(id);
-            }
-        });
-    });
 }
 
 void
@@ -865,17 +808,6 @@ QueueController::iterate_queues(const queue_iterator_cb_t& cb) const
         for(const auto& itr : _queues_v)
         {
             if(itr.second) cb(itr.second.get());
-        }
-    });
-}
-
-void
-QueueController::iterate_callbacks(const callback_iterator_cb_t& cb) const
-{
-    _callback_cache.rlock([&cb](const auto& map) {
-        for(const auto& [cid, tuple] : map)
-        {
-            cb(cid, tuple);
         }
     });
 }

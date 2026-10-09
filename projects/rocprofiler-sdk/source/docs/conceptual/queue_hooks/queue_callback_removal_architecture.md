@@ -204,11 +204,11 @@ completion path becomes an application hang rather than data loss.
 
 ## 6. Known gaps
 
-1. Until SPM (#11968), thread trace (#11967) and PC sampling (#11969) land, each still registers
-   through `QueueController::add_callback`, so `Queue::_callbacks`, `Queue::get_notifiers()` and
-   `add_callback` itself cannot be deleted yet. Device counter collection never used the registry.
-   Once all four migrations are in, nothing calls `add_callback` and the registry can be removed as
-   a follow-up.
+1. The per-queue callback registry (`QueueController::add_callback`, `Queue::_callbacks`,
+   `Queue::get_notifiers()`) has been removed: once SPM (#11968), thread trace (#11967), PC sampling
+   (#11969) and counter collection (#11970) migrated, nothing registered through it, and
+   `WriteInterceptor` / `AsyncSignalHandler` were still taking its lock to walk an empty map on
+   every intercepted dispatch.
 2. Several in-flight PRs edit the same `no_real_consumers` expression in `hsa/queue.cpp`.
    Consolidating the predicate into one `needs_interception(queue)` helper would remove the
    recurring conflict.

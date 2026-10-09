@@ -38,15 +38,9 @@ namespace queue_hooks
 // conversion to ClientID, so the emplace sites need no cast, while still grouping
 // the values under one type.
 //
-// The values are negative because they share the inst_pkt_t tag space with the
-// per-queue callback registry, whose QueueController::add_callback hands out
-// strictly positive ids counting up from 1. Migrated services (counters, thread
-// trace, SPM) select their own packets by comparing against these tags, so a tag
-// drawn from the registry's range could match a packet the service does not own.
-// Services that have not migrated yet still receive registry ids, so the two
-// ranges must stay disjoint until the registry is gone. Any tag added here must
-// likewise be negative; -1 is left unused because QueueController::add_callback
-// uses it as a local "unassigned" initializer.
+// Each service's exit hook claims a packet by comparing against its own tag, so the
+// tags only need to be distinct. (They are negative because they once had to stay
+// clear of the ids the removed per-queue callback registry handed out.)
 enum client_id : int64_t
 {
     COUNTERS_CLIENT_ID     = -1001,
@@ -54,11 +48,6 @@ enum client_id : int64_t
     PC_SAMPLING_CLIENT_ID  = -1003,
     SPM_CLIENT_ID          = -1004,
 };
-
-static_assert(COUNTERS_CLIENT_ID < 0 && THREAD_TRACE_CLIENT_ID < 0 && PC_SAMPLING_CLIENT_ID < 0 &&
-                  SPM_CLIENT_ID < 0,
-              "queue hook tags must stay disjoint from the positive ids handed out by "
-              "QueueController::add_callback");
 }  // namespace queue_hooks
 }  // namespace hsa
 }  // namespace rocprofiler
