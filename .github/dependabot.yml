@@ -10,6 +10,8 @@ updates:
       github-actions:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/aqlprofile/docs/sphinx" # Location of package manifests
@@ -20,6 +22,8 @@ updates:
       aqlprofile-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/rocr-runtime/runtime/docs/sphinx" # Location of package manifests
@@ -30,6 +34,8 @@ updates:
       rocr-runtime-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/rocprofiler-compute/docs/sphinx" # Location of package manifests
@@ -40,6 +46,8 @@ updates:
       rocprofiler-compute-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/rocprofiler-systems/docs/sphinx" # Location of package manifests
@@ -50,6 +58,8 @@ updates:
       rocprofiler-systems-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/rocprofiler-sdk/source/docs/sphinx" # Location of package manifests
@@ -60,6 +70,8 @@ updates:
       rocprofiler-sdk-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/rocm-smi-lib/docs/sphinx" # Location of package manifests
@@ -70,6 +82,8 @@ updates:
       rocm-smi-lib-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/rocminfo/docs/sphinx" # Location of package manifests
@@ -80,6 +94,8 @@ updates:
       rocminfo-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/rdc/docs/sphinx" # Location of package manifests
@@ -90,6 +106,8 @@ updates:
       rdc-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/hip/docs/sphinx" # Location of package manifests
@@ -100,6 +118,8 @@ updates:
       hip-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/amdsmi/docs/sphinx" # Location of package manifests
@@ -110,6 +130,8 @@ updates:
       amdsmi-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/rocr-debug-agent/docs/sphinx" # Location of package manifests
@@ -120,3 +142,5 @@ updates:
       rocr-debug-agent-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7

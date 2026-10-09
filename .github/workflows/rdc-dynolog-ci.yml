@@ -72,7 +72,9 @@ jobs:
       - ${{ vars.RUNNER_TYPE }}
     timeout-minutes: 60
     container:
-      image: ${{ vars.RDC_DOCKER_IMAGE || 'rocm/dev-ubuntu-22.04:7.2' }}
+      # Image is set by the RDC_DOCKER_IMAGE repository variable, falling back to
+      # rocm/dev-ubuntu-22.04:7.2.
+      image: ${{ vars.RDC_DOCKER_IMAGE || 'rocm/dev-ubuntu-22.04@sha256:05af5f04a06b04676d4c7438997d0deadaeb7478961ad621376e199bf3aeb644' }} # zizmor: ignore[unpinned-images]
       options: >-
         --rm --privileged
         --device=/dev/kfd
@@ -86,6 +88,7 @@ jobs:
           sparse-checkout: |
             projects/amdsmi
             projects/rdc
+          persist-credentials: false
 
       - name: Build metadata
         run: echo "TODAY=$(date +%Y_%m_%d)" >> "$GITHUB_ENV"

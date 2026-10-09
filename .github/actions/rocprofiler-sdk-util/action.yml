@@ -89,41 +89,51 @@ runs:
 
     - name: Display ccache info
       shell: bash
+      env:
+        COMPILER_LAUNCHER: ${{ inputs.compiler-launcher }}
       run: |
         echo "Checking compiler cache configuration..."
-        if [ -x "${{ inputs.compiler-launcher }}" ]; then
-          echo "Compiler launcher: ${{ inputs.compiler-launcher }}"
-          ${{ inputs.compiler-launcher }} --version || true
-          ${{ inputs.compiler-launcher }} -p || ${{ inputs.compiler-launcher }} --show-stats || true
+        if [ -x "${COMPILER_LAUNCHER}" ]; then
+          echo "Compiler launcher: ${COMPILER_LAUNCHER}"
+          ${COMPILER_LAUNCHER} --version || true
+          ${COMPILER_LAUNCHER} -p || ${COMPILER_LAUNCHER} --show-stats || true
         else
-          echo "Warning: Compiler launcher ${{ inputs.compiler-launcher }} not found or not executable"
+          echo "Warning: Compiler launcher ${COMPILER_LAUNCHER} not found or not executable"
         fi
 
     - name: Setup environment variables
       shell: bash
-      run: |
-        if [ -n "${{ inputs.python-venv-path }}" ]; then
-          echo "${GITHUB_WORKSPACE}/${{ inputs.python-venv-path }}/bin" >> $GITHUB_PATH
+      env:
+        PYTHON_VENV_PATH: ${{ inputs.python-venv-path }}
+        ROCM_INSTALL_DIR: ${{ inputs.rocm-path }}
+      # Exports search paths built from the calling workflow's rocm-path and
+      # python-venv-path inputs.
+      run: | # zizmor: ignore[github-env]
+        if [ -n "${PYTHON_VENV_PATH}" ]; then
+          echo "${GITHUB_WORKSPACE}/${PYTHON_VENV_PATH}/bin" >> $GITHUB_PATH
         fi
         echo "PKG_CONFIG_PATH=/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}" >> $GITHUB_ENV
-        echo "LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib64:${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
-        echo "PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:$HOME/.local/bin:${PATH}" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=${ROCM_INSTALL_DIR}/lib64:${ROCM_INSTALL_DIR}/lib:${ROCM_INSTALL_DIR}/llvm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+        echo "PATH=${ROCM_INSTALL_DIR}/bin:${ROCM_INSTALL_DIR}/llvm/bin:$HOME/.local/bin:${PATH}" >> $GITHUB_ENV
 
     - name: Build and Install ROCR-Runtime
       if: ${{ inputs.enable-rocr-build == 'true' }}
       shell: bash
       working-directory: projects/rocr-runtime
+      env:
+        ROCM_INSTALL_DIR: ${{ inputs.rocm-path }}
+        BUILD_JOBS: ${{ inputs.build-jobs }}
       run: |
         echo "Install ROCR-Runtime..."
         cmake -B build \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DCMAKE_C_COMPILER=${{ inputs.rocm-path }}/llvm/bin/clang \
-          -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/llvm/bin/clang++ \
-          -DCMAKE_PREFIX_PATH='${{ inputs.rocm-path }};${{ inputs.rocm-path }}/llvm' \
-          -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_C_COMPILER=${ROCM_INSTALL_DIR}/llvm/bin/clang \
+          -DCMAKE_CXX_COMPILER=${ROCM_INSTALL_DIR}/llvm/bin/clang++ \
+          -DCMAKE_PREFIX_PATH="${ROCM_INSTALL_DIR};${ROCM_INSTALL_DIR}/llvm" \
+          -DCMAKE_INSTALL_PREFIX=${ROCM_INSTALL_DIR} \
           -DCMAKE_INSTALL_LIBDIR=lib \
           .
-        cmake --build build --target all --parallel ${{ inputs.build-jobs }}
+        cmake --build build --target all --parallel ${BUILD_JOBS}
         cmake --build build --target install
         echo "✅ ROCR-Runtime Installation complete!"
 
@@ -131,6 +141,9 @@ runs:
       if: ${{ inputs.enable-hip-clr-build == 'true' }}
       shell: bash
       working-directory: projects
+      env:
+        ROCM_INSTALL_DIR: ${{ inputs.rocm-path }}
+        BUILD_JOBS: ${{ inputs.build-jobs }}
       run: |
         export HIP_DIR=$PWD/hip
         export CLR_DIR=$PWD/clr
@@ -139,19 +152,19 @@ runs:
         cmake \
           -DHIP_COMMON_DIR=$HIP_DIR \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DCMAKE_C_COMPILER=${{ inputs.rocm-path }}/llvm/bin/clang \
-          -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/llvm/bin/clang++ \
+          -DCMAKE_C_COMPILER=${ROCM_INSTALL_DIR}/llvm/bin/clang \
+          -DCMAKE_CXX_COMPILER=${ROCM_INSTALL_DIR}/llvm/bin/clang++ \
           -DHIP_PLATFORM=amd \
-          -DCMAKE_PREFIX_PATH='${{ inputs.rocm-path }};${{ inputs.rocm-path }}/llvm' \
-          -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_PREFIX_PATH="${ROCM_INSTALL_DIR};${ROCM_INSTALL_DIR}/llvm" \
+          -DCMAKE_INSTALL_PREFIX=${ROCM_INSTALL_DIR} \
           -DCMAKE_INSTALL_LIBDIR=lib \
-          -DHIP_LLVM_ROOT=${{ inputs.rocm-path }}/llvm \
+          -DHIP_LLVM_ROOT=${ROCM_INSTALL_DIR}/llvm \
           -DHIP_CATCH_TEST=0 \
           -DCLR_BUILD_HIP=ON \
           -DCLR_BUILD_OCL=ON \
           -S $CLR_DIR \
           -B build
-        cmake --build build --target all --parallel ${{ inputs.build-jobs }}
+        cmake --build build --target all --parallel ${BUILD_JOBS}
         cmake --build build --target install
         echo "✅ HIP Installation complete!"
 
@@ -159,18 +172,22 @@ runs:
       if: ${{ inputs.enable-rocprofiler-register-build == 'true' }}
       shell: bash
       working-directory: projects/rocprofiler-register
+      env:
+        ROCM_INSTALL_DIR: ${{ inputs.rocm-path }}
+        COMPILER_LAUNCHER: ${{ inputs.compiler-launcher }}
+        BUILD_JOBS: ${{ inputs.build-jobs }}
       run: |
-        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:${PATH}:/usr/local/bin
+        export PATH=${ROCM_INSTALL_DIR}/bin:${ROCM_INSTALL_DIR}/llvm/bin:${PATH}:/usr/local/bin
         echo "Install ROCProfiler-Register"
         cmake -B build-rocprofiler-register \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DCMAKE_PREFIX_PATH=${{ inputs.rocm-path }} \
-          -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_PREFIX_PATH=${ROCM_INSTALL_DIR} \
+          -DCMAKE_INSTALL_PREFIX=${ROCM_INSTALL_DIR} \
           -DCMAKE_INSTALL_LIBDIR=lib \
-          -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
-          -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
+          -DCMAKE_C_COMPILER_LAUNCHER=${COMPILER_LAUNCHER} \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=${COMPILER_LAUNCHER} \
           .
-        cmake --build build-rocprofiler-register --target all --parallel ${{ inputs.build-jobs }}
+        cmake --build build-rocprofiler-register --target all --parallel ${BUILD_JOBS}
         cmake --build build-rocprofiler-register --target install
         echo "✅ ROCProfiler-Register Installation complete!"
 
@@ -178,11 +195,15 @@ runs:
       if: ${{ inputs.enable-hipfile-build == 'true' }}
       shell: bash
       working-directory: projects/hipfile
+      env:
+        ROCM_INSTALL_DIR: ${{ inputs.rocm-path }}
+        COMPILER_LAUNCHER: ${{ inputs.compiler-launcher }}
+        BUILD_JOBS: ${{ inputs.build-jobs }}
       run: |
-        export ROCM_PATH=${{ inputs.rocm-path }}
+        export ROCM_PATH=${ROCM_INSTALL_DIR}
         export HIP_PLATFORM=amd
-        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/lib/rocm_sysdeps/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
-        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:${PATH}:/usr/local/bin
+        export LD_LIBRARY_PATH=${ROCM_INSTALL_DIR}/lib:${ROCM_INSTALL_DIR}/lib/rocm_sysdeps/lib:${ROCM_INSTALL_DIR}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${ROCM_INSTALL_DIR}/bin:${ROCM_INSTALL_DIR}/llvm/bin:${PATH}:/usr/local/bin
         # Temporary workaround until hipFILE adds the ROCm sysdeps include path for libmount.
         if [ -f "${ROCM_PATH}/lib/rocm_sysdeps/include/libmount/libmount.h" ]; then
           install -D -m 0644 \
@@ -192,19 +213,19 @@ runs:
         echo "Install hipFILE..."
         cmake -B build-hipfile \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/llvm/bin/amdclang++ \
+          -DCMAKE_CXX_COMPILER=${ROCM_INSTALL_DIR}/llvm/bin/amdclang++ \
           -DCMAKE_HIP_PLATFORM=amd \
-          -DCMAKE_PREFIX_PATH='${{ inputs.rocm-path }};${{ inputs.rocm-path }}/llvm;${{ inputs.rocm-path }}/lib/rocm_sysdeps' \
-          -DCMAKE_LIBRARY_PATH=${{ inputs.rocm-path }}/lib/rocm_sysdeps/lib \
-          -DCMAKE_INCLUDE_PATH=${{ inputs.rocm-path }}/lib/rocm_sysdeps/include \
-          -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
-          -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
-          -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
+          -DCMAKE_PREFIX_PATH="${ROCM_INSTALL_DIR};${ROCM_INSTALL_DIR}/llvm;${ROCM_INSTALL_DIR}/lib/rocm_sysdeps" \
+          -DCMAKE_LIBRARY_PATH=${ROCM_INSTALL_DIR}/lib/rocm_sysdeps/lib \
+          -DCMAKE_INCLUDE_PATH=${ROCM_INSTALL_DIR}/lib/rocm_sysdeps/include \
+          -DCMAKE_INSTALL_PREFIX=${ROCM_INSTALL_DIR} \
+          -DCMAKE_C_COMPILER_LAUNCHER=${COMPILER_LAUNCHER} \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=${COMPILER_LAUNCHER} \
           -DBUILD_TESTING=OFF \
           -DAIS_INSTALL_EXAMPLES=OFF \
           -DAIS_INSTALL_TOOLS=OFF \
           .
-        cmake --build build-hipfile --target hipfile --parallel ${{ inputs.build-jobs }}
+        cmake --build build-hipfile --target hipfile --parallel ${BUILD_JOBS}
         cmake --build build-hipfile --target install
         echo "✅ hipFILE Installation complete!"
 
@@ -212,51 +233,63 @@ runs:
       if: ${{ inputs.enable-aqlprofile-build == 'true' }}
       shell: bash
       working-directory: projects/aqlprofile
+      env:
+        ROCM_INSTALL_DIR: ${{ inputs.rocm-path }}
+        COMPILER_LAUNCHER: ${{ inputs.compiler-launcher }}
+        BUILD_JOBS: ${{ inputs.build-jobs }}
       run: |
         echo "Install Aqlprofile..."
         cmake -B build-aqlprofile \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DCMAKE_PREFIX_PATH=${{ inputs.rocm-path }} \
-          -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_PREFIX_PATH=${ROCM_INSTALL_DIR} \
+          -DCMAKE_INSTALL_PREFIX=${ROCM_INSTALL_DIR} \
           -DCMAKE_INSTALL_LIBDIR=lib \
-          -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
-          -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
+          -DCMAKE_C_COMPILER_LAUNCHER=${COMPILER_LAUNCHER} \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=${COMPILER_LAUNCHER} \
           .
-        cmake --build build-aqlprofile --target all --parallel ${{ inputs.build-jobs }}
+        cmake --build build-aqlprofile --target all --parallel ${BUILD_JOBS}
         cmake --build build-aqlprofile --target install
         echo "✅ AQLProfile Installation complete!"
 
     - name: Build and Install ROCDecode
       if: ${{ inputs.enable-rocdecode-build == 'true' }}
       shell: bash
+      env:
+        ROCM_INSTALL_DIR: ${{ inputs.rocm-path }}
+        COMPILER_LAUNCHER: ${{ inputs.compiler-launcher }}
+        BUILD_JOBS: ${{ inputs.build-jobs }}
       run: |
         echo "Building & Installing ROCDecode..."
         cmake -B build-rocdecode \
-          -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_INSTALL_PREFIX=${ROCM_INSTALL_DIR} \
           -DCMAKE_INSTALL_LIBDIR=lib \
-          -DCMAKE_PREFIX_PATH=${{ inputs.rocm-path }} \
-          -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/lib/llvm/bin/amdclang++ \
-          -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
-          -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
+          -DCMAKE_PREFIX_PATH=${ROCM_INSTALL_DIR} \
+          -DCMAKE_CXX_COMPILER=${ROCM_INSTALL_DIR}/lib/llvm/bin/amdclang++ \
+          -DCMAKE_C_COMPILER_LAUNCHER=${COMPILER_LAUNCHER} \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=${COMPILER_LAUNCHER} \
           ${GITHUB_WORKSPACE}/rocDecode
-        cmake --build build-rocdecode --target all --parallel ${{ inputs.build-jobs }}
+        cmake --build build-rocdecode --target all --parallel ${BUILD_JOBS}
         cmake --build build-rocdecode --target install
         echo "✅ ROCDecode Installation complete!"
 
     - name: Build and Install ROCJPEG
       if: ${{ inputs.enable-rocjpeg-build == 'true' }}
       shell: bash
+      env:
+        ROCM_INSTALL_DIR: ${{ inputs.rocm-path }}
+        COMPILER_LAUNCHER: ${{ inputs.compiler-launcher }}
+        BUILD_JOBS: ${{ inputs.build-jobs }}
       run: |
         echo "Building & Installing ROCJPEG..."
         cmake -B build-rocjpeg \
-          -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_INSTALL_PREFIX=${ROCM_INSTALL_DIR} \
           -DCMAKE_INSTALL_LIBDIR=lib \
-          -DCMAKE_PREFIX_PATH=${{ inputs.rocm-path }} \
-          -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/lib/llvm/bin/amdclang++ \
-          -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
-          -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
+          -DCMAKE_PREFIX_PATH=${ROCM_INSTALL_DIR} \
+          -DCMAKE_CXX_COMPILER=${ROCM_INSTALL_DIR}/lib/llvm/bin/amdclang++ \
+          -DCMAKE_C_COMPILER_LAUNCHER=${COMPILER_LAUNCHER} \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=${COMPILER_LAUNCHER} \
           ${GITHUB_WORKSPACE}/rocJPEG
-        cmake --build build-rocjpeg --target all --parallel ${{ inputs.build-jobs }}
+        cmake --build build-rocjpeg --target all --parallel ${BUILD_JOBS}
         cmake --build build-rocjpeg --target install
         echo "✅ ROCJPEG Installation complete!"
 
@@ -264,37 +297,45 @@ runs:
       if: ${{ inputs.enable-rocprof-trace-decoder-build == 'true' }}
       shell: bash
       working-directory: projects/rocprof-trace-decoder
+      env:
+        ROCM_INSTALL_DIR: ${{ inputs.rocm-path }}
+        COMPILER_LAUNCHER: ${{ inputs.compiler-launcher }}
+        BUILD_JOBS: ${{ inputs.build-jobs }}
       run: |
         echo "Install rocprof-trace-decoder..."
-        rm -f ${{ inputs.rocm-path }}/lib/librocprof-trace-decoder*
-        rm -f ${{ inputs.rocm-path }}/lib64/librocprof-trace-decoder*
+        rm -f ${ROCM_INSTALL_DIR}/lib/librocprof-trace-decoder*
+        rm -f ${ROCM_INSTALL_DIR}/lib64/librocprof-trace-decoder*
         cmake -B build-rocprof-trace-decoder \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DCMAKE_PREFIX_PATH=${{ inputs.rocm-path }} \
-          -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_PREFIX_PATH=${ROCM_INSTALL_DIR} \
+          -DCMAKE_INSTALL_PREFIX=${ROCM_INSTALL_DIR} \
           -DCMAKE_INSTALL_LIBDIR=lib \
-          -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
-          -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
+          -DCMAKE_C_COMPILER_LAUNCHER=${COMPILER_LAUNCHER} \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=${COMPILER_LAUNCHER} \
           .
-        cmake --build build-rocprof-trace-decoder --target all --parallel ${{ inputs.build-jobs }}
+        cmake --build build-rocprof-trace-decoder --target all --parallel ${BUILD_JOBS}
         cmake --build build-rocprof-trace-decoder --target install
         echo "✅ rocprof-trace-decoder Installation complete!"
 
     - name: Remove old ROCProfiler SDK artifacts
       shell: bash
+      env:
+        ROCM_INSTALL_DIR: ${{ inputs.rocm-path }}
       run: |
         echo "Removing old ROCProfiler SDK artifacts..."
         rm -rf \
-          ${{ inputs.rocm-path }}/lib/*rocprofiler-sdk* \
-          ${{ inputs.rocm-path }}/lib/cmake/*rocprofiler-sdk* \
-          ${{ inputs.rocm-path }}/share/*rocprofiler-sdk* \
-          ${{ inputs.rocm-path }}/libexec/*rocprofiler-sdk* \
-          ${{ inputs.rocm-path }}*/lib/python*/site-packages/roctx \
-          ${{ inputs.rocm-path }}*/lib/python*/site-packages/rocpd
+          ${ROCM_INSTALL_DIR}/lib/*rocprofiler-sdk* \
+          ${ROCM_INSTALL_DIR}/lib/cmake/*rocprofiler-sdk* \
+          ${ROCM_INSTALL_DIR}/share/*rocprofiler-sdk* \
+          ${ROCM_INSTALL_DIR}/libexec/*rocprofiler-sdk* \
+          ${ROCM_INSTALL_DIR}*/lib/python*/site-packages/roctx \
+          ${ROCM_INSTALL_DIR}*/lib/python*/site-packages/rocpd
         echo "✅ Old ROCProfiler SDK artifacts removed!"
 
     - name: List Files
       shell: bash
+      env:
+        ROCM_INSTALL_DIR: ${{ inputs.rocm-path }}
       run: |
         echo "PATH: ${PATH}"
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
@@ -302,7 +343,7 @@ runs:
         for i in python3 git cmake ctest gcc g++ gcov clang clang++; do which-realpath $i; done
         echo ""
         echo "ROCm version:"
-        cat ${{ inputs.rocm-path }}/.info/version 2>/dev/null || echo "Version file not found"
+        cat ${ROCM_INSTALL_DIR}/.info/version 2>/dev/null || echo "Version file not found"
         echo ""
         echo "ROCm directory contents:"
-        ls -la ${{ inputs.rocm-path }}/ 2>/dev/null || echo "ROCm directory not found"
+        ls -la ${ROCM_INSTALL_DIR}/ 2>/dev/null || echo "ROCm directory not found"

@@ -56,9 +56,11 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           ref: a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05 # 2026-09-21
+          persist-credentials: false
 
       - name: Run setup test environment workflow
-        uses: './.github/actions/setup_test_environment'
+        # TheRock's action, from the TheRock checkout at the workspace root.
+        uses: './.github/actions/setup_test_environment' # zizmor: ignore[self-repository]
         with:
           ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
           AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}

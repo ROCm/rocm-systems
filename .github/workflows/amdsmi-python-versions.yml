@@ -79,6 +79,7 @@ jobs:
           sparse-checkout: |
             projects/amdsmi
             .github/workflows
+          persist-credentials: false
 
       - name: Set up Python ${{matrix.python-version}}
         # Container legs already ship the exact interpreter; only host runners

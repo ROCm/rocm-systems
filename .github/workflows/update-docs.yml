@@ -37,6 +37,7 @@ jobs:
           sparse-checkout: |
             .github/docs-config.json
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Get changed files using GitHub REST API
         id: diff

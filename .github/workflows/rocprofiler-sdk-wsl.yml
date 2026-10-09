@@ -118,6 +118,7 @@ jobs:
             .dvc
           sparse-checkout-cone-mode: true
           submodules: false
+          persist-credentials: false
 
       # libhsakmt's wkmi dependency lives in shared/amdgpu-windows-interop/wkmi, and its
       # static archive is committed only as a DVC pointer, so it has to be pulled on the
@@ -202,7 +203,9 @@ jobs:
       - name: Provision ROCm
         shell: wsl-bash {0}
         timeout-minutes: 45
-        run: |
+        # ROCM_TARBALL is set by a workflow_dispatch input (write access) or the
+        # workflow default, and is validated below before use.
+        run: | # zizmor: ignore[template-injection]
           ROCM_PATH='${{ env.ROCM_PATH }}'
           ROCM_TARBALL='${{ env.ROCM_TARBALL }}'
 
@@ -347,7 +350,8 @@ jobs:
 
       - name: Prepare build environment
         shell: wsl-bash {0}
-        run: |
+        # SDK_VERSION is a directory name read from the runner's Windows Kits install.
+        run: | # zizmor: ignore[template-injection]
           GPU_TARGET_FALLBACK='${{ env.GPU_TARGET_FALLBACK }}'
 
           ROCM_PATH='${{ env.ROCM_PATH }}'

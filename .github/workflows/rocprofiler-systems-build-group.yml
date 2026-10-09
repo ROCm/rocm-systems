@@ -84,11 +84,12 @@ jobs:
       # Step anchors: steps shared identically with the system-deps job are
       # anchored here (_step-*) and aliased below to avoid duplication.
       - &_step-checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/
             .gitmodules
+          persist-credentials: false
 
       - name: Configure ROCm environment (Ubuntu / Debian)
         if: ${{ !matrix.is_rhel }}
@@ -102,9 +103,12 @@ jobs:
         if: ${{ matrix.is_rhel }}
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          MATRIX_CC: ${{ matrix.cc }}
+          MATRIX_COMPILER: ${{ matrix.compiler }}
         run: |
-          echo "CC=${{ matrix.cc }}" >> $GITHUB_ENV
-          echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV
+          echo "CC=${MATRIX_CC}" >> $GITHUB_ENV
+          echo "CXX=${MATRIX_COMPILER}" >> $GITHUB_ENV
           echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV
           echo "/opt/rocm/bin" >> $GITHUB_PATH
           echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
@@ -129,14 +133,16 @@ jobs:
         if: ${{ matrix.is_rhel }}
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          OS_MAJOR: ${{ matrix.os_major }}
         run: |
-          if [ "${{ matrix.os_major }}" = "10" ]; then
+          if [ "${OS_MAJOR}" = "10" ]; then
             dnf install -y --enablerepo=crb mpich mpich-devel
             echo "/usr/lib64/mpich/bin" >> $GITHUB_PATH
           fi
 
       - name: Restore ccache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-${{ matrix.ccache_key_distro }}-${{ matrix.image }}-${{ github.job }}-${{ matrix.distro }}-${{ matrix.compiler }}-${{ github.sha }}
@@ -158,8 +164,10 @@ jobs:
         timeout-minutes: 10
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          PYTHON_ENVS_GLOB: ${{ matrix.python_envs_glob }}
         run: |
-          for env_dir in /opt/conda/envs/${{ matrix.python_envs_glob }}/; do
+          for env_dir in /opt/conda/envs/${PYTHON_ENVS_GLOB}/; do
             if [ -d "${env_dir}" ] && [ -x "${env_dir}bin/python3" ]; then
               echo "Installing requirements into ${env_dir}"
               "${env_dir}bin/python3" -m pip install -r requirements.txt
@@ -188,21 +196,26 @@ jobs:
         timeout-minutes: 5
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          MATRIX_COMPILER: ${{ matrix.compiler }}
+          CDASH_SUFFIX: ${{ matrix.cdash_suffix }}
+          MATRIX_CC: ${{ matrix.cc }}
+          CMAKE_FLAGS: ${{ matrix.cmake_flags }}
         run: |
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
           git config --global --add safe.directory ${PWD}
           echo "CMake: $(cmake --version | head -n 1)"
-          echo "Compiler: $(${{ matrix.compiler }} --version | head -n 1)"
+          echo "Compiler: $(${MATRIX_COMPILER} --version | head -n 1)"
           python3 ./scripts/run-ci.py --stage generate \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${CDASH_SUFFIX}" \
             --build-jobs $(nproc) \
             --site GitHub \
             -B build \
             -- \
-            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
-            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_C_COMPILER=${MATRIX_CC} \
+            -DCMAKE_CXX_COMPILER=${MATRIX_COMPILER} \
             ${{ env.CMAKE_COMMON_FLAGS }} \
-            ${{ matrix.cmake_flags }} \
+            ${CMAKE_FLAGS} \
             -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
             -- \
             -LE "network|gpu"
@@ -211,18 +224,22 @@ jobs:
         timeout-minutes: 15
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          CDASH_SUFFIX: ${{ matrix.cdash_suffix }}
         run: |
           python3 ./scripts/run-ci.py --stage configure \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${CDASH_SUFFIX}" \
             -B build
 
       - name: Build
         timeout-minutes: 80
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          CDASH_SUFFIX: ${{ matrix.cdash_suffix }}
         run: |
           python3 ./scripts/run-ci.py --stage build \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${CDASH_SUFFIX}" \
             -B build
 
       - &_step-cdash-link
@@ -230,23 +247,27 @@ jobs:
         if: always()
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          CDASH_SUFFIX: ${{ matrix.cdash_suffix }}
         run: |
           python3 ./scripts/run-ci.py --stage cdash-link \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}"
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${CDASH_SUFFIX}"
 
       - name: Test
         timeout-minutes: 60
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          CDASH_SUFFIX: ${{ matrix.cdash_suffix }}
         run: |
           python3 ./scripts/run-ci.py --stage test \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${CDASH_SUFFIX}" \
             -B build
 
       - &_step-upload-junit-results
         name: Upload JUnit test results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: junit-build-${{ inputs.group_key }}-${{ github.job }}-${{ strategy.job-index }}
           path: projects/rocprofiler-systems/build/test-results.xml
@@ -280,29 +301,35 @@ jobs:
         timeout-minutes: 10
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          INSTALL_CLEANUP: ${{ matrix.install_cleanup }}
         run: |
           cmake --build build --target install --parallel $(nproc)
-          ${{ matrix.install_cleanup }}
+          ${INSTALL_CLEANUP}
 
       - name: CPack and Install
         if: ${{ !matrix.is_rhel }}
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          CPACK_PREFIX: ${{ matrix.cpack_prefix }}
         run: |
           cd build
           cpack -G STGZ
-          mkdir -p ${{ matrix.cpack_prefix }}
-          ./rocprofiler-systems-*.sh --prefix=${{ matrix.cpack_prefix }} --exclude-subdir --skip-license
+          mkdir -p ${CPACK_PREFIX}
+          ./rocprofiler-systems-*.sh --prefix=${CPACK_PREFIX} --exclude-subdir --skip-license
 
       - name: Test Install with Modulefile
         if: ${{ !matrix.is_rhel }}
         timeout-minutes: 15
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          CPACK_PREFIX: ${{ matrix.cpack_prefix }}
         run: |
           set -v
           source /usr/share/modules/init/$(basename ${SHELL})
-          module use ${{ matrix.cpack_prefix }}/share/modulefiles
+          module use ${CPACK_PREFIX}/share/modulefiles
           module avail
           module load rocprofiler-systems
           ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,python,rewrite,runtime}=1
@@ -323,13 +350,14 @@ jobs:
         timeout-minutes: 10
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          INSTALL_DIR: ${{ matrix.cpack_prefix || matrix.install_prefix }}
         run: |
           set -v
           # For distros that run CPack (non-RHEL), the cmake install prefix is
           # cleaned and CPack re-installs to cpack_prefix.  Use cpack_prefix
           # when set (non-empty), falling back to install_prefix for RHEL which
           # skips CPack and installs directly to install_prefix.
-          INSTALL_DIR="${{ matrix.cpack_prefix || matrix.install_prefix }}"
           ./scripts/test-find-package.sh --install-dir "${INSTALL_DIR}"
 
       - &_step-kill-perfetto
@@ -349,7 +377,7 @@ jobs:
         name: CTest artifacts
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ctest-${{ inputs.group_key }}-${{ github.job }}-${{ strategy.job-index }}-log
           path: |
@@ -359,7 +387,7 @@ jobs:
         name: Data artifacts
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: data-${{ inputs.group_key }}-${{ github.job }}-${{ strategy.job-index }}-files
           path: |
@@ -427,9 +455,12 @@ jobs:
         if: ${{ matrix.is_rhel }}
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          MATRIX_CC: ${{ matrix.cc }}
+          MATRIX_COMPILER: ${{ matrix.compiler }}
         run: |
-          echo "CC=${{ matrix.cc }}" >> $GITHUB_ENV
-          echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV
+          echo "CC=${MATRIX_CC}" >> $GITHUB_ENV
+          echo "CXX=${MATRIX_COMPILER}" >> $GITHUB_ENV
           echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV
           echo "/opt/rocm/bin" >> $GITHUB_PATH
           echo "/opt/rocm/llvm/bin" >> $GITHUB_PATH
@@ -474,7 +505,7 @@ jobs:
             dnf clean all
 
       - name: Restore ccache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-${{ matrix.ccache_key_distro }}-${{ matrix.image }}-${{ github.job }}-${{ matrix.compiler }}-${{ github.sha }}
@@ -491,23 +522,29 @@ jobs:
         timeout-minutes: 5
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          MATRIX_COMPILER: ${{ matrix.compiler }}
+          CDASH_SUFFIX: ${{ matrix.cdash_suffix }}
+          MATRIX_CC: ${{ matrix.cc }}
+          CMAKE_FLAGS: ${{ matrix.cmake_flags }}
+          MATRIX_USE_CLANG_OMP: ${{ matrix.use_clang_omp }}
         run: |
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
           git config --global --add safe.directory ${PWD}
           echo "CMake: $(cmake --version | head -n 1)"
-          echo "Compiler: $(${{ matrix.compiler }} --version | head -n 1)"
+          echo "Compiler: $(${MATRIX_COMPILER} --version | head -n 1)"
           echo "Testing build with SYSTEM dependencies (ROCPROFSYS_BUILD_{TBB,ELFUTILS,LIBIBERTY}=OFF)"
           python3 ./scripts/run-ci.py --stage generate \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${CDASH_SUFFIX}" \
             --build-jobs $(nproc) \
             --site GitHub \
             -B build \
             -- \
-            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
-            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_C_COMPILER=${MATRIX_CC} \
+            -DCMAKE_CXX_COMPILER=${MATRIX_COMPILER} \
             ${{ env.CMAKE_COMMON_FLAGS }} \
-            ${{ matrix.cmake_flags }} \
-            -DUSE_CLANG_OMP=${{ matrix.use_clang_omp }} \
+            ${CMAKE_FLAGS} \
+            -DUSE_CLANG_OMP=${MATRIX_USE_CLANG_OMP} \
             -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
             -- \
             -LE "network|gpu"
@@ -516,18 +553,22 @@ jobs:
         timeout-minutes: 15
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          CDASH_SUFFIX: ${{ matrix.cdash_suffix }}
         run: |
           python3 ./scripts/run-ci.py --stage configure \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${CDASH_SUFFIX}" \
             -B build
 
       - name: Build
         timeout-minutes: 80
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          CDASH_SUFFIX: ${{ matrix.cdash_suffix }}
         run: |
           python3 ./scripts/run-ci.py --stage build \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${CDASH_SUFFIX}" \
             -B build
 
       - *_step-cdash-link
@@ -536,9 +577,11 @@ jobs:
         timeout-minutes: 60
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          CDASH_SUFFIX: ${{ matrix.cdash_suffix }}
         run: |
           python3 ./scripts/run-ci.py --stage test \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${CDASH_SUFFIX}" \
             -B build
 
       - *_step-upload-junit-results
@@ -549,18 +592,22 @@ jobs:
         timeout-minutes: 10
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          INSTALL_PREFIX: ${{ matrix.install_prefix }}
         run: |
-          cmake --install build --prefix ${{ matrix.install_prefix }}
+          cmake --install build --prefix ${INSTALL_PREFIX}
 
       - name: Test Install with Modulefile
         if: ${{ !matrix.is_rhel }}
         timeout-minutes: 15
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          INSTALL_PREFIX: ${{ matrix.install_prefix }}
         run: |
           set -v
           source /usr/share/modules/init/$(basename ${SHELL})
-          module use ${{ matrix.install_prefix }}/share/modulefiles
+          module use ${INSTALL_PREFIX}/share/modulefiles
           module avail
           module load rocprofiler-systems
           ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,python,rewrite,runtime}=1
@@ -570,9 +617,11 @@ jobs:
         timeout-minutes: 10
         shell: bash
         working-directory: projects/rocprofiler-systems/
+        env:
+          INSTALL_PREFIX: ${{ matrix.install_prefix }}
         run: |
           set -v
-          source ${{ matrix.install_prefix }}/share/rocprofiler-systems/setup-env.sh
+          source ${INSTALL_PREFIX}/share/rocprofiler-systems/setup-env.sh
           export PYTHON_EXECUTABLE=/opt/conda/envs/py3.8/bin/python
           export PATH=/opt/conda/envs/py3.8/bin:${PATH}
           ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,rewrite,runtime,python}=1

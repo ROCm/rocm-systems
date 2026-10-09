@@ -80,15 +80,18 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           ref: a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05 # 2026-09-21
+          persist-credentials: false
 
       - name: Checkout rocm-systems scripts
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           sparse-checkout: projects/rccl/ci/scripts
           path: rocm-systems
+          persist-credentials: false
 
       - name: Run setup test environment workflow
-        uses: './.github/actions/setup_test_environment'
+        # TheRock's action, from the TheRock checkout at the workspace root.
+        uses: './.github/actions/setup_test_environment' # zizmor: ignore[self-repository]
         with:
           ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
           AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
@@ -123,6 +126,7 @@ jobs:
           # Empty on forked PRs (secrets unavailable) — only the notification
           # is skipped; tests always run regardless.
           NOTIFY_WEBHOOK: ${{ inputs.notify_webhook || secrets.RCCL_CI_TEAMS_WEBHOOK }}
+          TEST_SCOPE: ${{ inputs.test_scope || 'smoke' }}
         run: |
           # The dynamic linker caches LD_LIBRARY_PATH at process startup.
           # PyTorch's import chain (rocm_sdk.preload_libraries -> ctypes.CDLL)
@@ -140,10 +144,10 @@ jobs:
           [ -n "$NOTIFY_EMAIL" ] && NOTIFY_ARGS+=(--notify-email "$NOTIFY_EMAIL")
           [ -n "$NOTIFY_WEBHOOK" ] && NOTIFY_ARGS+=(--notify-webhook "$NOTIFY_WEBHOOK")
           python rocm-systems/projects/rccl/ci/scripts/test_pytorch_c10d.py \
-            --artifact-dir ${{ env.OUTPUT_ARTIFACTS_DIR }} \
-            --pytorch-src ${{ env.PYTORCH_SRC }} \
-            --results-log ${{ env.PYTORCH_SRC }}/pytorch_c10d_results.log \
-            --test-scope ${{ inputs.test_scope || 'smoke' }} \
+            --artifact-dir "${OUTPUT_ARTIFACTS_DIR}" \
+            --pytorch-src ${PYTORCH_SRC} \
+            --results-log ${PYTORCH_SRC}/pytorch_c10d_results.log \
+            --test-scope "${TEST_SCOPE}" \
             "${NOTIFY_ARGS[@]}"
 
       - name: Upload test results

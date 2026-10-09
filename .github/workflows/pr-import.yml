@@ -55,12 +55,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Actor is: ${{ github.actor }}"
+          echo "Actor is: ${GITHUB_ACTOR}"
           PERMISSION=$(gh api \
-            repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission \
+            repos/${{ github.repository }}/collaborators/${GITHUB_ACTOR}/permission \
             --jq .permission)
           if [[ "$PERMISSION" != "admin" && "$PERMISSION" != "maintain" ]]; then
-            echo "❌ User ${{ github.actor }} is not authorized to run this workflow"
+            echo "❌ User ${GITHUB_ACTOR} is not authorized to run this workflow"
             exit 1
           fi
 
@@ -70,7 +70,9 @@ jobs:
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
 
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -81,6 +83,8 @@ jobs:
           sparse-checkout-cone-mode: true
           token: ${{ steps.generate-token.outputs.token }}
           fetch-depth: 0  #for subtree operations
+          # "Split subrepo prefix from main branch" pushes with the persisted credentials.
+          persist-credentials: true
 
       - name: Set up Git user
         run: |
@@ -91,9 +95,11 @@ jobs:
         id: prdata
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GITHUB_EVENT_INPUTS_SUBREPO_PR_NUMBER: ${{ github.event.inputs.subrepo-pr-number }}
+          SUBREPO_UPSTREAM: ${{ github.event.inputs.subrepo-upstream }}
         run: |
-          PR_JSON=$(gh pr view ${{ github.event.inputs.subrepo-pr-number }} \
-            --repo ${{ github.event.inputs.subrepo-upstream }} \
+          PR_JSON=$(gh pr view ${GITHUB_EVENT_INPUTS_SUBREPO_PR_NUMBER} \
+            --repo ${SUBREPO_UPSTREAM} \
             --json title,body,headRefName,headRepository,isDraft \
             --jq '{title: .title, body: .body, head_ref: .headRefName, head_repo: .headRepository.cloneUrl, is_draft: .isDraft}')
 
@@ -115,34 +121,52 @@ jobs:
 
       - name: Create new branch for import
         id: import-branch
+        env:
+          SUPER_REPO_TARGET_BRANCH: ${{ github.event.inputs.super-repo-target-branch }}
+          GITHUB_EVENT_INPUTS_SUBREPO_REPO: ${{ github.event.inputs.subrepo-repo }}
+          UPSTREAM_PR_HEAD_REF: ${{ steps.prdata.outputs.head_ref }}
         run: |
-          git fetch origin ${{ github.event.inputs.super-repo-target-branch }}
-          git checkout ${{ github.event.inputs.super-repo-target-branch }}
-          SANITIZED_BASE=$(echo "${{ github.event.inputs.super-repo-target-branch }}" | sed 's|/|_|g')
-          SANITIZED_REPO=$(echo "${{ github.event.inputs.subrepo-repo }}" | sed 's|/|_|g')
-          SANITIZED_REF=$(echo "${{ steps.prdata.outputs.head_ref }}" | sed 's|/|_|g')
+          git fetch origin ${SUPER_REPO_TARGET_BRANCH}
+          git checkout ${SUPER_REPO_TARGET_BRANCH}
+          SANITIZED_BASE=$(echo "${SUPER_REPO_TARGET_BRANCH}" | sed 's|/|_|g')
+          SANITIZED_REPO=$(echo "${GITHUB_EVENT_INPUTS_SUBREPO_REPO}" | sed 's|/|_|g')
+          SANITIZED_REF=$(echo "${UPSTREAM_PR_HEAD_REF}" | sed 's|/|_|g')
           IMPORT_BRANCH="import/${SANITIZED_BASE}/${SANITIZED_REPO}/${SANITIZED_REF}"
           echo "import_branch=$IMPORT_BRANCH" >> $GITHUB_OUTPUT
           git checkout -b "$IMPORT_BRANCH"
 
       - name: Split subrepo prefix from main branch
+        env:
+          SUBREPO_PREFIX: ${{ github.event.inputs.subrepo-prefix }}
+          GITHUB_EVENT_INPUTS_SUBREPO_REPO: ${{ github.event.inputs.subrepo-repo }}
+          UPSTREAM_PR_HEAD_REF: ${{ steps.prdata.outputs.head_ref }}
+          STEPS_IMPORT_BRANCH_OUTPUTS_IMPORT_BRANCH: ${{ steps.import-branch.outputs.import_branch }}
         run: |
-          git subtree pull --prefix=${{ github.event.inputs.subrepo-prefix }} https://github.com/${{ github.event.inputs.subrepo-repo }} ${{ steps.prdata.outputs.head_ref }}
-          git push origin ${{ steps.import-branch.outputs.import_branch }}
+          git subtree pull --prefix=${SUBREPO_PREFIX} https://github.com/${GITHUB_EVENT_INPUTS_SUBREPO_REPO} ${UPSTREAM_PR_HEAD_REF}
+          git push origin ${STEPS_IMPORT_BRANCH_OUTPUTS_IMPORT_BRANCH}
 
       - name: Create super-repo PR
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          SUBREPO_PREFIX: ${{ github.event.inputs.subrepo-prefix }}
+          GITHUB_EVENT_INPUTS_SUBREPO_PR_NUMBER: ${{ github.event.inputs.subrepo-pr-number }}
+          UPSTREAM_PR_TITLE: ${{ steps.prdata.outputs.title }}
+          SUBREPO_UPSTREAM: ${{ github.event.inputs.subrepo-upstream }}
+          GITHUB_EVENT_INPUTS_SUBREPO_REPO: ${{ github.event.inputs.subrepo-repo }}
+          UPSTREAM_PR_BODY: ${{ steps.prdata.outputs.body }}
+          UPSTREAM_PR_IS_DRAFT: ${{ steps.prdata.outputs.is_draft }}
+          SUPER_REPO_TARGET_BRANCH: ${{ github.event.inputs.super-repo-target-branch }}
+          STEPS_IMPORT_BRANCH_OUTPUTS_IMPORT_BRANCH: ${{ steps.import-branch.outputs.import_branch }}
         run: |
-          IMPORT_BRANCH="import/${{ github.event.inputs.subrepo-prefix }}/pr-${{ github.event.inputs.subrepo-pr-number }}"
-          PR_TITLE="${{ steps.prdata.outputs.title }}"
-          UPSTREAM_REPO="${{ github.event.inputs.subrepo-upstream }}"
-          SUBREPO_REPO="${{ github.event.inputs.subrepo-repo }}"
-          SUBREPO_PR_NUMBER="${{ github.event.inputs.subrepo-pr-number }}"
+          IMPORT_BRANCH="import/${SUBREPO_PREFIX}/pr-${GITHUB_EVENT_INPUTS_SUBREPO_PR_NUMBER}"
+          PR_TITLE="${UPSTREAM_PR_TITLE}"
+          UPSTREAM_REPO="${SUBREPO_UPSTREAM}"
+          SUBREPO_REPO="${GITHUB_EVENT_INPUTS_SUBREPO_REPO}"
+          SUBREPO_PR_NUMBER="${GITHUB_EVENT_INPUTS_SUBREPO_PR_NUMBER}"
           SUBREPO_URL="https://github.com/$UPSTREAM_REPO/pull/$SUBREPO_PR_NUMBER"
           AUTHOR=$(gh pr view "$SUBREPO_PR_NUMBER" --repo "$UPSTREAM_REPO" --json author --jq .author.login)
 
-          echo "${{ steps.prdata.outputs.body }}" > pr_body.txt
+          echo "${UPSTREAM_PR_BODY}" > pr_body.txt
           {
             echo ""
             echo "---"
@@ -151,13 +175,13 @@ jobs:
           } >> pr_body.txt
 
           DRAFT_FLAG=""
-          if [[ "${{ steps.prdata.outputs.is_draft }}" == "true" ]]; then
+          if [[ "${UPSTREAM_PR_IS_DRAFT}" == "true" ]]; then
             DRAFT_FLAG="--draft"
           fi
 
           gh pr create \
-            --base "${{ github.event.inputs.super-repo-target-branch }}" \
-            --head "${{ steps.import-branch.outputs.import_branch }}" \
+            --base "${SUPER_REPO_TARGET_BRANCH}" \
+            --head "${STEPS_IMPORT_BRANCH_OUTPUTS_IMPORT_BRANCH}" \
             --title "$PR_TITLE" \
             --label "imported pr" \
             $DRAFT_FLAG \

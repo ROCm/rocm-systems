@@ -11,9 +11,11 @@ on:
     types: [created]
 
 jobs:
-  call-workflow:
+  call-workflow: # zizmor: ignore[excessive-permissions]
     if: github.event_name != 'issue_comment' ||(github.event_name == 'issue_comment' && github.event.issue.pull_request && (startsWith(github.event.comment.body, '!verify') || startsWith(github.event.comment.body, '!verify release') || startsWith(github.event.comment.body, '!verify retest')))
-    uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/rocm_ci.yml@mainline
+    # rocm_ci_infra is private: it is consumed at its mainline branch, and the
+    # token permissions and secrets it needs are defined in that repository.
+    uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/rocm_ci.yml@mainline # zizmor: ignore[unpinned-uses,secrets-inherit]
     secrets: inherit
     with:
       input_sha: ${{github.event_name == 'pull_request' && github.event.pull_request.head.sha || (github.event_name == 'push' && github.sha) || (github.event_name == 'issue_comment' && github.event.issue.pull_request.head.sha) || github.sha}}

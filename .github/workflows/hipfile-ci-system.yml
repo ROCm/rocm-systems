@@ -93,6 +93,7 @@ jobs:
           sparse-checkout: |
             projects/hipfile
             .github/workflows
+          persist-credentials: false
       - name: Download hipFile runtime package
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -152,20 +153,19 @@ jobs:
       - name: Install the hipFile packages
         run: |
           docker exec \
+            -e "_AIS_PKG_MGR=${AIS_PKG_MGR}" \
+            -e "_PKG_FILENAME=${AIS_INPUT_HIPFILE_PKG_FILENAME}" \
+            -e "_PKG_DEV_FILENAME=${AIS_INPUT_HIPFILE_PKG_DEV_FILENAME}" \
             -t \
             -w /root \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              ${{
-                format(
-                  env.AIS_PKG_MGR == 'apt' && 'apt install -y "./{0}" "./{1}"' ||
-                    env.AIS_PKG_MGR == 'dnf' && 'dnf install -y --cacheonly "./{0}" "./{1}"' ||
-                    env.AIS_PKG_MGR == 'zypper' && 'zypper --no-refresh install -y --allow-unsigned-rpm "./{0}" "./{1}"' ||
-                    'echo "Unknown platform."; exit 1',
-                  inputs.ais_hipfile_pkg_filename,
-                  inputs.ais_hipfile_pkg_dev_filename
-                )
-              }}
+              case "${_AIS_PKG_MGR}" in
+                apt) apt install -y "./${_PKG_FILENAME}" "./${_PKG_DEV_FILENAME}" ;;
+                dnf) dnf install -y --cacheonly "./${_PKG_FILENAME}" "./${_PKG_DEV_FILENAME}" ;;
+                zypper) zypper --no-refresh install -y --allow-unsigned-rpm "./${_PKG_FILENAME}" "./${_PKG_DEV_FILENAME}" ;;
+                *) echo "Unknown platform."; exit 1 ;;
+              esac
             '
       # GitHub Build Artifacts do not preserve file permissions, namely the executable bit.
       - name: Fix file permissions on GTest executables

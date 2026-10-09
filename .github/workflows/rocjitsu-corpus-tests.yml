@@ -176,6 +176,7 @@ jobs:
             emulation/rocjitsu
             .github
             shared/machine-readable-isa/isa
+          persist-credentials: false
 
       - name: Checkout corpus
         if: matrix.run_simulator_corpus
@@ -184,6 +185,7 @@ jobs:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
           ref: ${{ github.event.inputs.corpus_ref || env.ROCJITSU_DBT_CORPUS_REF }}
           path: rocjitsu-test-corpus
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0

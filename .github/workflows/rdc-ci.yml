@@ -47,10 +47,11 @@ jobs:
       with:
         sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
         set-safe-directory: true
+        persist-credentials: false
 
     - name: Resolve runner labels
       id: runner
-      uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+      uses: $/.github/actions/rocprofiler-sdk-util/resolve-ci-config
 
   rdc_build:
     if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
@@ -61,11 +62,12 @@ jobs:
       TODAY: ${{ steps.metadata.outputs.TODAY }}
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       with:
         sparse-checkout: |
           projects/amdsmi
           projects/rdc
+        persist-credentials: false
 
     - name: Build metadata
       id: metadata
@@ -151,7 +153,7 @@ jobs:
         ldconfig
 
     - name: Cache .ccache
-      uses: actions/cache@v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: ~/.cache/ccache
         key: ${{ runner.os }}-rdc-ccache-${{ github.ref_name }}-${{ env.TODAY }}
@@ -200,7 +202,7 @@ jobs:
         make -C build -j $(nproc) install
 
     - name: Upload RDC packages
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: rdc-packages
         path: |
@@ -220,9 +222,10 @@ jobs:
     container: rocm/dev-ubuntu-22.04:7.2
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       with:
         sparse-checkout: projects/rdc
+        persist-credentials: false
 
     - name: Install test dependencies
       working-directory: .
@@ -234,7 +237,7 @@ jobs:
         pip3 install pytest prometheus_client
 
     - name: Download RDC packages
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
       with:
         name: rdc-packages
         path: /opt/
@@ -299,7 +302,7 @@ jobs:
 
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: rdc-test-results
         path: projects/rdc/build/test-results-*.xml
@@ -319,9 +322,10 @@ jobs:
       options: --device=/dev/kfd --device=/dev/dri --group-add video
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       with:
         sparse-checkout: projects/rdc
+        persist-credentials: false
 
     - name: Set up environment
       working-directory: .
@@ -333,7 +337,7 @@ jobs:
         pip3 install pytest prometheus_client
 
     - name: Download RDC packages
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
       with:
         name: rdc-packages
         path: /opt/
@@ -372,7 +376,7 @@ jobs:
 
     - name: Upload GPU test results
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: rdc-test-results-gpu
         path: projects/rdc/build/test-results-*.xml

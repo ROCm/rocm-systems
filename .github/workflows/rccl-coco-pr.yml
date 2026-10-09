@@ -58,9 +58,10 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           sparse-checkout: .github/actions/checkout-coco-harness
+          persist-credentials: false
 
       - name: Checkout the coco harness
-        uses: ./.github/actions/checkout-coco-harness
+        uses: $/.github/actions/checkout-coco-harness
         with:
           ref: ${{ inputs.coco_ref || 'main' }}
           path: _coco
@@ -106,9 +107,10 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           sparse-checkout: .github/actions/checkout-coco-harness
+          persist-credentials: false
 
       - name: Checkout the coco harness
-        uses: ./.github/actions/checkout-coco-harness
+        uses: $/.github/actions/checkout-coco-harness
         with:
           ref: ${{ inputs.coco_ref || 'main' }}
           path: _coco
@@ -143,7 +145,7 @@ jobs:
     name: Ruby smoke (ruby64-rccl-pr-smoke)
     needs: ruby-setup
     if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
-    uses: ./.github/workflows/rccl-coco-run.yml
+    uses: $/.github/workflows/rccl-coco-run.yml
     permissions:
       contents: read
     secrets:
@@ -168,7 +170,7 @@ jobs:
     name: OCI smoke (oci-rccl-pr-smoke)
     needs: oci-setup
     if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
-    uses: ./.github/workflows/rccl-coco-run.yml
+    uses: $/.github/workflows/rccl-coco-run.yml
     permissions:
       contents: read
     secrets:

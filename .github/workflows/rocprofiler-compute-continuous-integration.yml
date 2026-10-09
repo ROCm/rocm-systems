@@ -75,14 +75,15 @@ jobs:
       gfx1151_runner: ${{ steps.runner.outputs.gfx1151_runner }}
     steps:
       - name: Checkout workflow actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
           set-safe-directory: true
+          persist-credentials: false
 
       - name: Resolve runner labels
         id: runner
-        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+        uses: $/.github/actions/rocprofiler-sdk-util/resolve-ci-config
 
   prepare_matrix:
     needs: ci_config
@@ -93,9 +94,10 @@ jobs:
       matrix: ${{ steps.generate_matrix.outputs.matrix }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: projects/rocprofiler-compute/.github
+          persist-credentials: false
 
       - name: Generate and output matrix
         id: generate_matrix
@@ -159,12 +161,13 @@ jobs:
         --pull always
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event_name == 'schedule' && 'rocprofiler-compute-develop' || github.ref }}
           sparse-checkout: |
             projects/rocprofiler-compute
             shared/ctest
+          persist-credentials: false
 
       - name: Setup Environment
         id: setup_env
@@ -251,17 +254,20 @@ jobs:
         continue-on-error: true
         timeout-minutes: ${{ steps.setup_env.outputs.mode == 'Nightly' && 120 || 90 }}
         working-directory: projects/rocprofiler-compute
+        env:
+          CI_MODE: ${{ steps.setup_env.outputs.mode }}
+          ADD_COVERAGE: ${{ steps.setup_env.outputs.add_coverage }}
         run: |
           set -e
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
           git config --global --add safe.directory ${PWD}
           python3 ./tools/run-ci.py \
-            --name "ROCm/rocprofiler-compute-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}" \
-            --actor "${{ github.actor }}" \
+            --name "ROCm/rocprofiler-compute-${GITHUB_REF_NAME}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}" \
+            --actor "${GITHUB_ACTOR}" \
             --site ${{ matrix.system.runner }} \
-            --mode ${{ steps.setup_env.outputs.mode }} \
+            --mode "${CI_MODE}" \
             --build-jobs 16 \
-            ${{ steps.setup_env.outputs.add_coverage }} \
+            ${ADD_COVERAGE:+"${ADD_COVERAGE}"} \
             -- \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${ROCM_PATH}" \
@@ -274,7 +280,7 @@ jobs:
 
       - name: Upload Test Logs (on failure)
         if: steps.test.outcome == 'failure'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: failed-test-logs-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.arch }}
           path: |

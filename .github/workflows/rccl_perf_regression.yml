@@ -56,7 +56,6 @@ env:
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   build:
@@ -80,19 +79,20 @@ jobs:
       config_json: ${{ steps.resolve.outputs.config_json }}
     steps:
       - name: Checkout PR (full history)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           # github.sha/github.ref point at the PR's synthetic merge commit on
           # pull_request events, not the PR head -- use the head SHA directly
           # so candidate == PR head exactly (matters for merge-base diffing).
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Detect changed paths
         id: paths
         if: github.event_name == 'pull_request'
         run: |
-          git diff --name-only origin/${{ github.base_ref }}...HEAD \
+          git diff --name-only "origin/${GITHUB_BASE_REF}...HEAD" \
             | grep -q '^projects/rccl/' \
             && echo "rccl_changed=1" >> "$GITHUB_OUTPUT" \
             || echo "rccl_changed=0" >> "$GITHUB_OUTPUT"
@@ -139,6 +139,9 @@ jobs:
 
   detect:
     needs: build
+    permissions:
+      contents: read
+      pull-requests: write
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # Serialise: the pinned calibration nodes can host only one A/B job at a
     # time, and thresholds are only valid there. Do NOT cancel in-progress (a
@@ -186,7 +189,7 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: rccl-ab-report
           path: |
@@ -205,13 +208,15 @@ jobs:
 
       - name: Gate on detector verdict
         if: always()
+        env:
+          DETECT_EXIT_CODE: ${{ steps.detect.outputs.exit_code }}
         run: |
           # submit_and_poll.sh exit codes: 0 = pass, 1 = regression detected,
           # 2 = submission/polling error (job never reached a terminal state).
           # steps.detect.outcome can't distinguish 1 from 2 -- continue-on-error
           # reports "failure" for any nonzero exit -- so branch on the exit
           # code we captured explicitly instead.
-          code="${{ steps.detect.outputs.exit_code }}"
+          code="${DETECT_EXIT_CODE}"
           if [[ "${code}" != "0" && "${code}" != "1" ]]; then
             echo "::error::Detector failed to run (SLURM submission/polling error or timeout, exit ${code}). Report on NFS may be stale — not gating on it."
             exit 2

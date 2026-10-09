@@ -99,7 +99,7 @@ jobs:
         apt-get install -y git
         git config --global --add safe.directory '*'
 
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         sparse-checkout: |
           .github/actions/rocprofiler-sdk-util
@@ -109,6 +109,7 @@ jobs:
           .github/workflows/rocprofiler-sdk-codeql.yml
           .github/workflows/rocprofiler-sdk-formatting.yml
         submodules: 'false'
+        persist-credentials: false
 
     - name: Init/Update submodules
       timeout-minutes: 15
@@ -130,7 +131,7 @@ jobs:
 
     # Initializes the CodeQL tools for scanning.
     - name: Initialize CodeQL
-      uses: github/codeql-action/init@v3
+      uses: github/codeql-action/init@9f759ee644a3e7c15c1390abf49868036c00067b # v3.38.3
       with:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
@@ -138,7 +139,7 @@ jobs:
 
     - name: Build ROCProfiler SDK Dependencies
       if: ${{ env.ENABLE_HIP_CLR_BUILD == 'true' }}
-      uses: ./.github/actions/rocprofiler-sdk-util
+      uses: $/.github/actions/rocprofiler-sdk-util
       with:
         rocm-path: ${{ env.ROCM_PATH }}
         gpu-target: 'gfx94X'
@@ -162,6 +163,6 @@ jobs:
         rm -rf ${EXCLUDED_PATHS}
 
     - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
+      uses: github/codeql-action/analyze@9f759ee644a3e7c15c1390abf49868036c00067b # v3.38.3
       with:
         category: "/language:${{matrix.language}}"

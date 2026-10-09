@@ -85,7 +85,8 @@ jobs:
       matrix:
         os: [Ubuntu22]
     container:
-      image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
+      # Image is set by the <os>_DOCKER_IMAGE repository variable.
+      image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }} # zizmor: ignore[unpinned-images]
       options: >-
         --rm --privileged
         --device=/dev/kfd
@@ -98,6 +99,8 @@ jobs:
       # --------------------------------------------------------
       - name: Checkout Super-repo
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Mark workspace safe for git
         run: git config --global --replace-all safe.directory "$GITHUB_WORKSPACE"

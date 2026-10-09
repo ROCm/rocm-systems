@@ -69,6 +69,7 @@ jobs:
           path: "prejob"
           repository: "ROCm/TheRock"
           ref: a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05 # 2026-09-21
+          persist-credentials: false
 
       # Checkout failure is possible on Windows, as it's the first job on a GPU test runner.
       # Post-job cleanup isn't necessary since no executables are launched in this job.
@@ -82,6 +83,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           ref: a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05 # 2026-09-21
+          persist-credentials: false
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -89,6 +91,7 @@ jobs:
           repository: ROCm/therock-ci-config
           ref: main
           path: ci-config
+          persist-credentials: false
         continue-on-error: true
 
       - name: Setting up Python
@@ -102,13 +105,14 @@ jobs:
           AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
           WINDOWS_HIP_ROCR_TESTS: ${{ contains(inputs.projects_to_test, 'hip-tests') }}
           CI_CONFIG_PATH: ci-config
+          TARGET_PLATFORM: ${{ inputs.platform }}
         id: configure
-        run: python ./build_tools/github_actions/fetch_test_configurations.py --platform ${{ inputs.platform }}
+        run: python ./build_tools/github_actions/fetch_test_configurations.py --platform ${TARGET_PLATFORM}
 
   test_sanity_check:
     name: 'Test Sanity Check'
     needs: configure_test_matrix
-    uses: './.github/workflows/therock-test-component.yml'
+    uses: '$/.github/workflows/therock-test-component.yml'
     with:
       artifact_run_id: ${{ inputs.artifact_run_id }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
@@ -132,7 +136,7 @@ jobs:
       fail-fast: false
       matrix:
         components: ${{ fromJSON(needs.configure_test_matrix.outputs.components) }}
-    uses: './.github/workflows/therock-test-component.yml'
+    uses: '$/.github/workflows/therock-test-component.yml'
     with:
       artifact_run_id: ${{ inputs.artifact_run_id }}
       amdgpu_families: ${{ inputs.amdgpu_families }}

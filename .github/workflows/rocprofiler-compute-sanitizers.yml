@@ -65,14 +65,15 @@ jobs:
       gfx950_runner: ${{ steps.runner.outputs.gfx950_runner }}
     steps:
       - name: Checkout workflow actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
           set-safe-directory: true
+          persist-credentials: false
 
       - name: Resolve runner labels
         id: runner
-        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+        uses: $/.github/actions/rocprofiler-sdk-util/resolve-ci-config
 
   sanitizer:
     name: ${{ matrix.sanitizer.name }}
@@ -105,11 +106,12 @@ jobs:
         --env-file /etc/podinfo/gha-gpu-isolation-settings
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             projects/rocprofiler-compute
             shared/ctest
+          persist-credentials: false
 
       - name: Install dependencies
         shell: bash
@@ -172,6 +174,8 @@ jobs:
         continue-on-error: true
         working-directory: projects/rocprofiler-compute
         shell: bash
+        env:
+          GFX950_RUNNER: ${{ needs.ci_config.outputs.gfx950_runner }}
         run: |
           set -e
           git config --global --add safe.directory "${GITHUB_WORKSPACE}"
@@ -181,9 +185,9 @@ jobs:
           cxx_compiler="$(command -v amdclang++)"
 
           python3 ./tools/run-ci.py \
-            --name "ROCm/rocprofiler-compute-${{ github.ref_name }}-ubuntu-24.04-${{ matrix.sanitizer.name }}" \
-            --actor "${{ github.actor }}" \
-            --site ${{ needs.ci_config.outputs.gfx950_runner }} \
+            --name "ROCm/rocprofiler-compute-${GITHUB_REF_NAME}-ubuntu-24.04-${{ matrix.sanitizer.name }}" \
+            --actor "${GITHUB_ACTOR}" \
+            --site ${GFX950_RUNNER} \
             --mode Continuous \
             --build-jobs 16 \
             --repeat-until-pass 1 \

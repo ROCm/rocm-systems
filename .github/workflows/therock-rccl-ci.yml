@@ -49,12 +49,14 @@ jobs:
       - name: "Determine test scope"
         id: scope
         shell: bash
+        env:
+          INPUT_TEST_SCOPE: ${{ inputs.test_scope || 'smoke' }}
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ] && [ "$(date -u +%u)" = "6" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "schedule" ] && [ "$(date -u +%u)" = "6" ]; then
             echo "test_scope=all" >> "$GITHUB_OUTPUT"
             echo "Saturday scheduled run — full test suite"
           else
-            echo "test_scope=${{ inputs.test_scope || 'smoke' }}" >> "$GITHUB_OUTPUT"
+            echo "test_scope=${INPUT_TEST_SCOPE}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: "Checking out repository"
@@ -62,6 +64,7 @@ jobs:
         with:
           # We need the parent commit to do a diff
           fetch-depth: 2
+          persist-credentials: false
 
       - name: "Detect RCCL file changes"
         id: rccl_check
@@ -95,7 +98,7 @@ jobs:
       fail-fast: false
       matrix:
         amdgpu_family: [gfx94X-dcgpu, gfx950-dcgpu]
-    uses: ./.github/workflows/therock-rccl-ci-linux.yml
+    uses: $/.github/workflows/therock-rccl-ci-linux.yml
     secrets:
       RCCL_CI_TEAMS_WEBHOOK: ${{ secrets.RCCL_CI_TEAMS_WEBHOOK }}
     with:
@@ -125,9 +128,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Output failed jobs
+        env:
+          NEEDS_JSON: ${{ toJson(needs) }}
         run: |
-          echo '${{ toJson(needs) }}'
-          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
+          echo "${NEEDS_JSON}"
+          FAILED_JOBS="$(echo "${NEEDS_JSON}" \
             | jq --raw-output \
             'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
           )"

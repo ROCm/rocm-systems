@@ -60,25 +60,27 @@ jobs:
         with:
           sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
           set-safe-directory: true
+          persist-credentials: false
 
       - name: Resolve runner labels
         id: runner
-        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+        uses: $/.github/actions/rocprofiler-sdk-util/resolve-ci-config
 
   build-docs:
     runs-on: ubuntu-latest
-    container: continuumio/miniconda3
+    container: continuumio/miniconda3@sha256:eca594d684f495c1a02beff33a9fab53aec8c5830eaf431bb149912dc6c9e4c1 # latest
     permissions:
       contents: read
       pages: write
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: projects/rocprofiler-sdk
           submodules: false
           set-safe-directory: true
+          persist-credentials: false
       - name: Init/Update submodules
         timeout-minutes: 15
         continue-on-error: true
@@ -137,7 +139,7 @@ jobs:
           echo "PATH=/usr/bin:$PATH" >> "$GITHUB_ENV"
 
       - name: Clone ROCProfiler SDK & HIP/CLR & ROCR-Runtime
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             .github/actions/rocprofiler-sdk-util
@@ -148,6 +150,7 @@ jobs:
             projects/hrr
           submodules: false
           set-safe-directory: true
+          persist-credentials: false
 
       - name: Configure safe directory
         run: |
@@ -189,7 +192,7 @@ jobs:
           python3 -m pip install --upgrade cmake==${{ env.CMAKE_VERSION_DEB }}
 
       - name: Build ROCProfiler SDK Dependencies
-        uses: ./.github/actions/rocprofiler-sdk-util
+        uses: $/.github/actions/rocprofiler-sdk-util
         with:
           rocm-path: ${{ env.ROCM_PATH }}
           python-venv-path: ${{ env.PYTHON_VENV_PATH }}

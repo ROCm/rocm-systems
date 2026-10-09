@@ -50,11 +50,14 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           ref: a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05 # 2026-09-21
+          persist-credentials: false
 
       # Centralized arch-specific configuration
       - name: Set arch-specific paths
+        env:
+          INPUTS_AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
         run: |
-          case "${{ inputs.amdgpu_families }}" in
+          case "${INPUTS_AMDGPU_FAMILIES}" in
             gfx950-dcgpu)
               echo "OUTPUT_ARTIFACTS_DIR=/apps/cvs_tests/dist_new/dist/rocm" >> $GITHUB_ENV
               echo "AWS_SHARED_CREDENTIALS_FILE=/apps/cvs_tests/awsconfig/credentials.ini" >> $GITHUB_ENV
@@ -70,7 +73,7 @@ jobs:
               ;;
 
             *)
-              echo "Unsupported arch: ${{ inputs.amdgpu_families }}"
+              echo "Unsupported arch: ${INPUTS_AMDGPU_FAMILIES}"
               exit 1
               ;;
           esac
@@ -92,7 +95,8 @@ jobs:
           fuser -vm "${OUTPUT_ARTIFACTS_DIR}" || true
 
       - name: Run setup test environment workflow
-        uses: './.github/actions/setup_test_environment'
+        # TheRock's action, from the TheRock checkout at the workspace root.
+        uses: './.github/actions/setup_test_environment' # zizmor: ignore[self-repository]
         with:
           ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
           AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
@@ -131,11 +135,13 @@ jobs:
       - name: Post test report upload
         if: always()
         working-directory: ${{ github.workspace }}
+        env:
+          INPUTS_AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
         run: |
           export PYTHONPATH="${PYTHONPATH}:${{ github.workspace }}/build_tools"
           python3 build_tools/github_actions/upload_test_report_script.py \
             --run-id "${{ github.run_id }}" \
-            --amdgpu-family "${{ inputs.amdgpu_families }}" \
+            --amdgpu-family "${INPUTS_AMDGPU_FAMILIES}" \
             --report-path "${REPORT_PATH}" \
             --log-destination "${LOG_DEST}" \
             --index-file-name "index_rccl_test_report.html"

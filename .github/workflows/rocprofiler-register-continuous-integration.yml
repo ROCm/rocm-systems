@@ -51,10 +51,11 @@ jobs:
         with:
           sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
           set-safe-directory: true
+          persist-credentials: false
 
       - name: Resolve runner labels
         id: runner
-        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+        uses: $/.github/actions/rocprofiler-sdk-util/resolve-ci-config
 
   ci:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
@@ -125,11 +126,12 @@ jobs:
         apt update
         apt install -y git
 
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         sparse-checkout: projects/rocprofiler-register
         submodules: false
         set-safe-directory: true
+        persist-credentials: false
 
     - name: Init/Update submodules
       run: |
@@ -172,7 +174,7 @@ jobs:
       working-directory: projects/rocprofiler-register
       run:
         python3 ./scripts/run-ci.py -B build
-          --name ${{ github.repository_owner }}-${{ github.ref_name }}-azure-mi300x-${{ matrix.compiler }}${{ matrix.ci-tag }}
+          --name ${{ github.repository_owner }}-${GITHUB_REF_NAME}-azure-mi300x-${{ matrix.compiler }}${{ matrix.ci-tag }}
           --build-jobs 2
           --site GitHub
           ${{ matrix.ci-args }}

@@ -39,13 +39,14 @@ jobs:
           apt-get install -y --no-install-recommends git ca-certificates
           git --version
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/
             .gitmodules
           set-safe-directory: true
           submodules: true
+          persist-credentials: false
 
       - name: Install Packages
         timeout-minutes: 25
@@ -66,7 +67,7 @@ jobs:
             apt-get autoclean
 
       - name: Restore ccache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-ubuntu-noble-sanitizers-${{ github.job }}-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-${{ github.sha }}
@@ -156,7 +157,7 @@ jobs:
           echo "Sanitizer type: ${{ matrix.sanitizer-type }}"
           echo "Sanitizer CMake flags: ${SANITIZER_CMAKE_FLAGS}"
           python3 ./scripts/run-ci.py --stage generate \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer" \
             --build-jobs $(nproc) \
             --site GitHub \
             -B build \
@@ -198,7 +199,7 @@ jobs:
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: |
           python3 ./scripts/run-ci.py --stage configure \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer" \
             -B build
 
       - name: Build
@@ -210,7 +211,7 @@ jobs:
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: |
           python3 ./scripts/run-ci.py --stage build \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer" \
             -B build
 
       - name: CDash link
@@ -219,7 +220,7 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           python3 ./scripts/run-ci.py --stage cdash-link \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer"
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer"
 
       - name: Test
         timeout-minutes: 180
@@ -227,7 +228,7 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           python3 ./scripts/run-ci.py --stage test \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer" \
             --repeat-until-pass 1 \
             --repeat-after-timeout 1 \
             -B build
@@ -294,7 +295,7 @@ jobs:
 
       - name: Upload JUnit test results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: junit-sanitizer-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}
           path: projects/rocprofiler-systems/build/test-results.xml
@@ -303,13 +304,15 @@ jobs:
       - name: Write sanitizer summary status
         if: always()
         shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
         run: |
           mkdir -p sanitizer-summary
-          printf '{"sanitizer":"%s","status":"%s"}\n' '${{ matrix.sanitizer-type }}' '${{ job.status }}' > sanitizer-summary/${{ matrix.sanitizer-type }}.json
+          printf '{"sanitizer":"%s","status":"%s"}\n' '${{ matrix.sanitizer-type }}' "${JOB_STATUS}" > sanitizer-summary/${{ matrix.sanitizer-type }}.json
 
       - name: Upload sanitizer summary status
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sanitizer-summary-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}
           path: sanitizer-summary/${{ matrix.sanitizer-type }}.json
@@ -328,7 +331,7 @@ jobs:
       - name: CTest Artifacts
         if: failure()
         continue-on-error: True
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ctest-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}-log
           path: |
@@ -337,7 +340,7 @@ jobs:
       - name: Data Artifacts
         if: failure()
         continue-on-error: True
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: data-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}-files
           path: |

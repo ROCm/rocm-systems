@@ -41,6 +41,7 @@ jobs:
         with:
           # rocm-systems is a large monorepo; only fetch what the host tests need.
           sparse-checkout: projects/rccl
+          persist-credentials: false
 
       - name: Install build deps
         # The ROCm dev image ships hipcc/hipify but not cmake or a host toolchain.

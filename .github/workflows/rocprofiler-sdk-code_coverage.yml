@@ -96,10 +96,11 @@ jobs:
         with:
           sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
           set-safe-directory: true
+          persist-credentials: false
 
       - name: Resolve runner labels
         id: runner
-        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+        uses: $/.github/actions/rocprofiler-sdk-util/resolve-ci-config
 
   code-coverage:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
@@ -132,7 +133,7 @@ jobs:
 
     steps:
     - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
-      uses: actions/checkout@v6
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         sparse-checkout: |
           .github/actions/rocprofiler-sdk-util
@@ -146,6 +147,7 @@ jobs:
           projects/hipfile
         submodules: false
         set-safe-directory: true
+        persist-credentials: false
 
     - name: Compute submodule cache key
       id: submods
@@ -161,7 +163,7 @@ jobs:
         { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
     - name: Restore submodule cache
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           ${{ steps.submods.outputs.paths }}
@@ -175,25 +177,27 @@ jobs:
       run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
     - name: Clone ROCDecode
-      uses: actions/checkout@v6
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         repository: 'ROCm/rocDecode'
         ref: 'release/rocm-rel-7.0'
         set-safe-directory: true
         path: 'rocDecode'
+        persist-credentials: false
 
     - name: Clone ROCJPEG
-      uses: actions/checkout@v6
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         repository: 'ROCm/rocJPEG'
         ref: 'release/rocm-rel-7.0'
         set-safe-directory: true
         path: 'rocJPEG'
+        persist-credentials: false
 
     - name: Load Existing XML Code Coverage
       if: github.event_name == 'pull_request'
       id: load-coverage
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         key: ${{ github.event.pull_request.base.sha }}-codecov
         path: .codecov/**
@@ -236,7 +240,7 @@ jobs:
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
     - name: Build ROCProfiler SDK Dependencies
-      uses: ./.github/actions/rocprofiler-sdk-util
+      uses: $/.github/actions/rocprofiler-sdk-util
       with:
         rocm-path: ${{ env.ROCM_PATH }}
         python-venv-path: ${{ env.PYTHON_VENV_PATH }}
@@ -256,12 +260,14 @@ jobs:
       timeout-minutes: 30
       shell: bash
       working-directory: projects/rocprofiler-sdk
+      env:
+        GFX94X_RUNNER: ${{ needs.ci_config.outputs.gfx94x_runner }}
       run:
         source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate &&
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov
+          --name ${{ github.repository }}-${GITHUB_REF_NAME}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov
           --build-jobs 16
-          --site ${{ needs.ci_config.outputs.gfx94x_runner }}
+          --site ${GFX94X_RUNNER}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage all
           --run-attempt ${{ github.run_attempt }}
@@ -278,13 +284,15 @@ jobs:
       timeout-minutes: 30
       shell: bash
       working-directory: projects/rocprofiler-sdk
+      env:
+        GFX94X_RUNNER: ${{ needs.ci_config.outputs.gfx94x_runner }}
       run:
         source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate &&
         find build -type f | egrep '\.gcda$' | xargs rm &&
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-tests
+          --name ${{ github.repository }}-${GITHUB_REF_NAME}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-tests
           --build-jobs 16
-          --site ${{ needs.ci_config.outputs.gfx94x_runner }}
+          --site ${GFX94X_RUNNER}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage tests
           --run-attempt ${{ github.run_attempt }}
@@ -301,13 +309,15 @@ jobs:
       timeout-minutes: 30
       working-directory: projects/rocprofiler-sdk
       shell: bash
+      env:
+        GFX94X_RUNNER: ${{ needs.ci_config.outputs.gfx94x_runner }}
       run:
         source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate &&
         find build -type f | egrep '\.gcda$' | xargs rm &&
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-samples
+          --name ${{ github.repository }}-${GITHUB_REF_NAME}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-samples
           --build-jobs 16
-          --site ${{ needs.ci_config.outputs.gfx94x_runner }}
+          --site ${GFX94X_RUNNER}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage samples
           --run-attempt ${{ github.run_attempt }}
@@ -322,7 +332,7 @@ jobs:
 
     - name: Save XML Code Coverage
       id: save-coverage
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         key: ${{ github.sha }}-codecov
         path: |
@@ -378,7 +388,7 @@ jobs:
     - name: Write Code Coverage Comment
       if: github.event_name == 'pull_request'
       timeout-minutes: 10
-      uses: actions/github-script@v6
+      uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6.4.1
       env:
         COMMENT_BODY: |
           <details>
@@ -425,7 +435,7 @@ jobs:
 
     - name: Archive Code Coverage Data
       if: ${{ github.event_name == 'workflow_dispatch' }}
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: code-coverage-details
         path: |
