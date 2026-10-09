@@ -76,6 +76,8 @@ test_categories:
       - "TuningGeneralMicrotest.*"
       # tuning/tuning.cc
       - "TuningMicrotest.*"
+      # include/param/utils.h, include/param/parser_common.h
+      - "ParamUtilsMicrotest.*"
       # group.cc
       - "GroupEndInternalTest.*"
       - "ReclaimPlannerStateTest.*"

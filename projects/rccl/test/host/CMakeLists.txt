@@ -83,6 +83,7 @@ function(rccl_define_micro_source_lists)
     ras-param-test.cc                    # src/ras/ras_param.cc
     tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
+    param-utils-test.cc                  # src/include/param/utils.h, src/include/param/parser_common.h
     ras-client-test.cc
     group-test.cc
     devcomm-test.cc

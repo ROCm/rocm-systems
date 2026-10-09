@@ -167,6 +167,19 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     overrides, NVLS efficiency policy, and symmetric-kernel fallback. Its
     `ncclParamSingleProcMemRegEnable` resolves from `group.cc` via
     `group-test.cc`; do not add `fakes/group_fakes.cc` to this binary.
+  - `include/param/utils.h` and `include/param/parser_common.h`, from
+    `param-utils-test.cc`; suite `ParamUtilsMicrotest.*`. Header-only, no
+    `_CC_PATH` macro needed. Covers `ncclParamTypeIdOf<T>`'s per-type mapping
+    and RAW fallback, `flagsStr`'s private-prefix/flag-ordering/comma-joining,
+    the `srcDefault`/`srcEnvPlugin` labels, `stringFormat` (including an
+    output longer than the dry-run `snprintf` stack estimate),
+    `iequals`/`trim`/`split`, the `ncclParamParser<T>` function-pointer-trio
+    wrapper and its explicit-`bool` truthiness, and `makeOption(s)` /
+    `ncclOptionSetAssertUnique`'s duplicate-name `WARN` (captured via
+    `../common/LogCapture.hpp`). First PR in the AICOMRCCL-2820 stacked
+    chain; the rest of `src/param/*` and `src/include/param/*.h` (the typed
+    registry, the remaining parsers, the C API, and env loading) are covered
+    by its follow-ups.
   - `misc/gdr_probe.cc` (`GDR_PROBE_CC_PATH`, from `gdr-probe-test.cc`); suite
     `GdrProbeTest.*`. Covers `ncclIbProbeGdrSupport`, the runtime GPU
     memory-registration fallback behind the sysfs peer-memory scan: the result
