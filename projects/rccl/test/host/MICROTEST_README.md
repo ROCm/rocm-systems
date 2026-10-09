@@ -249,8 +249,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `ENABLE_WARP_SPEED` is deliberately absent: all eleven files are free of it.
   See `test_categories_micro_taskprep.yaml`.
 - **`rccl-UnitTestsMicroGinHost`** — `gin/gin_host.cc` (`GIN_HOST_CC_PATH`, from
-  `gin-host-test.cc`); suites `GinHost*` (one per entry point, listed in the
-  test file's header comment). Covers every function in the file: type
+  `gin-host-test.cc`); suites `GinHost<EntryPoint>Microtest`, one per entry
+  point. Covers every function in the file: type
   negotiation, signal-requirement validation, `ncclGinConnectOnce` (including
   NVIDIA/nccl#2279 `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment and the
   strided team a rail-only comm connects), devComm setup (per-backend version

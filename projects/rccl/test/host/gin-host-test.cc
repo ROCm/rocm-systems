@@ -5,28 +5,10 @@
  ************************************************************************/
 
 // Host-only microtests for src/gin/gin_host.cc -- every function in the file
-// (AICOMRCCL-2642). The suites, in file order:
-//
-//   GinHostTest                        GIN_PROXY_NTHREADS (NVIDIA/nccl#2279,
-//                                      AICOMRCCL-2017): per-thread endpoint
-//                                      assignment, ginCommCount bump,
-//                                      writer-priority list lock, and
-//                                      progress-thread lifecycle.
-//   GinHostProxyAffinityMicrotest      the proxy-thread CPU affinity pin each
-//                                      worker applies (AICOMRCCL-1859); the
-//                                      comm->cpuAffinity stash that feeds it is
-//                                      in GinHostDevCommSetupMicrotest.
-//   GinHostTypeQueryMicrotest          ncclGetGinType / ncclGetRailedGinType.
-//   GinHostSignalRequestMicrotest      ncclGinValidateSignalRequest.
-//   GinHostConnectOnceMicrotest        ncclGinConnectOnce refusals, plugin
-//                                      failures, and the strided team.
-//   GinHostBackendSelectMicrotest      ncclGinDevCommSetup backend selection.
-//   GinHostDevCommSetupMicrotest       ncclGinDevCommSetup config, strides, and
-//                                      failure cleanup.
-//   GinHostDevCommFreeMicrotest        ncclGinDevCommFree lookup failures.
-//   GinHostFinalizeMicrotest           ncclGinHostFinalize.
-//   GinHostRegisterMicrotest           ncclGinRegister / ncclGinDeregister.
-//   GinHostQueryLastErrorMicrotest     ncclGinQueryLastError.
+// (AICOMRCCL-2642). Each suite is named GinHost<EntryPoint>Microtest after the
+// entry point it covers and is introduced by its own banner comment below; the
+// suites are not listed here, so there is one place to keep current rather than
+// a copy of the file's own table of contents.
 //
 // Own binary (rccl-UnitTestsMicroGinHost): gin-plugin-init-test.cc already defines
 // ncclParamGinEnable in rccl-UnitTestsMicro, and gin_fakes.cc supplies
@@ -367,7 +349,7 @@ struct FakeGin {
   }
 };
 
-class GinHostTest : public ::testing::Test {
+class GinHostFixture : public ::testing::Test {
  protected:
   FakeGin fake_;
   ncclGin_t vtable_{};
@@ -502,8 +484,13 @@ JoinThreadsOnExit progressWorkers(ncclGinState* gs) {
   return JoinThreadsOnExit([gs] { stopProgress(gs); });
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// ncclGinConnectOnce -- GIN_PROXY_NTHREADS (NVIDIA/nccl#2279, AICOMRCCL-2017)
+
+class GinHostProxyNthreadsMicrotest : public GinHostFixture {};
+
 // Unset GIN_PROXY_NTHREADS → proxyNthreads and ginCommCount stay 1.
-TEST_F(GinHostTest, DefaultNthreadsIsOne) {
+TEST_F(GinHostProxyNthreadsMicrotest, ConnectOnce_ProxyNthreadsUnset_UsesOneThreadAndOneConnection) {
   g_loadParam = [](const char* env, int64_t deft) -> int64_t {
     if (std::strcmp(env, "GIN_ENABLE") == 0) return 1;
     return deft;
@@ -514,7 +501,7 @@ TEST_F(GinHostTest, DefaultNthreadsIsOne) {
 }
 
 // GIN_PROXY_NTHREADS<=0 is treated as 1; no extra progress threads.
-TEST_F(GinHostTest, ZeroAndNegativeNthreadsStayAtOne) {
+TEST_F(GinHostProxyNthreadsMicrotest, ConnectOnce_ProxyNthreadsNotPositive_UsesOneThread) {
   nthreadsParam_ = 0;
   ASSERT_EQ(ncclSuccess, connectOnce());
   EXPECT_EQ(1, gin()->proxyNthreads);
@@ -526,7 +513,7 @@ TEST_F(GinHostTest, ZeroAndNegativeNthreadsStayAtOne) {
 }
 
 // GIN_PROXY_NTHREADS>4 is clamped to NCCL_GIN_MAX_CONNECTIONS (4).
-TEST_F(GinHostTest, ClampNthreadsToMaxConnections) {
+TEST_F(GinHostProxyNthreadsMicrotest, ConnectOnce_ProxyNthreadsAboveMax_ClampsToMaxConnections) {
   nthreadsParam_ = 100;
   ASSERT_EQ(ncclSuccess, connectOnce());
   EXPECT_EQ(NCCL_GIN_MAX_CONNECTIONS, gin()->proxyNthreads);
@@ -534,7 +521,7 @@ TEST_F(GinHostTest, ClampNthreadsToMaxConnections) {
 }
 
 // nthreads=4 with 1 local GIN dev → ginCommCount raised to 4 before AllGather.
-TEST_F(GinHostTest, BumpsGinCommCountToMatchNthreads) {
+TEST_F(GinHostProxyNthreadsMicrotest, ConnectOnce_FewerLocalDevsThanThreads_RaisesGinCommCountToNthreads) {
   nthreadsParam_ = 4;
   g_nLocalGinDevs = 1;
   ASSERT_EQ(ncclSuccess, connectOnce());
@@ -543,7 +530,7 @@ TEST_F(GinHostTest, BumpsGinCommCountToMatchNthreads) {
 }
 
 // GIN_NCONNECTIONS=2 then GIN_PROXY_NTHREADS=4 → ginCommCount is 4, not 2.
-TEST_F(GinHostTest, NthreadsWinsOverGinNconnections) {
+TEST_F(GinHostProxyNthreadsMicrotest, ConnectOnce_NconnectionsBelowNthreads_GinCommCountFollowsNthreads) {
   nthreadsParam_ = 4;
   nconnParam_ = 2;
   ASSERT_EQ(ncclSuccess, connectOnce());
@@ -551,8 +538,13 @@ TEST_F(GinHostTest, NthreadsWinsOverGinNconnections) {
   EXPECT_EQ(4, gin()->backends[0].ginCommCount);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// ncclGinProgress -- which connections a progress thread polls
+
+class GinHostProgressMicrotest : public GinHostFixture {};
+
 // 2 threads × 4 connections: thread t only progresses connections t, t+2, …
-TEST_F(GinHostTest, RoundRobinOwnership) {
+TEST_F(GinHostProgressMicrotest, Progress_MultipleThreads_EachThreadOwnsItsStridedConnections) {
   attachProgressList(/*ginCommCount=*/4, /*proxyNthreads=*/2, {1, 1, 1, 1});
   auto* gs = gin();
   {
@@ -582,7 +574,7 @@ TEST_F(GinHostTest, RoundRobinOwnership) {
 }
 
 // needsProxyProgress=0 (GDA/Anvil) slot is never passed to ginProgress.
-TEST_F(GinHostTest, SkipsConnectionsThatDoNotNeedProxyProgress) {
+TEST_F(GinHostProgressMicrotest, Progress_ConnectionWithoutProxyProgress_IsNeverProgressed) {
   attachProgressList(2, 1, {1, 0});
   auto* gs = gin();
   {
@@ -595,7 +587,7 @@ TEST_F(GinHostTest, SkipsConnectionsThatDoNotNeedProxyProgress) {
 }
 
 // writePending=true: progress thread yields (0 ginProgress) until the flag clears.
-TEST_F(GinHostTest, WritePendingBacksOffReaders) {
+TEST_F(GinHostProgressMicrotest, Progress_WritePendingSet_StopsProgressingUntilItClears) {
   attachProgressList(1, 1, {1});
   auto* gs = gin();
   gs->writePending.store(true);
@@ -616,7 +608,7 @@ TEST_F(GinHostTest, WritePendingBacksOffReaders) {
 }
 
 // ginProgress returning ncclSystemError stores it in asyncResult and the thread exits.
-TEST_F(GinHostTest, ProgressErrorSetsAsyncResultAndExits) {
+TEST_F(GinHostProgressMicrotest, Progress_PluginProgressFails_StoresTheStatusInAsyncResultAndExits) {
   attachProgressList(1, 1, {1});
   fake_.slots[0]->progressResult = ncclSystemError;
   auto* gs = gin();
@@ -632,8 +624,13 @@ TEST_F(GinHostTest, ProgressErrorSetsAsyncResultAndExits) {
   freeProgressList();
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// Progress-thread lifecycle across ncclGinDevCommSetup / ncclGinDevCommFree
+
+class GinHostProgressThreadsMicrotest : public GinHostFixture {};
+
 // First PROXY DevCommCreate starts exactly nthreads joinable progress threads.
-TEST_F(GinHostTest, FirstProxyDevCommStartsThreads) {
+TEST_F(GinHostProgressThreadsMicrotest, DevCommSetup_FirstProxyDevComm_StartsOneJoinableThreadPerProxyNthread) {
   nthreadsParam_ = 2;
   ASSERT_EQ(ncclSuccess, connectOnce());
   ncclDevComm devComm{};
@@ -648,7 +645,7 @@ TEST_F(GinHostTest, FirstProxyDevCommStartsThreads) {
 }
 
 // GDA DevComm first (no threads), then PROXY DevComm starts them (kgioioso hang).
-TEST_F(GinHostTest, GdaThenProxyStartsThreadsOnSecondDevComm) {
+TEST_F(GinHostProgressThreadsMicrotest, DevCommSetup_EarlierDevCommNeededNoProxyProgress_StartsThreadsOnTheFirstProxyDevComm) {
   nthreadsParam_ = 1;
   ASSERT_EQ(ncclSuccess, connectOnce());
 
@@ -670,7 +667,7 @@ TEST_F(GinHostTest, GdaThenProxyStartsThreadsOnSecondDevComm) {
 }
 
 // DevCommFree unlinks that ctx; ginProgress stops on it while the sibling still runs.
-TEST_F(GinHostTest, FreeUnlinksAndStopsProgressingDestroyedCtx) {
+TEST_F(GinHostProgressThreadsMicrotest, DevCommFree_OneOfTwoDevComms_StopsProgressingOnlyTheFreedContext) {
   nthreadsParam_ = 1;
   ASSERT_EQ(ncclSuccess, connectOnce());
   auto reqs = proxyReqs();
@@ -699,54 +696,8 @@ TEST_F(GinHostTest, FreeUnlinksAndStopsProgressingDestroyedCtx) {
   ASSERT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &keep));
 }
 
-// HostFinalize joins every progress thread before it returns. A worker held
-// inside ginProgress makes that join visible: deleting the join would let
-// finalize return while the worker is still in the call. The post-join memset
-// of ginState cannot be used instead, because it stops progress even if the
-// threads were never joined.
-TEST_F(GinHostTest, FinalizeJoinsAllProgressThreads) {
-  nthreadsParam_ = 2;
-  ASSERT_EQ(ncclSuccess, connectOnce());
-  ncclDevComm devComm{};
-  auto reqs = proxyReqs();
-  reqs.ginContextCount = gin()->backends[0].ginCommCount;
-  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, &devComm, NCCL_VERSION_CODE));
-  ASSERT_TRUE(gin()->thread[0].joinable());
-  ASSERT_TRUE(gin()->thread[1].joinable());
-
-  struct ncclGinStateDevComm* dc = gin()->devComms;
-  gin()->connected = true;
-  fake_.holdProgress.store(1, std::memory_order_release);
-  ASSERT_TRUE(waitUntil([&] { return fake_.progressHolders.load(std::memory_order_acquire) > 0; }))
-      << "no progress thread entered ginProgress";
-
-  std::atomic<bool> finalizeDone{false};
-  ncclResult_t finalizeSt = ncclInternalError;
-  std::thread fin([&] {
-    finalizeSt = ncclGinHostFinalize(comm());
-    finalizeDone.store(true, std::memory_order_release);
-  });
-  // Release the held worker and join finalize on every exit, including a fatal
-  // ASSERT.
-  ScopeExit finalizeGuard([&] {
-    fake_.holdProgress.store(0, std::memory_order_release);
-    if (fin.joinable()) fin.join();
-    restoreGinStateAfterFinalize();
-    std::free(dc);
-  });
-
-  ASSERT_TRUE(waitUntil([&] { return gin()->proxyThreadStopSignal.load(); }))
-      << "HostFinalize did not reach the progress-thread join";
-  EXPECT_FALSE(finalizeDone.load(std::memory_order_acquire))
-      << "HostFinalize returned while a worker was still inside ginProgress";
-  fake_.holdProgress.store(0, std::memory_order_release);
-  ASSERT_TRUE(waitUntil([&] { return finalizeDone.load(std::memory_order_acquire); }))
-      << "HostFinalize did not return after the worker left ginProgress";
-  EXPECT_EQ(ncclSuccess, finalizeSt);
-}
-
 // nthreads=4 but AllGather ginCommCount=2: threads 2 and 3 never call ginProgress.
-TEST_F(GinHostTest, IdleExtraThreadsNeverCallGinProgress) {
+TEST_F(GinHostProgressMicrotest, Progress_ThreadIndexBeyondTheConnectionCount_ProgressesNothing) {
   nthreadsParam_ = 4;
   comm_->nRanks = 2;
   g_peerGinCommCount = 2;
@@ -768,6 +719,10 @@ TEST_F(GinHostTest, IdleExtraThreadsNeverCallGinProgress) {
   }
   freeProgressList();
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// ncclGinProgress -- the proxy-thread CPU affinity pin (AICOMRCCL-1859). The
+// comm->cpuAffinity stash that feeds it is in GinHostDevCommSetupMicrotest.
 
 class GinHostProxyAffinityMicrotest : public ::testing::Test {
 protected:
@@ -815,44 +770,59 @@ TEST_F(GinHostProxyAffinityMicrotest, EmptyAffinity_LeavesProxyThreadAffinityUnc
 ////////////////////////////////////////////////////////////////////////////////
 // ncclGetGinType / ncclGetRailedGinType
 
-class GinHostTypeQueryMicrotest : public GinHostTest {};
+class GinHostTypeQueryMicrotest : public GinHostFixture {};
 
-// Both accessors reject a missing comm or a missing out-parameter rather than
+// The accessor rejects a missing comm or a missing out-parameter rather than
 // dereferencing them.
-TEST_F(GinHostTypeQueryMicrotest, NullArgumentsRejected) {
+TEST_F(GinHostTypeQueryMicrotest, GetGinType_NullCommOrOutParameter_ReturnsInternalError) {
   ncclGinType_t type = NCCL_GIN_TYPE_NONE;
   EXPECT_EQ(ncclInternalError, ncclGetGinType(nullptr, &type));
   EXPECT_EQ(ncclInternalError, ncclGetGinType(comm(), nullptr));
+}
+
+TEST_F(GinHostTypeQueryMicrotest, GetRailedGinType_NullCommOrOutParameter_ReturnsInternalError) {
+  ncclGinType_t type = NCCL_GIN_TYPE_NONE;
   EXPECT_EQ(ncclInternalError, ncclGetRailedGinType(nullptr, &type));
   EXPECT_EQ(ncclInternalError, ncclGetRailedGinType(comm(), nullptr));
 }
 
-// ncclGetGinType answers for all-to-all reachability: only a FULL comm has it.
-TEST_F(GinHostTypeQueryMicrotest, GinTypeNeedsFullConnectivity) {
+// ncclGetGinType answers for all-to-all reachability, which a FULL comm has.
+TEST_F(GinHostTypeQueryMicrotest, GetGinType_FullyConnectedComm_ReportsTheBackendType) {
   gin()->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  comm_->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
 
   ncclGinType_t type = NCCL_GIN_TYPE_NONE;
-  comm_->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
   ASSERT_EQ(ncclSuccess, ncclGetGinType(comm(), &type));
   EXPECT_EQ(NCCL_GIN_TYPE_ANVIL_SDMA, type);
+}
 
-  // A rail-only comm cannot reach every peer, so it reports no GIN at all.
+// A rail-only comm cannot reach every peer, so it reports no GIN at all.
+TEST_F(GinHostTypeQueryMicrotest, GetGinType_RailOnlyComm_ReportsNoGin) {
+  gin()->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
   comm_->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+
+  ncclGinType_t type = NCCL_GIN_TYPE_NONE;
   ASSERT_EQ(ncclSuccess, ncclGetGinType(comm(), &type));
   EXPECT_EQ(NCCL_GIN_TYPE_NONE, type);
 }
 
-// ncclGetRailedGinType answers for rail reachability, so anything but NONE
-// reports the backend's type -- including the RAIL case the accessor above hides.
-TEST_F(GinHostTypeQueryMicrotest, RailedGinTypeAcceptsRailConnectivity) {
+// ncclGetRailedGinType answers for rail reachability, so it reports the
+// backend's type for the RAIL case the accessor above hides.
+TEST_F(GinHostTypeQueryMicrotest, GetRailedGinType_RailConnectedComm_ReportsTheBackendType) {
   gin()->backends[0].ginType = NCCL_GIN_TYPE_GDAKI;
+  comm_->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
 
   ncclGinType_t type = NCCL_GIN_TYPE_NONE;
-  comm_->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
   ASSERT_EQ(ncclSuccess, ncclGetRailedGinType(comm(), &type));
   EXPECT_EQ(NCCL_GIN_TYPE_GDAKI, type);
+}
 
+// A comm with no GIN connectivity at all has no rail reachability either.
+TEST_F(GinHostTypeQueryMicrotest, GetRailedGinType_UnconnectedComm_ReportsNoGin) {
+  gin()->backends[0].ginType = NCCL_GIN_TYPE_GDAKI;
   comm_->globalGinSupport = NCCL_GIN_CONNECTION_NONE;
+
+  ncclGinType_t type = NCCL_GIN_TYPE_NONE;
   ASSERT_EQ(ncclSuccess, ncclGetRailedGinType(comm(), &type));
   EXPECT_EQ(NCCL_GIN_TYPE_NONE, type);
 }
@@ -860,11 +830,11 @@ TEST_F(GinHostTypeQueryMicrotest, RailedGinTypeAcceptsRailConnectivity) {
 ////////////////////////////////////////////////////////////////////////////////
 // ncclGinValidateSignalRequest
 
-class GinHostSignalRequestMicrotest : public GinHostTest {};
+class GinHostSignalRequestMicrotest : public GinHostFixture {};
 
 // A backend is only a candidate if it supports every signal flavour the
 // requirements insist on.
-TEST_F(GinHostSignalRequestMicrotest, RejectsBackendMissingARequiredSignalFlavour) {
+TEST_F(GinHostSignalRequestMicrotest, ValidateSignalRequest_BackendMissingARequiredSignalFlavour_ReturnsInvalidUsage) {
   auto* backend = &gin()->backends[0];
   auto reqs = proxyReqs();
 
@@ -876,14 +846,24 @@ TEST_F(GinHostSignalRequestMicrotest, RejectsBackendMissingARequiredSignalFlavou
   reqs.ginVaSignalsRequired = true;
   backend->supportsVASignals = false;
   EXPECT_EQ(ncclInvalidUsage, ncclGinValidateSignalRequest(&reqs, backend));
+}
 
+// The mirror image of the refusals above: a backend that has every required
+// flavour is a candidate.
+TEST_F(GinHostSignalRequestMicrotest, ValidateSignalRequest_BackendSupportsEveryRequiredFlavour_ReturnsSuccess) {
+  auto* backend = &gin()->backends[0];
+  backend->supportsStrongSignals = true;
   backend->supportsVASignals = true;
+
+  auto reqs = proxyReqs();
+  reqs.ginStrongSignalsRequired = true;
+  reqs.ginVaSignalsRequired = true;
   EXPECT_EQ(ncclSuccess, ncclGinValidateSignalRequest(&reqs, backend));
 }
 
 // Signals that are not required are never checked, so a backend without them
 // still qualifies.
-TEST_F(GinHostSignalRequestMicrotest, IgnoresUnsupportedSignalsThatAreNotRequired) {
+TEST_F(GinHostSignalRequestMicrotest, ValidateSignalRequest_SignalsNotRequired_IgnoresTheBackendsLackOfThem) {
   auto* backend = &gin()->backends[0];
   backend->supportsStrongSignals = false;
   backend->supportsVASignals = false;
@@ -895,10 +875,10 @@ TEST_F(GinHostSignalRequestMicrotest, IgnoresUnsupportedSignalsThatAreNotRequire
 ////////////////////////////////////////////////////////////////////////////////
 // ncclGinConnectOnce -- refusals, plugin failures, and the strided team
 
-class GinHostConnectOnceMicrotest : public GinHostTest {};
+class GinHostConnectOnceMicrotest : public GinHostFixture {};
 
-// Connecting twice is a no-op: the second call never reaches the plugin.
-TEST_F(GinHostConnectOnceMicrotest, SecondCallIsANoOp) {
+// The second connect returns early: it never reaches the plugin again.
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_AlreadyConnected_DoesNotReachThePlugin) {
   ASSERT_EQ(ncclSuccess, connectOnce());
   const int devicesCalls = fake_.devicesCalls;
   ASSERT_GE(devicesCalls, 1);
@@ -908,7 +888,7 @@ TEST_F(GinHostConnectOnceMicrotest, SecondCallIsANoOp) {
 }
 
 // NCCL_GIN_ENABLE=0 is a hard refusal, not a silent fallback.
-TEST_F(GinHostConnectOnceMicrotest, DisabledByParamReturnsInternalError) {
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_GinDisabledByParam_ReturnsInternalError) {
   g_loadParam = [](const char* env, int64_t deft) -> int64_t {
     if (std::strcmp(env, "GIN_ENABLE") == 0) return 0;
     return deft;
@@ -919,7 +899,7 @@ TEST_F(GinHostConnectOnceMicrotest, DisabledByParamReturnsInternalError) {
 }
 
 // No backend was loaded for this comm: an invalid request, not an internal fault.
-TEST_F(GinHostConnectOnceMicrotest, UnsupportedCommReturnsInvalidUsage) {
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_NoBackendLoaded_ReturnsInvalidUsage) {
   gin()->supported = false;
   EXPECT_EQ(ncclInvalidUsage, connectOnce());
   EXPECT_FALSE(gin()->connected);
@@ -927,14 +907,14 @@ TEST_F(GinHostConnectOnceMicrotest, UnsupportedCommReturnsInvalidUsage) {
 
 // GIN windows are symmetric memory, so a comm without symmetric support cannot
 // host them.
-TEST_F(GinHostConnectOnceMicrotest, NoSymmetricSupportReturnsInternalError) {
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_CommWithoutSymmetricSupport_ReturnsInternalError) {
   comm_->symmetricSupport = false;
   EXPECT_EQ(ncclInternalError, connectOnce());
   EXPECT_FALSE(gin()->connected);
 }
 
 // A plugin that reports zero devices is rejected before any listen/connect.
-TEST_F(GinHostConnectOnceMicrotest, ZeroDevicesReturnsInternalError) {
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_PluginReportsZeroDevices_ReturnsInternalErrorBeforeListening) {
   fake_.ndev = 0;
   EXPECT_EQ(ncclInternalError, connectOnce());
   EXPECT_EQ(0, fake_.listenCalls);
@@ -943,7 +923,7 @@ TEST_F(GinHostConnectOnceMicrotest, ZeroDevicesReturnsInternalError) {
 
 // A failing devices() surfaces the plugin's own status, and stops the connect
 // before the backend is sized or anything is opened.
-TEST_F(GinHostConnectOnceMicrotest, DevicesFailurePropagates) {
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_DevicesFails_PropagatesTheStatusAndOpensNothing) {
   gin()->backends[0].ginCommCount = 7;  // poison: only a connect that got past devices() rewrites this
   fake_.failDevices = {ncclSystemError, 1};
 
@@ -957,7 +937,7 @@ TEST_F(GinHostConnectOnceMicrotest, DevicesFailurePropagates) {
 
 // More local GIN devices than connections: the extra devices are dropped rather
 // than overrunning the fixed-size connection arrays.
-TEST_F(GinHostConnectOnceMicrotest, ClampsLocalDevicesToMaxConnections) {
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_MoreLocalDevsThanMaxConnections_ClampsToMaxConnections) {
   g_nLocalGinDevs = NCCL_GIN_MAX_CONNECTIONS + 2;
   ASSERT_EQ(ncclSuccess, connectOnce());
   EXPECT_EQ(NCCL_GIN_MAX_CONNECTIONS, gin()->backends[0].ginCommCount);
@@ -966,7 +946,7 @@ TEST_F(GinHostConnectOnceMicrotest, ClampsLocalDevicesToMaxConnections) {
 
 // A failed connect releases the listen comm it was handed and leaves the state
 // disconnected, so a later retry starts clean.
-TEST_F(GinHostConnectOnceMicrotest, ConnectFailureClosesListenComm) {
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_ConnectFails_ClosesTheListenComm) {
   fake_.failConnect = {ncclSystemError, 1};
   EXPECT_EQ(ncclSystemError, connectOnce());
   EXPECT_EQ(1, fake_.closeListenCalls);
@@ -976,7 +956,7 @@ TEST_F(GinHostConnectOnceMicrotest, ConnectFailureClosesListenComm) {
 
 // Failing partway through closes the connections that already succeeded and
 // clears their slots.
-TEST_F(GinHostConnectOnceMicrotest, ConnectFailureClosesEarlierConnections) {
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_SecondConnectFails_ClosesTheEarlierConnection) {
   nthreadsParam_ = 2;  // two connections, so there is an earlier one to close
   fake_.failConnect = {ncclSystemError, 2};
   EXPECT_EQ(ncclSystemError, connectOnce());
@@ -987,15 +967,15 @@ TEST_F(GinHostConnectOnceMicrotest, ConnectFailureClosesEarlierConnections) {
 
 // A listen that fails hands back no listen comm, so the fail path must not try
 // to close one.
-TEST_F(GinHostConnectOnceMicrotest, ListenFailureSkipsCloseListen) {
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_ListenFails_DoesNotCloseAListenComm) {
   fake_.failListen = {ncclSystemError, 1};
   EXPECT_EQ(ncclSystemError, connectOnce());
   EXPECT_EQ(0, fake_.closeListenCalls);
 }
 
 // A topology query that fails stops the connect before the plugin is touched.
-TEST_F(GinHostConnectOnceMicrotest, TopologyQueryFailurePropagates) {
-  gin()->backends[0].ginCommCount = 7;  // poison, as in DevicesFailurePropagates
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_TopologyQueryFails_PropagatesTheStatusBeforeTouchingThePlugin) {
+  gin()->backends[0].ginCommCount = 7;  // poison, as in the devices() failure above
   g_failTopoGetLocalGinDevs = {ncclSystemError, 1};
 
   EXPECT_EQ(ncclSystemError, connectOnce());
@@ -1008,7 +988,7 @@ TEST_F(GinHostConnectOnceMicrotest, TopologyQueryFailurePropagates) {
 
 // A failed property query releases the listen comm that was opened for the same
 // connection.
-TEST_F(GinHostConnectOnceMicrotest, GetPropertiesFailureClosesListenComm) {
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_GetPropertiesFails_ClosesTheListenCommWithoutConnecting) {
   fake_.failGetProperties = {ncclInternalError, 1};
   EXPECT_EQ(ncclInternalError, connectOnce());
   EXPECT_EQ(1, fake_.closeListenCalls);
@@ -1017,7 +997,7 @@ TEST_F(GinHostConnectOnceMicrotest, GetPropertiesFailureClosesListenComm) {
 
 // Ranks agree on the connection count before connecting, so a failed exchange
 // stops the connect.
-TEST_F(GinHostConnectOnceMicrotest, ConnectionCountExchangeFailurePropagates) {
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_ConnectionCountExchangeFails_PropagatesTheStatusAndOpensNothing) {
   g_failBootstrapAllGather = {ncclSystemError, 1};
 
   EXPECT_EQ(ncclSystemError, connectOnce());
@@ -1034,7 +1014,7 @@ TEST_F(GinHostConnectOnceMicrotest, ConnectionCountExchangeFailurePropagates) {
 
 // Cleanup failures must not mask the failure that caused the cleanup: the
 // caller still sees why the connect failed.
-TEST_F(GinHostConnectOnceMicrotest, OriginalFailureSurvivesAFailingCleanup) {
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_CleanupAlsoFails_ReportsTheOriginalFailure) {
   fake_.failConnect = {ncclSystemError, 1};
   fake_.failCloseListen = {ncclInternalError, 1};
   EXPECT_EQ(ncclSystemError, connectOnce());
@@ -1043,7 +1023,7 @@ TEST_F(GinHostConnectOnceMicrotest, OriginalFailureSurvivesAFailingCleanup) {
 
 // A comm that is only rail-connected connects a strided team of one rank per
 // host instead of the world team.
-TEST_F(GinHostConnectOnceMicrotest, RailOnlyCommConnectsStridedTeam) {
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_RailOnlyComm_ConnectsOneRankPerHostTeam) {
   comm_->nRanks = 4;
   comm_->rank = 2;
   comm_->contiguousRanksPerHost = 2;
@@ -1060,12 +1040,12 @@ TEST_F(GinHostConnectOnceMicrotest, RailOnlyCommConnectsStridedTeam) {
 ////////////////////////////////////////////////////////////////////////////////
 // ncclGinDevCommSetup -- backend selection
 
-class GinHostBackendSelectMicrotest : public GinHostTest {
+class GinHostBackendSelectMicrotest : public GinHostFixture {
  protected:
   ncclDevComm devComm_{};
 
   void SetUp() override {
-    GinHostTest::SetUp();
+    GinHostFixture::SetUp();
     ASSERT_EQ(ncclSuccess, connectOnce());
   }
 
@@ -1075,12 +1055,12 @@ class GinHostBackendSelectMicrotest : public GinHostTest {
 
   void TearDown() override {
     if (gin()->devComms != nullptr) EXPECT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &devComm_));
-    GinHostTest::TearDown();
+    GinHostFixture::TearDown();
   }
 };
 
 // A type outside the enum is rejected before any backend is considered.
-TEST_F(GinHostBackendSelectMicrotest, OutOfRangeGinTypeRejected) {
+TEST_F(GinHostBackendSelectMicrotest, DevCommSetup_GinTypeOutOfRange_ReturnsInvalidUsageBeforeAnyBackendIsConsidered) {
   auto reqs = proxyReqs();
   reqs.ginType = NCCL_GIN_MAX_TYPES;
   EXPECT_EQ(ncclInvalidUsage, setup(reqs));
@@ -1088,22 +1068,29 @@ TEST_F(GinHostBackendSelectMicrotest, OutOfRangeGinTypeRejected) {
 }
 
 // NCCL_GIN_TYPE picks the backend when the requirements express no preference.
-TEST_F(GinHostBackendSelectMicrotest, EnvGinTypeSelectsBackendWhenRequirementsAreNeutral) {
+TEST_F(GinHostBackendSelectMicrotest, DevCommSetup_NeutralRequestAndEnvTypeMatchingALoadedBackend_SelectsThatBackend) {
   auto reqs = proxyReqs();
   reqs.ginType = NCCL_GIN_TYPE_NONE;
-
-  g_paramGinType = NCCL_GIN_TYPE_GDAKI;  // no GDAKI backend is loaded
-  EXPECT_EQ(ncclInternalError, setup(reqs));
-  EXPECT_EQ(0, fake_.createContextCalls);
-
   g_paramGinType = NCCL_GIN_TYPE_PROXY;  // matches the loaded backend
+
   EXPECT_EQ(ncclSuccess, setup(reqs));
   EXPECT_EQ(1, fake_.createContextCalls);
 }
 
+// NCCL_GIN_TYPE is a demand, not a hint: with no backend of that type loaded
+// the setup fails rather than falling back to the one that is.
+TEST_F(GinHostBackendSelectMicrotest, DevCommSetup_NeutralRequestAndEnvTypeWithNoLoadedBackend_ReturnsInternalError) {
+  auto reqs = proxyReqs();
+  reqs.ginType = NCCL_GIN_TYPE_NONE;
+  g_paramGinType = NCCL_GIN_TYPE_GDAKI;  // no GDAKI backend is loaded
+
+  EXPECT_EQ(ncclInternalError, setup(reqs));
+  EXPECT_EQ(0, fake_.createContextCalls);
+}
+
 // With no preference from either the requirements or the environment, the first
 // loaded backend is taken whatever its type.
-TEST_F(GinHostBackendSelectMicrotest, NeutralRequestAcceptsTheFirstLoadedBackend) {
+TEST_F(GinHostBackendSelectMicrotest, DevCommSetup_NeutralRequestAndNoEnvType_SelectsTheFirstLoadedBackend) {
   ASSERT_EQ(-1, g_paramGinType);  // NCCL_GIN_TYPE unset
   gin()->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
 
@@ -1115,7 +1102,7 @@ TEST_F(GinHostBackendSelectMicrotest, NeutralRequestAcceptsTheFirstLoadedBackend
 
 // A backend that cannot provide a required signal flavour is skipped, not failed
 // into.
-TEST_F(GinHostBackendSelectMicrotest, SkipsBackendThatFailsSignalValidation) {
+TEST_F(GinHostBackendSelectMicrotest, DevCommSetup_OnlyBackendFailsSignalValidation_ReturnsInternalErrorWithoutCreatingContexts) {
   gin()->backends[0].supportsStrongSignals = false;
   auto reqs = proxyReqs();
   reqs.ginStrongSignalsRequired = true;
@@ -1126,7 +1113,7 @@ TEST_F(GinHostBackendSelectMicrotest, SkipsBackendThatFailsSignalValidation) {
 
 // When the first candidate's setup fails, the next backend gets a turn and the
 // devComm records the one that worked.
-TEST_F(GinHostBackendSelectMicrotest, FallsBackToTheNextBackendOnSetupFailure) {
+TEST_F(GinHostBackendSelectMicrotest, DevCommSetup_FirstBackendsSetupFails_SucceedsOnTheNextBackend) {
   auto* gs = gin();
   gs->numActiveBackends = 2;
   gs->backends[1] = gs->backends[0];
@@ -1147,12 +1134,12 @@ TEST_F(GinHostBackendSelectMicrotest, FallsBackToTheNextBackendOnSetupFailure) {
 // signal gating in front of the per-backend setup still runs. The refusals whose
 // status the public entry point collapses reach the file-static setup instead --
 // see setupWithBackend below.
-class GinHostDevCommSetupMicrotest : public GinHostTest {
+class GinHostDevCommSetupMicrotest : public GinHostFixture {
  protected:
   ncclDevComm devComm_{};
 
   void SetUp() override {
-    GinHostTest::SetUp();
+    GinHostFixture::SetUp();
     auto* gs = gin();
     gs->proxyNthreads = 1;
     gs->proxyThreadStopSignal.store(true);  // any spawned worker exits immediately
@@ -1162,7 +1149,7 @@ class GinHostDevCommSetupMicrotest : public GinHostTest {
 
   void TearDown() override {
     if (gin()->devComms != nullptr) EXPECT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &devComm_));
-    GinHostTest::TearDown();
+    GinHostFixture::TearDown();
   }
 
   ncclResult_t setup(ncclDevCommRequirements const& reqs, ncclDevComm* devComm,
@@ -1193,7 +1180,7 @@ class GinHostDevCommSetupMicrotest : public GinHostTest {
 
 // The plugin is told which device-code ABI to speak, derived from the device
 // code's NCCL version and the backend's own compatibility table.
-TEST_F(GinHostDevCommSetupMicrotest, BackendVersionFollowsDeviceCodeVersionPerBackend) {
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_DeviceCodeVersionAndBackendType_SelectTheBackendAbiVersion) {
   struct Case {
     const char* label;
     ncclGinType_t ginType;
@@ -1227,7 +1214,7 @@ TEST_F(GinHostDevCommSetupMicrotest, BackendVersionFollowsDeviceCodeVersionPerBa
 }
 
 // A backend whose type has no compatibility table cannot be configured at all.
-TEST_F(GinHostDevCommSetupMicrotest, UnknownBackendTypeRejected) {
+TEST_F(GinHostDevCommSetupMicrotest, SetupWithBackend_BackendTypeWithoutAVersionTable_ReturnsInternalError) {
   gin()->backends[0].ginType = NCCL_GIN_TYPE_NONE;  // the sentinel, never a real backend
   auto reqs = proxyReqs();
   EXPECT_EQ(ncclInternalError, setupWithBackend(reqs, &devComm_));
@@ -1240,7 +1227,7 @@ TEST_F(GinHostDevCommSetupMicrotest, UnknownBackendTypeRejected) {
 
 // Contexts are spread evenly over the connections, so the requested count is
 // rounded up to a whole number per connection.
-TEST_F(GinHostDevCommSetupMicrotest, ContextCountRoundsUpToWholeConnections) {
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_ContextCountNotAMultipleOfTheConnections_RoundsUpToWholeConnections) {
   gin()->backends[0].ginCommCount = 4;
   for (int i = 1; i < 4; i++) gin()->backends[0].ginComms[i] = reinterpret_cast<void*>(0x44 + i);
 
@@ -1255,7 +1242,7 @@ TEST_F(GinHostDevCommSetupMicrotest, ContextCountRoundsUpToWholeConnections) {
 
 // Exclusive contexts are the point of the flag: a second request gets contexts
 // of its own from the plugin rather than being handed the first devComm's.
-TEST_F(GinHostDevCommSetupMicrotest, ExclusiveContextsAreNotSharedWithAnotherDevComm) {
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_ExclusiveContextsRequestedTwice_GivesEachDevCommItsOwnContexts) {
   auto reqs = proxyReqs();
   reqs.ginContextCount = 1;
   reqs.ginExclusiveContexts = true;
@@ -1271,24 +1258,29 @@ TEST_F(GinHostDevCommSetupMicrotest, ExclusiveContextsAreNotSharedWithAnotherDev
   EXPECT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &first));
 }
 
-// The traffic class comes from the requirements when set, and from the comm's
-// config otherwise.
-TEST_F(GinHostDevCommSetupMicrotest, TrafficClassFallsBackToCommConfig) {
+// The traffic class in the requirements is what the plugin is configured with.
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_TrafficClassInTheRequirements_PassesItToThePlugin) {
   comm_->config.trafficClass = 7;
   auto reqs = proxyReqs();
-
   reqs.ginTrafficClass = 3;
+
   ASSERT_EQ(ncclSuccess, setupAndFree(reqs, NCCL_VERSION_CODE));
   EXPECT_EQ(3, lastConfig().trafficClass);
+}
 
+// With no traffic class of its own the request inherits the comm's.
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_TrafficClassUnset_FallsBackToTheCommConfig) {
+  comm_->config.trafficClass = 7;
+  auto reqs = proxyReqs();
   reqs.ginTrafficClass = NCCL_CONFIG_UNDEF_INT;
+
   ASSERT_EQ(ncclSuccess, setupAndFree(reqs, NCCL_VERSION_CODE));
   EXPECT_EQ(7, lastConfig().trafficClass);
 }
 
-// Signal and counter counts are passed through, and legacy signals default to
-// the strength the requirements asked for.
-TEST_F(GinHostDevCommSetupMicrotest, SignalRequirementsReachTheDevCommAndThePlugin) {
+// Signal, counter and queue-depth counts are passed through, and legacy signals
+// default to the strength the requirements asked for.
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_SignalCounterAndQueueDepthRequested_ReachTheDevCommAndThePlugin) {
   auto reqs = proxyReqs();
   reqs.ginSignalCount = 5;
   reqs.ginCounterCount = 6;
@@ -1306,7 +1298,7 @@ TEST_F(GinHostDevCommSetupMicrotest, SignalRequirementsReachTheDevCommAndThePlug
 }
 
 // A rail request takes its stride from the rail team.
-TEST_F(GinHostDevCommSetupMicrotest, RailRequestUsesTheRailStride) {
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_RailRequestOnAFullyConnectedComm_UsesTheRailStride) {
   g_railStride = 2;
   auto reqs = proxyReqs();
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_RAIL;
@@ -1320,7 +1312,7 @@ TEST_F(GinHostDevCommSetupMicrotest, RailRequestUsesTheRailStride) {
 
 // A rail-connected comm's connections already span whole hosts, so the config
 // stride is expressed relative to that.
-TEST_F(GinHostDevCommSetupMicrotest, StridesAreRelativeToTheConnectedStride) {
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_CustomStrideOnARailConnectedComm_ExpressesTheStrideRelativeToTheConnection) {
   gin()->ginConnectionType = NCCL_GIN_CONNECTION_RAIL;  // connectedStride = ranks per host
   comm_->contiguousRanksPerHost = 2;
   g_railStride = 4;
@@ -1337,7 +1329,7 @@ TEST_F(GinHostDevCommSetupMicrotest, StridesAreRelativeToTheConnectedStride) {
 
 // A zero stride would make every rank its own peer; it is rejected with the
 // hint to disable GIN instead.
-TEST_F(GinHostDevCommSetupMicrotest, ZeroCustomStrideRejected) {
+TEST_F(GinHostDevCommSetupMicrotest, SetupWithBackend_ZeroCustomStride_ReturnsInvalidUsage) {
   auto reqs = proxyReqs();
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_CUSTOM_STRIDE;
   reqs.ginCustomStride = 0;
@@ -1348,7 +1340,7 @@ TEST_F(GinHostDevCommSetupMicrotest, ZeroCustomStrideRejected) {
 
 // Hierarchical barriers assume GIN reaches at least the rail team, so a wider
 // stride than the rail's is rejected.
-TEST_F(GinHostDevCommSetupMicrotest, StrideWiderThanTheRailTeamRejected) {
+TEST_F(GinHostDevCommSetupMicrotest, SetupWithBackend_CustomStrideWiderThanTheRailTeam_ReturnsInvalidUsage) {
   g_railStride = 2;
   auto reqs = proxyReqs();
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_CUSTOM_STRIDE;
@@ -1359,7 +1351,7 @@ TEST_F(GinHostDevCommSetupMicrotest, StrideWiderThanTheRailTeamRejected) {
 }
 
 // The requested stride has to be reachable by stepping whole connections.
-TEST_F(GinHostDevCommSetupMicrotest, StrideThatIsNotAMultipleOfTheConnectedStrideRejected) {
+TEST_F(GinHostDevCommSetupMicrotest, SetupWithBackend_CustomStrideNotAMultipleOfTheConnectedStride_ReturnsInvalidUsage) {
   gin()->ginConnectionType = NCCL_GIN_CONNECTION_RAIL;  // connectedStride = 2 below
   comm_->contiguousRanksPerHost = 2;
   g_railStride = 4;
@@ -1374,7 +1366,7 @@ TEST_F(GinHostDevCommSetupMicrotest, StrideThatIsNotAMultipleOfTheConnectedStrid
 
 // A rejected setup leaves no GIN state behind on the devComm, so the caller can
 // retry with another backend against the same object.
-TEST_F(GinHostDevCommSetupMicrotest, FailedSetupClearsTheDevComm) {
+TEST_F(GinHostDevCommSetupMicrotest, SetupWithBackend_SetupFails_ClearsTheGinFieldsOfTheDevComm) {
   auto reqs = proxyReqs();
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_CUSTOM_STRIDE;
   reqs.ginCustomStride = 0;
@@ -1396,7 +1388,7 @@ TEST_F(GinHostDevCommSetupMicrotest, FailedSetupClearsTheDevComm) {
 
 // Each half of the plugin's createContext contract is checked, because a NULL
 // anywhere here would surface as a device-side fault instead.
-TEST_F(GinHostDevCommSetupMicrotest, IncompleteContextFromThePluginRejected) {
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_IncompleteContextFromThePlugin_ReturnsInternalError) {
   const BadContext cases[] = {BadContext::NullGinCtx, BadContext::NullDevHandle, BadContext::NullHandle};
   auto reqs = proxyReqs();
   for (BadContext bad : cases) {
@@ -1410,7 +1402,7 @@ TEST_F(GinHostDevCommSetupMicrotest, IncompleteContextFromThePluginRejected) {
 
 // A context that was created before the failure is destroyed again rather than
 // left behind in the plugin.
-TEST_F(GinHostDevCommSetupMicrotest, CreateContextFailureDestroysEarlierContexts) {
+TEST_F(GinHostDevCommSetupMicrotest, SetupWithBackend_SecondCreateContextFails_DestroysTheEarlierContext) {
   gin()->backends[0].ginCommCount = 2;
   gin()->backends[0].ginComms[1] = reinterpret_cast<void*>(0x45);
   fake_.failCreateContext = {ncclSystemError, 2};
@@ -1425,7 +1417,7 @@ TEST_F(GinHostDevCommSetupMicrotest, CreateContextFailureDestroysEarlierContexts
 // The producer half of the proxy-affinity pin (AICOMRCCL-1859): the branch that
 // first spawns the progress threads stashes comm->cpuAffinity into
 // ginState->cpuAffinity, which is the only mask the workers above ever see.
-TEST_F(GinHostDevCommSetupMicrotest, StashesCommAffinityBeforeSpawningProxyThreads) {
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_SpawningTheProxyThreads_StashesCommAffinityForTheWorkers) {
   CPU_ZERO(&comm_->cpuAffinity);
   CPU_SET(5, &comm_->cpuAffinity);  // a distinctive mask, to spot the copy
   g_ncclOsCpuCountValue = 1;        // so the spawned worker takes the pin branch
@@ -1442,7 +1434,7 @@ TEST_F(GinHostDevCommSetupMicrotest, StashesCommAffinityBeforeSpawningProxyThrea
 
 // Progress threads are started once; a later devComm joins the existing list
 // under the writer lock instead of spawning a second set.
-TEST_F(GinHostDevCommSetupMicrotest, LaterDevCommsReuseTheExistingProgressThreads) {
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_ProgressThreadsAlreadyRunning_LinksTheDevCommWithoutSpawningMore) {
   auto reqs = proxyReqs();
   ncclDevComm first{};
   ncclDevComm second{};
@@ -1467,10 +1459,10 @@ TEST_F(GinHostDevCommSetupMicrotest, LaterDevCommsReuseTheExistingProgressThread
 
 // The devComms this suite frees are built by ncclGinDevCommSetup, so the list a
 // free walks is the one production linked rather than one the test modelled.
-class GinHostDevCommFreeMicrotest : public GinHostTest {
+class GinHostDevCommFreeMicrotest : public GinHostFixture {
  protected:
   void SetUp() override {
-    GinHostTest::SetUp();
+    GinHostFixture::SetUp();
     ASSERT_EQ(ncclSuccess, connectOnce());
     gin()->proxyThreadStopSignal.store(true);  // any spawned worker exits immediately
   }
@@ -1486,7 +1478,7 @@ class GinHostDevCommFreeMicrotest : public GinHostTest {
 
 // Freeing against an empty list is an internal error, not a crash on a NULL
 // list head.
-TEST_F(GinHostDevCommFreeMicrotest, EmptyListReportsInternalError) {
+TEST_F(GinHostDevCommFreeMicrotest, DevCommFree_EmptyDevCommList_ReturnsInternalError) {
   ASSERT_EQ(nullptr, gin()->devComms);
   ncclDevComm devComm{};
   EXPECT_EQ(ncclInternalError, ncclGinDevCommFree(comm(), &devComm));
@@ -1494,7 +1486,7 @@ TEST_F(GinHostDevCommFreeMicrotest, EmptyListReportsInternalError) {
 
 // The devComm is looked up by its GIN handle; an unknown handle walks the whole
 // list and then fails, leaving the devComms that are on it untouched.
-TEST_F(GinHostDevCommFreeMicrotest, UnknownHandleReportsInternalError) {
+TEST_F(GinHostDevCommFreeMicrotest, DevCommFree_UnknownHandle_ReturnsInternalErrorAndLeavesTheListIntact) {
   ncclDevComm first = makeDevComm();
   ncclDevComm second = makeDevComm();
 
@@ -1512,7 +1504,7 @@ TEST_F(GinHostDevCommFreeMicrotest, UnknownHandleReportsInternalError) {
 
 // A plugin that fails to destroy a context surfaces that status to the caller,
 // and the devComm stays off the list: the free is not retryable.
-TEST_F(GinHostDevCommFreeMicrotest, DestroyContextFailurePropagates) {
+TEST_F(GinHostDevCommFreeMicrotest, DevCommFree_DestroyContextFails_PropagatesTheStatusAndStillUnlinks) {
   ncclDevComm devComm = makeDevComm();
   fake_.failDestroyContext = {ncclSystemError, 1};
 
@@ -1524,10 +1516,10 @@ TEST_F(GinHostDevCommFreeMicrotest, DestroyContextFailurePropagates) {
 ////////////////////////////////////////////////////////////////////////////////
 // ncclGinHostFinalize
 
-class GinHostFinalizeMicrotest : public GinHostTest {};
+class GinHostFinalizeMicrotest : public GinHostFixture {};
 
 // Finalizing a comm that never connected touches no plugin state.
-TEST_F(GinHostFinalizeMicrotest, UnconnectedCommIsANoOp) {
+TEST_F(GinHostFinalizeMicrotest, HostFinalize_CommNeverConnected_TouchesNoPluginState) {
   ASSERT_FALSE(gin()->connected);
   EXPECT_EQ(ncclSuccess, ncclGinHostFinalize(comm()));
   EXPECT_EQ(0, fake_.closeCollCalls);
@@ -1535,7 +1527,7 @@ TEST_F(GinHostFinalizeMicrotest, UnconnectedCommIsANoOp) {
 
 // Finalize closes every connection and wipes the GIN state, so a later
 // ncclGinConnectOnce starts from scratch.
-TEST_F(GinHostFinalizeMicrotest, ClosesEveryConnectionAndClearsState) {
+TEST_F(GinHostFinalizeMicrotest, HostFinalize_ConnectedComm_ClosesEveryConnectionAndClearsTheState) {
   nthreadsParam_ = 2;
   ASSERT_EQ(ncclSuccess, connectOnce());
   ASSERT_EQ(2, gin()->backends[0].ginCommCount);
@@ -1549,7 +1541,7 @@ TEST_F(GinHostFinalizeMicrotest, ClosesEveryConnectionAndClearsState) {
 }
 
 // A progress-thread slot that was never spawned is skipped rather than joined.
-TEST_F(GinHostFinalizeMicrotest, SkipsProgressThreadSlotsThatWereNeverSpawned) {
+TEST_F(GinHostFinalizeMicrotest, HostFinalize_ProgressThreadSlotNeverSpawned_SkipsTheJoin) {
   ASSERT_EQ(ncclSuccess, connectOnce());
   gin()->proxyThreadsCreated = true;  // ... but no std::thread was ever started
   ASSERT_FALSE(gin()->thread[0].joinable());
@@ -1560,7 +1552,7 @@ TEST_F(GinHostFinalizeMicrotest, SkipsProgressThreadSlotsThatWereNeverSpawned) {
 
 // A connection slot that is already empty is skipped instead of being closed a
 // second time.
-TEST_F(GinHostFinalizeMicrotest, SkipsConnectionSlotsThatAreAlreadyClosed) {
+TEST_F(GinHostFinalizeMicrotest, HostFinalize_ConnectionSlotAlreadyClosed_SkipsIt) {
   nthreadsParam_ = 2;
   ASSERT_EQ(ncclSuccess, connectOnce());
   gin()->backends[0].ginComms[1] = nullptr;
@@ -1573,7 +1565,7 @@ TEST_F(GinHostFinalizeMicrotest, SkipsConnectionSlotsThatAreAlreadyClosed) {
 // A close that fails surfaces to the caller instead of being swallowed by the
 // teardown path, and finalize stops there rather than wiping the state behind
 // a connection it could not release.
-TEST_F(GinHostFinalizeMicrotest, CloseCollFailurePropagates) {
+TEST_F(GinHostFinalizeMicrotest, HostFinalize_CloseCollFails_PropagatesTheStatusAndLeavesTheStateIntact) {
   nthreadsParam_ = 2;  // a second connection, to show the walk stopped
   ASSERT_EQ(ncclSuccess, connectOnce());
   ASSERT_EQ(2, gin()->backends[0].ginCommCount);
@@ -1587,17 +1579,63 @@ TEST_F(GinHostFinalizeMicrotest, CloseCollFailurePropagates) {
   EXPECT_EQ(1, gin()->numActiveBackends);
 }
 
+// HostFinalize joins every progress thread before it returns. A worker held
+// inside ginProgress makes that join visible: deleting the join would let
+// finalize return while the worker is still in the call. The post-join memset
+// of ginState cannot be used instead, because it stops progress even if the
+// threads were never joined.
+TEST_F(GinHostFinalizeMicrotest, HostFinalize_WorkerInsideGinProgress_WaitsForEveryProgressThread) {
+  nthreadsParam_ = 2;
+  ASSERT_EQ(ncclSuccess, connectOnce());
+  ncclDevComm devComm{};
+  auto reqs = proxyReqs();
+  reqs.ginContextCount = gin()->backends[0].ginCommCount;
+  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, &devComm, NCCL_VERSION_CODE));
+  ASSERT_TRUE(gin()->thread[0].joinable());
+  ASSERT_TRUE(gin()->thread[1].joinable());
+
+  struct ncclGinStateDevComm* dc = gin()->devComms;
+  gin()->connected = true;
+  fake_.holdProgress.store(1, std::memory_order_release);
+  ASSERT_TRUE(waitUntil([&] { return fake_.progressHolders.load(std::memory_order_acquire) > 0; }))
+      << "no progress thread entered ginProgress";
+
+  std::atomic<bool> finalizeDone{false};
+  ncclResult_t finalizeSt = ncclInternalError;
+  std::thread fin([&] {
+    finalizeSt = ncclGinHostFinalize(comm());
+    finalizeDone.store(true, std::memory_order_release);
+  });
+  // Release the held worker and join finalize on every exit, including a fatal
+  // ASSERT.
+  ScopeExit finalizeGuard([&] {
+    fake_.holdProgress.store(0, std::memory_order_release);
+    if (fin.joinable()) fin.join();
+    restoreGinStateAfterFinalize();
+    std::free(dc);
+  });
+
+  ASSERT_TRUE(waitUntil([&] { return gin()->proxyThreadStopSignal.load(); }))
+      << "HostFinalize did not reach the progress-thread join";
+  EXPECT_FALSE(finalizeDone.load(std::memory_order_acquire))
+      << "HostFinalize returned while a worker was still inside ginProgress";
+  fake_.holdProgress.store(0, std::memory_order_release);
+  ASSERT_TRUE(waitUntil([&] { return finalizeDone.load(std::memory_order_acquire); }))
+      << "HostFinalize did not return after the worker left ginProgress";
+  EXPECT_EQ(ncclSuccess, finalizeSt);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // ncclGinRegister / ncclGinDeregister
 
-class GinHostRegisterMicrotest : public GinHostTest {
+class GinHostRegisterMicrotest : public GinHostFixture {
  protected:
   void* hostWins_[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS] = {};
   ncclGinWindow_t devWins_[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS] = {};
   char buffer_[64] = {};
 
   void SetUp() override {
-    GinHostTest::SetUp();
+    GinHostFixture::SetUp();
     configureBackend(0, 2);
   }
 
@@ -1625,7 +1663,7 @@ class GinHostRegisterMicrotest : public GinHostTest {
 
 // Every connection of every active backend gets its own registration, and the
 // handles land in that connection's slot.
-TEST_F(GinHostRegisterMicrotest, RegistersOnEveryConnectionOfEveryBackend) {
+TEST_F(GinHostRegisterMicrotest, Register_MultipleActiveBackends_RegistersOnEveryConnectionOfEachOne) {
   gin()->numActiveBackends = 2;
   configureBackend(1, 1);
 
@@ -1646,7 +1684,7 @@ TEST_F(GinHostRegisterMicrotest, RegistersOnEveryConnectionOfEveryBackend) {
 }
 
 // The memory type the caller registered is handed to the plugin unchanged.
-TEST_F(GinHostRegisterMicrotest, PassesMemoryTypeThrough) {
+TEST_F(GinHostRegisterMicrotest, Register_MemoryTypeGiven_PassesItToThePluginUnchanged) {
   ASSERT_EQ(ncclSuccess, registerWindow(/*winFlags=*/0, /*multiSegment=*/false, NCCL_PTR_HOST));
   ASSERT_FALSE(fake_.regMrCalls.empty());
   EXPECT_EQ(NCCL_PTR_HOST, fake_.regMrCalls[0].memType);
@@ -1654,14 +1692,14 @@ TEST_F(GinHostRegisterMicrotest, PassesMemoryTypeThrough) {
 
 // A strictly-ordered window must be registered with strong ordering forced on
 // the NIC.
-TEST_F(GinHostRegisterMicrotest, StrictOrderingWindowForcesStrongOrdering) {
+TEST_F(GinHostRegisterMicrotest, Register_StrictOrderingWindow_ForcesStrongOrdering) {
   ASSERT_EQ(ncclSuccess, registerWindow(NCCL_WIN_STRICT_ORDERING));
   ASSERT_FALSE(fake_.regMrCalls.empty());
   for (const auto& call : fake_.regMrCalls) EXPECT_EQ(NCCL_NET_MR_FLAG_FORCE_SO, call.mrFlags);
 }
 
 // Without that flag no ordering constraint is imposed.
-TEST_F(GinHostRegisterMicrotest, OrdinaryWindowRegistersWithoutFlags) {
+TEST_F(GinHostRegisterMicrotest, Register_OrdinaryWindow_RegistersWithoutMrFlags) {
   ASSERT_EQ(ncclSuccess, registerWindow());
   ASSERT_FALSE(fake_.regMrCalls.empty());
   for (const auto& call : fake_.regMrCalls) EXPECT_EQ(0u, call.mrFlags);
@@ -1669,7 +1707,7 @@ TEST_F(GinHostRegisterMicrotest, OrdinaryWindowRegistersWithoutFlags) {
 
 // A multi-segment buffer needs DMABUF on every connection; one connection
 // without it rejects the whole registration before anything is registered.
-TEST_F(GinHostRegisterMicrotest, MultiSegmentWithoutDmabufOnEveryConnectionRejected) {
+TEST_F(GinHostRegisterMicrotest, Register_MultiSegmentWithoutDmabufOnEveryConnection_ReturnsInvalidArgumentBeforeRegistering) {
   gin()->backends[0].ginProps[0].ptrSupport |= NCCL_PTR_DMABUF;  // only the first connection
 
   EXPECT_EQ(ncclInvalidArgument, registerWindow(/*winFlags=*/0, /*multiSegment=*/true));
@@ -1677,7 +1715,7 @@ TEST_F(GinHostRegisterMicrotest, MultiSegmentWithoutDmabufOnEveryConnectionRejec
 }
 
 // With DMABUF everywhere the multi-segment registration proceeds normally.
-TEST_F(GinHostRegisterMicrotest, MultiSegmentWithDmabufEverywhereRegisters) {
+TEST_F(GinHostRegisterMicrotest, Register_MultiSegmentWithDmabufEverywhere_RegistersEveryConnection) {
   for (int i = 0; i < 2; i++) gin()->backends[0].ginProps[i].ptrSupport |= NCCL_PTR_DMABUF;
 
   EXPECT_EQ(ncclSuccess, registerWindow(/*winFlags=*/0, /*multiSegment=*/true));
@@ -1686,7 +1724,7 @@ TEST_F(GinHostRegisterMicrotest, MultiSegmentWithDmabufEverywhereRegisters) {
 
 // A plugin that reports success but hands back no window is treated as a
 // failure rather than storing a NULL window.
-TEST_F(GinHostRegisterMicrotest, NullWindowFromThePluginIsASystemError) {
+TEST_F(GinHostRegisterMicrotest, Register_PluginReturnsNoWindow_ReturnsSystemError) {
   fake_.regMrSymReturnsNullWindow = true;
   EXPECT_EQ(ncclSystemError, registerWindow());
   EXPECT_EQ(1u, fake_.regMrCalls.size());  // stops at the first bad connection
@@ -1694,7 +1732,7 @@ TEST_F(GinHostRegisterMicrotest, NullWindowFromThePluginIsASystemError) {
 
 // A failing registration surfaces the plugin's status and stops there: the
 // remaining connections are left unregistered rather than half-populated.
-TEST_F(GinHostRegisterMicrotest, RegistrationFailurePropagates) {
+TEST_F(GinHostRegisterMicrotest, Register_RegistrationFails_PropagatesTheStatusAndStopsAtThatConnection) {
   void* const poison = reinterpret_cast<void*>(0xDEAD);
   for (auto& win : hostWins_) win = poison;
   fake_.failRegMrSym = {ncclInternalError, 1};
@@ -1706,7 +1744,7 @@ TEST_F(GinHostRegisterMicrotest, RegistrationFailurePropagates) {
 }
 
 // Deregistration mirrors registration: one call per populated slot.
-TEST_F(GinHostRegisterMicrotest, DeregistersEveryPopulatedSlot) {
+TEST_F(GinHostRegisterMicrotest, Deregister_PopulatedSlots_DeregistersEachOne) {
   ASSERT_EQ(ncclSuccess, registerWindow());
   void* const win0 = hostWins_[0];
   void* const win1 = hostWins_[1];
@@ -1720,7 +1758,7 @@ TEST_F(GinHostRegisterMicrotest, DeregistersEveryPopulatedSlot) {
 
 // A connection that was never registered has an empty slot, which is skipped
 // rather than deregistered as a NULL window.
-TEST_F(GinHostRegisterMicrotest, SkipsEmptySlots) {
+TEST_F(GinHostRegisterMicrotest, Deregister_EmptySlot_IsNotDeregistered) {
   ASSERT_EQ(ncclSuccess, registerWindow());
   void* const win1 = hostWins_[1];
   hostWins_[0] = nullptr;
@@ -1733,7 +1771,7 @@ TEST_F(GinHostRegisterMicrotest, SkipsEmptySlots) {
 
 // A failing deregistration surfaces the plugin's status and stops the walk
 // there, same as registration.
-TEST_F(GinHostRegisterMicrotest, DeregistrationFailurePropagates) {
+TEST_F(GinHostRegisterMicrotest, Deregister_DeregistrationFails_PropagatesTheStatusAndStopsAtThatSlot) {
   ASSERT_EQ(ncclSuccess, registerWindow());
   fake_.failDeregMrSym = {ncclSystemError, 1};
 
@@ -1748,12 +1786,12 @@ TEST_F(GinHostRegisterMicrotest, DeregistrationFailurePropagates) {
 // Like the free suite, the list walked here is built by ncclGinDevCommSetup --
 // two GIN connections per devComm, so "asked every context" and "stopped early"
 // are distinguishable.
-class GinHostQueryLastErrorMicrotest : public GinHostTest {
+class GinHostQueryLastErrorMicrotest : public GinHostFixture {
  protected:
   std::vector<std::unique_ptr<ncclDevComm>> devComms_;
 
   void SetUp() override {
-    GinHostTest::SetUp();
+    GinHostFixture::SetUp();
     nthreadsParam_ = 2;
     ASSERT_EQ(ncclSuccess, connectOnce());
     ASSERT_EQ(2, gin()->backends[0].ginCommCount);
@@ -1769,12 +1807,12 @@ class GinHostQueryLastErrorMicrotest : public GinHostTest {
 
   void TearDown() override {
     for (auto& dc : devComms_) EXPECT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), dc.get()));
-    GinHostTest::TearDown();
+    GinHostFixture::TearDown();
   }
 };
 
 // With nothing registered there is nothing to ask, and the answer is "no error".
-TEST_F(GinHostQueryLastErrorMicrotest, NoDevCommsReportsNoError) {
+TEST_F(GinHostQueryLastErrorMicrotest, QueryLastError_NoDevComms_ReportsNoError) {
   ASSERT_EQ(nullptr, gin()->devComms);
   bool hasError = true;
   EXPECT_EQ(ncclSuccess, ncclGinQueryLastError(gin(), &hasError));
@@ -1784,7 +1822,7 @@ TEST_F(GinHostQueryLastErrorMicrotest, NoDevCommsReportsNoError) {
 
 // Every context of every devComm is asked, including the ones that do not need
 // proxy progress -- that is the only way a device-initiated backend reports.
-TEST_F(GinHostQueryLastErrorMicrotest, AsksEveryContextOfEveryDevComm) {
+TEST_F(GinHostQueryLastErrorMicrotest, QueryLastError_NoContextReportsAnError_AsksEveryContextOfEveryDevComm) {
   addDevComm();
   fake_.needsProxyProgress = false;  // a device-initiated devComm, never progressed
   addDevComm();
@@ -1797,7 +1835,7 @@ TEST_F(GinHostQueryLastErrorMicrotest, AsksEveryContextOfEveryDevComm) {
 
 // The first context reporting an error ends the walk: the caller only needs to
 // know that something failed.
-TEST_F(GinHostQueryLastErrorMicrotest, StopsAtTheFirstContextReportingAnError) {
+TEST_F(GinHostQueryLastErrorMicrotest, QueryLastError_AContextReportsAnError_StopsAtThatContext) {
   addDevComm();
   addDevComm();
   fake_.queryErrorOnCall = 2;
@@ -1811,7 +1849,7 @@ TEST_F(GinHostQueryLastErrorMicrotest, StopsAtTheFirstContextReportingAnError) {
 // A query that fails outright is a different thing from a query that reports an
 // error: the plugin's status surfaces, the walk stops, and the caller is not
 // told an error was found.
-TEST_F(GinHostQueryLastErrorMicrotest, QueryFailurePropagates) {
+TEST_F(GinHostQueryLastErrorMicrotest, QueryLastError_QueryFails_PropagatesTheStatusAndReportsNoError) {
   addDevComm();
   fake_.failQueryLastError = {ncclSystemError, 1};
 
