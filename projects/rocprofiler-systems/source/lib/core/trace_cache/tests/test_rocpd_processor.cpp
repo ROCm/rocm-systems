@@ -27,6 +27,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/version.h>
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <timemory/settings/settings.hpp>
 
@@ -798,23 +799,6 @@ protected:
         EXPECT_EQ(count_it->second, expected);
     }
 
-    template <typename Exception, typename Callable>
-    static void expect_throws_with_message(Callable&&       callable,
-                                           std::string_view expected_substring)
-    {
-        try
-        {
-            callable();
-            ADD_FAILURE() << "no exception thrown, expected message containing: "
-                          << expected_substring;
-        } catch(const Exception& error)
-        {
-            EXPECT_NE(std::string_view{ error.what() }.find(expected_substring),
-                      std::string_view::npos)
-                << "actual message: " << error.what();
-        }
-    }
-
     void expect_region_times_by_name(const char* name, std::uint64_t start_ts,
                                      std::uint64_t end_ts) const
     {
@@ -1053,8 +1037,9 @@ protected:
         rocpd_processor_t    processor{ metadata, mgr, static_cast<int>(k_pid),
                                      static_cast<int>(k_ppid), registry };
 
-        expect_throws_with_message<Exception>([&] { processor.prepare_for_processing(); },
-                                              expected_substring);
+        EXPECT_THAT(
+            [&] { processor.prepare_for_processing(); },
+            testing::ThrowsMessage<Exception>(testing::HasSubstr(expected_substring)));
         EXPECT_TRUE(find_rocpd_database_in_directory(out_dir).empty())
             << "rejected metadata must not create a rocpd database";
     }
@@ -1602,8 +1587,9 @@ TEST_F(rocpd_write_read_test_interface, handle_region_unregistered_thread_throws
         const region_sample reg{
             k_unregistered_thread_id, "hipMemcpy", 1, 0, 5000, 5200, "", "", "HIP_API"
         };
-        expect_throws_with_message<std::runtime_error>([&] { processor.handle(reg); },
-                                                       "Thread not registered");
+        EXPECT_THAT([&] { processor.handle(reg); },
+                    testing::ThrowsMessage<std::runtime_error>(
+                        testing::HasSubstr("Thread not registered")));
     });
 
     EXPECT_TRUE(m_reader->get_events().empty());
@@ -1617,8 +1603,9 @@ TEST_F(rocpd_write_read_test_interface, handle_region_arg_with_empty_name_throws
     run_processor_and_open_reader({}, {}, [&](rocpd_processor_t& processor) {
         const region_sample reg{ k_thread_id, "hipMemcpy", 1,           0,        5000,
                                  5200,        "",          region_args, "HIP_API" };
-        expect_throws_with_message<std::runtime_error>(
-            [&] { processor.handle(reg); }, "Type or name is empty for Arg Data");
+        EXPECT_THAT([&] { processor.handle(reg); },
+                    testing::ThrowsMessage<std::runtime_error>(
+                        testing::HasSubstr("Type or name is empty for Arg Data")));
     });
 
     EXPECT_TRUE(m_reader->get_events().empty());
@@ -1636,8 +1623,9 @@ TEST_F(rocpd_write_read_test_interface, handle_kernel_dispatch_unregistered_queu
         },
         [](rocpd_processor_t& processor) {
             const auto kds = make_kernel_dispatch(k_unregistered_queue_id, k_stream_id);
-            expect_throws_with_message<std::runtime_error>([&] { processor.handle(kds); },
-                                                           "Queue not registered");
+            EXPECT_THAT([&] { processor.handle(kds); },
+                        testing::ThrowsMessage<std::runtime_error>(
+                            testing::HasSubstr("Queue not registered")));
         });
 
     EXPECT_TRUE(m_reader->get_events().empty());
@@ -1655,8 +1643,9 @@ TEST_F(rocpd_write_read_test_interface, handle_kernel_dispatch_unregistered_stre
         },
         [](rocpd_processor_t& processor) {
             const auto kds = make_kernel_dispatch(k_queue_id, k_unregistered_stream_id);
-            expect_throws_with_message<std::runtime_error>([&] { processor.handle(kds); },
-                                                           "Stream not registered");
+            EXPECT_THAT([&] { processor.handle(kds); },
+                        testing::ThrowsMessage<std::runtime_error>(
+                            testing::HasSubstr("Stream not registered")));
         });
 
     EXPECT_TRUE(m_reader->get_events().empty());
@@ -1675,8 +1664,9 @@ TEST_F(rocpd_write_read_test_interface, handle_kernel_dispatch_unregistered_thre
         [](rocpd_processor_t& processor) {
             auto kds      = make_kernel_dispatch(k_queue_id, k_stream_id);
             kds.thread_id = k_unregistered_thread_id;
-            expect_throws_with_message<std::runtime_error>([&] { processor.handle(kds); },
-                                                           "Thread not registered");
+            EXPECT_THAT([&] { processor.handle(kds); },
+                        testing::ThrowsMessage<std::runtime_error>(
+                            testing::HasSubstr("Thread not registered")));
         });
 
     EXPECT_TRUE(m_reader->get_events().empty());
@@ -1691,8 +1681,9 @@ TEST_F(rocpd_write_read_test_interface, handle_scratch_memory_unregistered_queue
             const auto sms = make_scratch_memory(
                 k_unregistered_queue_id, k_stream_id,
                 static_cast<std::int32_t>(ROCPROFILER_SCRATCH_MEMORY_ALLOC));
-            expect_throws_with_message<std::runtime_error>([&] { processor.handle(sms); },
-                                                           "Queue not registered");
+            EXPECT_THAT([&] { processor.handle(sms); },
+                        testing::ThrowsMessage<std::runtime_error>(
+                            testing::HasSubstr("Queue not registered")));
         });
 
     EXPECT_TRUE(m_reader->get_events().empty());
@@ -1707,8 +1698,9 @@ TEST_F(rocpd_write_read_test_interface, handle_scratch_memory_unregistered_strea
             const auto sms = make_scratch_memory(
                 k_queue_id, k_unregistered_stream_id,
                 static_cast<std::int32_t>(ROCPROFILER_SCRATCH_MEMORY_ALLOC));
-            expect_throws_with_message<std::runtime_error>([&] { processor.handle(sms); },
-                                                           "Stream not registered");
+            EXPECT_THAT([&] { processor.handle(sms); },
+                        testing::ThrowsMessage<std::runtime_error>(
+                            testing::HasSubstr("Stream not registered")));
         });
 
     EXPECT_TRUE(m_reader->get_events().empty());
@@ -1733,8 +1725,9 @@ TEST_F(rocpd_write_read_test_interface, handle_memory_copy_unregistered_stream_t
                                           0x100000,
                                           0x7F0000000000,
                                           k_unregistered_stream_id };
-            expect_throws_with_message<std::runtime_error>([&] { processor.handle(mcs); },
-                                                           "Stream not registered");
+            EXPECT_THAT([&] { processor.handle(mcs); },
+                        testing::ThrowsMessage<std::runtime_error>(
+                            testing::HasSubstr("Stream not registered")));
         });
 
     EXPECT_TRUE(m_reader->get_events().empty());
@@ -1999,8 +1992,9 @@ TEST_F(rocpd_write_read_test_interface, handle_in_time_sample_unregistered_pmc_t
             const in_time_sample    its{
                 0, "unregistered_track", k_timestamp, "{}", k_event_id, 3, 0, "", ""
             };
-            expect_throws_with_message<std::runtime_error>([&] { processor.handle(its); },
-                                                           "PMC Info not registered");
+            EXPECT_THAT([&] { processor.handle(its); },
+                        testing::ThrowsMessage<std::runtime_error>(
+                            testing::HasSubstr("PMC Info not registered")));
         });
 
     // Validate: rejected sample left nothing behind and the database is still readable.
@@ -2032,8 +2026,9 @@ TEST_F(rocpd_write_read_test_interface, handle_pmc_event_unregistered_track_thro
                                              "SQ_WAVES",
                                              1024.0,
                                              static_cast<std::int64_t>(k_thread_id) };
-            expect_throws_with_message<std::runtime_error>([&] { processor.handle(pmc); },
-                                                           "Track not registered");
+            EXPECT_THAT([&] { processor.handle(pmc); },
+                        testing::ThrowsMessage<std::runtime_error>(
+                            testing::HasSubstr("Track not registered")));
         });
 
     // Validate: the event inserted before the track check was rolled back.
@@ -2363,8 +2358,9 @@ TEST_F(rocpd_write_read_test_interface, handle_kfd_sample_unknown_agent_throws)
                                      "kfd_page_fault",
                                      1.0,
                                      static_cast<std::int64_t>(k_thread_id) };
-            expect_throws_with_message<std::out_of_range>(
-                [&] { processor.handle(sample); }, "Agent not found for type index");
+            EXPECT_THAT([&] { processor.handle(sample); },
+                        testing::ThrowsMessage<std::out_of_range>(
+                            testing::HasSubstr("Agent not found for type index")));
         });
 
     // Validate: the failed sample wrote no region.
