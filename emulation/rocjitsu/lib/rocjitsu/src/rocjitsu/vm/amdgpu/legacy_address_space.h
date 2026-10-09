@@ -2545,6 +2545,18 @@ private:
     std::array<PteCache, kEntryCount> entries;
   };
 
+  /// @brief This thread's PTE cache, shared by every with_page_mapping caller.
+  /// @details glibc carves static TLS out of every thread's stack, including
+  /// application threads that never touch emulated memory, so the cache lives
+  /// on the heap. A thread_local block per template instantiation once made
+  /// glibc refuse a 64 KiB thread stack in any process that preloads rocJITsu.
+  static PteCacheSet &thread_pte_caches() {
+    thread_local std::unique_ptr<PteCacheSet> caches;
+    if (!caches)
+      caches = std::make_unique<PteCacheSet>();
+    return *caches;
+  }
+
 #if defined(RJ_GPU_MEMORY_WITH_ASAN)
   /// @brief Test-only callback invoked while page-table and VMID locks are released.
   using AsanPageTableUnlockedHook = std::function<void()>;
@@ -2887,7 +2899,7 @@ private:
       return fn(nullptr, IdentityPage(page));
     }
 
-    static thread_local PteCacheSet caches;
+    PteCacheSet &caches = thread_pte_caches();
     const uint64_t page = addr >> PAGE_SHIFT;
     const uint64_t cache_key =
         page ^ (page >> 6) ^ (page >> 12) ^ (static_cast<uint64_t>(vmid) * 0x9e3779b97f4a7c15ULL);
