@@ -3,7 +3,7 @@
 /.github/                                                             @ROCm/rocm-systems-reviewers
 /.github/workflows/hipfile-*.yml                                      @ROCm/hipfile-reviewers
 /.github/workflows/rocjitsu-*.yml                                     @ROCm/rocjitsu-core-team
-/.github/**/*rccl*                                                    @ROCm/rccl-ci
+/.github/**/*rccl*                                                    @ROCm/RCCL-CI
 
 # Project-specific ownership
 /projects/amdsmi/                                                     @ROCm/smi-reviewers
@@ -16,11 +16,11 @@
 /projects/hrr/                                                        @ROCm/hrr-reviewers
 /projects/rccl/                                                       @ROCm/rccl-reviewers @ROCm/rccl-leads
 /projects/rccl/src/include/api_trace.h                                @ROCm/rccl-reviewers @ROCm/rccl-leads @ROCm/ROCM-DevTools-Team
-/projects/rccl/tools/scripts/test_runner/configs/ci-precheckin.json   @ROCm/rccl-ci
+/projects/rccl/tools/scripts/test_runner/configs/ci-precheckin.json   @ROCm/RCCL-CI
 /projects/rccl-tests/                                                 @ROCm/rccl-reviewers @ROCm/rccl-leads
 /projects/rdc/                                                        @ROCm/rdc-reviewers
 /projects/rocm-core/                                                  @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru
-/projects/rocm-core/rdhc/                                             @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru @solaiys
+/projects/rocm-core/rdhc/                                             @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru
 /projects/rocm-smi-lib/                                               @ROCm/smi-reviewers
 /projects/rocminfo/                                                   @dayatsin-amd @shwetagkhatri
 /projects/rocprofiler-compute/                                        @ROCm/rocprof-compute-reviewer
