@@ -3,7 +3,8 @@
 
 //! Minimal non-GPU driver used to exercise heterogeneous session routing.
 
-use super::{AddressSpaceInfo, DeviceStateType, Driver, EndpointSelector};
+use super::{AddressSpaceInfo, Driver, EndpointSelector};
+use crate::host_storage::Allocator;
 use crate::memory::DeviceAccess;
 use crate::session::DriverContextLifetime;
 use crate::topology::{Endpoint, EndpointKind, TopologyKey};
@@ -80,11 +81,13 @@ impl AddressSpaceInfo for TestDevice {
     }
 }
 
-impl DeviceStateType for TestDriver {
-    type DeviceState = TestDevice;
-}
-
 impl Driver for TestDriver {
+    type DeviceState = TestDevice;
+
+    fn allocator(&self) -> Allocator {
+        Allocator::system()
+    }
+
     fn driver_instance(&self) -> u64 {
         self.instance
     }

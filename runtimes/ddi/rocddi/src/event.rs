@@ -95,7 +95,7 @@ impl DeviceEventSubscription {
 /// Reports unsupported drivers and unavailable native event state.
 pub fn subscribe(device: &Device) -> Result<DeviceEventSubscription, Error> {
     Ok(DeviceEventSubscription {
-        inner: device.activation.subscribe_events()?,
+        inner: device.driver_state.subscribe_events()?,
     })
 }
 
@@ -189,7 +189,9 @@ impl SignalEventPage {
             kind: ErrorKind::Internal,
             detail: "attempted signal event page lost its allocation",
         })?;
-        driver::KfdDriver::retain_kfd_signal_event_page(allocation.inner.driver_state_mut())?;
+        driver::KfdDriver::retain_kfd_signal_event_page(
+            allocation.linux_kfd_mut().driver_state_mut(),
+        )?;
         self.attempted = false;
         self.allocation = None;
         Ok(())
@@ -222,15 +224,13 @@ pub fn create_signal_event(
                 kind: ErrorKind::Internal,
                 detail: "signal event page lost its allocation",
             })?;
-            Some(allocation.inner.driver_state())
+            Some(allocation.linux_kfd().driver_state())
         }
         None => None,
     };
+    let (driver, state) = device.device.linux_kfd()?;
     let mut page_offered = false;
-    let result =
-        device
-            .driver
-            .create_kfd_signal_event(device.state, native_page, &mut page_offered);
+    let result = driver.create_kfd_signal_event(state, native_page, &mut page_offered);
     if let Some(page) = event_page {
         // KFD can install a page even when CREATE_EVENT reports an error.
         // Validation and metadata allocation before dispatch do not offer it.

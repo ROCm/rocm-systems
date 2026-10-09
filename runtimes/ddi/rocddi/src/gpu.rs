@@ -10,8 +10,6 @@
 //! requirements.
 
 use crate::device::Device;
-use crate::driver::{self, GpuDriver, UserQueueDriver};
-use crate::host_storage::Shared;
 use crate::topology::{CacheInfo, GpuInfo};
 use crate::{Error, ErrorKind};
 
@@ -41,8 +39,6 @@ pub const fn is_compute_data_cache(cache: &CacheInfo) -> bool {
 #[derive(Clone, Copy)]
 pub struct GpuDevice<'a> {
     pub(crate) device: &'a Device,
-    pub(crate) driver: &'a Shared<driver::KfdDriver>,
-    pub(crate) state: &'a driver::KfdDeviceState,
     pub(crate) info: &'a GpuInfo,
 }
 
@@ -70,7 +66,7 @@ impl GpuDevice<'_> {
         if self.info.gfx_major < 12 {
             return Ok(false);
         }
-        self.driver.supports_expert_scheduling(self.state)
+        self.device.driver_state.supports_expert_scheduling()
     }
 
     /// Requests a process-VM persisting L2 reservation for this GPU.
@@ -88,8 +84,9 @@ impl GpuDevice<'_> {
                 detail: "persisting L2 request exceeds the native limit",
             });
         }
-        self.driver
-            .set_persisting_l2_cache_size(self.state, size_bytes)
+        self.device
+            .driver_state
+            .set_persisting_l2_cache_size(size_bytes)
     }
 
     /// Returns the bytes currently available for allocation on this GPU.
@@ -100,7 +97,7 @@ impl GpuDevice<'_> {
     /// # Errors
     /// Returns native query or device-lifetime failures.
     pub fn available_memory(&self) -> Result<u64, Error> {
-        self.driver.available_memory(self.state)
+        self.device.driver_state.available_memory()
     }
 }
 

@@ -51,7 +51,7 @@ fn marker_state() -> usize {
     if state != 0 {
         return state;
     }
-    let Ok(page) = super::util::page_size() else {
+    let Ok(page) = super::linux_kfd::util::page_size() else {
         return install_fallback();
     };
     if page < size_of::<AtomicU32>() {
@@ -94,7 +94,7 @@ fn marker_state() -> usize {
 /// Enables cheap checks after an allocation passed its session process check.
 /// This preserves inert instance creation and the getpid fallback before the
 /// first host allocation or after a fork.
-pub(super) fn prepare_for_hot_checks() {
+pub(in crate::driver) fn prepare_for_hot_checks() {
     let state = marker_state();
     if state == FALLBACK_TO_GETPID {
         return;
@@ -115,7 +115,7 @@ pub(super) fn prepare_for_hot_checks() {
 }
 
 /// Rejects inherited native ownership without a syscall on supported Linux.
-pub(super) fn check_process(process: u32) -> io::Result<()> {
+pub(in crate::driver) fn check_process(process: u32) -> io::Result<()> {
     let state = MARKER.load(Ordering::Acquire);
     let current = if state <= FALLBACK_TO_GETPID {
         // Directly constructed low-level owners may precede any session.

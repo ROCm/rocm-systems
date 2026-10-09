@@ -8,7 +8,7 @@
 //! are implemented beside memory, queue, event, and profiling ownership.
 
 use crate::Error;
-use crate::driver::{self, DriverActivation};
+use crate::driver::{self, DeviceDriverState};
 use crate::host_storage::Shared;
 use crate::topology::Endpoint;
 
@@ -19,7 +19,7 @@ use crate::topology::Endpoint;
 /// extending this wrapper's lifetime.
 #[derive(Clone)]
 pub struct Device {
-    pub(crate) activation: DriverActivation,
+    pub(crate) driver_state: DeviceDriverState,
     pub(crate) endpoint: Endpoint,
     pub(crate) copy_pool: Option<Shared<crate::gpu::CopyResourcePool>>,
 }
@@ -30,7 +30,7 @@ impl Device {
     pub(crate) fn linux_kfd(
         &self,
     ) -> Result<(&Shared<driver::KfdDriver>, &driver::KfdDeviceState), Error> {
-        self.activation.linux_kfd()
+        self.driver_state.linux_kfd()
     }
 
     /// Returns the endpoint snapshot accepted at activation. This is a borrowed
@@ -45,7 +45,7 @@ impl Device {
     /// This is a cached identity check; it grants no access or lifetime by itself.
     #[must_use]
     pub fn shares_address_domain(&self, other: &Self) -> bool {
-        self.activation.shares_address_domain(&other.activation)
+        self.driver_state.shares_address_domain(&other.driver_state)
     }
 
     /// Returns the inclusive device-address bounds captured from the driver's
@@ -53,7 +53,7 @@ impl Device {
     /// and does not promise that every address in the interval is allocatable.
     #[must_use]
     pub fn address_range(&self) -> (u64, u64) {
-        self.activation.address_range()
+        self.driver_state.address_range()
     }
 
     /// Borrows the GPU-specific capability view when this device was activated
@@ -71,13 +71,13 @@ impl Device {
             kind: crate::ErrorKind::Unsupported,
             detail: "activated endpoint is not a GPU",
         })?;
-        let (driver, state) = self.linux_kfd()?;
-        Ok(crate::gpu::GpuDevice {
-            device: self,
-            driver,
-            state,
-            info,
-        })
+        if !self.driver_state.is_gpu() {
+            return Err(Error::Operation {
+                kind: crate::ErrorKind::Unsupported,
+                detail: "activated driver has no GPU capability",
+            });
+        }
+        Ok(crate::gpu::GpuDevice { device: self, info })
     }
 }
 
