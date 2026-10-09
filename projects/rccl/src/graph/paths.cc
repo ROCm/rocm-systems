@@ -807,6 +807,9 @@ int ncclPxnDisable(struct ncclComm* comm) {
   // pxnDisable); without one, honour the env default and skip PXN.
   if (comm == NULL) return ncclParamPxnDisable();
   if (comm->pxnDisable > RCCL_VALUE_INVALID) return comm->pxnDisable;
+  // commDestroySync() consults this on the teardown path, where a comm whose init failed before the topology was
+  // built can still reach us with a live user handle. rcclSetPxn() reads comm->topo unconditionally.
+  if (comm->topo == NULL) return ncclParamPxnDisable();
   if (comm->ncclNetVer == 4) {
     INFO(NCCL_INIT, "PXN Disabled as plugin is v4");
     comm->pxnDisable = 1;
