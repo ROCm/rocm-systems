@@ -575,11 +575,13 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity). Own
+  # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity) and
+  # src/gin/gin_host_proxy.cc (GIN_PROXY_POLL_BATCH). Own
   # binary: gin-plugin-init-test.cc already defines ncclParamGinEnable in
   # rccl-UnitTestsMicro, and gin_fakes.cc supplies ncclGinQueryLastError to Init.
   set(TEST_MICRO_GIN_HOST_SOURCE_FILES
     gin-host-test.cc
+    gin-host-proxy-test.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
@@ -1264,7 +1266,7 @@ set_property(TARGET rccl-micro-dv-provider-fake-ionic-no-gda APPEND PROPERTY
   LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/fakes/dv_provider_fake_ionic_no_gda.map")
 
 # ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity)
+# rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc and src/gin/gin_host_proxy.cc
 # ---------------------------------------------------------------------------
 rccl_add_micro_binary(rccl-UnitTestsMicroGinHost
   SOURCES ${TEST_MICRO_GIN_HOST_SOURCE_FILES}
@@ -1274,6 +1276,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroGinHost
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc"
+    GIN_HOST_PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host_proxy.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_gin_host.yaml")
 
 # ---------------------------------------------------------------------------
