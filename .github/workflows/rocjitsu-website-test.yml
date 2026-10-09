@@ -6,6 +6,7 @@ on:
       - "emulation/rocjitsu/website/dashboard/**"
       - ".github/workflows/rocjitsu-website-test.yml"
       - ".github/workflows/rocjitsu-publish-website.yml"
+      - ".github/workflows/rocjitsu-benchmarks.yml"
   push:
     branches:
       - develop
@@ -13,6 +14,7 @@ on:
       - "emulation/rocjitsu/website/dashboard/**"
       - ".github/workflows/rocjitsu-website-test.yml"
       - ".github/workflows/rocjitsu-publish-website.yml"
+      - ".github/workflows/rocjitsu-benchmarks.yml"
   workflow_dispatch:
 
 permissions:
@@ -41,6 +43,11 @@ jobs:
           cache: npm
           cache-dependency-path: emulation/rocjitsu/website/dashboard/package-lock.json
 
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
       - name: Install dependencies
         run: npm ci
 
@@ -49,6 +56,32 @@ jobs:
 
       - name: Verify website
         run: npm run verify
+
+      - name: Test dashboard data preparation
+        id: prepare-data
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          DASHBOARD_VALIDATION_DIR: ${{ runner.temp }}/dashboard-preparer-validation
+        run: |
+          python -m venv "${RUNNER_TEMP}/dashboard-tests-venv"
+          "${RUNNER_TEMP}/dashboard-tests-venv/bin/python" -m pip install pytest
+          "${RUNNER_TEMP}/dashboard-tests-venv/bin/python" -m pytest scripts/dashboard-data/tests/test-*.py -v
+
+      - name: Validate prepared dashboard data
+        if: ${{ !cancelled() && steps.prepare-data.outcome == 'success' }}
+        env:
+          DASHBOARD_VALIDATION_DIR: ${{ runner.temp }}/dashboard-preparer-validation
+        run: node scripts/validate-dashboard-data.mjs "${DASHBOARD_VALIDATION_DIR}"
+
+      - name: Upload prepared dashboard JSON example
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rocjitsu-dashboard-prepared-data
+          path: ${{ runner.temp }}/dashboard-preparer-validation
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload Playwright diagnostics
         if: ${{ !cancelled() && failure() }}
