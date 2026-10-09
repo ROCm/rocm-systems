@@ -35,8 +35,10 @@ kpack_error_t parse_toc(FILE* file, uint64_t toc_offset, uint64_t file_size,
   // Validate that the TOC size is representable before narrowing it for
   // allocation.
   const uint64_t toc_size_u64 = file_size - toc_offset;
-  if (toc_size_u64 > std::numeric_limits<size_t>::max()) {
-    return KPACK_ERROR_INVALID_FORMAT;
+  if constexpr (sizeof(size_t) < sizeof(uint64_t)) {
+    if (toc_size_u64 > std::numeric_limits<size_t>::max()) {
+      return KPACK_ERROR_INVALID_FORMAT;
+    }
   }
   const size_t toc_size = static_cast<size_t>(toc_size_u64);
 
@@ -52,8 +54,9 @@ kpack_error_t parse_toc(FILE* file, uint64_t toc_offset, uint64_t file_size,
   }
 
   // Unpack MessagePack
-  // A complete array cannot have more elements than input bytes, and a map
-  // entry requires at least one byte each for its key and value. The remaining
+  // A complete array cannot have more elements than input bytes. Each map
+  // entry requires at least two encoded bytes: one for its key and one for its
+  // value, so the entry count cannot exceed half the input size. The remaining
   // limits follow the same physical bound: declared data and nesting cannot
   // exceed the buffer containing the encoded TOC.
   const msgpack::unpack_limit unpack_limit(toc_size, toc_size / 2, toc_size,

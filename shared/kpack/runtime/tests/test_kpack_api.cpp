@@ -77,10 +77,11 @@ class TempFile {
 static std::string make_kpack_with_toc(const char* toc_data, size_t toc_size) {
   std::string archive(16, '\0');
   std::memcpy(archive.data(), KPACK_MAGIC, KPACK_MAGIC_SIZE);
-  uint32_t version = KPACK_CURRENT_VERSION;
-  uint64_t toc_offset = 16;
-  std::memcpy(archive.data() + 4, &version, sizeof(version));
-  std::memcpy(archive.data() + 8, &toc_offset, sizeof(toc_offset));
+  const uint32_t version = KPACK_CURRENT_VERSION;
+  const uint64_t toc_offset = 16;
+  std::memcpy(archive.data() + KPACK_MAGIC_SIZE, &version, sizeof(version));
+  std::memcpy(archive.data() + KPACK_MAGIC_SIZE + sizeof(version), &toc_offset,
+              sizeof(toc_offset));
   archive.append(toc_data, toc_size);
   return archive;
 }
@@ -192,6 +193,8 @@ static std::string make_oversized_toc_declaration(
       type = static_cast<char>(0xc9);  // ext32
       break;
   }
+  // MessagePack's 32-bit declarations encode their count or length as a
+  // four-byte big-endian value. Four 0xff bytes declare UINT32_MAX.
   return std::string{type, '\xff', '\xff', '\xff', '\xff'};
 }
 
