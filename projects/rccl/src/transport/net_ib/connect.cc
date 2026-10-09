@@ -12,8 +12,13 @@
 #include "p2p_resiliency.h"
 #include "transport.h"
 
-// NCCL_MULTI_SEGMENT_REGISTER=0 keeps the legacy connect metadata and CTS MR.
+// NCCL_MULTI_SEGMENT_REGISTER=0 keeps the legacy connect metadata, CTS MR and QP depths.
 static bool ncclIbAdvertiseMultiSeg() { return ncclParamMultiSegmentRegister() != 0; }
+static_assert(NCCL_RMA_SEND_QP_WRS == NCCL_IB_MAX_SEND_WRS, "rma_multiseg.h restates NCCL_IB_MAX_SEND_WRS");
+static_assert(NCCL_IB_MAX_SEND_WRS >= 2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS,
+              "multi-segment sender QP must also fit GIN iput signal WRs");
+static_assert(NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS >= NCCL_RMA_MAX_FLUSH_WRS,
+              "multi-segment flush QP must also fit GIN flush WRs");
 
 static_assert(NCCL_RMA_SEND_QP_WRS == NCCL_IB_MAX_SEND_WRS, "rma_multiseg.h restates NCCL_IB_MAX_SEND_WRS");
 static_assert(NCCL_IB_MAX_SEND_WRS >= 2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS,
@@ -733,8 +738,8 @@ static ncclResult_t ncclIbSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
-  // Segmented multi-recv chain plus the 2*MAX request budget. =0 keeps develop's depth.
-  qpCreateAttrs.maxSendWorkRequest = rcclRmaMultiSegEnabled() ? NCCL_IB_MAX_SEND_WRS : 2 * NET_IB_MAX_REQUESTS;
+  // Multi-segment adds one segmented multi-recv chain (also covering GIN iput) to the 2*MAX budget.
+  qpCreateAttrs.maxSendWorkRequest = ncclIbAdvertiseMultiSeg() ? NCCL_IB_MAX_SEND_WRS : 2 * NET_IB_MAX_REQUESTS;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
     // For example, if there are 2 devices and 4 QPs, the QPs will be created
@@ -1249,13 +1254,17 @@ static ncclResult_t ncclIbReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = NET_IB_MAX_REQUESTS;
-  // CTS messages are posted using send work requests. Multi-segment CTS posts
-  // an unsignaled side-table WR before the CTS WR (two WRs per slot). Because
-  // only specific CTS WRs are signaled, the send queue needs 2x max requests
-  // times two WRs. Resiliency signals every CTS WR, so 1x times two WRs.
+  // CTS messages are posted using send work requests.
+  // Note that because only specific CTS messages are signaled, the send queue
+  // size needs to be double the number of max requests.
+  // When resiliency is enabled, the number of send work requests is same as the
+  // number of max requests because every CTS message is signaled.
   // +1 reserves space for one in-flight speed update RDMA write on qps[0].
-  qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS * (rComm->base.resiliency ? 1 : 2) * 2 +
+  qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS * (rComm->base.resiliency ? 1 : 2) +
                                      ((ncclParamIbEventBasedLb() && ncclParamIbEventBasedLbRemote()) ? 1 : 0);
+  // Multi-segment chains an unsignaled side-table WR before each CTS WR.
+  if (ncclIbAdvertiseMultiSeg())
+    qpCreateAttrs.maxSendWorkRequest += NET_IB_MAX_REQUESTS * (rComm->base.resiliency ? 1 : 2);
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
     // For example, if there are 2 devices and 4 QPs, the QPs will be created
@@ -1398,10 +1407,9 @@ ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
     qpCreateAttrs.cq = rCommDev->base.cq;
     qpCreateAttrs.pd = rCommDev->base.pd;
     qpCreateAttrs.maxRecvWorkRequest = 0;
-    // Classic iflush posts one RDMA read per recv per segment. =0 keeps develop's depth.
-    qpCreateAttrs.maxSendWorkRequest = rcclRmaMultiSegEnabled()
-                                         ? NET_IB_MAX_REQUESTS + NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS
-                                         : NET_IB_MAX_REQUESTS;
+    // Multi-segment iflush posts one RDMA_READ per recv per segment; this also covers GIN flush.
+    qpCreateAttrs.maxSendWorkRequest =
+      NET_IB_MAX_REQUESTS + (ncclIbAdvertiseMultiSeg() ? NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS : 0);
     qpCreateAttrs.qpContext = &comm->base.stats;
     NCCLCHECK(ncclIbQpCreate(flushQp, &qpCreateAttrs));
     // Loopback flush QP: local and remote device indices are this recv device.

@@ -17,7 +17,7 @@
 #include <gtest/gtest.h>
 
 // Pure helpers under test (no ibverbs / RCCL deps).
-#include "../src/transport/net_ib/multiseg.h"
+#include "transport/net_ib/multiseg.h"
 
 namespace {
 

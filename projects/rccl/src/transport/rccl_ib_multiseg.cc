@@ -11,11 +11,9 @@
 #include "rccl_ib_multiseg.h"
 #include "net_ib/multiseg.h"
 
-// Register a multi-segment cuMem/VMM buffer for the classic NET/IB transport by
-// exporting one dma-buf fd per physical segment and registering one MR per
-// segment. ROCm/HIP dma-buf export only
-// describes the first physical segment, so a single whole-range MR fails with
-// EINVAL.
+// Register a multi-segment cuMem/VMM buffer for the classic NET/IB transport by exporting one dma-buf fd per
+// physical segment and registering one MR per segment. ROCm/HIP dma-buf export only describes the first physical
+// segment, so a single whole-range MR fails with EINVAL.
 //
 // Guards: only the built-in IB plugin is supported, and segments must be
 // uniformly sized (interior segments equal the max stride; the first and last
@@ -113,4 +111,3 @@ fail:
   goto exit;
 }
 #endif
-

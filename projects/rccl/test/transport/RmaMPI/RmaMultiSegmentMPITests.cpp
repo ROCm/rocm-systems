@@ -1778,7 +1778,7 @@ protected:
 
     static constexpr uint8_t kSentinel       = 0xD3;
     static constexpr int     kIbRequestSlots = 256;  // NET_IB_MAX_REQUESTS
-    // Send-queue depth of an RMA queue pair (NCCL_RMA_SEND_QP_WRS in rma_multiseg.h).
+    // Send-queue depth of an RMA queue pair with multi-segment on.
     static constexpr int     kSendQueueWrs   = NCCL_RMA_SEND_QP_WRS;
 
     int numContexts_ = 1;

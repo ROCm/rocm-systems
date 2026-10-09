@@ -14,7 +14,7 @@
 #include "NetIbMultiSegmentHelpers.hpp"
 #include "MPIHelpers.hpp"
 
-#include "../../../src/transport/net_ib/multiseg.h"
+#include "transport/net_ib/multiseg.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -371,6 +371,37 @@ TEST_F(NetIbMultiSegmentMPITest, ExceedsMaxSegmentsRejected) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// OFF SWITCH: with NCCL_MULTI_SEGMENT_REGISTER=0 neither side advertises the CTS side table,
+// so a multi-segment registration is declined and the caller falls back to staging.
+TEST_F(NetIbMultiSegmentMPITest, MultiSegmentRegisterOff_DeclinesRegistration) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                            false, kMinGpusPerNode, kNoNodeLimit);
+    if (SyncSkip(MPIHelpers::getEnvParam<int>("NCCL_MULTI_SEGMENT_REGISTER", 1) != 0))
+        GTEST_SKIP() << "Requires NCCL_MULTI_SEGMENT_REGISTER=0";
+    int ndev = 0; AssertInitAndGetDevices(&ndev);
+    if (SyncSkip(!PtrSupported(NCCL_PTR_DMABUF))) GTEST_SKIP() << "DMA-BUF registration not supported";
+
+    const int rank = MPIEnvironment::world_rank;
+    MultiSegmentVmmBuffer* buf = AllocSym(kNumSegments);
+    if (SyncSkip(buf == nullptr)) GTEST_SKIP() << "multi-segment VMM allocation unavailable";
+
+    ConnectionPair pair; NetConnectionGuard guard(net_);
+    ASSERT_SETUP_CONNECTION(0, pair, guard);
+    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+
+    void* mh = nullptr;
+    ncclResult_t r = RegisterMultiSegmentMr(comm, *buf, &mh);
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
+    EXPECT_EQ(r, ncclInvalidUsage) << "NCCL_MULTI_SEGMENT_REGISTER=0 still registered a multi-segment buffer";
+    EXPECT_EQ(mh, nullptr);
+    if (mh != nullptr) (void)net_->deregMr(comm, mh);
+#else
+    (void)r;
+    GTEST_SKIP() << "dma-buf export API unavailable at build time";
+#endif
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 // REGRESSION: a single-segment window registered through the multi-segment
 // entry point still registers and transfers via the nSeg==1 fast path (which
 // leaves ncclIbMultiSend on its original, unmodified code path).
@@ -550,7 +581,8 @@ TEST_F(NetIbMultiSegmentMPITest, MultiRecvMixesSingleAndMultiSegmentHandles) {
 
     const size_t chunk = 64 * 1024;
     void* singleBuf = static_cast<uint8_t*>(single->ptr) + chunk;
-    void* multiBuf  = static_cast<uint8_t*>(multi->ptr) + multi->segSize - chunk / 2; // crosses seg0/seg1
+    // Starts in seg1 so a flush through segment 0's MR faults.
+    void* multiBuf  = static_cast<uint8_t*>(multi->ptr) + 2 * multi->segSize - chunk / 2; // crosses seg1/seg2
     const int rank = MPIEnvironment::world_rank;
 
     for (int order = 0; order < 2; order++) {
@@ -570,9 +602,11 @@ TEST_F(NetIbMultiSegmentMPITest, MultiRecvMixesSingleAndMultiSegmentHandles) {
             int flushSizes[2] = {static_cast<int>(chunk), static_cast<int>(chunk)};
             void* flushReq = nullptr;
             EXPECT_EQ(FlushRecv(pair.recvComm, 2, bufs, flushSizes, handles, &flushReq), ncclSuccess);
+            if (directGdrFlushEnabled())
+                EXPECT_NE(flushReq, nullptr) << "GDR flush is enabled; iflush must return a request";
             if (flushReq != nullptr) {
                 int flushSize = 0;
-                EXPECT_EQ(WaitForCompletion(flushReq, &flushSize, kDefaultTimeoutMs), ncclSuccess);
+                EXPECT_EQ(WaitForCompletion(flushReq, &flushSize, kDefaultTimeoutMs), ncclSuccess) << "order " << order;
             }
             for (int i = 0; i < 2; i++)
                 EXPECT_TRUE(VerifyDevice(bufs[i], chunk, seeds[i])) << "order " << order << " entry " << i;

@@ -516,6 +516,32 @@
       ]
     },
 
+    "net_ib_multisegment_register_off": {
+      "extends": "net_ib_base",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 600,
+      "description": "Classic NET/IB with NCCL_MULTI_SEGMENT_REGISTER=0: no multi-segment capability is advertised, a multi-segment registration is declined, and single-segment registrations still transfer.",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,REG",
+        "NCCL_MULTI_SEGMENT_REGISTER": "0"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiSeg_RegisterOff_DeclinesRegistration",
+          "description": "A 4-segment window is declined with ncclInvalidUsage because neither peer advertised the CTS side table",
+          "test_filter": "NetIbMultiSegmentMPITest.MultiSegmentRegisterOff_DeclinesRegistration"
+        },
+        {
+          "name": "NetIB_MultiSeg_RegisterOff_SingleSegmentRegression",
+          "description": "Host, device and 1-segment VMM registrations still transfer with the switch off",
+          "test_filter": "NetIbMultiSegmentMPITest.HostAndDeviceSingleSegmentRegression:NetIbMultiSegmentMPITest.SingleSegmentThroughMultiSegPath"
+        }
+      ]
+    },
+
     "net_ib_multisegment_scale_2x4": {
       "extends": "net_ib_base",
       "num_ranks": 8,
@@ -2003,6 +2029,12 @@
       "name": "NET IB - Multi-Segment DMA-BUF",
       "description": "Classic NET/IB multi-segment registration, asymmetric offsets, boundary splitting, segment cap and single-region regressions",
       "config": "net_ib_multisegment",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multi-Segment DMA-BUF (register off)",
+      "description": "Classic NET/IB with NCCL_MULTI_SEGMENT_REGISTER=0: multi-segment registration declined, single-region paths unchanged",
+      "config": "net_ib_multisegment_register_off",
       "enabled": true
     },
     {

@@ -195,8 +195,14 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
       // (derived from device speeds). Each device's share is (size * weight / 100), further
       // split among the actual QPs on that device. When all devices have the same speed,
       // weights are equal and it reduces to the equal-split formula.
-      uint32_t chunkSize =
-        ncclIbQpChunkSize(reqs[r]->send.size, splitDataThreshold, i, weights[origDevIndex], qpsPerDev[origDevIndex]);
+      uint32_t chunkSize;
+      if (reqs[r]->send.size < splitDataThreshold) {
+        chunkSize = (i == 0) ? reqs[r]->send.size : 0;
+      } else {
+        chunkSize = DIVUP(DIVUP((uint64_t)reqs[r]->send.size * weights[origDevIndex], 100 * qpsPerDev[origDevIndex]),
+                          IB_WRITE_CHUNK_ALIGNMENT) *
+                    IB_WRITE_CHUNK_ALIGNMENT;
+      }
       // Check the data left to send. If the send is too small, it might be
       // that on the current QP there is no data left to be sent.
       comm->wrs[r].sg_list->length = std::min<uint32_t>(reqs[r]->send.size - sendOffsets[r], chunkSize);
