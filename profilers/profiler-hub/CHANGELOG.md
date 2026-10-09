@@ -20,6 +20,10 @@ downstream consumer of the library.
 
 ## [Unreleased]
 
+### Added
+
+- `writer_t::write_sample()` inserts an `event_data_t` and a `sample_data_t` referencing it on a registered track.
+
 ### Changed
 
 - CMake configure now prints the profiler-hub version and the RocPD schema version. The project version moved to a `VERSION` file.
