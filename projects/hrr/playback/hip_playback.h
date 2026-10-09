@@ -15,7 +15,6 @@
 #include <vector>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
 #include <atomic>
 #include <mutex>
 #include <shared_mutex>
@@ -235,11 +234,6 @@ struct PlaybackContext {
     // If d2h_attempted > 0 but d2h_pass == 0 && d2h_fail == 0, every check was
     // skipped — pointer translation or blob loading failed for all D2H events.
     std::atomic<size_t> d2h_attempted{0};
-    // Pinned host snapshot records written back, refused, and not applied
-    // because the launch was replayed into a graph capture.
-    std::atomic<size_t> host_snapshots_restored{0};
-    std::atomic<size_t> host_snapshots_refused{0};
-    std::atomic<size_t> host_snapshots_skipped{0};
 
     // Set true by note_d2h_fail when the running D2H-failure fraction crosses the
     // configured divergence-abort threshold. Distinguishes a clean "replay
@@ -848,47 +842,15 @@ extern thread_local uint64_t hrr_dispatch_seq;
 // completion — including a genuine GPU fault — is returned to the caller.
 hipError_t hrr_watchdog_device_sync(PlaybackContext& ctx, const char* what);
 
-// One pinned host snapshot record of a kernel launch event: u64 ptr_handle,
-// u64 offset, u64 length, u64 hash_lo, u64 hash_hi, u8 direction (0).
+// Negative control (cross-check only): pinned host snapshot replay removed,
+// only what the unit test names is left, refusing every record.
 inline constexpr size_t kHostSnapRecordSize = 41;
-
-// Whether n whole records fit between p and the end of the event.
 inline bool hrr_host_snapshots_fit(const uint8_t* p, const uint8_t* end, uint16_t n) {
     return p <= end && static_cast<size_t>(end - p) / kHostSnapRecordSize >= n;
 }
-
-// Where replay writes the blob of the record at `rec`, or nullptr with *why
-// saying why it refuses the record. The archive is input like any other: a
-// record must name the base of a pinned host allocation replay made, lie
-// inside it, and match its blob's length.
-inline void* hrr_host_snapshot_target(const PlaybackContext& ctx, const uint8_t* rec,
-                                      const void* blob, size_t blob_len,
-                                      const char** why) {
-    uint64_t ptr, off, len;
-    memcpy(&ptr, rec, 8);
-    memcpy(&off, rec + 8, 8);
-    memcpy(&len, rec + 16, 8);
-    void*  live = nullptr;
-    size_t size = 0;
-    {
-        std::shared_lock lk(ctx.map_mutex);
-        auto it = ctx.alloc_map.find(ptr);
-        if (it != ctx.alloc_map.end() && (it->second.kind == AllocKind::HostMalloc ||
-                                          it->second.kind == AllocKind::HostRegister)) {
-            live = it->second.live_ptr;
-            size = it->second.size;
-        }
-    }
-    if (rec[40] != 0)
-        *why = "has an unknown direction";
-    else if (!live)
-        *why = "names no pinned host allocation replay made";
-    else if (off > size || len > size - off)
-        *why = "lies outside its allocation";
-    else if (!blob || blob_len != len)
-        *why = "does not match its blob";
-    else
-        return static_cast<uint8_t*>(live) + off;
+inline void* hrr_host_snapshot_target(const PlaybackContext&, const uint8_t*,
+                                      const void*, size_t, const char** why) {
+    *why = "is not replayed (negative control)";
     return nullptr;
 }
 
