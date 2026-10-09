@@ -5651,76 +5651,167 @@ TEST_P(IsaTest, NonKernelBarrierPacketsOrderQueueEntries) {
   }
 }
 
-TEST(CommandProcessorAqlTest, MetadataCompletionEventOverridesTheSignalForDispatchAndBarriers) {
+TEST(CommandProcessorAqlTest, MetadataCompanionFormatsAndMemoryFallback) {
   using namespace rocr::llvm::amdhsa;
-  for (uint16_t type :
-       {HSA_PACKET_TYPE_KERNEL_DISPATCH, HSA_PACKET_TYPE_BARRIER_AND, HSA_PACKET_TYPE_BARRIER_OR}) {
-    for (uint32_t metadata_event : {0u, 73u}) {
-      SCOPED_TRACE(type);
-      SCOPED_TRACE(metadata_event);
-      VmFixture fixture("cdna5");
-      constexpr uint64_t ring = 0x8000, companion = ring + 64, signal = 0x7000;
-      constexpr uint64_t read = 0x9000, write = 0x9008, doorbell = 0x9010, mailbox = 0x7100;
-      constexpr uint32_t signal_event = 41, process_id = 7;
-      const uint32_t code = 0xbfb00000;
-      const uint64_t kernel = fixture.write_kernel(0x1000, &code, sizeof(code));
-      kernel_descriptor_t kd{};
-      fixture.mem()->read_block(kernel, {reinterpret_cast<uint8_t *>(&kd), sizeof(kd)});
-      init_completion_signal(fixture.mem(), signal);
-      fixture.mem()->write64(signal + 16, mailbox);
-      fixture.mem()->write32(signal + 24, signal_event);
-      fixture.mem()->write64(mailbox, UINT64_MAX);
-      uint32_t deliveries = 0;
-      amdgpu::InterruptSubscription subscription([&](uint32_t pid, uint32_t event_id) {
-        // Completion can be followed by the queue's ordinary idle broadcast.
-        if (deliveries != 0 && event_id == 0)
-          return;
-        EXPECT_EQ(pid, process_id);
-        EXPECT_EQ(event_id, metadata_event);
-        EXPECT_EQ(completion_signal_value(fixture.mem(), signal), 0);
-        EXPECT_EQ(fixture.mem()->read64(mailbox), metadata_event);
-        ++deliveries;
-      });
-      const auto registration = fixture.cp()->register_queue({
-          .address_space = fixture.cp()->default_address_space(),
-          .interrupt_sink = subscription.sink(),
-          .process_id = process_id,
-          .queue_id = 1,
-          .ring_base_va = ring,
-          .ring_size = 64,
-          .read_ptr_va = read,
-          .write_ptr_va = write,
-          .doorbell_va = doorbell,
-          .doorbell_mode = amdgpu::QueueDoorbellMode::VmPolled,
-          .metadata_ring_size = 256,
-      });
-      ASSERT_NE(registration, 0u);
-      hsa_kernel_dispatch_packet_t packet{};
-      if (type == HSA_PACKET_TYPE_KERNEL_DISPATCH)
-        packet = make_dispatch_packet(kernel, signal, 32, 32);
-      packet.header = type;
-      packet.completion_signal.handle = signal;
-      std::array<uint32_t, 64> metadata{};
-      if (type == HSA_PACKET_TYPE_KERNEL_DISPATCH)
-        std::memcpy(metadata.data() + 2, reinterpret_cast<const std::byte *>(&kd) + 16, 48);
-      for (uint32_t block = 0; block < 4; ++block)
-        metadata[block * 16] = type;
-      metadata[1] = metadata_event;
-      fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(metadata.data()),
-                                sizeof(metadata), companion);
-      fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet), ring);
-      fixture.mem()->write64(write, 1);
-      fixture.mem()->write64(doorbell, 0);
-      fixture.engine->schedule_event_now(fixture.cp()->doorbell_event());
-      for (uint32_t step = 0; step < 100 && deliveries == 0; ++step)
-        ASSERT_TRUE(fixture.engine->step());
-      EXPECT_EQ(deliveries, 1u);
-      EXPECT_EQ(fixture.mem()->read32(signal + 24), signal_event);
-      EXPECT_EQ(fixture.mem()->read64(read), 1u);
-      EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, process_id));
-      EXPECT_TRUE(fixture.cp()->unregister_queue_registration(registration));
+  namespace metadata_abi = amdgpu::aql_metadata;
+  struct PacketFormat {
+    uint16_t type;
+    uint8_t vendor;
+    bool kernel;
+  };
+  const std::array formats{
+      PacketFormat{HSA_PACKET_TYPE_KERNEL_DISPATCH, 0, true},
+      PacketFormat{HSA_PACKET_TYPE_BARRIER_AND, 0, false},
+      PacketFormat{HSA_PACKET_TYPE_BARRIER_OR, 0, false},
+      PacketFormat{HSA_PACKET_TYPE_VENDOR_SPECIFIC, amdgpu::kHsaAmdPacketTypeExtKernelDispatch,
+                   true},
+      PacketFormat{HSA_PACKET_TYPE_VENDOR_SPECIFIC, amdgpu::kHsaAmdPacketTypeBarrierValue, false}};
+  for (const auto format : formats) {
+    for (bool supplied : {false, true}) {
+      for (uint32_t metadata_event : {0u, 73u}) {
+        SCOPED_TRACE(format.type);
+        SCOPED_TRACE(format.vendor);
+        SCOPED_TRACE(supplied);
+        SCOPED_TRACE(metadata_event);
+        VmFixture fixture("cdna5");
+        auto *snapshots = fixture.capture_halts();
+        constexpr uint64_t ring = 0x8000, companion = ring + 64, signal = 0x7000;
+        constexpr uint64_t read_pointer = 0x9000, write_pointer = 0x9008;
+        constexpr uint64_t doorbell = 0x9010, mailbox = 0x7100, kernargs = 0x6000;
+        constexpr uint32_t signal_event = 41, process_id = 7;
+        const uint32_t expected_event = supplied ? metadata_event : signal_event;
+        const uint32_t code = 0xbfb00000;
+        const uint64_t kernel = fixture.write_kernel(0x1000, &code, sizeof(code));
+        kernel_descriptor_t kd{};
+        fixture.mem()->read_block(kernel, {reinterpret_cast<uint8_t *>(&kd), sizeof(kd)});
+        set_kernel_descriptor_user_sgpr_count(ROCJITSU_CODE_ARCH_CDNA5, kd, 2);
+        kd.kernarg_preload = 2;
+        fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kernel);
+        fixture.mem()->write32(kernargs, 91);
+        fixture.mem()->write32(kernargs + 4, 92);
+        init_completion_signal(fixture.mem(), signal);
+        fixture.mem()->write64(signal + 16, mailbox);
+        fixture.mem()->write32(signal + 24, signal_event);
+        fixture.mem()->write64(mailbox, UINT64_MAX);
+        uint32_t deliveries = 0;
+        amdgpu::InterruptSubscription subscription([&](uint32_t pid, uint32_t event_id) {
+          if (deliveries != 0 && event_id == 0)
+            return;
+          EXPECT_EQ(pid, process_id);
+          EXPECT_EQ(event_id, expected_event);
+          EXPECT_EQ(completion_signal_value(fixture.mem(), signal), 0);
+          EXPECT_EQ(fixture.mem()->read64(mailbox), expected_event);
+          ++deliveries;
+        });
+        const auto registration = fixture.cp()->register_queue({
+            .address_space = fixture.cp()->default_address_space(),
+            .interrupt_sink = subscription.sink(),
+            .process_id = process_id,
+            .queue_id = 1,
+            .ring_base_va = ring,
+            .ring_size = 64,
+            .read_ptr_va = read_pointer,
+            .write_ptr_va = write_pointer,
+            .doorbell_va = doorbell,
+            .doorbell_mode = amdgpu::QueueDoorbellMode::VmPolled,
+            .metadata_ring_size = metadata_abi::kPacketBytes,
+        });
+        ASSERT_NE(registration, 0u);
+        hsa_kernel_dispatch_packet_t packet{};
+        if (format.kernel)
+          packet = make_dispatch_packet(kernel, signal, 32, 32);
+        packet.header = format.type;
+        packet.completion_signal.handle = signal;
+        if (format.kernel)
+          packet.kernarg_address = reinterpret_cast<void *>(kernargs);
+        if (format.vendor == amdgpu::kHsaAmdPacketTypeExtKernelDispatch) {
+          amdgpu::AmdExtKernelDispatchPacket extended{};
+          extended.header = format.type;
+          extended.amd_format = format.vendor;
+          extended.setup = 1;
+          extended.workgroup_size_x = 32;
+          extended.workgroup_size_y = extended.workgroup_size_z = 1;
+          extended.cluster_count_x = extended.cluster_count_y = extended.cluster_count_z = 1;
+          extended.cluster_size_x = extended.cluster_size_y = extended.cluster_size_z = 1;
+          extended.kernel_object = kernel;
+          extended.kernarg_address = reinterpret_cast<void *>(kernargs);
+          extended.completion_signal.handle = signal;
+          std::memcpy(&packet, &extended, sizeof(packet));
+        } else if (format.vendor == amdgpu::kHsaAmdPacketTypeBarrierValue) {
+          amdgpu::AmdBarrierValuePacket barrier{};
+          barrier.header = format.type;
+          barrier.amd_format = format.vendor;
+          barrier.completion_signal.handle = signal;
+          std::memcpy(&packet, &barrier, sizeof(packet));
+        }
+        metadata_abi::Packet metadata{};
+        for (uint32_t block = 0; block < metadata_abi::kBlocks; ++block)
+          metadata[metadata_abi::header_word(block)] = HSA_PACKET_TYPE_INVALID;
+        if (supplied) {
+          // CLR barriers publish only header0; the other blocks remain INVALID.
+          const uint32_t blocks = format.kernel ? metadata_abi::kBlocks : 1;
+          for (uint32_t block = 0; block < blocks; ++block)
+            metadata[metadata_abi::header_word(block)] = format.type;
+          metadata[metadata_abi::kEventIdWord] = metadata_event;
+          if (format.kernel) {
+            std::memcpy(metadata.data() + metadata_abi::kDescriptorWord,
+                        reinterpret_cast<const std::byte *>(&kd) +
+                            metadata_abi::kKernelDescriptorOffset,
+                        metadata_abi::kDescriptorBytes);
+            metadata[metadata_abi::kernarg_word(0)] = 42;
+            metadata[metadata_abi::kernarg_word(1)] = 43;
+          }
+        }
+        fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(metadata.data()),
+                                  sizeof(metadata), companion);
+        fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet), ring);
+        fixture.mem()->write64(write_pointer, 1);
+        fixture.mem()->write64(doorbell, 0);
+        fixture.engine->schedule_event_now(fixture.cp()->doorbell_event());
+        for (uint32_t step = 0; step < 100 && deliveries == 0; ++step)
+          ASSERT_TRUE(fixture.engine->step());
+        EXPECT_EQ(deliveries, 1u);
+        EXPECT_EQ(fixture.mem()->read32(signal + 24), signal_event);
+        EXPECT_EQ(fixture.mem()->read64(read_pointer), 1u);
+        EXPECT_EQ(fixture.mem()->read32(ring) & 0xff, HSA_PACKET_TYPE_INVALID);
+        for (uint32_t block = 0; block < metadata_abi::kBlocks; ++block)
+          EXPECT_EQ(fixture.mem()->read32(companion + block * metadata_abi::kBlockBytes),
+                    HSA_PACKET_TYPE_INVALID);
+        if (format.kernel) {
+          ASSERT_EQ(snapshots->snapshots().size(), 1u);
+          EXPECT_EQ(snapshots->snapshots().back().sgpr(0), supplied ? 42u : 91u);
+          EXPECT_EQ(snapshots->snapshots().back().sgpr(1), supplied ? 43u : 92u);
+        }
+        EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, process_id));
+        EXPECT_TRUE(fixture.cp()->unregister_queue_registration(registration));
+      }
     }
   }
+}
+
+TEST(CommandProcessorAqlTest, MetadataRingCapacityMatchesAqlSlotsAtCreationAndUpdate) {
+  VmFixture fixture("cdna5");
+  amdgpu::ComputeQueueConfig config{
+      .address_space = fixture.cp()->default_address_space(),
+      .queue_id = 1,
+      .ring_base_va = 0x8000,
+      .ring_size = 64,
+      .read_ptr_va = 0x9000,
+      .write_ptr_va = 0x9008,
+      .doorbell_va = 0x9010,
+      .doorbell_mode = amdgpu::QueueDoorbellMode::VmPolled,
+      .metadata_ring_size = 512,
+  };
+  EXPECT_EQ(fixture.cp()->register_queue(config), 0u);
+  config.ring_size = 256;
+  EXPECT_EQ(fixture.cp()->register_queue(config), 0u);
+  config.ring_size = 128;
+  const uint64_t registration = fixture.cp()->register_queue(config);
+  ASSERT_NE(registration, 0u);
+  EXPECT_FALSE(fixture.cp()->update_queue_registration(registration, 0x8000, 64, 100));
+  EXPECT_FALSE(fixture.cp()->update_queue_registration(registration, 0x8000, 256, 100));
+  EXPECT_TRUE(fixture.cp()->update_queue_registration(registration, 0xa000, 128, 100));
+  EXPECT_TRUE(fixture.cp()->unregister_queue_registration(registration));
 }
 
 TEST(CommandProcessorAqlTest, MetadataWaitsForAllHeadersAndOwnsDescriptorAndPreloadedArguments) {
@@ -5759,13 +5850,16 @@ TEST(CommandProcessorAqlTest, MetadataWaitsForAllHeadersAndOwnsDescriptorAndPrel
   for (uint32_t preload_index = 0; preload_index < 32; ++preload_index)
     fixture.mem()->write32(args + preload_index * 4, 0xdeadbeef);
   for (uint32_t round = 1; round <= 2; ++round) {
-    std::array<uint32_t, 64> metadata{};
-    for (uint32_t block = 0; block < 4; ++block)
-      metadata[block * 16] = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-    std::memcpy(metadata.data() + 2, reinterpret_cast<const std::byte *>(&kd) + 16, 48);
+    amdgpu::aql_metadata::Packet metadata{};
+    for (uint32_t block = 0; block < amdgpu::aql_metadata::kBlocks; ++block)
+      metadata[amdgpu::aql_metadata::header_word(block)] = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    std::memcpy(metadata.data() + amdgpu::aql_metadata::kDescriptorWord,
+                reinterpret_cast<const std::byte *>(&kd) +
+                    amdgpu::aql_metadata::kKernelDescriptorOffset,
+                amdgpu::aql_metadata::kDescriptorBytes);
     for (uint32_t preload_index = 0; preload_index < 32; ++preload_index)
-      metadata[17 + preload_index + preload_index / 15] = round * 100 + preload_index;
-    metadata[48] = HSA_PACKET_TYPE_INVALID;
+      metadata[amdgpu::aql_metadata::kernarg_word(preload_index)] = round * 100 + preload_index;
+    metadata[amdgpu::aql_metadata::header_word(3)] = HSA_PACKET_TYPE_INVALID;
     fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(metadata.data()), sizeof(metadata),
                               companion);
     fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet), ring);

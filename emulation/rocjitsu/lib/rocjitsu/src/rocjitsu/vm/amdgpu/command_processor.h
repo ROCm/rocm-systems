@@ -603,6 +603,8 @@ private:
 
   /// @brief Build and admit one normalized AQL kernel-dispatch packet.
   /// @param packet_index Absolute AQL ring index for debugger correlation.
+  /// @param metadata Captured version-0.0 companion; empty uses descriptor,
+  /// kernargs and completion event ID from memory (including CLR KDQ-disabled queues).
   [[nodiscard]] AqlAdmissionResult
   admit_kernel_dispatch(const hsa_kernel_dispatch_packet_t &packet, ComputeQueueRecord &queue,
                         const GpuVmAccess &transaction_access, uint64_t packet_address,
