@@ -1093,9 +1093,7 @@ def test_format_operator_args_caps_item_count():
 
 def test_format_operator_args_caps_length():
     long_token = "x" * 80
-    formatted_args = format_operator_args(
-        f"({long_token})", max_items=8, max_chars=20
-    )
+    formatted_args = format_operator_args(f"({long_token})", max_items=8, max_chars=20)
     assert len(formatted_args) <= 20
     assert formatted_args.endswith("...)")
 
