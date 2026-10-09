@@ -2317,7 +2317,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     const size_t a2aCeRegMin = rcclCeRegMinTab(archTable, ncclFuncAlltoAll);
     const bool a2aCeRegWindow = rcclWindowFits(totalBytes, a2aCeRegMin, a2aCeRegMax);
     if (!a2aHasSysmem &&
-        ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || rcclForceCeCollEnabled(comm) ||a2aCeRegWindow) &&
+        ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || rcclForceCeCollEnabled(comm) || a2aCeRegWindow) &&
         ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin)) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
