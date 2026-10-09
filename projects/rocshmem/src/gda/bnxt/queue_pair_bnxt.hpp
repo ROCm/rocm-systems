@@ -413,7 +413,7 @@ __device__ __forceinline__ uint64_t QueuePairBNXT::quiet_target_single() {
   return __scoped_atomic_load_n(&sq.tail, __ATOMIC_SEQ_CST, __MEMORY_SCOPE_DEVICE);
 }
 
-// precondition: called with all active lanes using different QPs
+// Only reads queue state, so lanes sharing a queue pair can call it.
 // The tail wraps at the queue depth. If more than a full queue is posted after target, this can report
 // pending until the queue drains.
 __device__ inline __noinline__ bool QueuePairBNXT::try_quiet_until_single(uint64_t target) {
@@ -421,7 +421,6 @@ __device__ inline __noinline__ bool QueuePairBNXT::try_quiet_until_single(uint64
   uint32_t sq_depth = sq.depth;
 
   uint32_t sq_head = (((cqe->con_indx & 0xFFFF) * GDA_BNXT_WQE_SLOT_COUNT) % sq_depth);
-  sq.head = sq_head;
 
   uint32_t sq_tail = __scoped_atomic_load_n(&sq.tail, __ATOMIC_SEQ_CST, __MEMORY_SCOPE_DEVICE);
 

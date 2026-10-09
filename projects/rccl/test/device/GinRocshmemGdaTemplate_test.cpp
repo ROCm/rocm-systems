@@ -668,11 +668,11 @@ TEST_F(GinRocshmemGdaTemplateTest, FlushTimeout_DrainedQueueNeedsNoBudget) {
   env.build();
   DeviceBuffer<ncclResult_t> d_result(1);
   d_result.upload(ncclInternalError);
-  resetQuietCount();
   kernelFlushTimeout<<<1, 1>>>(env.dHarness.ptr, nullptr, /*timeoutCycles=*/0, d_result.ptr);
   syncAndCheck();
   EXPECT_EQ(d_result.download(), ncclSuccess);
-  EXPECT_EQ(readQuietCount(), static_cast<size_t>(GdaEnv::kNRanks));
+  EXPECT_EQ(readPolls(env, 0), 1u);
+  EXPECT_EQ(readPolls(env, GdaEnv::kPeer), 1u);
 }
 
 TEST_F(GinRocshmemGdaTemplateTest, FlushTimeout_BusyQueueTimesOut) {

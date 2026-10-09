@@ -343,7 +343,7 @@ __device__ __forceinline__ uint64_t QueuePairMLX5::quiet_target_single() {
   return __scoped_atomic_load_n(&sq.post, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE);
 }
 
-// precondition: called with all active lanes using different QPs
+// Only reads queue state, so lanes sharing a queue pair can call it.
 __device__ inline __noinline__ bool QueuePairMLX5::try_quiet_until_single(uint64_t target) {
   if (target == 0) {
     return true;

@@ -417,7 +417,7 @@ __device__ __forceinline__ uint64_t QueuePairIONIC::quiet_target_single() {
   return __scoped_atomic_load_n(&sq.pos, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 }
 
-// precondition: called with all active lanes using different QPs
+// Only reads queue state, so lanes sharing a queue pair can call it.
 __device__ inline __noinline__ bool QueuePairIONIC::try_quiet_until_single(uint64_t target) {
   volatile struct ionic_v1_cqe *cqe = &cq.buf[0];
   uint32_t qtf_be = cqe->qid_type_flags;
