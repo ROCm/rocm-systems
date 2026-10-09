@@ -598,6 +598,13 @@ hipError_t StatCO::GetGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_
 
   const auto it = vars_.find(hostVar);
   if (it == vars_.end()) {
+    // If we didn't find device variable, search for managed
+    if (Var* managed_var = FindDeferredManagedVar(hostVar)) {
+      IHIP_RETURN_ONFAIL(managed_var->AllocateManagedVarPtr());
+      *dev_ptr = *static_cast<void**>(managed_var->GetManagedVarPtr());
+      *size_ptr = managed_var->GetSize();
+      return hipSuccess;
+    }
     return hipErrorInvalidSymbol;
   }
 
