@@ -49,11 +49,14 @@ rocDecCreateDecoder(rocDecDecoderHandle *decoder_handle, RocDecoderCreateInfo *d
     }
     rocDecStatus ret = ROCDEC_SUCCESS;
     try {
-        // Constructs the VaContext singleton on first use, which loads the VA-API libraries and can throw.
+        // Construct the VaContext singleton (which loads the VA-API libraries and can throw) before
+        // InitializeDecoder. Its codec check goes through rocDecGetDecoderCaps, which catches a loader
+        // failure itself and would report it as ROCDEC_NOT_SUPPORTED instead.
+        VaContext::GetInstance();
         ret = static_cast<DecHandle *>(handle)->roc_decoder_->InitializeDecoder();
     }
     catch(const std::exception& e) {
-        CriticalLog(g_rocdec_logger, "Error: Failed to initialize the decoder, " + ROCDEC_STR(e.what()));
+        CriticalLog(g_rocdec_logger, "Error: Failed to initialize VA-API, " + ROCDEC_STR(e.what()));
         delete static_cast<DecHandle *>(handle);
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_NOT_INITIALIZED;
