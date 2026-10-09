@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -1648,6 +1649,285 @@ bool mutate_relocation(std::vector<std::uint8_t>& image, std::size_t index, std:
 
 
 }  // namespace
+
+// ---------------------------------------------------------------------------
+// hsa_amd_pointer_info on AIE allocations
+// ---------------------------------------------------------------------------
+// Applications patch agentBaseAddress into a full-ELF design's control code.
+
+TEST_F(DispatchTest, PointerInfoReportsDeviceAddress) {
+  constexpr std::size_t kSize = 4096;
+  void* ptr = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(dev_pool, kSize, 0, &ptr), HSA_STATUS_SUCCESS);
+
+  hsa_amd_pointer_info_t info{};
+  info.size = sizeof(info);
+  EXPECT_EQ(hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr), HSA_STATUS_SUCCESS);
+
+  EXPECT_EQ(info.type, HSA_EXT_POINTER_TYPE_HSA);
+  EXPECT_EQ(info.hostBaseAddress, ptr);
+  EXPECT_EQ(info.sizeInBytes, kSize);
+  EXPECT_EQ(info.agentOwner.handle, aie_agents.front().handle);
+  // Dev-pool memory has a device address distinct from its host address.
+  EXPECT_NE(info.agentBaseAddress, nullptr);
+  EXPECT_NE(info.agentBaseAddress, ptr);
+
+  EXPECT_EQ(hsa_amd_memory_pool_free(ptr), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, PointerInfoReportsAccessibleAgent) {
+  constexpr std::size_t kSize = 4096;
+  void* ptr = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(dev_pool, kSize, 0, &ptr), HSA_STATUS_SUCCESS);
+
+  hsa_amd_pointer_info_t info{};
+  info.size = sizeof(info);
+  std::uint32_t num_agents = 0;
+  hsa_agent_t* agents = nullptr;
+  EXPECT_EQ(hsa_amd_pointer_info(ptr, &info, std::malloc, &num_agents, &agents),
+            HSA_STATUS_SUCCESS);
+
+  // Only the owning agent can access the allocation.
+  ASSERT_EQ(num_agents, 1u);
+  ASSERT_NE(agents, nullptr);
+  EXPECT_EQ(agents[0].handle, aie_agents.front().handle);
+  std::free(agents);
+
+  EXPECT_EQ(hsa_amd_memory_pool_free(ptr), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, PointerInfoResolvesInteriorPointer) {
+  constexpr std::size_t kSize = 4096;
+  constexpr std::size_t kOffset = 256;
+  void* ptr = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(dev_pool, kSize, 0, &ptr), HSA_STATUS_SUCCESS);
+
+  hsa_amd_pointer_info_t base{};
+  base.size = sizeof(base);
+  hsa_amd_pointer_info_t inside{};
+  inside.size = sizeof(inside);
+  ASSERT_EQ(hsa_amd_pointer_info(ptr, &base, nullptr, nullptr, nullptr), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_pointer_info(static_cast<std::uint8_t*>(ptr) + kOffset, &inside, nullptr,
+                                 nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+
+  // An interior pointer reports the allocation that contains it.
+  EXPECT_EQ(inside.type, base.type);
+  EXPECT_EQ(inside.hostBaseAddress, base.hostBaseAddress);
+  EXPECT_EQ(inside.agentBaseAddress, base.agentBaseAddress);
+  EXPECT_EQ(inside.sizeInBytes, base.sizeInBytes);
+
+  EXPECT_EQ(hsa_amd_memory_pool_free(ptr), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, PointerInfoUnknownAfterFree) {
+  constexpr std::size_t kSize = 4096;
+  void* ptr = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(dev_pool, kSize, 0, &ptr), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_memory_pool_free(ptr), HSA_STATUS_SUCCESS);
+
+  // A freed allocation is unknown.
+  hsa_amd_pointer_info_t info{};
+  info.size = sizeof(info);
+  EXPECT_EQ(hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(info.type, HSA_EXT_POINTER_TYPE_UNKNOWN);
+
+  // An output struct with no size is rejected.
+  hsa_amd_pointer_info_t unsized{};
+  EXPECT_EQ(hsa_amd_pointer_info(ptr, &unsized, nullptr, nullptr, nullptr),
+            HSA_STATUS_ERROR_INVALID_ARGUMENT);
+}
+
+TEST_F(DispatchTest, PointerInfoUnknownForForeignPointers) {
+  // None of these are HSA allocations.
+  void* heap = std::malloc(4096);
+  ASSERT_NE(heap, nullptr);
+  int on_stack = 0;
+  static int in_bss = 0;
+
+  struct {
+    const char* what;
+    const void* ptr;
+  } cases[] = {
+      {"heap", heap},
+      {"stack", &on_stack},
+      {"bss", &in_bss},
+      {"function", reinterpret_cast<const void*>(&std::malloc)},
+      {"garbage", reinterpret_cast<const void*>(std::uintptr_t{1})},
+  };
+
+  for (const auto& c : cases) {
+    hsa_amd_pointer_info_t info{};
+    info.size = sizeof(info);
+    EXPECT_EQ(hsa_amd_pointer_info(c.ptr, &info, nullptr, nullptr, nullptr), HSA_STATUS_SUCCESS)
+        << c.what;
+    EXPECT_EQ(info.type, HSA_EXT_POINTER_TYPE_UNKNOWN) << c.what;
+    EXPECT_EQ(info.agentBaseAddress, nullptr) << c.what;
+  }
+
+  // A null pointer is rejected.
+  hsa_amd_pointer_info_t null_info{};
+  null_info.size = sizeof(null_info);
+  EXPECT_EQ(hsa_amd_pointer_info(nullptr, &null_info, nullptr, nullptr, nullptr),
+            HSA_STATUS_ERROR_INVALID_ARGUMENT);
+
+  std::free(heap);
+}
+
+TEST_F(DispatchTest, PointerInfoUnknownJustPastAnAllocation) {
+  constexpr std::size_t kSize = 4096;
+  void* ptr = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(dev_pool, kSize, 0, &ptr), HSA_STATUS_SUCCESS);
+
+  // One past the end is outside the allocation.
+  hsa_amd_pointer_info_t info{};
+  info.size = sizeof(info);
+  EXPECT_EQ(hsa_amd_pointer_info(static_cast<std::uint8_t*>(ptr) + kSize, &info, nullptr, nullptr,
+                                 nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(info.type, HSA_EXT_POINTER_TYPE_UNKNOWN);
+
+  // The last byte is inside.
+  hsa_amd_pointer_info_t last{};
+  last.size = sizeof(last);
+  EXPECT_EQ(hsa_amd_pointer_info(static_cast<std::uint8_t*>(ptr) + kSize - 1, &last, nullptr,
+                                 nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(last.type, HSA_EXT_POINTER_TYPE_HSA);
+  EXPECT_EQ(last.hostBaseAddress, ptr);
+
+  EXPECT_EQ(hsa_amd_memory_pool_free(ptr), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, PointerInfoUnknownInTheAlignmentPadding) {
+  // Allocations are rounded up to the region's granularity, and the padding past the requested
+  // size is not part of the allocation. The size is chosen so that there is padding.
+  constexpr std::size_t kRequested = 100;
+  void* ptr = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(dev_pool, kRequested, 0, &ptr), HSA_STATUS_SUCCESS);
+
+  hsa_amd_pointer_info_t info{};
+  info.size = sizeof(info);
+  ASSERT_EQ(hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(info.type, HSA_EXT_POINTER_TYPE_HSA);
+  // The reported size is the requested size.
+  EXPECT_EQ(info.sizeInBytes, kRequested);
+
+  // The last requested byte is inside.
+  hsa_amd_pointer_info_t last{};
+  last.size = sizeof(last);
+  EXPECT_EQ(hsa_amd_pointer_info(static_cast<std::uint8_t*>(ptr) + kRequested - 1, &last, nullptr,
+                                 nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(last.type, HSA_EXT_POINTER_TYPE_HSA);
+  EXPECT_EQ(last.hostBaseAddress, ptr);
+
+  // The first byte of padding is outside.
+  hsa_amd_pointer_info_t padding{};
+  padding.size = sizeof(padding);
+  EXPECT_EQ(hsa_amd_pointer_info(static_cast<std::uint8_t*>(ptr) + kRequested, &padding, nullptr,
+                                 nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(padding.type, HSA_EXT_POINTER_TYPE_UNKNOWN);
+
+  EXPECT_EQ(hsa_amd_memory_pool_free(ptr), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, PointerInfoReportsPoolFlags) {
+  // The allocation reports the same global flags as its pool.
+  constexpr std::size_t kSize = 4096;
+  void* ptr = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(dev_pool, kSize, 0, &ptr), HSA_STATUS_SUCCESS);
+
+  std::uint32_t pool_flags = 0;
+  ASSERT_EQ(
+      hsa_amd_memory_pool_get_info(dev_pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &pool_flags),
+      HSA_STATUS_SUCCESS);
+
+  hsa_amd_pointer_info_t info{};
+  info.size = sizeof(info);
+  ASSERT_EQ(hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr), HSA_STATUS_SUCCESS);
+
+  EXPECT_EQ(info.global_flags, pool_flags);
+  EXPECT_TRUE(info.registered);
+
+  EXPECT_EQ(hsa_amd_memory_pool_free(ptr), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, PointerInfoReportsKernargPoolFlags) {
+  // A kernarg pool allocation reports KERNARG_INIT.
+  find_pool_data kernarg{};
+  kernarg.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
+  kernarg.expected_allocatable = true;
+  if (hsa_amd_agent_iterate_memory_pools(aie_agents.front(), find_memory_pool, &kernarg) !=
+      HSA_STATUS_INFO_BREAK) {
+    GTEST_SKIP() << "no allocatable kernarg pool on this agent";
+  }
+
+  void* ptr = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg.pool, 4096, 0, &ptr), HSA_STATUS_SUCCESS);
+
+  std::uint32_t pool_flags = 0;
+  ASSERT_EQ(hsa_amd_memory_pool_get_info(kernarg.pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS,
+                                         &pool_flags),
+            HSA_STATUS_SUCCESS);
+
+  hsa_amd_pointer_info_t info{};
+  info.size = sizeof(info);
+  ASSERT_EQ(hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(info.type, HSA_EXT_POINTER_TYPE_HSA);
+  EXPECT_EQ(info.global_flags, pool_flags);
+  EXPECT_TRUE(info.global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT);
+
+  EXPECT_EQ(hsa_amd_memory_pool_free(ptr), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, PointerInfoReportsPerAllocationFlags) {
+  // Flags passed to the allocation are reported in alloc_flags.
+  constexpr std::size_t kSize = 4096;
+  void* ptr = nullptr;
+  const hsa_amd_memory_pool_flag_t kFlag = HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
+  if (hsa_amd_memory_pool_allocate(dev_pool, kSize, kFlag, &ptr) != HSA_STATUS_SUCCESS) {
+    GTEST_SKIP() << "pool does not accept the executable allocation flag";
+  }
+
+  hsa_amd_pointer_info_t info{};
+  info.size = sizeof(info);
+  ASSERT_EQ(hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(info.type, HSA_EXT_POINTER_TYPE_HSA);
+  EXPECT_TRUE(info.alloc_flags & HSA_AMD_POINTER_INFO_ALLOC_FLAG_EXECUTABLE);
+
+  EXPECT_EQ(hsa_amd_memory_pool_free(ptr), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, PointerInfoLeavesNonAieAllocationsAlone) {
+  // A CPU pool allocation is owned by the CPU agent.
+  std::vector<hsa_agent_t> cpu_agents;
+  ASSERT_EQ(hsa_iterate_agents(aie_test::discover_agents<HSA_DEVICE_TYPE_CPU>, &cpu_agents),
+            HSA_STATUS_SUCCESS);
+  if (cpu_agents.empty()) GTEST_SKIP() << "no CPU agent";
+
+  find_pool_data sys_pool{};
+  sys_pool.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
+  sys_pool.expected_allocatable = true;
+  if (hsa_amd_agent_iterate_memory_pools(cpu_agents.front(), find_memory_pool, &sys_pool) !=
+      HSA_STATUS_INFO_BREAK) {
+    GTEST_SKIP() << "no allocatable fine-grained CPU pool";
+  }
+
+  void* ptr = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(sys_pool.pool, 4096, 0, &ptr), HSA_STATUS_SUCCESS);
+
+  hsa_amd_pointer_info_t info{};
+  info.size = sizeof(info);
+  EXPECT_EQ(hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(info.type, HSA_EXT_POINTER_TYPE_HSA);
+  // System memory is accessed at its host address.
+  EXPECT_EQ(info.agentBaseAddress, ptr);
+  EXPECT_EQ(info.agentOwner.handle, cpu_agents.front().handle);
+
+  EXPECT_EQ(hsa_amd_memory_pool_free(ptr), HSA_STATUS_SUCCESS);
+}
 
 class FullElfDispatchTest : public DispatchTest {
  protected:

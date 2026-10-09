@@ -28,7 +28,7 @@ bit depth.
 
 ``rocDecDecodeFrame()`` is used to submit frames for hardware decoding. This function must be called when the ``pfn_decode_picture`` callback is triggered in the ``rocDecParseVideoData()`` call. See :doc:`The rocDecode parser API <./rocDecode-parser>` for details about this call.
 
-``rocDecDecodeFrame()`` takes the decoder handle and the pointer to the ``RocdecPicParams()`` struct and initiates the video decoding using VA-API. ``RocdecPicParams`` is populated with the decoded frame information.
+``rocDecDecodeFrame()`` takes the decoder handle and the pointer to the ``RocdecPicParams()`` struct and initiates the video decoding using VA-API. On Windows, VA-API is provided through the vaon12 backend (Mesa's VA-API on D3D12 translation layer), which translates VA-API calls to D3D12 Video Decode API calls. ``RocdecPicParams`` is populated with the decoded frame information.
 
 The ``pfn_sequence_callback`` callback is triggered when a format change occurs or when a new sequence header is encountered. The implementation of ``pfn_sequence_callback`` must call ``rocDecReconfigureDecoder()`` to reconfigure the decoder to handle the new sequence or format. See :doc:`The rocDecode parser API <./rocDecode-parser>` for details about this callback.
 

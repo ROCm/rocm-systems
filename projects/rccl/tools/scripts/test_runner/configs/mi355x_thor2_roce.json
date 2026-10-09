@@ -1423,6 +1423,16 @@
           "test_filter": "Recorder.VerifyMultithread"
         },
         {
+          "name": "Recorder.RedOpRecordJson",
+          "description": "Recorder RedOp record JSON output",
+          "test_filter": "Recorder.RedOpRecordJson"
+        },
+        {
+          "name": "Recorder.RedOpRecordBinary",
+          "description": "Recorder RedOp record binary output",
+          "test_filter": "Recorder.RedOpRecordBinary"
+        },
+        {
           "name": "ProxyTrace.nonEmptySingleton",
           "description": "Proxy trace non-empty singleton",
           "test_filter": "ProxyTraceTestFixture.nonEmptySingleton"
@@ -2183,6 +2193,11 @@
           "name": "Resiliency_RecoveryUdTimeoutExhaustsAttempts",
           "description": "UD recovery timeout exhausts max attempts, device stays failed",
           "test_filter": "NetIbMPITest.RecoveryUdTimeoutExhaustsAttempts"
+        },
+        {
+          "name": "Resiliency_GidChangeRefresh",
+          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
+          "test_filter": "Transport/NetIbGidChangeTest.*"
         }
       ]
     },
@@ -4442,8 +4457,8 @@
       "tests": [
         {
           "name": "GIN_DeviceMPI_AllTests",
-          "description": "GIN proxy device-side MPI tests over IB across two nodes",
-          "test_filter": "GinMPIDeviceTests.*-GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong",
+          "description": "GIN proxy device-side MPI tests over IB across two nodes (includes Recycle_* and GinProxyNthreadsSplitTests)",
+          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong",
           "timeout": 600
         },
         {
@@ -4465,11 +4480,35 @@
           }
         },
         {
+          "name": "GIN_SignalReset_MultiContext",
+          "description": "resetSignal on one GIN context leaves the other contexts' reads and offsets intact (NCCL_GIN_NCONTEXTS=4)",
+          "test_filter": "GinMPIDeviceTests.SignalReset_IsPerContext_MultiContext",
+          "env_variables": {
+            "NCCL_GIN_NCONTEXTS": "4"
+          }
+        },
+        {
           "name": "GIN_RailConnection_Create",
           "description": "RAIL GIN connection type; requires rail-only mode (NCCL_CROSS_NIC=0)",
           "test_filter": "GinMPIDeviceTests.RailConnection_Create",
           "env_variables": {
             "NCCL_CROSS_NIC": "0"
+          }
+        },
+        {
+          "name": "GIN_ProxyNthreads_2",
+          "description": "GIN PROXY Recycle/SplitShare/Put/HealthyBarrier under NCCL_GIN_PROXY_NTHREADS=2 (AICOMRCCL-2017 / NVIDIA/nccl#2279)",
+          "test_filter": "GinMPIDeviceTests.Recycle_*:GinProxyNthreadsSplitTests.SplitShare_SecondDevCommPut:GinMPIDeviceTests.Put_BasicAndOffsets:GinBarrierTimeoutMPITest.HealthyBarrierReturnsSuccess",
+          "env_variables": {
+            "NCCL_GIN_PROXY_NTHREADS": "2"
+          }
+        },
+        {
+          "name": "GIN_ProxyNthreads_4",
+          "description": "GIN PROXY Recycle/SplitShare/Put/HealthyBarrier under NCCL_GIN_PROXY_NTHREADS=4 (AICOMRCCL-2017 / NVIDIA/nccl#2279)",
+          "test_filter": "GinMPIDeviceTests.Recycle_*:GinProxyNthreadsSplitTests.SplitShare_SecondDevCommPut:GinMPIDeviceTests.Put_BasicAndOffsets:GinBarrierTimeoutMPITest.HealthyBarrierReturnsSuccess",
+          "env_variables": {
+            "NCCL_GIN_PROXY_NTHREADS": "4"
           }
         }
       ]
@@ -4563,6 +4602,37 @@
           "env_variables": {
             "NCCL_GIN_COUNTER_POOL_SIZE": "0x40000000"
           }
+        }
+      ]
+    },
+    "symmetric_kernel_mpi_8rank": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "description": "Symmetric ReduceScatter, AllReduce and AllGather partitioning and kernel selection correctness on 8 co-located ranks. Requires NCCL_CUMEM_ENABLE=1 for symmetric window registration.",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "HSA_NO_SCRATCH_RECLAIM": "1"
+      },
+      "tests": [
+        {
+          "name": "Symk_CountSweep",
+          "description": "ReduceScatter, AllReduce and AllGather across LL and deep-path sizes, including partial final chunk waves",
+          "test_filter": "SymmetricKernelCorruptionTest.CountSweep_PartitioningAndSlots"
+        },
+        {
+          "name": "Symk_MisalignedPacks",
+          "description": "ReduceScatter, AllReduce and AllGather with a 4-byte but not 16-byte aligned relative buffer offset",
+          "test_filter": "SymmetricKernelCorruptionTest.MisalignedBuffers_FourBytePackTier"
+        },
+        {
+          "name": "Symk_AllGatherStoreCrossover",
+          "description": "AllGather switches from LL to the store kernel at 4 MB on gfx950, skipped on other architectures",
+          "test_filter": "SymmetricKernelCorruptionTest.AllGather_StoreKernelFrom4MB"
         }
       ]
     }
@@ -5242,7 +5312,7 @@
     },
     {
       "name": "GIN Device MPI - Proxy Tests",
-      "description": "GIN proxy device-side MPI tests (put/signal/counter/barrier/alltoall) over IB across two nodes",
+      "description": "GIN proxy device-side MPI tests (put/signal/counter/barrier/alltoall + GIN_PROXY_NTHREADS recycle/splitShare) over IB across two nodes",
       "config": "gin_device_mpi",
       "enabled": true
     },
@@ -5292,6 +5362,12 @@
       "name": "Symmetric Abort + CheckMode Tests - Single Node",
       "description": "NCCL_CHECK_MODE validation and symmetric-kernel abort (AICOMRCCL-806)",
       "config": "symmetric_abort_checkmode_tests",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric Kernels (8-rank)",
+      "description": "Symmetric ReduceScatter, AllReduce and AllGather partitioning and buffer-alignment correctness on 8 co-located ranks (NCCL_CUMEM_ENABLE=1)",
+      "config": "symmetric_kernel_mpi_8rank",
       "enabled": true
     }
   ]
