@@ -87,7 +87,8 @@ not snapshot or restore — the dispatch takes the ordinary path.
 Input files are unaffected by the flag. An input file's jobs each describe a run of their own --
 their own output configuration, kernel filters and ranges -- so ``rocprofv3`` runs them exactly as
 it would without ``--replay-mode kernel``, and replay applies within each job to the
-counter groups that job asks for.
+counter groups that job asks for. To make the jobs of an input file the passes of one replay run
+instead, opt in inside the file, as described in `Describing passes with input-file jobs`_.
 
 List counters first with ``rocprofv3 --list-avail`` or ``rocprofv3-avail list --pmc``. Each
 individual ``--pmc`` group must still fit in one hardware pass; kernel replay does not split a
@@ -119,14 +120,84 @@ without replay: with no ``--kernel-iteration-range``, only the first launch of e
 traced and has its counters collected. A dispatch that is not replayed (a HIP graph launch or a
 multi-packet submission) collects the first counter group and is not traced.
 
+Describing passes with input-file jobs
+======================================
+
+A JSON or YAML input file can describe the passes themselves. Setting the top-level
+``job_replay_mode`` to ``kernel`` turns the file's jobs into the passes of a single kernel replay
+run, in job order, instead of separate runs of the application. Each job selects what its pass
+collects:
+
+* ``pmc``: one counter group, or
+* ``advanced_thread_trace``: the dispatch thread trace, configured by the ``att_*`` options on the
+  same job. At most one job may trace.
+
+Every other option a job sets applies to the whole run -- kernel filters, output settings, tracing
+options, ``kernel_replay_beta_enabled`` -- so it may be set on any job, and jobs that set the same
+option must agree on its value. ``att_library_path`` only says where the decoder is and may also sit
+on any job.
+
+.. code-block:: json
+
+   {
+     "job_replay_mode": "kernel",
+     "jobs": [
+       {
+         "pmc": ["SQ_WAVES", "GRBM_COUNT"],
+         "kernel_include_regex": "gemm",
+         "output_format": ["json"],
+         "kernel_replay_beta_enabled": true
+       },
+       {"advanced_thread_trace": true, "att_target_cu": 1},
+       {"pmc": ["GRBM_GUI_ACTIVE"]}
+     ]
+   }
+
+.. code-block:: yaml
+
+   job_replay_mode: kernel
+   jobs:
+     - pmc: [SQ_WAVES, GRBM_COUNT]
+       kernel_include_regex: gemm
+       output_format: [json]
+       kernel_replay_beta_enabled: true
+     - advanced_thread_trace: true
+       att_target_cu: 1
+     - pmc: [GRBM_GUI_ACTIVE]
+
+.. code-block:: bash
+
+   rocprofv3 -i input.json -- <application_path>
+
+Each ``gemm`` dispatch runs three times: pass 0 collects ``SQ_WAVES`` and ``GRBM_COUNT``, pass 1
+runs the thread trace with counter collection switched off, and pass 2 collects
+``GRBM_GUI_ACTIVE`` with the thread trace switched off. The output is written once, without a
+``pass_n/`` directory per job, and ``replay_pass`` in the counter records numbers the counter jobs
+(0 and 1 here) because the thread trace job collects no counters.
+
+``job_replay_mode`` defaults to ``application``, so input files that do not set it keep running each
+job as its own run, with or without ``--replay-mode kernel``. In ``kernel`` mode, ``rocprofv3``
+rejects:
+
+* a job that sets both ``pmc`` and ``advanced_thread_trace``, or neither;
+* more than one thread trace job, ``pmc_groups``, or a file without any ``pmc`` job;
+* ``att_*`` options other than ``att_library_path`` on a job that does not trace;
+* ``--pmc`` or ``--att`` on the command line, since every pass comes from a job;
+* ``replay_mode: application`` in a job or ``--replay-mode application`` on the command line;
+* attach mode (``--pid``) and ``--collection-period``.
+
+The restrictions of `Thread trace and counters on the same dispatch`_ apply as well.
+
 Pass count
 ==========
 
 The pass count is **not** a user-supplied integer. ``rocprofv3`` derives it per dispatch from the
 number of counter groups collectable on **that dispatch's GPU agent**, plus one for the thread
-trace pass with ``--att``. Pass ``i`` maps to group ``i`` (group ``i - 1`` with ``--att``, whose
-thread trace takes pass 0). An agent with fewer collectable groups than the global ``--pmc`` list
-is replayed only as many times as it has groups, so pass and group stay aligned.
+trace pass with ``--att``. Pass ``i`` maps to group ``i``; the thread trace pass takes pass 0 from
+the command line, or the position of its job with ``job_replay_mode: kernel``, and the groups after
+it shift one pass later. An agent with fewer collectable groups than the global ``--pmc`` list is
+replayed only as many times as it has groups, so pass and group stay aligned; its thread trace pass
+still follows exactly the groups configured ahead of it.
 
 A dispatch that the kernel filters (``--kernel-include-regex``, ``--kernel-exclude-regex``,
 ``--kernel-iteration-range``) do not select is not replayed at all: it runs once on the ordinary

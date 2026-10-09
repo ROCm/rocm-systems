@@ -9,6 +9,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 **rocprofv3 (CLI):**
 
   - `--att` can be combined with `--replay-mode kernel` (beta). Each profiled dispatch gets one extra replay pass, ahead of its counter passes, that runs the dispatch thread trace with counter collection switched off; the counter groups then run with the trace switched off. Device-mode thread trace options (`--att-consecutive-kernels`, `--att-no-intercept`, `--selected-regions`, `--collection-period`) are rejected with `--replay-mode kernel`.
+  - JSON and YAML input files can opt in to kernel replay with a top-level `job_replay_mode: kernel` (beta). The file's jobs then become the passes of a single kernel replay run, in job order, and each job selects what its pass collects: one counter group (`pmc`) or the dispatch thread trace (`advanced_thread_trace` with its `att_*` settings). Other job options apply to the whole run and must agree across jobs. Files without `job_replay_mode`, or with `job_replay_mode: application`, keep running each job as its own run. `rocprofv3_input_schema.json` documents the new field together with the replay and thread trace job options.
 
 ### Changed
 

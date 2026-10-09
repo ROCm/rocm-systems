@@ -22,8 +22,9 @@ set(rocprofv3-validate-env
     )
 
 rocprofiler_configure_pytest_files(
-    CONFIG pytest.ini COPY conftest.py validate.py validate_perf.py
-                           test_kernel_replay_cli.py)
+    CONFIG pytest.ini
+    COPY conftest.py validate.py validate_perf.py test_kernel_replay_cli.py
+         input-job-replay-counters.json input-job-replay-att.json)
 
 # Unit test for the rocprofv3 kernel-replay CLI logic. Imports rocprofv3.py directly, so
 # it needs no GPU, no application run and no fixtures -- it guards which services replay
@@ -32,8 +33,10 @@ rocprofiler_configure_pytest_files(
 # integration-test arguments (--json-input, --passes).
 add_test(
     NAME rocprofv3-test-kernel-replay-cli-unit
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/test_kernel_replay_cli.py
-            --script $<TARGET_FILE:rocprofiler-sdk::rocprofv3>)
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/test_kernel_replay_cli.py
+        --script $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --schema
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../source/docs/rocprofv3_input_schema.json)
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-cli-unit
@@ -328,6 +331,110 @@ set_tests_properties(
                "${rocprofv3-validate-env}"
                FIXTURES_REQUIRED
                rocprofv3-test-kernel-replay-att-first-iteration-data
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               ${KERNEL_REPLAY_ATT_DISABLED})
+
+# job_replay_mode: kernel. The input file's jobs are the passes of one run rather than
+# runs of their own: two counter jobs must produce the same replay structure as two --pmc
+# groups. The jobs generate tests run with RUN_SERIAL for the same reason as the thread
+# trace one: their validate steps compare SQ counters across a dispatch's passes.
+add_test(
+    NAME rocprofv3-test-kernel-replay-jobs-generate
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
+        ${CMAKE_CURRENT_BINARY_DIR}/input-job-replay-counters.json --output-format json
+        -d ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-jobs -o out --
+        $<TARGET_FILE:kernel-replay> 1048576 1)
+
+set_tests_properties(
+    rocprofv3-test-kernel-replay-jobs-generate
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;kernel-replay"
+               ENVIRONMENT
+               "${rocprofv3-generate-env}"
+               RESOURCE_LOCK
+               rocprofiler_kernel_replay
+               RUN_SERIAL
+               ON
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_SETUP
+               rocprofv3-test-kernel-replay-jobs-data)
+
+add_test(
+    NAME rocprofv3-test-kernel-replay-jobs-validate
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-jobs/out_results.json --passes 2
+        --common-counters SQ_WAVES SQ_INSTS_VALU --expected-counters SQ_WAVES
+        SQ_INSTS_VALU GRBM_COUNT GRBM_GUI_ACTIVE)
+
+set_tests_properties(
+    rocprofv3-test-kernel-replay-jobs-validate
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;kernel-replay"
+               ENVIRONMENT
+               "${rocprofv3-validate-env}"
+               FIXTURES_REQUIRED
+               rocprofv3-test-kernel-replay-jobs-data
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# The thread trace job sits between the two counter jobs, so its pass runs second: the
+# counter records must still number their groups 0..1 and each dispatch must be traced
+# exactly once.
+add_test(
+    NAME rocprofv3-test-kernel-replay-jobs-att-generate
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
+        ${CMAKE_CURRENT_BINARY_DIR}/input-job-replay-att.json --att-library-path
+        ${kernel_replay_attdecoder_LIB_DIR} --output-format json -d
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-jobs-att -o out --
+        $<TARGET_FILE:kernel-replay> 1048576 1)
+
+set_tests_properties(
+    rocprofv3-test-kernel-replay-jobs-att-generate
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;kernel-replay;thread-trace"
+               ENVIRONMENT
+               "${rocprofv3-generate-env}"
+               RESOURCE_LOCK
+               rocprofiler_kernel_replay
+               RUN_SERIAL
+               ON
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_SETUP
+               rocprofv3-test-kernel-replay-jobs-att-data
+               DISABLED
+               ${KERNEL_REPLAY_ATT_DISABLED})
+
+add_test(
+    NAME rocprofv3-test-kernel-replay-jobs-att-validate
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-jobs-att/out_results.json --passes 2
+        --common-counters SQ_WAVES SQ_INSTS_VALU --expected-counters SQ_WAVES
+        SQ_INSTS_VALU GRBM_COUNT GRBM_GUI_ACTIVE --thread-trace)
+
+set_tests_properties(
+    rocprofv3-test-kernel-replay-jobs-att-validate
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;kernel-replay;thread-trace"
+               ENVIRONMENT
+               "${rocprofv3-validate-env}"
+               FIXTURES_REQUIRED
+               rocprofv3-test-kernel-replay-jobs-att-data
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
