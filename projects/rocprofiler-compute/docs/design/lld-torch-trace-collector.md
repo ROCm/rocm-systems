@@ -153,12 +153,14 @@ marker syntax require the flat-marker analysis update.
    unique dispatches to markers on `Correlation_ID` (plus `GUID` when both
    files have that column).
 3. Record `UnaccountedKernelError` when a kernel's `Correlation_ID` is not
-   in the marker CSV (reported after the call tree). Plain analyze without
+   in the marker CSV (warns during join). Plain analyze without
    those flags does not join and does not report that error.
 4. Consolidate matching operator calls across passes on the stitch key plus
    `function_ordinal`. Record `PassMarkerMismatchError` when operator calls
-   or the kernel-name set disagree across passes (reported after the tree).
-5. Parse Function into name, file/line, `T_Tid`, `F_Tid`, `Backend`.
+   or the kernel-name set disagree across passes (analyze exits).
+5. Parse Function into name, file/line, `Backend`, `launcher_thread_id`
+   from `ltid=`, and args. `tid=` and `ftid=` stay on the Function cell
+   for stitch; they are not analyze columns.
 6. Nest marker intervals per `Thread_Id`. Two markers on the same
    `Thread_Id` whose intervals overlap (neither nested nor adjacent) record
    `OverlappingMarkerRangeError`.

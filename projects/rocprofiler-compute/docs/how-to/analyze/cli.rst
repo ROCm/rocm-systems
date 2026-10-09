@@ -814,10 +814,11 @@ A Function whose first token is the legacy stacked shape (``:#`` or
 ``#n@file:line``) makes analyze exit during parse, before the tree.
 Re-profile with current ``--torch-trace``.
 
-``Thread_Id`` is the rocprofiler thread. ``T_Tid`` is PyTorch
-``currentThreadId()`` and ``F_Tid`` is ``forwardThreadId()``; both are parsed
-from Function in analyze. ``/`` in the Operator column and in globs is the
-reconstructed call path, not a filesystem path.
+The forest is keyed by CSV ``Thread_Id``. Attach uses Function ``ltid=``
+against that ``Thread_Id``. Stitch uses ``tid=`` and ``ftid=`` on the
+Function cell; analyze does not keep those as columns. ``/`` in the
+Operator column and in globs is the reconstructed call path, not a
+filesystem path.
 
 
 List all operators
