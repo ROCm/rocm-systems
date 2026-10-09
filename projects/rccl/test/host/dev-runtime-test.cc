@@ -24,8 +24,7 @@
 // g_loadParam on every read, so tests can vary a param between cases. Must
 // precede the unit under test, which is where the bodies are emitted.
 //
-// g_loadParam is supplied by fakes/dev_runtime_micro_fakes.cc here rather than
-// fakes/nccl_fakes.cc, which this binary does not link.
+// g_loadParam is defined in fakes/nccl_fakes.cc, which this binary links.
 #include "fakes/param_redirect.h"
 
 // ncclCalloc's failure arms cannot be reached while it always succeeds, and it

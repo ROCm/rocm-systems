@@ -14,7 +14,7 @@
 // the init test's own TUs), this floor has just the one seam global of its
 // own (g_ncclArgsGlobalCheck, for ncclArgsGlobalCheck below). It also reads
 // ncclParamEnqueueRearchEnable through g_loadParam, so the binary it links into
-// must define that hook (fakes/dev_runtime_micro_fakes.cc does).
+// must also link that hook's definition (fakes/nccl_fakes.cc).
 
 #include "collective_stubs.h"
 #include "nccl_fakes.h"  // g_loadParam
