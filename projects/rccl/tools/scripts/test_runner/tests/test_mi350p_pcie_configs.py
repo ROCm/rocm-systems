@@ -43,6 +43,7 @@ class Mi350pPcieConfigTest(unittest.TestCase):
         for label, doc in (("func", self.func), ("perf", self.perf)):
             flags = doc["build_configuration"]["install_flags"]
             self.assertIn("--debug", flags, label)
+            self.assertIn("-l", flags, label)
             rccl_tests = doc["rccl_tests_build_configuration"]
             self.assertNotIn("rccl_home", rccl_tests, label)
 
@@ -98,14 +99,15 @@ class Mi350pPcieConfigTest(unittest.TestCase):
         self.assertEqual(extra_channels, {"2", "8", "16", "64"})
 
     def test_ipc_requests_sys_p2p_and_shm_disables_p2p(self):
-        for test in _tests(self.func, "allreduce_smoke"):
-            env = test["env_variables"]
-            if env["NCCL_P2P_DISABLE"] == "0":
-                self.assertEqual(env["NCCL_P2P_LEVEL"], "SYS", test["name"])
-                self.assertEqual(env["NCCL_SHM_DISABLE"], "1", test["name"])
-            else:
-                self.assertEqual(env["NCCL_P2P_DISABLE"], "1", test["name"])
-                self.assertNotIn("NCCL_P2P_LEVEL", env, test["name"])
+        for suite in ("allreduce_smoke", "allreduce_extra"):
+            for test in _tests(self.func, suite):
+                env = test["env_variables"]
+                if env["NCCL_P2P_DISABLE"] == "0":
+                    self.assertEqual(env["NCCL_P2P_LEVEL"], "SYS", test["name"])
+                    self.assertEqual(env["NCCL_SHM_DISABLE"], "1", test["name"])
+                else:
+                    self.assertEqual(env["NCCL_P2P_DISABLE"], "1", test["name"])
+                    self.assertNotIn("NCCL_P2P_LEVEL", env, test["name"])
 
     def test_perf_iteration_counts_match(self):
         proc = self.perf_proc

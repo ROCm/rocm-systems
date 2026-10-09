@@ -9,8 +9,9 @@
 //
 // The same gfx950 SKU is also sold on an all-XGMI fabric (topo_8p_950.xml).
 // These tests load the PCIe model with no GPU present and check that RCCL
-// keeps every GPU pair on PCIe: no XGMI path, same-socket pairs stay inside
-// one CPU, and cross-socket pairs cross the CPU link.
+// keeps every GPU pair on PCIe: no XGMI path, pairs that share an outer
+// PEX890 are PATH_PXB, other same-socket pairs are PATH_PHB, and
+// cross-socket pairs are PATH_SYS.
 //
 // RCCL_TOPO_XGMI_ALL is set only by ncclTopoTrimSystem, which this test does
 // not call, so the per-pair ncclTopoGetLinkType result is the check that
@@ -43,6 +44,8 @@ namespace
 
 constexpr int kGpuCount = 8;
 constexpr int kGpusPerSocket = 4;
+// Ranks 0-1, 2-3, 4-5, and 6-7 each sit behind one outer PEX890.
+constexpr int kGpusPerOuterSwitch = 2;
 constexpr uint64_t kMi350pDevice = 0x75a8;
 constexpr uint64_t kPex890Device = 0xc030;
 
@@ -157,13 +160,18 @@ TEST(Mi350pPcieTopo, EightGfx950GpusNoXgmi)
             EXPECT_FALSE(xgmi) << "rank " << a->gpu.rank << " -> " << b->gpu.rank;
 
             const bool sameSocket = (a->gpu.rank / kGpusPerSocket) == (b->gpu.rank / kGpusPerSocket);
-            if (sameSocket)
+            const bool sameOuterSwitch = (a->gpu.rank / kGpusPerOuterSwitch) == (b->gpu.rank / kGpusPerOuterSwitch);
+            if (!sameSocket)
             {
-                EXPECT_LT(pathType, PATH_SYS) << "same-socket rank " << a->gpu.rank << " -> " << b->gpu.rank;
+                EXPECT_EQ(pathType, PATH_SYS) << "cross-socket rank " << a->gpu.rank << " -> " << b->gpu.rank;
+            }
+            else if (sameOuterSwitch)
+            {
+                EXPECT_EQ(pathType, PATH_PXB) << "shared outer switch rank " << a->gpu.rank << " -> " << b->gpu.rank;
             }
             else
             {
-                EXPECT_EQ(pathType, PATH_SYS) << "cross-socket rank " << a->gpu.rank << " -> " << b->gpu.rank;
+                EXPECT_EQ(pathType, PATH_PHB) << "same-socket rank " << a->gpu.rank << " -> " << b->gpu.rank;
             }
         }
     }
