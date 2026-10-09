@@ -395,6 +395,9 @@ class CodeGenerator:
         'flat_atomic': 'flat_atomic',
         'global_load_async_to_lds': 'async_load',
         'global_store_async_from_lds': 'async_store',
+        # CDNA4 ISA 10.4: global instructions use VM_CNT only, never LGKM_CNT,
+        # even when the destination is LDS.
+        'global_load_lds': 'vmem_load',
         'global_load_addtid': 'vmem_load',
         'global_store_addtid': 'vmem_store',
         'buffer_load': 'vmem_load',
@@ -1213,6 +1216,7 @@ class CodeGenerator:
                 'gl1_wbinv',
                 'global_load_addtid',
                 'global_load_async_to_lds',
+                'global_load_lds',
                 'image_bvh',
                 'image_load',
                 'image_query',
@@ -7584,6 +7588,9 @@ class CodeGenerator:
         if cls == 'global_load_async_to_lds':
             return self._gen_global_load_async_to_lds(dst_ops, src_ops, sem)
 
+        if cls == 'global_load_lds':
+            return self._gen_global_load_lds(dst_ops, src_ops, sem)
+
         if cls == 'global_store_async_from_lds':
             return self._gen_global_store_async_from_lds(dst_ops, src_ops, sem)
 
@@ -8393,6 +8400,78 @@ class CodeGenerator:
                     f'    d->store_data[lane * {stride} + {i}] = static_cast<uint8_t>(val{i});'
                 )
         L.append('  }')
+        L.append('  set_data(std::move(d));')
+        return '\n'.join(L)
+
+    def _gen_global_load_lds(
+        self, dst: list[str], src: list[str], sem: InstructionSemantics
+    ) -> str:
+        """CDNA3/CDNA4 GLOBAL_LOAD_LDS_*: global memory straight into LDS.
+
+        CDNA4 ISA 10.3 gives the destination address as
+
+            LDS_ADDR = LDSbase(hw alloc) + LDSoffset(M0[17:2] * 4)
+                       + INST.OFFSET + ThreadID * stride
+
+        M0 is masked and dword-aligned here. This differs from the MUBUF
+        buffer-load-to-LDS form, which takes a raw 18-bit byte offset from
+        M0[17:0] (ISA 9.1.9); the two must not be conflated.
+        """
+        L = []
+        esz, ne = sem.elem_size, sem.num_elems
+        per_lane_bytes = esz * ne
+        # ISA 9.1.9: "For loads to LDS with data-size of 3 or 4 dwords, the
+        # equation is modified to be: (TIDinWave * 16)", and "LOAD_DWORDX3
+        # writes 3 dwords and skips the 4th". DWORDX3 therefore writes 12
+        # bytes on a 16-byte stride and cannot use the memory pipeline's
+        # default lane offset of lane * per_lane_bytes.
+        #
+        # Sub-dword strides are not stated anywhere in the ISA document, which
+        # only gives the DWORDX1 (*4) and DWORDX4 (*16) cases. These use
+        # per_lane_bytes, matching the existing MUBUF buffer-load-to-LDS
+        # implementation. If a sub-dword variant ever produces wrong data,
+        # this is the line to revisit -- the alternative reading is that every
+        # access up to one dword occupies a 4-byte slot.
+        stride = 16 if (esz == 4 and ne in (3, 4)) else per_lane_bytes
+        _, _, nt = self._coherency_exprs()
+        L.append(
+            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+        )
+        L.append(f'  d->elem_size = {esz};')
+        L.append(f'  d->num_elems = {ne};')
+        L.append('  d->is_load = true;')
+        self._append_wait_counter_type(L, sem, 'global_load_lds')
+        L.append('  d->lds_dst = true;')
+        L.append(
+            '  // CDNA4 ISA 10.3: LDS_ADDR = LDSbase + M0[17:2]*4 + INST.OFFSET'
+            ' + ThreadID*stride.'
+        )
+        L.append('  uint32_t raw_lds_offset;')
+        L.append('  if constexpr (requires { inst_.pad_12; })')
+        L.append('    raw_lds_offset = inst_.offset | (inst_.pad_12 << 12);')
+        L.append('  else')
+        L.append('    raw_lds_offset = inst_.offset;')
+        L.append(
+            '  const int32_t lds_inst_offset = '
+            'static_cast<int32_t>(raw_lds_offset << 19) >> 19;'
+        )
+        L.append(
+            '  d->lds_base = wf.lds_base() + ((wf.m0() >> 2) & 0xFFFFu) * 4u +'
+            ' static_cast<uint32_t>(lds_inst_offset);'
+        )
+        L.append(f'  d->mtype = {self._mtype_expr()};')
+        L.append(f'  d->non_temporal = {nt};')
+        L.append('  flat_calculate_addresses(inst_, wf, *d);')
+        if stride != per_lane_bytes:
+            L.append(
+                f'  // {ne} dwords written on a {stride}-byte stride, so the'
+                ' lane offset cannot come from the payload size.'
+            )
+            L.append('  d->lds_per_lane_addr = true;')
+            L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)')
+            L.append(
+                f'    d->per_lane_lds_addr[lane] = d->lds_base + lane * {stride}u;'
+            )
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
