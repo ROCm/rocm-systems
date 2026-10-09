@@ -1000,7 +1000,8 @@ TEST(ProxyTests, ProxyConnectionPoolBoundsCheck)
 // Before 2.30.7, a bad-magic connection was discarded and ncclSocketAccept()
 // immediately retried from inside the proxy service thread. With no subsequent
 // connection ready, that retry blocked in accept() and the thread stopped
-// polling the proxy listen socket and checking abortFlag. The proxy now calls
+// connection ready, that retry spun on EAGAIN from the nonblocking listen
+// socket and the thread stopped servicing its other peers. The proxy now calls
 // ncclSocketAccept(..., false), which returns after rejecting the peer.
 TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
 {
