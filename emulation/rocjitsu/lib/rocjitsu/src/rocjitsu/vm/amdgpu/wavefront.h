@@ -45,7 +45,7 @@ enum class WfState : uint8_t {
   WAITCNT,  ///< Stalled at a waitcnt.
   VM_RETRY, ///< A prepared memory operation is waiting for backing availability.
   BARRIER,  ///< Stalled at a barrier.
-  GWS_WAIT, ///< Parked at a Global Wave Sync rendezvous (dispatch-global).
+  GWS_WAIT, ///< Parked at a Global Wave Sync rendezvous (device-global).
   ENDING,   ///< s_endpgm executed but outstanding memory ops are draining.
 };
 
@@ -1224,6 +1224,7 @@ private:
   WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
 
   friend class ComputeUnitCore; // CU sets allocation fields during dispatch.
+  friend class GwsDevice;       // Device-global GWS store parks/wakes this wave.
   friend class ::rocjitsu::ExecutionPluginGroup;
 
   // Memory pipelines complete deferred VM loads into physical SGPR/VGPR

@@ -14,6 +14,7 @@
 #include "rocjitsu/vm/amdgpu/decoded_instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gws_device.h"
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
@@ -156,7 +157,7 @@ public:
     }
   };
 
-  ~ComputeUnitCore() override = default;
+  ~ComputeUnitCore() override;
   /// @brief Number of memory-wait hazards observed, including suppressed reports.
   uint64_t memory_wait_diagnostic_count() const { return memory_wait_diagnostic_count_; }
   /// @brief Number of replay-source hazards, including suppressed reports.
@@ -414,6 +415,26 @@ public:
     return *cluster_lds_multicast_engine_;
   }
 
+  /// @brief Share one device-global GWS store across the CUs that run a dispatch.
+  ///
+  /// @details GWS resources are device-global (see GwsDevice): the command
+  /// processor scatters a dispatch's workgroups across CUs, so every CU that can
+  /// run a dispatch must share one store for cross-CU wakeups and quiescence.
+  /// Passing nullptr restores this CU's private default store (standalone use).
+  /// The CU registers itself with the store so its waves participate in shared
+  /// wake and deadlock-escape.
+  void set_gws_device(GwsDevice *device) {
+    GwsDevice *replacement = device ? device : default_gws_device_.get();
+    if (replacement == gws_device_)
+      return;
+    gws_device_->unregister_compute_unit(this);
+    gws_device_ = replacement;
+    gws_device_->register_compute_unit(this);
+  }
+
+  /// @brief Return the device-global GWS store this CU participates in.
+  GwsDevice &gws_device() { return *gws_device_; }
+
   /// @brief Register a new workgroup with its expected WF count.
   /// @details Called by the DispatchController when assigning a WG to this CU.
   /// Initializes the refcount so release_wf() can detect WG completion.
@@ -439,20 +460,22 @@ public:
   bool named_barrier_leave(Wavefront &wf);
 
   /// @brief Seed a GWS resource's barrier count / semaphore credits.
+  /// @details Forwards to the device-global GWS store (see GwsDevice); state is
+  /// shared across all CUs of the device and persists across dispatches.
   void gws_init(Wavefront &wf, uint32_t rid, uint32_t count);
 
   /// @brief Arrive at a GWS barrier. Parks the wave when the participant set is
   /// provably resident in the dispatch and more arrivals are pending; the final
-  /// arrival releases the parked peers (from any workgroup). Non-resident/
-  /// degenerate counts fall back to a non-blocking structural no-op.
+  /// arrival releases the parked peers (on any CU). Non-resident/degenerate
+  /// counts fall back to a non-blocking structural no-op.
   void gws_barrier_arrive(Wavefront &wf, uint32_t rid, uint32_t count);
 
   /// @brief Signal (V) a GWS semaphore: add one credit, release one waiter
-  /// (parked by any workgroup of the dispatch).
+  /// (parked by any wave of the process, on any CU).
   void gws_sema_v(Wavefront &wf, uint32_t rid);
 
   /// @brief Wait (P) on a GWS semaphore: consume a credit, else park until any
-  /// workgroup of the dispatch signals the shared resource.
+  /// wave of the process signals the shared resource.
   void gws_sema_p(Wavefront &wf, uint32_t rid);
 
   /// @brief Bulk-signal (BR) a GWS semaphore: add @p count credits and release
@@ -1413,28 +1436,14 @@ protected:
   void notify_barrier_complete(std::span<Wavefront *> members);
   std::unordered_map<uint64_t, WorkgroupBarriers> barrier_wgs_;
 
-  /// @brief Per-resource state for a Global Wave Sync (GWS) barrier/semaphore.
-  /// @details One array of kGwsResourcesPerWg entries is kept per dispatch
-  /// (keyed by gws_key(dispatch_id)), indexed by the 6-bit resource id. GWS
-  /// state is dispatch-global, matching hardware: every workgroup of a dispatch
-  /// shares one resource, so a signal/arrival from any workgroup rendezvouses
-  /// with a waiter parked by another. The dispatch-wide quiescence scan in
-  /// update_wf_states() is the genuine-deadlock backstop.
-  static constexpr uint32_t kGwsResourcesPerWg = 64;
-  struct GwsResource {
-    uint32_t counter = 0; ///< Live barrier counter: decremented per arrival, reloaded from the
-                          ///< releasing arrival's value at zero (see gws_barrier_arrive).
-    uint32_t credits = 0; ///< Semaphore credits (V/BR add, P consumes).
-    bool armed = false;   ///< Whether the barrier counter has been seeded (init or first arrival).
-  };
-  std::unordered_map<uint64_t, std::array<GwsResource, kGwsResourcesPerWg>> gws_resources_;
-  /// @brief Wake up to @p max_wake waves parked on one GWS resource, across every
-  /// workgroup of the dispatch (GWS state is dispatch-global).
-  /// @returns Number of waves released.
-  uint32_t release_gws_waiters(uint32_t dispatch_id, uint32_t rid, uint32_t max_wake);
-  /// @brief Total resident (not-yet-retired) waves across all workgroups of a
-  /// dispatch. Used as the GWS barrier's provable-participant bound.
-  uint32_t dispatch_resident_waves(uint32_t dispatch_id) const;
+  /// @brief Device-global GWS resource store (see GwsDevice).
+  /// @details GWS state is device-global, matching hardware: the store is shared
+  /// across every CU that can run a dispatch (via set_gws_device) and persists
+  /// across dispatches. Standalone CUs keep a private default store so single-CU
+  /// use needs no wiring. The store scans this CU's wfs_ / active_wgs_ for shared
+  /// wakeups and the dispatch-wide quiescence backstop, so it is a friend.
+  std::unique_ptr<GwsDevice> default_gws_device_ = std::make_unique<GwsDevice>();
+  GwsDevice *gws_device_ = default_gws_device_.get();
 
   uint64_t shared_aperture_base_ = 0;
   uint64_t shared_aperture_limit_ = 0;
@@ -1489,6 +1498,7 @@ protected:
 
   friend class CommandProcessor;
   friend class InstructionComputeUnitView;
+  friend class GwsDevice; // Shared GWS store scans this CU's waves for wake/quiescence.
   friend class ::rocjitsu::test::ComputeUnitTestAccess;
 };
 

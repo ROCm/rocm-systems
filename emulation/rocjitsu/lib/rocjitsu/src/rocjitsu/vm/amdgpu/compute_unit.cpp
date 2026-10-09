@@ -187,6 +187,17 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
   scalar_mem_pipeline_.set_fault_handler(vm_fault_handler);
   global_mem_pipeline_.set_fault_handler(vm_fault_handler);
   tensor_dma_pipeline_.set_fault_handler(std::move(vm_fault_handler));
+
+  // Participate in the (initially private) device-global GWS store so its waves
+  // are visible to shared wakeups and the quiescence backstop. set_gws_device()
+  // re-registers with a shared store when CUs of one device are wired together.
+  gws_device_->register_compute_unit(this);
+}
+
+ComputeUnitCore::~ComputeUnitCore() {
+  // Drop this CU from whichever GWS store it joined so a shared store does not
+  // retain a dangling pointer after the CU is destroyed.
+  gws_device_->unregister_compute_unit(this);
 }
 
 template <GpuIsa Isa>
@@ -670,147 +681,28 @@ bool ComputeUnitCore::named_barrier_leave(Wavefront &wf) {
   return barrier.member_count == 0;
 }
 
-uint32_t ComputeUnitCore::release_gws_waiters(uint32_t dispatch_id, uint32_t rid,
-                                              uint32_t max_wake) {
-  uint32_t woke = 0;
-  for (auto &w : wfs_) {
-    if (woke >= max_wake)
-      break;
-    if (!w || w->state() != WfState::GWS_WAIT)
-      continue;
-    // GWS state is dispatch-global, so any workgroup's waiter on this rid is a
-    // candidate -- do not filter on wg_id.
-    if (w->dispatch_id() == dispatch_id && w->gws_wait_rid_ == rid) {
-      w->gws_wait_rid_ = Wavefront::kNoGwsWait;
-      w->set_state(WfState::RUNNING);
-      w->set_ready_cycle(cycle_counter_);
-      ++woke;
-    }
-  }
-  return woke;
-}
-
-uint32_t ComputeUnitCore::dispatch_resident_waves(uint32_t dispatch_id) const {
-  uint32_t resident = 0;
-  for (const auto &entry : active_wgs_)
-    if (static_cast<uint32_t>(entry.first >> 32) == dispatch_id)
-      resident += entry.second;
-  return resident;
-}
-
-// Global Wave Sync (GWS) scheduling policy (authoritative description).
-//
-// GWS state is dispatch-global, matching hardware: gws_resources_ is keyed by
-// gws_key(dispatch_id), so one resource is shared by every workgroup of a
-// dispatch. A signal/arrival from any workgroup reaches the same entry and
-// wakes a waiter parked by any other workgroup -- the model is event-driven, so
-// no producer-identity guess is needed (a V really reaches a cross-workgroup P).
-//
-//  * Barrier: hardware/LLVM program the resource with (participants - 1); the
-//    CDNA/RDNA barrier pseudocode queues an arrival while the counter is
-//    positive and, on the arrival that observes zero, releases every queued
-//    arrival and reloads the counter from that arrival's own value (so
-//    consecutive phases may differ in size). We follow that convention exactly
-//    (see gws_barrier_arrive). A
-//    blocking arrival is gated on the outstanding counter: the still-required
-//    participant set is (counter + 1), and we only park when that whole set is
-//    provably resident in the dispatch; larger sets fall back to a non-blocking
-//    structural no-op.
-//  * Semaphore: V/BR add credits and wake queued P waiters; P consumes a credit
-//    or parks until any workgroup of the dispatch signals the resource. Because
-//    the state is shared, a cross-workgroup producer reaches the parked P.
-//  * Deadlock-escape (update_wf_states): a parked GWS wave is released only when
-//    every non-halted wave of the whole dispatch is blocked in GWS_WAIT or at an
-//    s_barrier -- true quiescence, where no wave can ever signal/arrive. This is
-//    a genuine-deadlock backstop (the step budget must terminate); it never
-//    fires while any wave can still run and reach a signal.
+// Global Wave Sync (GWS) is device-global and shared across the CUs that run a
+// dispatch; all state and scheduling policy live in GwsDevice (see gws_device.h
+// / gws_device.cpp for the authoritative description). These forward to the
+// store this CU participates in.
 void ComputeUnitCore::gws_init(Wavefront &wf, uint32_t rid, uint32_t count) {
-  if (rid >= kGwsResourcesPerWg)
-    return;
-  auto &res = gws_resources_[gws_key(wf.dispatch_id())][rid];
-  // Barrier: (participants - 1) is the programmed counter value.
-  res.counter = count;
-  res.armed = true;
-  // Semaphore reuses the same init to seed the initial credit count.
-  res.credits = count;
+  gws_device_->init(wf, rid, count);
 }
 
 void ComputeUnitCore::gws_barrier_arrive(Wavefront &wf, uint32_t rid, uint32_t count) {
-  if (rid >= kGwsResourcesPerWg)
-    return;
-  const uint32_t resident = dispatch_resident_waves(wf.dispatch_id());
-  auto &res = gws_resources_[gws_key(wf.dispatch_id())][rid];
-  // The still-outstanding arrivals that must occur to release this wave are the
-  // current counter (a fresh resource seeds that counter from this arrival's own
-  // value). A blocking arrival therefore needs (outstanding + 1) participants to
-  // be provably resident in the dispatch; if that set is larger than the resident
-  // waves it would reference arrivals that may never happen, so fall back to a
-  // non-blocking structural no-op. A releasing arrival (outstanding == 0) never
-  // blocks, so it is exempt from the gate. The gate is written as
-  // (outstanding >= resident), which is equivalent to (outstanding + 1 > resident)
-  // for integers but cannot overflow when count is near UINT32_MAX (a huge count
-  // must take the fallback, never wrap the sum to zero and park).
-  const uint32_t outstanding = res.armed ? res.counter : count;
-  if (outstanding != 0 && outstanding >= resident)
-    return;
-  if (!res.armed) {
-    res.counter = count;
-    res.armed = true;
-  }
-  if (res.counter == 0) {
-    // This arrival observes zero: it is the releasing arrival. Wake the queued
-    // peers and reload the counter from this arrival's own value so the next
-    // phase may use a different participant count.
-    release_gws_waiters(wf.dispatch_id(), rid, std::numeric_limits<uint32_t>::max());
-    res.counter = count;
-    return;
-  }
-  // Positive counter: queue this arrival and park.
-  --res.counter;
-  wf.gws_wait_rid_ = rid;
-  wf.set_state(WfState::GWS_WAIT);
+  gws_device_->barrier_arrive(wf, rid, count);
 }
 
-void ComputeUnitCore::gws_sema_v(Wavefront &wf, uint32_t rid) {
-  if (rid >= kGwsResourcesPerWg)
-    return;
-  auto &res = gws_resources_[gws_key(wf.dispatch_id())][rid];
-  ++res.credits;
-  if (release_gws_waiters(wf.dispatch_id(), rid, 1) == 1)
-    --res.credits; // the released waiter consumes the credit it was waiting on
-}
+void ComputeUnitCore::gws_sema_v(Wavefront &wf, uint32_t rid) { gws_device_->sema_v(wf, rid); }
 
-void ComputeUnitCore::gws_sema_p(Wavefront &wf, uint32_t rid) {
-  if (rid >= kGwsResourcesPerWg)
-    return;
-  auto &res = gws_resources_[gws_key(wf.dispatch_id())][rid];
-  if (res.credits > 0) {
-    --res.credits;
-    return;
-  }
-  // No credit: park until any workgroup of the dispatch signals this shared
-  // resource. The signal is event-driven (gws_sema_v/br/release_all wake us
-  // directly), and the dispatch-wide quiescence backstop releases us only if the
-  // whole dispatch deadlocks.
-  wf.gws_wait_rid_ = rid;
-  wf.set_state(WfState::GWS_WAIT);
-}
+void ComputeUnitCore::gws_sema_p(Wavefront &wf, uint32_t rid) { gws_device_->sema_p(wf, rid); }
 
 void ComputeUnitCore::gws_sema_br(Wavefront &wf, uint32_t rid, uint32_t count) {
-  if (rid >= kGwsResourcesPerWg || count == 0)
-    return;
-  auto &res = gws_resources_[gws_key(wf.dispatch_id())][rid];
-  res.credits += count;
-  uint32_t woke = release_gws_waiters(wf.dispatch_id(), rid, count);
-  res.credits -= woke; // released waiters consume credits
+  gws_device_->sema_br(wf, rid, count);
 }
 
 void ComputeUnitCore::gws_sema_release_all(Wavefront &wf, uint32_t rid) {
-  if (rid >= kGwsResourcesPerWg)
-    return;
-  auto &res = gws_resources_[gws_key(wf.dispatch_id())][rid];
-  release_gws_waiters(wf.dispatch_id(), rid, std::numeric_limits<uint32_t>::max());
-  res.credits = 0;
+  gws_device_->sema_release_all(wf, rid);
 }
 
 void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
@@ -838,9 +730,8 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
   if (it != active_wgs_.end() && --it->second == 0) {
     active_wgs_.erase(it);
     barrier_wgs_.erase(key);
-    // GWS state is dispatch-global; drop it only once the whole dispatch retires.
-    if (dispatch_resident_waves(dispatch_id) == 0)
-      gws_resources_.erase(gws_key(dispatch_id));
+    // GWS state is device-global and persists across dispatches (see GwsDevice),
+    // so it is deliberately not torn down on workgroup/dispatch retirement.
     // Queued rather than sent: notify_wg_complete() takes the CP's
     // hw_queue_mutex_, and this runs under the wave-state lock, which the CP
     // takes in the other order when it dispatches. WaveStateGuard delivers it
@@ -866,9 +757,7 @@ void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
   }
   active_wgs_.erase(wg_key(dispatch_id, wg_id));
   barrier_wgs_.erase(wg_key(dispatch_id, wg_id));
-  // GWS state is dispatch-global; drop it only once the whole dispatch retires.
-  if (dispatch_resident_waves(dispatch_id) == 0)
-    gws_resources_.erase(gws_key(dispatch_id));
+  // GWS state is device-global and persists across dispatches (see GwsDevice).
   maybe_reset_lds_alloc();
 }
 
@@ -885,9 +774,8 @@ void ComputeUnitCore::abort_dispatch(uint32_t dispatch_id) {
   std::erase_if(barrier_wgs_, [dispatch_id](const auto &entry) {
     return static_cast<uint32_t>(entry.first >> 32) == dispatch_id;
   });
-  std::erase_if(gws_resources_, [dispatch_id](const auto &entry) {
-    return static_cast<uint32_t>(entry.first >> 32) == dispatch_id;
-  });
+  // GWS state is device-global and persists across dispatches (see GwsDevice);
+  // a faulted dispatch does not reset the device's shared GWS resources.
   std::erase_if(pending_wg_completions_,
                 [dispatch_id](const auto &completion) { return completion.first == dispatch_id; });
   maybe_reset_lds_alloc();
@@ -1572,38 +1460,13 @@ void ComputeUnitCore::update_wf_states() {
     }
   }
 
-  // GWS deadlock-escape: GWS state is dispatch-global, so a parked GWS_WAIT wave
-  // is normally woken by a signal/arrival from any workgroup of the dispatch. The
-  // only case that cannot resolve is true quiescence -- every non-halted wave of
-  // the whole dispatch is already blocked (parked in GWS_WAIT or stalled at an
-  // s_barrier) -- where no wave can ever reach a GWS signal/arrival. That is a
-  // genuine deadlock; release the parked GWS waves non-blockingly so the step
-  // budget terminates. Covering BARRIER also breaks the mixed deadlock where some
-  // waves wait at a GWS barrier while their siblings wait at an s_barrier. The
-  // scan is dispatch-wide, so a still-running wave in any workgroup (e.g. a
-  // producer or a poll loop) keeps the backstop from firing prematurely.
-  for (auto &w : wfs_) {
-    if (!w || w->state() != WfState::GWS_WAIT)
-      continue;
-    uint32_t did = w->dispatch_id();
-    bool all_parked = true;
-    for (auto &w2 : wfs_) {
-      if (w2 && w2->dispatch_id() == did && w2->state() != WfState::HALTED &&
-          w2->state() != WfState::GWS_WAIT && w2->state() != WfState::BARRIER) {
-        all_parked = false;
-        break;
-      }
-    }
-    if (!all_parked)
-      continue;
-    for (auto &w2 : wfs_) {
-      if (w2 && w2->dispatch_id() == did && w2->state() == WfState::GWS_WAIT) {
-        w2->gws_wait_rid_ = Wavefront::kNoGwsWait;
-        w2->set_state(WfState::RUNNING);
-        w2->set_ready_cycle(cycle_counter_);
-      }
-    }
-  }
+  // GWS deadlock-escape: GWS state is device-global, so a parked GWS_WAIT wave is
+  // normally woken by a signal/arrival from any wave of the process, on any CU.
+  // The only case that cannot resolve is true quiescence -- every non-halted wave
+  // of a dispatch, across all CUs sharing the store, is already blocked -- which
+  // the shared store detects dispatch-wide so a still-running wave on any CU keeps
+  // the backstop from firing prematurely.
+  gws_device_->escape_deadlocks();
 }
 
 AsyncInstructionWindow::AsyncInstructionWindow(ComputeUnitCore &cu, Wavefront &wf,
