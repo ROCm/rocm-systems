@@ -36,8 +36,8 @@ Units sharing a binary must be `#include`d from *different* test TUs and must no
 export colliding non-`static` symbols; otherwise a unit needs its own binary:
 
 - **`rccl-UnitTestsMicro`** — one unit per test TU:
-  - `p2p.cc` (`P2P_CC_PATH`, from `p2p-test.cc`); suites `P2pMicrotest.*`,
-    `FreshRegistration*`.
+  - `p2p.cc` (`P2P_CC_PATH`, from `p2p-test.cc`); suites `P2p*`,
+    `FreshRegistration*`, `ConnStepAcquireMicrotest.*`.
   - `rma/rma_proxy_progress.cc` (`RMA_PROXY_PROGRESS_CC_PATH`, from
     `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
   - `plugin/gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suite
@@ -49,7 +49,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
     `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
     covered yet.
-  - `dev_runtime.cc` (`DEV_RUNTIME_CC_PATH`, from `dev-runtime-test.cc`);
+  - `dev_runtime.cc` and `dev_runtime_segments.cc` (`DEV_RUNTIME_CC_PATH`,
+    `DEV_RUNTIME_SEGMENTS_CC_PATH`, from `dev-runtime-test.cc`);
     suites `Alloc*`, `Comm*`, `Compute*`, `DeepCopy*`, `Dev*`, `Gin*`, `Nccl*`,
     `Sym*`, and `Win*`.
   - the generated `sym_kernels_host.cc` (`SYM_KERNELS_HOST_CC_PATH`, from
@@ -162,8 +163,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
   `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
   GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
-  `SymKernelMaskTest.*`, `SymAllChunkEltsCases/*` (covered by the `Sym*` CTest
-  pattern). Its own binary, not shared with `rccl-UnitTestsMicro`:
+  `SymKernelMaskTest.*`, `SymAllChunkEltsCases/*`, `SymHasLDMCPostDivCases/*`
+  (covered by the `Sym*` CTest pattern). Its own binary, not shared with `rccl-UnitTestsMicro`:
   `fakes/sym_kernels_fakes.cc` (needed there by other units) fakes the exact
   symbols the real file also defines, which would duplicate-symbol together;
   this binary simply does not link that file, so no guard is needed.
@@ -172,7 +173,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   fake would be needed.
 - **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**, **`-faultinj`**) — `init.cc` (via
   `INIT_CC_PATH`);
-  suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. The `-uncached` variant adds
+  suites `InitMicrotest.*`, `InitMicrotestIsolated.*`, `ScopedHookMicrotest.*`.
+  The `-uncached` variant adds
   `HIP_HOST_UNCACHED_MEMORY`/`HIP_UNCACHED_MEMORY` to cover the alternate host-alloc
   arm; the `-faultinj` variant adds `ENABLE_FAULT_INJECTION` to cover the fault-mask
   arm of `commAlloc`/`devCommSetup` (the arm that ships, since `FAULT_INJECTION`
@@ -225,7 +227,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroDda`**: `src/algorithms/dda/`. Tests mirror the source
   tree under `test/host/algorithms/`. See `test_categories_micro_dda.yaml`.
 
-Everything below (seams, fakes, coverage) applies to both; the concrete examples
+Everything below (seams, fakes, coverage) applies to all of them; the concrete examples
 use `p2p.cc`.
 
 
@@ -242,7 +244,7 @@ to:
   (the proxy layer, the HIP driver API, the topology graph) to return
   a specific failure.
 
-`rccl-UnitTestsMicro` addresses all three by:
+`rccl-UnitTestsMicro` addresses both by:
 
 1. **`#include`-ing the unit-under-test `.cc` file** from the test TU,
    so `static` symbols are visible to tests.
@@ -343,10 +345,13 @@ symbol.
 | Production TU | Fakes file |
 |---|---|
 | `src/algorithms/dda/*.cc` | `fakes/dda_fakes.cc` |
+| `src/allocator.cc` | `fakes/allocator_fakes.cc` |
 | `src/bootstrap.cc` | `fakes/bootstrap_stubs.cc` |
 | `src/ce_coll.cc` | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
 | `src/dev_runtime.cc` (targets that do not compile the real file) | `fakes/dev_runtime_fakes.cc` |
+| externals `src/dev_runtime.cc` reaches (`rccl-UnitTestsMicro`, which compiles it) | `fakes/dev_runtime_micro_fakes.cc` |
+| externals the devcomm compat shims reach | `fakes/devcomm_fakes.cc` |
 | `src/diagnostics/device/p2p.cu` (`ncclDiagP2p*` kernel launchers) | `fakes/diagnostics_p2p_device_fakes.cc` |
 | `src/graph/*.cc` (topo, paths, search, connect, rome consensus) | `fakes/topo_stubs.cc` |
 | `src/graph/tuning.cc`, `src/graph/connect.cc` params | `fakes/tuning_fakes.cc` |
@@ -370,6 +375,7 @@ symbol.
 | `src/plugin/gin.cc`, `src/gin/gin_host.cc` | `fakes/gin_fakes.cc` |
 | `src/proxy.cc` | `fakes/proxy_fakes.cc` |
 | `src/ras/ras_param.cc` | `fakes/ras_param_fakes.cc` (the direct `ras-param-test.cc` inclusion uses renamed symbols) |
+| `src/rccl_arch_thresholds.cc` | `fakes/rccl_arch_thresholds_fakes.cc` |
 | `src/rccl_wrap.cc`'s own public entry points (targets that don't compile the real file, e.g. `rccl-UnitTestsMicroEnqueue`) | `fakes/rccl_wrap_fakes.cc` |
 | `src/rccl_wrap.cc`'s dependencies (`rccl-UnitTestsMicro`, which compiles the real file and tests it directly) | `fakes/wrap_fakes.cc` |
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |
@@ -377,6 +383,8 @@ symbol.
 | `src/rma/*.cc` | `fakes/rma_fakes.cc` |
 | `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
+| generated `sym_kernels_host.cc` (targets that do not compile it) | `fakes/sym_kernels_index_fakes.cc` |
+| rocSHMEM host API | `fakes/rocshmem_fakes.cc` |
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`) | `fakes/transport_p2p_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`) | `fakes/libc_interposers.cc` |
@@ -398,7 +406,7 @@ and that default silently selects which production arm runs. Driving a seam mean
 marker. The marker travels with the declaration rather than a block comment so it cannot drift from
 what it describes. Call *counters* do not take the marker unless the counter itself is unread.
 
-Five things do NOT follow the TU-per-file rule, deliberately:
+Six things do NOT follow the TU-per-file rule, deliberately:
 
 - `fakes/collective_stubs.cc` is a fail-loud floor for the collective *launch*
   pipeline (`ncclLaunchKernel` and friends), which `enqueue.cc` itself defines.
@@ -424,13 +432,9 @@ Five things do NOT follow the TU-per-file rule, deliberately:
 - `rcclParamIntraGraphGen` stays in `fakes/init_fakes.cc` because its owner
   (`graph/rccl_graph_gen.cc:34`) has no fakes file at all. `rcclEffectiveP2pBatchEnable`
   did have one and moved to `fakes/enqueue_fakes.cc`.
-- `IsArchMatch` and the `allocTracker` data symbol stay in `p2p-test.cc`
-  itself rather than a fakes file, because neither has an owning production
-  TU to name a fakes file after: `IsArchMatch` is declared in the
-  header-only `archinfo.h`, and `allocTracker` is an `alloc.h` data symbol
-  that only `p2p.cc` references in this target. (The busId helpers alongside
-  them *do* have an owner — `src/misc/utils.cc` — so they live in
-  `fakes/utils_fakes.cc`, not here.)
+- `allocTracker` (owned by `src/init.cc`) is defined in the test TUs that need
+  it (`p2p-test.cc`, `fabric-mem-handler-test.cc`): its owner's fakes file,
+  `comm_fakes.cc`, would pull in the comm lifecycle.
 
 An aggregation header includes the per-TU headers a unit's tests use and
 declares the reset that chains their per-TU resets, and defines no seams itself.
@@ -446,20 +450,21 @@ faked in two places.
 
 ## Adding more controllable seams
 
-The fakes today return constants. When a test needs to drive one of
-them to a specific value (for instance, fake
-`ncclProxyCallBlocking` returning a canned `rmtRegAddr` so the
-new-registration happy path can be tested), the recommended pattern
-is:
+When a test needs to drive a fake that still returns a constant, turn it
+into a hook. `g_proxyCallBlocking` in `fakes/nccl_fakes.cc` is an example:
 
 1. In the fakes file that owns that module's seams (`fakes/nccl_fakes.cc`
    for `nccl*` symbols, `fakes/hip_fakes.cc` for HIP runtime symbols), add
    a `std::function`-typed hook with a default that matches the current
    constant behaviour:
    ```cpp
+   static ncclResult_t DefaultProxyCallBlocking(ncclComm*, ncclProxyConnector*, int,
+                                                void*, int, void*, int) {
+       return ncclSystemError;
+   }
    std::function<ncclResult_t(ncclComm*, ncclProxyConnector*, int,
                               void*, int, void*, int)>
-       g_proxyCallBlocking = [](auto...) { return ncclSystemError; };
+       g_proxyCallBlocking = DefaultProxyCallBlocking;
 
    ncclResult_t ncclProxyCallBlocking(ncclComm* c, ncclProxyConnector* p,
                                       int t, void* req, int rs,
@@ -586,20 +591,17 @@ When the link fails with `undefined symbol: foo`, find `foo` and
 triage it into the right bucket:
 
 - **It's a global variable (`extern int foo;`)** → add a definition
-  to its owning TU's fakes file. If it has no owning TU (e.g. a data
-  symbol declared in a header-only file) and only one test TU
-  references it, define it in that test (the fifth exception above —
-  e.g. the `allocTracker` array in `p2p-test.cc`). Use a sensible
-  default (usually zero).
+  to its owning TU's fakes file. If it has no owning TU, or that file
+  cannot be linked (e.g. `allocTracker`, above), define it in the test.
+  Use a sensible default (usually zero).
 - **It's a plain function the module references but doesn't define**
   → add a definition returning a sensible default to its owning TU's
   fakes file (e.g. `busIdToInt64` / `getBusId` go in
   `fakes/utils_fakes.cc`, since `src/misc/utils.cc` owns them). Only
-  when the symbol has no owning TU does it belong in the test itself
-  (the fifth exception above — e.g. `IsArchMatch`, owned by the
-  header-only `archinfo.h`, in `p2p-test.cc`).
-- **It's a logging or env-param helper** → already covered by the
-  no-op `ncclDebugLog` / `ncclLoadParam`. If a new logging primitive
+  when the symbol has no owning TU does it belong in the test itself.
+- **It's a logging or env-param helper** → already covered by
+  `ncclDebugLog` (prints to stderr) / `ncclLoadParam` (no-op). If a new
+  logging primitive
   appears, follow the same pattern.
 - **It's a `ncclProxy*` / `ncclShm*` / `ncclCommGraph*` / `ncclTopo*`
   function** → add a return-failure stub. If a future test will need
@@ -618,15 +620,11 @@ triage it into the right bucket:
     symbol. An unresolved HIP symbol is precisely the mechanism that
     surfaces an unfaked dependency.
 
-  Either way, CUDA-driver-API shims that the real RCCL resolves
-  dynamically via `dlsym` on `libcuda.so` (`cuMemGetAddressRange`,
-  `cuPointerGetAttribute`, `cuMemCreate`, `cuMemExportToShareableHandle`,
-  …) are never ordinary HIP host-runtime symbols, so under
-  `rccl-UnitTestsMicro` they always need an explicit definition in
+  Either way, RCCL's `cuMem*` / `cuPointer*` calls are hipified to
+  `hipMem*` / `hipPointer*` and called directly, so under
+  `rccl-UnitTestsMicro` each needs an explicit definition in
   `fakes/hip_fakes.cc`: use the signature the header declares and return a
-  failure code (or a canned success) by default — another bucket-C seam
-  that gets the function-pointer-hook treatment when a test needs to
-  drive it.
+  failure code (or a canned success) by default.
 - **It's a HIP kernel launch** → you almost certainly don't want to
   test the path that launches it from this binary. Refactor the test
   to avoid the branch, or split the kernel-launching code into a
@@ -750,9 +748,10 @@ is now stripped from the inherited list and set per variant in both paths, so th
 **ROCm is a prerequisite.** Per epic AICOMRCCL-1661 ("ROCm toolchain is
 available"), this build uses `hipcc` in host-only mode (`--offload-host-only`)
 against the **real ROCm headers**. There is no CPU-only / g++ path and no stubbed
-`<hip/*>` / `<hsa/*>` / `<cuda*>` headers. It links **gtest + fmt only** and
+`<hip/*>` / `<hsa/*>` / `<cuda*>` headers. It links **gtest, fmt and pthread** and
 passes `-no-hip-rt`, so it links **neither `librccl.so` nor the HIP runtime** —
-every HIP symbol the tests reach is provided by `fakes/`.
+every HIP symbol the tests reach is provided by `fakes/` (and, for
+`rccl-HostUnitTests`, `wrapper_link_stubs.cpp` / `hip_prop_r0600_stub.cpp`).
 
 ```bash
 cd projects/rccl/test/host
