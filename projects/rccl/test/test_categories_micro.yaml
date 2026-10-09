@@ -88,6 +88,19 @@ test_categories:
       - "WrapMicrotestIsolated.*"
       # misc/gdr_probe.cc
       - "GdrProbeTest.*"
+      # graph/rccl_graph_gen.cc
+      - "GraphGenPermuteTest.*"
+      - "GraphGenIsPrimeTest.*"
+      - "NodeCounts/GraphGenWaleckiTest.*"
+      - "EvenNodeCounts/GraphGenWaleckiEvenTest.*"
+      - "GraphGenWaleckiGuardTest.*"
+      - "Tables/GraphGenFixedRingTableTest.*"
+      - "PrimeNodeCounts/GraphGenPrimeRingTest.*"
+      - "GraphGenPrimeRingGuardTest.*"
+      - "GraphGenGreedyTest.*"
+      - "GraphGenGenerateRingsTest.*"
+      - "Constructions/GraphGenDispatchTest.*"
+      - "GraphGenCutIndicesTest.*"
       # dev_runtime.cc
       - "Alloc*"
       - "Comm*"

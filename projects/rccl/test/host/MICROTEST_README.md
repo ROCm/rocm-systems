@@ -154,6 +154,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `transport/net_ib*/reg.cc` copies by configure-time `rccl_assert_source_line`
     checks in `CMakeLists.txt`, so a flag change in `reg.cc` fails the configure
     until the probe and the test are updated to match.
+  - `graph/rccl_graph_gen.cc` (`RCCL_GRAPH_GEN_CC_PATH`, from
+    `rccl-graph-gen-test.cc`); suites `GraphGen*Test.*`. Covers ring
+    construction for every `generateRings` dispatch arm (degenerate, the 4/6/8
+    tables, prime strides, Walecki, Walecki+greedy) and the load-balanced cut
+    selection in `findRingCutIndices`. `greedyRingGen`'s out-of-memory arm is
+    driven through the heap half of `fakes/libc_seam.h`.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
   `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file
@@ -386,7 +392,7 @@ symbol.
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`) | `fakes/transport_p2p_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`) | `fakes/libc_interposers.cc` |
-| `src/ras/client.cc`'s libc surface (sockets/stdio/exit; see `fakes/libc_seam.h`) | `fakes/libc_fakes.cc` |
+| libc surface of `src/ras/client.cc` (sockets/stdio/exit) and `src/graph/rccl_graph_gen.cc` (heap); see `fakes/libc_seam.h` | `fakes/libc_fakes.cc` |
 | core/lifecycle floor + data symbols | `fakes/nccl_stubs.cc` |
 | reusable `nccl*` seams | `fakes/nccl_fakes.cc` |
 | HIP runtime | `fakes/hip_fakes.cc` |

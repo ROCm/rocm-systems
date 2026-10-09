@@ -6,7 +6,7 @@
 
 #include "fakes/libc_fakes.h"
 
-// Puts the seam's 15 micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
+// Puts the seam's 18 micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
 // this file. Without it the two lists are hand-maintained and both extern "C", so a drifted parameter type would link
 // cleanly and corrupt arguments at run time. Include the undef half immediately: this file's defaults call real libc.
 #include "fakes/libc_seam.h"
@@ -32,6 +32,7 @@ std::string g_stdoutData;
 std::vector<MicroFwriteCall> g_fwriteCalls;
 std::vector<MicroPerrorCall> g_perrorCalls;
 std::vector<int> g_closedFds;
+std::vector<void*> g_freedPointers;
 std::vector<FILE*> g_fprintfCalls;
 std::vector<int> g_writtenFds;
 std::vector<int> g_readFds;
@@ -197,6 +198,15 @@ static void DefaultPerror(const char* prefix) {
 
 static void DefaultExit(int status) { throw MicroExit{status}; }
 
+static void* DefaultMalloc(size_t size) { return std::malloc(size); }
+
+static void* DefaultCalloc(size_t nmemb, size_t size) { return std::calloc(nmemb, size); }
+
+static void DefaultFree(void* ptr) {
+  g_freedPointers.push_back(ptr);
+  std::free(ptr);
+}
+
 // ---------------------------------------------------------------------------
 
 std::function<ssize_t(int, const void*, size_t)> g_write = DefaultWrite;
@@ -215,6 +225,9 @@ std::function<size_t(const void*, size_t, size_t, FILE*)> g_fwrite = DefaultFwri
 std::function<int(FILE*)> g_fflush = DefaultFflush;
 std::function<void(const char*)> g_perror = DefaultPerror;
 std::function<void(int)> g_exit = DefaultExit;
+std::function<void*(size_t)> g_malloc = DefaultMalloc;
+std::function<void*(size_t, size_t)> g_calloc = DefaultCalloc;
+std::function<void(void*)> g_free = DefaultFree;
 
 void ScriptRead(ssize_t ret, int err, std::string data) {
   g_readScript.push_back(MicroReadStep{ret, err, std::move(data)});
@@ -240,12 +253,16 @@ void ResetLibcFakes() {
   g_fflush = DefaultFflush;
   g_perror = DefaultPerror;
   g_exit = DefaultExit;
+  g_malloc = DefaultMalloc;
+  g_calloc = DefaultCalloc;
+  g_free = DefaultFree;
 
   g_writtenData.clear();
   g_stdoutData.clear();
   g_fwriteCalls.clear();
   g_perrorCalls.clear();
   g_closedFds.clear();
+  g_freedPointers.clear();
   g_fprintfCalls.clear();
   g_writtenFds.clear();
   g_readFds.clear();
@@ -294,6 +311,9 @@ size_t micro_fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
 }
 int micro_fflush(FILE* stream) { return g_fflush(stream); }
 void micro_perror(const char* prefix) { g_perror(prefix); }
+void* micro_malloc(size_t size) { return g_malloc(size); }
+void* micro_calloc(size_t nmemb, size_t size) { return g_calloc(nmemb, size); }
+void micro_free(void* ptr) { g_free(ptr); }
 
 // Always forwards to the real vfprintf so stderr output still happens; records only the FILE* and never the
 // formatted text, since no test needs the diagnostic's wording, only whether and where one was printed.

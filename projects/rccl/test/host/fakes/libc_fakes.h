@@ -7,12 +7,12 @@
 #ifndef RCCL_TEST_HOST_FAKES_LIBC_FAKES_H_
 #define RCCL_TEST_HOST_FAKES_LIBC_FAKES_H_
 
-// Controllable seams for the libc socket / stdio / process surface.
+// Controllable seams for the libc socket / stdio / process / heap surface.
 //
 // For units whose external dependencies are libc rather than HIP or nccl --
-// src/ras/client.cc is the first, and the socket-facing halves of
-// ras/client_support.cc, misc/socket.cc and bootstrap.cc are the obvious next
-// ones. Such a unit needs no HIP runtime and no nccl fakes at all.
+// src/ras/client.cc (sockets, stdio, exit) and src/graph/rccl_graph_gen.cc
+// (heap) so far, and the socket-facing halves of ras/client_support.cc,
+// misc/socket.cc and bootstrap.cc are the obvious next ones.
 //
 // fakes/libc_seam.h macro-renames each call in the unit under test to the
 // matching micro_* trampoline, which dispatches through the std::function slot
@@ -92,6 +92,12 @@ extern std::function<int(FILE*)> g_fflush;
 extern std::function<void(const char*)> g_perror;
 extern std::function<void(int)> g_exit;
 
+// Fail an allocation for one case with a hook returning nullptr; g_freedPointers
+// then shows whether the unit released what it had already taken on the way out.
+extern std::function<void*(size_t)> g_malloc;
+extern std::function<void*(size_t, size_t)> g_calloc;
+extern std::function<void(void*)> g_free;
+
 // ---------------------------------------------------------------------------
 // Observation points fed by the default seams. A test that installs its own
 // hook over a seam stops feeding the corresponding record.
@@ -101,6 +107,8 @@ extern std::string g_stdoutData;        // every byte the unit fwrite()'d, which
 extern std::vector<MicroFwriteCall> g_fwriteCalls;   // every fwrite(), in order, with its stream
 extern std::vector<MicroPerrorCall> g_perrorCalls;  // every perror(), in order; prefer this over matching stderr text
 extern std::vector<int> g_closedFds;    // fds passed to close(), in order
+// Pointers passed to free(), in order, nullptrs included.
+extern std::vector<void*> g_freedPointers;
 // FILE* argument of every fprintf() the unit made, in order. Never the formatted text: fprintf always forwards to
 // the real vfprintf, so this only proves whether and where a diagnostic was printed, not what it said.
 extern std::vector<FILE*> g_fprintfCalls;
