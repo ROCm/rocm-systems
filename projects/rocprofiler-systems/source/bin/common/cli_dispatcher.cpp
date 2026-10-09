@@ -67,13 +67,6 @@ make_error(std::string message)
     return result;
 }
 
-dispatch_result
-unknown_subcommand_error(std::string_view program, std::string_view token)
-{
-    return make_error(
-        fmt::format("error: unknown subcommand '{}'\n{}", token, help_hint(program)));
-}
-
 // True when the payload already contains @p flag, or an -o / --output alias
 // when @p flag is "-o". Stops at "--" or an empty argument.
 [[nodiscard]] bool
@@ -116,10 +109,6 @@ parse_dispatch(int argc, char** argv, std::string_view program)
     }
 
     const auto first = arg_at(argc, argv, 1);
-    if(first.empty())
-    {
-        return unknown_subcommand_error(program, first);
-    }
     if(first == "-h" || first == "-?" || first == "--help" ||
        first.starts_with("--help="))
     {
@@ -152,9 +141,10 @@ parse_dispatch(int argc, char** argv, std::string_view program)
         return result;
     }
 
-    if(first.front() != '-')
+    if(first.empty() || first.front() != '-')
     {
-        return unknown_subcommand_error(program, first);
+        return make_error(
+            fmt::format("error: unknown subcommand '{}'\n{}", first, help_hint(program)));
     }
 
     // Implicit default: first token is a flag or "--".

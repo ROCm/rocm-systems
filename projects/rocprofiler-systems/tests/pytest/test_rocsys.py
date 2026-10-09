@@ -90,6 +90,7 @@ class TestRocsys(RocprofsysTest):
             result,
             pass_regex=[
                 r"Usage:",
+                r"rocsys \[subcommand\] \[options\] -- <app> \[app-args\]",
                 r"profile",
                 r"instrument",
                 r"rewrite",
@@ -131,6 +132,7 @@ class TestRocsys(RocprofsysTest):
             result,
             pass_regex=[
                 r"error: unknown subcommand",
+                r"Usage: rocsys \[subcommand\] \[options\] -- <app> \[app-args\]",
                 r"hint: run 'rocsys --help'",
             ],
             use_abort_fail_regex=False,
@@ -147,7 +149,11 @@ class TestRocsys(RocprofsysTest):
         )
         self.assert_regex(
             result,
-            pass_regex=[r"error: missing application argument", r"hint:"],
+            pass_regex=[
+                r"error: missing application argument",
+                r"Usage: rocsys \[subcommand\] \[options\] -- <app> \[app-args\]",
+                r"hint:",
+            ],
             use_abort_fail_regex=False,
         )
 
@@ -163,7 +169,11 @@ class TestRocsys(RocprofsysTest):
         )
         self.assert_regex(
             result,
-            pass_regex=[rf"error: unknown subcommand '{verb}'", r"hint:"],
+            pass_regex=[
+                rf"error: unknown subcommand '{verb}'",
+                r"Usage: rocsys \[subcommand\] \[options\] -- <app> \[app-args\]",
+                r"hint:",
+            ],
             use_abort_fail_regex=False,
         )
 

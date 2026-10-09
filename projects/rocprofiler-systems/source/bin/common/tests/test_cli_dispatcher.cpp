@@ -100,6 +100,17 @@ forwarded_args(int argc, char** argv, forward_options options)
 {
     return make_forwarded_argv(argc, argv, options);
 }
+
+void
+expect_message_contains(std::string_view                        text,
+                        std::initializer_list<std::string_view> parts,
+                        const char*                             context)
+{
+    for(const auto part : parts)
+    {
+        EXPECT_NE(text.find(part), std::string_view::npos) << context << ": " << part;
+    }
+}
 }  // namespace
 
 TEST(cli_dispatcher_test, no_args_shows_help)
@@ -167,10 +178,11 @@ TEST(cli_dispatcher_test, sample_and_trace_are_unknown_verbs)
         auto args   = argv_builder{ "rocsys", verb, "--", "./app" };
         auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
         EXPECT_EQ(result.kind, dispatch_kind::error) << verb;
-        EXPECT_NE(result.error_message.find("unknown subcommand"), std::string::npos)
-            << verb;
-        EXPECT_NE(result.error_message.find("error:"), std::string::npos) << verb;
-        EXPECT_NE(result.error_message.find("hint:"), std::string::npos) << verb;
+        expect_message_contains(
+            result.error_message,
+            { "error:", "unknown subcommand",
+              "Usage: rocsys [subcommand] [options] -- <app> [app-args]", "hint:" },
+            verb);
     }
 }
 
@@ -249,6 +261,9 @@ TEST(cli_dispatcher_test, unknown_subcommand_is_error)
     auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
     EXPECT_EQ(result.kind, dispatch_kind::error);
     EXPECT_NE(result.error_message.find("error: unknown subcommand"), std::string::npos);
+    EXPECT_NE(result.error_message.find(
+                  "Usage: rocsys [subcommand] [options] -- <app> [app-args]"),
+              std::string::npos);
     EXPECT_NE(result.error_message.find("hint: run 'rocsys --help'"), std::string::npos);
 }
 
@@ -258,6 +273,9 @@ TEST(cli_dispatcher_test, profile_without_app_is_error)
     auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
     EXPECT_EQ(result.kind, dispatch_kind::error);
     EXPECT_NE(result.error_message.find("error: missing application argument"),
+              std::string::npos);
+    EXPECT_NE(result.error_message.find(
+                  "Usage: rocsys [subcommand] [options] -- <app> [app-args]"),
               std::string::npos);
     EXPECT_NE(result.error_message.find("hint:"), std::string::npos);
 }
@@ -338,7 +356,8 @@ TEST(cli_dispatcher_test, print_help_lists_subcommands_and_example)
     std::ostringstream out;
     print_help(out, "rocsys");
     const auto text = out.str();
-    EXPECT_NE(text.find("Usage:"), std::string::npos);
+    EXPECT_NE(text.find("Usage:\n  rocsys [subcommand] [options] -- <app> [app-args]\n"),
+              std::string::npos);
     EXPECT_NE(text.find("ROCm Systems Profiler."), std::string::npos);
     EXPECT_NE(text.find("Experimental: This is a preview of the rocsys command-line "
                         "tool."),
