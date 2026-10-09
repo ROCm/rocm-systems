@@ -9294,7 +9294,8 @@ TEST(InstructionExecution, Cdna2GwsInitRetiresAndSynchronizationStaysUnimplement
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
   ASSERT_NE(decoder, nullptr);
 
-  // Only INIT retires.
+  // INIT retires so runtime initialization completes. Retiring a barrier or
+  // semaphore wait would falsely claim synchronization, so those stay unimplemented.
   for (const std::string_view mnemonic : {"ds_gws_sema_release_all", "ds_gws_init", "ds_gws_sema_v",
                                           "ds_gws_sema_br", "ds_gws_sema_p", "ds_gws_barrier"}) {
     SCOPED_TRACE(mnemonic);
