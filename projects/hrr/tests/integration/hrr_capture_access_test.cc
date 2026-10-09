@@ -53,6 +53,14 @@
  *     others makes them private again, and a hard-linked blob found there is
  *     written again rather than trusted (POSIX).
  *
+ *   Unit_HRR_CaptureResumeChecksBlobBytes:
+ *     resuming an archive with a blob whose bytes no longer hash to its name
+ *     writes the blob again and leaves the archive marked incomplete (POSIX).
+ *
+ *   Unit_HRR_CaptureEventsWriteFails:
+ *     a failed write or close of events.bin leaves the archive without the
+ *     clean-shutdown trailer and marked incomplete (Linux, with seccomp).
+ *
  *   Unit_HRR_CaptureActiveMarker:
  *     pid-<pid>/active, the file producers read as "capture is on", exists
  *     while the capture runs, names the process instance on Linux, and is
@@ -420,6 +428,76 @@ TEST_CASE("Unit_HRR_CaptureTrimFails_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   void* d = nullptr;
   HRR_HIP_CHECK(hipMalloc(&d, 256));
+  HRR_HIP_CHECK(hipMemset(d, 0, 256));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+  HRR_HIP_CHECK(hipFree(d));
+#else
+  std::printf("%sLinux on x86-64 or AArch64 only\n", kNoSeccomp);
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// Hidden ([.]) workload for Unit_HRR_CaptureEventsWriteFails: once the
+// capture has opened its archive, it finds the descriptor of events.bin and
+// installs a seccomp filter that fails, with EIO, either every write to it or
+// closing it, as HRR_TEST_FAIL_EVENTS says. Then it records a few events and
+// exits normally, so the writer meets the failure while it finishes the
+// archive. Without a filter it says so.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_CaptureEventsFail_Direct", "[.][hrr-direct]") {
+#ifdef HRR_TEST_HAVE_SECCOMP
+  // Only Unit_HRR_CaptureEventsWriteFails says what to fail.
+  const char* mode = std::getenv("HRR_TEST_FAIL_EVENTS");
+  if (mode == nullptr) HRR_SKIP("HRR_TEST_FAIL_EVENTS is not set");
+  const std::string fail(mode);
+  REQUIRE((fail == "write" || fail == "close"));
+
+  HRR_HIP_CHECK(hipSetDevice(0));
+  void* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, 256));
+
+  int events_fd = -1;
+  if (DIR* fds = ::opendir("/proc/self/fd")) {
+    while (const dirent* ent = ::readdir(fds)) {
+      char target[4096];
+      const std::string link = std::string("/proc/self/fd/") + ent->d_name;
+      const ssize_t n = ::readlink(link.c_str(), target, sizeof(target) - 1);
+      if (n <= 0) continue;
+      const std::string path(target, static_cast<size_t>(n));
+      const std::string tail = "/events.bin";
+      if (path.size() > tail.size() &&
+          path.compare(path.size() - tail.size(), tail.size(), tail) == 0)
+        events_fd = std::atoi(ent->d_name);
+    }
+    ::closedir(fds);
+  }
+  REQUIRE(events_fd >= 0);
+
+#if defined(__x86_64__)
+  constexpr std::uint32_t kArch = AUDIT_ARCH_X86_64;
+#else
+  constexpr std::uint32_t kArch = AUDIT_ARCH_AARCH64;
+#endif
+  const std::uint32_t nr = fail == "write" ? __NR_write : __NR_close;
+  struct sock_filter code[] = {
+      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)),
+      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, kArch, 0, 5),
+      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
+      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, nr, 0, 3),
+      // The descriptor is an int, so the low half of args[0] is all of it.
+      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[0])),
+      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, static_cast<std::uint32_t>(events_fd), 0, 1),
+      BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EIO & SECCOMP_RET_DATA)),
+      BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+  };
+  struct sock_fprog prog{static_cast<unsigned short>(sizeof(code) / sizeof(code[0])), code};
+  if (::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 ||
+      ::prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) != 0) {
+    std::printf("%s%s\n", kNoSeccomp, std::strerror(errno));
+    HRR_HIP_CHECK(hipFree(d));
+    return;
+  }
+
   HRR_HIP_CHECK(hipMemset(d, 0, 256));
   HRR_HIP_CHECK(hipDeviceSynchronize());
   HRR_HIP_CHECK(hipFree(d));
@@ -899,6 +977,105 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles) {
   CHECK(fs::hard_link_count(archive / linked) == 1);
   CHECK(fs::hard_link_count(victim) == 1);
   CHECK(file_holds(victim, victim_contents));
+#endif
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Captures Unit_HRR_GpuWorkload_Direct, changes one byte of its largest
+ *     blob, and copies the archive into the next run's pid-<pid>, which
+ *     resumes it.
+ *   - The file no longer hashes to its name, so the resume does not trust it:
+ *     the run writes that blob again, and the archive is marked incomplete,
+ *     since events from the first run named the bytes it lost.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureResumeChecksBlobBytes) {
+#ifdef _WIN32
+  HRR_SKIP("POSIX paths");
+#else
+  ScopedDir work{fs::temp_directory_path() / "hrr_access_resume_bytes"};
+  const fs::path first = work.path / "first";
+  const fs::path base = work.path / "capture";
+  fs::create_directories(base);
+  hrr_capture_direct("Unit_HRR_GpuWorkload_Direct", first);
+  const fs::path first_archive = hrr_single_process_archive(first);
+  REQUIRE(manifest_says_complete(first_archive, true));
+
+  // The largest blob is a host buffer the workload copies on every run.
+  const std::vector<fs::path> blobs = archive_files(first_archive, "blobs", ".blob");
+  REQUIRE_FALSE(blobs.empty());
+  const fs::path changed = *std::max_element(
+      blobs.begin(), blobs.end(), [&](const fs::path& a, const fs::path& b) {
+        return fs::file_size(first_archive / a) < fs::file_size(first_archive / b);
+      });
+  const std::string original = read_text_file(first_archive / changed);
+  REQUIRE_FALSE(original.empty());
+  {
+    std::string altered = original;
+    altered[0] = static_cast<char>(altered[0] ^ 0x5a);
+    std::ofstream out(first_archive / changed, std::ios::binary | std::ios::trunc);
+    out << altered;
+  }
+
+  const PlantedRun run = capture_after_planting(
+      base, work.path / "plant.sh",
+      "mkdir \"$HRR_TEST_BASE/pid-$$\"\n"
+      "cp -R '" + first_archive.string() + "/.' \"$HRR_TEST_BASE/pid-$$/\"\n");
+  INFO("Workload exit code: " << run.ret << "\n" << run.output);
+  REQUIRE(run.ret == 0);
+  const std::vector<fs::path> archives = hrr_process_archives(base);
+  REQUIRE(archives.size() == 1);
+  INFO("Changed blob: " << changed.string());
+  CHECK(file_holds(archives.front() / changed, original));
+  CHECK(manifest_says_complete(archives.front(), false));
+#endif
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Runs Unit_HRR_CaptureEventsFail_Direct twice: once with every write to
+ *     events.bin failing once the archive is open, and once with closing
+ *     events.bin failing after the archive is finished.
+ *   - Either way the archive ends without a clean-shutdown trailer and its
+ *     manifest says it is incomplete, so neither the reader nor the root
+ *     index takes it for a whole capture. Skipped where the workload cannot
+ *     install its filter.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureEventsWriteFails) {
+#ifdef _WIN32
+  HRR_SKIP("seccomp");
+#else
+  ScopedDir work{fs::temp_directory_path() / "hrr_access_events_fail"};
+  for (const char* fail : {"write", "close"}) {
+    DYNAMIC_SECTION("failing " << fail) {
+      const fs::path base = work.path / fail;
+      fs::create_directories(base);
+      const PlantedRun run = capture_after_planting(
+          base, work.path / (std::string(fail) + ".sh"),
+          std::string("export HRR_TEST_FAIL_EVENTS=") + fail + "\n",
+          "Unit_HRR_CaptureEventsFail_Direct");
+      INFO("Workload exit code: " << run.ret << "\n" << run.output);
+      REQUIRE(run.ret == 0);
+      if (run.output.find(kNoSeccomp) != std::string::npos)
+        HRR_SKIP("The workload cannot make events.bin fail without a seccomp filter");
+      const std::vector<fs::path> archives = hrr_process_archives(base);
+      REQUIRE(archives.size() == 1);
+      CHECK(manifest_says_complete(archives.front(), false));
+
+      const std::string events = read_text_file(archives.front() / "events.bin");
+      bool trailer = false;
+      if (events.size() >= sizeof(hrr_file_header) + sizeof(hrr_eof_record)) {
+        hrr_eof_record rec{};
+        std::memcpy(&rec, events.data() + events.size() - sizeof(rec), sizeof(rec));
+        trailer = rec.hdr.event_type == HRR_EOF_MARKER && rec.eof_magic == HRR_EOF_MAGIC;
+      }
+      CHECK_FALSE(trailer);
+    }
+  }
 #endif
 }
 

@@ -136,15 +136,23 @@ namespace writer {
 // FNV-1a 128-bit hash (same algorithm as out-of-tree writer)
 // ---------------------------------------------------------------------------
 
-static Hash128 hash_buffer(const void* data, size_t len) {
-  uint64_t h1 = 0xcbf29ce484222325ULL;
-  uint64_t h2 = 0x100000001b3ULL;
+static constexpr Hash128 kHashSeed = {0xcbf29ce484222325ULL, 0x100000001b3ULL};
+
+// Fold more bytes into `h`, so a file can be hashed a chunk at a time.
+static void hash_update(Hash128* h, const void* data, size_t len) {
+  uint64_t h1 = h->lo, h2 = h->hi;
   const auto* p = static_cast<const uint8_t*>(data);
   for (size_t i = 0; i < len; i++) {
     h1 ^= p[i]; h1 *= 0x100000001b3ULL;
     h2 ^= p[i]; h2 *= 0xcbf29ce484222325ULL;
   }
-  return {h1, h2};
+  *h = {h1, h2};
+}
+
+static Hash128 hash_buffer(const void* data, size_t len) {
+  Hash128 h = kHashSeed;
+  hash_update(&h, data, len);
+  return h;
 }
 
 static void hash_hex(Hash128 h, char buf[33]) {
@@ -199,6 +207,15 @@ static bool     g_events_finalized   = false;
 // WITHOUT the clean-shutdown trailer and with manifest "complete": false, so the
 // reader treats it like a truncated archive rather than a faithful capture.
 static std::atomic<bool> g_capture_incomplete{false};
+
+// Set when a write or fsync of events.bin failed, so records may be missing
+// or torn. Only an atomic store, so the crash callback can set it too; the
+// other paths turn it into mark_incomplete() through note_events_io_locked().
+static std::atomic<bool> g_events_io_failed{false};
+
+// Where the clean-shutdown trailer starts in events.bin once flush() wrote it,
+// -1 before. close() cuts it off again if closing the file fails.
+static std::int64_t g_trailer_at = -1;
 
 // Crash-callback guard over g_buf / g_buf_len, raised by writer threads while
 // they mutate the buffer. If the crash interrupts a writer mid-lock,
@@ -289,8 +306,24 @@ static bool write_all_fd(int fd, const void* data, size_t len) {
 // crash callback that has claimed g_buf_busy via test_and_set). Does not fsync.
 static void flush_buffer_locked() {
   if (g_events_fd < 0 || g_buf_len == 0) { g_buf_len = 0; return; }
-  write_all_fd(g_events_fd, g_buf, g_buf_len);
+  if (!write_all_fd(g_events_fd, g_buf, g_buf_len))
+    g_events_io_failed.store(true, std::memory_order_relaxed);
   g_buf_len = 0;
+}
+
+// fsync events.bin, noting a failure as a failed write is. Caller holds
+// g_file_mu.
+static void sync_events_locked() {
+  if (g_events_fd >= 0 && HRR_FSYNC(g_events_fd) != 0)
+    g_events_io_failed.store(true, std::memory_order_relaxed);
+}
+
+// Mark the archive incomplete once a write or fsync of events.bin has failed,
+// and say whether one has. Logs, so not for the crash callback.
+static bool note_events_io_locked() {
+  if (!g_events_io_failed.load(std::memory_order_relaxed)) return false;
+  mark_incomplete("a write to events.bin failed, so records may be missing");
+  return true;
 }
 
 // Append `len` bytes of one complete record to the buffer, flushing first if it
@@ -303,7 +336,8 @@ static void buffer_append_locked(const void* data, size_t len) {
   if (len > kBufCap) {
     // Oversized record: buffer is now empty (flushed above); write it straight
     // through rather than memcpy'ing past the end of g_buf.
-    if (g_events_fd >= 0) write_all_fd(g_events_fd, data, len);
+    if (g_events_fd >= 0 && !write_all_fd(g_events_fd, data, len))
+      g_events_io_failed.store(true, std::memory_order_relaxed);
     return;
   }
   memcpy(g_buf + g_buf_len, data, len);
@@ -656,13 +690,46 @@ static bool resumed_file_is_ours(const fs::path& p) {
 #endif
 }
 
+// Whether a file found on resume holds the bytes its name is the hash of.
+// Events already in the archive name a blob by that hash, and only a check of
+// the bytes shows the file still holds them. Reads the whole file.
+static bool resumed_file_matches(const fs::path& p, const std::string& hex) {
+#ifdef _WIN32
+  FILE* f = fopen(p.string().c_str(), "rb");
+#else
+  FILE* f = fopen_read_regular(p.string());
+#endif
+  if (!f) return false;
+  Hash128 h = kHashSeed;
+  std::vector<uint8_t> chunk(1u << 20);
+  size_t n;
+  while ((n = fread(chunk.data(), 1, chunk.size(), f)) > 0) hash_update(&h, chunk.data(), n);
+  const bool read_ok = !ferror(f);
+  fclose(f);
+  char name[33];
+  hash_hex(h, name);
+  return read_ok && hex == name;
+}
+
 static void index_existing_blobs_locked(const std::string& output_dir) {
   std::lock_guard<std::mutex> lk(g_blob_mu);
   g_written_blobs.clear();
+  size_t mismatched = 0;
+  // Ours, but holding other bytes than its name says: left unindexed like a
+  // file that is not ours, so the next write of that hash replaces it, and
+  // the archive is incomplete, since its events may name the lost bytes.
+  const auto trust = [&](const fs::path& p, const std::string& key, const std::string& hex) {
+    if (!resumed_file_is_ours(p)) return;
+    if (resumed_file_matches(p, hex))
+      g_written_blobs.insert(key);
+    else
+      ++mismatched;
+  };
 
   // error_code overloads throughout: a missing or unreadable directory only
   // means fewer blobs are known to exist, and a blob written twice is harmless.
-  // Only a file resumed_file_is_ours() accepts counts; anything else is replaced.
+  // Only a file that is ours and matches its name counts; anything else is
+  // replaced.
   // A blobs/<xx> prefix is claimed before its files are trusted: one that fails
   // claim_private_dir contributes nothing, and write_blob refuses it later.
   std::error_code ec;
@@ -682,16 +749,26 @@ static void index_existing_blobs_locked(const std::string& output_dir) {
 #endif
     for (fs::directory_iterator it(dit->path(), entry_ec), end; !entry_ec && it != end;
          it.increment(entry_ec)) {
-      if (it->path().extension() == ".blob" && resumed_file_is_ours(it->path()))
-        g_written_blobs.insert(it->path().stem().string());
+      if (it->path().extension() == ".blob") {
+        const std::string hex = it->path().stem().string();
+        trust(it->path(), hex, hex);
+      }
     }
   }
 
   ec.clear();
   const fs::path co_root = output_dir + "/code_objects";
   for (fs::directory_iterator it(co_root, ec), end; !ec && it != end; it.increment(ec)) {
-    if (it->path().extension() == ".hsaco" && resumed_file_is_ours(it->path()))
-      g_written_blobs.insert(std::string("co:") + it->path().stem().string());
+    if (it->path().extension() == ".hsaco") {
+      const std::string hex = it->path().stem().string();
+      trust(it->path(), std::string("co:") + hex, hex);
+    }
+  }
+
+  if (mismatched) {
+    LogPrintfWarning("[HRR capture] %zu blob or code object files in %s do not hold the bytes "
+                     "their names are the hash of", mismatched, output_dir.c_str());
+    mark_incomplete("a blob or code object found on resume does not match its hash");
   }
 }
 
@@ -1383,7 +1460,8 @@ void checkpoint() {
   BufWriteGuard lk;
   if (g_events_fd < 0) return;
   flush_buffer_locked();
-  HRR_FSYNC(g_events_fd);
+  sync_events_locked();
+  note_events_io_locked();
   save_writer_state_locked();
   g_events_since_ckpt = 0;
 }
@@ -1441,20 +1519,32 @@ void flush(const char* /*output_dir*/) {
     // Must be read under the lock, see stop_for_space().
     incomplete = g_capture_incomplete.load(std::memory_order_relaxed);
     out_dir = g_output_dir;
+    if (g_events_fd >= 0) {
+      // The buffered events go out first, so a failed write among them is
+      // known before the trailer would claim them.
+      flush_buffer_locked();
+      sync_events_locked();
+      if (note_events_io_locked()) incomplete = true;
+    }
     // Skip the clean-shutdown trailer when the capture is known incomplete: its
     // absence is exactly how the reader detects a non-faithful archive.
     if (g_events_fd >= 0 && !g_events_finalized && !incomplete) {
+      const std::int64_t trailer_at = hrr_seek_end(g_events_fd);
       hrr_eof_record rec = hrr_make_eof_record(
           g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
       rec.hdr.timestamp_ns = amd::Os::timeNanos();
       rec.hdr.thread_id    = current_thread_id();
       buffer_append_locked(&rec, sizeof(rec));
       flush_buffer_locked();
-      HRR_FSYNC(g_events_fd);
-    } else if (g_events_fd >= 0 && incomplete) {
-      // Still flush buffered events so nothing is lost, just no trailer.
-      flush_buffer_locked();
-      HRR_FSYNC(g_events_fd);
+      sync_events_locked();
+      if (note_events_io_locked()) {
+        // A trailer that may not have reached the disk claims nothing: cut it
+        // off, so a reader finds no trailer, or at worst a torn one.
+        if (trailer_at >= 0) (void)hrr_ftruncate_fd(g_events_fd, trailer_at);
+        incomplete = true;
+      } else {
+        g_trailer_at = trailer_at;
+      }
     }
     // close() runs later and the fd stays open until then. A thread can still
     // record in between: a forked child's first record finishes opening the
@@ -1474,13 +1564,28 @@ void close() {
   // this: nothing would finalize it. Fat-binary destructors still record then.
   std::lock_guard<std::mutex> reopen_lk(g_reopen_mu);
   g_reopen_after_fork.store(false, std::memory_order_release);
-  BufWriteGuard lk;
-  if (g_events_fd >= 0) {
+  std::int64_t trailer_at = -1;
+  std::string out_dir;
+  {
+    BufWriteGuard lk;
+    if (g_events_fd < 0) return;
     flush_buffer_locked();
-    HRR_FSYNC(g_events_fd);
-    HRR_CLOSE(g_events_fd);
+    sync_events_locked();
+    if (HRR_CLOSE(g_events_fd) != 0)
+      g_events_io_failed.store(true, std::memory_order_relaxed);
     g_events_fd = -1;
+    if (!note_events_io_locked()) return;
+    trailer_at = g_trailer_at;
+    g_trailer_at = -1;
+    out_dir = g_output_dir;
   }
+  // flush() already wrote the trailer and a manifest saying complete, before
+  // the file failed. Take both back.
+  if (trailer_at < 0 || out_dir.empty()) return;
+  std::error_code ec;
+  fs::resize_file(out_dir + "/events.bin", static_cast<std::uintmax_t>(trailer_at), ec);
+  write_manifest_stdio(out_dir.c_str(), /*complete=*/false);
+  update_root_manifest();
 }
 
 // ---------------------------------------------------------------------------
@@ -1605,9 +1710,10 @@ static void append_event_locked(hrr_event_header* hdr, uint32_t payload_len) {
   g_event_count.fetch_add(1, std::memory_order_relaxed);
   if (++g_events_since_ckpt >= kCheckpointEvents) {
     flush_buffer_locked();
-    HRR_FSYNC(g_events_fd);
+    sync_events_locked();
     g_events_since_ckpt = 0;
   }
+  note_events_io_locked();
 }
 
 void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_len) {
