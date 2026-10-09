@@ -22,6 +22,13 @@ extern __device__ uint64_t g_sdmaStubMarkBitOnQuiet;
 // after draining it, which is what a concurrently flushing CTA would observe.
 extern __device__ uint64_t* g_sdmaStubObserveDirtyOnQuiet;
 extern __device__ unsigned long long g_sdmaStubDirtyAtQuiet;
+// Entry count for quiet(). A racing Flush test waits on this so the second CTA
+// starts only after the first is already inside quiet().
+extern __device__ unsigned long long g_sdmaStubInQuiet;
+// When non-zero, the first quieter spins until g_sdmaStubReleaseQuiet becomes
+// non-zero, holding Flush mid-drain while another CTA races the same context.
+extern __device__ int g_sdmaStubHoldQuiet;
+extern __device__ int g_sdmaStubReleaseQuiet;
 
 // Opt-in call log: with recordOnly set, put/putSignal/quiet append here and put/putSignal skip the copy.
 enum SdmaStubOp : int { kSdmaStubPut = 1, kSdmaStubPutSignal = 2, kSdmaStubQuiet = 3 };
@@ -93,6 +100,7 @@ __device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) {
   (void)handle;
   sdmaStubRecord(kSdmaStubQuiet, nullptr, nullptr, 0, nullptr);
   atomicAdd(&g_sdmaStubQuietCount, 1ULL);
+  const unsigned long long entry = atomicAdd(&g_sdmaStubInQuiet, 1ULL);
   uint64_t* observed = g_sdmaStubObserveDirtyOnQuiet;
   if (observed != nullptr) {
     atomicOr(&g_sdmaStubDirtyAtQuiet,
@@ -103,6 +111,12 @@ __device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) {
   if (dirty != nullptr) {
     atomicOr(reinterpret_cast<unsigned long long*>(dirty),
              static_cast<unsigned long long>(g_sdmaStubMarkBitOnQuiet));
+  }
+  // Hold only the first quieter so a second CTA can race Flush without also
+  // parking inside quiet() and deadlocking on the same release flag.
+  if (g_sdmaStubHoldQuiet != 0 && entry == 0) {
+    while (__hip_atomic_load(&g_sdmaStubReleaseQuiet, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT) == 0) {
+    }
   }
 }
 

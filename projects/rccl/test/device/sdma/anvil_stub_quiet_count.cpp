@@ -19,4 +19,7 @@ __device__ uint64_t* g_sdmaStubMarkDirtyOnQuiet = nullptr;
 __device__ uint64_t g_sdmaStubMarkBitOnQuiet = 0;
 __device__ uint64_t* g_sdmaStubObserveDirtyOnQuiet = nullptr;
 __device__ unsigned long long g_sdmaStubDirtyAtQuiet = 0;
+__device__ unsigned long long g_sdmaStubInQuiet = 0;
+__device__ int g_sdmaStubHoldQuiet = 0;
+__device__ int g_sdmaStubReleaseQuiet = 0;
 }

@@ -605,6 +605,21 @@ static unsigned long long readDirtyAtQuiet() {
   return c;
 }
 
+// Parks the first quieter inside quiet() until the racing CTA releases it.
+static void setHoldQuiet(bool hold) {
+  int h = hold ? 1 : 0;
+  int r = 0;
+  unsigned long long z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(sdma_anvil::g_sdmaStubHoldQuiet), &h, sizeof(h)));
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(sdma_anvil::g_sdmaStubReleaseQuiet), &r, sizeof(r)));
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(sdma_anvil::g_sdmaStubInQuiet), &z, sizeof(z)));
+}
+
+static void releaseHoldQuiet() {
+  int one = 1;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(sdma_anvil::g_sdmaStubReleaseQuiet), &one, sizeof(one)));
+}
+
 TEST_F(GinAnvilSdmaTemplateTest, MarkSdmaDirty_SetsPeerBit) {
   DeviceBuffer<uint8_t> d_src(1);
   DeviceBuffer<uint8_t> d_dst(1);
@@ -665,11 +680,39 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_MarkDuringQuietSurvives) {
   EXPECT_EQ(readQuietCount(), 1ULL);
 }
 
-// The clear has to follow the drain, not precede it. Several coops can flush
-// the same context and compute identical owned masks, so if Flush cleared
-// first, the coop that lost the RMW would read a clean mask and return while
-// the winner was still inside quiet(). Pinned by observing the mask from
-// inside quiet(): the bit being drained must still be set there.
+// role 0: Flush and park inside quiet() while the hold is armed.
+// role 1: race Flush on the same dirty word, then release the hold.
+__global__ void kernelFlushRacingCoop(TemplateHarness* h, uint64_t* dirty, int* secondSawDirty, int role) {
+  h->ctx.sdmaDirty = dirty;
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  if (role == 0) {
+    ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{}, false, nullptr,
+                                                           cuda::memory_order_seq_cst, nullptr);
+    return;
+  }
+  secondSawDirty[0] =
+      (__hip_atomic_load(dirty, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT) & 1ULL) != 0 ? 1 : 0;
+  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{}, false, nullptr,
+                                                         cuda::memory_order_seq_cst, nullptr);
+  __hip_atomic_store(&sdma_anvil::g_sdmaStubReleaseQuiet, 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+}
+
+static unsigned long long readInQuiet() {
+  unsigned long long c = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&c, HIP_SYMBOL(sdma_anvil::g_sdmaStubInQuiet), sizeof(c)));
+  return c;
+}
+
+// Two coops flush one context. The first enters quiet() and holds on stream 0;
+// the host then launches the second on stream 1 against the same dirty word.
+// The clear must follow the drain: if Flush cleared first, the second coop
+// would load a clean mask and return while the first was still inside quiet(),
+// and the bit observed from quiet() would already be clear. Clearing afterwards
+// keeps the bit set through the drain, so the racing coop also quiets and both
+// finish drained. Two streams avoid a cross-block spin that can deadlock when
+// the GPU schedules only one CTA at a time.
 TEST_F(GinAnvilSdmaTemplateTest, Flush_ClearsOnlyAfterDraining) {
   DeviceBuffer<uint8_t> d_src(1);
   DeviceBuffer<uint8_t> d_dst(1);
@@ -678,19 +721,50 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_ClearsOnlyAfterDraining) {
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
   DeviceBuffer<uint64_t> d_dirty(1);
+  DeviceBuffer<int> d_secondSawDirty(1);
+  d_secondSawDirty.zero();
   uint64_t one = 1;
   d_dirty.copyFrom(&one, 1);
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
+
+  hipStream_t s0 = nullptr;
+  hipStream_t s1 = nullptr;
+  HIP_CHECK(hipStreamCreateWithFlags(&s0, hipStreamNonBlocking));
+  HIP_CHECK(hipStreamCreateWithFlags(&s1, hipStreamNonBlocking));
+
   resetQuietCount();
   setObserveDirtyOnQuiet(d_dirty.ptr);
-  kernelFlushQuiet<<<1, 1>>>(d_h.ptr, d_dirty.ptr);
-  syncAndCheck();
+  setHoldQuiet(true);
+  kernelFlushRacingCoop<<<1, 1, 0, s0>>>(d_h.ptr, d_dirty.ptr, d_secondSawDirty.ptr, /*role=*/0);
+  // Wait until the first coop is mid-drain before starting the racer.
+  for (int i = 0; i < 100000 && readInQuiet() == 0; ++i) {
+  }
+  const bool firstEnteredQuiet = readInQuiet() >= 1ULL;
+  if (firstEnteredQuiet) {
+    kernelFlushRacingCoop<<<1, 1, 0, s1>>>(d_h.ptr, d_dirty.ptr, d_secondSawDirty.ptr, /*role=*/1);
+  } else {
+    // Unblock stream 0 so teardown cannot hang on a parked quiet().
+    releaseHoldQuiet();
+  }
+  HIP_CHECK(hipStreamSynchronize(s0));
+  HIP_CHECK(hipStreamSynchronize(s1));
+  HIP_CHECK(hipGetLastError());
+
   const unsigned long long duringQuiet = readDirtyAtQuiet();
+  const int secondSawDirty = d_secondSawDirty.download();
+  const unsigned long long quietCount = readQuietCount();
+  const uint64_t dirtyAfter = d_dirty.download();
   setObserveDirtyOnQuiet(nullptr);
-  EXPECT_EQ(readQuietCount(), 1ULL);
+  setHoldQuiet(false);
+  HIP_CHECK(hipStreamDestroy(s0));
+  HIP_CHECK(hipStreamDestroy(s1));
+
+  ASSERT_TRUE(firstEnteredQuiet) << "first Flush never entered quiet()";
   EXPECT_EQ(duringQuiet & 1ULL, 1ULL) << "Flush cleared the bit before draining it";
-  EXPECT_EQ(d_dirty.download(), 0ULL);
+  EXPECT_EQ(secondSawDirty, 1) << "racing Flush saw a clean mask mid-drain";
+  EXPECT_EQ(quietCount, 2ULL) << "racing Flush skipped quiet while the drain was held";
+  EXPECT_EQ(dirtyAfter, 0ULL);
 }
 
 using nccl::gin::anvil::detail::ncclGinAnvilSdmaRequest;
