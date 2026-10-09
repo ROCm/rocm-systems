@@ -24,6 +24,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed GPU metrics returning no data on integrated GPUs**.  
   - `amdsmi_get_gpu_metrics_info()` answered `AMDSMI_STATUS_UNEXPECTED_DATA` on APUs such as gfx1103, which also left PLX temperature and the `amd-smi metric` output empty. These devices now return the values they provide with everything else marked N/A, and a metrics version amd-smi cannot read reports `AMDSMI_STATUS_NOT_SUPPORTED`.
 
+- **Fixed a one-byte overrun when reading the memory partition into a small buffer**.  
+  - A buffer too small for the partition name had the byte after its end overwritten. The name is now truncated inside the buffer, and the call still reports that the buffer is too small.
+
+- **Fixed crashes when several threads start or stop AMD SMI at the same time**.  
+  - Programs that initialize and shut down the library from more than one thread could crash, find no GPUs, or leave the library initialized after every thread had shut it down.
+
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  
   - `amd-smi ras --cper` showed an empty `list afids` column for fatal records, `amd-smi ras --afid --cper-file` printed `-`, and `amdsmi_get_afids_from_cper()` returned no AFIDs. amdgpu writes fatal crashdump sections 32 bytes shorter than `sizeof(cper_sec_crashdump)`, and the section bounds check required the full struct, so every such section was skipped. The check now requires only the dump member the record type uses.
 

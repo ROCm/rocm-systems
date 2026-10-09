@@ -787,6 +787,13 @@ TEST(Gfx1250SimulationTest, VgprMsbModeTracksModeRegisterLayout) {
   static_assert(amdgpu::set_vgpr_msb_to_mode_layout(kSetLayout) == kModeLayout);
   static_assert(amdgpu::mode_layout_to_set_vgpr_msb(kModeLayout) == kSetLayout);
   for (uint32_t layout = 0; layout <= 0xFF; ++layout) {
+    wf->set_vgpr_msb_mode(static_cast<uint8_t>(layout));
+    EXPECT_EQ(wf->vgpr_msb_for_role(amdgpu::VgprMsbRole::None), 0u);
+    EXPECT_EQ(wf->vgpr_msb_for_role(amdgpu::VgprMsbRole::Src0), layout & 3u);
+    EXPECT_EQ(wf->vgpr_msb_for_role(amdgpu::VgprMsbRole::Src1), (layout >> 2) & 3u);
+    EXPECT_EQ(wf->vgpr_msb_for_role(amdgpu::VgprMsbRole::Src2), (layout >> 4) & 3u);
+    EXPECT_EQ(wf->vgpr_msb_for_role(amdgpu::VgprMsbRole::Dst), (layout >> 6) & 3u);
+    EXPECT_EQ(wf->vgpr_msb_for_role(static_cast<amdgpu::VgprMsbRole>(255)), 0u);
     EXPECT_EQ(amdgpu::mode_layout_to_set_vgpr_msb(
                   amdgpu::set_vgpr_msb_to_mode_layout(static_cast<uint8_t>(layout))),
               layout);

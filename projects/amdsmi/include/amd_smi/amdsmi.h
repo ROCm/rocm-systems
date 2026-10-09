@@ -3212,7 +3212,8 @@ typedef struct {
  *
  *  @details This function initializes the library and the internal data structures,
  *  including those corresponding to sources of information that SMI provides.
- *  Singleton Design, requires the same number of inits as shutdowns.
+ *  Singleton Design, requires the same number of inits as shutdowns. Threads may call
+ *  ::amdsmi_init and ::amdsmi_shut_down concurrently; the calls are serialized.
  *
  *  The @p init_flags decides which type of processor
  *  can be discovered by ::amdsmi_get_socket_handles(). AMDSMI_INIT_AMD_GPUS returns
@@ -3238,7 +3239,8 @@ amdsmi_status_t amdsmi_init(uint64_t init_flags);
  *
  *  @details This function shuts down the library and internal data structures and
  *  performs any necessary clean ups. Singleton Design, requires the same number
- *  of inits as shutdowns.
+ *  of inits as shutdowns. The call that releases the last reference frees every
+ *  handle, so no other thread may still be using one.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -3432,16 +3434,15 @@ amdsmi_status_t amdsmi_get_processor_info(amdsmi_processor_handle processor_hand
  *  totals. Counts are derived purely from ::amdsmi_get_processor_type and do not require
  *  ENABLE_ESMI_LIB; on builds without ESMI, @p nr_cpusockets and @p nr_cpucores will be 0.
  *
- *  @param[in] processor_handles A pointer to a block of memory to which the
- *  ::amdsmi_processor_handle values will be written. This value may be NULL.
+ *  @param[in] processor_handles The processor handles to classify. Must not be NULL.
  *
- *  @param[in] processor_count total processor count per socket
+ *  @param[in] processor_count Number of handles in @p processor_handles. Must not be NULL.
  *
- *  @param[out] nr_cpusockets Total number of cpu sockets
+ *  @param[out] nr_cpusockets Total number of cpu sockets. Must not be NULL.
  *
- *  @param[out] nr_cpucores Total number of cpu cores
+ *  @param[out] nr_cpucores Total number of cpu cores. Must not be NULL.
  *
- *  @param[out] nr_gpus Total number of gpu devices
+ *  @param[out] nr_gpus Total number of gpu devices. Must not be NULL.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
