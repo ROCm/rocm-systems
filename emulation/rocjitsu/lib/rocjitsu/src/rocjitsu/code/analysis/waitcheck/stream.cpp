@@ -404,7 +404,7 @@ util::FailureOr<WaitcheckStreamReport> analyze_stream(std::span<const uint32_t> 
   if ((options.wave_size != 32 && options.wave_size != 64) ||
       (has_committed_generations(arch) && options.wave_size != 64))
     return emit_error.emit() << "invalid waitcheck wave size";
-  if (options.expert_scheduling && !waitcheck_detail::supports_expert_scheduling(arch))
+  if (options.expert_scheduling && !supports_expert_scheduling(arch))
     return emit_error.emit() << "expert scheduling is unavailable on this architecture";
   WaitcheckStreamReport report;
   StreamAnalyzer analyzer{arch, options, report};

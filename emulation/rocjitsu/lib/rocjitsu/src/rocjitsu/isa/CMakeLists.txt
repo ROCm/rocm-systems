@@ -9,6 +9,13 @@ rj_add_object_library(rocjitsu_isa
     target_registry.cpp
 )
 
+# Architectural wait decoding is shared by static analysis and runtime
+# detectors without pulling in either detector's pending-event state.
+rj_add_object_library(
+    rocjitsu_wait_counter_policy
+    arch/amdgpu/shared/wait_counter_policy.cpp
+)
+
 function(rj_add_split_amdgpu_isa_library arch)
     set(options NO_BUILTIN)
     set(one_value_args GENERATED_ROOT INCLUDE_BASE)

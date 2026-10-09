@@ -16,6 +16,10 @@ rj_add_object_library(
     race_detector/core/race_detector.cpp
     race_detector/core/wave_race_state.cpp
 )
+target_link_libraries(
+    rocjitsu_plugin_race_detector
+    INTERFACE $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
+)
 
 rj_add_object_library(
     rocjitsu_plugin_throughput
