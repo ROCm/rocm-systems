@@ -1538,17 +1538,18 @@ TEST(DataHazardAdapterTest, LocalPerLaneRouteFeedsSpecificLdsRegion) {
   lds_write.size_bytes = 4;
   lds_write.is_store = true;
   lds_write.exec_mask = 0xFu;
-  lds_write.per_lane_addresses = {0, 4, 8, 12};
+  lds_write.per_lane_addresses = {0, 8, 16, 24};
   h.adapter.on_memory_route(lds_write);
 
-  // Each active lane's write is tracked at its own address. Read from the wave
-  // state: a DS read is ordered behind these writes and would not race them.
+  // Each active lane's write is tracked at its own address; strided, so lanes
+  // are not folded together. Read from the wave state: a DS read is ordered
+  // behind these writes and would not race them.
   const auto snapshot = h.engine.wave_snapshot(h.wave);
   ASSERT_TRUE(snapshot.has_value());
   std::vector<uint32_t> addresses;
   for (const auto &[address, op] : snapshot->core.lds_fifo)
     addresses.push_back(address);
-  EXPECT_EQ(addresses, (std::vector<uint32_t>{0, 4, 8, 12}));
+  EXPECT_EQ(addresses, (std::vector<uint32_t>{0, 8, 16, 24}));
   EXPECT_TRUE(h.engine.warning_snapshot().empty());
 }
 

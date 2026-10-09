@@ -35,23 +35,20 @@ namespace hazard_core {
 /// Drop the entries of one counter that @p retiring names from an address-keyed
 /// FIFO. An instruction scattering several accesses still occupies a single
 /// counter slot, so whole instructions retire together.
-inline void retire_address_entries(std::deque<std::pair<uint32_t, PendingAsyncOp>> &fifo,
-                                   WaitCntType wait_type, const std::vector<uint64_t> &retiring) {
+inline void retire_address_entries(LdsRangeQueue &fifo, WaitCntType wait_type,
+                                   const std::vector<uint64_t> &retiring) {
   if (retiring.empty())
     return;
 
-  fifo.erase(std::remove_if(fifo.begin(), fifo.end(),
-                            [&](const auto &entry) {
-                              return entry.second.wait_type == wait_type &&
-                                     is_retiring(retiring, entry.second.instruction_id);
-                            }),
-             fifo.end());
+  fifo.remove_if([&](const auto &entry) {
+    return entry.second.wait_type == wait_type &&
+           is_retiring(retiring, entry.second.instruction_id);
+  });
 }
 
 /// Drain the entries of one counter from an address-keyed FIFO, for a counter
 /// whose operations leave entries in that FIFO alone.
-inline void clear_address_fifo(std::deque<std::pair<uint32_t, PendingAsyncOp>> &fifo,
-                               uint32_t keep_count, WaitCntType wait_type) {
+inline void clear_address_fifo(LdsRangeQueue &fifo, uint32_t keep_count, WaitCntType wait_type) {
   retire_address_entries(fifo, wait_type,
                          instructions_to_retire(fifo, keep_count, [wait_type](const auto &entry) {
                            return entry.second.wait_type == wait_type;
@@ -251,8 +248,7 @@ inline bool ranges_overlap(uint32_t address, uint32_t size, uint32_t other_addre
 ///                     cannot race it, so they are passed over.
 /// @return Pointer to the first overlapping pending op, or nullptr if none
 inline const PendingAsyncOp *
-find_overlapping_pending_op(const std::deque<std::pair<uint32_t, PendingAsyncOp>> &fifo,
-                            uint32_t address, uint32_t size,
+find_overlapping_pending_op(const LdsRangeQueue &fifo, uint32_t address, uint32_t size,
                             WaitCntType ordered_with = WaitCntType::NONE) {
   for (const auto &entry : fifo) {
     if (ordered_with != WaitCntType::NONE && entry.second.wait_type == ordered_with)

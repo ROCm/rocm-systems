@@ -10,10 +10,13 @@
 #include "detail/wait_handling.h"
 #include "detail/waitcnt_decode.h"
 
+#include <algorithm>
 #include <deque>
+#include <random>
 #include <set>
 #include <stdexcept>
 #include <unordered_map>
+#include <vector>
 
 using namespace hazard_core;
 
@@ -160,6 +163,122 @@ TEST(HazardCoreAccessHandlingTest, TracksLdsReadWriteAndTensorRanges) {
 
   hazard_core::process_wait_instruction(&wave, WaitCntType::TENSOR, 0);
   EXPECT_EQ(hazard_core::check_tensor_lds_hazard(&wave, 0x180, 4), nullptr);
+}
+
+TEST(HazardCoreAccessHandlingTest, CoalescesAdjacentLanesOfOneLdsInstruction) {
+  hazard_core::WaveState wave;
+
+  // 64 lanes of a dwordx4 access, contiguous, as an LDS DMA load writes them.
+  for (uint32_t lane = 0; lane < 64; ++lane)
+    hazard_core::track_lds_write(&wave, 13, 0x300, 0x1000 + lane * 16, 16, WaitCntType::VMEM);
+
+  ASSERT_EQ(wave.lds_fifo.size(), 1u);
+  EXPECT_EQ(wave.lds_fifo.front().first, 0x1000u);
+  EXPECT_EQ(wave.lds_fifo.front().second.size, 64u * 16u);
+  EXPECT_NE(hazard_core::check_lds_read_hazard(&wave, 0x13fc, 4), nullptr);
+  EXPECT_EQ(hazard_core::check_lds_read_hazard(&wave, 0x1400, 4), nullptr);
+  EXPECT_EQ(hazard_core::check_lds_read_hazard(&wave, 0xffc, 4), nullptr);
+}
+
+TEST(HazardCoreAccessHandlingTest, CoalescesLanesSwizzledWithinTheWindow) {
+  hazard_core::WaveState wave;
+
+  // Pairs of lanes swapped: 0x10, 0x00, 0x30, 0x20, ...
+  for (uint32_t lane = 0; lane < 16; ++lane)
+    hazard_core::track_lds_read(&wave, 14, 0x300, (lane ^ 1u) * 16, 16);
+
+  ASSERT_EQ(wave.lds_read_fifo.size(), 1u);
+  EXPECT_EQ(wave.lds_read_fifo.front().first, 0u);
+  EXPECT_EQ(wave.lds_read_fifo.front().second.size, 16u * 16u);
+}
+
+TEST(HazardCoreAccessHandlingTest, KeepsGapsAndOtherInstructionsSeparate) {
+  hazard_core::WaveState wave;
+
+  // Strided lanes leave gaps that must stay unreported.
+  hazard_core::track_lds_write(&wave, 13, 0x300, 0x00, 4);
+  hazard_core::track_lds_write(&wave, 13, 0x300, 0x08, 4);
+  // Contiguous with the previous range, but a different instruction.
+  hazard_core::track_lds_write(&wave, 14, 0x304, 0x0c, 4);
+  // Same instruction as before 14, so it is not folded back past it.
+  hazard_core::track_lds_write(&wave, 13, 0x300, 0x10, 4);
+
+  EXPECT_EQ(wave.lds_fifo.size(), 4u);
+  EXPECT_EQ(hazard_core::check_lds_read_hazard(&wave, 0x04, 4), nullptr);
+
+  // Retiring 13 leaves 14's range alone.
+  hazard_core::retire_address_entries(wave.lds_fifo, WaitCntType::LDS, {13});
+  ASSERT_EQ(wave.lds_fifo.size(), 1u);
+  EXPECT_EQ(wave.lds_fifo.front().second.instruction_id, 14u);
+}
+
+TEST(HazardCoreAccessHandlingTest, MergedLdsEntriesCoverExactlyTheirPendingLanes) {
+  // Folding lanes into shared entries must neither lose a pending byte nor
+  // claim one no pending lane touched, through merges, swizzles, strides and
+  // retirement. Each byte is checked against the lanes themselves, kept aside.
+  struct Lane {
+    EntityId id;
+    WaitCntType wait;
+    uint32_t address;
+    uint32_t size;
+  };
+  hazard_core::LdsRangeQueue fifo;
+  std::vector<Lane> lanes;
+  std::mt19937 rng(1234);
+  constexpr uint32_t kBytes = 1024;
+
+  const auto check = [&]() {
+    for (uint32_t byte = 0; byte < kBytes; ++byte) {
+      for (const auto wait : {WaitCntType::LDS, WaitCntType::VMEM}) {
+        std::set<EntityId> expected;
+        for (const auto &lane : lanes) {
+          if (lane.wait == wait && lane.address <= byte && byte < lane.address + lane.size)
+            expected.insert(lane.id);
+        }
+        std::set<EntityId> covered;
+        for (const auto &[start, op] : fifo) {
+          if (op.wait_type == wait && start <= byte && byte < start + op.size)
+            covered.insert(op.instruction_id);
+        }
+        ASSERT_EQ(covered, expected) << "byte " << byte;
+      }
+    }
+  };
+
+  EntityId next_id = 1;
+  for (int step = 0; step < 300; ++step) {
+    if (rng() % 4 != 0) {
+      // One instruction: lanes in address order, swizzled, or strided.
+      const EntityId id = next_id++;
+      const uint32_t size = 4u << (rng() % 3);
+      const uint32_t base = (rng() % 32) * 8;
+      const uint32_t stride = rng() % 2 ? size : size * 2;
+      const bool swizzle = rng() % 2;
+      const auto wait = rng() % 2 ? WaitCntType::LDS : WaitCntType::VMEM;
+      for (uint32_t lane = 0; lane < 16; ++lane) {
+        const uint32_t slot = swizzle ? (lane ^ 1u) : lane;
+        const uint32_t address = base + slot * stride;
+        fifo.push_range(address, hazard_core::make_pending_op(id, 0x100, wait, size));
+        lanes.push_back({id, wait, address, size});
+      }
+    } else {
+      // Retire a random half of the outstanding instructions on one counter.
+      std::vector<uint64_t> retiring;
+      for (EntityId id = 1; id < next_id; ++id) {
+        if (rng() % 2)
+          retiring.push_back(id);
+      }
+      const auto wait = rng() % 2 ? WaitCntType::LDS : WaitCntType::VMEM;
+      hazard_core::retire_address_entries(fifo, wait, retiring);
+      std::erase_if(lanes, [&](const Lane &lane) {
+        return lane.wait == wait &&
+               std::find(retiring.begin(), retiring.end(), lane.id) != retiring.end();
+      });
+    }
+    check();
+    if (HasFatalFailure())
+      return;
+  }
 }
 
 TEST(HazardCoreAccessHandlingTest, LdsWaitKeepsAllEntriesWhenKeepCountExceedsPendingWrites) {

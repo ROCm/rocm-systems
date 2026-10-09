@@ -19,8 +19,10 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <deque>
+#include <limits>
 #include <set>
 #include <unordered_map>
 #include <utility>
@@ -150,6 +152,81 @@ struct RegisterHazardKey {
   }
 };
 
+/// A FIFO of pending LDS ranges, (start address, op), oldest first.
+///
+/// The frontend reports LDS accesses one lane at a time. push_range folds a
+/// lane into an entry of the same instruction whose range it overlaps or
+/// abuts, so a contiguous wave access holds one entry rather than one per
+/// lane, and a later access scans one entry rather than one per lane. Entries
+/// of one instruction share everything but their range and retire together,
+/// so a merged entry covers exactly the bytes its lanes did.
+class LdsRangeQueue {
+public:
+  using Entry = std::pair<uint32_t, PendingAsyncOp>;
+  /// How many of an instruction's most recent entries a new lane range is
+  /// tried against before it gets an entry of its own. Lanes usually arrive in
+  /// address order, so the newest entry almost always absorbs the next lane; a
+  /// short window also catches lanes swizzled within a row.
+  static constexpr int COALESCE_WINDOW = 8;
+
+  auto begin() const { return entries_.begin(); }
+  auto end() const { return entries_.end(); }
+  size_t size() const { return entries_.size(); }
+  bool empty() const { return entries_.empty(); }
+  const Entry &front() const { return entries_.front(); }
+  const Entry &operator[](size_t i) const { return entries_[i]; }
+
+  void clear() { entries_.clear(); }
+
+  /// Append an entry as is, with no folding.
+  void push_back(const Entry &entry) { entries_.push_back(entry); }
+
+  /// Append one lane's range, folding it into the instruction's recent entries.
+  void push_range(uint32_t address, const PendingAsyncOp &op) {
+    uint64_t lo = address;
+    uint64_t hi = lo + op.size;
+    // Absorb every recent entry of this instruction the range touches. Taking
+    // one can bridge the gap to another -- a swizzled lane landing between two
+    // runs -- so the window is searched again until nothing more joins.
+    for (bool merged = true; merged;) {
+      merged = false;
+      int tried = 0;
+      for (auto it = entries_.end(); it != entries_.begin() && tried < COALESCE_WINDOW; ++tried) {
+        --it;
+        const auto &[start, pending] = *it;
+        if (pending.instruction_id != op.instruction_id)
+          break;
+        if (pending.wait_type != op.wait_type)
+          continue;
+        const uint64_t end = uint64_t{start} + pending.size;
+        if (lo > end || start > hi)
+          continue;
+        const uint64_t new_lo = std::min<uint64_t>(lo, start);
+        const uint64_t new_hi = std::max(hi, end);
+        if (new_hi - new_lo > std::numeric_limits<uint32_t>::max())
+          continue;
+        lo = new_lo;
+        hi = new_hi;
+        entries_.erase(it);
+        merged = true;
+        break;
+      }
+    }
+
+    PendingAsyncOp entry = op;
+    entry.size = static_cast<uint32_t>(hi - lo);
+    entries_.push_back({static_cast<uint32_t>(lo), entry});
+  }
+
+  /// Drop every entry @p pred selects.
+  template <typename Pred> void remove_if(Pred pred) {
+    entries_.erase(std::remove_if(entries_.begin(), entries_.end(), pred), entries_.end());
+  }
+
+private:
+  std::deque<Entry> entries_;
+};
+
 struct WaveState {
   // === RAW hazard tracking (reads before async writes complete) ===
   std::unordered_map<uint32_t, PendingAsyncOp> pending_vgpr_writes;
@@ -170,7 +247,7 @@ struct WaveState {
   // false positives on adjacent non-overlapping accesses.
   std::deque<std::pair<uint32_t, PendingAsyncOp>> vmem_load_fifo;
   std::deque<std::pair<uint32_t, PendingAsyncOp>> smem_load_fifo;
-  std::deque<std::pair<uint32_t, PendingAsyncOp>> lds_fifo; // (start_addr, op)
+  LdsRangeQueue lds_fifo;
 
   // DScnt-side tracking for flat load VGPR writes.
   // Flat instructions use both LOADcnt and DScnt; the VGPR destination is
@@ -203,10 +280,10 @@ struct WaveState {
   // Pending async LDS reads (DS loads in flight): address -> op.
   // WAR hazard: a DS write to an overlapping address before s_wait_dscnt
   // could corrupt LDS before the in-flight read captures it.
-  std::deque<std::pair<uint32_t, PendingAsyncOp>> lds_read_fifo; // (start_addr, op)
+  LdsRangeQueue lds_read_fifo;
 
   // TENSORcnt-tracked LDS writes (tensor_load_to_lds, tensor_store_from_lds)
-  std::deque<std::pair<uint32_t, PendingAsyncOp>> tensor_lds_fifo;
+  LdsRangeQueue tensor_lds_fifo;
 
   // === Deduplication ===
   std::set<WawHazardKey> reported_raw_hazards;
