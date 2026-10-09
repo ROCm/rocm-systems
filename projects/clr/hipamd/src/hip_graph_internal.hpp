@@ -2181,8 +2181,7 @@ class GraphKernelNode : public GraphNode {
     }
     launchFlags_ = kernelNode->launchFlags_;
     kernelEvents_ = kernelNode->kernelEvents_;
-    CopyAttr(kernelNode);
-    return status;
+    return CopyAttr(kernelNode);
   }
 
   hipError_t validateKernelParams(const hipKernelNodeParams* pNodeParams,
