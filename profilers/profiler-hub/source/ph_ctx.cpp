@@ -102,7 +102,9 @@ ph_ctx::load_async(std::shared_ptr<ph_future> future)
         const auto stop_requested = [&] {
             return token.stop_requested() || future->stop_token().stop_requested();
         };
-        const auto progress = [&](double value) { future->report_progress(value); };
+        const auto progress = [&](double value, ph_progress_description_t description) {
+            future->report_progress(value, description);
+        };
 
         try
         {
@@ -196,20 +198,26 @@ ph_ctx::read_trace(const stop_requested_fn& stop_requested, const progress_fn& p
 {
     if(stop_requested()) return false;
 
+    if(progress) progress(0.0, "Reading schema version");
     profiler_hub::storage_t version_probe{ m_file_path, "" };
     const auto              version = version_probe.get_storage_version();
     m_schema_version                = { .major = version.major,
                                         .minor = version.minor,
                                         .patch = version.patch };
 
+    if(progress) progress(0.0, "Building reader catalog");
     populate_reader_catalog(m_thread_pool, m_connection_pool, *m_catalog);
     if(stop_requested()) return false;
 
+    if(progress) progress(0.0, "Building track list");
     initialize_track_list();
     if(!load_all_tracks(stop_requested, progress)) return false;
 
+    if(progress) progress(1.0, "Reading node agents");
     initialize_node_agents();
+    if(progress) progress(1.0, "Reading processes");
     initialize_node_processes();
+    if(progress) progress(1.0, "Reading node info");
     initialize_node_info();
     return true;
 }
@@ -340,7 +348,8 @@ ph_ctx::load_all_tracks(const stop_requested_fn& stop_requested,
         if(progress && total_events != 0)
         {
             progress(static_cast<double>(loaded_events) /
-                     static_cast<double>(total_events));
+                         static_cast<double>(total_events),
+                     "Loading tracks");
         }
     }
     return true;

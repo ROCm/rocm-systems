@@ -29,8 +29,9 @@ struct ph_future : std::enable_shared_from_this<ph_future>
 
     [[nodiscard]] std::stop_token stop_token() const noexcept;
 
-    /** Calls on_progress with @p value clamped to [0, 1]; ignored once finished. */
-    void report_progress(double value);
+    /** Calls on_progress with @p value clamped to [0, 1] and @p description;
+     *  ignored once finished. */
+    void report_progress(double value, ph_progress_description_t description);
 
     /** Ends the operation; only the first call has an effect. Calls on_finished. */
     void finish(ph_future_status_t status, ph_result_t result);

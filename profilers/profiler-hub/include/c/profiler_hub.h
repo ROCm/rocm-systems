@@ -26,8 +26,8 @@ extern "C"
      *        from ph_future_create() that was not passed to an operation yet: the
      *        call returns at once with the context and the trace is read in the
      *        background. The future reports the progress of the read in
-     *        [0.0, 1.0] and ends with PH_FUTURE_FINISHED, PH_FUTURE_CANCELLED or
-     *        PH_FUTURE_ERROR.
+     *        [0.0, 1.0], with a description of the current phase, and ends with
+     *        PH_FUTURE_FINISHED, PH_FUTURE_CANCELLED or PH_FUTURE_ERROR.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p file_path is null
      *         or @p future already serves an operation,
@@ -213,7 +213,9 @@ extern "C"
     /**
      * @brief Creates a future that can be passed to an API call to run it
      *        asynchronously.
-     * @param on_progress Called with the progress of the operation, may be null.
+     * @param on_progress Called with the fraction completed and a description of
+     *        the current work. The description may be null. The callback itself
+     *        may be null.
      * @param on_finished Called once when the operation ends, may be null.
      * @param future Out parameter receiving the new future. Must not be null.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if

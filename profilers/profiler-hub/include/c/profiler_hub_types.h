@@ -249,8 +249,15 @@ extern "C"
         PH_FUTURE_ERROR,     /**< The operation failed; see the ph_result_t. */
     } ph_future_status_t;
 
-    /** @brief Progress callback of a future, @p value is in [0.0, 1.0]. */
-    typedef void (*ph_progress_fn)(ph_future_t future, double value);
+    /** @brief What the library is doing, reported with a progress value.
+     *         Valid only for the duration of the progress callback. May be
+     *         null. */
+    typedef const char* ph_progress_description_t;
+
+    /** @brief Progress callback of a future. @p value is in [0.0, 1.0]. */
+    typedef void (*ph_progress_fn)(ph_future_t               future,
+                                   double                    value,
+                                   ph_progress_description_t description);
 
     /** @brief Completion callback of a future, called exactly once. */
     typedef void (*ph_finished_fn)(ph_future_t        future,

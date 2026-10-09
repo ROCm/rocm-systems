@@ -84,6 +84,10 @@ downstream consumer of the library.
 
 ### Changed
 
+- **Breaking:** `ph_progress_fn` now takes a `ph_progress_description_t`
+  (`const char*`) describing the work in progress. The pointer is valid only
+  for the duration of the callback and may be null. Loading a trace reports
+  the current phase (schema, catalog, track list, track load, node info).
 - **Breaking:** public C++ headers moved from `<prefix>/include/profiler-hub/*.hpp`
   to `<prefix>/include/profiler-hub/cpp/*.hpp` (e.g.
   `#include <profiler-hub/storage.hpp>` becomes
