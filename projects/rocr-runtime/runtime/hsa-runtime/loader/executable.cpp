@@ -1764,7 +1764,7 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       desc->insts_bo_va = nullptr;
       desc->insts_size = 0;
       desc->insts_bo_handle = 0;
-      desc->pdi_bo_handle = 0;  // the PDIs are in desc->pdis
+      desc->pdi_bo_handle = 0;  // the PDIs are in desc->pdi_bo_handles
 
       auto it = parsed_elfs.find(ki->insts_data);
       if (it == parsed_elfs.end()) {
@@ -1816,14 +1816,13 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       }
 
       // Unlike the control code, the PDIs are fetched by the NPU, so they need device memory.
-      // The control code's PDI sites keep whatever the ELF shipped: only the driver can turn a BO
-      // handle into the address the NPU fetches from, so it patches each dispatch's copy and the
-      // loader never handles device addresses. aie_elf::Parse() has already validated every
+      // Each PDI's device address is written into its sites in the control code here, once; it
+      // is a plain store, unlike the additive argument patches, so the result stays a valid
+      // starting point for every dispatch's copy. aie_elf::Parse() has already validated every
       // offset as non-zero, 4-byte aligned and within range.
-      desc->num_pdis = static_cast<uint32_t>(kernel.pdis.size());
-      desc->pdis = std::make_unique<AMD::AieKernelDescriptor::Pdi[]>(desc->num_pdis);
-      for (uint32_t p = 0; p < desc->num_pdis; ++p) {
-        AMD::aie_elf::Pdi& pdi = kernel.pdis[p];
+      desc->pdi_bo_handles.resize(kernel.pdis.size());
+      for (size_t p = 0; p < kernel.pdis.size(); ++p) {
+        const AMD::aie_elf::Pdi& pdi = kernel.pdis[p];
         void* pdi_dev = nullptr;
         // Not cached: pdi.bytes is heap memory owned by the parsed kernel, freed when the kernel is
         // erased below, so a later nested ELF's PDI of the same size can reuse its address and
@@ -1832,10 +1831,23 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
             s != HSA_STATUS_SUCCESS) {
           return s;
         }
-        if (auto s = resolve_handle(pdi_dev, &desc->pdis[p].bo_handle); s != HSA_STATUS_SUCCESS) {
+        if (auto s = resolve_handle(pdi_dev, &desc->pdi_bo_handles[p]); s != HSA_STATUS_SUCCESS) {
           return s;
         }
-        desc->pdis[p].patch_offsets = std::move(pdi.patch_offsets);
+        // The agent address is the one the NPU fetches from, which differs from the host one.
+        hsa_amd_pointer_info_t info = {};
+        info.size = sizeof(info);
+        const hsa_status_t s =
+            core::Runtime::runtime_singleton_->PtrInfo(pdi_dev, &info, nullptr, nullptr, nullptr);
+        if (s != HSA_STATUS_SUCCESS || info.type == HSA_EXT_POINTER_TYPE_UNKNOWN) {
+          return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+        }
+        // A site is the low dword then the high dword, which on a little-endian host is the
+        // address's own byte order.
+        const uint64_t pdi_dev_addr = reinterpret_cast<uint64_t>(info.agentBaseAddress);
+        for (const uint32_t offset : pdi.patch_offsets) {
+          std::memcpy(kernel.ctrl_code.data() + offset, &pdi_dev_addr, sizeof(pdi_dev_addr));
+        }
       }
 
       // The control code is only ever a memcpy source for a per-dispatch buffer, so it stays in

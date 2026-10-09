@@ -7,11 +7,11 @@
 // Reader for the full-ELF kernel binaries aiecc emits (`aiecc --get-full-elf`).
 //
 // A full ELF carries the PDIs, the control code, and the relocations that say where addresses go
-// in the control code. The loader parses the full ELF found in a unified hsaco's AIE section, keeps
-// the control code pristine in host memory and places the PDIs in the agent's device memory. No
-// address is patched here. At dispatch time the driver copies the pristine control code into a
-// per-dispatch device buffer and patches the PDI and argument addresses into that copy, so
-// concurrent dispatches of the same kernel never share a patch site.
+// in the control code. The loader parses the full ELF found in a unified hsaco's AIE section,
+// places the PDIs in the agent's device memory and keeps the control code in host memory with the
+// PDI addresses written in. No address is patched here. At dispatch time the driver copies the
+// control code into a per-dispatch device buffer and patches the argument addresses into that copy,
+// so concurrent dispatches of the same kernel never share a patch site.
 
 #ifndef HSA_RUNTIME_CORE_INC_AMD_AIE_ELF_H_
 #define HSA_RUNTIME_CORE_INC_AMD_AIE_ELF_H_
