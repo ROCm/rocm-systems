@@ -24,6 +24,7 @@ struct callback_log
 {
     std::atomic<int>                progress_calls{ 0 };
     std::atomic<double>             last_progress{ -1.0 };
+    std::atomic<const char*>        last_description{ nullptr };
     std::atomic<int>                finished_calls{ 0 };
     std::atomic<ph_future_status_t> status{ PH_FUTURE_ERROR };
     std::atomic<ph_result_t>        result{ PH_RESULT_INTERNAL_ERROR };
@@ -34,10 +35,11 @@ struct callback_log
 callback_log g_log;
 
 void
-on_progress(ph_future_t future, double value)
+on_progress(ph_future_t future, double value, ph_progress_description_t description)
 {
-    g_log.progress_future = future;
-    g_log.last_progress   = value;
+    g_log.progress_future  = future;
+    g_log.last_progress    = value;
+    g_log.last_description = description;
     ++g_log.progress_calls;
 }
 
@@ -55,13 +57,14 @@ class c_api_future_test : public ::testing::Test
 protected:
     void SetUp() override
     {
-        g_log.progress_calls  = 0;
-        g_log.last_progress   = -1.0;
-        g_log.finished_calls  = 0;
-        g_log.status          = PH_FUTURE_ERROR;
-        g_log.result          = PH_RESULT_INTERNAL_ERROR;
-        g_log.finished_future = nullptr;
-        g_log.progress_future = nullptr;
+        g_log.progress_calls   = 0;
+        g_log.last_progress    = -1.0;
+        g_log.last_description = nullptr;
+        g_log.finished_calls   = 0;
+        g_log.status           = PH_FUTURE_ERROR;
+        g_log.result           = PH_RESULT_INTERNAL_ERROR;
+        g_log.finished_future  = nullptr;
+        g_log.progress_future  = nullptr;
     }
 
     void TearDown() override
@@ -96,7 +99,7 @@ TEST_F(c_api_future_test, a_future_may_have_no_callbacks)
     create(nullptr, nullptr);
     ASSERT_TRUE(m_future->try_attach());
 
-    m_future->report_progress(0.5);
+    m_future->report_progress(0.5, "loading");
     m_future->finish(PH_FUTURE_FINISHED, PH_RESULT_SUCCESS);
 
     EXPECT_EQ(ph_future_wait(m_future), PH_RESULT_SUCCESS);
@@ -162,18 +165,22 @@ TEST_F(c_api_future_test, progress_is_reported_clamped_until_the_operation_ends)
     create();
     ASSERT_TRUE(m_future->try_attach());
 
-    m_future->report_progress(0.25);
+    m_future->report_progress(0.25, "loading");
     EXPECT_DOUBLE_EQ(g_log.last_progress, 0.25);
-    m_future->report_progress(7.0);
+    EXPECT_STREQ(g_log.last_description.load(), "loading");
+    m_future->report_progress(7.0, "still loading");
     EXPECT_DOUBLE_EQ(g_log.last_progress, 1.0);
-    m_future->report_progress(-3.0);
+    EXPECT_STREQ(g_log.last_description.load(), "still loading");
+    m_future->report_progress(-3.0, nullptr);
     EXPECT_DOUBLE_EQ(g_log.last_progress, 0.0);
+    EXPECT_EQ(g_log.last_description.load(), nullptr);
     EXPECT_EQ(g_log.progress_future, m_future);
 
     m_future->finish(PH_FUTURE_FINISHED, PH_RESULT_SUCCESS);
-    m_future->report_progress(0.5);
+    m_future->report_progress(0.5, "ignored");
 
     EXPECT_EQ(g_log.progress_calls, 3);
+    EXPECT_EQ(g_log.last_description.load(), nullptr);
 }
 
 TEST_F(c_api_future_test, wait_returns_after_the_finished_callback_has_returned)
@@ -295,7 +302,8 @@ TEST_F(c_api_async_ctx_test, the_context_is_read_in_the_background_and_reports_i
     EXPECT_EQ(g_log.finished_calls, 1);
     EXPECT_EQ(g_log.status, PH_FUTURE_FINISHED);
     EXPECT_DOUBLE_EQ(g_log.last_progress, 1.0);
-    EXPECT_EQ(g_log.progress_calls, 2);
+    EXPECT_STREQ(g_log.last_description.load(), "Reading node info");
+    EXPECT_EQ(g_log.progress_calls, 8);
 
     ph_track_list_t tracks{};
     ASSERT_EQ(ph_get_track_list(m_ctx, &tracks, nullptr), PH_RESULT_SUCCESS);

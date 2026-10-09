@@ -455,14 +455,16 @@ read_all_tracks_async(ph_ctx_t               ctx,
 }
 
 static void
-on_load_progress(ph_future_t future, double value)
+on_load_progress(ph_future_t future, double value, ph_progress_description_t description)
 {
     (void) future;
-    static int last_percent = -1;
-    const int  percent      = (int) (value * 100.0);
-    if(percent / 10 == last_percent / 10) return;
-    last_percent = percent;
-    printf("loading trace: %3d%%\n", percent);
+    static int         last_percent     = -1;
+    static const char* last_description = NULL;
+    const int          percent          = (int) (value * 100.0);
+    if(percent / 10 == last_percent / 10 && description == last_description) return;
+    last_percent     = percent;
+    last_description = description;
+    printf("%s: %3d%%\n", description != NULL ? description : "loading trace", percent);
 }
 
 static void

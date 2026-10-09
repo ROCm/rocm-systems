@@ -81,7 +81,7 @@ private:
     };
 
     using stop_requested_fn = std::function<bool()>;
-    using progress_fn       = std::function<void(double)>;
+    using progress_fn       = std::function<void(double, ph_progress_description_t)>;
 
     /** @return false if @p stop_requested became true before the trace was read. */
     [[nodiscard]] bool read_trace(const stop_requested_fn& stop_requested,
