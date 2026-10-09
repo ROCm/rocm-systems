@@ -135,7 +135,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .symMaxR2 = {
     0,                    // [0] Broadcast      -- not used on gfx1250
     0,                    // [1] Reduce          -- not used on gfx1250
-    2ULL*1024*1024,       // [2] AllGather
+    kThreshUnlimited,       // [2] AllGather
     kThreshUnlimited,     // [3] ReduceScatter
     0,                    // [4] AllReduce
     0,                    // [5] SendRecv        -- not used on gfx1250
@@ -162,7 +162,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .symMinR2 = {
     kThreshUnlimited,     // [0] Broadcast      -- not used on gfx1250
     kThreshUnlimited,     // [1] Reduce          -- not used on gfx1250
-    128ULL*1024,          // [2] AllGather
+    1024,          // [2] AllGather
     2ULL*1024*1024,       // [3] ReduceScatter
     8ULL*1024*1024,       // [4] AllReduce
     kThreshUnlimited,     // [5] SendRecv        -- not used on gfx1250
