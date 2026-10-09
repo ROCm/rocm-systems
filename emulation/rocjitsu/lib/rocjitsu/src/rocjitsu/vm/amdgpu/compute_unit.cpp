@@ -197,6 +197,23 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
 ComputeUnitCore::~ComputeUnitCore() {
   // Drop this CU from whichever GWS store it joined so a shared store does not
   // retain a dangling pointer after the CU is destroyed.
+  //
+  // ComputeUnitCore is a base class, so this body runs after the derived
+  // subobjects have already been destroyed; the window in which the store still
+  // lists a half-destroyed `this` is nonetheless safe:
+  //   - A shared store's peer-CU scan (escape_ready / wakeups) dereferences only
+  //     the base-class wave_activity_ atomic. Its per-CU residency and park-epoch
+  //     bookkeeping is keyed by the pointer and lives in GwsDevice, not in the CU,
+  //     and the self-CU maintenance that touches wfs_/cycle_counter_ runs on this
+  //     CU's own thread. The store never reads derived state, and wave_activity_
+  //     is still alive here -- the base subobject is torn down only after this
+  //     body returns.
+  //   - unregister_compute_unit() takes the store mutex_, the same lock every
+  //     peer scan holds, and removes `this` before any base member dies, so no
+  //     later scan can observe a freed CU.
+  // Because unregister and every peer scan serialize on that one mutex_, these
+  // guarantees hold even if a peer CU is mid-scan on another thread: correctness
+  // here does not depend on teardown being quiescent.
   gws_device_->unregister_compute_unit(this);
 }
 
