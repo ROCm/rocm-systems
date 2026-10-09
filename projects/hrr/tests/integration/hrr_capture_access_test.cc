@@ -59,7 +59,9 @@
  *
  *   Unit_HRR_CaptureEventsWriteFails:
  *     a failed write or close of events.bin leaves the archive without the
- *     clean-shutdown trailer and marked incomplete (Linux, with seccomp).
+ *     clean-shutdown trailer and marked incomplete, and a link planted at
+ *     events.bin before the failed close is not truncated through (Linux,
+ *     with seccomp).
  *
  *   Unit_HRR_CaptureActiveMarker:
  *     pid-<pid>/active, the file producers read as "capture is on", exists
@@ -442,7 +444,10 @@ TEST_CASE("Unit_HRR_CaptureTrimFails_Direct", "[.][hrr-direct]") {
 // installs a seccomp filter that fails, with EIO, either every write to it or
 // closing it, as HRR_TEST_FAIL_EVENTS says. Then it records a few events and
 // exits normally, so the writer meets the failure while it finishes the
-// archive. Without a filter it says so.
+// archive. With close-link it first moves events.bin aside to
+// events.bin.written and plants a link to HRR_TEST_DECOY in its place, so a
+// writer that cut the trailer off by path would cut the decoy instead.
+// Without a filter it says so.
 // ---------------------------------------------------------------------------
 TEST_CASE("Unit_HRR_CaptureEventsFail_Direct", "[.][hrr-direct]") {
 #ifdef HRR_TEST_HAVE_SECCOMP
@@ -450,13 +455,14 @@ TEST_CASE("Unit_HRR_CaptureEventsFail_Direct", "[.][hrr-direct]") {
   const char* mode = std::getenv("HRR_TEST_FAIL_EVENTS");
   if (mode == nullptr) HRR_SKIP("HRR_TEST_FAIL_EVENTS is not set");
   const std::string fail(mode);
-  REQUIRE((fail == "write" || fail == "close"));
+  REQUIRE((fail == "write" || fail == "close" || fail == "close-link"));
 
   HRR_HIP_CHECK(hipSetDevice(0));
   void* d = nullptr;
   HRR_HIP_CHECK(hipMalloc(&d, 256));
 
   int events_fd = -1;
+  std::string events_path;
   if (DIR* fds = ::opendir("/proc/self/fd")) {
     while (const dirent* ent = ::readdir(fds)) {
       char target[4096];
@@ -466,8 +472,10 @@ TEST_CASE("Unit_HRR_CaptureEventsFail_Direct", "[.][hrr-direct]") {
       const std::string path(target, static_cast<size_t>(n));
       const std::string tail = "/events.bin";
       if (path.size() > tail.size() &&
-          path.compare(path.size() - tail.size(), tail.size(), tail) == 0)
+          path.compare(path.size() - tail.size(), tail.size(), tail) == 0) {
         events_fd = std::atoi(ent->d_name);
+        events_path = path;
+      }
     }
     ::closedir(fds);
   }
@@ -501,6 +509,12 @@ TEST_CASE("Unit_HRR_CaptureEventsFail_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMemset(d, 0, 256));
   HRR_HIP_CHECK(hipDeviceSynchronize());
   HRR_HIP_CHECK(hipFree(d));
+  if (fail == "close-link") {
+    const char* decoy = std::getenv("HRR_TEST_DECOY");
+    REQUIRE(decoy != nullptr);
+    REQUIRE(::rename(events_path.c_str(), (events_path + ".written").c_str()) == 0);
+    REQUIRE(::symlink(decoy, events_path.c_str()) == 0);
+  }
 #else
   std::printf("%sLinux on x86-64 or AArch64 only\n", kNoSeccomp);
 #endif
@@ -1037,26 +1051,33 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeChecksBlobBytes) {
 /**
  * Test Description
  * ----------------
- *   - Runs Unit_HRR_CaptureEventsFail_Direct twice: once with every write to
- *     events.bin failing once the archive is open, and once with closing
- *     events.bin failing after the archive is finished.
- *   - Either way the archive ends without a clean-shutdown trailer and its
- *     manifest says it is incomplete, so neither the reader nor the root
- *     index takes it for a whole capture. Skipped where the workload cannot
- *     install its filter.
+ *   - Runs Unit_HRR_CaptureEventsFail_Direct three times: once with every
+ *     write to events.bin failing once the archive is open, once with closing
+ *     events.bin failing after the archive is finished, and once more like
+ *     that with events.bin moved aside and a link to a decoy file planted in
+ *     its place before the close.
+ *   - Each time the file the writer wrote ends without a clean-shutdown
+ *     trailer and the manifest says the archive is incomplete, so neither the
+ *     reader nor the root index takes it for a whole capture. The decoy is
+ *     left as it was. Skipped where the workload cannot install its filter.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureEventsWriteFails) {
 #ifdef _WIN32
   HRR_SKIP("seccomp");
 #else
   ScopedDir work{fs::temp_directory_path() / "hrr_access_events_fail"};
-  for (const char* fail : {"write", "close"}) {
+  constexpr const char* kDecoyText = "not part of the archive\n";
+  for (const char* fail : {"write", "close", "close-link"}) {
     DYNAMIC_SECTION("failing " << fail) {
-      const fs::path base = work.path / fail;
+      const std::string mode(fail);
+      const fs::path base = work.path / mode;
+      const fs::path decoy = work.path / (mode + ".decoy");
       fs::create_directories(base);
+      write_text(decoy, kDecoyText);
       const PlantedRun run = capture_after_planting(
-          base, work.path / (std::string(fail) + ".sh"),
-          std::string("export HRR_TEST_FAIL_EVENTS=") + fail + "\n",
+          base, work.path / (mode + ".sh"),
+          "export HRR_TEST_FAIL_EVENTS=" + mode + "\nexport HRR_TEST_DECOY='" +
+              decoy.string() + "'\n",
           "Unit_HRR_CaptureEventsFail_Direct");
       INFO("Workload exit code: " << run.ret << "\n" << run.output);
       REQUIRE(run.ret == 0);
@@ -1065,8 +1086,10 @@ HRR_TEST_CASE(Unit_HRR_CaptureEventsWriteFails) {
       const std::vector<fs::path> archives = hrr_process_archives(base);
       REQUIRE(archives.size() == 1);
       CHECK(manifest_says_complete(archives.front(), false));
+      CHECK(file_holds(decoy, kDecoyText));
 
-      const std::string events = read_text_file(archives.front() / "events.bin");
+      const std::string events = read_text_file(
+          archives.front() / (mode == "close-link" ? "events.bin.written" : "events.bin"));
       bool trailer = false;
       if (events.size() >= sizeof(hrr_file_header) + sizeof(hrr_eof_record)) {
         hrr_eof_record rec{};

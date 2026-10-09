@@ -68,6 +68,7 @@
 #  define HRR_WRITE(fd,b,n)    _write((fd), (b), (unsigned)(n))
 #  define HRR_CLOSE(fd)        _close((fd))
 #  define HRR_FSYNC(fd)        _commit((fd))
+#  define HRR_DUP(fd)          _dup((fd))
 
 using hrr_stat_t = struct _stat64;
 static int hrr_stat_file(const char* path, hrr_stat_t* st) { return _stat64(path, st); }
@@ -104,6 +105,7 @@ static inline uint64_t current_parent_process_id() {
 #  define HRR_WRITE(fd,b,n)  ::write((fd), (b), (n))
 #  define HRR_CLOSE(fd)      ::close((fd))
 #  define HRR_FSYNC(fd)      ::fsync((fd))
+#  define HRR_DUP(fd)        ::fcntl((fd), F_DUPFD_CLOEXEC, 0)
 
 static int hrr_ftruncate_fd(int fd, std::int64_t len) {
   return ftruncate(fd, static_cast<off_t>(len));
@@ -1564,26 +1566,34 @@ void close() {
   // this: nothing would finalize it. Fat-binary destructors still record then.
   std::lock_guard<std::mutex> reopen_lk(g_reopen_mu);
   g_reopen_after_fork.store(false, std::memory_order_release);
-  std::int64_t trailer_at = -1;
+  bool cut = false;
   std::string out_dir;
   {
     BufWriteGuard lk;
     if (g_events_fd < 0) return;
     flush_buffer_locked();
     sync_events_locked();
+    const std::int64_t trailer_at = g_trailer_at;
+    g_trailer_at = -1;
+    // Once flush() wrote the trailer, a second descriptor keeps events.bin open
+    // past a failed close, so the trailer is cut off the file that holds it,
+    // never off whatever the path names by then.
+    const int keep = trailer_at >= 0 ? HRR_DUP(g_events_fd) : -1;
     if (HRR_CLOSE(g_events_fd) != 0)
       g_events_io_failed.store(true, std::memory_order_relaxed);
     g_events_fd = -1;
-    if (!note_events_io_locked()) return;
-    trailer_at = g_trailer_at;
-    g_trailer_at = -1;
+    const bool failed = note_events_io_locked();
+    if (failed && keep >= 0) cut = hrr_ftruncate_fd(keep, trailer_at) == 0;
+    if (keep >= 0) HRR_CLOSE(keep);
+    if (!failed || trailer_at < 0) return;
     out_dir = g_output_dir;
   }
   // flush() already wrote the trailer and a manifest saying complete, before
   // the file failed. Take both back.
-  if (trailer_at < 0 || out_dir.empty()) return;
-  std::error_code ec;
-  fs::resize_file(out_dir + "/events.bin", static_cast<std::uintmax_t>(trailer_at), ec);
+  if (out_dir.empty()) return;
+  if (!cut)
+    LogPrintfError("[HRR capture] Cannot cut the clean-shutdown trailer off %s/events.bin, so "
+                   "only its manifest says the archive is incomplete", out_dir.c_str());
   write_manifest_stdio(out_dir.c_str(), /*complete=*/false);
   update_root_manifest();
 }
