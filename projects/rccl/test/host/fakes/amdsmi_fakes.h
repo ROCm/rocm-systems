@@ -27,6 +27,16 @@ extern std::function<ncclResult_t(uint32_t, struct amdsmiFabricDeviceInfo*)> g_a
 
 extern ncclResult_t g_amdSmiInitResult;
 
+// commAlloc's fabric telemetry opt-in. The default declines, i.e. what every host
+// reports unless RCCL_FABRIC_TELEMETRY_ENABLE is set, which leaves commFree with
+// nothing to release.
+ncclResult_t DefaultAmdSmiFabricTelemetryAcquire(uint32_t deviceIndex, uint64_t commHash, int rank, bool* acquired);
+extern std::function<ncclResult_t(uint32_t, uint64_t, int, bool*)> g_amdSmiFabricTelemetryAcquire;
+
+// commFree's matching release. Nothing to undo in the default, which never acquired.
+ncclResult_t DefaultAmdSmiFabricTelemetryRelease(uint32_t deviceIndex);
+extern std::function<ncclResult_t(uint32_t)> g_amdSmiFabricTelemetryRelease;
+
 void ResetAmdSmiFakes();
 
 #endif  // RCCL_TEST_HOST_AMDSMI_FAKES_H_

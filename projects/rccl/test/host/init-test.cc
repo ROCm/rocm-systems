@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "fakes/init_fakes.h"
+#include "fakes/amdsmi_fakes.h"                      // g_amdSmiFabricTelemetry{Acquire,Release}
 #include "fakes/sym_kernels_fakes.h"                 // g_symkFinalize
 #include "../common/LogCapture.hpp"                 // CaptureLog: assert on WARN/INFO text
 #include "../common/ProcessIsolatedTestRunner.hpp"  // fork+execv process isolation
@@ -2348,6 +2349,32 @@ TEST_F(InitMicrotest, CommCleanup_CommFreeFails_PropagatesError) {
 
   ASSERT_NO_FATAL_FAILURE(ReleaseUncleanedComm(c));
 }
+
+#ifdef USE_AMDSMI
+// --- fabric telemetry release sits ahead of every NCCLCHECK in commFree ---
+// Teardown is expected to fail on abort, so a release placed after any of those
+// would leave the sampler thread polling a GPU whose comm is already gone.
+TEST_F(InitMicrotest, CommFree_TelemetryAcquired_ReleasesEvenWhenTeardownFails) {
+  ScopedHook acquire(g_amdSmiFabricTelemetryAcquire,
+                     [](uint32_t, uint64_t, int, bool* acquired) {
+                       *acquired = true;
+                       return ncclSuccess;
+                     });
+  ScopedHook release(g_amdSmiFabricTelemetryRelease, [](uint32_t) { return ncclSuccess; });
+  CleanupComm c;
+  ASSERT_NO_FATAL_FAILURE(MakeCleanupComm(c, /*withTuner=*/false));
+  ASSERT_TRUE(c.comm->fabricTelemetryAcquired) << "commAlloc never recorded the session ref";
+  g_ncclCeFinalizeResult = ncclInternalError;  // first NCCLCHECK after the release; bails before free(comm)
+
+  EXPECT_EQ(ncclInternalError, commFree(c.comm));
+
+  EXPECT_EQ(1, release.calls);
+  EXPECT_FALSE(c.comm->fabricTelemetryAcquired) << "a second commFree would double-release";
+
+  ASSERT_NO_FATAL_FAILURE(ReleaseUncleanedComm(c));
+  EXPECT_EQ(1, release.calls) << "the retried commFree released the same device twice";
+}
+#endif  // USE_AMDSMI
 
 // ===========================================================================
 // initTransportsRank's supporting cast: four helpers it calls that are already
