@@ -74,6 +74,12 @@ bool kfd_version_ok(int fd) {
 
 int open_kfd() { return open("/dev/kfd", O_RDWR | O_CLOEXEC); }
 
+// The simulated topology exposes its only GPU as node 1.
+bool read_gpu_id(uint32_t &gpu_id) {
+  std::ifstream gpu_id_file("/sys/class/kfd/kfd/topology/nodes/1/gpu_id");
+  return static_cast<bool>(gpu_id_file >> gpu_id);
+}
+
 void noop_signal_handler(int) {}
 
 } // namespace
@@ -109,10 +115,7 @@ void check_hidden_backing_after_dup(HiddenBacking kind, bool use_dup3) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
   uint32_t gpu_id = 0;
-  {
-    std::ifstream gpu_id_file("/sys/class/kfd/kfd/topology/nodes/1/gpu_id");
-    ASSERT_TRUE(gpu_id_file >> gpu_id);
-  }
+  ASSERT_TRUE(read_gpu_id(gpu_id));
   int source = open("/dev/zero", O_RDONLY | O_CLOEXEC);
   ASSERT_GE(source, 0);
   // Leave an ordinary low slot free before creating the hidden backing. Keeping
@@ -1057,10 +1060,7 @@ void check_dmabuf_export_keeps_cpu_mapping(bool reserve_va) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
   uint32_t gpu_id = 0;
-  {
-    std::ifstream gpu_id_file("/sys/class/kfd/kfd/topology/nodes/1/gpu_id");
-    ASSERT_TRUE(gpu_id_file >> gpu_id);
-  }
+  ASSERT_TRUE(read_gpu_id(gpu_id));
   constexpr size_t kBytes = 4096;
   void *reserved = nullptr;
   if (reserve_va) {
@@ -1117,10 +1117,7 @@ TEST(InterposerDrmTest, KfdBufferKeepsItsMetadataAfterEveryHandleCloses) {
   int drm = open_drm_render();
   ASSERT_GE(drm, 0);
   uint32_t gpu_id = 0;
-  {
-    std::ifstream gpu_id_file("/sys/class/kfd/kfd/topology/nodes/1/gpu_id");
-    ASSERT_TRUE(gpu_id_file >> gpu_id);
-  }
+  ASSERT_TRUE(read_gpu_id(gpu_id));
   constexpr size_t kBytes = 4096;
   void *reserved =
       mmap(nullptr, kBytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
@@ -1177,10 +1174,7 @@ TEST(InterposerDrmTest, DmabufExportLeavesPagesPastAPartialMapping) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
   uint32_t gpu_id = 0;
-  {
-    std::ifstream gpu_id_file("/sys/class/kfd/kfd/topology/nodes/1/gpu_id");
-    ASSERT_TRUE(gpu_id_file >> gpu_id);
-  }
+  ASSERT_TRUE(read_gpu_id(gpu_id));
   constexpr size_t kPage = 4096;
   auto *reserved = static_cast<uint8_t *>(
       mmap(nullptr, 2 * kPage, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0));
@@ -1229,10 +1223,7 @@ TEST(InterposerDrmTest, DmabufExportKeepsStoresMadeDuringTheExport) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
   uint32_t gpu_id = 0;
-  {
-    std::ifstream gpu_id_file("/sys/class/kfd/kfd/topology/nodes/1/gpu_id");
-    ASSERT_TRUE(gpu_id_file >> gpu_id);
-  }
+  ASSERT_TRUE(read_gpu_id(gpu_id));
   constexpr size_t kBytes = size_t{64} << 20;
   constexpr size_t kWords = kBytes / sizeof(uint32_t);
   void *reserved =
@@ -1288,6 +1279,50 @@ TEST(InterposerDrmTest, DmabufExportKeepsStoresMadeDuringTheExport) {
   kfd_ioctl_free_memory_of_gpu_args free_args{};
   free_args.handle = allocation.handle;
   EXPECT_EQ(ioctl(kfd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+// amdgpu refuses to export a USERPTR range, and the caller's memory must be
+// left as it was: no snapshot, no remap.
+TEST(InterposerDrmTest, ExportOfAUserptrBufferFailsAndLeavesTheCallersMemoryAlone) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  uint32_t gpu_id = 0;
+  ASSERT_TRUE(read_gpu_id(gpu_id));
+  constexpr size_t kBytes = 4096;
+  auto *buffer = static_cast<uint32_t *>(mmap(nullptr, kBytes, PROT_READ | PROT_WRITE,
+                                              MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(buffer, MAP_FAILED);
+  buffer[0] = 0x1111u;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = reinterpret_cast<uint64_t>(buffer);
+  allocation.size = kBytes;
+  allocation.gpu_id = gpu_id;
+  allocation.mmap_offset = allocation.va_addr;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+  kfd_ioctl_export_dmabuf_args dmabuf{};
+  dmabuf.handle = allocation.handle;
+  dmabuf.flags = O_CLOEXEC;
+  errno = 0;
+  EXPECT_EQ(ioctl(kfd, AMDKFD_IOC_EXPORT_DMABUF, &dmabuf), -1);
+  EXPECT_EQ(errno, EPERM);
+  kfd_ioctl_ipc_export_handle_args ipc{};
+  ipc.handle = allocation.handle;
+  ipc.gpu_id = gpu_id;
+  errno = 0;
+  EXPECT_EQ(ioctl(kfd, AMDKFD_IOC_IPC_EXPORT_HANDLE, &ipc), -1);
+  EXPECT_EQ(errno, EPERM);
+
+  EXPECT_EQ(buffer[0], 0x1111u);
+  buffer[0] = 0x2222u;
+  EXPECT_EQ(buffer[0], 0x2222u);
+
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = allocation.handle;
+  EXPECT_EQ(ioctl(kfd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+  EXPECT_EQ(munmap(buffer, kBytes), 0);
   EXPECT_EQ(close(kfd), 0);
 }
 
