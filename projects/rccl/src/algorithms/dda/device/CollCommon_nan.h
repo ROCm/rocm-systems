@@ -5,9 +5,10 @@
  ************************************************************************/
 
 // NaN-flag DDA kernels (NCCL_PROTO=NaN). The payload doubles as the ready flag:
-// every rank's scratch starts out all-ones, which no f16/bf16/f32 value the user
-// may pass ever is (an all-ones dword is NaN), so a 16B unit has landed once none
-// of its dwords reads back all-ones. Each rank pushes its data straight into
+// every rank's scratch starts out all-ones, and a 16B unit has landed once none
+// of its dwords reads back all-ones. Under f16/bf16/f32 an all-ones dword is a
+// NaN, and every push escapes it to another NaN first (see escape), so real data
+// never reads back as the sentinel. Each rank pushes its data straight into
 // every rank's scratch (its own included), polls its own, and puts the sentinel
 // back after consuming a unit. That replaces the two cross-rank barriers of the copy-based DDA kernels.
 //
@@ -62,6 +63,14 @@ __device__ __forceinline__ bool pending(v4u x) {
 __device__ __forceinline__ v4u sentinel() {
   const v4u s = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
   return s;
+}
+// Clears bit 31 of any all-ones dword. That bit is the sign of the f32 or of the
+// upper f16/bf16, so the value stays a NaN. Every pushed value goes through this,
+// reduced ones included: a sum can carry NaN payloads into an all-ones dword.
+__device__ __forceinline__ v4u escape(v4u x) {
+#pragma unroll
+  for (int d = 0; d < 4; d++) x[d] = x[d] == 0xFFFFFFFFu ? 0x7FFFFFFFu : x[d];
+  return x;
 }
 
 // Slots are packed at this call's slot size so a small call touches few pages.
@@ -135,7 +144,7 @@ __global__ void __launch_bounds__(kThreads)
   const uint32_t bank = e & 1;
   const size_t g0 = (size_t)blockIdx.x * blockDim.x + threadIdx.x, G = (size_t)gridDim.x * blockDim.x;
   for (size_t u = g0; u < units; u += G) {
-    const v4u x = load(send + u);
+    const v4u x = escape(load(send + u));
 #pragma unroll
     for (int p = 0; p < kRanks; p++) store(slot(peers.p[p], bank, 0, self, units) + u, x);
   }
@@ -233,7 +242,7 @@ __device__ __forceinline__ void regCopy(const Peers& peers, uint32_t* epoch, con
   }
   // The fill is in memory once its write-through stores are acknowledged.
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
-  __builtin_amdgcn_s_storecnt(0);
+  __asm__ volatile("s_wait_storecnt 0x0" ::: "memory");
 #else
   __builtin_amdgcn_s_waitcnt(0);
 #endif
@@ -247,7 +256,7 @@ __device__ __forceinline__ void regCopy(const Peers& peers, uint32_t* epoch, con
   for (size_t u = g0; u < units; u += G) {
     v4u x[kLoads];
 #pragma unroll
-    for (int p = 0; p < kLoads; p++) x[p] = load(send + p * units + u);
+    for (int p = 0; p < kLoads; p++) x[p] = escape(load(send + p * units + u));
 #pragma unroll
     for (int p = 0; p < kRanks; p++) push(to[p], u, x[kAllToAll ? p : 0]);
   }
@@ -280,7 +289,7 @@ __global__ void __launch_bounds__(kThreads)
   for (size_t u = g0; u < units; u += G) {
     v4u x[kRanks];
 #pragma unroll
-    for (int p = 0; p < kRanks; p++) x[p] = load(send + p * units + u);
+    for (int p = 0; p < kRanks; p++) x[p] = escape(load(send + p * units + u));
 #pragma unroll
     for (int p = 0; p < kRanks; p++) store(slot(peers.p[p], bank, 0, self, units) + u, x[p]);
   }
@@ -305,7 +314,7 @@ __global__ void __launch_bounds__(kThreads)
   for (size_t u = g0; u < units; u += G) {
     v4u x[kRanks];
 #pragma unroll
-    for (int p = 0; p < kRanks; p++) x[p] = load(send + p * units + u);
+    for (int p = 0; p < kRanks; p++) x[p] = escape(load(send + p * units + u));
 #pragma unroll
     for (int p = 0; p < kRanks; p++) store(slot(peers.p[p], bank, 0, self, units) + u, x[p]);
   }
@@ -326,7 +335,7 @@ __global__ void __launch_bounds__(kThreads)
   const uint32_t bank = e & 1;
   const size_t g0 = (size_t)blockIdx.x * blockDim.x + threadIdx.x, G = (size_t)gridDim.x * blockDim.x;
   for (size_t u = g0; u < units; u += G) {
-    const v4u x = load(send + u);
+    const v4u x = escape(load(send + u));
 #pragma unroll
     for (int p = 0; p < kRanks; p++) store(slot(peers.p[p], bank, 0, self, units) + u, x);
   }
@@ -350,7 +359,7 @@ __global__ void __launch_bounds__(kThreads)
   for (size_t u = g0; u < units; u += G) {
     v4u x[kRanks];
 #pragma unroll
-    for (int p = 0; p < kRanks; p++) x[p] = load(send + p * units + u);
+    for (int p = 0; p < kRanks; p++) x[p] = escape(load(send + p * units + u));
 #pragma unroll
     for (int p = 0; p < kRanks; p++) store(slot(peers.p[p], bank, 0, self, units) + u, x[p]);
   }
@@ -358,7 +367,7 @@ __global__ void __launch_bounds__(kThreads)
   for (size_t u = g0; u < units; u += G) {
     v4u v[kRanks];
     collect(mine, bank, 0, u, units, v);
-    const v4u r = sumInRankOrder<T>(v);
+    const v4u r = escape(sumInRankOrder<T>(v));
 #pragma unroll
     for (int p = 0; p < kRanks; p++) store(slot(peers.p[p], bank, 1, self, units) + u, r);
   }

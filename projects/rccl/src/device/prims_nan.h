@@ -28,10 +28,9 @@
 // writes the sentinel back over every slice it consumes, released ahead of the
 // credit that lets the sender reuse the slot.
 //
-// Limitation: a genuine NaN in user data is indistinguishable from an empty slot
-// and hangs the receiver. The protocol is opt-in for that reason (see the gate in
-// updateCollCostTable), and NCCL_NAN_PROTO_CHECK_INPUT traps on NaN input in
-// debug builds.
+// Real data can still hold an all-ones dword, but only as a NaN: the sender
+// clears bit 31 of every such dword before it goes on the wire (see
+// escapeSentinel), which leaves a NaN that cannot be mistaken for an empty slot.
 
 #include "rccl_ptr.h"
 
@@ -229,10 +228,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
   // whole dwords at the all-ones sentinel.
   //
   // For f16, bf16 and f32 every element sits inside one dword, and an all-ones
-  // dword is NaN under all three. NaN input is forbidden, so no dword of real
-  // data is all-ones. For f64 only the high dword decides: it is all-ones
-  // exactly when the double is a NaN with the sign set, which real data never
-  // is, whereas a finite double can carry an all-ones low dword.
+  // dword is NaN under all three. For f64 only the high dword decides: it is
+  // all-ones exactly when the double is a NaN with the sign set, whereas a
+  // finite double can carry an all-ones low dword. escapeSentinel() keeps
+  // either kind of all-ones dword off the wire.
   //
   // "Some dword is all-ones" is "the unsigned max is all-ones", so the whole
   // test folds into a max3 tree and one compare instead of a compare per dword.
@@ -248,6 +247,21 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
       }
     }
     return m == 0xFFFFFFFFu;
+  }
+
+  // Clears bit 31 of every dword anyNan() would read as the sentinel. That bit
+  // is a sign bit in each case (of the f32, of the upper f16/bf16, or of the
+  // f64), so the value stays a NaN. It has to run after the reduce, not just on
+  // input: a sum can carry NaN payloads into an all-ones dword, e.g. two f16
+  // dwords that each hold one all-ones half.
+  template <int NR>
+  __device__ __forceinline__ static void escapeSentinel(v4u (&x)[PackPerThread]) {
+    constexpr int First = sizeof(T) <= 4 ? 0 : 1, Stride = sizeof(T) <= 4 ? 1 : 2;
+#pragma unroll
+    for (int p = 0; p < NR; p++) {
+#pragma unroll
+      for (int d = First; d < 4; d += Stride) x[p][d] = x[p][d] == 0xFFFFFFFFu ? 0x7FFFFFFFu : x[p][d];
+    }
   }
 
   // First element of the user buffer that pack p of this lane carries.
@@ -275,9 +289,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
   // those 16 bytes run past the slice and possibly into an unmapped page. It
   // reads the 16 bytes that end exactly at eltN instead, and alignTail() later
   // shifts them down into place, which also zero-fills the slots past eltN. That
-  // keeps it one dwordx4 like every other pack. Elements past eltN must end up
-  // zero rather than whatever the buffer holds: they go out on the wire, and a
-  // NaN there would strand the receiver.
+  // keeps it one dwordx4 like every other pack. Elements past eltN end up zero
+  // rather than whatever the buffer holds, so the padding that goes out on the
+  // wire never depends on memory outside the slice.
   //
   // Only a slice shorter than one pack has no such window; it falls back to
   // element-wide loads.
@@ -421,7 +435,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
       for (int p = 0; p < NR; p++) v[p] = applyPostOp(redOp, v[p]);
     }
 
+    // Escaped in place, so the local DST copy matches what the peers receive.
     if (SEND) {
+      escapeSentinel<NR>(v);
 #pragma unroll
       for (int i = 1; i < MaxSend; i++) {
         if (i >= nsend) break;

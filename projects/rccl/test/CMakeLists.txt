@@ -377,6 +377,7 @@ if(BUILD_TESTS)
       device/TestOp128.cpp
       device/RcclEpTests.cpp
       device/LlFifoSysScopeTests.cpp
+      device/NanSentinelEscapeTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
       device/TestAsyncCopy.cpp
