@@ -1170,7 +1170,7 @@ TEST_F(GinAnvilSdmaTemplateTest, PutValue_SdmaFusedSignalSkipsSignalPeer) {
   EXPECT_EQ(downloadU64(env.dst), kVal);
 }
 
-// H25-H30: Flush and Wait poll the queue until it reaches the target, the budget runs out, or abort is set.
+// H26-H31: Flush and Wait poll the queue until it reaches the target, the budget runs out, or abort is set.
 constexpr uint64_t kShortBudget = 1000;
 constexpr uint64_t kLongBudget = 1ULL << 34;
 constexpr unsigned long long kNeverDrains = ~0ULL;
@@ -1282,7 +1282,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Wait_BlockingReturnsOnAbort) {
   EXPECT_EQ(readThreadfenceCount(), 1ULL);
 }
 
-// H31: a request spanning several channels records the live-target marker, and Wait drains each channel.
+// H32: a request spanning several channels records the live-target marker, and Wait drains each channel.
 TEST_F(GinAnvilSdmaTemplateTest, Wait_MultiChannelRequestDrainsEachChannel) {
   SdmaEnv env(/*dirtyBits=*/(1ULL << 2) | (1ULL << 3), /*numChannels=*/2);  // peer 1, channels 0 and 1
   DeviceBuffer<ncclGinRequest_t> d_req(1);
@@ -1298,7 +1298,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Wait_MultiChannelRequestDrainsEachChannel) {
   EXPECT_EQ(env.polls(3), 1ULL);
 }
 
-// H32: blocking Flush returns once abort is set, even if the queue never drains.
+// H33: blocking Flush returns once abort is set, even if the queue never drains.
 __global__ void kernelFlushBlocking(TemplateHarness* h, uint32_t* abortFlag) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
@@ -1318,7 +1318,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_BlockingReturnsOnAbort) {
   EXPECT_GT(env.polls(1), 1ULL);
 }
 
-// H33: when one peer drains and the next times out, the timed Flush clears only the drained peer's bits.
+// H34: when one peer drains and the next times out, the timed Flush clears only the drained peer's bits.
 TEST_F(GinAnvilSdmaTemplateTest, FlushTimeout_ClearsOnlyDrainedPeers) {
   SdmaEnv env(/*dirtyBits=*/(1ULL << 0) | (1ULL << 1));
   env.setQueue(/*index=*/1, /*writeIndex=*/0, /*readLag=*/0, kNeverDrains);
@@ -1329,6 +1329,20 @@ TEST_F(GinAnvilSdmaTemplateTest, FlushTimeout_ClearsOnlyDrainedPeers) {
   EXPECT_EQ(d_result.download(), ncclTimeout);
   EXPECT_EQ(env.dirty.download(), 1ULL << 1);
   EXPECT_EQ(env.polls(0), 1ULL);
+}
+
+// H35: a peer whose first channel drains but whose second times out keeps both dirty bits.
+TEST_F(GinAnvilSdmaTemplateTest, FlushTimeout_PartlyDrainedPeerStaysDirty) {
+  uint64_t peer1Bits = (1ULL << 2) | (1ULL << 3);  // peer 1, channels 0 and 1
+  SdmaEnv env(peer1Bits, /*numChannels=*/2);
+  env.setQueue(/*index=*/3, /*writeIndex=*/0, /*readLag=*/0, kNeverDrains);
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+  kernelFlushTimeout<<<1, 1>>>(env.h.ptr, nullptr, kShortBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclTimeout);
+  EXPECT_EQ(env.dirty.download(), peer1Bits);
+  EXPECT_EQ(env.polls(2), 1ULL);
 }
 
 #endif  // NCCL_GIN_ANVIL_SDMA_ENABLE
