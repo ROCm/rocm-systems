@@ -64,18 +64,10 @@ env:
 
 jobs:
   test:
-    runs-on: azure-linux-scale-rocm
+    runs-on: aws-linux-scale-rocm-prod
     name: test (${{ matrix.name }})
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
-      # `--init` gives the container a PID 1 that reaps orphans, as every
-      # real machine has. Without it a process whose parent exits is
-      # reparented to a PID 1 that never calls `wait`, so it stays a
-      # zombie for the life of the job: `/proc/<pid>` remains and
-      # `kill(pid, 0)` still succeeds. Mirage's teardown tests assert a
-      # process tree is *gone* after a reap, and they cannot distinguish
-      # that from a leak.
-      options: --user 0:0 --init
       env:
         DEBIAN_FRONTEND: noninteractive
     continue-on-error: ${{ matrix.allow_failure }}
@@ -185,6 +177,7 @@ jobs:
             libclang-rt-dev \
             libdrm-dev \
             ninja-build \
+            tini \
             clang
 
       - name: Checkout rocm-systems
@@ -362,6 +355,7 @@ jobs:
 
           # Set a conservative number of workers to avoid OOM and excessive system load.
           WORKERS="$(( ($(nproc) + 1) / 2 ))"
+          echo "Build and CTest workers: ${WORKERS} (available CPUs: $(nproc))"
           cmake --build "${ROCJITSU_BUILD_DIR}" -j "${WORKERS}"
 
           CTEST_SELECTION=()
@@ -427,7 +421,9 @@ jobs:
           # silently skips the one check that catches header drift.
           test -d "${ROCJITSU_INCLUDE_DIR}"
           unset MIRAGE_E2E_ALLOW_SKIP
-          cargo test --locked --workspace --no-fail-fast -- --test-threads=4 --nocapture
+          # AWS Kubernetes runners do not support Docker's --init option.
+          # Reap orphaned descendants so teardown tests can observe them gone.
+          tini -s -- cargo test --locked --workspace --no-fail-fast -- --test-threads=4 --nocapture
 
       - name: Test static ASan launcher preload
         if: matrix.run_static_asan_launch
