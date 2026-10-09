@@ -86,9 +86,7 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record,
 
     auto const track_name = fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
                                         dst_agent->logical_node_id, record->thread_id);
-    metadata_registry.ensure_track(track_name, [&] {
-        return typename Externals::track_t{ track_name, record->thread_id, k_empty_json };
-    });
+    metadata_registry.ensure_track(track_name, record->thread_id);
 
     metadata_registry.add_stream(stream_id);
 

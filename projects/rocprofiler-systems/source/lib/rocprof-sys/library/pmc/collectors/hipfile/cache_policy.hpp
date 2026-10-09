@@ -59,9 +59,7 @@ struct cache_policy
         {
             const auto name = track_name(gpu_id, metric.suffix);
 
-            trace_cache::get_metadata_registry().ensure_track(name, [&] {
-                return trace_cache::info::track{ name, std::nullopt, "{}" };
-            });
+            trace_cache::get_metadata_registry().ensure_track(name, std::nullopt);
 
             // ABSOLUTE is accurate for both shapes here: the counters are cumulative
             // totals and the bandwidths are instantaneous rates. Neither is a delta.

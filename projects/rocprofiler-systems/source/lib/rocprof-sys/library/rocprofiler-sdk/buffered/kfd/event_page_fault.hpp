@@ -109,8 +109,7 @@ on_kfd_event_page_fault(typename SdkBackend::kfd_event_page_fault_record* record
     };
 
     auto const track_name = fmt::format("KFD Event Page Fault [{}]", agent_label(agent));
-    metadata_registry.ensure_track(
-        track_name, [&] { return typename Externals::track_t{ track_name, tid, "{}" }; });
+    metadata_registry.ensure_track(track_name, tid);
 
     constexpr auto k_empty_args = "";
 

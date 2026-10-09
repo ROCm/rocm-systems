@@ -51,11 +51,7 @@ struct cache_policy
             auto qname      = make_qualified_name(meta);
             auto track_name = format_track_name(gpu_id, qname);
 
-            registry.ensure_track(track_name, [&] {
-                return rocprofsys::trace_cache::info::track{ .track_name = track_name,
-                                                             .thread_id  = std::nullopt,
-                                                             .extdata    = "{}" };
-            });
+            registry.ensure_track(track_name, std::nullopt);
 
             registry.add_pmc_info({ .type             = agent_type::gpu,
                                     .agent_type_index = gpu_id,

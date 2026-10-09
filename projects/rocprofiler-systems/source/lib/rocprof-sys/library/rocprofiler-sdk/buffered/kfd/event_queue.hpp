@@ -111,8 +111,7 @@ on_kfd_event_queue(typename SdkBackend::kfd_event_queue_record* record,
     constexpr auto k_empty_args           = "";
     constexpr auto k_empty_event_metadata = "{}";
     auto const     track_name = fmt::format("KFD Event Queue [{}]", agent_label(agent));
-    metadata_registry.ensure_track(
-        track_name, [&] { return typename Externals::track_t{ track_name, tid, "{}" }; });
+    metadata_registry.ensure_track(track_name, tid);
 
     constexpr double k_pmc_value = 1.0;
     Externals::get_buffer_storage().store(typename Externals::kfd_sample_t{

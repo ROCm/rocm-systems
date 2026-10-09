@@ -8,20 +8,18 @@
 namespace rocprofsys::trace_cache
 {
 
-TEST(metadata_registry_test, ensure_track_builds_only_when_unknown)
+TEST(metadata_registry_test, ensure_track_keeps_first_registration)
 {
     metadata_registry registry;
-    int               builds = 0;
-    auto const        make   = [&builds] {
-        ++builds;
-        return info::track{ "track", std::nullopt, "{}" };
-    };
 
-    registry.ensure_track("track", make);
-    registry.ensure_track("track", make);
+    registry.ensure_track("track", std::nullopt);
+    registry.ensure_track("track", 7, "{\"second\":1}");
 
-    EXPECT_EQ(builds, 1);
-    EXPECT_EQ(registry.get_track_info_list().size(), 1U);
+    auto const tracks = registry.get_track_info_list();
+    ASSERT_EQ(tracks.size(), 1U);
+    EXPECT_EQ(tracks.front().track_name, "track");
+    EXPECT_FALSE(tracks.front().thread_id.has_value());
+    EXPECT_EQ(tracks.front().extdata, "{}");
 }
 
 TEST(metadata_registry_test, ensure_thread_builds_only_when_unknown)

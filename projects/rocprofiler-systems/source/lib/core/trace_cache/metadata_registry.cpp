@@ -51,18 +51,6 @@ get_type_info(const DataType& data, const Filter& filter)
     return result;
 }
 
-/// Shared-lock membership check first; the write lock is taken only for a new key.
-template <typename Synchronized, typename Key>
-void
-insert_if_absent(Synchronized& data, const Key& key)
-{
-    data.ulock([&key](const auto& _data) { return _data.find(key) != _data.end(); },
-               [&key](auto& _data) {
-                   _data.emplace(key);
-                   return true;
-               });
-}
-
 template <typename T>
 auto
 assign_set_to_vector(T& result)
@@ -425,7 +413,7 @@ from_json(metadata_registry& _registry, std::vector<std::shared_ptr<agent>>& _ag
 
     fill_from_json("tracks", [&_registry](const auto& item) {
         auto const track = from_json_track(item);
-        _registry.ensure_track(track.track_name, [&track] { return track; });
+        _registry.ensure_track(track.track_name, track.thread_id, track.extdata);
     });
 
     fill_from_json("queues", [&_registry](const auto& item) {
@@ -475,25 +463,34 @@ metadata_registry::set_process(const info::process& process)
 void
 metadata_registry::add_pmc_info(const info::pmc& pmc_info)
 {
-    insert_if_absent(m_pmc_infos, pmc_info);
+    detail::insert_if_absent(m_pmc_infos, pmc_info);
+}
+
+void
+metadata_registry::ensure_track(std::string_view name, std::optional<size_t> thread_id,
+                                std::string_view extdata)
+{
+    detail::insert_if_absent(m_tracks, name, [&] {
+        return info::track{ std::string{ name }, thread_id, std::string{ extdata } };
+    });
 }
 
 void
 metadata_registry::add_queue(const std::uint64_t& queue_handle)
 {
-    insert_if_absent(m_queues, queue_handle);
+    detail::insert_if_absent(m_queues, queue_handle);
 }
 
 void
 metadata_registry::add_stream(const std::uint64_t& stream_handle)
 {
-    insert_if_absent(m_streams, stream_handle);
+    detail::insert_if_absent(m_streams, stream_handle);
 }
 
 void
 metadata_registry::add_string(const std::string_view string_value)
 {
-    insert_if_absent(m_strings, string_value);
+    detail::insert_if_absent(m_strings, string_value);
 }
 
 info::process
@@ -613,7 +610,7 @@ void
 metadata_registry::add_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {
-    insert_if_absent(m_code_objects, code_object);
+    detail::insert_if_absent(m_code_objects, code_object);
 }
 
 void
@@ -621,7 +618,7 @@ metadata_registry::add_kernel_symbol(
     const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t&
         kernel_symbol)
 {
-    insert_if_absent(m_kernel_symbols, kernel_symbol);
+    detail::insert_if_absent(m_kernel_symbols, kernel_symbol);
 }
 
 std::optional<rocprofiler_callback_tracing_code_object_load_data_t>

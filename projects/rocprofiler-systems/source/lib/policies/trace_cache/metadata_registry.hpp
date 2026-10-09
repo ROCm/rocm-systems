@@ -16,14 +16,6 @@
 namespace rocprofsys::policies::trace_cache
 {
 
-/// Declaration-only callable returning T; stands in for a builder lambda, which cannot
-/// capture inside a requires-expression. Never invoked.
-template <typename T>
-struct value_builder
-{
-    T operator()() const;
-};
-
 template <typename Registry, typename Process, typename Pmc, typename Thread,
           typename Track, typename Agent, typename AgentType>
 concept metadata_registry_policy =
@@ -31,13 +23,14 @@ concept metadata_registry_policy =
     requires(Registry& registry, const Registry& const_registry, const Process& process,
              const Pmc& pmc_info, const std::uint64_t& handle,
              const std::string_view& name, const std::uint32_t& thread_id,
-             const std::string& filepath, std::vector<std::shared_ptr<Agent>>& agents) {
+             const std::string& filepath, std::vector<std::shared_ptr<Agent>>& agents,
+             Thread (&make_thread)()) {
         { Registry() };
 
         { registry.set_process(process) };
         { registry.add_pmc_info(pmc_info) };
-        { registry.ensure_thread(handle, value_builder<Thread>{}) };
-        { registry.ensure_track(name, value_builder<Track>{}) };
+        { registry.ensure_thread(handle, make_thread) };
+        { registry.ensure_track(name, std::optional<std::size_t>{}) };
         { registry.add_queue(handle) };
         { registry.add_stream(handle) };
         { registry.add_string(name) };
