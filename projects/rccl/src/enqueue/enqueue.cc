@@ -19,6 +19,7 @@
 #include "channel.h"
 #include "rocmwrap.h"
 #include "rccl_vars.h"
+#include "rccl_arch_thresholds.h"
 #include "profiler.h"
 #include "transport.h"
 #include "register_inline.h"
@@ -4694,8 +4695,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
           const size_t twoShotMax = rcclCeAr2ShotMax(comm);
           const size_t twoShotMin = rcclCeAr2ShotMin(comm);
-          if (twoShotMax == 0 || totalBytes > twoShotMax || totalBytes > comm->ceColl.ceArMaxBytes ||
-              (twoShotMin > 0 && totalBytes < twoShotMin) ||
+          if (!rcclWindowFits(totalBytes, twoShotMin, twoShotMax) || totalBytes > comm->ceColl.ceArMaxBytes ||
               !rcclForceCeAllReduceEnabled(comm) || !comm->symmetricSupport || comm->nNodes > 1) {
             ceAllReduceFits = false;
           } else {

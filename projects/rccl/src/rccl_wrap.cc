@@ -907,7 +907,7 @@ inline bool rcclAllGatherCeRegisteredWindowTab(const rcclArchThresholds* table, 
   if (!recvReg) return false;
   const size_t regMax = rcclCeRegMaxTab(table, ncclFuncAllGather);
   const size_t regMin = rcclCeRegMinTab(table, ncclFuncAllGather);
-  return totalBytes >= regMin && (regMax == kThreshUnlimited || totalBytes <= regMax);
+  return rcclWindowFits(totalBytes, regMin, regMax);
 }
 bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes,
                                             ncclSymRegType_t winRegType, bool graphMode) {
@@ -1067,7 +1067,7 @@ bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
   } else {
     return false;
   }
-  const bool ok = threshold > 0 && totalBytes <= threshold;
+  const bool ok = rcclWindowFits(totalBytes, 0, threshold);
   if (!ok && !query && prefix)
     INFO(NCCL_TUNING, "%s DDA disqualified: totalBytes=%zu > entryThreshold=%zu",
          prefix, totalBytes, threshold);
@@ -1432,8 +1432,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // alongside symMaxR2/symMinR2, rather than buried inside rcclUseCeAr2Shot.
   const size_t arTwoShotMax = rcclCeNonRegMaxTab(archTable, ncclFuncAllReduce);
   const size_t arTwoShotMin = rcclCeNonRegMinTab(archTable, ncclFuncAllReduce);
-  const bool twoShotWindow = arTwoShotMax > 0 && msgBytes <= arTwoShotMax &&
-                             (arTwoShotMin == 0 || msgBytes >= arTwoShotMin);
+  const bool twoShotWindow = rcclWindowFits(msgBytes, arTwoShotMin, arTwoShotMax);
   // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
   // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
   const bool ceAr2ShotEligible = rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr);
@@ -1732,9 +1731,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
         !ceCapturing && ncclCeScratchAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
       const size_t agCeNonRegMax = rcclCeNonRegMaxTab(archTable, ncclFuncAllGather);
       const size_t agCeNonRegMin = rcclCeNonRegMinTab(archTable, ncclFuncAllGather);
-      const bool agCeNonRegWindow = agCeNonRegMax > 0 &&
-                                     totalBytes >= agCeNonRegMin &&
-                                     totalBytes <= agCeNonRegMax;
+      const bool agCeNonRegWindow = rcclWindowFits(totalBytes, agCeNonRegMin, agCeNonRegMax);
       if ((rcclParamForceCe() || agCeNonRegWindow) && ceScratch &&
           winRegType == ncclSymSendNonregRecvNonreg &&
           !hasSysmemSegment &&
@@ -2082,7 +2079,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     // buffer-less ABI (rcclSymKGetInfo) simply sees unregistered buffers.
     const size_t a2aCeRegMax = rcclCeRegMaxTab(archTable, ncclFuncAlltoAll);
     const size_t a2aCeRegMin = rcclCeRegMinTab(archTable, ncclFuncAlltoAll);
-    const bool a2aCeRegWindow = a2aCeRegMax > 0 && totalBytes >= a2aCeRegMin && totalBytes <= a2aCeRegMax;
+    const bool a2aCeRegWindow = rcclWindowFits(totalBytes, a2aCeRegMin, a2aCeRegMax);
     if (((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || rcclForceCeCollEnabled(comm)) && !a2aHasSysmem && a2aCeRegWindow &&
         ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin)) {
       decision->algo = RCCL_CE_REGISTERED;

@@ -25,6 +25,13 @@ enum { RCCL_DDA_FUNC_COUNT = ncclFuncAlltoAll + 1 };
 // inconsistent with the no-suppression meaning needed for symMaxR2 unused/uncapped slots.
 static constexpr size_t kThreshUnlimited = SIZE_MAX;
 
+// Returns true when totalBytes falls within the [ceMin, ceMax] window.
+// ceMax == 0 means disabled (returns false for any size).
+// ceMax == SIZE_MAX (kThreshUnlimited) means no upper bound.
+inline bool rcclWindowFits(size_t totalBytes, size_t ceMin, size_t ceMax) {
+  return ceMax > 0 && totalBytes >= ceMin && totalBytes <= ceMax;
+}
+
 struct rcclArchThresholds {
   // DDA tier upper bounds, per collective.  gfx1250 uses fabric LL/LL128/VMM;
   // gfx942/gfx950 use ddaVmmMax as the DDA-IPC cap (LL/LL128 unused, stay 0).
