@@ -34,6 +34,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added `amdsmi_is_gpu_apu()` in C, Python, and Rust**.  
+  - Identifies integrated GPUs using the native Linux amdgpu fusion flag, without memory-size heuristics or a HIP context. GPU handles retain the `AMD_GPU` processor type.
+  - Unavailable identification, including on WSL, reports `AMDSMI_STATUS_NOT_SUPPORTED` rather than classifying the GPU as discrete. Existing structure layouts and ASIC flags are unchanged.
+  - `amd-smi` now uses it to pick the memory pool it reports for an APU, replacing its own copy of the flag test.
+
 - **Exposed `BOOT_FIRMWARE` field in `amd-smi static --ifwi` output**.  
   - The `boot_firmware` value returned by `amdsmi_get_gpu_vbios_info()` now appears under the `IFWI` section alongside `NAME`, `BUILD_DATE`, `PART_NUMBER` and `VERSION` (`--vbios` remains available as a legacy alias).
 
@@ -176,6 +181,16 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Optimized
 
 ### Resolved Issues
+
+- **Fixed processor cleanup during AMD SMI shutdown**.  
+  - Releases AI-NIC processors and sockets in NIC-only sessions, clears processor tracking, and resets NIC context state so reinitialization does not retain stale handles.
+
+- **Fixed incremental builds leaving staged Python files out of date**.  
+  - Refreshes the staged package after source edits, preventing stale exports or implementations from causing import errors after an API rename.
+
+- **Fixed typed processor enumeration returning GPUs for unhandled processor types**.  
+  - Concrete types with no processors, including `AMD_APU`, now return an empty list. `UNKNOWN` and out-of-range types return `AMDSMI_STATUS_INVAL`. Use `amdsmi_is_gpu_apu()` on `AMD_GPU` handles to identify APUs ([#8476](https://github.com/ROCm/rocm-systems/issues/8476)).
+  - Migration: callers that passed `UNKNOWN` as a wildcard must pass `AMD_GPU`; `UNKNOWN` is rejected instead of returning the GPU list.
 
 - **Fixed `amd-smi` printing a Python traceback when an unknown NIC or switch is selected**.  
   - `amd-smi static --nic 999` and `--switch 999` failed while building the "device not found" error, so the command exited `1` with a traceback and no readable message. `--json` and `--csv` produced no parseable output.

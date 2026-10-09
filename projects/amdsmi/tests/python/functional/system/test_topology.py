@@ -128,6 +128,13 @@ class TestSystemTopology(unittest.TestCase):
         for i, socket in enumerate(sockets):
             for processor_name, processor_type, processor_cond in common.PROCESSOR_TYPES:
                 msg = f"\t### amdsmi_get_processor_handles_by_type(socket={socket.value}, processor_type={processor_name}):"
+                if processor_type == amdsmi.AmdSmiProcessorType.UNKNOWN:
+                    with self.assertRaises(amdsmi.AmdSmiLibraryException) as error:
+                        amdsmi.amdsmi_get_processor_handles_by_type(socket, processor_type)
+                    self.assertEqual(
+                        error.exception.get_error_code(), amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL
+                    )
+                    continue
                 try:
                     ret = amdsmi.amdsmi_get_processor_handles_by_type(socket, processor_type)
                     handles = ret["processor_handles"]
@@ -145,6 +152,8 @@ class TestSystemTopology(unittest.TestCase):
                         self.assertIsInstance(handle, amdsmi.amdsmi_wrapper.amdsmi_processor_handle)
                     if processor_name == "AMD_GPU":
                         gpu_handles_by_type.extend(handles)
+                    if processor_name in ("NON_AMD_GPU", "NON_AMD_CPU", "AMD_APU"):
+                        self.assertEqual(count, 0)
                     self.common.check_ret("", "", self.common.PASS)
                 except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
                     if self.common.check_ret(msg, e, processor_cond):
