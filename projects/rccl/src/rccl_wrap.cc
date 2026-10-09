@@ -857,6 +857,17 @@ bool rcclForceCeAllReduceEnabled(const ncclComm* comm) {
   return rcclForceCeAllReduceEnabledDef(rcclCeAllReduceArchDefault(comm));
 }
 
+// Symmetric windows have equal offsets on every rank and a min-size bound, so all ranks agree.
+void rcclSetCeAllReduceFastPath(struct ncclComm* comm) {
+  for (struct ncclTaskColl* task = ncclIntruQueueHead(&comm->planner.collCeTaskQueue); task != nullptr;
+       task = task->next) {
+    const size_t totalBytes = task->count * ncclTypeSize(task->datatype);
+    task->ceAllReduceFastPath = task->func == ncclFuncAllReduce && task->recvWin != nullptr &&
+                                (task->recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
+                                ncclCeRecvRangeContainedInWindow(task->recvWin, task->recvbuff, totalBytes) != 0;
+  }
+}
+
 inline size_t rcclCeNonRegMinTab(const rcclArchThresholds* table, ncclFunc_t func) {
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMin[(size_t)func] : 0;
@@ -1240,6 +1251,17 @@ bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t dataty
     return false;
   }
 
+  // Staged CE still addresses every peer by LSA rank, so it needs the same
+  // runtime and topology as registered CE; only the window checks differ.
+  if (!ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, datatype)) {
+    INFO(NCCL_TUNING, "Skipping CE AllReduce: CE is not supported by this driver");
+    return false;
+  }
+  if (!ncclDevrIsOneLsaTeam(comm)) {
+    INFO(NCCL_TUNING, "Skipping CE AllReduce: LSA team does not span the comm");
+    return false;
+  }
+
   return true;
 }
 
@@ -1404,8 +1426,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType, sendWin, recvWin);
   // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
   // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
-  const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
-                                  rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr) && (force || symReg);
+  const bool ceUsable = rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr);
+  const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed && ceUsable && (force || symReg);
 
     // (3) Eager CE 2-shot (staging buffer). Requires !symkRequested and an
     // initialized ceARTmpBuf (first call, before init, falls through to enqueue).
@@ -1482,6 +1504,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // develop's taskAppend appends CE for AllReduce iff !hasSysmemSegment && ceAvailable
   // && ((CTAPolicy & ZERO) || force): ceAvailable is the conjunction of the four
   // sub-conditions below; split out so the disqualification log can name the blocker.
+  // Forced CE on unregistered buffers (!symkRequested, as in (3)) also uses this
+  // path before ceARTmpBuf has been initialized (ceStagedUnregistered).
   const bool ceBufferOk          = !ceCapturing && ncclCeAvailable(comm, ncclFuncAllReduce, (int)op, datatype, winRegType, sendWin, recvWin);
   const bool ceAllReduceOpSupported = (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
   const bool ceCountDivisible    = (count % (size_t)comm->nRanks == 0);
@@ -1493,8 +1517,10 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // Independent of the 2-shot selector (ceNonRegMax/env, 0 = off) and ceARTmpBuf sizing.
   const size_t ceArRegMax = rcclCeRegMaxTab(archTable, ncclFuncAllReduce);
   const bool ceRegInWindow = ceArRegMax == kThreshUnlimited || msgBytes <= ceArRegMax;
-  if (!symEligible && ceRegInWindow && ceAvailable && !hasSysmemSegment &&
-      ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
+  const bool ceRegisteredWindows = !symEligible && ceRegInWindow && ceAvailable &&
+      ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force);
+  const bool ceStagedUnregistered = !symkRequested && ncclGroupDepth == 0 && force && ceArGraphAllowed && ceUsable;
+  if (!hasSysmemSegment && (ceRegisteredWindows || ceStagedUnregistered)) {
     decision->algo = RCCL_CE_REGISTERED;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     return ncclSuccess;

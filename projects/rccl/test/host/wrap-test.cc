@@ -3184,6 +3184,7 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_ForceBypassesCtaPolicyAndAllValidRetu
           if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
           return deft;
         };
+        g_ceImplemented = true;
         ncclComm* comm = MakeZeroedComm();
         comm->symmetricSupport = 1;
         comm->nNodes = 1;
@@ -3194,11 +3195,118 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_ForceBypassesCtaPolicyAndAllValidRetu
       });
 }
 
+// Every other guard passes; only the CE driver gate says no.
+TEST(WrapMicrotestIsolated, UseCeAllReduce_CeNotImplementedReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_CeNotImplementedReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return int64_t(1);
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
+          return deft;
+        };
+        g_ceImplemented = false;
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        comm->nNodes = 1;
+        comm->nRanks = 1;
+        EXPECT_FALSE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, nullptr));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// One node, LSA team of 2 in a comm of 4: staged CE is not usable; with a
+// spanning team it is.
+TEST(WrapMicrotestIsolated, UseCeAllReduce_SplitLsaTeamReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_SplitLsaTeamReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return int64_t(1);
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
+          return deft;
+        };
+        g_ceImplemented = true;
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        comm->nNodes = 1;
+        comm->nRanks = 4;
+        comm->devrState.bigSize = 1; // take computeLsaSize's cached path
+        comm->devrState.lsaSize = 2;
+        EXPECT_FALSE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, nullptr));
+        comm->devrState.lsaSize = 4;
+        EXPECT_TRUE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, nullptr));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Runs from ncclPrepareTasks for every comm, so cross-clique comms that skip
+// ncclMakeSymmetricTaskList still get the bit.
+TEST(WrapMicrotest, SetCeAllReduceFastPath_RangeInSymmetricWindowSetsBit) {
+  ncclComm* comm = MakeZeroedComm();
+  alignas(16) uint8_t storage[128];
+  ncclDevrWindow recvWin{};
+  recvWin.userPtr = storage;
+  recvWin.size = sizeof(storage);
+  recvWin.winFlags = NCCL_WIN_COLL_SYMMETRIC;
+  ncclTaskColl a{}, b{};
+  for (ncclTaskColl* t : {&a, &b}) {
+    t->func = ncclFuncAllReduce;
+    t->datatype = ncclInt8;
+    t->recvWin = &recvWin;
+    ncclIntruQueueEnqueue(&comm->planner.collCeTaskQueue, t);
+  }
+  a.count = 16;
+  a.recvbuff = storage + 32;
+  b.count = sizeof(storage);  // exactly the whole window
+  b.recvbuff = storage;
+  comm->p2pCrossClique = true;
+
+  rcclSetCeAllReduceFastPath(comm);
+  EXPECT_TRUE(a.ceAllReduceFastPath);
+  EXPECT_TRUE(b.ceAllReduceFastPath);
+  delete comm;
+}
+
+TEST(WrapMicrotest, SetCeAllReduceFastPath_IneligibleTasksClearBit) {
+  ncclComm* comm = MakeZeroedComm();
+  alignas(16) uint8_t storage[128];
+  ncclDevrWindow symWin{};
+  symWin.userPtr = storage;
+  symWin.size = sizeof(storage);
+  symWin.winFlags = NCCL_WIN_COLL_SYMMETRIC;
+  ncclDevrWindow plainWin = symWin;
+  plainWin.winFlags = 0;
+
+  ncclTaskColl pastEnd{}, notSym{}, noWin{}, notAr{};
+  for (ncclTaskColl* t : {&pastEnd, &notSym, &noWin, &notAr}) {
+    t->func = ncclFuncAllReduce;
+    t->datatype = ncclInt8;
+    t->count = 16;
+    t->recvbuff = storage;
+    t->recvWin = &symWin;
+    t->ceAllReduceFastPath = true;  // stale value from an earlier launch
+    ncclIntruQueueEnqueue(&comm->planner.collCeTaskQueue, t);
+  }
+  pastEnd.count = 64;
+  pastEnd.recvbuff = storage + 96;
+  notSym.recvWin = &plainWin;
+  noWin.recvWin = nullptr;
+  notAr.func = ncclFuncAllGather;
+
+  rcclSetCeAllReduceFastPath(comm);
+  EXPECT_FALSE(pastEnd.ceAllReduceFastPath);
+  EXPECT_FALSE(notSym.ceAllReduceFastPath);
+  EXPECT_FALSE(noWin.ceAllReduceFastPath);
+  EXPECT_FALSE(notAr.ceAllReduceFastPath);
+  delete comm;
+}
+
 // Documents/pins a real production gap (does not change production code):
-// of this function's ten early-return guards, eight emit a WARN with NO
-// log-once protection. The other two are the exception that shows the intent:
-// the disabled-by-default guard latches its message behind a
-// `static bool warnedDisabled`, and the `acc != nullptr` guard is silent.
+// of this function's twelve early-return guards, seven emit a WARN with NO
+// log-once protection. The disabled-by-default guard latches behind
+// `static bool warnedDisabled`, the `acc` and zero 2-shot cap guards are
+// silent, and the CE-driver and LSA-span guards log at INFO.
 // Every other test in this
 // section is single-call-per-process (RUN_ISOLATED_TEST), so none of them
 // can reveal this -- this test deliberately calls the SAME non-qualifying
@@ -3639,6 +3747,55 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredChosenWhenAvailableAndPo
       });
 }
 
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredRequiresZeroOrForce) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeRegisteredRequiresZeroOrForce",
+      []() {
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return 0;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
+          return def;
+        };
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclProd,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroRegMaxDisablesRegisteredCe) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ZeroRegMaxDisablesRegisteredCe",
+      []() {
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return 0;
+          return def;
+        };
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclProd,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredForwardsBlockCalculatorArguments) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_CeRegisteredForwardsBlockCalculatorArguments",
@@ -3737,6 +3894,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenEligibleAndStagin
           EXPECT_EQ(8u, chunkElems); // count(8) / nRanks(1)
           return 19;
         });
+        g_ceImplemented = true;
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         // force bypasses this, matching rcclUseCeAr2Shot's precedent
@@ -3765,6 +3923,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenNeitherForceNo
       "Wrap_SelectAllReduce_CeTwoShotNotChosenWhenNeitherForceNorSymRegEligible",
       []() {
         g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        g_ceImplemented = true;
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO; // rcclUseCeAr2Shot itself still eligible
@@ -3779,19 +3938,18 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenNeitherForceNo
       });
 }
 
-// Complementary proof: ceAllReduceAllowed is true (force set), but
-// ceARTmpBuf is left null -- the "staging buffer initialized" conjunct's
-// own false side had never fired (every prior test either set the buffer
-// or made ceAllReduceAllowed false first).
-TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenStagingBufferNotInitialized) {
+// First FORCE-unregistered AllReduce enqueues CE so ncclCeInit can allocate
+// staging. Eager 2-shot waits for ceARTmpBuf.
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceUnregisteredEnqueuesCeWhenStagingBufferNotInitialized) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectAllReduce_CeTwoShotNotChosenWhenStagingBufferNotInitialized",
+      "Wrap_SelectAllReduce_ForceUnregisteredEnqueuesCeWhenStagingBufferNotInitialized",
       []() {
         g_loadParam = [](const char* env, int64_t deft) {
           if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return int64_t(1);
           if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
           return deft;
         };
+        g_ceImplemented = true;
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
@@ -3800,9 +3958,143 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenStagingBufferN
         EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
                                                     /*stream=*/nullptr, /*query=*/true,
                                                     /*graphCapturingHint=*/false, &decision));
-        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         DeleteCommWithArch(comm);
       });
+}
+
+// Forced CE on unregistered buffers needs a spanning LSA team on both CE arms
+// (enqueued and eager 2-shot); a split team falls back.
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceUnregisteredNeedsSpanningLsaTeam) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceUnregisteredNeedsSpanningLsaTeam",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return int64_t(1);
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
+          return deft;
+        };
+        g_ceImplemented = true;
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = 2;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+        comm->devrState.bigSize = 1; // take computeLsaSize's cached path
+        uint8_t stagingBuf[16];
+        for (uint8_t* staging : {static_cast<uint8_t*>(nullptr), stagingBuf}) {
+          SCOPED_TRACE(staging ? "staging ready" : "staging not initialized");
+          comm->ceColl.ceARTmpBuf = staging;
+          comm->devrState.lsaSize = 2;
+          rcclCollDecision spanning{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                      /*stream=*/nullptr, /*query=*/true,
+                                                      /*graphCapturingHint=*/false, &spanning));
+          EXPECT_EQ((int)(staging ? rcclAddonAlgos_t::RCCL_CE_2SHOT : rcclAddonAlgos_t::RCCL_CE_REGISTERED),
+                    spanning.algo);
+
+          comm->devrState.lsaSize = 1;
+          rcclCollDecision split{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                      /*stream=*/nullptr, /*query=*/true,
+                                                      /*graphCapturingHint=*/false, &split));
+          EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, split.algo);
+          EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, split.algo);
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Spanning LSA team but no CE driver support: forced CE on unregistered
+// buffers falls back on both CE arms.
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceUnregisteredNeedsCeDriver) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceUnregisteredNeedsCeDriver",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return int64_t(1);
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
+          return deft;
+        };
+        g_ceImplemented = false;
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+        uint8_t stagingBuf[16];
+        for (uint8_t* staging : {static_cast<uint8_t*>(nullptr), stagingBuf}) {
+          SCOPED_TRACE(staging ? "staging ready" : "staging not initialized");
+          comm->ceColl.ceARTmpBuf = staging;
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                      /*stream=*/nullptr, /*query=*/true,
+                                                      /*graphCapturingHint=*/false, &decision));
+          EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+          EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+namespace {
+// FORCE with staging not yet allocated, on symmetric-window Sum operands (symkRequested).
+void SelectForcedRegisteredSum(int64_t ceArRegMax, const rcclArchThresholds* table, rcclCollDecision* decision) {
+  static int64_t s_ceArRegMax;
+  s_ceArRegMax = ceArRegMax;
+  g_loadParam = [](const char* env, int64_t deft) {
+    if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return int64_t(1);
+    if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
+    if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return s_ceArRegMax;
+    return deft;
+  };
+  g_ceImplemented = true;
+  ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                            size_t, const void*, void*, bool) { return true; });
+  ScopedHook ceAvailable(g_ceAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+                                           struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+  ScopedHook symkAvailable(g_symkAvailable,
+                           [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+  ScopedHook tuningCompute(g_tuningCompute,
+                           SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/6));
+  ncclComm* comm = MakeSelectComm();
+  comm->symmetricSupport = 1;
+  comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+  comm->archThresholds = table;
+  EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                              /*stream=*/nullptr, /*query=*/true,
+                                              /*graphCapturingHint=*/false, decision));
+  DeleteCommWithArch(comm);
+}
+}  // namespace
+
+// The first-call staged CE arm is for unregistered operands only; symk still wins under FORCE.
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceKeepsSymmetricForSymmetricWindowSum) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_ForceKeepsSymmetricForSymmetricWindowSum", []() {
+    rcclCollDecision decision{};
+    SelectForcedRegisteredSum(INT64_MAX, nullptr, &decision);
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+  });
+}
+
+// symMaxR2 = 0 withdraws symk; registered CE then takes the call within its cap.
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceSymmetricWindowSumAboveSymMaxUsesRegisteredCe) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_ForceSymmetricWindowSumAboveSymMaxUsesRegisteredCe", []() {
+    rcclArchThresholds table{};
+    table.ceNonRegMax[ncclFuncAllReduce] = SIZE_MAX;
+    rcclCollDecision decision{};
+    SelectForcedRegisteredSum(INT64_MAX, &table, &decision);
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+  });
+}
+
+// RCCL_CE_AR_REG_MAX_MSG_BYTES=0 disables registered CE even under FORCE with 2-shot enabled.
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceZeroRegMaxDisablesCeForSymmetricWindowSum) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_ForceZeroRegMaxDisablesCeForSymmetricWindowSum", []() {
+    rcclArchThresholds table{};
+    table.ceNonRegMax[ncclFuncAllReduce] = SIZE_MAX;
+    rcclCollDecision decision{};
+    SelectForcedRegisteredSum(0, &table, &decision);
+    EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+    EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+  });
 }
 
 // DDA fabric LL: gfx1250 arch, rcclAllReduceShouldTakeDdaPath eligible
