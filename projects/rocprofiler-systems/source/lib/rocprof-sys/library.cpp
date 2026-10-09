@@ -608,6 +608,9 @@ rocprofsys_init_library_hidden()
         return;
     }
 
+    // Runs again on re-attach, so each attach session gets its own run clock.
+    output::registry::instance().start_new_session();
+
     auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     if(_debug_init)
@@ -1107,7 +1110,8 @@ rocprofsys_finalize_hidden(void)
     // disable initialization callback
     threading::remove_callback(&ensure_initialization);
 
-    const bool _is_child = is_child_process();
+    const bool  _is_child = is_child_process();
+    const pid_t pid       = getpid();
     state::thread::set(state::thread::Completed);
 
     // return if not active
@@ -1135,7 +1139,7 @@ rocprofsys_finalize_hidden(void)
         const auto _agents  = get_agent_manager_instance().get_agents();
         _manager.shutdown();
         const auto metadata_filepath =
-            trace_cache::utility::get_metadata_filepath(get_root_process_id(), getpid());
+            trace_cache::utility::get_metadata_filepath(get_root_process_id(), pid);
         _manager.get_metadata_registry().save_to_file(metadata_filepath, _agents);
 
         std::quick_exit(EXIT_SUCCESS);
@@ -1394,8 +1398,8 @@ rocprofsys_finalize_hidden(void)
     {
         LOG_DEBUG("Registering causal output files...");
         auto _base = config::get_causal_output_filename();
-        output::registry::instance().register_file(fmt::format("{}.json", _base));
-        output::registry::instance().register_file(fmt::format("{}.txt", _base));
+        output::registry::instance().register_file(fmt::format("{}.json", _base), pid);
+        output::registry::instance().register_file(fmt::format("{}.txt", _base), pid);
     }
 
     if(get_use_process_sampling())
@@ -1446,8 +1450,8 @@ rocprofsys_finalize_hidden(void)
 
     if(_timemory_manager && _timemory_manager != nullptr)
     {
-        _timemory_manager->add_metadata([](auto& ar) {
-            auto _maps = tim::procfs::read_maps(process::get_id());
+        _timemory_manager->add_metadata([pid](auto& ar) {
+            auto _maps = tim::procfs::read_maps(pid);
             auto _libs = std::set<std::string>{};
             for(auto& itr : _maps)
             {
@@ -1505,9 +1509,9 @@ rocprofsys_finalize_hidden(void)
                 }
 
                 output::registry::instance().register_file(
-                    settings::compose_output_filename(_comp_name, "txt", _cfg));
+                    settings::compose_output_filename(_comp_name, "txt", _cfg), pid);
                 output::registry::instance().register_file(
-                    settings::compose_output_filename(_comp_name, "json", _cfg));
+                    settings::compose_output_filename(_comp_name, "json", _cfg), pid);
             }
         }
     }
@@ -1515,7 +1519,7 @@ rocprofsys_finalize_hidden(void)
     if(config::output_filtering::is_log_output_enabled_for_current_mpi_rank())
     {
         output::registry::instance().record_process(output::process_metadata{
-            .pid = getpid(), .ppid = getppid(), .command = config::get_exe_name() });
+            .pid = pid, .ppid = getppid(), .command = config::get_exe_name() });
 
         std::cout << output::registry::instance().format_summary();
     }

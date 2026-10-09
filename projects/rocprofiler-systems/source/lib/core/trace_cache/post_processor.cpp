@@ -63,11 +63,10 @@ publish_process_metadata(const std::shared_ptr<data::processor_config_t>& _confi
     if(!_config->_metadata_registry) return;
 
     auto process_info = _config->_metadata_registry->get_process_info();
-    output::process_metadata proc_meta{};
-    proc_meta.pid     = process_info.pid;
-    proc_meta.ppid    = process_info.ppid;
-    proc_meta.command = std::move(process_info.command);
-    output::registry::instance().record_process(std::move(proc_meta));
+    output::registry::instance().record_process(
+        output::process_metadata{ .pid     = process_info.pid,
+                                  .ppid    = process_info.ppid,
+                                  .command = std::move(process_info.command) });
 }
 
 [[nodiscard]] data::processor_storage_t

@@ -9,6 +9,8 @@
 #include "core/perfetto/packet_framing.hpp"
 #include "logger/debug.hpp"
 
+#include <unistd.h>
+
 #include <cstdint>
 #include <span>
 #include <utility>
@@ -196,7 +198,7 @@ single_file_sink::finalize()
             append_with_file_lock(filename, m_buffer.data(), m_buffer.size());
         if(status == locked_append_status::success)
         {
-            output::registry::instance().register_file(std::move(filename));
+            output::registry::instance().register_file(std::move(filename), getpid());
         }
         else
         {
@@ -204,7 +206,11 @@ single_file_sink::finalize()
                       status_name(status));
         }
     }
-    else if(!write_proto_to(filename, m_buffer.data(), m_buffer.size()))
+    else if(write_proto_to(filename, m_buffer.data(), m_buffer.size()))
+    {
+        output::registry::instance().register_file(std::move(filename), getpid());
+    }
+    else
     {
         LOG_ERROR("single_file_sink: failed to open '{}'", filename);
     }

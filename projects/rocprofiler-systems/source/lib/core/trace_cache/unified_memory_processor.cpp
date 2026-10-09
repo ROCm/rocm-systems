@@ -180,7 +180,7 @@ unified_memory_processor_t::finalize_processing()
     {
         write_text_output(txt_file);
         txt_file.close();
-        output::registry::instance().register_file(txt_path);
+        output::registry::instance().register_file(txt_path, m_pid);
         LOG_INFO("Unified memory text report written to: {}", txt_path);
     }
 
@@ -195,7 +195,7 @@ unified_memory_processor_t::finalize_processing()
     {
         write_json_output(json_file);
         json_file.close();
-        output::registry::instance().register_file(json_path);
+        output::registry::instance().register_file(json_path, m_pid);
         LOG_INFO("Unified memory JSON report written to: {}", json_path);
     }
 
