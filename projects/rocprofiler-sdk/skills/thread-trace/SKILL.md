@@ -103,8 +103,8 @@ the lines that hold it, read against the source. Adapt it to the task.
    - `lifetime` and `occupancy`: what grows with wave lifetime, and how many waves were
      resident.
 4. **Narrow: where in the source.** `lines` and `hotspots` rank source lines and
-   instructions by the cost no issue on related pipes on the SIMD overlapped
-   ([stalls.md](resources/stalls.md#hidden-cost)); `stats` ranks the stats CSV; `barriers`
+   instructions by the part of their cost that issue on related pipes on the SIMD did not
+   overlap ([stalls.md](resources/stalls.md#hidden-cost)); `stats` ranks the stats CSV; `barriers`
    shows which wave, by launch order, waited least at `s_barrier` (often, not always, the
    one the others wait for), and in what share of the workgroups (estimated). When no line stands out, the cost is spread over many
    instructions: go back to `pipes`, which shows which classes hold it. When a question is
@@ -126,14 +126,19 @@ the lines that hold it, read against the source. Adapt it to the task.
    kind of time often
    changes after a fix, so start the next round at step 3, and time again the changes the
    earlier trace set aside.
-7. **Report.** Give the user, in this order:
-   1. the bottleneck: the kind of time (wave states and the instruction class) and what it
-      means for this kernel;
-   2. where: the instructions and source lines that hold it, with their share;
-   3. the evidence: the commands you ran and the numbers they printed;
+7. **Report.** Keep it short; state each finding once, in the item it belongs to. Leave out
+   the commands you ran and raw cycle and instruction counts. Give the user, in this order:
+   1. the bottleneck: the kind of time (wave states and the instruction class), with the two
+      or three figures that show it;
+   2. where: file:line and share, for the lines that hold most of the cost; read each line
+      in the source before describing it;
+   3. the mechanism: why those lines cost what they do, without repeating item 1, marking
+      what you inferred from the code and the trace did not measure;
    4. the change, if you made one, and the kernel's time before and after, measured
       without the profiler;
-   5. what the trace could not show, and how you checked it otherwise, if you did.
+   5. what the trace could not show and you did not check, and the changes you would try
+      next, marked untested (the trace does not show whether a change will help); setup
+      problems only if they change how to read the result.
 
 ## Tips
 

@@ -100,7 +100,7 @@ below merge them.
 ## Examples
 
 Reproduce the stats CSV from the records, and rank instructions by the part of their cost
-that no issue on related pipes overlapped ([stalls.md](stalls.md#hidden-cost)):
+that issue on related pipes did not overlap ([stalls.md](stalls.md#hidden-cost)):
 
 ```python
 for w in waves:
