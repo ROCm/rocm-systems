@@ -21,8 +21,8 @@
 //   GinHostConnectOnceMicrotest        ncclGinConnectOnce refusals, plugin
 //                                      failures, and the strided team.
 //   GinHostBackendSelectMicrotest      ncclGinDevCommSetup backend selection.
-//   GinHostDevCommSetupMicrotest       ginDevCommSetupWithBackend config,
-//                                      strides, and failure cleanup.
+//   GinHostDevCommSetupMicrotest       ncclGinDevCommSetup config, strides, and
+//                                      failure cleanup.
 //   GinHostDevCommFreeMicrotest        ncclGinDevCommFree lookup failures.
 //   GinHostFinalizeMicrotest           ncclGinHostFinalize.
 //   GinHostRegisterMicrotest           ncclGinRegister / ncclGinDeregister.
@@ -442,23 +442,6 @@ class GinHostTest : public ::testing::Test {
   }
 
   ncclResult_t connectOnce() { return ncclGinConnectOnce(comm()); }
-
-  // Call the file-static setup directly: ncclGinDevCommSetup collapses every
-  // per-backend failure into ncclInternalError, so the status a single backend
-  // produced is only observable here.
-  ncclResult_t setupWithBackend(ncclDevCommRequirements const& reqs, ncclDevComm* devComm,
-                                uint32_t deviceCodeVersion = NCCL_VERSION_CODE, int backendIdx = 0) {
-    return ginDevCommSetupWithBackend(comm(), &reqs, devComm, deviceCodeVersion, &gin()->backends[backendIdx]);
-  }
-
-  // One setup plus the matching free, so a table-driven test can loop over
-  // variants without leaking a context per iteration.
-  ncclResult_t setupAndFree(ncclDevCommRequirements const& reqs, uint32_t deviceCodeVersion) {
-    ncclDevComm devComm{};
-    ncclResult_t ret = setupWithBackend(reqs, &devComm, deviceCodeVersion);
-    if (ret == ncclSuccess) ret = ncclGinDevCommFree(comm(), &devComm);
-    return ret;
-  }
 
   ncclDevCommRequirements proxyReqs() {
     ncclDevCommRequirements r = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
@@ -1157,10 +1140,13 @@ TEST_F(GinHostBackendSelectMicrotest, FallsBackToTheNextBackendOnSetupFailure) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// ginDevCommSetupWithBackend -- config, strides, and failure cleanup
+// ncclGinDevCommSetup -- config, strides, and failure cleanup
 
-// Drives the file-static setup directly against a hand-built backend, so no
-// connect plumbing stands between the test and the branch under test.
+// Drives the public entry point against a hand-built backend, so no connect
+// plumbing stands between the test and the branch under test while the type and
+// signal gating in front of the per-backend setup still runs. The refusals whose
+// status the public entry point collapses reach the file-static setup instead --
+// see setupWithBackend below.
 class GinHostDevCommSetupMicrotest : public GinHostTest {
  protected:
   ncclDevComm devComm_{};
@@ -1177,6 +1163,29 @@ class GinHostDevCommSetupMicrotest : public GinHostTest {
   void TearDown() override {
     if (gin()->devComms != nullptr) EXPECT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &devComm_));
     GinHostTest::TearDown();
+  }
+
+  ncclResult_t setup(ncclDevCommRequirements const& reqs, ncclDevComm* devComm,
+                     uint32_t deviceCodeVersion = NCCL_VERSION_CODE) {
+    return ncclGinDevCommSetup(comm(), &reqs, devComm, deviceCodeVersion);
+  }
+
+  // One setup plus the matching free, so a table-driven test can loop over
+  // variants without leaking a context per iteration.
+  ncclResult_t setupAndFree(ncclDevCommRequirements const& reqs, uint32_t deviceCodeVersion) {
+    ncclDevComm devComm{};
+    ncclResult_t ret = setup(reqs, &devComm, deviceCodeVersion);
+    if (ret == ncclSuccess) ret = ncclGinDevCommFree(comm(), &devComm);
+    return ret;
+  }
+
+  // Call the file-static setup directly: ncclGinDevCommSetup collapses every
+  // per-backend failure into ncclInternalError, so a refusal that has to be seen
+  // as its own status -- or that returns before the `end:` cleanup -- is only
+  // observable here. Every other test in this suite goes through setup() above.
+  ncclResult_t setupWithBackend(ncclDevCommRequirements const& reqs, ncclDevComm* devComm,
+                                uint32_t deviceCodeVersion = NCCL_VERSION_CODE, int backendIdx = 0) {
+    return ginDevCommSetupWithBackend(comm(), &reqs, devComm, deviceCodeVersion, &gin()->backends[backendIdx]);
   }
 
   const ncclGinConfig_t& lastConfig() { return fake_.createdConfigs.back(); }
@@ -1211,6 +1220,7 @@ TEST_F(GinHostDevCommSetupMicrotest, BackendVersionFollowsDeviceCodeVersionPerBa
   for (const Case& c : cases) {
     SCOPED_TRACE(c.label);
     gin()->backends[0].ginType = c.ginType;
+    reqs.ginType = c.ginType;  // so backend selection lands on the case's backend
     ASSERT_EQ(ncclSuccess, setupAndFree(reqs, c.deviceCodeVersion));
     EXPECT_EQ(c.expectedBackendVersion, lastConfig().backendVersion);
   }
@@ -1236,7 +1246,7 @@ TEST_F(GinHostDevCommSetupMicrotest, ContextCountRoundsUpToWholeConnections) {
 
   auto reqs = proxyReqs();
   reqs.ginContextCount = 5;
-  ASSERT_EQ(ncclSuccess, setupWithBackend(reqs, &devComm_));
+  ASSERT_EQ(ncclSuccess, setup(reqs, &devComm_));
 
   EXPECT_EQ(8u, devComm_.ginContextCount);  // 5 rounded up to a multiple of 4
   EXPECT_EQ(2, lastConfig().nContexts);     // ... which is 2 per connection
@@ -1251,8 +1261,8 @@ TEST_F(GinHostDevCommSetupMicrotest, ExclusiveContextsAreNotSharedWithAnotherDev
   reqs.ginExclusiveContexts = true;
 
   ncclDevComm first{};
-  ASSERT_EQ(ncclSuccess, setupWithBackend(reqs, &first));
-  ASSERT_EQ(ncclSuccess, setupWithBackend(reqs, &devComm_));
+  ASSERT_EQ(ncclSuccess, setup(reqs, &first));
+  ASSERT_EQ(ncclSuccess, setup(reqs, &devComm_));
 
   EXPECT_EQ(2, fake_.createContextCalls);
   EXPECT_EQ(1u, devComm_.ginContextCount);
@@ -1285,7 +1295,7 @@ TEST_F(GinHostDevCommSetupMicrotest, SignalRequirementsReachTheDevCommAndThePlug
   reqs.ginQueueDepth = 64;
   reqs.ginStrongSignalsRequired = true;
 
-  ASSERT_EQ(ncclSuccess, setupWithBackend(reqs, &devComm_));
+  ASSERT_EQ(ncclSuccess, setup(reqs, &devComm_));
 
   EXPECT_EQ(5, devComm_.ginSignalCount);
   EXPECT_EQ(6, devComm_.ginCounterCount);
@@ -1301,7 +1311,7 @@ TEST_F(GinHostDevCommSetupMicrotest, RailRequestUsesTheRailStride) {
   auto reqs = proxyReqs();
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_RAIL;
 
-  ASSERT_EQ(ncclSuccess, setupWithBackend(reqs, &devComm_));
+  ASSERT_EQ(ncclSuccess, setup(reqs, &devComm_));
 
   EXPECT_EQ(2, devComm_.ginContextStride);
   EXPECT_EQ(1, devComm_.ginConnectionStride);  // the comm itself is FULL-connected
@@ -1318,7 +1328,7 @@ TEST_F(GinHostDevCommSetupMicrotest, StridesAreRelativeToTheConnectedStride) {
   auto reqs = proxyReqs();
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_CUSTOM_STRIDE;
   reqs.ginCustomStride = 4;
-  ASSERT_EQ(ncclSuccess, setupWithBackend(reqs, &devComm_));
+  ASSERT_EQ(ncclSuccess, setup(reqs, &devComm_));
 
   EXPECT_EQ(2, devComm_.ginConnectionStride);
   EXPECT_EQ(4, devComm_.ginContextStride);
@@ -1393,7 +1403,7 @@ TEST_F(GinHostDevCommSetupMicrotest, IncompleteContextFromThePluginRejected) {
     SCOPED_TRACE(static_cast<int>(bad));
     fake_.badContext = bad;
     ncclDevComm devComm{};
-    EXPECT_EQ(ncclInternalError, setupWithBackend(reqs, &devComm));
+    EXPECT_EQ(ncclInternalError, setup(reqs, &devComm));
     EXPECT_EQ(0, devComm.ginConnectionCount);
   }
 }
@@ -1420,7 +1430,7 @@ TEST_F(GinHostDevCommSetupMicrotest, StashesCommAffinityBeforeSpawningProxyThrea
   CPU_SET(5, &comm_->cpuAffinity);  // a distinctive mask, to spot the copy
   g_ncclOsCpuCountValue = 1;        // so the spawned worker takes the pin branch
 
-  ASSERT_EQ(ncclSuccess, setupWithBackend(proxyReqs(), &devComm_));
+  ASSERT_EQ(ncclSuccess, setup(proxyReqs(), &devComm_));
   ASSERT_TRUE(gin()->proxyThreadsCreated);  // it took the spawn branch
   EXPECT_TRUE(CPU_EQUAL(&comm_->cpuAffinity, &gin()->cpuAffinity));  // stashed verbatim
 
@@ -1436,11 +1446,11 @@ TEST_F(GinHostDevCommSetupMicrotest, LaterDevCommsReuseTheExistingProgressThread
   auto reqs = proxyReqs();
   ncclDevComm first{};
   ncclDevComm second{};
-  ASSERT_EQ(ncclSuccess, setupWithBackend(reqs, &first));
+  ASSERT_EQ(ncclSuccess, setup(reqs, &first));
   ASSERT_TRUE(gin()->proxyThreadsCreated);
-  ASSERT_EQ(ncclSuccess, setupWithBackend(reqs, &second));
+  ASSERT_EQ(ncclSuccess, setup(reqs, &second));
   // The third devComm has to walk past both of its predecessors to find the tail.
-  ASSERT_EQ(ncclSuccess, setupWithBackend(reqs, &devComm_));
+  ASSERT_EQ(ncclSuccess, setup(reqs, &devComm_));
 
   EXPECT_FALSE(gin()->thread[1].joinable());  // still just the one worker
   EXPECT_FALSE(gin()->writePending.load());   // the writer lock was released
