@@ -639,7 +639,7 @@ TEST_P(HipFileIoParam, HipFileIoHandlesHipPointerGetAttributesError)
 {
     StrictMock<MHip> mhip;
     EXPECT_CALL(mhip, hipPointerGetAttributes).WillOnce(testing::Throw(Hip::RuntimeError(hipErrorUnknown)));
-    ASSERT_EQ(hipFileIo(GetParam(), file_handle, unreg_bufptr, 0, 0, 0, mbackends), -hipErrorUnknown);
+    ASSERT_EQ(hipFileIo(GetParam(), file_handle, unreg_bufptr, 0, 0, 0, mbackends), -hipFileHipDriverError);
 }
 
 TEST_P(HipFileIoParam, HipFileIoHandlesUnsupportedHipMemoryType)
@@ -673,7 +673,7 @@ TEST_P(HipFileIoParam, HipFileIoHandlesHipRuntimeError)
 {
     EXPECT_CALL(*mbackend, score).WillOnce(Return(1));
     EXPECT_CALL(*mbackend, io).WillOnce(Throw(Hip::RuntimeError(hipErrorUnknown)));
-    ASSERT_EQ(hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, mbackends), -hipErrorUnknown);
+    ASSERT_EQ(hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, mbackends), -hipFileHipDriverError);
 }
 
 TEST_P(HipFileIoParam, HipFileIoHandlesInvalidArgumentError)
