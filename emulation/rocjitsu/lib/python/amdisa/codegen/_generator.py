@@ -10308,6 +10308,20 @@ class CodeGenerator:
                         and inst_sem.semantic_class.startswith(('buffer_', 'tbuffer_'))
                         and 'lds' in inst_field_names
                     )
+                    # GLOBAL_LOAD_LDS_* delivers its result to LDS and never
+                    # writes VDST (CDNA4 ISA 10.3). The FLAT encoding still
+                    # carries a VDST field, which compilers leave at its
+                    # default, so declaring it as a destination would make
+                    # consumers of the instruction's metadata -- the
+                    # memory-wait scoreboard, register liveness, the race
+                    # detector -- treat v0 as a pending vector result and flag
+                    # every later read of it. Unlike the MUBUF form below, the
+                    # LDS destination is implied by the opcode rather than
+                    # selected by an `lds` bit, so the exclusion is
+                    # unconditional.
+                    flat_lds_load = bool(
+                        inst_sem and inst_sem.semantic_class == 'global_load_lds'
+                    )
                     readwrite_output_sources = []
                     vgpr_msb_role_body = []
                     src_idx = 0
@@ -10549,6 +10563,10 @@ class CodeGenerator:
                             conditional_dst_body.append(
                                 'if (!inst_.lds) dst_operands_[num_dst_++] = &vdata;'
                             )
+                        elif flat_lds_load and opnd.is_output and opnd.name == 'vdst':
+                            # Deliberately no destination: the result lands in
+                            # LDS, so this instruction defines no register.
+                            pass
                         elif opnd.is_output:
                             opnd_body.append(
                                 f'dst_operands_[{dst_idx}] = &{destination_operand};'
