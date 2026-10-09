@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://rocm.github.io/rocm-systems/rocjitsu/memory-wait-counter-coverage/">
+        <link rel="canonical" href="https://rocm.github.io/rocm-systems/rocjitsu/isa-diagnostics/">
       
       
-        <link rel="prev" href="../concurrent-dispatch/">
+        <link rel="prev" href="../memory-wait-diagnostics/">
       
       
-        <link rel="next" href="../blog/">
+        <link rel="next" href="../architecture/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Memory wait coverage - Rocjitsu</title>
+        <title>ISA diagnostics - Rocjitsu</title>
       
     
     
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#memory-wait-diagnostic-coverage" class="md-skip">
+        <a href="#isa-diagnostics" class="md-skip">
           Skip to content
         </a>
       
@@ -110,7 +110,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Memory wait coverage
+              ISA diagnostics
             
           </span>
         </div>
@@ -296,8 +296,10 @@
       
   
   
+    
   
   
+  
     
     
     
@@ -308,13 +310,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
           <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
@@ -337,7 +337,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             
@@ -604,10 +604,19 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../isa-diagnostics/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -623,6 +632,7 @@
   
 
       </a>
+      
     </li>
   
 
@@ -639,8 +649,6 @@
       
   
   
-    
-  
   
   
     
@@ -653,11 +661,13 @@
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
@@ -680,7 +690,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1171,37 +1181,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Memory wait coverage
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../memory-wait-counter-coverage/" class="md-nav__link">
         
   
   
@@ -1217,70 +1200,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#architectures-and-queues" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Architectures and queues
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#flat-register-readiness" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        FLAT register readiness
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#producer-accounting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Producer accounting
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#limits-of-the-guarantee" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Limits of the guarantee
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1434,58 +1353,6 @@
     
   
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#architectures-and-queues" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Architectures and queues
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#flat-register-readiness" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        FLAT register readiness
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#producer-accounting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Producer accounting
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#limits-of-the-guarantee" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Limits of the guarantee
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
 </nav>
                   </div>
                 </div>
@@ -1504,222 +1371,110 @@
   
 
 
-<h1 id="memory-wait-diagnostic-coverage">Memory wait diagnostic coverage<a class="headerlink" href="#memory-wait-diagnostic-coverage" title="Permanent link">&para;</a></h1>
-<p>The core checker accounts for completion-counter producers independently of the
-functional memory pipelines. Generated instruction metadata selects producers, then the
-shared waitcheck target model determines their counter families. Register values and
-memory effects are still computed eagerly.</p>
-<h2 id="architectures-and-queues">Architectures and queues<a class="headerlink" href="#architectures-and-queues" title="Permanent link">&para;</a></h2>
+<h1 id="isa-diagnostics">ISA diagnostics<a class="headerlink" href="#isa-diagnostics" title="Permanent link">&para;</a></h1>
+<p>RocJITsu checks for these explicitly undefined ISA conditions:</p>
 <table>
 <thead>
 <tr>
-<th>Architecture</th>
-<th>Completion queues</th>
+<th>Check</th>
+<th>Targets</th>
+<th>Legal cases kept silent</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>CDNA1, CDNA2, CDNA3, CDNA4</td>
-<td><code>vmcnt</code>, <code>lgkmcnt</code>, <code>expcnt</code></td>
+<td>Negative combined offset on non-buffer scalar memory</td>
+<td>CDNA1–4, RDNA1–4 (including RDNA3.5)</td>
+<td>A negative immediate compensated by the unsigned register offset, including unaligned offsets; CDNA5 ordinary loads</td>
 </tr>
 <tr>
-<td>RDNA1, RDNA2, RDNA3, RDNA3.5</td>
-<td><code>vmcnt</code>, <code>vscnt</code>, <code>lgkmcnt</code>, <code>expcnt</code></td>
+<td>Negative scalar-buffer load immediate</td>
+<td>RDNA4, CDNA5</td>
+<td>Nonnegative immediates, including loads beyond the buffer bounds that return zero</td>
 </tr>
 <tr>
-<td>RDNA4</td>
-<td><code>loadcnt</code>, <code>storecnt</code>, <code>dscnt</code>, <code>kmcnt</code>, <code>expcnt</code>, <code>samplecnt</code>, <code>bvhcnt</code></td>
+<td>MFMA broadcast group larger than the instruction's block count</td>
+<td>CDNA3, CDNA4</td>
+<td>All supported integer/float broadcast sizes; F64 ignores CBSZ; F8/F6/F4 format selectors that reuse the CBSZ field</td>
 </tr>
 <tr>
+<td>Nonempty, partial EXEC on global transpose loads</td>
+<td>RDNA4, CDNA5</td>
+<td>Full or empty effective EXEC, including wave32 with unused upper EXEC bits</td>
+</tr>
+<tr>
+<td>VOPD source-bank/scalar-input limits</td>
+<td>RDNA3, RDNA3.5, RDNA4, CDNA5</td>
+<td>GFX12 same-register/same-width sharing and MOV/MOV routing; unused sources; unqualified cross-operation dependencies and older EXEC/SCC budgets</td>
+</tr>
+<tr>
+<td><code>NEG[2]</code> or <code>NEG_HI</code> on IU DOT/WMMA</td>
+<td>RDNA3, RDNA3.5, RDNA4, CDNA5</td>
+<td><code>NEG[1:0]</code> signedness, floating-point modifiers, unqualified SWMMAC forms and CDNA5 DOT8</td>
+</tr>
+<tr>
+<td>Misaligned normal SGPR data in <code>s_mov_b64</code> and scalar loads, or scalar-buffer descriptors</td>
+<td>RDNA4, CDNA5</td>
+<td>Constants, special selectors, NULL destinations; other operand roles and ISA families</td>
+</tr>
+<tr>
+<td>Zero or non-power-of-two scalar group width on permlane BCAST/UP/DOWN/XOR</td>
 <td>CDNA5</td>
-<td><code>loadcnt</code>, <code>storecnt</code>, <code>dscnt</code>, <code>kmcnt</code>, <code>expcnt</code>, <code>asynccnt</code>, <code>tensorcnt</code></td>
+<td>Larger powers of two, empty EXEC, unqualified VGPR widths and IDX_GEN</td>
 </tr>
 </tbody>
 </table>
-<p>Only instructions present in a target's ISA produce entries. Counter names do not imply
-that every target has every instruction associated with that family. The GFX10 legacy
-<code>lgkmcnt</code> field has six bits; the CDNA legacy field has four.</p>
-<p>Each ordered counter has monotonically increasing issue and retirement positions. For
-<code>Q</code> issued entries, a wait with threshold <code>N</code> proves completion through <code>max(0, Q-N)</code>. A
-later, weaker wait cannot undo completion. Instructions without register results occupy
-positions too. An instruction contributing to two counters contributes to both
-independently. Counter occupancy and the readiness of individual returned lanes are
-separate: each register dependency follows the pipeline that writes those lanes.</p>
-<p>Scalar memory is unordered: nonzero waits do not prove individual results ready. This
-includes cache operations; their bank-level counter increments are not simulated. Routed
-SMEM transfers use the decoded <code>MemoryCounterObligation::counter_increment()</code> for
-both admission and issue accounting (two units for transfers larger than a DWORD),
-but readiness still requires zero. Mixed hardware event types sharing a counter retain separate ordered-class
-positions: a nonzero wait proves an ordered result complete only when at least that
-many younger operations in its own class follow it. Generic FLAT on older CDNA is treated
-conservatively as unordered. Zero waits reset this ordering state. FLAT contributes only
-to memory domains used by its resolved requests; register dependencies follow the
-resolved routing masks. Mixed global/shared FLAT functional execution still has the
-existing first-request-lane routing limitation; the checker does not repair memory
-routing.</p>
-<p>Legacy VMEM writeback can avoid an overwrite warning only when the pending result
-and the incoming producer share an ordered completion class. On legacy RDNA,
-ordinary loads, image samples and BVH results share VMcnt but keep separate
-classes. A newer result supersedes a fully covered older dependency only within
-the same ordered class; other classes and unordered results remain tracked.</p>
-<p>Before reading an incoming producer's operands, the checker applies the finite
-counter bound to each qualified ordered class in that counter. A capacity of <code>C</code>
-and an incoming increment of <code>U</code> leave at most <code>C-U</code> old counter units before
-admission, including when the incoming producer itself is unordered. Younger operations from a
-different completion class cannot prove readiness. Capacities come from the
-target's counter fields (for example, 15 for legacy CDNA LGKM and 63 for VMEM).
-SMEM, GDS, exports, messages and legacy CDNA FLAT do not acquire a FIFO guarantee
-from sharing a counter; their results require a zero wait, even after a nonzero
-partial wait. CDNA5 async load and store completion classes are separate;
-async barrier arrive orders with async loads. Proven completion also releases the
-associated replay translation prefix.</p>
-<p>FLAT admission is address-dependent, so the checker applies its memory-counter
-capacity constraints after routing, before checking result writeback. The instruction
-cannot use an unused domain's full counter to prove an older request complete. Address
-and other source operands are read before this inference is available.</p>
-<h2 id="flat-register-readiness">FLAT register readiness<a class="headerlink" href="#flat-register-readiness" title="Permanent link">&para;</a></h2>
-<p>FLAT contributes to VMEM when at least one lane requests global/scratch memory and
-to DS when at least one lane requests LDS memory. This conditional-participation
-rule is the runtime model across AMD GPU targets; physical validation on every
-architecture is not established. Its global/scratch and LDS portions can complete independently;
-RDNA4 ISA section 5.7.1.3 describes complementary lane masks for these portions.
-The checker uses the resolved address of each lane, rather than the functional
-pipeline's first-lane route, to associate a returned VGPR lane with its counter.
-For example, if lane 0 loads from LDS and lane 1 loads from global memory, a zero
-DS wait releases lane 0's register dependency while lane 1 still needs a VMEM wait.
-A consumer reading both lanes needs both; a consumer reading only lane 0 does not.</p>
-<p>This distinction also appears in LLVM's AMDGPU wait insertion:
-<a href="https://github.com/llvm/llvm-project/blob/1ac93e094347b45208f215c98038606432c87d60/llvm/lib/Target/AMDGPU/SIInstrInfo.cpp#L4769"><code>mayAccessVMEMThroughFlat</code> and <code>mayAccessLDSThroughFlat</code></a>
-exclude the irrelevant address space when it is known from the memory operand.
-<a href="https://github.com/llvm/llvm-project/blob/1ac93e094347b45208f215c98038606432c87d60/llvm/lib/Target/AMDGPU/Utils/AMDGPUHWEvents.cpp#L110"><code>getEventsFor</code></a>
-then adds only the relevant completion events. Unknown FLAT pointers require both;
-the runtime checker has per-lane routing information unavailable to static codegen.
-Requiring both waits for every returned lane would warn about accesses that this
-policy accepts. Avoiding such false positives takes priority over diagnosing an
-unproven additional whole-instruction requirement. This does not treat a successful
-run without a wait as proof of an architectural completion guarantee.</p>
-<p>A hardware probe on gfx1100 and gfx1201 used inline assembly to load LDS in even
-lanes and global memory in odd lanes, then immediately add to the returned value.
-With only the DS wait, all 1,048,576 global-lane observations per device were wrong
-and all LDS-lane observations were correct. Waiting for both produced no errors;
-omitting both broke both lane groups. VMEM-only waits happened to leave both groups
-ready in this probe, which does not establish a guarantee for the LDS lanes.
-These observations support keeping the lanes separate; they do not establish
-wait requirements on untested architectures or under all schedules.</p>
-<h2 id="producer-accounting">Producer accounting<a class="headerlink" href="#producer-accounting" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Producers</th>
-<th>Counter accounting and register dependencies</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Global, scratch, buffer, typed buffer, image loads and returning atomics</td>
-<td>Load queue; track returned registers</td>
-</tr>
-<tr>
-<td>Stores and atomics without return</td>
-<td>Store queue, or the shared legacy VMEM queue; no destination register</td>
-</tr>
-<tr>
-<td>Generic FLAT loads, stores and atomics</td>
-<td>Only the VMEM/DS queues used by resolved requests; returned lanes depend on DS for the shared aperture and VMEM for global/scratch</td>
-</tr>
-<tr>
-<td>LDS/GDS, including permutation, swizzle and DS no-op</td>
-<td>DS/legacy LGKM queue; returning forms track registers. GDS also contributes to EXP</td>
-</tr>
-<tr>
-<td>Scalar loads, atomics, cache operations, timestamps, barrier-state and wave-ID queries</td>
-<td>KM/legacy LGKM queue; returned scalar registers are tracked</td>
-</tr>
-<tr>
-<td>Messages, including message returns</td>
-<td>KM/legacy LGKM queue. Return forms contribute two units, with the result pending through the return unit</td>
-</tr>
-<tr>
-<td>Barrier signal with an <code>isfirst</code> result</td>
-<td>KM queue and pending SCC result</td>
-</tr>
-<tr>
-<td>LDS direct/parameter loads</td>
-<td>EXP queue and returned VGPRs</td>
-</tr>
-<tr>
-<td>Exports</td>
-<td>EXP queue accounting</td>
-</tr>
-<tr>
-<td>Image sampling, gather and LOD queries</td>
-<td>SAMPLE on RDNA4, otherwise the target's VMEM queue; decoded returned registers are tracked</td>
-</tr>
-<tr>
-<td>Image BVH</td>
-<td>BVH on RDNA4, otherwise the target's VMEM queue; decoded returned registers are tracked</td>
-</tr>
-<tr>
-<td>Global and buffer cache operations that participate in counters</td>
-<td>Load or store queue accounting, including counter-only invalidations</td>
-</tr>
-<tr>
-<td>Direct-to-LDS asynchronous loads/stores</td>
-<td>Ordinary load/store queue and ASYNC queue</td>
-</tr>
-<tr>
-<td>Asynchronous barrier arrive</td>
-<td>ASYNC queue</td>
-</tr>
-<tr>
-<td>Tensor DMA loads/stores</td>
-<td>TENSOR queue</td>
-</tr>
-<tr>
-<td>gfx1250 scalar address operations and multi-group VMEM, including async LDS transfers</td>
-<td>X translation queue; protect source dwords against overwrite, plus VMEM EXEC. One X unit per instruction, independently of completion-counter units. Tensor DMA has no X event</td>
-</tr>
-</tbody>
-</table>
-<p>Zero-EXEC vector producers generally still contribute positions behind pending requests;
-an empty queue may skip them. FLAT contributes no VMEM/DS position without a requesting
-lane. Scalar producers do not depend on EXEC. Prefetches that do not
-increment completion counters contribute no entries.
-If a zero-EXEC instruction occupies an X position but no completion position, it
-has no completion-to-X mapping. Waiting on that empty completion counter cannot
-release older replay sources. The X entry remains until an X wait or another
-proven translation drain reaches it.</p>
-<p>The checker handles explicit, combined load/store-plus-DS and idle waits, plus
-RDNA3/3.5/4 interpolation's embedded EXP wait. No-wait sentinel fields leave the queue
-unchanged. RDNA4's compatibility <code>s_waitcnt</code> ignores its immediate and acts as
-<code>s_wait_idle</code>, draining all supported counters. Older interpolation encodings have no
-embedded EXP wait.</p>
-<h2 id="limits-of-the-guarantee">Limits of the guarantee<a class="headerlink" href="#limits-of-the-guarantee" title="Permanent link">&para;</a></h2>
-<p>Both false negatives and false positives are possible. Eager global/LDS memory
-effects can hide memory-ordering dependencies even within one wave. Conversely,
-architecturally sufficient instruction spacing can make a dependency safe without
-an explicit wait; latency and instruction spacing are not modeled here.
-See <a href="../memory-wait-diagnostics/#false-negatives-and-false-positives">diagnostic limitations</a>.</p>
-<p>The diagnostic checks pending register results and the qualified XCNT source
-lifetimes. It does not compare memory addresses, prove memory visibility, check LDS
-or tensor transfer footprints, or detect communication hazards within or between
-waves. ASYNC, TENSOR and store-only producers still count without a register result.</p>
-<p>The <a href="../memory-wait-diagnostics/#xcnt-replay-source-diagnostics">XCNT policy</a>
-covers SMEM sources and VMEM sources in multi-group replay mode. Single-group VMEM,
-atomic replay ordering, and scheduling/source-lifetime fields such as <code>vm_vsrc</code>,
-<code>va_vdst</code> and other dependency fields remain outside this checker. Parity and conditional barrier completion
-protocols are not used to prove register readiness. Instruction implementations that are
-functional stubs, including some image and LDS-direct operations, still lack functional
-qualification: decoded counter and destination coverage does not supply the missing
-execution semantics.</p>
-<p>The first diagnostic recovers that dependency to avoid cascades. Therefore the checker
-is not an exhaustive listing of every later use of the same bad result. Pending state is
-not serialized in checkpoints.</p>
-<p>Tests combine decoded producer cases and wait encodings across all ten AMD architectures
-with real instruction execution for scalar/vector loads, inline DS results, counter-only
-producers, zero EXEC, message return units, and FLAT's lane-specific dependencies and
-both counter positions. Real-kernel checks supplement these tests; they do not prove
-complete recall across all kernel families.</p>
+<p>Each <code>isa-undefined</code> warning identifies the CU, workgroup, wave and PC. Execution
+continues with the simulator's existing behavior. Reports are capped at 16 per CU.
+Static operand restrictions are decoded once and share one fast-path flag test.
+They are reported on the issuing thread, including when a helper executes the
+instruction. Other checks use operands already calculated for execution; they
+do not scan register allocations, track lane conflicts or maintain an access
+history.</p>
+<p>These small checks run unconditionally, independently of memory-wait checking,
+in both RocJITsu and Mirage. They have no CLI or configuration switch.
+A warning on a defined instruction is a checker bug and should be reported.</p>
+<p>Combined offsets are checked before alignment masks are applied. CDNA1–4 and
+RDNA1–3.5 scalar-buffer operations are excluded: their separate manual sections do not
+establish the ordinary scalar-memory rule for buffer offsets.</p>
+<p>VOPD checks apply only to nonempty wave32 execution. They account for FMAMK's
+SRC2 port, the older accumulator-port rules, and explicit VOPD3 sources. The
+bank check includes both registers of F64 sources and ignores scalar sources.
+Scalar input counting includes CNDMASK's implicit VCC read on RDNA3/3.5/4 and
+deduplicates explicit VCC_LO reads. CDNA5 implicit VCC and RDNA3/3.5 EXEC/SCC
+budgets remain unqualified. GFX12 identical SRC2 sharing stays silent because
+LLVM permits it despite the manual's broader parity rule. Alignment checks require
+an even SGPR for 64-bit data and a multiple of four for wider data or a buffer
+descriptor. They only cover normal SGPR tuples wholly within their register
+region; they do not infer lane-mask widths from generic operand metadata.</p>
+<p>Cross-operation VOPD dependencies remain unchecked. RDNA4's broad prohibition
+conflicts with LLVM's deliberate single-cycle pairing, while CDNA5's restriction
+depends on product-specific multi-cycle execution. Neither supports an
+unconditional warning with the available qualification.</p>
+<p>This is a qualified set of checks, not a complete ISA validator. An access beyond
+an allocation is not sufficient evidence of undefined behavior: the manuals
+define zero-filled LDS reads, discarded LDS writes, register-source substitution
+and discarded register destinations in many cases. The diagnostics do not flag
+those cases or same-address LDS/global stores. They also do not infer HIP/C++
+data races from machine instructions. Source-register rules differ between
+instruction classes and sometimes conflict with general descriptions, so a
+generic allocation-bound warning would not meet this checker's standard.</p>
+<p>The checks follow the scalar-memory addressing sections across the supported
+families, and the MFMA broadcast sections of
+the <a href="https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-mi300-cdna3-instruction-set-architecture.pdf">CDNA3</a>
+and <a href="https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf">CDNA4</a>
+manuals, scalar-memory addressing and VOPD/VOP3P restrictions in the
+<a href="https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/instruction-set-architectures/rdna3-shader-instruction-set-architecture-feb-2023_0.pdf">RDNA3 manual</a>,
+and the scalar-memory, SGPR-alignment, VOPD/VOP3P, global load-transpose and
+permlane sections of the
+<a href="https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/instruction-set-architectures/rdna4-instruction-set-architecture.pdf">RDNA4</a>
+and <a href="https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna5-instruction-set-architecture.pdf">CDNA5</a>
+manuals. CDNA5 explicitly permits negative combined offsets on ordinary scalar
+loads; its buffer-load restriction still applies even when a register offset
+would compensate for a negative immediate.</p>
+<p>RDNA3/3.5 negative scalar-buffer offsets specify a MEMVIOL rather than undefined
+behavior. That fault is outside this checker; its absence from the warnings does
+not imply the access succeeds on hardware.</p>
 
 
 

@@ -203,7 +203,7 @@
       ROCm/rocm-systems
       <ul class="md-source__facts">
         <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 527 · build snapshot" aria-label="Stars: 527">527</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 441 · build snapshot" aria-label="Forks: 441">441</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 442 · build snapshot" aria-label="Forks: 442">442</li>
       </ul>
     </div>
   </a>
@@ -256,7 +256,7 @@
       ROCm/rocm-systems
       <ul class="md-source__facts">
         <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 527 · build snapshot" aria-label="Stars: 527">527</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 441 · build snapshot" aria-label="Forks: 441">441</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 442 · build snapshot" aria-label="Forks: 442">442</li>
       </ul>
     </div>
   </a>
@@ -784,6 +784,34 @@
     
   
     Memory wait diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../isa-diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA diagnostics
   
 
     
@@ -2213,6 +2241,9 @@ each with values <code>warn</code> or <code>off</code>. Invalid per-CU values ar
 global override. Checkpoints preserve each CU's effective diagnostic settings;
 older checkpoints without these fields use the defaults. See
 <a href="../memory-wait-diagnostics/">memory wait diagnostics</a> for coverage and limitations.</p>
+<p>Qualified <a href="../isa-diagnostics/">ISA diagnostics</a> are always enabled, independently
+of memory-wait checking. The checks use decoded fields and existing operands;
+the coverage and legal exceptions are documented separately.</p>
 <h3 id="kfd-device-sections">KFD device sections<a class="headerlink" href="#kfd-device-sections" title="Permanent link">&para;</a></h3>
 <p>KFD device identity can be defined by <code>vm.gpu.device</code> for a simulated GPU and
 by <code>dbt_guest.guest_device</code> for a DBT guest. These sections define properties
