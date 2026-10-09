@@ -18,6 +18,10 @@ AMDSmiSocket::~AMDSmiSocket() {
     delete cpu_core_processors_[i];
   }
   cpu_core_processors_.clear();
+  for (uint32_t i = 0; i < ainic_processors_.size(); i++) {
+    delete ainic_processors_[i];
+  }
+  ainic_processors_.clear();
 }
 
 amdsmi_status_t AMDSmiSocket::get_processor_count(uint32_t* processor_count) const {

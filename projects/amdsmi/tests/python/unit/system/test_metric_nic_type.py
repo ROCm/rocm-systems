@@ -54,7 +54,9 @@ def _load_metric() -> types.SimpleNamespace:
 
 
 class TestMetricNicType(unittest.TestCase):
-    def _run_metric_nic(self, label: Optional[str], telemetry: Dict[str, object]) -> Dict:
+    def _run_metric_nic(
+        self, label: Optional[str], telemetry: Dict[str, object], json_format: bool = False
+    ) -> Dict:
         """Run metric_nic and return the values dict it stored; ``None`` fails the type read."""
         loaded = _load_metric()
         self._interface = loaded.interface
@@ -67,7 +69,8 @@ class TestMetricNicType(unittest.TestCase):
                 self.helpers.get_ainic_id_from_device_handle.return_value = 0
                 self.helpers.handle_ainics.return_value = (False, handle)
                 self.logger = mock.Mock()
-                self.logger.is_json_format.return_value = False
+                self.logger.is_json_format.return_value = json_format
+                self.logger.is_human_readable_format.return_value = not json_format
 
         loaded.interface.amdsmi_get_nic_telemetry = mock.Mock(return_value=telemetry)
         if label is None:
@@ -93,7 +96,27 @@ class TestMetricNicType(unittest.TestCase):
     def test_a_type_read_failure_reports_na_and_keeps_the_telemetry(self) -> None:
         stored = self._run_metric_nic(None, {"temperature": {"asic_temp_c": 31}})
         self.assertEqual(stored["type"], "N/A")
-        self.assertEqual(stored["temperature"], {"asic_temp_c": 31})
+        self.assertEqual(stored["temperature"], {"asic": "31 \N{DEGREE SIGN}C"})
+
+    def test_temperatures_read_like_the_gpu_metric_in_text(self) -> None:
+        stored = self._run_metric_nic(
+            "AINIC",
+            {"temperature": {"asic_temp_c": 27, "transceiver_temp_c": "N/A", "board_temp_c": 40}},
+        )
+        self.assertEqual(
+            stored["temperature"],
+            {"asic": "27 \N{DEGREE SIGN}C", "transceiver": "N/A", "board": "40 \N{DEGREE SIGN}C"},
+        )
+
+    def test_temperatures_carry_a_unit_in_json(self) -> None:
+        stored = self._run_metric_nic(
+            "AINIC",
+            {"temperature": {"asic_temp_c": 27, "transceiver_temp_c": "N/A"}},
+            json_format=True,
+        )
+        self.assertEqual(
+            stored["temperature"], {"asic": {"value": 27, "unit": "C"}, "transceiver": "N/A"}
+        )
 
     def test_the_six_getter_summary_is_not_read(self) -> None:
         # An unrelated getter failing there (port, rdma) must not turn the type into N/A.

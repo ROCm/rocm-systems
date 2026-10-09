@@ -3387,6 +3387,20 @@ class MetricCommands:
             telemetry = amdsmi_interface.amdsmi_get_nic_telemetry(args.nic)
         except amdsmi_exception.AmdSmiLibraryException as e:
             logging.debug("Failed to get telemetry for nic %s | %s", nic_id, e.get_error_info())
+        # Same shape as the GPU temperature section: "ASIC: 27 °C" in text, value and unit in JSON.
+        if isinstance(telemetry.get("temperature"), dict):
+            temperatures = {}
+            for key, value in telemetry["temperature"].items():
+                name = key.replace("_temp_c", "")
+                if value == "N/A":
+                    temperatures[name] = value
+                elif self.logger.is_json_format():
+                    temperatures[name] = {"value": value, "unit": "C"}
+                elif self.logger.is_human_readable_format():
+                    temperatures[name] = f"{value} \N{DEGREE SIGN}C"
+                else:
+                    temperatures[name] = value
+            telemetry["temperature"] = temperatures
         values.update(telemetry)
 
         requested_port = getattr(args, "port", None)

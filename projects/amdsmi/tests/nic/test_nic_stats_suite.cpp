@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -269,6 +270,75 @@ static void test_rdma_hw_counters_skip_lifespan_and_refresh() {
   fs::remove_all(root);
 }
 
+// Every statistics read ends in a C API call, where an exception means std::terminate. A sysfs
+// error other than "absent" (a symlink loop here) must read as no data, not throw.
+static bool is_collect_throwing(const std::function<void()>& collect) {
+  try {
+    collect();
+  } catch (...) {
+    return true;
+  }
+  return false;
+}
+
+static void test_standard_statistics_survive_sysfs_errors() {
+  namespace fs = std::filesystem;
+  const fs::path root =
+      fs::temp_directory_path() / ("amdsmi-std-stats-" + std::to_string(::getpid()));
+  fs::remove_all(root);
+
+  // statistics itself is a symlink loop.
+  const fs::path looped = root / "looped";
+  fs::create_directories(looped);
+  fs::create_symlink("statistics", looped / "statistics");
+  SmiNicPort looped_port("faketh0", "0000:00:00.0", looped.string(), looped.string());
+  check("a looping statistics dir does not throw",
+        !is_collect_throwing([&] { looped_port.collect_standard_statistics(); }));
+  check("a looping statistics dir reads as no counters",
+        looped_port.get_standard_stats_map().empty());
+
+  // One unreadable entry must not hide the counters beside it.
+  const fs::path mixed = root / "mixed";
+  fs::create_directories(mixed / "statistics");
+  fs::create_symlink("bad", mixed / "statistics" / "bad");
+  write_counter(mixed / "statistics", "rx_bytes", 7);
+  SmiNicPort mixed_port("faketh0", "0000:00:00.0", mixed.string(), mixed.string());
+  check("a looping entry does not throw",
+        !is_collect_throwing([&] { mixed_port.collect_standard_statistics(); }));
+  check("the counters beside a looping entry are still read",
+        (mixed_port.get_standard_stats_map().count("rx_bytes") == 1));
+  fs::remove_all(root);
+}
+
+static void test_rdma_hw_counters_survive_sysfs_errors() {
+  namespace fs = std::filesystem;
+  const fs::path root =
+      fs::temp_directory_path() / ("amdsmi-hw-errs-" + std::to_string(::getpid()));
+  fs::remove_all(root);
+  std::string netdev = "enP1p3s0f3";
+  std::string name = "1";
+
+  const fs::path looped = root / "looped";
+  fs::create_directories(looped);
+  fs::create_symlink("hw_counters", looped / "hw_counters");
+  SmiInfiniBandPort looped_port(netdev, name, looped.string());
+  check("a looping hw_counters dir does not throw",
+        !is_collect_throwing([&] { looped_port.collect_hw_counters(); }));
+  check("a looping hw_counters dir reads as no counters",
+        looped_port.get_hw_counters_map().empty());
+
+  const fs::path mixed = root / "mixed";
+  fs::create_directories(mixed / "hw_counters");
+  fs::create_symlink("bad", mixed / "hw_counters" / "bad");
+  write_counter(mixed / "hw_counters", "rx_rdma_ucast_pkts", 3);
+  SmiInfiniBandPort mixed_port(netdev, name, mixed.string());
+  check("a looping hw counter entry does not throw",
+        !is_collect_throwing([&] { mixed_port.collect_hw_counters(); }));
+  check("the counters beside a looping entry are still read",
+        (mixed_port.get_hw_counters_map().count("rx_rdma_ucast_pkts") == 1));
+  fs::remove_all(root);
+}
+
 static void test_no_table_yields_empty_map() {
   auto transport = std::make_shared<FakeTransport>();
   transport->stats = {true, {{"tx_packets"}, {1}}, 0};
@@ -292,7 +362,7 @@ static void test_large_table_not_truncated_by_mechanism() {
     stats.names.push_back("stat_" + std::to_string(i));
     stats.values.push_back(static_cast<uint64_t>(i));
   }
-  static std::vector<std::string> owned_names = stats.names;  // keep c_str() storage alive
+  const auto owned_names = stats.names;  // keep c_str() storage alive
   for (const auto& name : owned_names) {
     big_table.push_back({name.c_str(), StatTier_t::Default});
   }
@@ -327,6 +397,8 @@ int main() {
   test_fec_failure_is_not_an_error();
   test_fec_query_is_logged_with_interface_and_outcome();
   test_rdma_hw_counters_skip_lifespan_and_refresh();
+  test_standard_statistics_survive_sysfs_errors();
+  test_rdma_hw_counters_survive_sysfs_errors();
   test_no_table_yields_empty_map();
   test_large_table_not_truncated_by_mechanism();
   test_real_tables_fit_within_cap();
