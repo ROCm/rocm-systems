@@ -29,6 +29,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Experimental ML API analyze no longer writes `ml_api_trace/consolidated.csv`.
 
+* Workloads profiled with the previous stacked Function labels (`:#` or `@`) make `--list-*-operators` / `--*-operator` exit. Re-profile with current `--torch-trace` or `--triton-trace`.
+
 * Improved the standalone roofline HTML kernel hover tooltip: it now shows the limiting roof, percent of roofline, achieved and peak bandwidth per memory level, dispatch count and share of total application dispatches, and kernel duration and share of total application time. Kernel names longer than 200 characters are truncated in the sidebar, with the full name shown on hover.
 
 * The roofline benchmark now reports the peak measured sample across runs instead of the mean.
