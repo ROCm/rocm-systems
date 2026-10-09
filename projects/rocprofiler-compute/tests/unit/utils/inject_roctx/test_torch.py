@@ -314,4 +314,3 @@ def test_uninitialized_buffer_keeps_persistent_on_to(monkeypatch):
     moved = UninitializedBuffer(persistent=False).to(dtype=torch.float64)
     assert isinstance(moved, UninitializedBuffer)
     assert moved.persistent is False
-
