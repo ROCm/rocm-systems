@@ -31,16 +31,8 @@
 #include <cstdint>
 #include <functional>
 
-
-
-
-
-
-
-
-// Team shape seen by ncclDevrWorldToLsaRank's symmetric arm. Default to the
-// comm's own contiguous stride-1 team; override for strided/offset layouts.
-extern std::function<ncclTeam_t(ncclComm_t)> g_devrTeamWorld;
+// The ncclTeam* accessors moved to fakes/nccl_device_core_fakes.h, named for
+// src/nccl_device/core.cc which defines them (g_ncclTeamWorld and friends).
 
 extern std::function<ncclResult_t(void*, int, int, int)> g_devrBootstrapBarrier;
 extern std::function<ncclResult_t(struct ncclIntruAddressMap_untyped*, int, int, int, uintptr_t, void*)>
@@ -79,11 +71,10 @@ extern std::function<ncclResult_t(struct ncclDevrState*, struct ncclDevrMemory*,
 extern std::function<ncclResult_t(struct ncclDevrMemory*, struct ncclComm*)> g_devrVerifySegmentLayouts;
 extern std::function<ncclResult_t(struct ncclDevrMemory*)> g_devrBuildGinSegmentInfos;
 
-// The CFT seams 2.31 added: the two team accessors, the two sizes
-// ncclDevrInitOnce caches, and whether the RMA proxy is in play. Defaults
-// describe a comm without CFT and without the proxy; see dev_runtime_micro_fakes.cc.
-extern std::function<ncclTeam_t(ncclComm_t, ncclCftTeamMode_t)> g_devrTeamCft;
-extern std::function<ncclTeam_t(ncclComm_t)> g_devrTeamCftMultimem;
+// The CFT seams 2.31 added: the two sizes ncclDevrInitOnce caches, and whether
+// the RMA proxy is in play. Defaults describe a comm without CFT and without the
+// proxy; see dev_runtime_micro_fakes.cc. (The CFT team accessors it also added
+// are in fakes/nccl_device_core_fakes.h with the rest of the ncclTeam* family.)
 extern std::function<int(struct ncclComm*)> g_devrComputeCftSize;
 extern std::function<int(struct ncclComm*)> g_devrComputeCftMcSize;
 

@@ -17,6 +17,7 @@
 #include "fakes/hip_fakes.h"      // the shared g_hip* seams this suite drives
 #include "fakes/nccl_fakes.h"     // g_ncclProxyClientGetFdBlocking
 #include "fakes/devcomm_fakes.h"  // g_ncclTeamLsa
+#include "fakes/nccl_device_core_fakes.h"  // g_ncclTeamWorld and the rest of the ncclTeam* family
 
 // param.h's NCCL_PARAM caches its value in a function-local static, so a param
 // read once is frozen for the process. fakes/param_redirect.h -- shared with
@@ -4240,7 +4241,7 @@ protected:
     // descriptors carry *our own* position in that team -- the member test is
     // relative to it -- so world rank 4 is lsa rank 0, and a returned index is
     // plainly distinguishable from the world rank it came from.
-    g_devrTeamWorld = [](ncclComm_t) { return ncclTeam_t{8, 4, 1}; };
+    g_ncclTeamWorld = [](ncclComm_t) { return ncclTeam_t{8, 4, 1}; };
     g_ncclTeamLsa   = [](ncclComm_t) { return ncclTeam_t{4, 0, 1}; };
   }
   void TearDown() override {

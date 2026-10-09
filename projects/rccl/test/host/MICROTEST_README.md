@@ -402,6 +402,7 @@ symbol.
 | `src/group.cc` | `fakes/group_fakes.cc` |
 | `src/config/algorithm_*.cc` | compiled real (no fakes file) |
 | `src/config/collconfig.cc` (targets that do not compile the real file) | `fakes/collconfig_fakes.cc` |
+| `src/debug.cc` (`ncclDebugLog`, `ncclDebugLevelMask`, `ncclSetThreadName`, ...) | `fakes/nccl_fakes.cc` |
 | `src/enqueue/enqueue.cc`'s own symbols (targets that do not compile the real file) | `fakes/enqueue_fakes.cc` |
 | `src/init.cc` comm lifecycle + CTA/channel params | `fakes/comm_fakes.cc` |
 | `src/init_nvtx.cc` | `fakes/init_nvtx_fakes.cc` |
@@ -414,6 +415,7 @@ symbol.
 | `src/misc/rocmwrap.cc` | `fakes/rocmwrap_fakes.cc` |
 | `src/misc/strongstream.cc` | `fakes/strongstream_stubs.cc` |
 | `src/misc/utils.cc` | `fakes/utils_fakes.cc` |
+| `src/nccl_device/core.cc` host `ncclTeam*` accessors | `fakes/nccl_device_core_fakes.cc` (except `ncclTeamLsa`; see below) |
 | `src/os/linux.cc` | `fakes/os_fakes.cc` |
 | `src/plugin/env.cc` | `fakes/env_plugin_fakes.cc` |
 | `src/plugin/gin.cc`, `src/gin/gin_host.cc` (targets that do not compile the real file) | `fakes/gin_fakes.cc` |
@@ -448,7 +450,7 @@ and that default silently selects which production arm runs. Driving a seam mean
 marker. The marker travels with the declaration rather than a block comment so it cannot drift from
 what it describes. Call *counters* do not take the marker unless the counter itself is unread.
 
-Five things do NOT follow the TU-per-file rule, deliberately:
+These do NOT follow the TU-per-file rule, deliberately:
 
 - `fakes/collective_stubs.cc` is a fail-loud floor for the collective *launch*
   pipeline (`ncclLaunchKernel` and friends), which `enqueue.cc` itself defines.
@@ -474,6 +476,12 @@ Five things do NOT follow the TU-per-file rule, deliberately:
 - `rcclParamIntraGraphGen` stays in `fakes/init_fakes.cc` because its owner
   (`graph/rccl_graph_gen.cc:34`) has no fakes file at all. `rcclEffectiveP2pBatchEnable`
   did have one and moved to `fakes/enqueue_fakes.cc`.
+- `ncclTeamLsa` stays in `fakes/devcomm_fakes.cc` rather than moving to
+  `fakes/nccl_device_core_fakes.cc` with the other `src/nccl_device/core.cc`
+  accessors: its default silently satisfies the `nRanks ==
+  comm->nRanks` comparison every `devcomm-test.cc` filter makes, and the trap
+  comment warning about that is what keeps those tests honest. Moving the hook
+  without moving the readers that depend on the warning is how it would get lost.
 - `IsArchMatch` and the `allocTracker` data symbol stay in `p2p-test.cc`
   itself rather than a fakes file, because neither has an owning production
   TU to name a fakes file after: `IsArchMatch` is declared in the

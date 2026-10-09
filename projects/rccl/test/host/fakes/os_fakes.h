@@ -10,7 +10,9 @@
 #ifndef RCCL_TEST_HOST_OS_FAKES_H_
 #define RCCL_TEST_HOST_OS_FAKES_H_
 
+#include <atomic>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -19,8 +21,14 @@
 
 // ncclOsCpuCount is load-bearing: initTransportsRank's exit: block calls it on EVERY path, so nothing in
 // the function was testable until it was seamed, and its counter is the only way to see that :1488 skips exit:.
+// Both entry points are called from SPAWNED THREADS as well as the test thread -- gin_host.cc's proxy
+// progress workers pin themselves through them -- so the counter is atomic (gin-host-test.cc polls it while
+// the workers run) and the mask vectors below are written under g_ncclOsAffinityMutex.
 extern int g_ncclOsCpuCountValue;
-extern int g_ncclOsCpuCountCalls;
+extern std::atomic<int> g_ncclOsCpuCountCalls;
+// Held across every write to the two mask vectors. Tests that read a vector back must either hold it or
+// have joined the threads that write it; the single-threaded suites need neither.
+extern std::mutex g_ncclOsAffinityMutex;
 // Every mask ncclOsCpuCount was handed, in call order. Which index is which call site is PATH-DEPENDENT:
 // a path running :1607-1611 and reaching exit: gives [0]=:1608 and [1]=exit::2403; a path stopping before
 // :1607 gives [0]=exit::2403; a path bypassing exit: (:1618) gives only :1608. Check .size() first.

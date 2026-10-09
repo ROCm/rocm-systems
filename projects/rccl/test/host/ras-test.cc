@@ -586,7 +586,6 @@ ncclResult_t ncclOsSocketPairRead(ncclSocketPairDescriptor descriptor, void* buf
   *nread = n;
   return ncclSuccess;
 }
-void ncclSetThreadName(std::thread&, const char*, ...) {}
 
 ncclResult_t rasClientInitSocket() { return ncclSuccess; }
 ncclResult_t rasClientAcceptNewSocket() {

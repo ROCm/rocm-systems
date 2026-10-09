@@ -99,6 +99,7 @@ function(rccl_define_micro_source_lists)
     # real IsArchMatch, for wrap-test.cc (path is build-directory-relative).
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     fakes/dev_runtime_micro_fakes.cc
+    fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
     fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
     fakes/nccl_fakes.cc
     fakes/libc_fakes.cc
@@ -332,6 +333,9 @@ function(rccl_define_micro_source_lists)
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
+    fakes/bootstrap_stubs.cc             # src/bootstrap.cc AllGather seam
+    fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
+    fakes/os_fakes.cc                    # src/os/linux.cc proxy-thread affinity seams
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
     
@@ -344,6 +348,7 @@ function(rccl_define_micro_source_lists)
     fakes/diagnostics_p2p_device_fakes.cc  # src/diagnostics/device/p2p.cu
     fakes/hip_fakes.cc
     fakes/libc_fakes.cc
+    fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
     fakes/nccl_fakes.cc
     fakes/topo_stubs.cc
     fakes/transport_net_ib_fakes.cc      # src/transport/net_ib/connect.cc params

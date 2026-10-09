@@ -87,6 +87,13 @@ void ncclDebugLog(ncclDebugLogLevel /*level*/,
     std::fputc('\n', stderr);
 }
 
+// src/debug.cc, same owner as the logging symbols above. A no-op rather than a
+// recorder: the name is cosmetic (pthread_setname_np on a thread the test owns),
+// so nothing a microtest asserts can depend on it -- but every target that spawns
+// a production thread needs the symbol, which is why it belongs here rather than
+// re-declared per test TU.
+void ncclSetThreadName(std::thread& /*thread*/, const char* /*fmt*/, ...) {}
+
 void ncclLoadParam(char const* /*env*/,
                    int64_t     /*deftVal*/,
                    int64_t     /*uninitialized*/,

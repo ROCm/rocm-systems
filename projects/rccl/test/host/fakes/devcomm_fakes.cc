@@ -18,15 +18,10 @@
 #include "signature-drift.h"
 
 ASSERT_HOOK_MATCHES_PROD(g_ncclDevCommCopyLsaData, ncclDevCommCopyLsaData);
-// ncclTeamLsa cannot go through the macro: core.h declares two overloads (a device one taking
-// ncclDevComm const&, and the host one taking ncclComm_t), so `&ncclTeamLsa` is ambiguous. Naming
-// the host overload's type explicitly is the same guarantee by hand.
-static_assert(std::is_same_v<::rccl_test_host::FnSigOf_t<decltype(g_ncclTeamLsa)>,
-                             ncclTeam_t(ncclComm_t)>,
-              "signature drift: g_ncclTeamLsa no longer matches the host ncclTeamLsa(ncclComm_t) "
-              "declared in nccl_device/core.h -- update the std::function hook signature to match");
-
-#undef ASSERT_HOOK_MATCHES_PROD
+// ncclTeamLsa cannot go through the macro above: core.h declares two overloads (a device one taking
+// ncclDevComm const&, and the host one taking ncclComm_t), so `&ncclTeamLsa` is ambiguous.
+// ASSERT_HOOK_MATCHES_SIG names the host overload's type instead -- the same guarantee.
+ASSERT_HOOK_MATCHES_SIG(g_ncclTeamLsa, ncclTeam_t(ncclComm_t));
 
 // Default: reports the LSA team as exactly spanning the communicator.
 //
