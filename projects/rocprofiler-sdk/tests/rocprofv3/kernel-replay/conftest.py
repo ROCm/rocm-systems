@@ -35,6 +35,12 @@ def pytest_addoption(parser):
         help="rocprofv3 results JSON produced by a --replay-mode kernel --kernel-replay-beta-enabled run",
     )
     parser.addoption(
+        "--rocpd-input",
+        action="store",
+        default=None,
+        help="rocpd database written by the same run as --json-input",
+    )
+    parser.addoption(
         "--passes",
         action="store",
         type=int,
@@ -47,12 +53,6 @@ def pytest_addoption(parser):
         nargs="+",
         default=["SQ_WAVES", "SQ_INSTS_VALU"],
         help="counters shared by every --pmc group; must be constant across a kernel's passes",
-    )
-    parser.addoption(
-        "--rocpd-input",
-        action="store",
-        default=None,
-        help="rocpd database written by the same run as --json-input",
     )
 
 
