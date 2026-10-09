@@ -73,7 +73,7 @@
 #    include <rocprofiler-sdk/registration.h>
 #endif
 
-#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0
+#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0 && ROCPROFILER_VERSION >= 600
 #    include <rocprofiler-sdk/ompt.h>
 #    include <timemory/components/ompt/backends.hpp>
 #endif
@@ -1923,18 +1923,18 @@ extern "C"
     }
 #endif  // ROCPROFILER_VERSION >= 10200
 
-#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0
+#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0 && ROCPROFILER_VERSION >= 600
     ompt_start_tool_result_t* ompt_start_tool(
         unsigned int omp_version, const char* runtime_version) ROCPROFSYS_PUBLIC_API;
 
-    // rocprofiler-sdk does not export ompt_start_tool; a tool provides its own and
-    // forwards. The forward is honored only once the SDK is initialized. Read and load
-    // nothing here: the OpenMP runtime holds its init lock across the call and offloading
-    // binaries make it from a static initializer, so re-entry deadlocks.
+    // OMPT tool entry point. The OpenMP runtime calls this while holding its init lock,
+    // and offloading binaries call it from a static initializer, so the body is a plain
+    // forward with no initialization or library loading. A NULL result means
+    // rocprofiler-sdk declined the OMPT tool role and it stays with this library.
     ompt_start_tool_result_t* ompt_start_tool(unsigned int omp_version,
                                               const char*  runtime_version)
     {
         return rocprofiler_ompt_start_tool(omp_version, runtime_version);
     }
-#endif
+#endif  // ROCPROFSYS_USE_OMPT && ROCPROFILER_VERSION >= 600
 }
