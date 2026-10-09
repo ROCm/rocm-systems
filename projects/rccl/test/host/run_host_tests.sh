@@ -236,10 +236,9 @@ do_device_table_guards() {
   python3 "$RCCL_ROOT/src/device/test_generate_device_table.py" -v
 }
 
-# Run the kernel-count guard pytest suite (test/kernel-count) in a local venv so
-# the lean host-test image needs no system pytest. See that dir's README.
-do_kernel_count_guards() {
-  echo "==> Kernel-count guards (pytest: test/kernel-count)"
+# Provision (once) the shared pytest venv the guard suites run in, so the lean
+# host-test image needs no system pytest. Prints its path. See test/kernel-count.
+guard_venv() {
   local gd="$RCCL_ROOT/test/kernel-count"
   local venv="$gd/venv"
   if [ ! -x "$venv/bin/pytest" ]; then
@@ -247,11 +246,29 @@ do_kernel_count_guards() {
       && "$venv/bin/pip" install -q --disable-pip-version-check -r "$gd/requirements.txt" \
       || { echo "ERROR: could not provision $venv" >&2; return 1; }
   fi
-  "$venv/bin/python" -m pytest "$gd/tests" -v
+  echo "$venv"
 }
 
-# All CPU-only guards: the device-table unittest, the kernel-count pytest suite,
-# then the __hip_atomic_* poison compile probe. Collected with `|| rc=1` rather
+# Run the kernel-count guard pytest suite (test/kernel-count).
+do_kernel_count_guards() {
+  echo "==> Kernel-count guards (pytest: test/kernel-count)"
+  local venv
+  venv=$(guard_venv) || return 1
+  "$venv/bin/python" -m pytest "$RCCL_ROOT/test/kernel-count/tests" -v
+}
+
+# Run the accl-profiler reporter suite. It covers accl_report.py's loss banner
+# and its refusal to read pre-rename summaries -- pure host Python, no GPU.
+do_accl_report_guards() {
+  echo "==> ACCL reporter guards (pytest: test/test_accl_report.py)"
+  local venv
+  venv=$(guard_venv) || return 1
+  "$venv/bin/python" -m pytest "$RCCL_ROOT/test/test_accl_report.py" -v
+}
+
+# All CPU-only guards: the device-table unittest, the kernel-count and
+# accl-reporter pytest suites, then the __hip_atomic_* poison compile probe.
+# Collected with `|| rc=1` rather
 # than run back to back so that under `set -e` (line 53) an early failure still
 # leaves the later guards running and reported, instead of aborting the phase at
 # the first one. Same idiom as do_host_tests above.
@@ -259,6 +276,7 @@ do_guards() {
   local rc=0
   do_device_table_guards || rc=1
   do_kernel_count_guards || rc=1
+  do_accl_report_guards || rc=1
   do_poison_hip_atomics || rc=1
   return "$rc"
 }
