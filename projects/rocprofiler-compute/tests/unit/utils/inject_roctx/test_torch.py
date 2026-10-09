@@ -1,6 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+"""Unit tests for TorchBackend: dispatcher names, tensor wraps,
+LazyLinear / LazyBatchNorm ``.to``."""
+
 from types import SimpleNamespace
 
 import pytest
