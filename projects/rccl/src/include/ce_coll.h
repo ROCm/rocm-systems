@@ -23,8 +23,10 @@
 #define RCCL_CE_HIER_SELECTED_TAG "[Hierarchical CE]"
 
 // Total payload capacity of one reusable CE AllReduce staging slot. Messages
-// larger than this are pipelined; sizing each slot to ceArStagingBytes per-rank
-// wastes VMM (512 MiB with two slots) and fails late VA reservations on ROCm.
+// larger than this are pipelined. ceArStagingBytes is the total across all ranks
+// for one slot; with NUM_SLOTS=2 the VMM reservation is 2 * 256 MiB = 512 MiB.
+// On gfx1250, CE-registered AllReduce is default-on, so this is allocated
+// unconditionally at init. Larger values risk late VA reservations on ROCm.
 #define NCCL_CE_AR_STAGING_BYTES (256ull * 1024 * 1024)
 
 // Fallback 2-shot max cap for rcclCeNonRegMaxTab(table, ncclFuncAllReduce) when no arch table is present.
