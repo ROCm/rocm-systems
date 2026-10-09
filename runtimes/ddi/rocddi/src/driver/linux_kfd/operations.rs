@@ -18,7 +18,7 @@ impl GpuDriver for LinuxKfdDriver {
         Ok((version.major, version.minor) >= (1, 20))
     }
 
-    fn available_sdma_rings(&self, device: &DeviceState) -> Result<u32, Error> {
+    fn available_sdma_engines(&self, device: &DeviceState) -> Result<u32, Error> {
         self.ensure_open()?;
         if !cfg!(target_arch = "x86_64")
             || device.native.queues.gfx_target != 120_001
@@ -29,6 +29,8 @@ impl GpuDriver for LinuxKfdDriver {
                 "SDMA kernel queue is unqualified for this GPU target",
             ));
         }
+        // Linux currently maps logical engine indices one-to-one to DRM's
+        // qualified DMA ring indices. No DRM numbering escapes this driver.
         drm::sdma_available_rings(device.vm.render()?)
             .map_err(|source| native_error("DRM SDMA ring query", source))
     }
@@ -61,7 +63,7 @@ impl GpuDriver for LinuxKfdDriver {
                     "PM4 kernel queue is unavailable",
                 ));
             }
-            KernelQueueFormat::Sdma | KernelQueueFormat::SdmaOnRing(_)
+            KernelQueueFormat::Sdma | KernelQueueFormat::SdmaOnEngine(_)
                 if !device.native.queues.sdma_qualified =>
             {
                 return Err(error(
@@ -314,7 +316,7 @@ impl AllocationOperations for LinuxKfdDriver {
         }
         let native_kind = match kind {
             MemoryKind::System => memory::BufferKind::Gtt,
-            MemoryKind::OwnedHost { cache } => memory::BufferKind::OwnedUserptr { cache },
+            MemoryKind::OwnedHost { policy } => memory::BufferKind::OwnedUserptr { cache: policy },
             MemoryKind::RegisteredHost { .. } => {
                 return Err(error(
                     ErrorKind::DriverContract,
@@ -370,14 +372,14 @@ impl AllocationOperations for LinuxKfdDriver {
     ) -> Result<Owned<LinuxAllocation>, Error> {
         let HostRegistration {
             address,
-            cache,
+            policy,
             size,
             alignment,
             permissions,
         } = request;
         let desc = checked_allocation_desc(size, alignment)?;
         if device.lifetime == DriverContextLifetime::Session {
-            if cache == HostCachePolicy::Extended
+            if policy == HostMappingPolicy::Extended
                 && std::iter::once(device)
                     .chain(peers.iter().copied())
                     .any(|peer| peer.native.queues.gfx_target != 120_001)
@@ -398,13 +400,13 @@ impl AllocationOperations for LinuxKfdDriver {
                     desc,
                     address,
                     permissions,
-                    cache == HostCachePolicy::Uncached,
+                    policy == HostMappingPolicy::Uncached,
                 )
             }
         } else {
             // SAFETY: The driver caller retains these pages until cleanup or
             // process exit, including an ambiguous KFD result.
-            let pages = unsafe { memory::BorrowedHostPages::new(address, cache) };
+            let pages = unsafe { memory::BorrowedHostPages::new(address, policy) };
             LinuxAllocation::create_with_peers(
                 device.vm.clone(),
                 peers.iter().map(|peer| peer.vm.clone()),

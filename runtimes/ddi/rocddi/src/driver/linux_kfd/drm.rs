@@ -21,7 +21,6 @@ use std::ptr;
 
 unsafe extern "C" {
     fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
-    fn clock_gettime(clock_id: c_int, time: *mut Timespec) -> c_int;
 }
 
 const fn request(direction: u32, number: u32, size: u32) -> u64 {
@@ -66,7 +65,6 @@ pub(super) const GEM_CREATE_GFX12_DCC: u64 = 1 << 16;
 pub(super) const GEM_CREATE_SPARSE: u64 = 1 << 29;
 const GEM_LIST_HANDLES_IS_IMPORT: u32 = 1;
 const DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT: u32 = 1 << 1;
-const CLOCK_MONOTONIC: c_int = 1;
 const VM_UPDATE_WAIT_NANOSECONDS: i64 = 5_000_000_000;
 const CTX_ALLOC: u32 = 1;
 const CTX_FREE: u32 = 2;
@@ -83,12 +81,6 @@ pub(super) const HW_IP_DMA: u32 = 2;
 pub(super) struct CommandEngine {
     pub(super) ip_type: u32,
     pub(super) ring: u32,
-}
-
-#[repr(C)]
-struct Timespec {
-    seconds: i64,
-    nanoseconds: i64,
 }
 
 #[repr(C)]
@@ -745,18 +737,18 @@ pub(super) fn wait_submission(
     timeout_nanoseconds: Option<u64>,
 ) -> io::Result<bool> {
     let deadline = if let Some(timeout) = timeout_nanoseconds {
-        let mut now = Timespec {
-            seconds: 0,
-            nanoseconds: 0,
+        let mut now = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
         };
-        // SAFETY: clock_gettime fills this exact Linux timespec record.
-        if unsafe { clock_gettime(CLOCK_MONOTONIC, &raw mut now) } != 0 {
+        // SAFETY: libc fills its own timespec representation.
+        if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &raw mut now) } != 0 {
             return Err(io::Error::last_os_error());
         }
-        let now = u64::try_from(now.seconds)
+        let now = u64::try_from(now.tv_sec)
             .ok()
             .and_then(|seconds| seconds.checked_mul(1_000_000_000))
-            .and_then(|value| value.checked_add(u64::try_from(now.nanoseconds).ok()?))
+            .and_then(|value| value.checked_add(u64::try_from(now.tv_nsec).ok()?))
             .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))?;
         now.saturating_add(timeout).min(i64::MAX as u64)
     } else {
@@ -785,18 +777,18 @@ pub(super) fn wait_timeline_point(
     timeout_nanoseconds: Option<u64>,
 ) -> io::Result<bool> {
     let deadline = if let Some(timeout) = timeout_nanoseconds {
-        let mut now = Timespec {
-            seconds: 0,
-            nanoseconds: 0,
+        let mut now = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
         };
-        // SAFETY: clock_gettime writes the exact Linux timespec record.
-        if unsafe { clock_gettime(CLOCK_MONOTONIC, &raw mut now) } != 0 {
+        // SAFETY: libc fills its own timespec representation.
+        if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &raw mut now) } != 0 {
             return Err(io::Error::last_os_error());
         }
         let now = now
-            .seconds
+            .tv_sec
             .checked_mul(1_000_000_000)
-            .and_then(|value| value.checked_add(now.nanoseconds))
+            .and_then(|value| value.checked_add(now.tv_nsec))
             .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))?;
         now.saturating_add(i64::try_from(timeout).unwrap_or(i64::MAX))
     } else {
@@ -1034,18 +1026,18 @@ pub(super) fn unmap(
 }
 
 pub(super) fn wait(file: &File, handle: u32, point: u64) -> io::Result<()> {
-    let mut now = Timespec {
-        seconds: 0,
-        nanoseconds: 0,
+    let mut now = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
     };
-    // SAFETY: clock_gettime fills this exact Linux timespec record.
-    if unsafe { clock_gettime(CLOCK_MONOTONIC, &raw mut now) } != 0 {
+    // SAFETY: libc fills its own timespec representation.
+    if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &raw mut now) } != 0 {
         return Err(io::Error::last_os_error());
     }
     let deadline = now
-        .seconds
+        .tv_sec
         .checked_mul(1_000_000_000)
-        .and_then(|value| value.checked_add(now.nanoseconds))
+        .and_then(|value| value.checked_add(now.tv_nsec))
         .and_then(|value| value.checked_add(VM_UPDATE_WAIT_NANOSECONDS))
         .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))?;
     let handles = [handle];

@@ -7,10 +7,13 @@
 //! Linux process connection retains its exact render files through exit for
 //! later activation; secondary bindings are released with their session.
 use super::{drm, errno, error, native_error, os_file, os_memory, sys, sysfs, uapi};
-use crate::event::{DeviceEvent, GpuHardwareException, GpuMemoryFault};
+use crate::event::{
+    DeviceEvent, GpuHardwareException, GpuMemoryFault, GpuMemoryFaultCause, GpuResetCause,
+    GpuResetScope,
+};
 use crate::host_storage::{Allocator, Buffer, Owned, Shared};
 use crate::memory::interop::linux::{DmaBuf, DmaBufInfo, KfdIpcMemoryHandle};
-use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess, HostCachePolicy};
+use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess, HostMappingPolicy};
 use crate::{Error, ErrorKind};
 use std::fs::File;
 use std::io;
@@ -933,9 +936,17 @@ impl LossEvent {
                 exception.gpu_id,
                 DeviceEvent::GpuHardwareException(GpuHardwareException {
                     endpoint_id: None,
-                    reset_type: exception.reset_type,
+                    scope: if exception.reset_type == 0 {
+                        GpuResetScope::WholeGpu
+                    } else {
+                        GpuResetScope::Other
+                    },
                     memory_lost: exception.memory_lost,
-                    reset_cause: exception.reset_cause,
+                    cause: match exception.reset_cause {
+                        0 => GpuResetCause::Hang,
+                        1 => GpuResetCause::Ecc,
+                        _ => GpuResetCause::Other,
+                    },
                 }),
             )?;
             if exception.memory_lost {
@@ -971,7 +982,13 @@ impl LossEvent {
                     read_only: fault.read_only != 0,
                     no_execute: fault.no_execute != 0,
                     imprecise: fault.imprecise != 0,
-                    error_type: fault.error_type,
+                    cause: match fault.error_type {
+                        0 => GpuMemoryFaultCause::None,
+                        1 => GpuMemoryFaultCause::SramEcc,
+                        2 => GpuMemoryFaultCause::DramEcc,
+                        3 => GpuMemoryFaultCause::Hang,
+                        _ => GpuMemoryFaultCause::Other,
+                    },
                 }),
             )?;
             records.memory_needs_reset = true;
@@ -1021,7 +1038,7 @@ struct AccessChange {
 #[derive(Clone, Copy)]
 pub(super) struct BorrowedHostPages {
     address: usize,
-    cache: HostCachePolicy,
+    cache: HostMappingPolicy,
 }
 
 impl BorrowedHostPages {
@@ -1029,7 +1046,7 @@ impl BorrowedHostPages {
     /// The caller retains the complete page cover and synchronizes CPU and GPU
     /// access until successful allocation cleanup or process teardown.
     #[allow(unsafe_code)]
-    pub(super) unsafe fn new(address: usize, cache: HostCachePolicy) -> Self {
+    pub(super) unsafe fn new(address: usize, cache: HostMappingPolicy) -> Self {
         Self { address, cache }
     }
 }
@@ -1048,17 +1065,17 @@ pub(super) enum BufferKind {
     Gtt,
     Mmio,
     OwnedUserptr {
-        cache: HostCachePolicy,
+        cache: HostMappingPolicy,
     },
     Userptr(BorrowedHostPages),
 }
 
-fn host_cache_flags(cache: HostCachePolicy) -> u32 {
+fn host_cache_flags(cache: HostMappingPolicy) -> u32 {
     match cache {
-        HostCachePolicy::Coarse => 0,
-        HostCachePolicy::Fine => uapi::COHERENT,
-        HostCachePolicy::Extended => uapi::COHERENT | uapi::EXT_COHERENT,
-        HostCachePolicy::Uncached => uapi::COHERENT | uapi::UNCACHED,
+        HostMappingPolicy::Coarse => 0,
+        HostMappingPolicy::Fine => uapi::COHERENT,
+        HostMappingPolicy::Extended => uapi::COHERENT | uapi::EXT_COHERENT,
+        HostMappingPolicy::Uncached => uapi::COHERENT | uapi::UNCACHED,
     }
 }
 

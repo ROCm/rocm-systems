@@ -915,7 +915,7 @@ pub(crate) unsafe extern "C" fn device_destroy(pointer: *mut amdf_device_t) -> u
 #[allow(clippy::unwrap_used)]
 mod observer_tests {
     use super::*;
-    use rocddi::device::event::GpuHardwareException;
+    use rocddi::device::event::{GpuHardwareException, GpuResetCause, GpuResetScope};
 
     fn observer(allocator: Allocator, endpoint_id: [u8; 16]) -> EventObserver {
         EventObserver {
@@ -929,9 +929,9 @@ mod observer_tests {
     fn reset(endpoint_id: [u8; 16], memory_lost: bool) -> DeviceEvent {
         DeviceEvent::GpuHardwareException(GpuHardwareException {
             endpoint_id: Some(endpoint_id),
-            reset_type: 0,
+            scope: GpuResetScope::WholeGpu,
             memory_lost,
-            reset_cause: 0,
+            cause: GpuResetCause::Hang,
         })
     }
 

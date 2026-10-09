@@ -28,7 +28,10 @@ fn reset_epoch_advances_once_for_observed_native_loss() {
 
 #[test]
 fn reset_epoch_policy_uses_reset_evidence_and_device_identity() {
-    use rocddi::device::event::{DeviceEvent, GpuHardwareException, GpuMemoryFault};
+    use rocddi::device::event::{
+        DeviceEvent, GpuHardwareException, GpuMemoryFault, GpuMemoryFaultCause, GpuResetCause,
+        GpuResetScope,
+    };
 
     let endpoint_id = [1; 16];
     let memory_fault = DeviceEvent::GpuMemoryFault(GpuMemoryFault {
@@ -38,15 +41,15 @@ fn reset_epoch_policy_uses_reset_evidence_and_device_identity() {
         read_only: false,
         no_execute: false,
         imprecise: false,
-        error_type: 0,
+        cause: GpuMemoryFaultCause::None,
     });
     assert!(!instance::event_resets_device(memory_fault, endpoint_id));
 
     let exception = GpuHardwareException {
         endpoint_id: Some(endpoint_id),
-        reset_type: 1,
+        scope: GpuResetScope::Other,
         memory_lost: false,
-        reset_cause: 0,
+        cause: GpuResetCause::Hang,
     };
     assert!(instance::event_resets_device(
         DeviceEvent::GpuHardwareException(exception),

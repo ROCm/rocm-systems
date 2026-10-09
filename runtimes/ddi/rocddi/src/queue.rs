@@ -10,7 +10,7 @@
 mod types;
 pub use types::*;
 
-use crate::driver::{self, Driver, GpuDriver, UserQueueResource};
+use crate::driver::{self, Driver, UserQueueResource};
 use crate::gpu::GpuDevice;
 use crate::host_storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
@@ -43,92 +43,15 @@ pub unsafe fn ring_doorbell(address: usize, value: u64) {
 
 /// Driver-owned queue transport and cleanup state, independent of the
 /// selected GPU driver's queue representation.
-struct DriverQueue<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> {
+pub(crate) struct DriverQueue<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> {
     // Drop the queue resource before its shared driver instance.
     inner: Owned<Q>,
     driver: Shared<D>,
     info: QueueTransport,
 }
 
-/// Selects the concrete GPU queue owner without exposing its driver in `Queue`.
-enum QueueState {
-    LinuxKfd(DriverQueue<driver::KfdDriver, driver::KfdQueue>),
-}
-
-impl QueueState {
-    fn info(&self) -> QueueTransport {
-        match self {
-            Self::LinuxKfd(queue) => queue.info(),
-        }
-    }
-
-    fn map_device(&self, device: &crate::device::Device) -> Result<QueueTransport, Error> {
-        match (self, &device.driver_state) {
-            (Self::LinuxKfd(queue), driver::DeviceDriverState::LinuxKfd { driver, state }) => {
-                queue.map_device(driver, state)
-            }
-            #[cfg(test)]
-            _ => Err(Error::Operation {
-                kind: ErrorKind::Unsupported,
-                detail: "device driver cannot map this GPU queue",
-            }),
-        }
-    }
-
-    fn progress(&self) -> Result<(u64, u64), Error> {
-        match self {
-            Self::LinuxKfd(queue) => queue.progress(),
-        }
-    }
-
-    fn inactivate(&mut self) -> Result<(), Error> {
-        match self {
-            Self::LinuxKfd(queue) => queue.inactivate(),
-        }
-    }
-
-    fn set_priority(&mut self, priority: QueuePriority) -> Result<(), Error> {
-        match self {
-            Self::LinuxKfd(queue) => queue.set_priority(priority),
-        }
-    }
-
-    fn set_cu_mask(&mut self, mask: &[u32]) -> Result<(), Error> {
-        match self {
-            Self::LinuxKfd(queue) => queue.set_cu_mask(mask),
-        }
-    }
-
-    /// # Safety
-    /// The command processor has stopped the queue. The caller retains scratch
-    /// backing.
-    #[allow(unsafe_code)]
-    unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
-        match self {
-            // SAFETY: The caller preserves the stopped queue and backing.
-            Self::LinuxKfd(queue) => unsafe { queue.set_scratch(scratch) },
-        }
-    }
-
-    fn check(&self) -> Result<(), Error> {
-        match self {
-            Self::LinuxKfd(queue) => queue.check(),
-        }
-    }
-
-    /// # Safety
-    /// The caller has retired producers and transport mappings.
-    #[allow(unsafe_code)]
-    unsafe fn destroy(&mut self) -> Result<(), Error> {
-        match self {
-            // SAFETY: The caller has retired all queue reachability.
-            Self::LinuxKfd(queue) => unsafe { queue.destroy() },
-        }
-    }
-}
-
 impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<D, Q> {
-    fn new(driver: Shared<D>, inner: Owned<Q>) -> Self {
+    pub(crate) fn new(driver: Shared<D>, inner: Owned<Q>) -> Self {
         let info = inner.cached_info();
         Self {
             inner,
@@ -137,11 +60,11 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
         }
     }
 
-    fn info(&self) -> QueueTransport {
+    pub(crate) fn info(&self) -> QueueTransport {
         self.info
     }
 
-    fn map_device(
+    pub(crate) fn map_device(
         &self,
         device_driver: &Shared<D>,
         state: &D::DeviceState,
@@ -155,19 +78,19 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
         self.inner.map_device(state)
     }
 
-    fn progress(&self) -> Result<(u64, u64), Error> {
+    pub(crate) fn progress(&self) -> Result<(u64, u64), Error> {
         self.inner.progress()
     }
 
-    fn inactivate(&mut self) -> Result<(), Error> {
+    pub(crate) fn inactivate(&mut self) -> Result<(), Error> {
         self.inner.inactivate()
     }
 
-    fn set_priority(&mut self, priority: QueuePriority) -> Result<(), Error> {
+    pub(crate) fn set_priority(&mut self, priority: QueuePriority) -> Result<(), Error> {
         self.inner.set_priority(priority)
     }
 
-    fn set_cu_mask(&mut self, mask: &[u32]) -> Result<(), Error> {
+    pub(crate) fn set_cu_mask(&mut self, mask: &[u32]) -> Result<(), Error> {
         self.inner.set_cu_mask(mask)
     }
 
@@ -176,12 +99,12 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
     /// the new scratch backing and synchronizes its inactive signal until
     /// replacement or conclusive queue teardown.
     #[allow(unsafe_code)]
-    unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
+    pub(crate) unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
         // SAFETY: The caller keeps the stopped-queue and backing obligations.
         unsafe { self.inner.set_scratch(scratch) }
     }
 
-    fn check(&self) -> Result<(), Error> {
+    pub(crate) fn check(&self) -> Result<(), Error> {
         self.inner.check()
     }
 
@@ -189,7 +112,7 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
     /// Producers and public transport mappings must be retired before native
     /// destruction can release queue backing.
     #[allow(unsafe_code)]
-    unsafe fn destroy(&mut self) -> Result<(), Error> {
+    pub(crate) unsafe fn destroy(&mut self) -> Result<(), Error> {
         // SAFETY: The caller retired every producer and transport mapping.
         unsafe { self.inner.destroy() }
     }
@@ -201,7 +124,7 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
 /// Dropping a live queue without explicit destruction retains its native
 /// backing through process teardown because producers may still publish.
 pub struct Queue {
-    inner: QueueState,
+    pub(crate) inner: driver::QueueState,
 }
 
 /// Keep externally supplied backing alive if native queue creation may have
@@ -401,19 +324,9 @@ impl GpuDevice<'_> {
     pub unsafe fn create_queue(&self, desc: QueueRequest) -> Result<Queue, Error> {
         // SAFETY: The caller retains every raw address in the request, even
         // when native creation has an ambiguous result.
-        match &self.device.driver_state {
-            driver::DeviceDriverState::LinuxKfd { driver, state } => {
-                let inner = unsafe { driver.create_user_queue(state, desc) }?;
-                Ok(Queue {
-                    inner: QueueState::LinuxKfd(DriverQueue::new(driver.clone(), inner)),
-                })
-            }
-            #[cfg(test)]
-            driver::DeviceDriverState::Test { .. } => Err(Error::Operation {
-                kind: ErrorKind::Unsupported,
-                detail: "activated driver has no GPU queue capability",
-            }),
-        }
+        Ok(Queue {
+            inner: unsafe { self.device.driver_state.create_queue(desc)? },
+        })
     }
 
     /// Creates a queue while carrying every frontend-owned signal and scratch

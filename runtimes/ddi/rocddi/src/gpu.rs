@@ -106,7 +106,7 @@ pub mod event {
     /// Linux KFD event interoperability.
     #[cfg(target_os = "linux")]
     pub mod linux {
-        pub use crate::event::{
+        pub use crate::event::linux::{
             SignalEvent, SignalEventInfo, SignalEventPage, create_signal_event,
         };
     }
