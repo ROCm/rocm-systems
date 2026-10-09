@@ -251,10 +251,11 @@ TEST_P(DsGwsTest, DecodesWithoutGdsBit) {
 }
 
 // ---------------------------------------------------------------------------
-// Stateful GWS: dispatch-global rendezvous. These exercise the shared counter
+// Stateful GWS: device-global rendezvous. These exercise the shared counter
 // table through execute_instruction(), which runs the generated execute body
-// (decode rid, read count, call the CU hook). Resources are dispatch-global, so
-// a signal/arrival from any workgroup releases a waiter parked by another.
+// (decode rid, read count, call the CU hook). Resources are device-global and
+// persist across dispatches, so a signal/arrival from any wave -- any workgroup,
+// any CU, even a later dispatch -- releases a waiter parked by another.
 // ---------------------------------------------------------------------------
 
 // Decode one GWS op, publish @p count in the ADDR VGPR's first active lane, and
@@ -781,6 +782,146 @@ TEST_P(DsGwsTest, MixedBarrierSBarrierEscapeReleasesGwsWave) {
   for (int i = 0; i < 4 && wf0->state() == amdgpu::WfState::GWS_WAIT; ++i)
     cu->step();
   EXPECT_NE(wf0->state(), amdgpu::WfState::GWS_WAIT);
+}
+
+// GWS resources are device-global: the command processor scatters a dispatch's
+// workgroups across CUs, so a P parked on one CU must be released by a V issued
+// from a wave on a *different* CU. Both CUs share one GwsDevice (declared so it
+// outlives them; CUs unregister on destruction).
+TEST_P(DsGwsTest, CrossComputeUnitSemaphorePWakesOnCrossCuV) {
+  const auto arch = GetParam();
+  amdgpu::GpuMemory mem("ds_gws_xcu_mem");
+  amdgpu::L2Cache l2("ds_gws_xcu_l2");
+  amdgpu::GwsDevice gws;
+  auto cu0 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu1 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  cu0->set_gws_device(&gws);
+  cu1->set_gws_device(&gws);
+  auto decoder = Decoder::create(arch);
+  auto *consumer = cu0->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  auto *producer = cu1->dispatch_wf(/*wg_id=*/1, /*pc=*/0, 102, 16);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_NE(producer, nullptr);
+  cu0->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
+  cu1->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1);
+  for (auto *wf : {consumer, producer}) {
+    wf->set_exec(0x1);
+    wf->set_m0(0);
+  }
+
+  // Consumer parks on CU0's wave slot with no credit.
+  run_gws(*cu0, *decoder, arch, GwsOp::kSemaP, *consumer, /*count=*/0);
+  EXPECT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT);
+
+  // Producer signals from CU1: the shared store wakes the waiter parked on CU0.
+  run_gws(*cu1, *decoder, arch, GwsOp::kSemaV, *producer, /*count=*/0);
+  EXPECT_EQ(consumer->state(), amdgpu::WfState::RUNNING);
+
+  consumer->halt();
+  producer->halt();
+}
+
+// A GWS barrier programmed for two participants whose workgroups land on
+// different CUs rendezvouses across the CU boundary: the early arrival on CU0
+// parks and the releasing arrival on CU1 wakes it. The residency bound is summed
+// across both CUs (one resident wave each -> two participants).
+TEST_P(DsGwsTest, CrossComputeUnitBarrierReleasesBothParticipants) {
+  const auto arch = GetParam();
+  amdgpu::GpuMemory mem("ds_gws_xcubar_mem");
+  amdgpu::L2Cache l2("ds_gws_xcubar_l2");
+  amdgpu::GwsDevice gws;
+  auto cu0 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu1 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  cu0->set_gws_device(&gws);
+  cu1->set_gws_device(&gws);
+  auto decoder = Decoder::create(arch);
+  auto *wf0 = cu0->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  auto *wf1 = cu1->dispatch_wf(/*wg_id=*/1, /*pc=*/0, 102, 16);
+  ASSERT_NE(wf0, nullptr);
+  ASSERT_NE(wf1, nullptr);
+  cu0->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
+  cu1->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1);
+  wf0->set_exec(0x1);
+  wf0->set_m0(0);
+  wf1->set_exec(0x1);
+  wf1->set_m0(0);
+
+  // Two participants -> programmed value 1. wf0 (CU0) arrives first and parks.
+  run_gws(*cu0, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/1);
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
+
+  // wf1 (CU1) is the releasing arrival and wakes the peer parked on CU0.
+  run_gws(*cu1, *decoder, arch, GwsOp::kBarrier, *wf1, /*count=*/1);
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
+
+  wf0->halt();
+  wf1->halt();
+}
+
+// Device-global GWS state is not torn down when a workgroup retires: a V leaves a
+// credit, the signaling workgroup fully retires, and a later workgroup's P still
+// finds the persisted credit. The dispatch-keyed per-CU model lost it here.
+TEST_P(DsGwsTest, WorkgroupTurnoverSemaphoreCreditPersists) {
+  const auto arch = GetParam();
+  amdgpu::GpuMemory mem("ds_gws_turnover_mem");
+  amdgpu::L2Cache l2("ds_gws_turnover_l2");
+  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto decoder = Decoder::create(arch);
+  auto *producer = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  ASSERT_NE(producer, nullptr);
+  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
+  producer->set_exec(0x1);
+  producer->set_m0(0);
+
+  // Producer signals (no waiter), leaving one credit, then its workgroup retires.
+  run_gws(*cu, *decoder, arch, GwsOp::kSemaV, *producer, /*count=*/0);
+  producer->halt();
+
+  // A later workgroup's P consumes the credit that survived the retirement.
+  auto *consumer = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, 102, 16);
+  ASSERT_NE(consumer, nullptr);
+  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1);
+  consumer->set_exec(0x1);
+  consumer->set_m0(0);
+  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *consumer, /*count=*/0);
+  EXPECT_EQ(consumer->state(), amdgpu::WfState::RUNNING);
+
+  consumer->halt();
+}
+
+// A separate init kernel (one dispatch) seeds a semaphore credit that a later
+// dispatch's P consumes -- the CLR RunGwsInit / KFDGWSTest.Semaphore sequence.
+// GWS resources are keyed by process and persist across dispatches, so the seed
+// survives the init dispatch's retirement.
+TEST_P(DsGwsTest, SeparateInitDispatchSeedsLaterDispatch) {
+  const auto arch = GetParam();
+  amdgpu::GpuMemory mem("ds_gws_initdispatch_mem");
+  amdgpu::L2Cache l2("ds_gws_initdispatch_l2");
+  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto decoder = Decoder::create(arch);
+
+  // Init dispatch (dispatch_id 0) seeds one credit, then fully retires.
+  auto *initer = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  ASSERT_NE(initer, nullptr);
+  initer->set_dispatch_id(0);
+  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
+  initer->set_exec(0x1);
+  initer->set_m0(0);
+  run_gws(*cu, *decoder, arch, GwsOp::kInit, *initer, /*count=*/1);
+  initer->halt();
+
+  // Main dispatch (dispatch_id 1) consumes the credit seeded by the init dispatch.
+  auto *user = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  ASSERT_NE(user, nullptr);
+  user->set_dispatch_id(1);
+  cu->begin_workgroup(/*dispatch_id=*/1, /*wg_id=*/0, /*wf_count=*/1);
+  user->set_exec(0x1);
+  user->set_m0(0);
+  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *user, /*count=*/0);
+  EXPECT_EQ(user->state(), amdgpu::WfState::RUNNING);
+
+  user->halt();
 }
 
 // On CDNA2/CDNA3 the DS acc bit selects the AGPR bank for the count operand.
