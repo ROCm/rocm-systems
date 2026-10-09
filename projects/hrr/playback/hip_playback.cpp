@@ -47,6 +47,10 @@
 #include <process.h>  // _exit
 #else
 #include <unistd.h>   // _exit
+#include <sys/mman.h> // capture-address placement
+#ifndef MAP_FIXED_NOREPLACE
+#define MAP_FIXED_NOREPLACE 0x100000
+#endif
 #endif
 
 // Thread-local sequence ID — set by dispatch_event before calling any handler.
@@ -2350,8 +2354,9 @@ static size_t hrr_vmm_granularity(int device) {
 }
 
 // Reserve `mapped + gran` of VA, back only the first `mapped` bytes, and leave
-// the tail span unmapped. Any access past the mapped region traps.
-static hipError_t hrr_guard_map(size_t mapped, size_t gran, int device,
+// the tail span unmapped. Any access past the mapped region traps. A `hint`
+// must be met exactly: the runtime reserves elsewhere when it cannot.
+static hipError_t hrr_guard_map(size_t mapped, size_t gran, int device, void* hint,
                                 void** out_va, size_t* out_reserved,
                                 hipMemGenericAllocationHandle_t* out_handle) {
     const size_t reserved = mapped + gran;
@@ -2361,8 +2366,9 @@ static hipError_t hrr_guard_map(size_t mapped, size_t gran, int device,
     prop.location.id   = device;
 
     void* va = nullptr;
-    hipError_t r = hipMemAddressReserve(&va, reserved, 0, nullptr, 0);
+    hipError_t r = hipMemAddressReserve(&va, reserved, 0, hint, 0);
     if (r != hipSuccess || !va) return r != hipSuccess ? r : hipErrorOutOfMemory;
+    if (hint && va != hint) { (void)hipMemAddressFree(va, reserved); return hipErrorOutOfMemory; }
 
     hipMemGenericAllocationHandle_t handle{};
     r = hipMemCreate(&handle, mapped, &prop, 0);
@@ -2400,6 +2406,105 @@ static void hrr_guard_unmap(void* va, size_t mapped, size_t reserved,
     (void)hipMemAddressFree(va, reserved);
 }
 
+// ---- Capture-address placement ----------------------------------------------
+// hipMalloc and hipMallocAsync land at their recorded address, as a VMM mapping
+// in place of the PROT_NONE placeholder hrr_place_hold left there before
+// hipInit. See DESIGN.md, "GPU Allocator Address Non-Determinism".
+
+#ifndef _WIN32
+// MAP_FIXED_NOREPLACE fails rather than move; a kernel too old to know the flag
+// takes the address as a hint, hence the check.
+static bool hrr_place_mmap(uint64_t b, uint64_t e) {
+    void* want = reinterpret_cast<void*>(b);
+    void* p = mmap(want, e - b, PROT_NONE,
+                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, -1, 0);
+    if (p == MAP_FAILED) return false;
+    if (p != want) { munmap(p, e - b); return false; }
+    return true;
+}
+#endif
+
+void hrr_place_hold(PlaybackContext& ctx, const std::vector<HrrVaRange>& plan) {
+#ifndef _WIN32
+    std::lock_guard<std::mutex> lk(ctx.place_mutex);
+    for (const auto& r : plan)
+        if (hrr_place_mmap(r.base, r.end)) ctx.place_held.add(r.base, r.end);
+    ctx.place = true;
+#else
+    (void)ctx; (void)plan;
+#endif
+}
+
+// Map the granules holding `size` bytes at the recorded address `rec` (a
+// stream-ordered allocation need not start on one). False: allocate as before.
+static bool hrr_place_alloc(PlaybackContext& ctx, uint64_t rec, size_t size, void** out) {
+#ifndef _WIN32
+    if (!ctx.place) return false;
+    const int      dev  = hrr_current_device();
+    const size_t   gran = hrr_vmm_granularity(dev);
+    const uint64_t base = rec - rec % gran;
+    const uint64_t len  = (rec + size - base + gran - 1) / gran * gran;
+    bool held;
+    {
+        std::lock_guard<std::mutex> lk(ctx.place_mutex);
+        held = ctx.place_held.take(base, base + len);
+        if (held) munmap(reinterpret_cast<void*>(base), len);
+    }
+    void* va = nullptr;
+    size_t reserved = 0;
+    hipMemGenericAllocationHandle_t handle{};
+    if (held && hrr_guard_map(len, 0, dev, reinterpret_cast<void*>(base), &va, &reserved,
+                              &handle) == hipSuccess) {
+        {
+            std::unique_lock lk(ctx.map_mutex);
+            ctx.guard_allocs[reinterpret_cast<void*>(rec)] = {va, reserved, len, handle,
+                                                              /*placed=*/true};
+        }
+        ctx.placed++;
+        *out = reinterpret_cast<void*>(rec);
+        return true;
+    }
+    if (ctx.verbose)
+        fprintf(stderr, "[HRR] Placement: 0x%llx (%zu bytes) fell back: %s\n",
+                (unsigned long long)rec, size, held ? "not mapped there" : "not held");
+    if (held) {
+        (void)hipGetLastError();  // the recorded call succeeded
+        std::lock_guard<std::mutex> lk(ctx.place_mutex);
+        if (hrr_place_mmap(base, base + len)) ctx.place_held.add(base, base + len);
+    }
+    ctx.place_fell_back++;
+#else
+    (void)ctx; (void)rec; (void)size; (void)out;
+#endif
+    return false;
+}
+
+// A placed allocation was unmapped. Hold its range again for the next
+// allocation recorded there, then flush the GPU TLBs: on gfx1201 with Linux
+// 7.0.0-34's in-box amdgpu, hipMemUnmap leaves stale entries, and KFD flushes
+// them when it unmaps an ordinary allocation larger than ROCr's 2 MiB
+// fragments. Not while a graph capture is open, where hipMalloc is illegal.
+static void hrr_place_released(PlaybackContext& ctx, uint64_t b, uint64_t e) {
+#ifndef _WIN32
+    {
+        std::lock_guard<std::mutex> lk(ctx.place_mutex);
+        if (hrr_place_mmap(b, e)) ctx.place_held.add(b, e);
+    }
+    if (ctx.in_graph_capture) return;
+    void* p = nullptr;
+    if (hipMalloc(&p, size_t(4) << 20) == hipSuccess) (void)hipFree(p);
+    else (void)hipGetLastError();
+#else
+    (void)ctx; (void)b; (void)e;
+#endif
+}
+
+static bool hrr_is_placed(PlaybackContext& ctx, void* live) {
+    std::shared_lock lk(ctx.map_mutex);
+    auto it = ctx.guard_allocs.find(live);
+    return it != ctx.guard_allocs.end() && it->second.placed;
+}
+
 // ---- Segment-tail guard (--guard-segments) ----------------------------------
 
 static hipError_t hrr_guard_alloc(PlaybackContext& ctx, size_t want, void** out) {
@@ -2410,7 +2515,7 @@ static hipError_t hrr_guard_alloc(PlaybackContext& ctx, size_t want, void** out)
     void* va = nullptr;
     size_t reserved = 0;
     hipMemGenericAllocationHandle_t handle{};
-    hipError_t r = hrr_guard_map(mapped, gran, dev, &va, &reserved, &handle);
+    hipError_t r = hrr_guard_map(mapped, gran, dev, nullptr, &va, &reserved, &handle);
     if (r != hipSuccess) return r;
 
     {
@@ -2427,7 +2532,7 @@ static hipError_t hrr_guard_alloc(PlaybackContext& ctx, size_t want, void** out)
     return hipSuccess;
 }
 
-// Returns true if `live` was a guarded allocation and was torn down.
+// Returns true if `live` was a guarded or placed allocation and was torn down.
 static bool hrr_guard_free(PlaybackContext& ctx, void* live) {
     PlaybackContext::GuardAlloc g;
     {
@@ -2438,6 +2543,10 @@ static bool hrr_guard_free(PlaybackContext& ctx, void* live) {
         ctx.guard_allocs.erase(it);
     }
     hrr_guard_unmap(g.va_base, g.mapped, g.reserved, g.handle);
+    if (g.placed) {
+        const uint64_t b = reinterpret_cast<uint64_t>(g.va_base);
+        hrr_place_released(ctx, b, b + g.mapped);
+    }
     return true;
 }
 
@@ -2445,6 +2554,21 @@ void hrr_free_device_alloc(PlaybackContext& ctx, void* live) {
     if (!live) return;
     if (hrr_guard_free(ctx, live)) return;
     (void)hipFree(live);
+}
+
+void hrr_place_reset(PlaybackContext& ctx) {
+    std::vector<void*> placed;
+    {
+        std::shared_lock lk(ctx.map_mutex);
+        for (const auto& [va, g] : ctx.guard_allocs)
+            if (g.placed) placed.push_back(va);
+    }
+    for (void* va : placed) {
+        hrr_guard_free(ctx, va);
+        ctx.remove_alloc(reinterpret_cast<uint64_t>(va));  // placed: live == recorded
+    }
+    ctx.placed = 0;
+    ctx.place_fell_back = 0;
 }
 
 // ---- Block guard (--guard-blocks) -------------------------------------------
@@ -2491,7 +2615,7 @@ static hipError_t hrr_block_guard_alloc(PlaybackContext& ctx, uint64_t blk_base,
     void* va = nullptr;
     size_t reserved = 0;
     hipMemGenericAllocationHandle_t handle{};
-    hipError_t r = hrr_guard_map(mapped, gran, dev, &va, &reserved, &handle);
+    hipError_t r = hrr_guard_map(mapped, gran, dev, nullptr, &va, &reserved, &handle);
     if (r != hipSuccess) return r;
 
     g->va        = va;
@@ -2696,7 +2820,9 @@ static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
     // landing in whatever the driver placed next. Managed memory has no VMM
     // equivalent, and a failed reservation falls back to a plain allocation
     // rather than failing the replay.
-    if (!managed && ctx.guard_segments &&
+    if (!managed && hrr_place_alloc(ctx, a->ptr, pad_sz, &live)) {
+        r = hipSuccess;
+    } else if (!managed && ctx.guard_segments &&
         hrr_guard_alloc(ctx, pad_sz, &live) == hipSuccess) {
         r = hipSuccess;
     } else if (managed) {
@@ -2770,7 +2896,10 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     void* live = nullptr;
     size_t orig_sz = static_cast<size_t>(a->size);
     size_t pad_sz  = replay_padded_alloc_size(orig_sz);
-    hipError_t r = hipMallocAsync(&live, pad_sz, stream);
+    // Inside a graph capture this is a graph allocation node; not placed.
+    hipError_t r = !ctx.in_graph_capture && hrr_place_alloc(ctx, a->dev_ptr, pad_sz, &live)
+                       ? hipSuccess
+                       : hipMallocAsync(&live, pad_sz, stream);
     if (r == hipSuccess) {
         if (hrr_replay_zero_init() && !ctx.in_graph_capture)
             (void)hipMemsetAsync(live, 0, pad_sz, stream);
@@ -3026,6 +3155,15 @@ hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
     void*       live   = ctx.translate_ptr(a->dev_ptr);
     hipStream_t stream = ctx.translate_stream(a->stream);
     if (!live) return hipSuccess;
+    if (hrr_is_placed(ctx, live)) {
+        // Unmapped at once, after the work queued on its stream.
+        if (!ctx.in_graph_capture) {
+            if (hipError_t sr = hipStreamSynchronize(stream); sr != hipSuccess) return sr;
+        }
+        hrr_guard_free(ctx, live);
+        ctx.remove_alloc(a->dev_ptr);
+        return hipSuccess;
+    }
     hipError_t r = hipFreeAsync(live, stream);
     if (r == hipSuccess) ctx.remove_alloc(a->dev_ptr);
     return r;
