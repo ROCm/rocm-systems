@@ -844,7 +844,11 @@ def _validate_all_markers_nested(
 
 
 def clone_call_tree_node(node: CallTreeNode) -> CallTreeNode:
-    """Deep-copy a call-tree node, including descendants and kernel stats."""
+    """Copy a call-tree node's payload; children start empty.
+
+    Kernel stats, invocation ids, and argument variants are new objects.
+    Callers attach already-copied children after the clone.
+    """
     copied = CallTreeNode(
         name=node.name,
         kernels={
@@ -877,7 +881,6 @@ def clone_call_tree_node(node: CallTreeNode) -> CallTreeNode:
         args_blob: set(recorded_invocation_ids)
         for args_blob, recorded_invocation_ids in node.args_invocations.items()
     }
-    copied.children = [clone_call_tree_node(child) for child in node.children]
     return copied
 
 
