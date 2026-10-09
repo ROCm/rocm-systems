@@ -33,11 +33,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi node --tray` printing an empty section on hardware without UALoE**.  
   - The tray output was guarded on the retrieved dictionary being non-empty, so the `N/A` defaults next to it could never be reached. `NODE:` was emitted with no body, and `--json` returned `{"node": {}}`. All three output formats now report `MAX_ACC_PER_TRAY` and `TRAY_TYPE` as `N/A`.
 
-- **Fixed `amdsmi_get_afids_from_cper()` raising `TypeError` for every caller**.  
-  - The input was validated with `isinstance()` against a subscripted generic, which Python rejects regardless of the value passed. A list of CPER records is now accepted as documented.
+- **Fixed `amdsmi_get_afids_from_cper()` raising `TypeError` when passed a list of CPER records**.  
+  - The list branch called `isinstance()` with a subscripted generic, which Python rejects at runtime, so the documented list-of-dicts input always failed. `bytes` input was unaffected. Input that is neither `bytes` nor a list now raises `AmdSmiParameterException`.
 
-- **Fixed a segmentation fault in the DRM example on GPUs without accelerator partition support**.  
-  - The profile configuration was read into an uninitialized structure and its return value was never checked, so an unsupported query left `num_profiles` holding indeterminate data and the loop ran past the end of the profiles array. Unprivileged callers hit this on every GPU.
+- **Fixed a segmentation fault in the DRM example when run without root**.  
+  - `amdsmi_get_gpu_accelerator_partition_profile_config()` returns `AMDSMI_STATUS_NO_PERM` without filling its output, and the example read `num_profiles` from that uninitialized structure, so the profile loop ran past the end of the `profiles` array on every GPU. The structure is now zero-initialized and the loop runs only when the query succeeds.
 
 ## amd_smi_lib for ROCm 10.1.0
 
