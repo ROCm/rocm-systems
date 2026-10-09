@@ -17,6 +17,7 @@
 // reachable. No GPU, no librccl.so, no network.
 
 #include <gtest/gtest.h>
+#include <gtest/gtest-spi.h>
 
 #include <sched.h>
 
@@ -138,7 +139,24 @@ ncclResult_t ncclTopoGetLocalGinDevs(struct ncclComm*, int* localGinDevs, int* l
 
 namespace {
 
-struct FakeSlot {
+struct FakeGin;
+
+// The opaque handles production threads back into the plugin: the per-comm
+// instance (ginInstance), the listen comm, the coll comm and the GIN context.
+// Each one carries the fake it came from and the role it was handed out for, so
+// a handle that arrives at the wrong entry point fails the test instead of
+// being accepted silently.
+struct FakeHandle {
+  enum class Role { Instance, ListenComm, CollComm, GinCtx };
+  FakeHandle() = default;
+  FakeHandle(FakeGin* f, Role r) : fake(f), role(r) {}
+  FakeGin* fake = nullptr;
+  Role role = Role::Instance;
+};
+
+// The plugin's ginCtx: a tagged handle in its own right, plus the per-context
+// state a test reads back.
+struct FakeSlot : FakeHandle {
   int idx = 0;
   std::atomic<int> progressCalls{0};
   ncclResult_t progressResult = ncclSuccess;
@@ -204,130 +222,200 @@ struct FakeGin {
   std::vector<std::unique_ptr<FakeSlot>> slots;
   std::vector<void*> destroyed;
 
-  static FakeGin*& currentPtr() {
+  // --- the handles this fake hands out --------------------------------------
+  // The instance and listen comm are single objects (production keeps one of
+  // each per backend); coll comms are per connection, created on demand so a
+  // test that fills ginComms[] by hand uses the same tagged handles connect()
+  // would have returned.
+  FakeHandle instanceHandle{this, FakeHandle::Role::Instance};
+  FakeHandle listenHandle{this, FakeHandle::Role::ListenComm};
+  std::vector<std::unique_ptr<FakeHandle>> collHandles;
+
+  void* collCommHandle(int index) {
+    while (static_cast<int>(collHandles.size()) <= index) {
+      collHandles.emplace_back(new FakeHandle(this, FakeHandle::Role::CollComm));
+    }
+    return collHandles[index].get();
+  }
+
+  FakeSlot* addSlot() {
+    std::unique_ptr<FakeSlot> slot(new FakeSlot());
+    slot->fake = this;
+    slot->role = FakeHandle::Role::GinCtx;
+    slot->idx = static_cast<int>(slots.size());
+    FakeSlot* raw = slot.get();
+    slots.push_back(std::move(slot));
+    return raw;
+  }
+
+  // The vtable's devices() and getProperties() are handed no handle at all, so
+  // those two -- and only those two -- recover the fake from here. Every other
+  // entry point recovers it from the handle production passed back.
+  static FakeGin*& handlelessInstance() {
     static FakeGin* p = nullptr;
     return p;
   }
-  static FakeGin& current() { return *currentPtr(); }
-  static void setCurrent(FakeGin* p) { currentPtr() = p; }
+  static void setCurrent(FakeGin* p) { handlelessInstance() = p; }
 
-  FakeSlot* slotFor(void* ginCtx) {
-    return static_cast<FakeSlot*>(ginCtx);
-  }
-
-  static ncclResult_t Devices(int* ndev) {
-    FakeGin& self = current();
-    ++self.devicesCalls;
-    if (ndev) *ndev = self.ndev;
-    return self.failDevices.at(self.devicesCalls);
+  // --- test-facing behaviour: the logic lives here, in member functions ------
+  ncclResult_t devices(int* ndevOut) {
+    ++devicesCalls;
+    if (ndevOut) *ndevOut = ndev;
+    return failDevices.at(devicesCalls);
   }
   // A plugin that fails hands back no listenComm, so production's fail path sees
   // the NULL slot and skips closeListen for it.
-  static ncclResult_t Listen(void*, int, void*, void** listenComm) {
-    FakeGin& self = current();
-    ++self.listenCalls;
-    ncclResult_t ret = self.failListen.at(self.listenCalls);
-    if (ret == ncclSuccess) *listenComm = reinterpret_cast<void*>(0x11);
+  ncclResult_t listen(void** listenComm) {
+    ++listenCalls;
+    ncclResult_t ret = failListen.at(listenCalls);
+    if (ret == ncclSuccess) *listenComm = &listenHandle;
     return ret;
   }
-  static ncclResult_t GetProperties(int, ncclNetProperties_t* props) {
-    FakeGin& self = current();
-    ++self.getPropertiesCalls;
+  ncclResult_t getProperties(ncclNetProperties_t* props) {
+    ++getPropertiesCalls;
     if (props) std::memset(props, 0, sizeof(*props));
-    return self.failGetProperties.at(self.getPropertiesCalls);
+    return failGetProperties.at(getPropertiesCalls);
   }
-  static ncclResult_t Connect(void*, void**, int nRanks, int rank, void*, void** collComm) {
-    FakeGin& self = current();
-    ++self.connectCalls;
-    self.lastConnectNRanks = nRanks;
-    self.lastConnectRank = rank;
-    ncclResult_t ret = self.failConnect.at(self.connectCalls);
-    if (ret == ncclSuccess) *collComm = reinterpret_cast<void*>(0x22);
+  ncclResult_t connect(int nRanks, int rank, void** collComm) {
+    ++connectCalls;
+    lastConnectNRanks = nRanks;
+    lastConnectRank = rank;
+    ncclResult_t ret = failConnect.at(connectCalls);
+    // One handle per connection, so a later call can be traced to the
+    // connection it was made on.
+    if (ret == ncclSuccess) *collComm = collCommHandle(connectCalls - 1);
     return ret;
   }
-  static ncclResult_t CloseListen(void*) {
-    FakeGin& self = current();
-    ++self.closeListenCalls;
-    return self.failCloseListen.at(self.closeListenCalls);
+  ncclResult_t closeListen() {
+    ++closeListenCalls;
+    return failCloseListen.at(closeListenCalls);
   }
-  static ncclResult_t CloseColl(void*) {
-    FakeGin& self = current();
-    ++self.closeCollCalls;
-    return self.failCloseColl.at(self.closeCollCalls);
+  ncclResult_t closeColl() {
+    ++closeCollCalls;
+    return failCloseColl.at(closeCollCalls);
   }
 
-  static ncclResult_t CreateContext(void*, ncclGinConfig_t* config, void** ginCtx,
-                                    ncclNetDeviceHandle_t** devHandle) {
-    FakeGin& self = current();
-    ++self.createContextCalls;
-    if (config) self.createdConfigs.push_back(*config);
-    ncclResult_t ret = self.failCreateContext.at(self.createContextCalls);
+  ncclResult_t createContext(ncclGinConfig_t* config, void** ginCtx, ncclNetDeviceHandle_t** devHandle) {
+    ++createContextCalls;
+    if (config) createdConfigs.push_back(*config);
+    ncclResult_t ret = failCreateContext.at(createContextCalls);
     if (ret != ncclSuccess) return ret;
-    auto slot = std::make_unique<FakeSlot>();
-    slot->idx = static_cast<int>(self.slots.size());
+    FakeSlot* slot = addSlot();
     slot->handle.netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
-    slot->handle.handle = self.badContext == BadContext::NullHandle ? nullptr : slot.get();
-    slot->handle.needsProxyProgress = self.needsProxyProgress ? 1 : 0;
-    *devHandle = self.badContext == BadContext::NullDevHandle ? nullptr : &slot->handle;
-    *ginCtx = self.badContext == BadContext::NullGinCtx ? nullptr : slot.get();
-    self.slots.push_back(std::move(slot));
+    slot->handle.handle = badContext == BadContext::NullHandle ? nullptr : slot;
+    slot->handle.needsProxyProgress = needsProxyProgress ? 1 : 0;
+    *devHandle = badContext == BadContext::NullDevHandle ? nullptr : &slot->handle;
+    *ginCtx = badContext == BadContext::NullGinCtx ? nullptr : static_cast<FakeHandle*>(slot);
     return ncclSuccess;
   }
 
-  static ncclResult_t DestroyContext(void* ginCtx) {
-    FakeGin& self = current();
-    ++self.destroyCalls;
-    self.destroyed.push_back(ginCtx);
-    return self.failDestroyContext.at(self.destroyCalls);
+  ncclResult_t destroyContext(void* ginCtx) {
+    ++destroyCalls;
+    destroyed.push_back(ginCtx);
+    return failDestroyContext.at(destroyCalls);
   }
 
-  static ncclResult_t RegMrSym(void* collComm, void* address, size_t size, int memType, uint64_t mrFlags,
-                               void** mhandle, void** ginHandle) {
-    FakeGin& self = current();
-    self.regMrCalls.push_back(RegMrCall{collComm, address, size, memType, mrFlags});
-    const int callNumber = static_cast<int>(self.regMrCalls.size());
-    ncclResult_t ret = self.failRegMrSym.at(callNumber);
+  ncclResult_t regMrSym(void* collComm, void* address, size_t size, int memType, uint64_t mrFlags,
+                        void** mhandle, void** ginHandle) {
+    regMrCalls.push_back(RegMrCall{collComm, address, size, memType, mrFlags});
+    const int callNumber = static_cast<int>(regMrCalls.size());
+    ncclResult_t ret = failRegMrSym.at(callNumber);
     if (ret != ncclSuccess) return ret;
     // Distinct per call so a test can tell the slots apart.
     if (mhandle) {
-      *mhandle = self.regMrSymReturnsNullWindow ? nullptr
-                                                : reinterpret_cast<void*>(0x1000 + (uintptr_t)callNumber);
+      *mhandle = regMrSymReturnsNullWindow ? nullptr
+                                           : reinterpret_cast<void*>(0x1000 + (uintptr_t)callNumber);
     }
     if (ginHandle) *ginHandle = reinterpret_cast<void*>(0x2000 + (uintptr_t)callNumber);
     return ncclSuccess;
   }
 
-  static ncclResult_t DeregMrSym(void* collComm, void* mhandle) {
-    FakeGin& self = current();
-    self.deregMrCalls.emplace_back(collComm, mhandle);
-    return self.failDeregMrSym.at(static_cast<int>(self.deregMrCalls.size()));
+  ncclResult_t deregMrSym(void* collComm, void* mhandle) {
+    deregMrCalls.emplace_back(collComm, mhandle);
+    return failDeregMrSym.at(static_cast<int>(deregMrCalls.size()));
   }
 
-  static ncclResult_t Progress(void* ginCtx) {
-    FakeGin& self = current();
-    if (self.holdProgress.load(std::memory_order_acquire) != 0) {
-      self.progressHolders.fetch_add(1, std::memory_order_release);
-      while (self.holdProgress.load(std::memory_order_acquire) != 0) {
+  ncclResult_t progress(FakeSlot* slot) {
+    if (holdProgress.load(std::memory_order_acquire) != 0) {
+      progressHolders.fetch_add(1, std::memory_order_release);
+      while (holdProgress.load(std::memory_order_acquire) != 0) {
         std::this_thread::yield();
       }
-      self.progressHolders.fetch_sub(1, std::memory_order_release);
+      progressHolders.fetch_sub(1, std::memory_order_release);
     }
-    FakeSlot* slot = self.slotFor(ginCtx);
     slot->progressCalls.fetch_add(1);
-    self.totalProgressCalls.fetch_add(1);
+    totalProgressCalls.fetch_add(1);
     return slot->progressResult;
   }
 
-  static ncclResult_t QueryLastError(void*, bool* hasError) {
-    FakeGin& self = current();
-    ++self.queryCalls;
+  ncclResult_t queryLastError(bool* hasError) {
+    ++queryCalls;
     // A plugin that fails the query reports nothing, so the out-parameter is
     // left as production set it -- otherwise the fake, not production, would be
     // what clears it.
-    ncclResult_t ret = self.failQueryLastError.at(self.queryCalls);
+    ncclResult_t ret = failQueryLastError.at(queryCalls);
     if (ret != ncclSuccess) return ret;
-    if (hasError) *hasError = (self.queryErrorOnCall != 0 && self.queryCalls == self.queryErrorOnCall);
+    if (hasError) *hasError = (queryErrorOnCall != 0 && queryCalls == queryErrorOnCall);
     return ncclSuccess;
+  }
+
+  // --- handle recovery ------------------------------------------------------
+  // A handle that reaches an entry point it was not handed out for is a
+  // production bug the fake must not paper over, so the tag is checked on every
+  // recovery.
+  static FakeGin* fakeFrom(void* h, FakeHandle::Role want) {
+    auto* handle = static_cast<FakeHandle*>(h);
+    if (handle == nullptr) {
+      ADD_FAILURE() << "GIN plugin entry point called with a null handle";
+      return handlelessInstance();
+    }
+    EXPECT_EQ(static_cast<int>(want), static_cast<int>(handle->role))
+        << "GIN handle passed to the wrong plugin entry point";
+    return handle->fake;
+  }
+  static FakeSlot* slotFrom(void* ginCtx) {
+    fakeFrom(ginCtx, FakeHandle::Role::GinCtx);
+    return static_cast<FakeSlot*>(static_cast<FakeHandle*>(ginCtx));
+  }
+
+  // --- vtable-facing adapters: recover + forward, no logic ------------------
+  static ncclResult_t Devices(int* ndev) { return handlelessInstance()->devices(ndev); }
+  static ncclResult_t GetProperties(int, ncclNetProperties_t* props) {
+    return handlelessInstance()->getProperties(props);
+  }
+  static ncclResult_t Listen(void* ctx, int, void*, void** listenComm) {
+    return fakeFrom(ctx, FakeHandle::Role::Instance)->listen(listenComm);
+  }
+  static ncclResult_t Connect(void* ctx, void**, int nRanks, int rank, void* listenComm, void** collComm) {
+    fakeFrom(listenComm, FakeHandle::Role::ListenComm);
+    return fakeFrom(ctx, FakeHandle::Role::Instance)->connect(nRanks, rank, collComm);
+  }
+  static ncclResult_t CloseListen(void* listenComm) {
+    return fakeFrom(listenComm, FakeHandle::Role::ListenComm)->closeListen();
+  }
+  static ncclResult_t CloseColl(void* collComm) {
+    return fakeFrom(collComm, FakeHandle::Role::CollComm)->closeColl();
+  }
+  static ncclResult_t CreateContext(void* collComm, ncclGinConfig_t* config, void** ginCtx,
+                                    ncclNetDeviceHandle_t** devHandle) {
+    return fakeFrom(collComm, FakeHandle::Role::CollComm)->createContext(config, ginCtx, devHandle);
+  }
+  static ncclResult_t DestroyContext(void* ginCtx) {
+    return fakeFrom(ginCtx, FakeHandle::Role::GinCtx)->destroyContext(ginCtx);
+  }
+  static ncclResult_t RegMrSym(void* collComm, void* address, size_t size, int memType, uint64_t mrFlags,
+                               void** mhandle, void** ginHandle) {
+    return fakeFrom(collComm, FakeHandle::Role::CollComm)
+        ->regMrSym(collComm, address, size, memType, mrFlags, mhandle, ginHandle);
+  }
+  static ncclResult_t DeregMrSym(void* collComm, void* mhandle) {
+    return fakeFrom(collComm, FakeHandle::Role::CollComm)->deregMrSym(collComm, mhandle);
+  }
+  static ncclResult_t Progress(void* ginCtx) {
+    return fakeFrom(ginCtx, FakeHandle::Role::GinCtx)->progress(slotFrom(ginCtx));
+  }
+  static ncclResult_t QueryLastError(void* ginCtx, bool* hasError) {
+    return fakeFrom(ginCtx, FakeHandle::Role::GinCtx)->queryLastError(hasError);
   }
 
   ncclGin_t vtable() {
@@ -399,7 +487,7 @@ class GinHostFixture : public ::testing::Test {
     gs->backends[0].ncclGin = &vtable_;
     gs->backends[0].supportsStrongSignals = true;
     gs->backends[0].supportsVASignals = true;
-    gs->backends[0].ginInstance = reinterpret_cast<void*>(0x33);
+    gs->backends[0].ginInstance = &fake_.instanceHandle;
   }
 
   // ncclGinHostFinalize memsets the GIN state, which ends the C++ lifetime of
@@ -454,14 +542,12 @@ class GinHostFixture : public ::testing::Test {
     // The slot vector is how a test tells which context each ginProgress call
     // landed on.
     for (int i = 0; i < ginCommCount; i++) {
-      auto slot = std::make_unique<FakeSlot>();
-      slot->idx = i;
+      FakeSlot* slot = fake_.addSlot();
       slot->handle.netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
-      slot->handle.handle = slot.get();
+      slot->handle.handle = slot;
       slot->handle.needsProxyProgress = (i < static_cast<int>(needsProxy.size()) && needsProxy[i]) ? 1 : 0;
       dc->devHandles[i] = &slot->handle;
-      dc->ginCtx[i] = slot.get();
-      fake_.slots.push_back(std::move(slot));
+      dc->ginCtx[i] = static_cast<FakeHandle*>(slot);
     }
     gs->devComms = dc;
   }
@@ -482,6 +568,25 @@ void stopProgress(ncclGinState* gs) { gs->proxyThreadStopSignal.store(true); }
 // the stop signal is raised, so that is the stop action their joiner needs.
 JoinThreadsOnExit progressWorkers(ncclGinState* gs) {
   return JoinThreadsOnExit([gs] { stopProgress(gs); });
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// FakeGin's own contract -- the handles it hands out are tagged
+
+class GinHostFakeHandleMicrotest : public GinHostFixture {};
+
+// The point of tagging: every suite below trusts that a handle production
+// threads to the wrong entry point is caught, so that detection is pinned here
+// rather than assumed.
+TEST_F(GinHostFakeHandleMicrotest, FakeGin_HandleDeliveredToTheWrongEntryPoint_FailsTheTest) {
+  // EXPECT_NONFATAL_FAILURE's body may not name locals or fixture members, so
+  // what it calls is staged in statics first.
+  static ncclGin_t* plugin;
+  static void* collComm;
+  plugin = &vtable_;
+  collComm = fake_.collCommHandle(0);
+
+  EXPECT_NONFATAL_FAILURE(plugin->closeListen(collComm), "wrong plugin entry point");
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1117,7 +1222,7 @@ TEST_F(GinHostBackendSelectMicrotest, DevCommSetup_FirstBackendsSetupFails_Succe
   auto* gs = gin();
   gs->numActiveBackends = 2;
   gs->backends[1] = gs->backends[0];
-  gs->backends[1].ginComms[0] = reinterpret_cast<void*>(0x55);
+  gs->backends[1].ginComms[0] = fake_.collCommHandle(1);
   fake_.failCreateContext = {ncclSystemError, 1};  // only the first backend's attempt
 
   auto reqs = proxyReqs();
@@ -1144,7 +1249,7 @@ class GinHostDevCommSetupMicrotest : public GinHostFixture {
     gs->proxyNthreads = 1;
     gs->proxyThreadStopSignal.store(true);  // any spawned worker exits immediately
     gs->backends[0].ginCommCount = 1;
-    gs->backends[0].ginComms[0] = reinterpret_cast<void*>(0x44);
+    gs->backends[0].ginComms[0] = fake_.collCommHandle(0);
   }
 
   void TearDown() override {
@@ -1229,7 +1334,7 @@ TEST_F(GinHostDevCommSetupMicrotest, SetupWithBackend_BackendTypeWithoutAVersion
 // rounded up to a whole number per connection.
 TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_ContextCountNotAMultipleOfTheConnections_RoundsUpToWholeConnections) {
   gin()->backends[0].ginCommCount = 4;
-  for (int i = 1; i < 4; i++) gin()->backends[0].ginComms[i] = reinterpret_cast<void*>(0x44 + i);
+  for (int i = 1; i < 4; i++) gin()->backends[0].ginComms[i] = fake_.collCommHandle(i);
 
   auto reqs = proxyReqs();
   reqs.ginContextCount = 5;
@@ -1404,7 +1509,7 @@ TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_IncompleteContextFromThePlugin
 // left behind in the plugin.
 TEST_F(GinHostDevCommSetupMicrotest, SetupWithBackend_SecondCreateContextFails_DestroysTheEarlierContext) {
   gin()->backends[0].ginCommCount = 2;
-  gin()->backends[0].ginComms[1] = reinterpret_cast<void*>(0x45);
+  gin()->backends[0].ginComms[1] = fake_.collCommHandle(1);
   fake_.failCreateContext = {ncclSystemError, 2};
 
   auto reqs = proxyReqs();
@@ -1652,8 +1757,11 @@ class GinHostRegisterMicrotest : public GinHostFixture {
     }
   }
 
-  static void* collCommFor(int backendIdx, int commIdx) {
-    return reinterpret_cast<void*>(0x100 + 0x10 * (uintptr_t)backendIdx + (uintptr_t)commIdx);
+  // A tagged collComm handle per (backend, connection), from the fake's own
+  // pool, so the plugin entry points recover the fake from it the same way they
+  // would from a handle connect() handed out.
+  void* collCommFor(int backendIdx, int commIdx) {
+    return fake_.collCommHandle(backendIdx * NCCL_GIN_MAX_CONNECTIONS + commIdx);
   }
 
   ncclResult_t registerWindow(int winFlags = 0, bool multiSegment = false, int memType = NCCL_PTR_CUDA) {
