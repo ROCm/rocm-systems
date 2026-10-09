@@ -43,7 +43,8 @@ jobs:
   build-amdsmi-wheels:
     name: ${{matrix.target.name}}
     runs-on: ${{matrix.target.runs-on}}
-    container: ${{matrix.target.container}}
+    # Matrix images are digest-pinned; '' runs the job on the host.
+    container: ${{matrix.target.container}} # zizmor: ignore[unpinned-images]
     # Build directory for build_wheel.py's CMake tree. This mirrors
     # build_wheel.py's own default (/tmp/amdsmi-build); it is set explicitly
     # here so the build step and the SONAME conflict check, which reads both
@@ -58,7 +59,7 @@ jobs:
           - id: rpm
             name: Build RPM Wheels (AlmaLinux 8 / manylinux_2_28)
             runs-on: ubuntu-22.04
-            container: quay.io/pypa/manylinux_2_28_x86_64
+            container: quay.io/pypa/manylinux_2_28_x86_64@sha256:39df0042d5cc900b085aa25a0659368b42a0006c54c474299b785b44c1b4ff82 # latest
             python-bin: /opt/python/cp310-cp310/bin/python3
             os-variant: AlmaLinux8
             repair-flag: '--repair'
@@ -82,6 +83,7 @@ jobs:
           sparse-checkout: |
             projects/amdsmi
             .github/workflows
+          persist-credentials: false
 
       - name: Install Debian build prerequisites
         if: matrix.target.id == 'debian'

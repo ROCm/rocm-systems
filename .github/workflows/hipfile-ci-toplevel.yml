@@ -19,7 +19,7 @@ concurrency:
 
 permissions:
   contents: read
-  packages: write
+  packages: read
 
 jobs:
   Precheck:
@@ -86,6 +86,7 @@ jobs:
           sparse-checkout: |
             projects/hipfile
             .github/workflows
+          persist-credentials: false
       - name: Authenticating to GitHub Container Registry
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
@@ -193,7 +194,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.Precheck.outputs.build_CI_images_matrix) }}
-    uses: ./.github/workflows/hipfile-image-build.yml
+    uses: $/.github/workflows/hipfile-image-build.yml
     with:
       ci_image_name: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image }}
       ci_image_cache: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image_cache }}
@@ -223,7 +224,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.Precheck.outputs.ci_matrix) }}
-    uses: ./.github/workflows/hipfile-ci.yml
+    uses: $/.github/workflows/hipfile-ci.yml
     with:
       ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image }}
       ci_image_nvidia: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image_nvidia }}
@@ -250,7 +251,7 @@ jobs:
       contents: read
       packages: read
       security-events: write
-    uses: ./.github/workflows/hipfile-codeql.yml
+    uses: $/.github/workflows/hipfile-codeql.yml
     with:
       ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.14.0'].ci_image }}
 
@@ -267,7 +268,7 @@ jobs:
         )
       }}
     needs: [Precheck, build_CI_image]
-    uses: ./.github/workflows/hipfile-sanitizers.yml
+    uses: $/.github/workflows/hipfile-sanitizers.yml
     with:
       ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.14.0'].ci_image }}
 
@@ -284,7 +285,7 @@ jobs:
         )
       }}
     needs: [Precheck, build_CI_image]
-    uses: ./.github/workflows/hipfile-clang-tidy.yml
+    uses: $/.github/workflows/hipfile-clang-tidy.yml
     with:
       ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.14.0'].ci_image }}
 
@@ -302,6 +303,6 @@ jobs:
         )
       }}
     needs: [Precheck, build_CI_image]
-    uses: ./.github/workflows/hipfile-profiler-abi.yml
+    uses: $/.github/workflows/hipfile-profiler-abi.yml
     with:
       ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.14.0'].ci_image }}

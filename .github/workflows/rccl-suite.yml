@@ -173,6 +173,7 @@ jobs:
         with:
           repository: ROCm/TheRock
           ref: ${{ inputs.therock_ref }}
+          persist-credentials: false
 
       # rocm-systems sources for the compute-node build (rocSHMEM only used by gin).
       - name: Checkout rocm-systems
@@ -183,6 +184,7 @@ jobs:
             projects/rccl
             projects/rccl-tests
             projects/rocshmem
+          persist-credentials: false
 
       # find_latest_artifacts.py imports boto3, which the compute-node runners do
       # not provide system-wide. TheRock's setup_test_environment populates
@@ -256,7 +258,8 @@ jobs:
       - name: Provision ROCm from TheRock artifacts
         id: provision
         if: ${{ inputs.rocm_path == '' }}
-        uses: ./.github/actions/setup_test_environment
+        # TheRock's action, from the TheRock checkout at the workspace root.
+        uses: ./.github/actions/setup_test_environment # zizmor: ignore[self-repository]
         with:
           ARTIFACT_RUN_ID: ${{ steps.rocm_run.outputs.run_id }}
           ARTIFACT_GROUP: ${{ inputs.artifact_group }}

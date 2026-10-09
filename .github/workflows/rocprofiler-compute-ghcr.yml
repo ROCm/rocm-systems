@@ -37,9 +37,10 @@ jobs:
       gpu_list: ${{ steps.generate_containers_list.outputs.gpu_list }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: projects/rocprofiler-compute/docker
+          persist-credentials: false
 
       - name: Generate containers list
         working-directory: projects/rocprofiler-compute/docker
@@ -73,10 +74,11 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: projects/rocprofiler-compute
           submodules: recursive
+          persist-credentials: false
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
@@ -87,6 +89,8 @@ jobs:
 
       - name: Set up Docker variables
         id: setup_vars
+        env:
+          MATRIX_GPU: ${{ matrix.gpu }}
         run: |
           if [ ${{ matrix.system.distro }} = "opensuse" ]; then
             DISTRO_IMAGE="opensuse/leap"
@@ -104,8 +108,8 @@ jobs:
           fi
           echo "docker_file=${DOCKER_FILE}" >> $GITHUB_OUTPUT
 
-          if [ "${{ matrix.gpu }}" != "base" ]; then
-            echo "gpu_build_arg=GPU_TYPE=${{ matrix.gpu }}" >> $GITHUB_OUTPUT
+          if [ "${MATRIX_GPU}" != "base" ]; then
+            echo "gpu_build_arg=GPU_TYPE=${MATRIX_GPU}" >> $GITHUB_OUTPUT
           else
             echo "gpu_build_arg=" >> $GITHUB_OUTPUT
           fi

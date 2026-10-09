@@ -73,9 +73,10 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           sparse-checkout: .github/actions/checkout-coco-harness
+          persist-credentials: false
 
       - name: Checkout the coco harness
-        uses: ./.github/actions/checkout-coco-harness
+        uses: $/.github/actions/checkout-coco-harness
         with:
           ref: ${{ inputs.coco_ref || 'main' }}
           path: _coco
@@ -123,7 +124,7 @@ jobs:
   ruby-perf:
     name: 'Perf (ruby64-rccl-perf-nightly)'
     needs: setup
-    uses: ./.github/workflows/rccl-coco-run.yml
+    uses: $/.github/workflows/rccl-coco-run.yml
     permissions:
       contents: read
     secrets:
@@ -147,7 +148,7 @@ jobs:
   ruby-coverage:
     name: 'Coverage (ruby64-rccl-coverage-nightly)'
     needs: setup
-    uses: ./.github/workflows/rccl-coco-run.yml
+    uses: $/.github/workflows/rccl-coco-run.yml
     permissions:
       contents: read
     secrets:
@@ -170,7 +171,7 @@ jobs:
   ruby-unit:
     name: 'Unit (ruby64-rccl-unit-nightly)'
     needs: setup
-    uses: ./.github/workflows/rccl-coco-run.yml
+    uses: $/.github/workflows/rccl-coco-run.yml
     permissions:
       contents: read
     secrets:
@@ -198,9 +199,10 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           sparse-checkout: .github/actions/checkout-coco-harness
+          persist-credentials: false
 
       - name: Checkout the coco harness
-        uses: ./.github/actions/checkout-coco-harness
+        uses: $/.github/actions/checkout-coco-harness
         with:
           ref: ${{ inputs.coco_ref || 'main' }}
           path: _coco
@@ -232,7 +234,7 @@ jobs:
   oci-perf:
     name: 'Perf (oci-rccl-perf-nightly)'
     needs: oci-setup
-    uses: ./.github/workflows/rccl-coco-run.yml
+    uses: $/.github/workflows/rccl-coco-run.yml
     permissions:
       contents: read
     secrets:
@@ -251,7 +253,7 @@ jobs:
   oci-unit:
     name: 'Unit (oci-rccl-unit-nightly)'
     needs: oci-setup
-    uses: ./.github/workflows/rccl-coco-run.yml
+    uses: $/.github/workflows/rccl-coco-run.yml
     permissions:
       contents: read
     secrets:
@@ -270,7 +272,7 @@ jobs:
   oci-nixl:
     name: 'NIXL (oci-nixl-nightly)'
     needs: oci-setup
-    uses: ./.github/workflows/rccl-coco-run.yml
+    uses: $/.github/workflows/rccl-coco-run.yml
     permissions:
       contents: read
     secrets:

@@ -8,8 +8,10 @@ on:
   workflow_dispatch:  
   
 jobs:  
-  call-workflow:  
-    uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/rocm_ci.yml@mainline 
+  call-workflow: # zizmor: ignore[excessive-permissions]
+    # rocm_ci_infra is private: it is consumed at its mainline branch, and the
+    # token permissions and secrets it needs are defined in that repository.
+    uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/rocm_ci.yml@mainline # zizmor: ignore[unpinned-uses,secrets-inherit]
     secrets: inherit  
     with:  
       input_sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}  

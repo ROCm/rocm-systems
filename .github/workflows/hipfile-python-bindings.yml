@@ -74,6 +74,7 @@ jobs:
           sparse-checkout: |
             projects/hipfile
             .github/workflows
+          persist-credentials: false
       - name: Download hipFile runtime package
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -117,20 +118,19 @@ jobs:
       - name: Install the hipFile packages
         run: |
           docker exec \
+            -e "_AIS_PKG_MGR=${AIS_PKG_MGR}" \
+            -e "_PKG_FILENAME=${AIS_INPUT_HIPFILE_PKG_FILENAME}" \
+            -e "_PKG_DEV_FILENAME=${AIS_INPUT_HIPFILE_PKG_DEV_FILENAME}" \
             -t \
             -w /root \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              ${{
-                format(
-                  env.AIS_PKG_MGR == 'apt' && 'apt install -y "./{0}" "./{1}"' ||
-                    env.AIS_PKG_MGR == 'dnf' && 'dnf install -y --cacheonly "./{0}" "./{1}"' ||
-                    env.AIS_PKG_MGR == 'zypper' && 'zypper --no-refresh install -y --allow-unsigned-rpm "./{0}" "./{1}"' ||
-                    'echo "Unknown platform."; exit 1',
-                  inputs.ais_hipfile_pkg_filename,
-                  inputs.ais_hipfile_pkg_dev_filename
-                )
-              }}
+              case "${_AIS_PKG_MGR}" in
+                apt) apt install -y "./${_PKG_FILENAME}" "./${_PKG_DEV_FILENAME}" ;;
+                dnf) dnf install -y --cacheonly "./${_PKG_FILENAME}" "./${_PKG_DEV_FILENAME}" ;;
+                zypper) zypper --no-refresh install -y --allow-unsigned-rpm "./${_PKG_FILENAME}" "./${_PKG_DEV_FILENAME}" ;;
+                *) echo "Unknown platform."; exit 1 ;;
+              esac
               ldconfig
             '
       - name: Create Python virtual environment and install build dependencies
@@ -169,13 +169,15 @@ jobs:
               echo "HIPFILE_PYTHON_SDIST_FILENAME=${NEW_FILENAME}" >> "${AIS_GITHUB_OUTPUT}"
             '
       - name: Install hipFile Python sdist into virtual environment
+        env:
+          STEPS_SDIST_METADATA_OUTPUTS_HIPFILE_PYTHON_SDIST_FILENAME: ${{ steps.sdist-metadata.outputs.HIPFILE_PYTHON_SDIST_FILENAME }}
         run: |
           docker exec \
             -t \
             -w /ais/rocm-systems/projects/hipfile \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              .venv/bin/pip install ./python/dist/${{ steps.sdist-metadata.outputs.HIPFILE_PYTHON_SDIST_FILENAME }}
+              .venv/bin/pip install ./python/dist/${STEPS_SDIST_METADATA_OUTPUTS_HIPFILE_PYTHON_SDIST_FILENAME}
             '
       - name: Verify hipFile Python package installation
         run: |
@@ -196,9 +198,11 @@ jobs:
               .venv/bin/python -m pytest python/tests
             '
       - name: Copy sdist out of the container
+        env:
+          STEPS_SDIST_METADATA_OUTPUTS_HIPFILE_PYTHON_SDIST_FILENAME: ${{ steps.sdist-metadata.outputs.HIPFILE_PYTHON_SDIST_FILENAME }}
         run: |
           docker cp \
-            "${AIS_CONTAINER_NAME}:/ais/rocm-systems/projects/hipfile/python/dist/${{ steps.sdist-metadata.outputs.HIPFILE_PYTHON_SDIST_FILENAME }}" \
+            "${AIS_CONTAINER_NAME}:/ais/rocm-systems/projects/hipfile/python/dist/${STEPS_SDIST_METADATA_OUTPUTS_HIPFILE_PYTHON_SDIST_FILENAME}" \
             ${GITHUB_WORKSPACE}
       - name: Upload hipFile Python sdist as an artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

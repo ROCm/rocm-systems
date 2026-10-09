@@ -49,7 +49,7 @@ jobs:
   # device-API suite on ruby.
   device-api:
     name: device-API
-    uses: ./.github/workflows/rccl-suite.yml
+    uses: $/.github/workflows/rccl-suite.yml
     permissions:
       contents: read
       id-token: write
@@ -70,7 +70,7 @@ jobs:
   # it is validated on the runner.
   rccl-ext-plugins:
     name: rccl-ext-plugins
-    uses: ./.github/workflows/rccl-suite.yml
+    uses: $/.github/workflows/rccl-suite.yml
     permissions:
       contents: read
       id-token: write
@@ -91,7 +91,7 @@ jobs:
   # gin-build-gate below. AICOMRCCL-1478: enable full gating once GIN lands in develop.
   gin:
     name: GIN
-    uses: ./.github/workflows/rccl-suite.yml
+    uses: $/.github/workflows/rccl-suite.yml
     permissions:
       contents: read
       id-token: write

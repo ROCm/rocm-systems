@@ -41,6 +41,7 @@ jobs:
             projects/cuid/lib/src/sha256.cc
             projects/rocprofiler-sdk/source/lib/common/sha256.cpp
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Check for sha256 drift
         run: python3 projects/cuid/tests/check_sha256_drift.py
@@ -66,7 +67,8 @@ jobs:
           - AzureLinux3
           - AlmaLinux8
     container:
-      image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
+      # Image is set by the <os>_DOCKER_IMAGE repository variable.
+      image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }} # zizmor: ignore[unpinned-images]
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
@@ -76,6 +78,8 @@ jobs:
         run: find "$GITHUB_WORKSPACE" -mindepth 1 -delete
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set Project Directory
         run: |
@@ -101,13 +105,13 @@ jobs:
           echo 'Building on ${{ matrix.os }}'
 
           # Ensure build directory exists
-          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
+          BUILD_FOLDER="${PROJECT_DIR}/build"
           rm -rf $BUILD_FOLDER
           mkdir -p $BUILD_FOLDER
           cd $BUILD_FOLDER
 
           # Configure
-          cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DBUILD_DAEMON=OFF
+          cmake "${PROJECT_DIR}" -DBUILD_TESTS=ON -DBUILD_DAEMON=OFF
 
           # Build
           make -j $(nproc)
@@ -162,7 +166,8 @@ jobs:
       - ${{ vars.RUNNER_TYPE }}
     container:
       # this runs once rather than across full build-and-test matrix
-      image: ${{ vars.Ubuntu22_DOCKER_IMAGE }}
+      # Image is set by the Ubuntu22_DOCKER_IMAGE repository variable.
+      image: ${{ vars.Ubuntu22_DOCKER_IMAGE }} # zizmor: ignore[unpinned-images]
       options: --rm -u root
 
     steps:
@@ -170,6 +175,8 @@ jobs:
         run: find "$GITHUB_WORKSPACE" -mindepth 1 -delete
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set Project Directory
         run: |
@@ -194,12 +201,12 @@ jobs:
           set -e
 
           # Build daemon so its sources land in compile_commands.json
-          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
+          BUILD_FOLDER="${PROJECT_DIR}/build"
           rm -rf $BUILD_FOLDER
           mkdir -p $BUILD_FOLDER
           cd $BUILD_FOLDER
 
-          cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DBUILD_DAEMON=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake "${PROJECT_DIR}" -DBUILD_TESTS=ON -DBUILD_DAEMON=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
           make -j $(nproc)
 
       - name: Run clang-tidy
@@ -210,6 +217,6 @@ jobs:
             apt-get update && apt-get install -y clang-tidy
           fi
 
-          cd ${{ env.PROJECT_DIR }}
+          cd "${PROJECT_DIR}"
           # .clang-tidy at the project root is picked up per-file automatically.
           clang-tidy -p build $(find lib/src cli daemon -name '*.cc')

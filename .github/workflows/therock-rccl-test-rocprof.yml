@@ -78,15 +78,18 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           ref: a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05 # 2026-09-21
+          persist-credentials: false
 
       - name: Checkout rocm-systems scripts
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           sparse-checkout: projects/rccl/ci/scripts
           path: "rocm-systems"
+          persist-credentials: false
 
       - name: Run setup test environment
-        uses: './.github/actions/setup_test_environment'
+        # TheRock's action, from the TheRock checkout at the workspace root.
+        uses: './.github/actions/setup_test_environment' # zizmor: ignore[self-repository]
         with:
           ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
           ARTIFACT_GROUP: ${{ inputs.artifact_group }}
@@ -118,7 +121,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: rocprof-smoke-test-results-${{ inputs.amdgpu_families }}
           path: rocprof_test_results.txt

@@ -25,7 +25,7 @@ jobs:
 
     steps:
       - name: Clean up GHCR rocprofiler-${{ matrix.os }} Docker CI Images
-        uses: dataaxiom/ghcr-cleanup-action@v1
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
         with:
           package: rocprofiler-${{ matrix.os }}
           older-than: 7 days

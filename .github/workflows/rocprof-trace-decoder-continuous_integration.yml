@@ -68,10 +68,11 @@ jobs:
         with:
           sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
           set-safe-directory: true
+          persist-credentials: false
 
       - name: Resolve runner labels
         id: runner
-        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+        uses: $/.github/actions/rocprofiler-sdk-util/resolve-ci-config
 
   build-and-test-ubuntu:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
@@ -92,10 +93,11 @@ jobs:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       with:
         sparse-checkout: projects/rocprof-trace-decoder
         set-safe-directory: true
+        persist-credentials: false
 
     - name: Install dependencies
       timeout-minutes: 10
@@ -171,7 +173,7 @@ jobs:
 
     steps:
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             .github/actions/rocprofiler-sdk-util
@@ -185,6 +187,7 @@ jobs:
             projects/hrr
           submodules: false
           set-safe-directory: true
+          persist-credentials: false
 
       - name: Compute submodule cache key
         id: submods
@@ -201,7 +204,7 @@ jobs:
           { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Restore submodule cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ${{ steps.submods.outputs.paths }}
@@ -226,7 +229,7 @@ jobs:
           python3 -m pip install --upgrade cmake==${{ env.CMAKE_VERSION_RPM }}
 
       - name: Build ROCProfiler SDK Dependencies (installs trace-decoder under test)
-        uses: ./.github/actions/rocprofiler-sdk-util
+        uses: $/.github/actions/rocprofiler-sdk-util
         with:
           rocm-path: ${{ env.ROCM_PATH }}
           python-venv-path: ${{ env.PYTHON_VENV_PATH }}
@@ -244,14 +247,16 @@ jobs:
         timeout-minutes: 30
         shell: bash
         working-directory: projects/rocprofiler-sdk
+        env:
+          GFX94X_RUNNER: ${{ needs.ci_config.outputs.gfx94x_runner }}
         run: |
           export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
           source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
           python3 ./source/scripts/run-ci.py -B build \
-            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-trace-decoder-core \
+            --name ${{ github.repository }}-${GITHUB_REF_NAME}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-trace-decoder-core \
             --mode ${CI_MODE} \
             --build-jobs 16 \
-            --site ${{ needs.ci_config.outputs.gfx94x_runner }} \
+            --site ${GFX94X_RUNNER} \
             --gpu-targets ${{ env.GPU_TARGETS }} \
             --run-attempt ${{ github.run_attempt }} \
             -- \

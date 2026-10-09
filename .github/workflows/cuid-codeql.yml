@@ -27,7 +27,8 @@ jobs:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
     container:
-      image: ${{ vars.Ubuntu22_DOCKER_IMAGE }}
+      # Image is set by the Ubuntu22_DOCKER_IMAGE repository variable.
+      image: ${{ vars.Ubuntu22_DOCKER_IMAGE }} # zizmor: ignore[unpinned-images]
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
     permissions:
       actions: read
@@ -42,6 +43,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       # AMD's custom query pack (amd-sit-sast-scv/cpp-queries) ships inside this bundle --
       # no GHCR login or token needed to pull it.

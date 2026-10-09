@@ -59,6 +59,8 @@ jobs:
     steps:
       - name: "Checking out repository for rocm-systems"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
 
       - name: Checkout TheRock repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -66,6 +68,7 @@ jobs:
           repository: "ROCm/TheRock"
           path: "TheRock"
           ref: a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05 # 2026-09-21
+          persist-credentials: false
 
       - name: Install python deps
         run: |
@@ -144,7 +147,7 @@ jobs:
         run: |
           python3 TheRock/build_tools/github_actions/post_build_upload.py \
             --run-id ${{ github.run_id }} \
-            --artifact-group ${{ env.AMDGPU_FAMILIES }} \
+            --artifact-group "${AMDGPU_FAMILIES}" \
             --build-dir TheRock/build \
             --upload
 
@@ -170,7 +173,7 @@ jobs:
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
     if: ${{ (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     needs: [therock-build-linux]
-    uses: ./.github/workflows/therock-rccl-test-packages-single-node.yml
+    uses: $/.github/workflows/therock-rccl-test-packages-single-node.yml
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
@@ -181,7 +184,7 @@ jobs:
     name: "Test PyTorch distributed (scheduled)"
     if: ${{ (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
     needs: [therock-build-linux]
-    uses: ./.github/workflows/therock-rccl-test-pytorch-distributed.yml
+    uses: $/.github/workflows/therock-rccl-test-pytorch-distributed.yml
     secrets:
       RCCL_CI_TEAMS_WEBHOOK: ${{ secrets.RCCL_CI_TEAMS_WEBHOOK }}
     with:
@@ -197,7 +200,7 @@ jobs:
     name: "Test JAX collective (scheduled)"
     if: ${{ (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
     needs: [therock-build-linux]
-    uses: ./.github/workflows/therock-rccl-test-jax-collective.yml
+    uses: $/.github/workflows/therock-rccl-test-jax-collective.yml
     secrets:
       RCCL_CI_TEAMS_WEBHOOK: ${{ secrets.RCCL_CI_TEAMS_WEBHOOK }}
     with:
@@ -212,7 +215,7 @@ jobs:
     name: "Test rocprofv3 smoke"
     if: ${{ (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     needs: [therock-build-linux]
-    uses: ./.github/workflows/therock-rccl-test-rocprof.yml
+    uses: $/.github/workflows/therock-rccl-test-rocprof.yml
     secrets:
       RCCL_CI_TEAMS_WEBHOOK: ${{ secrets.RCCL_CI_TEAMS_WEBHOOK }}
     with:
@@ -230,8 +233,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ./.github/workflows/therock-rccl-test-madengine.yml
-    secrets: inherit
+    uses: $/.github/workflows/therock-rccl-test-madengine.yml
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}

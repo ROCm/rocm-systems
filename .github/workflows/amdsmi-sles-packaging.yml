@@ -69,6 +69,7 @@ jobs:
           sparse-checkout: |
             projects/amdsmi
             .github/workflows
+          persist-credentials: false
 
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"

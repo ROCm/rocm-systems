@@ -4,7 +4,8 @@ run-name: Update latest hipFile CI image
 env:
   AIS_DOCKER_REGISTRY: ghcr.io/${{ github.repository_owner }}/hipfile
 
-on:
+# Jobs run only for merged PRs, so the checkout is trusted develop content.
+on: # zizmor: ignore[dangerous-triggers]
   pull_request_target: # A.K.A. This is a privileged action. See `pull_request`.
     types:
       - closed # CAUTION: Includes un-merged PRs
@@ -64,6 +65,7 @@ jobs:
           sparse-checkout: |
             projects/hipfile
             .github/workflows
+          persist-credentials: false
 
       - name: Authenticating to GitHub Container Registry.
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
@@ -87,17 +89,18 @@ jobs:
         # for 'null'.
         # See: https://docs.github.com/en/actions/reference/workflows-and-actions/expressions
         # for how null gets converted when compared to non-null, and converted into a string.
+        env:
+          PULL_FROM_CACHE: ${{ format('{0}', inputs.pull_from_cache) == '' || inputs.pull_from_cache }}
+          CI_IMAGE: ${{ steps.ci-image.outputs.AIS_CI_IMAGE }}
+          CI_IMAGE_NVIDIA: ${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}
         run: |
-          echo "CACHE_FROM_CMD=${{
-            ( format('{0}', inputs.pull_from_cache) == '' || inputs.pull_from_cache ) &&
-            format('--cache-from=type=registry,ref=\"{0}-cache\"', steps.ci-image.outputs.AIS_CI_IMAGE) ||
-            ''
-          }}" >> "${GITHUB_OUTPUT}"
-          echo "CACHE_FROM_CMD_NVIDIA=${{
-            ( format('{0}', inputs.pull_from_cache) == '' || inputs.pull_from_cache ) &&
-            format('--cache-from=type=registry,ref=\"{0}-cache\"', steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA) ||
-            ''
-          }}" >> "${GITHUB_OUTPUT}"
+          if [[ "${PULL_FROM_CACHE}" == "true" ]]; then
+            echo "CACHE_FROM_CMD=--cache-from=type=registry,ref=\"${CI_IMAGE}-cache\"" >> "${GITHUB_OUTPUT}"
+            echo "CACHE_FROM_CMD_NVIDIA=--cache-from=type=registry,ref=\"${CI_IMAGE_NVIDIA}-cache\"" >> "${GITHUB_OUTPUT}"
+          else
+            echo "CACHE_FROM_CMD=" >> "${GITHUB_OUTPUT}"
+            echo "CACHE_FROM_CMD_NVIDIA=" >> "${GITHUB_OUTPUT}"
+          fi
 
       - name: Setup Docker Builder
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
@@ -107,25 +110,31 @@ jobs:
           cache-binary: false # True uses the GHA Cache Backend
 
       - name: Build & Push latest base image for AIS CI
+        env:
+          STEPS_CI_IMAGE_OUTPUTS_AIS_CI_IMAGE: ${{ steps.ci-image.outputs.AIS_CI_IMAGE }}
+          STEPS_USE_CACHE_OUTPUTS_CACHE_FROM_CMD: ${{ steps.use-cache.outputs.CACHE_FROM_CMD }}
         run: |
           docker buildx build \
             -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
             --target base \
             --build-arg ROCM_VERSION=${{ matrix.rocm_versions }} \
-            --cache-to=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_IMAGE }}-cache" \
-            ${{ steps.use-cache.outputs.CACHE_FROM_CMD }} \
+            --cache-to=type=registry,ref="${STEPS_CI_IMAGE_OUTPUTS_AIS_CI_IMAGE}-cache" \
+            ${STEPS_USE_CACHE_OUTPUTS_CACHE_FROM_CMD} \
             --push \
-            -t "${{ steps.ci-image.outputs.AIS_CI_IMAGE }}" \
+            -t "${STEPS_CI_IMAGE_OUTPUTS_AIS_CI_IMAGE}" \
             "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"
 
       - name: Build & Push latest NVIDIA image for AIS CI
+        env:
+          STEPS_CI_IMAGE_OUTPUTS_AIS_CI_IMAGE_NVIDIA: ${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}
+          STEPS_USE_CACHE_OUTPUTS_CACHE_FROM_CMD_NVIDIA: ${{ steps.use-cache.outputs.CACHE_FROM_CMD_NVIDIA }}
         run: |
           docker buildx build \
             -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
             --target nvidia \
             --build-arg ROCM_VERSION=${{ matrix.rocm_versions }} \
-            --cache-to=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}-cache" \
-            ${{ steps.use-cache.outputs.CACHE_FROM_CMD_NVIDIA }} \
+            --cache-to=type=registry,ref="${STEPS_CI_IMAGE_OUTPUTS_AIS_CI_IMAGE_NVIDIA}-cache" \
+            ${STEPS_USE_CACHE_OUTPUTS_CACHE_FROM_CMD_NVIDIA} \
             --push \
-            -t "${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}" \
+            -t "${STEPS_CI_IMAGE_OUTPUTS_AIS_CI_IMAGE_NVIDIA}" \
             "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"

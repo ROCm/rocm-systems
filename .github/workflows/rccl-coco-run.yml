@@ -133,12 +133,13 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           sparse-checkout: .github/actions/checkout-coco-harness
+          persist-credentials: false
 
       # The harness itself, cloned rather than vendored so a run can pin any
       # coco ref without touching this repo. Mints its own scoped token; see
       # .github/actions/checkout-coco-harness.
       - name: Checkout the coco harness
-        uses: ./.github/actions/checkout-coco-harness
+        uses: $/.github/actions/checkout-coco-harness
         with:
           ref: ${{ inputs.coco_ref }}
           path: ${{ env.COCO_DIR }}/tRCCL

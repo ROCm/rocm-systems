@@ -29,13 +29,14 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
           filter: blob:none
           sparse-checkout: |
             projects/rocprofiler-systems
             .gitmodules
+          persist-credentials: false
 
       - name: Init rocprofiler-systems submodules
         run: |
@@ -64,7 +65,7 @@ jobs:
         working-directory: projects/rocprofiler-systems
         run: |
           python3 scripts/clang-tidy-check.py \
-            --base "origin/${{ github.base_ref }}" \
+            --base "origin/${GITHUB_BASE_REF}" \
             --build-path build/debug-mpi \
             -j $(nproc) \
             --timeout 600

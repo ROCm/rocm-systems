@@ -15,3 +15,5 @@ updates:
       - "ci:docs-only"
     reviewers:
       - "samjwu"
+    cooldown:
+      default-days: 7

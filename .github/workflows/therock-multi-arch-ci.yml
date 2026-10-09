@@ -116,6 +116,7 @@ jobs:
             .github/repos-config.json
             .github/scripts/compute_build_stages.py
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Checkout TheRock for configure script
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -133,6 +134,7 @@ jobs:
             build_tools/project_mappings.json
             build_tools/artifact_subprojects.json
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Configure CI for pull request or push
         id: configure-pr
@@ -161,10 +163,13 @@ jobs:
       # / run_all_tests CI-infra change).
       - name: Compute build-stage allowlist
         id: build_stages
+        env:
+          CHANGED_PROJECTS: ${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}
+          RUN_ALL_TESTS: ${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}
         run: |
           python3 .github/scripts/compute_build_stages.py \
-            --changed-projects "${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}" \
-            --run-all-tests "${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}" \
+            --changed-projects "${CHANGED_PROJECTS}" \
+            --run-all-tests "${RUN_ALL_TESTS}" \
             --therock-path "_therock"
 
   setup:
@@ -233,7 +238,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      changed_projects: ${{ needs.configure.outputs.run_all_tests != 'true' && needs.configure.outputs.changed_projects || '' }}
       repository: ROCm/TheRock
       ref: a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05 # 2026-09-21
     permissions:
@@ -257,7 +262,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      changed_projects: ${{ needs.configure.outputs.run_all_tests != 'true' && needs.configure.outputs.changed_projects || '' }}
       repository: ROCm/TheRock
       ref: a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05 # 2026-09-21
     permissions:
@@ -281,10 +286,12 @@ jobs:
           ref: a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05 # 2026-09-21
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       - name: Evaluate workflow results
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
           python3 build_tools/github_actions/workflow_summary.py \
-            --needs-json '${{ toJSON(needs) }}'
+            --needs-json "${NEEDS_JSON}"

@@ -85,17 +85,21 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           ref: a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05 # 2026-09-21
+          persist-credentials: false
 
       - name: Checkout rocm-systems scripts
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           sparse-checkout: projects/rccl/ci/scripts
           path: rocm-systems
+          persist-credentials: false
 
       - name: Validate arch
+        env:
+          AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
         run: |
-          if [ "${{ inputs.amdgpu_families }}" != "gfx950-dcgpu" ]; then
-            echo "Unsupported arch for MADEngine: ${{ inputs.amdgpu_families }}"
+          if [ "${AMDGPU_FAMILIES}" != "gfx950-dcgpu" ]; then
+            echo "Unsupported arch for MADEngine: ${AMDGPU_FAMILIES}"
             exit 1
           fi
 
@@ -135,18 +139,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
+          ARTIFACT_GROUP: ${{ inputs.artifact_group }}
         run: |
           run_id="$(python3 -c "
-          import sys, contextlib
+          import os, sys, contextlib
           sys.path.insert(0, 'build_tools')
           from find_latest_artifacts import find_latest_artifacts
           with contextlib.redirect_stdout(sys.stderr):
               results = find_latest_artifacts(
-                  artifact_groups=['${{ inputs.artifact_group }}'],
+                  artifact_groups=[os.environ['ARTIFACT_GROUP']],
                   verbose=True,
               )
           if not results:
-              print('No artifacts found for ${{ inputs.artifact_group }}', file=sys.stderr)
+              print('No artifacts found for ' + os.environ['ARTIFACT_GROUP'], file=sys.stderr)
               sys.exit(1)
           print(results[0].workflow_run_id)
           ")"
@@ -154,10 +159,12 @@ jobs:
           echo "ARTIFACT_RUN_ID=${run_id}" >> $GITHUB_ENV
 
       - name: Fetch RCCL artifacts
+        env:
+          ARTIFACT_GROUP: ${{ inputs.artifact_group }}
         run: |
           python3 build_tools/install_rocm_from_artifacts.py \
             --run-id="${ARTIFACT_RUN_ID}" \
-            --artifact-group="${{ inputs.artifact_group }}" \
+            --artifact-group="${ARTIFACT_GROUP}" \
             --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
             --rccl
 
@@ -166,23 +173,27 @@ jobs:
         env:
           NCCL_DEBUG: WARN
           MAD_SECRETS_HFTOKEN: ${{ secrets.HF_TOKEN || '' }}
+          NOTIFY_EMAIL: ${{ inputs.notify_email }}
+          TEAMS_WEBHOOK: ${{ inputs.teams_webhook }}
+          WORKLOAD_NAME: ${{ inputs.workload }}
+          NUM_NODES: ${{ inputs.nodes }}
         run: |
           source "${WORK_DIR}/venv/bin/activate"
           export PYTHONPATH="rocm-systems/projects/rccl/ci/scripts:${PYTHONPATH}"
 
           NOTIFY_ARGS=""
-          if [ -n "${{ inputs.notify_email }}" ]; then
-            NOTIFY_ARGS="$NOTIFY_ARGS --notify-email ${{ inputs.notify_email }}"
+          if [ -n "${NOTIFY_EMAIL}" ]; then
+            NOTIFY_ARGS="$NOTIFY_ARGS --notify-email ${NOTIFY_EMAIL}"
           fi
-          if [ -n "${{ inputs.teams_webhook }}" ]; then
-            NOTIFY_ARGS="$NOTIFY_ARGS --teams-webhook ${{ inputs.teams_webhook }}"
+          if [ -n "${TEAMS_WEBHOOK}" ]; then
+            NOTIFY_ARGS="$NOTIFY_ARGS --teams-webhook ${TEAMS_WEBHOOK}"
           fi
 
           python3 rocm-systems/projects/rccl/ci/scripts/test_madengine.py \
             --artifact-dir "${OUTPUT_ARTIFACTS_DIR}" \
-            --workload "${{ inputs.workload }}" \
+            --workload "${WORKLOAD_NAME}" \
             --cluster "${CLUSTER}" \
-            --nodes "${{ inputs.nodes }}" \
+            --nodes "${NUM_NODES}" \
             --results-dir "${RESULTS_DIR}" \
             --work-dir "${WORK_DIR}" \
             $NOTIFY_ARGS

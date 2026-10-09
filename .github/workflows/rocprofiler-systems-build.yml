@@ -63,11 +63,12 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout summary comment action
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             .github/actions/upsert-ci-summary-comment
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Write "in progress" placeholder
         shell: bash
@@ -77,7 +78,7 @@ jobs:
           : > ci-run-in-progress-empty.md
 
       - name: Post placeholder on the sticky CI summary comment
-        uses: ./.github/actions/upsert-ci-summary-comment
+        uses: $/.github/actions/upsert-ci-summary-comment
         with:
           build-content-file: ci-run-in-progress.md
           sanitizer-content-file: ci-run-in-progress-empty.md
@@ -106,12 +107,13 @@ jobs:
       rhel_has_system_deps: ${{ steps.rhel.outputs.has_system_deps }}
     steps:
       - name: Checkout matrix helper
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/.github/ci-build-matrix.json
             projects/rocprofiler-systems/scripts/generate-ci-build-matrix.py
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Generate Ubuntu 22.04 matrix
         id: ubuntu_2204
@@ -148,7 +150,7 @@ jobs:
   ubuntu-2204:
     name: Ubuntu 22.04
     needs: matrix-setup
-    uses: ./.github/workflows/rocprofiler-systems-build-group.yml
+    uses: $/.github/workflows/rocprofiler-systems-build-group.yml
     permissions:
       contents: read
     with:
@@ -162,7 +164,7 @@ jobs:
   ubuntu-2404:
     name: Ubuntu 24.04
     needs: matrix-setup
-    uses: ./.github/workflows/rocprofiler-systems-build-group.yml
+    uses: $/.github/workflows/rocprofiler-systems-build-group.yml
     permissions:
       contents: read
     with:
@@ -176,7 +178,7 @@ jobs:
   debian:
     name: Debian
     needs: matrix-setup
-    uses: ./.github/workflows/rocprofiler-systems-build-group.yml
+    uses: $/.github/workflows/rocprofiler-systems-build-group.yml
     permissions:
       contents: read
     with:
@@ -190,7 +192,7 @@ jobs:
   rhel:
     name: RHEL
     needs: matrix-setup
-    uses: ./.github/workflows/rocprofiler-systems-build-group.yml
+    uses: $/.github/workflows/rocprofiler-systems-build-group.yml
     permissions:
       contents: read
     with:
@@ -226,12 +228,13 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             projects/rocprofiler-systems
             .gitmodules
           submodules: recursive
+          persist-credentials: false
 
       - name: Install GCC Toolset
         shell: bash
@@ -255,7 +258,7 @@ jobs:
           echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> "${GITHUB_ENV}"
 
       - name: Restore ccache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-gcc${{ matrix.gcc-toolset }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-${{ github.sha }}
@@ -320,7 +323,7 @@ jobs:
   code-coverage:
     name: Code coverage
     needs: matrix-setup
-    uses: ./.github/workflows/rocprofiler-systems-code-coverage.yml
+    uses: $/.github/workflows/rocprofiler-systems-code-coverage.yml
     permissions:
       contents: read
       pull-requests: write
@@ -328,7 +331,7 @@ jobs:
   sanitizers:
     name: Sanitizers
     needs: matrix-setup
-    uses: ./.github/workflows/rocprofiler-systems-ubuntu-noble-sanitizers.yml
+    uses: $/.github/workflows/rocprofiler-systems-ubuntu-noble-sanitizers.yml
     permissions:
       contents: read
 
@@ -351,15 +354,16 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout summary tooling
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/scripts/summarize-junit-results.py
             .github/actions/upsert-ci-summary-comment
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Download build JUnit artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         continue-on-error: true
         with:
           pattern: junit-build-*
@@ -367,7 +371,7 @@ jobs:
           merge-multiple: false
 
       - name: Download sanitizer JUnit artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         continue-on-error: true
         with:
           pattern: junit-sanitizer-*
@@ -375,7 +379,7 @@ jobs:
           merge-multiple: false
 
       - name: Download sanitizer status artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         continue-on-error: true
         with:
           pattern: sanitizer-summary-*
@@ -405,7 +409,7 @@ jobs:
 
       - name: Update PR CI result summary
         if: github.event_name == 'pull_request'
-        uses: ./.github/actions/upsert-ci-summary-comment
+        uses: $/.github/actions/upsert-ci-summary-comment
         with:
           build-content-file: junit-summary.md
           sanitizer-content-file: sanitizer-summary.md

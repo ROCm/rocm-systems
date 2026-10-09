@@ -29,9 +29,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: projects/rocprofiler-systems
+          persist-credentials: false
 
       - name: Use markdownlint-cli2
         uses: DavidAnson/markdownlint-cli2-action@6b51ade7a9e4a75a7ad929842dd298a3804ebe8b # v23.1.0
@@ -43,9 +44,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: projects/rocprofiler-systems
+          persist-credentials: false
 
       - name: Fetch config
         working-directory:
@@ -72,12 +74,13 @@ jobs:
         python-version: ['3.10']
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         sparse-checkout: projects/rocprofiler-systems
+        persist-credentials: false
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -96,9 +99,10 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         sparse-checkout: projects/rocprofiler-systems
+        persist-credentials: false
 
     - name: Install dependencies
       run: |
@@ -123,9 +127,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         sparse-checkout: projects/rocprofiler-systems
+        persist-credentials: false
 
     - name: Install dependencies
       run: |
@@ -150,9 +155,10 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         sparse-checkout: projects/rocprofiler-systems
+        persist-credentials: false
     - name: check-includes
       working-directory: projects/rocprofiler-systems/
       run: |
@@ -171,9 +177,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         sparse-checkout: projects/rocprofiler-systems
+        persist-credentials: false
     - name: check-banned-includes
       working-directory: projects/rocprofiler-systems/
       run: python3 scripts/check-banned-includes.py
@@ -182,9 +189,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         sparse-checkout: projects/rocprofiler-systems
+        persist-credentials: false
     - name: check-fixedwidth-types
       working-directory: projects/rocprofiler-systems/
       run: |

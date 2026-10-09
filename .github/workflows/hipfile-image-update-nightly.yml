@@ -4,7 +4,8 @@ run-name: Refresh the latest nightly hipFile CI image
 env:
   AIS_DOCKER_REGISTRY: ghcr.io/${{ github.repository_owner }}/hipfile
 
-on:
+# Jobs run only for merged PRs, so the checkout is trusted develop content.
+on: # zizmor: ignore[dangerous-triggers]
   schedule:
     # ~10:00 UTC daily. The ROCm nightly publish runs ~02:00 UTC, leaving ~8h of
     # buffer. This job is purely an optimization: if it is late/failed/builds
@@ -31,7 +32,6 @@ concurrency:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   # Resolve runs on the runner (not the docker:28.5 container) because the
@@ -51,6 +51,7 @@ jobs:
           sparse-checkout: |
             projects/hipfile
             .github/workflows
+          persist-credentials: false
       - name: Resolve ROCm nightly metadata
         id: nightly
         working-directory: projects/hipfile
@@ -72,6 +73,9 @@ jobs:
       AIS_NIGHTLY_ROCM_VERSION: ${{ needs.resolve_nightly.outputs.nightly_rocm_version }}
     runs-on: [ubuntu-24.04]
     container: docker:28.5
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Fetching code repository...
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -79,6 +83,7 @@ jobs:
           sparse-checkout: |
             projects/hipfile
             .github/workflows
+          persist-credentials: false
 
       - name: Authenticating to GitHub Container Registry.
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
@@ -110,28 +115,35 @@ jobs:
           cache-binary: false # True uses the GHA Cache Backend
 
       - name: Build & Push latest nightly base image for AIS CI
+        env:
+          STEPS_CI_IMAGE_OUTPUTS_AIS_CI_CACHE: ${{ steps.ci-image.outputs.AIS_CI_CACHE }}
+          STEPS_CI_IMAGE_OUTPUTS_AIS_CI_IMAGE: ${{ steps.ci-image.outputs.AIS_CI_IMAGE }}
         run: |
           docker buildx build \
             -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
             --target base \
             --build-arg ROCM_VERSION=${AIS_NIGHTLY_ROCM_VERSION} \
             --build-arg ROCM_NIGHTLY_BUILD=${AIS_NIGHTLY_BUILD} \
-            --cache-to=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_CACHE }}" \
-            --cache-from=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_CACHE }}" \
+            --cache-to=type=registry,ref="${STEPS_CI_IMAGE_OUTPUTS_AIS_CI_CACHE}" \
+            --cache-from=type=registry,ref="${STEPS_CI_IMAGE_OUTPUTS_AIS_CI_CACHE}" \
             --push \
-            -t "${{ steps.ci-image.outputs.AIS_CI_IMAGE }}" \
+            -t "${STEPS_CI_IMAGE_OUTPUTS_AIS_CI_IMAGE}" \
             "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"
 
       - name: Build & Push latest nightly NVIDIA image for AIS CI
+        env:
+          STEPS_CI_IMAGE_OUTPUTS_AIS_CI_CACHE_NVIDIA: ${{ steps.ci-image.outputs.AIS_CI_CACHE_NVIDIA }}
+          STEPS_CI_IMAGE_OUTPUTS_AIS_CI_CACHE: ${{ steps.ci-image.outputs.AIS_CI_CACHE }}
+          STEPS_CI_IMAGE_OUTPUTS_AIS_CI_IMAGE_NVIDIA: ${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}
         run: |
           docker buildx build \
             -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
             --target nvidia \
             --build-arg ROCM_VERSION=${AIS_NIGHTLY_ROCM_VERSION} \
             --build-arg ROCM_NIGHTLY_BUILD=${AIS_NIGHTLY_BUILD} \
-            --cache-to=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_CACHE_NVIDIA }}" \
-            --cache-from=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_CACHE }}" \
-            --cache-from=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_CACHE_NVIDIA }}" \
+            --cache-to=type=registry,ref="${STEPS_CI_IMAGE_OUTPUTS_AIS_CI_CACHE_NVIDIA}" \
+            --cache-from=type=registry,ref="${STEPS_CI_IMAGE_OUTPUTS_AIS_CI_CACHE}" \
+            --cache-from=type=registry,ref="${STEPS_CI_IMAGE_OUTPUTS_AIS_CI_CACHE_NVIDIA}" \
             --push \
-            -t "${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}" \
+            -t "${STEPS_CI_IMAGE_OUTPUTS_AIS_CI_IMAGE_NVIDIA}" \
             "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"
