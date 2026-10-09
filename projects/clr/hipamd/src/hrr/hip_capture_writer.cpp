@@ -1428,10 +1428,14 @@ bool open(const char* output_dir) {
     g_parent_pid = parent_pid;
     snprintf(g_manifest_path, sizeof(g_manifest_path), "%s", manifest_path.c_str());
     // Buffer/checkpoint state is reset here so it is consistent for this
-    // process's pid-<pid> sub-archive.
+    // process's pid-<pid> sub-archive. So is a failure of an earlier events.bin,
+    // which a forked child inherits from its parent: it says nothing about this
+    // one. A failure the resume found is in g_capture_incomplete and stays.
     g_buf_len           = 0;
     g_events_since_ckpt = 0;
     g_events_finalized  = false;
+    g_events_io_failed.store(false, std::memory_order_relaxed);
+    g_trailer_at        = -1;
     g_seq_id.store(next_seq, std::memory_order_relaxed);
     g_event_count.store(ev_count, std::memory_order_relaxed);
     if (!exists)
