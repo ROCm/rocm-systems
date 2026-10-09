@@ -152,6 +152,17 @@ std::array<uint32_t, 7> copy_packet(uint64_t source, uint64_t destination, uint3
           static_cast<uint32_t>(destination >> 32)};
 }
 
+// The copy-rectangle packet layouts and the dialects that decode them.
+struct RectLayout {
+  bool gfx12_rect;
+  SdmaPacketDialect dialect;
+};
+constexpr RectLayout kRectLayouts[] = {
+    {false, SdmaPacketDialect::LegacyExtendedCount},
+    {true, SdmaPacketDialect::Gfx1250},
+    {true, SdmaPacketDialect::Rdna4},
+};
+
 std::array<uint32_t, 13> linear_rect_packet(bool gfx12_rect, uint64_t source, uint64_t destination,
                                             uint32_t element, uint32_t rect_x, uint32_t rect_y,
                                             uint32_t rect_z, uint32_t src_pitch_bytes,
@@ -492,15 +503,8 @@ TEST(SdmaPacketProcessorTest, ProcessesOnlyTheDecodedPacketExtentFromALargeSuffi
 }
 
 TEST(SdmaPacketProcessorTest, LinearRectCopiesPitchedRowsAndSkipsTheGap) {
-  const struct {
-    bool gfx12_rect;
-    SdmaPacketDialect dialect;
-  } cases[] = {
-      {false, SdmaPacketDialect::LegacyExtendedCount},
-      {true, SdmaPacketDialect::Gfx1250},
-      {true, SdmaPacketDialect::Rdna4},
-  };
-  for (const auto &test_case : cases) {
+  for (const auto &test_case : kRectLayouts) {
+    SCOPED_TRACE(static_cast<int>(test_case.dialect));
     PacketProcessorFixture fixture;
     ASSERT_TRUE(fixture.access);
     constexpr uint64_t kSource = 0x1000;
@@ -530,15 +534,7 @@ TEST(SdmaPacketProcessorTest, LinearRectCopiesPitchedRowsAndSkipsTheGap) {
 }
 
 TEST(SdmaPacketProcessorTest, LinearRectHonorsElementSizeAndSlicePitch) {
-  const struct {
-    bool gfx12_rect;
-    SdmaPacketDialect dialect;
-  } cases[] = {
-      {false, SdmaPacketDialect::LegacyExtendedCount},
-      {true, SdmaPacketDialect::Gfx1250},
-      {true, SdmaPacketDialect::Rdna4},
-  };
-  for (const auto &test_case : cases) {
+  for (const auto &test_case : kRectLayouts) {
     SCOPED_TRACE(static_cast<int>(test_case.dialect));
     PacketProcessorFixture fixture;
     ASSERT_TRUE(fixture.access);
@@ -569,14 +565,6 @@ TEST(SdmaPacketProcessorTest, LinearRectHonorsElementSizeAndSlicePitch) {
 }
 
 TEST(SdmaPacketProcessorTest, LinearRectKeepsDistinctPaddedSliceStrides) {
-  const struct {
-    bool gfx12_rect;
-    SdmaPacketDialect dialect;
-  } cases[] = {
-      {false, SdmaPacketDialect::LegacyExtendedCount},
-      {true, SdmaPacketDialect::Gfx1250},
-      {true, SdmaPacketDialect::Rdna4},
-  };
   // 16-byte elements, two per row. The source rows are 48 bytes apart and its slices
   // 128 apart; the destination rows are 64 and its slices 160. Each slice pitch
   // exceeds two row pitches, so a copy that flattens the volume into rows moves the
@@ -591,7 +579,7 @@ TEST(SdmaPacketProcessorTest, LinearRectKeepsDistinctPaddedSliceStrides) {
   constexpr uint32_t kSrcSlice = 128;
   constexpr uint32_t kDstSlice = 160;
   constexpr uint8_t kGap = 0xee;
-  for (const auto &test_case : cases) {
+  for (const auto &test_case : kRectLayouts) {
     SCOPED_TRACE(static_cast<int>(test_case.dialect));
     PacketProcessorFixture fixture;
     ASSERT_TRUE(fixture.access);
@@ -624,15 +612,8 @@ TEST(SdmaPacketProcessorTest, LinearRectKeepsDistinctPaddedSliceStrides) {
 }
 
 TEST(SdmaPacketProcessorTest, LinearRectUsesZOriginWhenTheCopyIsOneSlice) {
-  const struct {
-    bool gfx12_rect;
-    SdmaPacketDialect dialect;
-  } cases[] = {
-      {false, SdmaPacketDialect::LegacyExtendedCount},
-      {true, SdmaPacketDialect::Gfx1250},
-      {true, SdmaPacketDialect::Rdna4},
-  };
-  for (const auto &test_case : cases) {
+  for (const auto &test_case : kRectLayouts) {
+    SCOPED_TRACE(static_cast<int>(test_case.dialect));
     PacketProcessorFixture fixture;
     ASSERT_TRUE(fixture.access);
     constexpr uint64_t kSource = 0x1000;
@@ -661,15 +642,7 @@ TEST(SdmaPacketProcessorTest, LinearRectUsesZOriginWhenTheCopyIsOneSlice) {
 }
 
 TEST(SdmaPacketProcessorTest, LinearRectAppliesSourceAndDestinationYOrigins) {
-  const struct {
-    bool gfx12_rect;
-    SdmaPacketDialect dialect;
-  } cases[] = {
-      {false, SdmaPacketDialect::LegacyExtendedCount},
-      {true, SdmaPacketDialect::Gfx1250},
-      {true, SdmaPacketDialect::Rdna4},
-  };
-  for (const auto &test_case : cases) {
+  for (const auto &test_case : kRectLayouts) {
     SCOPED_TRACE(static_cast<int>(test_case.dialect));
     PacketProcessorFixture fixture;
     ASSERT_TRUE(fixture.access);
