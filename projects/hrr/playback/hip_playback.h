@@ -852,6 +852,11 @@ hipError_t hrr_watchdog_device_sync(PlaybackContext& ctx, const char* what);
 // u64 offset, u64 length, u64 hash_lo, u64 hash_hi, u8 direction (0).
 inline constexpr size_t kHostSnapRecordSize = 41;
 
+// Whether n whole records fit between p and the end of the event.
+inline bool hrr_host_snapshots_fit(const uint8_t* p, const uint8_t* end, uint16_t n) {
+    return p <= end && static_cast<size_t>(end - p) / kHostSnapRecordSize >= n;
+}
+
 // Where replay writes the blob of the record at `rec`, or nullptr with *why
 // saying why it refuses the record. The archive is input like any other: a
 // record must name the base of a pinned host allocation replay made, lie

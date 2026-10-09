@@ -1060,7 +1060,7 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                        dbg_dump_ptrs ? &dbg_args : nullptr);
 
     const uint8_t* snapshots = p;
-    if (p > end || static_cast<size_t>(end - p) / kHostSnapRecordSize < num_snapshots) {
+    if (!hrr_host_snapshots_fit(p, end, num_snapshots)) {
         fprintf(stderr, "[HRR] '%s': %u pinned host snapshot records run past the "
                 "event — refused\n", kernel_name.c_str(), num_snapshots);
         ctx.host_snapshots_refused += num_snapshots;

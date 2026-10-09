@@ -496,8 +496,8 @@ static std::vector<uint8_t> make_launch_with_snapshot(uint64_t seq,
  * ----------------
  *   - A pinned host snapshot record round-trips through the reader, and replay
  *     points it at its own pinned buffer at the recorded offset.
- *   - A launch whose record runs past the event is not decoded, and replay
- *     refuses a record that names a device allocation or the inside of one,
+ *   - A launch whose record runs past the event is not decoded by the reader
+ *     nor by replay, and replay refuses a record that names a device allocation or the inside of one,
  *     runs past its allocation, differs from its blob in length, or has an
  *     unknown direction.
  */
@@ -529,6 +529,8 @@ HRR_TEST_CASE(Unit_HRR_Format_HostSnapshotRecord) {
   CHECK(s.hash_hi == 0x99aabbccddeeff00ULL);
   CHECK(s.direction == 0);
   CHECK(archive.events[1].kernel_launch == nullptr);
+  CHECK(hrr_host_snapshots_fit(good.data(), good.data() + good.size(), 1));
+  CHECK_FALSE(hrr_host_snapshots_fit(good.data(), good.data() + good.size() - 1, 1));
 
   PlaybackContext ctx;
   std::vector<uint8_t> pinned(128), device(128), blob(64);
