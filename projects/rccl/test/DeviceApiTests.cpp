@@ -8,6 +8,8 @@
 #include <hip/hip_runtime.h>
 #include <rccl/rccl.h>
 
+#include <malloc.h>
+
 #include <array>
 #include <chrono>
 #include <cstdlib>
@@ -525,6 +527,68 @@ static void runDevCommCreateFailureTest()
         resources.ranks[0].devCommCreated = true;
 }
 
+// Heap bytes currently handed out by malloc, summed over every arena.
+static long long heapInUseBytes()
+{
+    return static_cast<long long>(mallinfo2().uordblks);
+}
+
+// ncclDevCommCreate deep-copies the caller's requirements before it validates
+// them, so a request rejected after the copy must free it (NVIDIA/nccl#2225).
+// NCCL_CFT_MULTIMEM is rejected after the copy on every AMD communicator that
+// supports the device API (no CFT, no NVLS), and that must leave the heap where
+// it was. A long resource list makes each copy large, so a leak over the loop
+// dwarfs allocator noise.
+static void runDevCommCreateRejectedAfterCopyTest()
+{
+    constexpr int kResourceNodes = 256;
+    constexpr int kWarmupCalls   = 16;
+    constexpr int kCalls         = 2000;
+
+    DeviceApiResources resources(kNegativeRanks);
+    ASSERT_NO_FATAL_FAILURE(initializeCommunicators(resources));
+    ncclComm_t comm = resources.ranks[0].comm;
+
+    ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+    ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+    // Without device API support the request is turned away before the copy
+    // (dev_runtime.cc:2584), so the loop below would prove nothing.
+    if(!props.deviceApiSupport)
+        GTEST_SKIP() << "Device API unsupported here; the request is rejected before the "
+                        "requirements are copied.";
+    const ncclResult_t expected = ncclInvalidArgument;
+
+    std::vector<ncclDevResourceRequirements_t> resourceList(kResourceNodes);
+    for(int i = 0; i + 1 < kResourceNodes; ++i)
+        resourceList[i].next = &resourceList[i + 1];
+
+    ncclDevCommRequirements_t requirements = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+    requirements.resourceRequirementsList  = resourceList.data();
+    requirements.cftCaps                   = NCCL_CFT_MULTIMEM;
+
+    ncclDevComm_t devComm = {};
+    for(int i = 0; i < kWarmupCalls; ++i)
+        ASSERT_EQ(ncclDevCommCreate(comm, &requirements, &devComm), expected);
+
+    int             rejected = 0;
+    const long long before   = heapInUseBytes();
+    for(int i = 0; i < kCalls; ++i)
+    {
+        if(ncclDevCommCreate(comm, &requirements, &devComm) == expected)
+            ++rejected;
+    }
+    const long long growth = heapInUseBytes() - before;
+
+    const long long copyBytes = static_cast<long long>(
+        sizeof(ncclDevCommRequirements_t) + kResourceNodes * sizeof(ncclDevResourceRequirements_t));
+    EXPECT_EQ(rejected, kCalls);
+    // A leaked copy per call would add kCalls * copyBytes; allow one copy for
+    // allocations made meanwhile by RCCL's own threads.
+    EXPECT_LT(growth, copyBytes)
+        << kCalls << " rejected calls left " << growth << " heap bytes behind; one copy is "
+        << copyBytes;
+}
+
 // Per-test config notes:
 //   - These are single-process multi-GPU tests (ncclCommInitAll). All rank-to-
 //     rank bootstrap traffic is intra-host by construction, so we pin NCCL's
@@ -583,6 +647,24 @@ static ProcessIsolatedTestRunner::TestConfig makeWinDisabledConfig(const std::st
         .withNumGpus(kNegativeRanks);
 }
 
+// Device API enabled on a single GPU. ncclDevCommCreate holds its copy of the
+// requirements in an in-group task by default and in an async job with
+// NCCL_ENQUEUE_REARCH_ENABLE=1, so the leak check runs once per path.
+static ProcessIsolatedTestRunner::TestConfig makeDeviceApiSingleGpuConfig(
+    const std::string& name, std::function<void()> testFn, bool rearch)
+{
+    return ProcessIsolatedTestRunner::TestConfig(name, testFn)
+        .withEnvironment({
+            {          "NCCL_CUMEM_ENABLE",               "1"},
+            {            "NCCL_WIN_ENABLE",               "1"},
+            {         "NCCL_SOCKET_IFNAME",              "lo"},
+            {            "NCCL_IB_DISABLE",               "1"},
+            {"NCCL_ENQUEUE_REARCH_ENABLE", rearch ? "1" : "0"}
+    })
+        .withTimeout(std::chrono::seconds(60))
+        .withNumGpus(kNegativeRanks);
+}
+
 } // namespace
 
 TEST(DeviceApi, LsaRemoteRead)
@@ -613,6 +695,29 @@ TEST(DeviceApi, WinDisabled)
 {
     RUN_ISOLATED_TESTS(
         makeWinDisabledConfig("DeviceApi.WinDisabled", []() { runDevCommCreateFailureTest(); }));
+}
+
+// Gated here for the reason given at FindWindowRemoteRead: a GTEST_SKIP() in
+// the isolated child is reported as a pass by the parent.
+TEST(DeviceApi, RejectedCreateReleasesRequirements)
+{
+    if(getVisibleGpuCount() < kNegativeRanks)
+        GTEST_SKIP() << "This test requires at least 1 visible GPU.";
+
+    RUN_ISOLATED_TESTS(makeDeviceApiSingleGpuConfig("DeviceApi.RejectedCreateReleasesRequirements",
+                                                    []() { runDevCommCreateRejectedAfterCopyTest(); },
+                                                    false));
+}
+
+TEST(DeviceApi, RejectedCreateReleasesRequirementsRearch)
+{
+    if(getVisibleGpuCount() < kNegativeRanks)
+        GTEST_SKIP() << "This test requires at least 1 visible GPU.";
+
+    RUN_ISOLATED_TESTS(
+        makeDeviceApiSingleGpuConfig("DeviceApi.RejectedCreateReleasesRequirementsRearch",
+                                     []() { runDevCommCreateRejectedAfterCopyTest(); },
+                                     true));
 }
 
 } // namespace RcclUnitTesting
