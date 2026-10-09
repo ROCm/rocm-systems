@@ -1464,8 +1464,12 @@ protected:
     uint32_t queue_id = 0;
     uint32_t process_id = 0;
     uint32_t dispatch_id = 0;
+    /// Empty for an instruction failure; a value preserves VM-fault reporting.
     std::optional<VmAccessOutcome> vm_outcome;
   };
+  /// @brief Dispatch failures deferred until the wave-state lock is dropped.
+  /// @details Drained before workgroup completions so the CP marks failed
+  /// dispatches and queues before a completion can publish success.
   std::vector<PendingDispatchFailure> pending_dispatch_failures_;
   struct PendingExecutionFailure {
     uint32_t queue_id;
