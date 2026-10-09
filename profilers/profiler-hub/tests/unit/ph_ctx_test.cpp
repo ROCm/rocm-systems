@@ -136,6 +136,7 @@ TEST_F(ph_ctx_test, construction_populates_schema_version_and_node)
     writer.reset();
 
     ph_ctx ctx{ m_db_path };
+    ctx.load();
 
     const auto version = ctx.get_schema_version();
     EXPECT_GT(version.major + version.minor + version.patch, 0U);
@@ -152,6 +153,7 @@ TEST_F(ph_ctx_test, construction_with_no_nodes_succeeds_with_empty_node_info)
     writer.reset();
 
     ph_ctx ctx{ m_db_path };
+    ctx.load();
 
     const auto node = ctx.get_node();
     EXPECT_EQ(node.info.id, 0U);
@@ -179,6 +181,7 @@ TEST_F(ph_ctx_test, get_track_list_returns_seeded_non_empty_track)
     writer.reset();
 
     ph_ctx ctx{ m_db_path };
+    ctx.load();
 
     const auto tracks = ctx.get_track_list();
     ASSERT_EQ(tracks.list_size, 1U);
@@ -196,6 +199,7 @@ TEST_F(ph_ctx_test, has_track_reflects_seeded_and_unknown_ids)
     writer.reset();
 
     ph_ctx ctx{ m_db_path };
+    ctx.load();
 
     const auto tracks = ctx.get_track_list();
     ASSERT_EQ(tracks.list_size, 1U);
@@ -212,6 +216,7 @@ TEST_F(ph_ctx_test, get_track_events_returns_event_for_seeded_track)
     writer.reset();
 
     ph_ctx ctx{ m_db_path };
+    ctx.load();
 
     const auto tracks = ctx.get_track_list();
     ASSERT_EQ(tracks.list_size, 1U);
@@ -230,6 +235,7 @@ TEST_F(ph_ctx_test, get_track_events_returns_empty_for_unknown_track)
     writer.reset();
 
     ph_ctx ctx{ m_db_path };
+    ctx.load();
 
     const auto events = ctx.get_track_events(999999, 0, 0);
     EXPECT_EQ(events.list_size, 0U);
@@ -244,6 +250,7 @@ TEST_F(ph_ctx_test, get_track_events_start_only_filters_to_overlapping_events)
     writer.reset();
 
     ph_ctx ctx{ m_db_path };
+    ctx.load();
 
     const auto tracks = ctx.get_track_list();
     ASSERT_EQ(tracks.list_size, 1U);
@@ -262,6 +269,7 @@ TEST_F(ph_ctx_test, get_track_events_end_only_filters_to_overlapping_events)
     writer.reset();
 
     ph_ctx ctx{ m_db_path };
+    ctx.load();
 
     const auto tracks = ctx.get_track_list();
     ASSERT_EQ(tracks.list_size, 1U);
@@ -280,6 +288,7 @@ TEST_F(ph_ctx_test, get_track_events_both_bounds_filters_to_overlapping_events)
     writer.reset();
 
     ph_ctx ctx{ m_db_path };
+    ctx.load();
 
     const auto tracks = ctx.get_track_list();
     ASSERT_EQ(tracks.list_size, 1U);
@@ -298,6 +307,7 @@ TEST_F(ph_ctx_test, get_track_events_no_bounds_returns_all_events)
     writer.reset();
 
     ph_ctx ctx{ m_db_path };
+    ctx.load();
 
     const auto tracks = ctx.get_track_list();
     ASSERT_EQ(tracks.list_size, 1U);
@@ -314,6 +324,7 @@ TEST_F(ph_ctx_test, get_track_samples_returns_empty_for_non_pmc_track)
     writer.reset();
 
     ph_ctx ctx{ m_db_path };
+    ctx.load();
 
     const auto tracks = ctx.get_track_list();
     ASSERT_EQ(tracks.list_size, 1U);

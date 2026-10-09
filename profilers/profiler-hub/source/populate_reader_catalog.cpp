@@ -5,10 +5,12 @@
 
 #include "common/connection.hpp"
 #include "common/connection_pool.hpp"
+#include "common/helper_group.hpp"
 #include "common/thread_pool.hpp"
 #include "profiler-hub/cpp/reader.hpp"
 #include "reader_catalog.hpp"
 
+#include <atomic>
 #include <exception>
 #include <functional>
 #include <mutex>
@@ -26,33 +28,31 @@ void
 run_all_and_rethrow(common::thread_pool&                      workers,
                     const std::vector<std::function<void()>>& jobs)
 {
-    std::mutex         error_mutex;
-    std::exception_ptr first_error;
+    std::atomic<size_t> next{ 0 };
+    std::mutex          error_mutex;
+    std::exception_ptr  first_error;
 
-    std::vector<common::thread_pool::task_handle> handles;
-    handles.reserve(jobs.size());
+    const auto run_jobs = [&] {
+        for(size_t i = next.fetch_add(1); i < jobs.size(); i = next.fetch_add(1))
+        {
+            try
+            {
+                jobs[i]();
+            } catch(...)
+            {
+                const std::scoped_lock lock{ error_mutex };
+                if(!first_error) first_error = std::current_exception();
+            }
+        }
+    };
 
-    for(const auto& job : jobs)
     {
-        handles.push_back(
-            workers.submit([&job, &error_mutex, &first_error](const std::stop_token&) {
-                try
-                {
-                    job();
-                } catch(...)
-                {
-                    std::scoped_lock lock{ error_mutex };
-                    if(!first_error)
-                    {
-                        first_error = std::current_exception();
-                    }
-                }
-            }));
-    }
-
-    for(const auto& handle : handles)
-    {
-        handle.wait();
+        common::helper_group helpers{ workers };
+        for(size_t i = 1; i < jobs.size(); ++i)
+        {
+            helpers.add([&run_jobs](const std::stop_token&) { run_jobs(); });
+        }
+        run_jobs();
     }
 
     if(first_error)

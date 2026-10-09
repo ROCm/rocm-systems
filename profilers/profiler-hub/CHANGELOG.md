@@ -62,6 +62,10 @@ downstream consumer of the library.
   whole-track events, so its events keep that nesting depth and come ordered by start.
 - `ph_track_t::nesting_depth` is the largest `ph_event_t::nesting_depth` of the track (0 for
   PMC tracks).
+- `ph_ctx_create()` takes a `ph_future_t` (null for the previous blocking behaviour).
+  With a future it returns the context at once and reads the trace in the background,
+  reporting progress and the end through the future's callbacks. Calls that return data
+  wait for the read; `ph_ctx_free()` cancels a read that is still running.
 - `ph_ctx_create()` now reads the events of every track and the samples of every PMC
   track and keeps them in memory until `ph_ctx_free()`. Opening a trace takes longer
   and uses memory proportional to its event count; `ph_get_track_events()` and

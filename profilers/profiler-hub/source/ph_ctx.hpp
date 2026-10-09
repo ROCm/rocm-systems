@@ -7,21 +7,46 @@
 #include "profiler-hub/c/profiler_hub_types.h"
 #include "profiler-hub/cpp/reader.hpp"
 #include "track_read_options.hpp"
+#include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <stop_token>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
 
+struct ph_future;
+
 struct ph_ctx
 {
+    /** Opens nothing yet: the trace is read by load() or load_async(). */
     explicit ph_ctx(std::string_view trace_path);
+    ~ph_ctx();
 
     ph_ctx(const ph_ctx&)            = delete;
     ph_ctx& operator=(const ph_ctx&) = delete;
     ph_ctx(ph_ctx&&)                 = delete;
     ph_ctx& operator=(ph_ctx&&)      = delete;
+
+    /** Reads the trace on the calling thread. Throws if it cannot be read. */
+    void load();
+
+    /**
+     * Reads the trace on a worker of the ctx pool and reports to @p future, which must
+     * have been attached by the caller. The future ends with PH_FUTURE_CANCELLED if it is
+     * cancelled or the ctx is destroyed meanwhile.
+     */
+    void load_async(std::shared_ptr<ph_future> future);
+
+    /**
+     * Blocks until the trace is read.
+     * @return PH_RESULT_SUCCESS once it is, PH_RESULT_CANCELLED if the load was
+     *         cancelled, PH_RESULT_INVALID_CONTEXT if it failed.
+     */
+    [[nodiscard]] ph_result_t wait_until_ready();
 
     [[nodiscard]] ph_schema_version_t get_schema_version();
     [[nodiscard]] ph_track_list_t     get_track_list();
@@ -37,11 +62,29 @@ struct ph_ctx
     profiler_hub::common::thread_pool& get_thread_pool() { return m_thread_pool; }
 
 private:
-    void initialize_track_list();
-    void load_all_tracks();
-    void initialize_node_info();
-    void initialize_node_agents();
-    void initialize_node_processes();
+    enum class load_state_t : uint8_t
+    {
+        loading,
+        ready,
+        failed,
+        cancelled,
+    };
+
+    using stop_requested_fn = std::function<bool()>;
+    using progress_fn       = std::function<void(double)>;
+
+    /** @return false if @p stop_requested became true before the trace was read. */
+    [[nodiscard]] bool read_trace(const stop_requested_fn& stop_requested,
+                                  const progress_fn&       progress);
+    void               set_load_state(load_state_t state);
+    void               set_load_state_if_loading(load_state_t state);
+
+    void               initialize_track_list();
+    [[nodiscard]] bool load_all_tracks(const stop_requested_fn& stop_requested,
+                                       const progress_fn&       progress);
+    void               initialize_node_info();
+    void               initialize_node_agents();
+    void               initialize_node_processes();
 
     static size_t default_thread_pool_size();
     static size_t default_connection_count();
@@ -73,4 +116,11 @@ private:
     profiler_hub::cached_track_reader m_track_reader{ m_connection_source,
                                                       m_thread_pool,
                                                       m_read_options };
+
+    std::mutex              m_state_mutex;
+    std::condition_variable m_state_cv;
+    load_state_t            m_state{ load_state_t::loading };
+
+    std::optional<profiler_hub::common::thread_pool::task_handle> m_load_task;
+    std::shared_ptr<ph_future>                                    m_load_future;
 };

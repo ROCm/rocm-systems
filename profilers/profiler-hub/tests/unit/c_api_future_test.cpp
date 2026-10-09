@@ -3,11 +3,14 @@
 
 #include "ph_future.hpp"
 #include "profiler-hub/c/profiler_hub.h"
+#include "trace_fixtures.hpp"
 
 #include <gtest/gtest.h>
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -253,6 +256,144 @@ TEST_F(c_api_future_test, concurrent_finishes_call_on_finished_exactly_once)
         thread.join();
     }
 
+    EXPECT_EQ(g_log.finished_calls, 1);
+}
+
+class c_api_async_ctx_test : public c_api_future_test
+{
+protected:
+    void SetUp() override
+    {
+        c_api_future_test::SetUp();
+        m_db_path = profiler_hub::test::temp_trace_path("c_api_async_ctx_test");
+        profiler_hub::test::write_two_thread_tracks(m_db_path);
+    }
+
+    void TearDown() override
+    {
+        if(m_ctx != nullptr) ph_ctx_free(m_ctx);
+        c_api_future_test::TearDown();
+        std::filesystem::remove(m_db_path);
+    }
+
+    std::string m_db_path;
+    ph_ctx_t    m_ctx{ nullptr };
+};
+
+TEST_F(c_api_async_ctx_test, the_context_is_read_in_the_background_and_reports_its_end)
+{
+    create();
+
+    ASSERT_EQ(ph_ctx_create(&m_ctx, m_db_path.c_str(), m_future), PH_RESULT_SUCCESS);
+    ASSERT_NE(m_ctx, nullptr);
+    ASSERT_EQ(ph_future_wait(m_future), PH_RESULT_SUCCESS);
+
+    ph_result_t result = PH_RESULT_INTERNAL_ERROR;
+    ASSERT_EQ(ph_future_result(m_future, &result), PH_RESULT_SUCCESS);
+    EXPECT_EQ(result, PH_RESULT_SUCCESS);
+    EXPECT_EQ(g_log.finished_calls, 1);
+    EXPECT_EQ(g_log.status, PH_FUTURE_FINISHED);
+    EXPECT_DOUBLE_EQ(g_log.last_progress, 1.0);
+    EXPECT_EQ(g_log.progress_calls, 2);
+
+    ph_track_list_t tracks{};
+    ASSERT_EQ(ph_get_track_list(m_ctx, &tracks), PH_RESULT_SUCCESS);
+    EXPECT_EQ(tracks.list_size, 2U);
+}
+
+TEST_F(c_api_async_ctx_test, a_data_call_waits_for_the_read_to_end)
+{
+    create();
+    ASSERT_EQ(ph_ctx_create(&m_ctx, m_db_path.c_str(), m_future), PH_RESULT_SUCCESS);
+
+    ph_track_list_t tracks{};
+    ASSERT_EQ(ph_get_track_list(m_ctx, &tracks), PH_RESULT_SUCCESS);
+
+    EXPECT_EQ(tracks.list_size, 2U);
+    EXPECT_EQ(tracks.tracks[0].nesting_depth, 1U);
+}
+
+TEST_F(c_api_async_ctx_test, a_future_that_serves_an_operation_is_rejected)
+{
+    create();
+    ASSERT_TRUE(m_future->try_attach());
+
+    EXPECT_EQ(ph_ctx_create(&m_ctx, m_db_path.c_str(), m_future),
+              PH_RESULT_INVALID_ARGUMENT);
+
+    EXPECT_EQ(m_ctx, nullptr);
+}
+
+TEST_F(c_api_async_ctx_test, a_missing_trace_fails_at_once_and_leaves_the_future_unused)
+{
+    create();
+
+    EXPECT_EQ(ph_ctx_create(&m_ctx, (m_db_path + ".missing").c_str(), m_future),
+              PH_RESULT_CONTEXT_ALLOCATION_FAILED);
+
+    EXPECT_EQ(m_ctx, nullptr);
+    EXPECT_EQ(ph_future_wait(m_future), PH_RESULT_INVALID_ARGUMENT);
+    EXPECT_EQ(g_log.finished_calls, 0);
+}
+
+TEST_F(c_api_async_ctx_test,
+       cancelling_the_read_ends_it_cancelled_and_the_data_calls_follow)
+{
+    static std::atomic<bool> release{ false };
+    static std::atomic<bool> in_progress{ false };
+    release     = false;
+    in_progress = false;
+
+    create(
+        [](ph_future_t, double) {
+            in_progress = true;
+            while(!release)
+            {
+                std::this_thread::sleep_for(1ms);
+            }
+        },
+        on_finished);
+    ASSERT_EQ(ph_ctx_create(&m_ctx, m_db_path.c_str(), m_future), PH_RESULT_SUCCESS);
+
+    while(!in_progress)
+    {
+        std::this_thread::sleep_for(1ms);
+    }
+    ASSERT_EQ(ph_future_cancel(m_future), PH_RESULT_SUCCESS);
+    release = true;
+    ASSERT_EQ(ph_future_wait(m_future), PH_RESULT_SUCCESS);
+
+    EXPECT_EQ(g_log.status, PH_FUTURE_CANCELLED);
+    EXPECT_EQ(g_log.result, PH_RESULT_CANCELLED);
+    ph_track_list_t tracks{};
+    EXPECT_EQ(ph_get_track_list(m_ctx, &tracks), PH_RESULT_CANCELLED);
+}
+
+TEST_F(c_api_async_ctx_test, freeing_the_context_ends_the_future_exactly_once)
+{
+    create();
+    ASSERT_EQ(ph_ctx_create(&m_ctx, m_db_path.c_str(), m_future), PH_RESULT_SUCCESS);
+
+    ASSERT_EQ(ph_ctx_free(m_ctx), PH_RESULT_SUCCESS);
+    m_ctx = nullptr;
+
+    EXPECT_EQ(g_log.finished_calls, 1);
+    EXPECT_EQ(ph_future_wait(m_future), PH_RESULT_SUCCESS);
+}
+
+TEST_F(c_api_async_ctx_test, a_future_can_be_freed_while_the_read_runs)
+{
+    create();
+    ASSERT_EQ(ph_ctx_create(&m_ctx, m_db_path.c_str(), m_future), PH_RESULT_SUCCESS);
+
+    ASSERT_EQ(ph_future_free(m_future), PH_RESULT_SUCCESS);
+    m_future = nullptr;
+
+    ph_track_list_t tracks{};
+    EXPECT_EQ(ph_get_track_list(m_ctx, &tracks), PH_RESULT_SUCCESS);
+
+    ASSERT_EQ(ph_ctx_free(m_ctx), PH_RESULT_SUCCESS);
+    m_ctx = nullptr;
     EXPECT_EQ(g_log.finished_calls, 1);
 }
 

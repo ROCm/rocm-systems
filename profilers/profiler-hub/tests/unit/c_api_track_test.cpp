@@ -24,7 +24,7 @@ protected:
     {
         m_db_path = test::temp_trace_path("c_api_track_test");
         test::write_thread_track_with_two_regions(m_db_path);
-        ASSERT_EQ(ph_ctx_create(&m_ctx, m_db_path.c_str()), PH_RESULT_SUCCESS);
+        ASSERT_EQ(ph_ctx_create(&m_ctx, m_db_path.c_str(), nullptr), PH_RESULT_SUCCESS);
 
         ph_track_list_t tracks{};
         ASSERT_EQ(ph_get_track_list(m_ctx, &tracks), PH_RESULT_SUCCESS);
@@ -248,7 +248,7 @@ TEST(c_api_create_test, a_null_path_is_an_invalid_argument_and_clears_the_contex
 {
     ph_ctx_t ctx = reinterpret_cast<ph_ctx_t>(0x1);
 
-    EXPECT_EQ(ph_ctx_create(&ctx, nullptr), PH_RESULT_INVALID_ARGUMENT);
+    EXPECT_EQ(ph_ctx_create(&ctx, nullptr, nullptr), PH_RESULT_INVALID_ARGUMENT);
 
     EXPECT_EQ(ctx, nullptr);
 }
@@ -260,7 +260,7 @@ TEST(c_api_create_test, a_missing_trace_fails_without_creating_files)
     std::filesystem::remove_all(directory);
     ph_ctx_t ctx = reinterpret_cast<ph_ctx_t>(0x1);
 
-    EXPECT_EQ(ph_ctx_create(&ctx, (directory / "trace.db").string().c_str()),
+    EXPECT_EQ(ph_ctx_create(&ctx, (directory / "trace.db").string().c_str(), nullptr),
               PH_RESULT_CONTEXT_ALLOCATION_FAILED);
 
     EXPECT_EQ(ctx, nullptr);
@@ -271,9 +271,9 @@ TEST(c_api_create_test, a_directory_is_not_a_trace)
 {
     ph_ctx_t ctx = nullptr;
 
-    EXPECT_EQ(
-        ph_ctx_create(&ctx, std::filesystem::temp_directory_path().string().c_str()),
-        PH_RESULT_CONTEXT_ALLOCATION_FAILED);
+    EXPECT_EQ(ph_ctx_create(
+                  &ctx, std::filesystem::temp_directory_path().string().c_str(), nullptr),
+              PH_RESULT_CONTEXT_ALLOCATION_FAILED);
 
     EXPECT_EQ(ctx, nullptr);
 }

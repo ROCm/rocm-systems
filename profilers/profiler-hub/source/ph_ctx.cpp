@@ -1,5 +1,6 @@
 #include "ph_ctx.hpp"
 #include "debug.hpp"
+#include "ph_future.hpp"
 #include "populate_reader_catalog.hpp"
 #include "profiler-hub/cpp/storage.hpp"
 #include "reader_catalog.hpp"
@@ -9,6 +10,7 @@
 #include <filesystem>
 #include <limits>
 #include <mutex>
+#include <numeric>
 #include <stdexcept>
 #include <thread>
 #include <tuple>
@@ -64,7 +66,106 @@ ph_ctx::default_connection_count()
 ph_ctx::ph_ctx(std::string_view trace_path)
 : m_file_path{ existing_trace_path(trace_path) }
 , m_catalog{ std::make_shared<profiler_hub::reader_catalog_t>() }
+{}
+
+ph_ctx::~ph_ctx()
 {
+    if(!m_load_task) return;
+
+    std::ignore = m_load_task->cancel();
+    m_load_task->wait();
+
+    // A load that never got a worker did not run, so nobody ended its future.
+    set_load_state_if_loading(load_state_t::cancelled);
+    m_load_future->finish(PH_FUTURE_CANCELLED, PH_RESULT_CANCELLED);
+}
+
+void
+ph_ctx::load()
+{
+    try
+    {
+        std::ignore = read_trace([] { return false; }, {});
+    } catch(...)
+    {
+        set_load_state(load_state_t::failed);
+        throw;
+    }
+    set_load_state(load_state_t::ready);
+}
+
+void
+ph_ctx::load_async(std::shared_ptr<ph_future> future)
+{
+    m_load_future = future;
+    m_load_task   = m_thread_pool.submit([this, future](const std::stop_token& token) {
+        const auto stop_requested = [&] {
+            return token.stop_requested() || future->stop_token().stop_requested();
+        };
+        const auto progress = [&](double value) { future->report_progress(value); };
+
+        try
+        {
+            if(read_trace(stop_requested, progress))
+            {
+                set_load_state(load_state_t::ready);
+                future->finish(PH_FUTURE_FINISHED, PH_RESULT_SUCCESS);
+            }
+            else
+            {
+                set_load_state(load_state_t::cancelled);
+                future->finish(PH_FUTURE_CANCELLED, PH_RESULT_CANCELLED);
+            }
+        } catch(...)
+        {
+            set_load_state(load_state_t::failed);
+            future->finish(PH_FUTURE_ERROR, PH_RESULT_CONTEXT_ALLOCATION_FAILED);
+        }
+    });
+}
+
+ph_result_t
+ph_ctx::wait_until_ready()
+{
+    std::unique_lock lock{ m_state_mutex };
+    m_state_cv.wait(lock, [this] { return m_state != load_state_t::loading; });
+
+    switch(m_state)
+    {
+        case load_state_t::ready: return PH_RESULT_SUCCESS;
+        case load_state_t::cancelled: return PH_RESULT_CANCELLED;
+        case load_state_t::loading:
+        case load_state_t::failed: break;
+    }
+    return PH_RESULT_INVALID_CONTEXT;
+}
+
+void
+ph_ctx::set_load_state(load_state_t state)
+{
+    {
+        const std::scoped_lock lock{ m_state_mutex };
+        m_state = state;
+    }
+    m_state_cv.notify_all();
+}
+
+void
+ph_ctx::set_load_state_if_loading(load_state_t state)
+{
+    {
+        const std::scoped_lock lock{ m_state_mutex };
+        if(m_state != load_state_t::loading) return;
+        m_state = state;
+    }
+    m_state_cv.notify_all();
+}
+
+bool
+ph_ctx::read_trace(const stop_requested_fn& stop_requested, const progress_fn& progress)
+{
+    if(stop_requested()) return false;
+
     profiler_hub::storage_t version_probe{ m_file_path, "" };
     const auto              version = version_probe.get_storage_version();
     m_schema_version                = { .major = version.major,
@@ -72,12 +173,15 @@ ph_ctx::ph_ctx(std::string_view trace_path)
                                         .patch = version.patch };
 
     populate_reader_catalog(m_thread_pool, m_connection_pool, *m_catalog);
+    if(stop_requested()) return false;
 
     initialize_track_list();
-    load_all_tracks();
+    if(!load_all_tracks(stop_requested, progress)) return false;
+
     initialize_node_agents();
     initialize_node_processes();
     initialize_node_info();
+    return true;
 }
 
 ph_schema_version_t
@@ -176,21 +280,40 @@ ph_ctx::initialize_track_list()
     }
 }
 
-void
-ph_ctx::load_all_tracks()
+bool
+ph_ctx::load_all_tracks(const stop_requested_fn& stop_requested,
+                        const progress_fn&       progress)
 {
+    const auto total_events = std::accumulate(
+        m_c_tracks.begin(),
+        m_c_tracks.end(),
+        uint64_t{ 0 },
+        [](uint64_t sum, const auto& track) { return sum + track.event_count; });
+
+    uint64_t loaded_events = 0;
     for(auto& c_track : m_c_tracks)
     {
+        if(stop_requested()) return false;
+
         const auto& track = m_track_by_id.at(c_track.id);
         if(track->category == profiler_hub::reader_types::track_kind_t::pmc_agent)
         {
             std::ignore = m_track_reader.samples(track, 0, 0);
-            continue;
+        }
+        else
+        {
+            std::ignore           = m_track_reader.events(track, 0, 0);
+            c_track.nesting_depth = m_track_reader.nesting_depth(track);
         }
 
-        std::ignore           = m_track_reader.events(track, 0, 0);
-        c_track.nesting_depth = m_track_reader.nesting_depth(track);
+        loaded_events += c_track.event_count;
+        if(progress && total_events != 0)
+        {
+            progress(static_cast<double>(loaded_events) /
+                     static_cast<double>(total_events));
+        }
     }
+    return true;
 }
 
 void

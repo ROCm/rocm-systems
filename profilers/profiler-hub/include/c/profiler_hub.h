@@ -22,14 +22,26 @@ extern "C"
      * @brief Opens a trace file and creates a context for it.
      * @param ctx Out parameter receiving the new context. Must not be null.
      * @param file_path Path to the trace database to open. Must not be null.
+     * @param future Null to read the trace before returning. Otherwise a future
+     *        from ph_future_create() that was not passed to an operation yet: the
+     *        call returns at once with the context and the trace is read in the
+     *        background. The future reports the progress of the read in
+     *        [0.0, 1.0] and ends with PH_FUTURE_FINISHED, PH_FUTURE_CANCELLED or
+     *        PH_FUTURE_ERROR.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
-     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p file_path is
-     *         null, PH_RESULT_CONTEXT_ALLOCATION_FAILED if the trace could
-     *         not be opened/parsed.
+     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p file_path is null
+     *         or @p future already serves an operation,
+     *         PH_RESULT_CONTEXT_ALLOCATION_FAILED if the context could not be
+     *         created or, without a future, the trace could not be read.
      * @note On success, the caller owns @p *ctx and must release it with
      *       ph_ctx_free(). On any failure @p *ctx is set to null.
+     * @note While a context is being read, the calls that return its data wait
+     *       for the read to end. If it was cancelled they return
+     *       PH_RESULT_CANCELLED, if it failed PH_RESULT_INVALID_CONTEXT.
+     * @warning ph_ctx_free() cancels a read that is still running and calls the
+     *          on_finished callback of its future with PH_FUTURE_CANCELLED.
      */
-    ph_result_t ph_ctx_create(ph_ctx_t* ctx, const char* file_path);
+    ph_result_t ph_ctx_create(ph_ctx_t* ctx, const char* file_path, ph_future_t future);
 
     /**
      * @brief Releases a context and all data obtained through it.

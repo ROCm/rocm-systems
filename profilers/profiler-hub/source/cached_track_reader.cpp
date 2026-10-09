@@ -3,6 +3,7 @@
 
 #include "cached_track_reader.hpp"
 
+#include "common/helper_group.hpp"
 #include "common/natural_merge_sort.hpp"
 #include "depth_tracker.hpp"
 #include "event_partitions.hpp"
@@ -361,26 +362,12 @@ cached_track_reader::read_thread_track_in_parts(
         if(helper_reader) worker(*helper_reader);
     };
 
-    struct helper_group
     {
-        std::vector<common::thread_pool::task_handle> handles;
-
-        ~helper_group()
-        {
-            for(const auto& handle : handles)
-            {
-                std::ignore = handle.cancel();
-                handle.wait();
-            }
-        }
-    };
-
-    {
-        helper_group helpers;
+        common::helper_group helpers{ m_workers };
         const size_t wanted = std::min(m_options.parallel_read_parts, ranges.size());
         for(size_t i = 1; i < wanted; ++i)
         {
-            helpers.handles.push_back(m_workers.submit(helper));
+            helpers.add(helper);
         }
         worker(reader);
     }

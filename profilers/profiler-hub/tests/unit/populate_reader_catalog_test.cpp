@@ -93,6 +93,20 @@ TEST_F(populate_reader_catalog_test, works_with_a_single_worker_and_a_single_con
     EXPECT_EQ(catalog->tracks.size(), 1U);
 }
 
+TEST_F(populate_reader_catalog_test, can_run_inside_the_only_worker_of_its_own_pool)
+{
+    auto                    catalog = std::make_shared<reader_catalog_t>();
+    common::thread_pool     workers{ 1 };
+    common::connection_pool connections{ m_db_path, 4, catalog };
+
+    const auto task = workers.submit([&](const std::stop_token&) {
+        populate_reader_catalog(workers, connections, *catalog);
+    });
+    task.wait();
+
+    EXPECT_EQ(catalog->tracks.size(), 1U);
+}
+
 TEST_F(populate_reader_catalog_test,
        a_failing_query_is_reported_and_the_pools_stay_usable)
 {

@@ -635,6 +635,20 @@ TEST_F(large_thread_track_test, only_thread_tracks_are_read_in_parts)
     EXPECT_EQ(m_state.events_calls, 1);
 }
 
+TEST_F(large_thread_track_test, can_be_read_inside_the_only_worker_of_its_own_pool)
+{
+    common::thread_pool single_worker{ 1 };
+    cached_track_reader reader{ m_source, single_worker, m_options };
+    ph_event_list_t     list{};
+
+    const auto task = single_worker.submit([&](const std::stop_token&) {
+        list = reader.events(make_track(1, track_kind_t::thread, 10), 0, 0);
+    });
+    task.wait();
+
+    EXPECT_EQ(list.list_size, 10U);
+}
+
 TEST_F(large_thread_track_test, a_failing_part_fails_the_read_and_the_next_read_works)
 {
     auto       reader = make_reader(m_options);

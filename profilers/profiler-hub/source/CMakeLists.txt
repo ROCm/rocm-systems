@@ -30,6 +30,7 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/track_read_options.hpp
     ${CMAKE_CURRENT_LIST_DIR}/track_row_reader.hpp
     ${CMAKE_CURRENT_LIST_DIR}/track_window.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/common/helper_group.hpp
     ${CMAKE_CURRENT_LIST_DIR}/common/natural_merge_sort.hpp
     ${CMAKE_CURRENT_LIST_DIR}/common/thread_pool.cpp
     ${CMAKE_CURRENT_LIST_DIR}/common/thread_pool.hpp

@@ -352,12 +352,34 @@ demo_track_samples(ph_ctx_t ctx, uint32_t track_id)
     print_samples(&slice, PRINT_LIMIT);
 }
 
+static void
+on_load_progress(ph_future_t future, double value)
+{
+    (void) future;
+    static int last_percent = -1;
+    const int  percent      = (int) (value * 100.0);
+    if(percent / 10 == last_percent / 10) return;
+    last_percent = percent;
+    printf("loading trace: %3d%%\n", percent);
+}
+
+static void
+on_load_finished(ph_future_t future, ph_future_status_t status, ph_result_t result)
+{
+    (void) future;
+    printf("loading trace finished: status %d, result %d\n", (int) status, (int) result);
+}
+
 int
 main(int argc, char** argv)
 {
     const char* trace_path = argc > 1 ? argv[1] : "/home/amd/test_dbs/rocpd-3930708-0.db";
     ph_ctx_t    ctx        = NULL;
-    TIME_CALL("ph_ctx_create", ph_ctx_create(&ctx, trace_path));
+    ph_future_t load_future = NULL;
+    ph_future_create(on_load_progress, on_load_finished, &load_future);
+    TIME_CALL("ph_ctx_create (async)", ph_ctx_create(&ctx, trace_path, load_future));
+    TIME_CALL("ph_future_wait (load)", ph_future_wait(load_future));
+    ph_future_free(load_future);
 
     print_version(ctx);
 

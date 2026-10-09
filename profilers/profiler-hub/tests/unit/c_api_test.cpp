@@ -21,7 +21,7 @@ using namespace profiler_hub;
 
 TEST(c_api_test, ph_ctx_create_null_ctx_returns_invalid_context)
 {
-    EXPECT_EQ(ph_ctx_create(nullptr, "unused.db"), PH_RESULT_INVALID_CONTEXT);
+    EXPECT_EQ(ph_ctx_create(nullptr, "unused.db", nullptr), PH_RESULT_INVALID_CONTEXT);
 }
 
 TEST(c_api_test, ph_ctx_free_null_returns_invalid_context)
@@ -115,7 +115,7 @@ protected:
 TEST_F(c_api_real_ctx_test, create_and_free_succeeds_on_real_trace)
 {
     ph_ctx_t ctx = nullptr;
-    ASSERT_EQ(ph_ctx_create(&ctx, m_db_path.c_str()), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_ctx_create(&ctx, m_db_path.c_str(), nullptr), PH_RESULT_SUCCESS);
     ASSERT_NE(ctx, nullptr);
 
     ph_node_t node{};
@@ -132,7 +132,7 @@ TEST_F(c_api_real_ctx_test, create_and_free_succeeds_on_real_trace)
 TEST_F(c_api_real_ctx_test, ph_get_library_version_returns_build_version)
 {
     ph_ctx_t ctx = nullptr;
-    ASSERT_EQ(ph_ctx_create(&ctx, m_db_path.c_str()), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_ctx_create(&ctx, m_db_path.c_str(), nullptr), PH_RESULT_SUCCESS);
 
     ph_library_version_t version{};
     EXPECT_EQ(ph_get_library_version(ctx, &version), PH_RESULT_SUCCESS);
@@ -178,7 +178,7 @@ protected:
 TEST_F(c_api_pmc_ctx_test, ph_get_track_list_pmc_track_exposes_valid_value_range)
 {
     ph_ctx_t ctx = nullptr;
-    ASSERT_EQ(ph_ctx_create(&ctx, m_db_path.c_str()), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_ctx_create(&ctx, m_db_path.c_str(), nullptr), PH_RESULT_SUCCESS);
 
     ph_track_list_t tracks{};
     ASSERT_EQ(ph_get_track_list(ctx, &tracks), PH_RESULT_SUCCESS);
@@ -198,7 +198,7 @@ TEST_F(c_api_pmc_ctx_test, ph_get_track_list_pmc_track_exposes_valid_value_range
 TEST_F(c_api_pmc_ctx_test, ph_get_track_list_pmc_track_has_nesting_depth_zero)
 {
     ph_ctx_t ctx = nullptr;
-    ASSERT_EQ(ph_ctx_create(&ctx, m_db_path.c_str()), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_ctx_create(&ctx, m_db_path.c_str(), nullptr), PH_RESULT_SUCCESS);
 
     ph_track_list_t tracks{};
     ASSERT_EQ(ph_get_track_list(ctx, &tracks), PH_RESULT_SUCCESS);
@@ -216,7 +216,7 @@ TEST_F(c_api_pmc_ctx_test, ph_get_track_list_pmc_track_has_nesting_depth_zero)
 TEST_F(c_api_thread_ctx_test, ph_get_track_list_thread_track_value_range_is_not_valid)
 {
     ph_ctx_t ctx = nullptr;
-    ASSERT_EQ(ph_ctx_create(&ctx, m_db_path.c_str()), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_ctx_create(&ctx, m_db_path.c_str(), nullptr), PH_RESULT_SUCCESS);
 
     ph_track_list_t tracks{};
     ASSERT_EQ(ph_get_track_list(ctx, &tracks), PH_RESULT_SUCCESS);
@@ -231,7 +231,7 @@ TEST_F(c_api_thread_ctx_test, ph_get_track_list_thread_track_value_range_is_not_
 TEST_F(c_api_real_ctx_test, ph_get_track_list_null_track_list_returns_invalid_argument)
 {
     ph_ctx_t ctx = nullptr;
-    ASSERT_EQ(ph_ctx_create(&ctx, m_db_path.c_str()), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_ctx_create(&ctx, m_db_path.c_str(), nullptr), PH_RESULT_SUCCESS);
 
     EXPECT_EQ(ph_get_track_list(ctx, nullptr), PH_RESULT_INVALID_ARGUMENT);
 
@@ -241,7 +241,7 @@ TEST_F(c_api_real_ctx_test, ph_get_track_list_null_track_list_returns_invalid_ar
 TEST_F(c_api_real_ctx_test, get_track_events_unknown_track_returns_invalid_argument)
 {
     ph_ctx_t ctx = nullptr;
-    ASSERT_EQ(ph_ctx_create(&ctx, m_db_path.c_str()), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_ctx_create(&ctx, m_db_path.c_str(), nullptr), PH_RESULT_SUCCESS);
 
     ph_event_list_t events{};
     EXPECT_EQ(ph_get_track_events(ctx, 999999, 0, 0, &events),

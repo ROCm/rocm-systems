@@ -23,7 +23,7 @@ guard_call(Fn&& fn)
 }  // namespace
 
 ph_result_t
-ph_ctx_create(ph_ctx_t* ctx, const char* file_path)
+ph_ctx_create(ph_ctx_t* ctx, const char* file_path, ph_future_t future)
 {
     if(ctx == nullptr)
     {
@@ -36,14 +36,28 @@ ph_ctx_create(ph_ctx_t* ctx, const char* file_path)
         return PH_RESULT_INVALID_ARGUMENT;
     }
 
+    std::unique_ptr<ph_ctx> created;
     try
     {
-        *ctx = new ph_ctx(file_path);
+        created = std::make_unique<ph_ctx>(file_path);
+        if(future == nullptr)
+        {
+            created->load();
+        }
+        else if(future->try_attach())
+        {
+            created->load_async(future->shared_from_this());
+        }
+        else
+        {
+            return PH_RESULT_INVALID_ARGUMENT;
+        }
     } catch(...)
     {
         return PH_RESULT_CONTEXT_ALLOCATION_FAILED;
     }
 
+    *ctx = created.release();
     return PH_RESULT_SUCCESS;
 }
 
@@ -96,6 +110,10 @@ ph_get_schema_version(ph_ctx_t ctx, ph_schema_version_t* version)
     }
 
     return guard_call([ctx, version]() {
+        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+        {
+            return ready;
+        }
         const auto ctx_version = ctx->get_schema_version();
         version->major         = ctx_version.major;
         version->minor         = ctx_version.minor;
@@ -118,6 +136,10 @@ ph_get_track_list(ph_ctx_t ctx, ph_track_list_t* track_list)
     }
 
     return guard_call([ctx, track_list]() {
+        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+        {
+            return ready;
+        }
         *track_list = ctx->get_track_list();
         return PH_RESULT_SUCCESS;
     });
@@ -137,6 +159,10 @@ ph_get_node(ph_ctx_t ctx, ph_node_t* node)
     }
 
     return guard_call([ctx, node]() {
+        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+        {
+            return ready;
+        }
         *node = ctx->get_node();
         return PH_RESULT_SUCCESS;
     });
@@ -161,6 +187,10 @@ ph_get_track_events(ph_ctx_t         ctx,
 
     *events = ph_event_list_t{ .list_size = 0, .events = nullptr };
     return guard_call([ctx, track_id, start_ts, end_ts, events]() {
+        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+        {
+            return ready;
+        }
         if(!ctx->has_track(track_id))
         {
             return PH_RESULT_INVALID_ARGUMENT;
@@ -191,6 +221,10 @@ ph_get_track_samples(ph_ctx_t          ctx,
 
     *samples = ph_sample_list_t{ .list_size = 0, .samples = nullptr };
     return guard_call([ctx, track_id, start_ts, end_ts, samples]() {
+        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+        {
+            return ready;
+        }
         if(!ctx->has_track(track_id))
         {
             return PH_RESULT_INVALID_ARGUMENT;
