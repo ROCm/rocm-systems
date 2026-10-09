@@ -213,9 +213,14 @@ def _run_validation_script(
         if result.returncode == 0:
             message = result.stdout.strip()
         else:
+            # Both streams: the traceback goes to stderr, but the context needed
+            # to read it (paths, counts, what the script decided) is on stdout
             message = (
-                result.stderr.strip()
-                or result.stdout.strip()
+                "\n".join(
+                    stream
+                    for stream in (result.stdout.strip(), result.stderr.strip())
+                    if stream
+                )
                 or f"Exit code: {result.returncode}"
             )
 
@@ -249,6 +254,8 @@ def validate_perfetto_trace(
     depths: Optional[list[int]] = None,
     label_substrings: Optional[list[str]] = None,
     counter_names: Optional[list[str]] = None,
+    counter_names_present: Optional[list[str]] = None,
+    counter_names_zero: Optional[list[str]] = None,
     key_names: Optional[list[str]] = None,
     key_counts: Optional[list[int]] = None,
     trace_processor_path: Optional[Path] = None,
@@ -264,17 +271,24 @@ def validate_perfetto_trace(
     presence-only checks.
 
     Args:
-        trace_path: Path to perfetto-trace.proto file
+        trace_path: Path to Perfetto trace file (.pftrace or .proto)
         tests_dir: Path to directory containing validation scripts
         categories: List of categories to filter by (-m flag)
         labels: Expected labels (-l flag)
         counts: Expected counts (-c flag)
         depths: Expected depths (-d flag); omit for aggregate-by-name validation
         label_substrings: Expected label substrings (-s flag)
-        counter_names: Counter names to validate (--counter-names flag)
+        counter_names: Counter names to validate (--counter-names flag); each must
+            have a positive total
+        counter_names_present: Counter names that must exist and be sampled, whatever
+            their values (--counter-names-present flag)
+        counter_names_zero: Counter names that must exist, be sampled, and stay zero
+            throughout (--counter-names-zero flag)
         key_names: Debug key names to check (--key-names flag)
         key_counts: Expected counts for debug keys (--key-counts flag)
-        trace_processor_path: Path to trace_processor_shell (-t flag)
+        trace_processor_path: Path to trace_processor_shell (-t flag). When omitted,
+            validate-perfetto-proto.py falls back to $ROCPROFSYS_TRACE_PROC_SHELL, then
+            to the binary staged next to it by the build, then to a Perfetto download
         print_output: Whether to print trace data (-p flag)
         check_counter_pairing: Verify counter tracks have paired start/end entries
         timeout: Validation timeout in seconds
@@ -284,11 +298,6 @@ def validate_perfetto_trace(
     """
     if not trace_path.exists():
         return ValidationResult(False, f"Trace file not found: {trace_path}")
-
-    # Allow override of trace_processor_path to allow perfetto validation using older GLIBC versions
-    env_path = os.environ.get("ROCPROFSYS_TRACE_PROC_SHELL")
-    if env_path:
-        trace_processor_path = Path(env_path)
 
     args = ["-i", str(trace_path)]
 
@@ -308,6 +317,12 @@ def validate_perfetto_trace(
 
     if counter_names:
         args.extend(["--counter-names"] + counter_names)
+
+    if counter_names_present:
+        args.extend(["--counter-names-present"] + counter_names_present)
+
+    if counter_names_zero:
+        args.extend(["--counter-names-zero"] + counter_names_zero)
 
     if check_counter_pairing:
         args.append("--check-counter-pairing")

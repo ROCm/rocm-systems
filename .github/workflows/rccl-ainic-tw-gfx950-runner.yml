@@ -1,0 +1,338 @@
+# RCCL AINIC test runner for the TensorWave gfx950 (MI355X) cluster.
+#
+# DEPLOYMENT: RCCL lives in the ROCm/rocm-systems monorepo at projects/rccl. The
+# test_runner framework lives at projects/rccl/tools/scripts/test_runner/ and its
+# entry point is test_runner.py (run from that directory so its `from lib...`
+# imports resolve, matching the README). The test plan is
+# configs/mi355x_ainic_tw_roce.json. Runs on the self-hosted org runner
+# "tw-gfx950-ainic-ROCm-scale-runner".
+#
+# Test scope and categories live entirely in the JSON config (not here), so the
+# set of suites and the smoke subset can be changed without editing this
+# workflow:
+#   - Category is derived from is_gtest in the config: "gtest-tests" (freshly
+#     built rccl-UnitTestsMPI gtests) vs "rccl-tests-sweeps" (prebuilt rccl-tests
+#     perf binaries + IONIC counter validation). Both run in one test_runner
+#     invocation; each suite resolves its own binary directory (GTEST_BIN_DIR vs
+#     PERF_BIN_DIR) from its base config's test_binary_dir.
+#   - Scope is selected with --scope: PRs run --scope smoke (only suites marked
+#     "smoke": true); schedule/manual run the full plan (all enabled suites).
+#
+# Triggers: manual (workflow_dispatch), nightly (schedule) against the default
+# branch, and label-gated on PRs -- add the "ainic-test" label to run the smoke
+# subset. Not a required merge gate.
+#
+# Build strategy: the runner is a SLURM submit node with no local GPUs, so
+# everything runs inside one SLURM batch job (sbatch --wait) on the GPU compute
+# nodes. Phase 0 builds RCCL fresh with --enable-mpi-tests from this run's own
+# checkout on the compute node (install.sh defaults -j to $(nproc), using all of
+# the node's cores). The single test run then loads that fresh build: gtest
+# suites use the freshly built rccl-UnitTestsMPI binary, and rccl-tests perf
+# suites use prebuilt rccl-tests binaries that load the fresh librccl.so via
+# LD_LIBRARY_PATH.
+name: RCCL AINIC TW gfx950 Runner
+
+on:
+  workflow_dispatch:
+    # Inputs are left without hardcoded defaults: when empty they fall back to the
+    # env.DEFAULT_* values below (the single source of truth), so nothing is
+    # duplicated between here and the env block.
+    inputs:
+      scope:
+        description: 'Suite scope: "nightly" (all enabled suites) or "smoke" (only suites marked smoke in the config)'
+        required: false
+        default: 'nightly'
+        type: choice
+        options:
+          - nightly
+          - smoke
+      workdir:
+        description: 'Working directory on the runner for test artifacts/logs (WORKDIR)'
+        required: false
+        default: ''
+      mpi_path:
+        description: 'MPI install path (MPI_PATH)'
+        required: false
+        default: ''
+      rocm_path:
+        description: 'ROCm toolchain root (ROCM_PATH)'
+        required: false
+        default: ''
+      perf_bin_dir:
+        description: 'Prebuilt rccl-tests perf binary dir for the rccl-tests-sweeps category (empty = env default)'
+        required: false
+        default: ''
+      salloc_partition:
+        description: 'SLURM partition to allocate GPU nodes from (empty = env default)'
+        required: false
+        default: ''
+      salloc_reservation:
+        description: 'SLURM reservation holding the AINIC GPU nodes (empty = env default)'
+        required: false
+        default: ''
+      salloc_nodes:
+        description: 'Number of GPU nodes to allocate (empty = env default)'
+        required: false
+        default: ''
+      salloc_time:
+        description: 'Max wall clock for the SLURM allocation, HH:MM:SS (empty = env default)'
+        required: false
+        default: ''
+      salloc_exclude:
+        description: 'SLURM nodes to exclude from allocation (empty = env default, known-broken hardware)'
+        required: false
+        default: ''
+  schedule:
+    # Nightly at 02:00 UTC: runs the full plan against HEAD of the default branch.
+    - cron: '0 2 * * *'
+  pull_request:
+    # Label-gated smoke: runs only when the "ainic-test" label is present (see the
+    # job `if`); the subset that runs is every suite marked "smoke": true in the
+    # config (selected via --scope smoke below).
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+env:
+  TEST_RUNNER_DIR: projects/rccl/tools/scripts/test_runner
+  DEFAULT_WORKDIR: /it-share/rccl-ci/rocm-systems
+  DEFAULT_MPI_PATH: /it-share/ompi-5.0.8
+  DEFAULT_ROCM_PATH: /it-share/rccl-ci/rocm_devel
+  # Prebuilt rccl-tests perf binaries for the rccl-tests-sweeps category (they
+  # load the fresh librccl.so at runtime via LD_LIBRARY_PATH; see the
+  # build-strategy note in the header).
+  DEFAULT_PERF_BIN_DIR: /it-share/rccl-ci/rccl-tests-2.30.4/bin
+  # SLURM allocation defaults (single source of truth; workflow_dispatch inputs
+  # override them when non-empty).
+  DEFAULT_SALLOC_PARTITION: amd-tw
+  DEFAULT_SALLOC_RESERVATION: rccl_dev
+  DEFAULT_SALLOC_NODES: '2'
+  DEFAULT_SALLOC_TIME: '04:00:00'
+  # No nodes excluded by default; override via the salloc_exclude input if needed.
+  DEFAULT_SALLOC_EXCLUDE: ''
+
+jobs:
+  ainic-test-runner:
+    # On PRs, run only for same-repo branches (never forks) that carry the
+    # "ainic-test" label -- the same-repo guard stops a labeled fork PR from
+    # running updated fork code on the self-hosted runner via later synchronize
+    # events. All other events (workflow_dispatch, schedule) always run.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       contains(github.event.pull_request.labels.*.name, 'ainic-test'))
+    # Serialise on the shared AINIC nodes: only one run at a time, and never
+    # cancel an in-progress allocation (it must finish cleanly to release the
+    # nodes). Job-level (not workflow-level) so skipped PR runs -- every PR
+    # synchronize in the monorepo triggers this workflow -- don't join the queue
+    # and cancel a pending labeled run that is still waiting for the runner.
+    concurrency:
+      group: ainic-test-runner-pinned-nodes
+      cancel-in-progress: false
+    runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
+    timeout-minutes: 540
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run AINIC test suite (sbatch)
+        id: run_tests
+        continue-on-error: true
+        env:
+          WORKDIR: ${{ github.event.inputs.workdir || env.DEFAULT_WORKDIR }}
+          MPI_PATH: ${{ github.event.inputs.mpi_path || env.DEFAULT_MPI_PATH }}
+          ROCM_PATH: ${{ github.event.inputs.rocm_path || env.DEFAULT_ROCM_PATH }}
+          # Fresh build produced by Phase 0 of the batch job (on the compute node).
+          # librccl.so lives directly under build/debug; this is passed to the test
+          # run as RCCL_BUILD_DIR (librccl.so existence check + LD_LIBRARY_PATH so
+          # the prebuilt perf binaries load the fresh lib). It is deliberately NOT
+          # named RCCL_BUILD_DIR at the step/env level: test_runner treats a
+          # non-empty RCCL_BUILD_DIR as a prebuilt library and would skip Phase 0's
+          # build, so it must be absent from the environment while Phase 0 runs and
+          # only set inline on the --no-build test run below. The gtest binaries
+          # live under build/debug/test (GTEST_BIN_DIR -> the gtest_base
+          # test_binary_dir in the config); GTEST_BIN_DIR/PERF_BIN_DIR do not
+          # trigger the prebuilt-library path, so they are safe to export. Both
+          # live under ${{ github.workspace }} (on /it-share, shared with the
+          # compute nodes).
+          RUN_RCCL_BUILD_DIR: ${{ github.workspace }}/projects/rccl/build/debug
+          GTEST_BIN_DIR: ${{ github.workspace }}/projects/rccl/build/debug/test
+          # rccl-tests-sweeps category: prebuilt perf binaries (rccl_tests_base
+          # test_binary_dir in the config resolves PERF_BIN_DIR).
+          PERF_BIN_DIR: ${{ github.event.inputs.perf_bin_dir || env.DEFAULT_PERF_BIN_DIR }}
+          # PRs run the smoke subset; workflow_dispatch honors its input;
+          # schedule runs the full plan.
+          SCOPE: ${{ github.event_name == 'pull_request' && 'smoke' || (github.event.inputs.scope || 'nightly') }}
+          SALLOC_PARTITION: ${{ github.event.inputs.salloc_partition || env.DEFAULT_SALLOC_PARTITION }}
+          SALLOC_RESERVATION: ${{ github.event.inputs.salloc_reservation || env.DEFAULT_SALLOC_RESERVATION }}
+          SALLOC_NODES: ${{ github.event.inputs.salloc_nodes || env.DEFAULT_SALLOC_NODES }}
+          SALLOC_TIME: ${{ github.event.inputs.salloc_time || env.DEFAULT_SALLOC_TIME }}
+          SALLOC_EXCLUDE: ${{ github.event.inputs.salloc_exclude || env.DEFAULT_SALLOC_EXCLUDE }}
+        run: |
+          set -o pipefail
+
+          # Run inside a SLURM batch job (sbatch, not interactive salloc): it
+          # decouples compute from the runner's shell so a transient runner hiccup
+          # can't tear down the allocation, and `--wait` makes sbatch's exit code
+          # equal the job's exit code for gating. Inside the job
+          # SLURM_JOB_ID/SLURM_NODELIST are set, test_runner calls
+          # `scontrol show hostnames`, and mpirun lands ranks on real GPUs.
+          # --exclusive gives full CPUs per node so `--bind-to numa` has room.
+          # GITHUB_WORKSPACE and RUNNER_TEMP live under /it-share (shared with the
+          # compute nodes), so the fresh build and the run log are visible here.
+          RESV_ARG=""
+          if [ -n "${SALLOC_RESERVATION}" ]; then
+            RESV_ARG="--reservation=${SALLOC_RESERVATION}"
+          fi
+          EXCLUDE_ARG=""
+          if [ -n "${SALLOC_EXCLUDE}" ]; then
+            EXCLUDE_ARG="--exclude=${SALLOC_EXCLUDE}"
+          fi
+
+          # sbatch --export=ALL (default) forwards these to the batch job. Note
+          # RUN_RCCL_BUILD_DIR (not RCCL_BUILD_DIR): the bare name is only set
+          # inline on the test run so it never leaks into Phase 0's build.
+          export RUN_RCCL_BUILD_DIR GTEST_BIN_DIR PERF_BIN_DIR SCOPE \
+                 GITHUB_WORKSPACE TEST_RUNNER_DIR RUNNER_TEMP \
+                 WORKDIR MPI_PATH ROCM_PATH
+
+          BATCH_SCRIPT="${RUNNER_TEMP}/ainic_job.sbatch"
+          SLURM_OUT="${RUNNER_TEMP}/ainic_slurm.out"
+
+          # Batch payload. Quoted heredoc ('BATCH') => the ${...} expand at job
+          # time from the exported environment, not now.
+          cat > "${BATCH_SCRIPT}" <<'BATCH'
+          #!/bin/bash
+          set -o pipefail
+          cd "${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}"
+
+          # Phase 0: build RCCL with --enable-mpi-tests on THIS compute node
+          # rather than the 8-core submit node. RCCL_BUILD_DIR is intentionally not
+          # in the environment here (only RUN_RCCL_BUILD_DIR is), so test_runner
+          # does a real build instead of treating it as a prebuilt library:
+          # test_runner.py invokes install.sh, which defaults -j to $(nproc) and
+          # therefore uses ALL of the compute node's cores. WORKDIR points at this
+          # run's own checkout so install.sh and the build tree resolve there (on
+          # /it-share, shared with every node in the allocation). The build is
+          # always required: gtest suites need the fresh rccl-UnitTestsMPI binary,
+          # and the perf suites load the freshly built librccl.so via
+          # LD_LIBRARY_PATH.
+          echo "================================================================"
+          echo "Phase 0: build RCCL (--enable-mpi-tests) on $(hostname) [nproc=$(nproc)]"
+          echo "================================================================"
+          WORKDIR="${GITHUB_WORKSPACE}/projects/rccl" \
+          python3 test_runner.py \
+            --config configs/mi355x_ainic_tw_roce.json \
+            --system ainic \
+            --skip-tests \
+            2>&1 | tee "${RUNNER_TEMP}/ainic_build.log"
+          build_rc=$?
+          if [ "${build_rc}" -ne 0 ]; then
+            echo "ERROR: RCCL build failed (rc=${build_rc}); aborting batch job."
+            exit "${build_rc}"
+          fi
+          echo "== rccl-UnitTestsMPI =="
+          ls -la "${GITHUB_WORKSPACE}/projects/rccl/build/debug/test/rccl-UnitTestsMPI" 2>&1 || true
+
+          # Single test run: one test_runner invocation executes every selected
+          # suite. Each suite resolves its own binary directory from the config
+          # (GTEST_BIN_DIR for gtest suites, PERF_BIN_DIR for rccl-tests suites),
+          # so no group split is needed here. --scope selects nightly (all
+          # enabled) vs smoke (only suites marked smoke).
+          echo "================================================================"
+          echo "Run AINIC suites (--scope ${SCOPE})"
+          echo "================================================================"
+          RCCL_BUILD_DIR="${RUN_RCCL_BUILD_DIR}" \
+          GTEST_BIN_DIR="${GTEST_BIN_DIR}" \
+          PERF_BIN_DIR="${PERF_BIN_DIR}" \
+          python3 test_runner.py \
+            --config configs/mi355x_ainic_tw_roce.json \
+            --system ainic \
+            --no-build \
+            --scope "${SCOPE}" \
+            --report-suffix ainic \
+            2>&1 | tee "${RUNNER_TEMP}/ainic_run.log"
+          exit $?
+          BATCH
+
+          chmod +x "${BATCH_SCRIPT}"
+          : > "${SLURM_OUT}"
+
+          echo "Submitting sbatch job (partition=${SALLOC_PARTITION} nodes=${SALLOC_NODES} time=${SALLOC_TIME})..."
+          # --wait: sbatch blocks until the job finishes and exits with the job's
+          # exit code. Backgrounded so we can stream the job's output live into the
+          # step log via tail -F while it runs.
+          sbatch --wait \
+            --job-name=ainic \
+            --output="${SLURM_OUT}" \
+            --partition="${SALLOC_PARTITION}" \
+            ${RESV_ARG} \
+            ${EXCLUDE_ARG} \
+            --nodes="${SALLOC_NODES}" \
+            --ntasks-per-node=8 \
+            --gres=gpu:8 \
+            --exclusive \
+            --time="${SALLOC_TIME}" \
+            "${BATCH_SCRIPT}" &
+          SBATCH_PID=$!
+
+          tail -n +1 -F "${SLURM_OUT}" 2>/dev/null &
+          TAIL_PID=$!
+
+          wait "${SBATCH_PID}"
+          rc=$?
+
+          sleep 2
+          kill "${TAIL_PID}" 2>/dev/null || true
+
+          # Collect this run's report directory. test_runner writes it to
+          # ${WORKDIR}/rccl_test_artifacts_ainic_<timestamp>; copy the newest into
+          # RUNNER_TEMP so the upload step captures the full per-test logs/reports
+          # (not just the tee'd console log) without picking up older runs that
+          # share this WORKDIR.
+          REPORTS_DIR="${RUNNER_TEMP}/reports"
+          mkdir -p "${REPORTS_DIR}"
+          newest="$(ls -dt "${WORKDIR}"/rccl_test_artifacts_ainic_* 2>/dev/null | head -n1)"
+          if [ -n "${newest}" ]; then
+            cp -a "${newest}" "${REPORTS_DIR}/" 2>/dev/null || true
+          fi
+
+          echo "sbatch --wait exit code: ${rc}"
+          exit "${rc}"
+
+      - name: Upload run log and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ainic-test-report
+          path: |
+            ${{ runner.temp }}/ainic_build.log
+            ${{ runner.temp }}/ainic_run.log
+            ${{ runner.temp }}/reports
+          if-no-files-found: warn
+
+      - name: Print summary
+        if: always()
+        run: |
+          {
+            echo '### RCCL AINIC TW gfx950 Runner'
+            for label_log in "Build (--enable-mpi-tests):${RUNNER_TEMP}/ainic_build.log" \
+                              "AINIC tests:${RUNNER_TEMP}/ainic_run.log"; do
+              label="${label_log%%:*}"
+              log="${label_log#*:}"
+              if [ -f "${log}" ]; then
+                echo "#### ${label}"
+                echo '```'
+                # The runner prints a "Detailed Results" / "Total Tests" block at
+                # the end; surface the tail of the log in the job summary.
+                tail -n 80 "${log}"
+                echo '```'
+              fi
+            done
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Fail job if tests failed
+        if: steps.run_tests.outcome == 'failure'
+        run: exit 1

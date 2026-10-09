@@ -17,10 +17,13 @@
 #include "signals.h" // [RCCL]
 #include "param.h"
 #include "ras.h"
+#include "crypt.h"
+#include <condition_variable>
 #include <mutex>
 #include "os.h"
 #include <thread>
 #include <chrono>
+#include <new>
 
 #define BOOTSTRAP_N_CHECK_ABORT 10000
 #define BOOTSTRAP_TAG_CONNECT (0x1 << 31)
@@ -431,9 +434,9 @@ struct extInfo {
 #define BOOTSTRAP_HANDLE(h, i) ((struct ncclBootstrapHandle*)((char*)h + i * NCCL_UNIQUE_ID_BYTES))
 
 // Bootstrap-side accept wrapper. ncclSocketAccept's default behavior
-// (retryOnBadMagic=true) loops internally on bad-magic events, which can
+// (retry=true) loops internally on bad-handshake events, which can
 // monopolize CPU and starve legitimate peer connects when a non-NCCL TCP
-// peer hits the bootstrap listen socket. We pass retryOnBadMagic=false and
+// peer hits the bootstrap listen socket. We pass retry=false and
 // drive the retry from here: close the rejected socket, yield 1ms, retry.
 // abortFlag is honored between iterations.
 static ncclResult_t bootstrapAccept(struct ncclSocket* sock, struct ncclSocket* listenSock,
@@ -443,8 +446,8 @@ static ncclResult_t bootstrapAccept(struct ncclSocket* sock, struct ncclSocket* 
       return ncclInternalError;
     }
     NCCLCHECK(ncclSocketInit(sock));
-    NCCLCHECK(ncclSocketAccept(sock, listenSock, /*retryOnBadMagic=*/false));
-    if (sock->state != ncclSocketStateBadMagic) return ncclSuccess;
+    NCCLCHECK(ncclSocketAccept(sock, listenSock, /*retry=*/false));
+    if (sock->state != ncclSocketStateBadHandshake) return ncclSuccess;
     INFO(NCCL_INIT | NCCL_NET, "bootstrap: rejected bad-magic peer connection on listen sock, retrying accept");
     (void)ncclSocketClose(sock);
     usleep(1000);
@@ -580,7 +583,8 @@ static void* bootstrapRoot(void* rargs) {
   BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_ROOT_SEND]);
   // here we need to send info only to my own local process
   for (int r = 0; r < n2send; ++r) {
-    // use nrecv to periodize: if 1 root, we will send the first one to the last one, if >1 roots we will send the additional one we have received
+    // use nrecv to periodize: if 1 root, we will send the first one to the last one,
+    // if >1 roots we will send the additional one we have received
     int next = BOOTSTRAP_PID(r + 1, nrecv);
     if (memcmp(&zeroAddress, &rankAddressesRoot[r], sizeof(union ncclSocketAddress)) != 0 &&
         memcmp(&zeroInfo, &rankInfo[next], sizeof(struct ringConnectInfo)) != 0) {
@@ -731,6 +735,16 @@ struct bootstrapListen_t {
   };
 };
 
+struct bootstrapState;
+struct bootstrapAsyncSend {
+  struct bootstrapState* state;
+  int peer;
+  int tag;
+  int size;
+  char* data;
+  struct bootstrapAsyncSend* next;
+};
+
 struct bootstrapState {
   struct bootstrapRing_t ring;
   struct bootstrapListen_t listen;
@@ -744,6 +758,12 @@ struct bootstrapState {
   int nranks;
   uint64_t magic;
   volatile uint32_t* abortFlag;
+  std::mutex asyncSendLock;
+  std::condition_variable asyncSendCond;
+  struct ncclIntruQueue<struct bootstrapAsyncSend, &bootstrapAsyncSend::next> asyncSendQueue; // in caller order
+  ncclResult_t asyncSendError;
+  bool asyncSendClosing; // rejects sends once drain/teardown begins
+  bool asyncSendSetAbort; // async failure set abortFlag; report it once before abort cleanup
 };
 #define STATE_RING(s, f) (s->ring.f)
 #define STATE_LISTEN(s, f) (s->listen.f)
@@ -856,15 +876,20 @@ static ncclResult_t netRingConnectFinish(void* ctx, ncclNet_t* net, struct boots
 // TCP connect/accept handshakes with local proxy/P2P socket setup, without adding
 // threads. socketRingConnect() below keeps the old blocking semantics for callers that
 // do not have useful work to overlap (notably bootstrapSplit).
+// With TLS on the bootstrap sockets, the handshake is also progressed by the polling in
+// socketRingConnectFinish, so connecting to next and accepting from prev make progress
+// together on this single thread (upstream's bootstrapConcurrent spawns a helper thread for
+// the same reason).
 static ncclResult_t socketRingConnectStart(ncclSocketAddress* addr, struct ncclSocket* sendSocket,
                                            struct ncclSocket* listenSock, struct ncclSocket* recvSocket, uint64_t magic,
                                            volatile uint32_t* abortFlag) {
   ncclResult_t ret = ncclSuccess;
+  // Init recvSocket first so callers can safely close both sockets on failure.
+  NCCLCHECK(ncclSocketInit(recvSocket));
   NCCLCHECK(ncclSocketInit(sendSocket, addr, magic, ncclSocketTypeBootstrap, abortFlag, /*asyncFlag*/ 1));
   NCCLCHECK(ncclSocketConnect(sendSocket));
   int oldAsync = listenSock->asyncFlag;
   listenSock->asyncFlag = 1;
-  NCCLCHECKGOTO(ncclSocketInit(recvSocket), ret, exit);
   NCCLCHECKGOTO(ncclSocketAccept(recvSocket, listenSock), ret, exit);
 exit:
   listenSock->asyncFlag = oldAsync;
@@ -884,12 +909,60 @@ static ncclResult_t socketRingConnectFinish(struct ncclSocket* sendSocket, struc
   return ncclSuccess;
 }
 
+// With TLS on the bootstrap sockets, a connector cannot finish its handshake (and
+// therefore its send) until the acceptor's application accepts the connection and
+// runs the server half. The ring connect (connect to next, then accept from prev)
+// would deadlock once every rank sits in its connect, so the connect side runs on
+// a helper thread while this rank keeps serving its accept side. Plaintext mode
+// keeps the stock single-threaded order. One-shot sends get the same property from
+// the asynchronous bootstrapSend below.
+// RCCL: the bootstrap ring itself uses the non-blocking socketRingConnectStart/Finish
+// above instead; this helper serves the intra-node peer connect/accept.
+struct bootstrapThreadOp {
+  ncclResult_t (*fn)(void*);
+  void* args;
+  ncclResult_t result;
+};
+
+static void bootstrapThreadRun(void* opaque) {
+  struct bootstrapThreadOp* op = (struct bootstrapThreadOp*)opaque;
+  op->result = op->fn(op->args);
+}
+
+static ncclResult_t bootstrapConcurrent(ncclResult_t (*sendFn)(void*), void* sendArgs, ncclResult_t (*recvFn)(void*),
+                                        void* recvArgs) {
+  bool encrypted;
+  NCCLCHECK(ncclGetCryptConnectionMode(&encrypted));
+  if (!encrypted) {
+    NCCLCHECK(sendFn(sendArgs));
+    NCCLCHECK(recvFn(recvArgs));
+    return ncclSuccess;
+  }
+  // We want to be able to do the initial TLS handshake connecting to the next rank around the ring
+  // and accepting from the previous rank around the ring. To keep this simple, we spawn a thread to
+  // handle the outgoing side. Unencrypted doesn't need this because no data flows on initial
+  // connect.
+  struct bootstrapThreadOp op = {sendFn, sendArgs, ncclInternalError};
+  std::thread thread;
+  STDTHREADCREATE(thread, bootstrapThreadRun, &op);
+  ncclResult_t recvRes = recvFn(recvArgs);
+  NCCLCHECK(ncclThreadJoin(thread));
+  NCCLCHECK(op.result);
+  NCCLCHECK(recvRes);
+  return ncclSuccess;
+}
+
 static ncclResult_t socketRingConnect(ncclSocketAddress* addr, struct ncclSocket* sendSocket,
                                       struct ncclSocket* listenSock, struct ncclSocket* recvSocket, uint64_t magic,
                                       volatile uint32_t* abortFlag) {
-  NCCLCHECK(socketRingConnectStart(addr, sendSocket, listenSock, recvSocket, magic, abortFlag));
-  NCCLCHECK(socketRingConnectFinish(sendSocket, recvSocket, abortFlag));
+  ncclResult_t ret = ncclSuccess;
+  NCCLCHECKGOTO(socketRingConnectStart(addr, sendSocket, listenSock, recvSocket, magic, abortFlag), ret, fail);
+  NCCLCHECKGOTO(socketRingConnectFinish(sendSocket, recvSocket, abortFlag), ret, fail);
   return ncclSuccess;
+fail:
+  (void)ncclSocketClose(sendSocket);
+  (void)ncclSocketClose(recvSocket);
+  return ret;
 }
 
 // Set up the reverse direction of the bootstrap ring for the net OOB path:
@@ -1076,8 +1149,7 @@ fail:
 
 NCCL_PARAM(StaggerRate, "UID_STAGGER_RATE", 7000);
 NCCL_PARAM(StaggerThreshold, "UID_STAGGER_THRESHOLD", 256);
-
-NCCL_PARAM(RasEnable, "RAS_ENABLE", 1);
+extern int64_t ncclParamRasEnable();
 
 ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, struct ncclComm* parent) {
   ncclResult_t result = ncclSuccess;
@@ -1102,7 +1174,8 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
   // Multi-root rendezvous can't propagate revHandle cross-root; bidir requires nHandles==1.
   bool wantNetBidir = (nHandles == 1) && bootstrapBidirEnabled(nranks, 1);
 
-  NCCLCHECK(ncclCalloc(&state, 1));
+  NEW_NOTHROW(state, bootstrapState);
+  ncclIntruQueueConstruct(&state->asyncSendQueue);
   state->rank = rank;
   state->nranks = nranks;
   state->cudaDev = comm->cudaDev;
@@ -1113,7 +1186,8 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
   // Set magic: for grow existing ranks, receive from coordinator; otherwise use handle magic.
   // This is consistent with the magic created in ncclCommGetUniqueId.
   if (handles != NULL) {
-    comm->magic = state->magic = BOOTSTRAP_HANDLE(handles, 0)->magic; // state and comm magic set to the first magic ID
+    // state and comm magic set to the first magic ID
+    comm->magic = state->magic = BOOTSTRAP_HANDLE(handles, 0)->magic;
   } else if (parent != NULL) {
     comm->magic = state->magic = hashCombine(parent->magic, parent->childCount);
   } else {
@@ -1221,7 +1295,8 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
     NCCLCHECK(ncclSocketClose(&listenSockRoot));
   }
   if (parent && comm->isGrow && rank != parent->nRanks - 1) {
-    // Grow: Ranks 0 to N-2 use the parent bootstrap to recv connection information to the next rank. This is consistent with the bootstrapSend above.
+    // Grow: Ranks 0 to N-2 use the parent bootstrap to recv connection information to the next rank.
+    // This is consistent with the bootstrapSend above.
     NCCLCHECK(bootstrapRecv(parent->bootstrap, rank + 1, 0, &nextPeer, sizeof(nextPeer)));
   }
   BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_RECV]);
@@ -1274,8 +1349,8 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
 
   // Initialize RAS
   if (ncclParamRasEnable() == 1) {
-    // The RAS thread will take care of freeing the memory allocated below.
-    NCCLCHECK(ncclCalloc(&rasRanks, nranks));
+    // The RAS thread will take ownership after ncclRasAddRanks succeeds.
+    NCCLCHECKGOTO(ncclCalloc(&rasRanks, nranks), result, fail);
     memcpy(&rasRanks[rank].addr, &bootstrapNetIfAddr, sizeof(rasRanks[rank].addr));
     rasRanks[rank].pid = ncclOsGetPid();
     rasRanks[rank].cudaDev = comm->cudaDev;
@@ -1333,6 +1408,11 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
   if (ncclParamRasEnable() == 1 && performRasAddRanks) {
     if (ncclRasAddRanks(rasRanks, nranks) != ncclSuccess)
       INFO(NCCL_INIT | NCCL_RAS, "Continuing in spite of a RAS initialization error");
+    else
+      // Ownership of rasRanks has been handed off to the RAS thread, which frees it in
+      // rasLocalHandleAddRanks(). Clear our local pointer so the free() at exit does not
+      // double-free it (an async double-free that corrupts the heap).
+      rasRanks = nullptr;
   }
 
   BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_TOTAL]);
@@ -1342,6 +1422,7 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
        timers[BOOTSTRAP_INIT_TIME_SEND] / 1e9, timers[BOOTSTRAP_INIT_TIME_RECV] / 1e9,
        timers[BOOTSTRAP_INIT_TIME_RING] / 1e9, timers[BOOTSTRAP_INIT_TIME_DELAY] / 1e9);
 exit:
+  free(rasRanks);
   return result;
 fail:
   free(proxySocket);
@@ -1359,7 +1440,8 @@ ncclResult_t bootstrapSplit(uint64_t magic, struct ncclComm* comm, struct ncclCo
   struct ncclSocket* proxySocket = NULL;
   struct bootstrapState* state;
 
-  NCCLCHECKGOTO(ncclCalloc(&state, 1), ret, fail);
+  NEW_NOTHROW_GOTO(state, bootstrapState, ret, fail);
+  ncclIntruQueueConstruct(&state->asyncSendQueue);
   state->rank = rank;
   state->nranks = nranks;
   state->cudaDev = comm->cudaDev;
@@ -1453,6 +1535,7 @@ struct socketAckInfo {
   int rank;
   int tag;
 };
+
 static ncclResult_t socketConnect(void* commState, int peer, int tag, struct ncclSocket* sock) {
   ncclResult_t ret = ncclSuccess;
   struct bootstrapState* state = (struct bootstrapState*)commState;
@@ -1468,7 +1551,7 @@ fail:
   (void)ncclSocketClose(sock);
   return ret;
 }
-ncclResult_t bootstrapSend(void* commState, int peer, int tag, void* data, int size) {
+static ncclResult_t bootstrapSendSync(void* commState, int peer, int tag, void* data, int size) {
   ncclResult_t ret = ncclSuccess;
   struct ncclSocket sock;
   TRACE(NCCL_BOOTSTRAP, "Sending to peer=%d tag=%d size=%d", peer, tag, size);
@@ -1481,6 +1564,130 @@ fail:
   (void)ncclSocketClose(&sock);
   return ret;
 }
+
+// With TLS, sockets that are send-only at the data level still need to receive for TLS handshaking
+// so we put them on their own threads with a copy of the payload and run them async.
+// bootstrapClose waits for them to drain, and a send failure is stashed on the state and returned
+// by the next bootstrap operation or close. It also sets the abort flag so an operation already
+// blocked on this state can make progress and fail.
+//
+// The receiver matches connections by (peer, tag) in accept order, so two sends to the same (peer,
+// tag) must reach it in call order (NVLS setup broadcasts to the same peers with the same tag
+// several times during init). The in-flight queue keeps caller order; a send's thread waits until it
+// is the oldest in-flight send for its (peer, tag) before connecting. Sends to distinct (peer, tag)
+// stay concurrent.
+
+// Called with asyncSendLock held, which serializes competing async-send writers.
+// asyncSendError is still atomic because bootstrap operations read it without
+// taking the lock. Publish asyncSendSetAbort before asyncSendError so acquire
+// readers that see asyncSendError also see the marker.
+static void bootstrapAsyncSendSetError(struct bootstrapState* state, ncclResult_t res) {
+  if (res == ncclSuccess || COMPILER_ATOMIC_LOAD(&state->asyncSendError, std::memory_order_relaxed) != ncclSuccess)
+    return;
+  COMPILER_ATOMIC_STORE(&state->asyncSendSetAbort, true, std::memory_order_relaxed);
+  COMPILER_ATOMIC_STORE(&state->asyncSendError, res, std::memory_order_release);
+  COMPILER_ATOMIC_STORE(state->abortFlag, 1u, std::memory_order_release);
+}
+
+static bool bootstrapAsyncSendMatches(struct bootstrapAsyncSend* a, struct bootstrapAsyncSend* b) {
+  return a == b;
+}
+
+static void bootstrapAsyncSendMain(void* opaque) {
+  struct bootstrapAsyncSend* op = (struct bootstrapAsyncSend*)opaque;
+  struct bootstrapState* state = op->state;
+  std::unique_lock<std::mutex> lock(state->asyncSendLock);
+  for (;;) {
+    struct bootstrapAsyncSend* earlier = ncclIntruQueueHead(&state->asyncSendQueue);
+    while (earlier != op && !(earlier->peer == op->peer && earlier->tag == op->tag)) earlier = earlier->next;
+    if (earlier == op) break;
+    // someone is queued ahead of us with the same (peer, tag), wait for it
+    state->asyncSendCond.wait(lock);
+  }
+  // Once any send on this state has failed, stop sending: a dropped message
+  // followed by a delivered one would be matched to the wrong bootstrapRecv on
+  // the receiver. The comm is coming down anyway; keep the first error.
+  bool skip = (COMPILER_ATOMIC_LOAD(&state->asyncSendError, std::memory_order_relaxed) != ncclSuccess);
+  ncclResult_t res = ncclSuccess;
+  if (!skip) {
+    lock.unlock();
+    res = bootstrapSendSync(state, op->peer, op->tag, op->data, op->size);
+    lock.lock();
+  }
+  bootstrapAsyncSendSetError(state, res);
+  ncclIntruQueueDelete(&state->asyncSendQueue, op, bootstrapAsyncSendMatches);
+  // we're done, wake up anyone that might be waiting for us to finish
+  state->asyncSendCond.notify_all();
+  lock.unlock();
+  free(op->data);
+  free(op);
+}
+
+static ncclResult_t bootstrapAsyncSendDrain(struct bootstrapState* state) {
+  std::unique_lock<std::mutex> lock(state->asyncSendLock);
+  state->asyncSendClosing = true;
+  while (!ncclIntruQueueEmpty(&state->asyncSendQueue)) state->asyncSendCond.wait(lock);
+  return COMPILER_ATOMIC_LOAD(&state->asyncSendError, std::memory_order_acquire);
+}
+
+ncclResult_t bootstrapSend(void* commState, int peer, int tag, void* data, int size) {
+  struct bootstrapState* state = (struct bootstrapState*)commState;
+  ncclResult_t ret = ncclSuccess;
+  bool encrypted;
+  NCCLCHECK(ncclGetCryptConnectionMode(&encrypted));
+  if (!encrypted) {
+    NCCLCHECK(bootstrapSendSync(commState, peer, tag, data, size));
+    return ncclSuccess;
+  }
+
+  char* copy = nullptr;
+  struct bootstrapAsyncSend* op = nullptr;
+  ncclResult_t pending;
+  bool closing;
+  std::thread thread;
+  if (size > 0) {
+    NCCLCHECKGOTO(ncclCalloc(&copy, size), ret, fail);
+    memcpy(copy, data, size);
+  }
+  NCCLCHECKGOTO(ncclCalloc(&op, 1), ret, fail);
+  op->state = state;
+  op->peer = peer;
+  op->tag = tag;
+  op->size = size;
+  op->data = copy;
+
+  {
+    std::lock_guard<std::mutex> lock(state->asyncSendLock);
+    pending = COMPILER_ATOMIC_LOAD(&state->asyncSendError, std::memory_order_acquire);
+    if (pending != ncclSuccess) COMPILER_ATOMIC_STORE(&state->asyncSendSetAbort, false, std::memory_order_relaxed);
+    closing = state->asyncSendClosing;
+    if (pending == ncclSuccess && !closing) {
+      STDTHREADCREATE_GOTO(thread, bootstrapAsyncSendMain, ret, fail, op);
+      // Append in caller order; bootstrapAsyncSendMain relies on it for the
+      // per-(peer, tag) ordering.
+      ncclIntruQueueEnqueue(&state->asyncSendQueue, op);
+    }
+  }
+  if (pending != ncclSuccess) {
+    WARN("bootstrapSend: an earlier asynchronous send to peer %d failed", peer);
+    ret = pending;
+    goto fail;
+  }
+  if (closing) {
+    WARN("bootstrapSend: bootstrap state is closing");
+    ret = ncclInternalError;
+    goto fail;
+  }
+
+  thread.detach();
+  TRACE(NCCL_BOOTSTRAP, "Async send to peer=%d tag=%d size=%d", peer, tag, size);
+  return ncclSuccess;
+fail:
+  free(copy);
+  free(op);
+  return ret;
+}
+
 // Bootstrap send/receive functions
 static ncclResult_t unexpectedEnqueue(struct bootstrapState* state, int peer, int tag, struct ncclSocket* sock) {
   // New unex
@@ -1488,7 +1695,7 @@ static ncclResult_t unexpectedEnqueue(struct bootstrapState* state, int peer, in
   NCCLCHECK(ncclCalloc(&unex, 1));
   unex->peer = peer;
   unex->tag = tag;
-  memcpy(&unex->sock, sock, sizeof(struct ncclSocket));
+  ncclSocketMove(&unex->sock, sock);
 
   // Enqueue
   struct unexConn* list = state->unexpectedConnections;
@@ -1513,7 +1720,7 @@ static ncclResult_t unexpectedDequeue(struct bootstrapState* state, int peer, in
       } else {
         prev->next = elem->next;
       }
-      memcpy(sock, &elem->sock, sizeof(struct ncclSocket));
+      ncclSocketMove(sock, &elem->sock);
       free(elem);
       *found = 1;
       return ncclSuccess;
@@ -1531,6 +1738,7 @@ static void unexpectedFree(struct bootstrapState* state) {
   while (elem) {
     prev = elem;
     elem = elem->next;
+    (void)ncclSocketClose(&prev->sock);
     free(prev);
   }
   return;
@@ -1561,10 +1769,21 @@ fail:
   (void)ncclSocketClose(sock);
   return ret;
 }
+
 // We can't know who we'll receive from, so we need to receive everything at once
 ncclResult_t bootstrapRecv(void* commState, int peer, int tag, void* data, int size) {
   ncclResult_t ret;
   struct ncclSocket sock;
+  struct bootstrapState* state = (struct bootstrapState*)commState;
+  // Asynchronous send failures are stashed rather than returned to their caller;
+  // surface them at the next bootstrap operation so init fails on this rank
+  // instead of only hanging the peer.
+  ret = COMPILER_ATOMIC_LOAD(&state->asyncSendError, std::memory_order_acquire);
+  if (ret != ncclSuccess) COMPILER_ATOMIC_STORE(&state->asyncSendSetAbort, false, std::memory_order_relaxed);
+  if (ret != ncclSuccess) {
+    WARN("bootstrapRecv: an earlier asynchronous bootstrap send failed");
+    return ret;
+  }
   NCCLCHECK(socketAccept(commState, peer, tag, &sock));
   TRACE(NCCL_BOOTSTRAP, "Receiving tag=%d peer=%d size=%d", tag, peer, size);
   NCCLCHECKGOTO(socketRecv(&sock, ((char*)data), size), ret, fail);
@@ -1850,16 +2069,39 @@ ncclResult_t bootstrapBarrier(void* commState, int rank, int nranks, int tag) {
   return ncclSuccess;
 }
 
+// Like the ring connect: connecting to next and accepting from prev must make
+// progress together once the connect includes a TLS handshake.
+struct bootstrapPeerSocketOp {
+  void* commState;
+  int peer;
+  int tag;
+  struct ncclSocket* sock;
+};
+static ncclResult_t bootstrapPeerConnectOp(void* opaque) {
+  struct bootstrapPeerSocketOp* op = (struct bootstrapPeerSocketOp*)opaque;
+  NCCLCHECK(socketConnect(op->commState, op->peer, op->tag, op->sock));
+  return ncclSuccess;
+}
+static ncclResult_t bootstrapPeerAcceptOp(void* opaque) {
+  struct bootstrapPeerSocketOp* op = (struct bootstrapPeerSocketOp*)opaque;
+  NCCLCHECK(socketAccept(op->commState, op->peer, op->tag, op->sock));
+  return ncclSuccess;
+}
+
 ncclResult_t bootstrapIntraNodeAllGather(void* commState, int* ranks, int rank, int nranks, void* allData, int size) {
   if (nranks == 1) return ncclSuccess;
+  ncclResult_t ret = ncclSuccess;
   TRACE(NCCL_INIT, "rank %d nranks %d size %d - ENTER", rank, nranks, size);
 
   int prevRank = ranks[(rank - 1 + nranks) % nranks];
   int nextRank = ranks[(rank + 1) % nranks];
   // intraNode bootstrap is done defacto using the socket-based implementation
   struct ncclSocket recvSocket, sendSocket;
-  NCCLCHECK(socketConnect(commState, nextRank, BOOTSTRAP_TAG_INTRANODE_ALLGATHER, &sendSocket));
-  NCCLCHECK(socketAccept(commState, prevRank, BOOTSTRAP_TAG_INTRANODE_ALLGATHER, &recvSocket));
+  struct bootstrapPeerSocketOp connectOp = {commState, nextRank, BOOTSTRAP_TAG_INTRANODE_ALLGATHER, &sendSocket};
+  struct bootstrapPeerSocketOp acceptOp = {commState, prevRank, BOOTSTRAP_TAG_INTRANODE_ALLGATHER, &recvSocket};
+  NCCLCHECK(ncclSocketInit(&recvSocket));
+  NCCLCHECKGOTO(ncclSocketInit(&sendSocket), ret, fail);
+  NCCLCHECKGOTO(bootstrapConcurrent(bootstrapPeerConnectOp, &connectOp, bootstrapPeerAcceptOp, &acceptOp), ret, fail);
 
   // Intra-node AllGather is socket-only and so cannot reuse bootstrapBidirEnabled
   // (its `!netOn` clause is geared to inter-node OOB selection). Gate purely on the
@@ -1867,16 +2109,20 @@ ncclResult_t bootstrapIntraNodeAllGather(void* commState, int* ranks, int rank, 
   // (nranks==2 → single bidirectional socketSendRecv; nranks==1 is short-circuited
   // earlier in this function).
   if (ncclParamBootstrapBidirAllGather() != 0) {
-    NCCLCHECK(socketRingAllGather(&sendSocket, &recvSocket, rank, nranks, (char*)allData, size));
+    NCCLCHECKGOTO(socketRingAllGather(&sendSocket, &recvSocket, rank, nranks, (char*)allData, size), ret, fail);
   } else {
-    NCCLCHECK(socketRingAllGatherUnidir(&sendSocket, &recvSocket, rank, nranks, (char*)allData, size));
+    NCCLCHECKGOTO(socketRingAllGatherUnidir(&sendSocket, &recvSocket, rank, nranks, (char*)allData, size), ret, fail);
   }
 
-  NCCLCHECK(ncclSocketClose(&sendSocket));
-  NCCLCHECK(ncclSocketClose(&recvSocket));
+  NCCLCHECKGOTO(ncclSocketClose(&sendSocket), ret, fail);
+  NCCLCHECKGOTO(ncclSocketClose(&recvSocket), ret, fail);
 
   TRACE(NCCL_INIT, "rank %d nranks %d size %d - DONE", rank, nranks, size);
   return ncclSuccess;
+fail:
+  (void)ncclSocketClose(&sendSocket);
+  (void)ncclSocketClose(&recvSocket);
+  return ret;
 }
 
 // [IntraNode] in-place Broadcast
@@ -1918,6 +2164,15 @@ ncclResult_t bootstrapClose(void* commState) {
   if (commState == NULL) return ncclSuccess;
   struct bootstrapState* state = (struct bootstrapState*)commState;
   int nranks = state->nranks;
+  // In-flight asynchronous sends reference this state; let them finish before
+  // tearing it down. On abort they exit quickly via the abort flag.
+  ncclResult_t asyncSendError = bootstrapAsyncSendDrain(state);
+  if (asyncSendError != ncclSuccess && (COMPILER_ATOMIC_LOAD(state->abortFlag, std::memory_order_acquire) == 0 ||
+                                        COMPILER_ATOMIC_LOAD(&state->asyncSendSetAbort, std::memory_order_relaxed))) {
+    WARN("bootstrapClose: an asynchronous bootstrap send failed");
+    COMPILER_ATOMIC_STORE(&state->asyncSendSetAbort, false, std::memory_order_relaxed);
+    return asyncSendError;
+  }
   // close unexpected and return an error if we are not aborting and still operations in the pipe
   if (state->unexpectedConnections != NULL) {
     unexpectedFree(state);
@@ -1944,16 +2199,6 @@ ncclResult_t bootstrapClose(void* commState) {
 
   // proxy things are free'd elsewhere
   free(state->peerP2pAddresses);
-  free(state);
-  return ncclSuccess;
-}
-
-ncclResult_t bootstrapAbort(void* commState) {
-  if (commState == NULL) return ncclSuccess;
-  struct bootstrapState* state = (struct bootstrapState*)commState;
-  // when aborting we need to close the proxy here (maybe?)
-  free(state->peerProxyAddresses);
-  free(state->peerProxyAddressesUDS);
-  NCCLCHECK(bootstrapClose(commState));
+  delete state;
   return ncclSuccess;
 }

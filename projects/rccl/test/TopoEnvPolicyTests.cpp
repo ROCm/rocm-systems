@@ -21,7 +21,7 @@
 // settings like MAX:1 did not actually limit which network devices a GPU used.
 //
 // The policy is applied through ncclTopoGetLocalNet(), and the per-peer
-// network channel count for remote ranks is derived from getLocalNetCountByBw()
+// network channel count for remote ranks is derived from ncclTopoGetLocalNetCountByBw()
 // (called by ncclTopoGetNchannels() in src/graph/paths.cc). These are exactly
 // the functions send/recv/all-to-all use to pick NICs and channels over the
 // network. This test ties the policy to that P2P NET channel-selection path so
@@ -53,8 +53,9 @@
 #include <string>
 
 #include "comm.h"        // struct ncclComm, struct ncclPeerInfo
-#include "graph.h"       // ncclTopoGetLocalNet(), getLocalNetCountByBw(), ncclTopoComputePaths(), ncclTopoFree()
+#include "graph.h"       // ncclTopoGetLocalNet(), ncclTopoGetLocalNetCountByBw(), ncclTopoComputePaths(), ncclTopoFree()
 #include "graph/topo.h"  // struct ncclTopoSystem, ncclTopoGetSystemFromXml(), GPU/NET, ncclTopoRankToIndex()
+#include "common/TopoRailPlane.hpp"
 #include "graph/xml.h"   // struct ncclXml, ncclTopoGetXmlFromFile()
 
 #include "common/ProcessIsolatedTestRunner.hpp"
@@ -118,7 +119,8 @@ ncclResult_t loadTopoSystem(const char* path, struct ncclTopoSystem** system)
         free(xml);
         return res;
     }
-    res = ncclTopoGetSystemFromXml(xml, system, /*localHostHash=*/0);
+    res = RcclUnitTesting::fillMissingRailPlane(xml);
+    if(res == ncclSuccess) res = ncclTopoGetSystemFromXml(xml, system, /*localHostHash=*/0);
     free(xml);
     return res;
 }
@@ -270,7 +272,7 @@ void checkXgmiPairP2p(int* p2pOut, int* cudaP2pOut)
 }  // namespace
 
 // NCCL_NETDEVS_POLICY=MAX:1 -- the policy must cap network device usage to a
-// single NIC: getLocalNetCountByBw() returns 1, and ncclTopoGetLocalNet()
+// single NIC: ncclTopoGetLocalNetCountByBw() returns 1, and ncclTopoGetLocalNet()
 // returns the same NIC for channel 0 and channel 1.
 TEST(NetDevsPolicyTests, Max1_LimitsGetLocalNetCountByBw)
 {
@@ -287,7 +289,7 @@ TEST(NetDevsPolicyTests, Max1_LimitsGetLocalNetCountByBw)
 
                     int   count = -1;
                     float bw    = 0.0f;
-                    ASSERT_EQ(getLocalNetCountByBw(system, gpu, &count, &bw), ncclSuccess);
+                    ASSERT_EQ(ncclTopoGetLocalNetCountByBw(system, gpu, &count, &bw), ncclSuccess);
                     EXPECT_EQ(count, 1);
 
                     int     dev0 = -1, dev1 = -1;
@@ -308,7 +310,7 @@ TEST(NetDevsPolicyTests, Max1_LimitsGetLocalNetCountByBw)
 // channels 0 and 1 map to different NICs.
 //
 // Note: this is asserted through ncclTopoGetLocalNet() rather than
-// getLocalNetCountByBw(). getLocalNetCountByBw() is bandwidth-driven -- it stops
+// ncclTopoGetLocalNetCountByBw(). ncclTopoGetLocalNetCountByBw() is bandwidth-driven -- it stops
 // once the accumulated NIC bandwidth meets the GPU's bandwidth -- so when a
 // single NIC already saturates the GPU it returns 1 regardless of the policy.
 // The policy itself only governs how ncclTopoGetLocalNet() distributes NICs.

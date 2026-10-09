@@ -93,7 +93,7 @@ target_link_libraries(hiprtc PUBLIC ${CMAKE_DL_LIBS})
 # This is required for static libraries
 if(NOT BUILD_SHARED_LIBS)
   find_package(hsa-runtime64)
-  find_package(amd_comgr)
+  find_package(amd_comgr 3.2 REQUIRED)
   target_link_libraries(hiprtc PRIVATE
     pthread numa rt c amd_comgr hsa-runtime64::hsa-runtime64)
 endif()
@@ -189,7 +189,7 @@ generate_hiprtc_mcin("${HIPRTC_GEN_MCIN}" "${HIPRTC_GEN_PREPROCESSED}")
 # When device code is built with the address sanitizer, the builtins header must
 # be preprocessed with ASAN enabled too.
 set(HIPRTC_ASAN_OPTIONS "")
-if(ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
+if(ENABLE_SANITIZER STREQUAL "ASAN")
   # The --offload-arch below is only a vehicle to enable
   # __has_feature(address_sanitizer) during preprocessing. clang silently ignores
   # -fsanitize=address unless the offload arch supports it. The preprocessing

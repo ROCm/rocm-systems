@@ -43,10 +43,10 @@
 #    include <rocprofiler-sdk/profile_config.h>
 #endif
 
-#if ROCPROFILER_VERSION >= 600
-#    include <rocprofiler-sdk/rccl/api_args.h>
-#    include <rocprofiler-sdk/rccl/api_id.h>
-#endif
+#include <rocprofiler-sdk/rccl/details/api_trace.h>
+
+#include <rocprofiler-sdk/rccl/api_args.h>
+#include <rocprofiler-sdk/rccl/api_id.h>
 
 #if ROCPROFILER_VERSION >= 700
 #    include <rocprofiler-sdk/hip.h>
@@ -64,7 +64,7 @@ namespace rocprofsys::rocprofiler_sdk
 /// This is the `Wrapper` template argument consumed by
 /// rocprofsys::backends::rocprofiler_sdk::backend<Wrapper> (backend.hpp); it must
 /// expose the same nested types/constants/static methods that struct relies on.
-struct backend
+struct wrapper
 {
     // ─── Compile-time SDK version ────────────────────────────────────────────────
     static constexpr std::uint32_t compile_time_version = ROCPROFILER_VERSION;
@@ -117,6 +117,9 @@ struct backend
 
     // ─── Correlation types ────────────────────────────────────────────────────────
     using correlation_id_t = rocprofiler_correlation_id_t;
+#if ROCPROFILER_VERSION >= 700
+    using async_correlation_id_t = rocprofiler_async_correlation_id_t;
+#endif
 
     // ─── Buffer/callback tracing record types ────────────────────────────────────
     using record_header_t         = rocprofiler_record_header_t;
@@ -129,7 +132,7 @@ struct backend
     using scratch_memory_record   = rocprofiler_buffer_tracing_scratch_memory_record_t;
     using callback_tracing_record = rocprofiler_callback_tracing_record_t;
     using code_object_load_data   = rocprofiler_callback_tracing_code_object_load_data_t;
-    using kernel_symbol_data =
+    using code_object_kernel_symbol_register_data =
         rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
     using marker_payload_t = rocprofiler_callback_tracing_marker_api_data_t;
 
@@ -246,6 +249,9 @@ struct backend
         ROCPROFILER_OMPT_ID_callback_functions;
     static constexpr ompt_operation_t OMPT_ID_LAST = ROCPROFILER_OMPT_ID_LAST;
 
+    using memory_alloc_record = rocprofiler_buffer_tracing_memory_allocation_record_t;
+#endif
+
     using rccl_api_data    = rocprofiler_callback_tracing_rccl_api_data_t;
     using rccl_api_id_t    = rocprofiler_rccl_api_id_t;
     using nccl_data_type_t = ncclDataType_t;
@@ -264,10 +270,14 @@ struct backend
     static constexpr nccl_data_type_t NCCL_INT64    = ncclInt64;
     static constexpr nccl_data_type_t NCCL_UINT64   = ncclUint64;
     static constexpr nccl_data_type_t NCCL_FLOAT64  = ncclFloat64;
-#    if defined(ncclFp8E4M3) && defined(ncclFp8E5M2)
-    static constexpr nccl_data_type_t NCCL_FP8_E4M3 = ncclFp8E4M3;
-    static constexpr nccl_data_type_t NCCL_FP8_E5M2 = ncclFp8E5M2;
-#    endif
+
+#if defined(ncclFp8E4M3) && defined(ncclFp8E5M2)
+    static constexpr nccl_data_type_t NCCL_FP8_E4M3                  = ncclFp8E4M3;
+    static constexpr nccl_data_type_t NCCL_FP8_E5M2                  = ncclFp8E5M2;
+    static constexpr bool             k_are_nccl_fp8_types_available = true;
+#else
+    static constexpr bool k_are_nccl_fp8_types_available = false;
+#endif
 
     // ─── RCCL API ID constants ─────────────────────────────────────────────────
     static constexpr rccl_api_id_t RCCL_API_ID_ncclAllGather =
@@ -288,7 +298,13 @@ struct backend
         ROCPROFILER_RCCL_API_ID_ncclReduceScatter;
     static constexpr rccl_api_id_t RCCL_API_ID_ncclSend =
         ROCPROFILER_RCCL_API_ID_ncclSend;
-    using memory_alloc_record = rocprofiler_buffer_tracing_memory_allocation_record_t;
+
+#if defined(ROCPROFILER_RCCL_API_ID_ncclAlltoAll)
+    // RCCL renamed ncclAllToAll to ncclAlltoAll (note the lowercase 't'). The deprecated
+    // ncclAllToAll now forwards to ncclAlltoAll, so the SDK reports the collective under
+    // this id too on toolchains new enough to define it.
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAlltoAll =
+        ROCPROFILER_RCCL_API_ID_ncclAlltoAll;
 #endif
 
 #if ROCPROFILER_VERSION >= 700
@@ -296,7 +312,7 @@ struct backend
     using hip_stream_operation_t = rocprofiler_hip_stream_operation_t;
 #endif
 
-#if ROCPROFILER_VERSION >= 10000
+#if ROCPROFILER_VERSION >= 10202
     using kfd_page_fault_record   = rocprofiler_buffer_tracing_kfd_page_fault_record_t;
     using kfd_page_migrate_record = rocprofiler_buffer_tracing_kfd_page_migrate_record_t;
     using kfd_queue_record        = rocprofiler_buffer_tracing_kfd_queue_record_t;
@@ -305,12 +321,19 @@ struct backend
         rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t;
     using kfd_event_dropped_record =
         rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t;
+    using kfd_event_page_migrate_record =
+        rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t;
+    using kfd_event_page_fault_record =
+        rocprofiler_buffer_tracing_kfd_event_page_fault_record_t;
     using kfd_event_queue_operation_t = rocprofiler_kfd_event_queue_operation_t;
     using kfd_event_unmap_from_gpu_operation_t =
         rocprofiler_kfd_event_unmap_from_gpu_operation_t;
     using kfd_page_fault_operation_t   = rocprofiler_kfd_page_fault_operation_t;
     using kfd_page_migrate_operation_t = rocprofiler_kfd_page_migrate_operation_t;
     using kfd_queue_operation_t        = rocprofiler_kfd_queue_operation_t;
+    using kfd_event_page_migrate_operation_t =
+        rocprofiler_kfd_event_page_migrate_operation_t;
+    using kfd_event_page_fault_operation_t = rocprofiler_kfd_event_page_fault_operation_t;
 #endif
 
     // ─── Status constants ────────────────────────────────────────────────────────
@@ -324,6 +347,8 @@ struct backend
         ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
     static constexpr status_t STATUS_ERROR_INVALID_ARGUMENT =
         ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    static constexpr status_t STATUS_ERROR_NOT_IMPLEMENTED =
+        ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 
     // ─── Callback phase constants ────────────────────────────────────────────────
     static constexpr callback_phase_t CALLBACK_PHASE_ENTER =
@@ -405,6 +430,16 @@ struct backend
         ROCPROFILER_CALLBACK_TRACING_HIP_STREAM;
 #endif
 
+#if ROCPROFILER_VERSION >= 10304
+    static constexpr callback_tracing_kind CALLBACK_TRACING_ROCSHMEM_API =
+        ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API;
+#endif
+
+#if ROCPROFILER_VERSION >= 10305
+    static constexpr callback_tracing_kind CALLBACK_TRACING_HIPFILE_API =
+        ROCPROFILER_CALLBACK_TRACING_HIPFILE_API;
+#endif
+
     // ─── Buffer tracing kind constants ───────────────────────────────────────────
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_CORE_API =
         ROCPROFILER_BUFFER_TRACING_HSA_CORE_API;
@@ -437,7 +472,7 @@ struct backend
         ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION;
 #endif
 
-#if ROCPROFILER_VERSION >= 10000
+#if ROCPROFILER_VERSION >= 10202
     static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_PAGE_FAULT =
         ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT;
     static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_PAGE_MIGRATE =
@@ -450,6 +485,12 @@ struct backend
         ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU;
     static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS =
         ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE =
+        ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_PAGE_FAULT =
+        ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT;
 #endif
 
     // ─── Counter flag constants ───────────────────────────────────────────────────
@@ -517,7 +558,7 @@ struct backend
     static constexpr hip_stream_operation_t HIP_STREAM_SET = ROCPROFILER_HIP_STREAM_SET;
 #endif
 
-#if ROCPROFILER_VERSION >= 10000
+#if ROCPROFILER_VERSION >= 10202
     // ─── KFD event queue operation constants ─────────────────────────────────────
     static constexpr kfd_event_queue_operation_t KFD_EVENT_QUEUE_NONE =
         ROCPROFILER_KFD_EVENT_QUEUE_NONE;

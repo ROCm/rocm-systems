@@ -51,14 +51,27 @@ set(BUILD_PYTHON
     CACHE STRING "Install Python API: AUTO, ON, or OFF")
 
 set_property(CACHE BUILD_PYTHON PROPERTY STRINGS AUTO ON OFF)
-option(BUILD_MARKERS "Enable Building SQTT marker instrumentation plugin" OFF)
 option(DISABLE_COMGR "Disable dependency on amd_comgr disassembly" OFF)
 
-if(BUILD_MARKERS)
-    add_subdirectory(markers)
-endif()
-
 add_subdirectory(source)
+
+# The marker producer lives in llvm-project/amd/sqtt-marker.  Keep the
+# decoder-side tools and format documentation in this package independently
+# of that plugin.
+set(TTD_MARKER_SCRIPTS
+    ${CMAKE_SOURCE_DIR}/scripts/sqtt_data.py ${CMAKE_SOURCE_DIR}/scripts/sqtt_decode_funcmap.py
+    ${CMAKE_SOURCE_DIR}/scripts/sqtt_flamegraph.py ${CMAKE_SOURCE_DIR}/scripts/sqtt_memory_trace.py
+    ${CMAKE_SOURCE_DIR}/scripts/sqtt_perfetto.py)
+
+install(
+    PROGRAMS ${TTD_MARKER_SCRIPTS}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT runtime)
+
+install(
+    DIRECTORY ${CMAKE_SOURCE_DIR}/docs/markers/
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}/markers
+    COMPONENT devel)
 
 if(BUILD_PYTHON)
     set(Python3_FIND_UNVERSIONED_NAMES LAST)
@@ -114,9 +127,6 @@ if(CLANG_FORMAT)
         ${CMAKE_SOURCE_DIR}/source/*.cpp
         ${CMAKE_SOURCE_DIR}/source/*.hpp
         ${CMAKE_SOURCE_DIR}/source/*.h
-        ${CMAKE_SOURCE_DIR}/markers/*.cpp
-        ${CMAKE_SOURCE_DIR}/markers/*.hpp
-        ${CMAKE_SOURCE_DIR}/markers/*.h
         ${CMAKE_SOURCE_DIR}/include/*.hpp
         ${CMAKE_SOURCE_DIR}/include/*.h
         ${CMAKE_SOURCE_DIR}/test/*.cpp
@@ -130,8 +140,7 @@ endif()
 if(CMAKE_FORMAT)
     set(ALL_CMAKE_FILES
         ${CMAKE_SOURCE_DIR}/CMakeLists.txt ${CMAKE_SOURCE_DIR}/source/CMakeLists.txt
-        ${CMAKE_SOURCE_DIR}/markers/CMakeLists.txt ${CMAKE_SOURCE_DIR}/test/CMakeLists.txt
-        ${CMAKE_SOURCE_DIR}/test/unit/CMakeLists.txt)
+        ${CMAKE_SOURCE_DIR}/test/CMakeLists.txt ${CMAKE_SOURCE_DIR}/test/unit/CMakeLists.txt)
     file(GLOB CMAKE_MODULES ${CMAKE_SOURCE_DIR}/cmake/*.cmake)
     list(APPEND ALL_CMAKE_FILES ${CMAKE_MODULES})
     list(APPEND FORMAT_COMMANDS COMMAND ${CMAKE_FORMAT} -i ${ALL_CMAKE_FILES})
@@ -184,18 +193,7 @@ if(BUILD_TESTS
         list(APPEND TTD_COVERAGE_DEPS unit_tests)
         list(APPEND TTD_COVERAGE_DEPS unit_tests_logging)
     endif()
-    if(BUILD_MARKERS)
-        list(APPEND TTD_COVERAGE_DEPS SQTTInstrumentPass)
-        if(TARGET marker_unit_tests)
-            list(APPEND TTD_COVERAGE_DEPS marker_unit_tests)
-        endif()
-    endif()
-
     set(TTD_COVERAGE_SOURCES "${CMAKE_SOURCE_DIR}/source/*")
-    if(BUILD_MARKERS)
-        list(APPEND TTD_COVERAGE_SOURCES "${CMAKE_SOURCE_DIR}/markers/*"
-             "${CMAKE_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/markers.hpp")
-    endif()
 
     add_custom_target(
         coverage
@@ -220,19 +218,4 @@ if(BUILD_TESTS
         DEPENDS ${TTD_COVERAGE_DEPS}
         VERBATIM)
 
-    if(BUILD_MARKERS)
-        add_custom_command(
-            TARGET coverage
-            POST_BUILD
-            COMMAND
-                ${LCOV} --quiet --extract ${CMAKE_BINARY_DIR}/coverage.info "${CMAKE_SOURCE_DIR}/markers/*"
-                "${CMAKE_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/markers.hpp" --output-file
-                ${CMAKE_BINARY_DIR}/coverage_markers.info --ignore-errors empty,unused
-            COMMAND ${LCOV} --summary ${CMAKE_BINARY_DIR}/coverage_markers.info --fail-under-lines 90
-            COMMAND ${GENHTML} --quiet ${CMAKE_BINARY_DIR}/coverage_markers.info --output-directory
-                    ${CMAKE_BINARY_DIR}/coverage_markers_report --ignore-errors empty
-            COMMAND ${CMAKE_COMMAND} -E echo
-                    "Marker coverage report: ${CMAKE_BINARY_DIR}/coverage_markers_report/index.html"
-            VERBATIM)
-    endif()
 endif()

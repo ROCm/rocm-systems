@@ -9,9 +9,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace gpu
+namespace rocprofsys::gpu
 {
 void
 get_processor_handles();
@@ -77,5 +75,4 @@ reinitialize_amdsmi();
 
 void
 add_device_metadata();
-}  // namespace gpu
-}  // namespace rocprofsys
+}  // namespace rocprofsys::gpu

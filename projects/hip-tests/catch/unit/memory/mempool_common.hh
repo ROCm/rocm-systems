@@ -304,10 +304,20 @@ class streamMemAllocTest {
   size_t byte_size;
   hipMemPool_t mem_pool;
   bool threadSafe;
+  int seed;  //!< Offsets this instance's data so it differs from every other instance
+  // Details of the first mismatch seen by validateResult*(), for reporting.
+  int mismatch_count = 0;
+  int mismatch_index = -1;
+  int mismatch_expected = 0;
+  int mismatch_actual = 0;
 
  public:
-  explicit streamMemAllocTest(int N, bool threadSafe = false)
-      : size(N), threadSafe(threadSafe) {
+  // @param seed makes the data of concurrent instances distinct. Instances that
+  // share a memory pool must use different seeds, otherwise every instance
+  // computes identical values and a buffer handed to two users at once produces
+  // the expected result anyway.
+  explicit streamMemAllocTest(int N, bool threadSafe = false, int seed = 0)
+      : size(N), threadSafe(threadSafe), seed(seed) {
     byte_size = N*sizeof(int);
     A_h = B_h = C_h = nullptr;
     A_d = B_d = C_d = nullptr;
@@ -328,8 +338,8 @@ class streamMemAllocTest {
     }
     // set data to host
     for (int i = 0; i < size; i++) {
-      A_h[i] = 2*i + 1;  // Odd
-      B_h[i] = 2*i;      // Even
+      A_h[i] = 2*i + 1 + seed;  // Odd, based on the seed
+      B_h[i] = 2*i;             // Even
       C_h[i] = 0;
     }
   }
@@ -362,8 +372,18 @@ class streamMemAllocTest {
       HIP_CHECK_OPT_THREAD(threadSafe, hipMemPoolSetAttribute(mem_pool, attr, &value));
     }
   }
+  // True once createHostBufferWithData() has allocated every host buffer.
+  bool hasHostBufs() const {
+    return (A_h != nullptr) && (B_h != nullptr) && (C_h != nullptr);
+  }
+  // True once allocFromMempool()/allocFromDefMempool() has allocated every device buffer.
+  bool hasDevBufs() const {
+    return (A_d != nullptr) && (B_d != nullptr) && (C_d != nullptr);
+  }
   // allocate device memory from mempool.
   void allocFromMempool(hipStream_t stream) {
+    // Reset before allocating.
+    A_d = B_d = C_d = nullptr;
     HIP_CHECK_OPT_THREAD(threadSafe, hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d),
               byte_size, mem_pool, stream));
     HIP_CHECK_OPT_THREAD(threadSafe, hipMallocFromPoolAsync(reinterpret_cast<void**>(&B_d),
@@ -380,6 +400,7 @@ class streamMemAllocTest {
   }
   // allocate from default mempool.
   void allocFromDefMempool(hipStream_t stream) {
+    A_d = B_d = C_d = nullptr;
     HIP_CHECK_OPT_THREAD(threadSafe, hipMallocAsync(reinterpret_cast<void**>(&A_d),
               byte_size, stream));
     HIP_CHECK_OPT_THREAD(threadSafe, hipMallocAsync(reinterpret_cast<void**>(&B_d),
@@ -389,6 +410,11 @@ class streamMemAllocTest {
   }
   // Execute Kernel to process input data and wait for it.
   void runKernel(hipStream_t stream) {
+    // bail out here and let the caller report the error.
+    REQUIRE_OPT_THREAD(threadSafe, hasDevBufs());
+    if (!hasDevBufs()) {
+      return;
+    }
     int blocks = (size % THREADS_PER_BLOCK == 0) ? (size / THREADS_PER_BLOCK)
                                                  : ((size / THREADS_PER_BLOCK) + 1);
     hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(THREADS_PER_BLOCK), 0, stream,
@@ -403,6 +429,7 @@ class streamMemAllocTest {
   }
   // Validate the data returned from device.
   bool validateResult() {
+    REQUIRE(hasHostBufs());
     for (int i = 0; i < size; i++) {
       auto res = A_h[i] + B_h[i];
       REQUIRE(res == C_h[i]);
@@ -412,14 +439,28 @@ class streamMemAllocTest {
   // Thread-safe variant of validateResult(): returns a bool instead of using a
   // Catch2 macro, so it is safe to call from worker threads.
   bool validateResultThreadSafe() {
+    mismatch_count = 0;
+    mismatch_index = -1;
+    if (!hasHostBufs()) {
+      return false;
+    }
     for (int i = 0; i < size; i++) {
       auto res = A_h[i] + B_h[i];
       if (res != C_h[i]) {
-        return false;
+        if (mismatch_count == 0) {
+          mismatch_index = i;
+          mismatch_expected = res;
+          mismatch_actual = C_h[i];
+        }
+        mismatch_count++;
       }
     }
-    return true;
+    return (mismatch_count == 0);
   }
+  int mismatchCount() const { return mismatch_count; }
+  int mismatchIndex() const { return mismatch_index; }
+  int mismatchExpected() const { return mismatch_expected; }
+  int mismatchActual() const { return mismatch_actual; }
   // Free device memory
   void freeDevBuf(hipStream_t stream) {
     HIP_CHECK_OPT_THREAD(threadSafe, hipFreeAsync(reinterpret_cast<void*>(A_d), stream));
@@ -435,6 +476,7 @@ class streamMemAllocTest {
     free(A_h);
     free(B_h);
     free(C_h);
+    A_h = B_h = C_h = nullptr;
   }
 };
 

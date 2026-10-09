@@ -20,9 +20,9 @@ with open("../CMakeLists.txt", encoding="utf-8") as f:
 
 
 def _cmake_version_part(part):
-    match = re.search(rf"set\(AIS_LIBRARY_{part}\s+(\d+)\)", _cmake)
+    match = re.search(rf"set\(HIPFILE_LIBRARY_{part}\s+(\d+)\)", _cmake)
     if not match:
-        raise ValueError(f"AIS_LIBRARY_{part} not found in CMakeLists.txt")
+        raise ValueError(f"HIPFILE_LIBRARY_{part} not found in CMakeLists.txt")
     return match.group(1)
 
 
@@ -57,8 +57,18 @@ cpp_id_attributes = ["HIPFILE_API"]
 
 exclude_patterns = ["_build", "_diffs", "Thumbs.db", ".DS_Store"]
 
+# Theme-related settings
 html_theme = "rocm_docs_theme"
-html_theme_options = {"flavor": "rocm"}
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-systems",
+    "path_to_docs": "projects/hipfile/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+}
 
 external_toc_path = "sphinx/_toc.yml"
 external_projects_current_project = "hipfile"
+# Generate llms.txt and llms-full.txt
+rocm_docs_generate_llms = True

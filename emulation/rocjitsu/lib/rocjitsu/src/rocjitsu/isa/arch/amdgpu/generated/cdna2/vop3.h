@@ -652,6 +652,9 @@ class VCndmaskB32Vop3 : public Vop3 {
 public:
   VCndmaskB32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.src2_is_wave_mask = true;
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1930,6 +1933,7 @@ class VWritelaneB32Vop3 : public Vop3 {
 public:
   VWritelaneB32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4041,6 +4045,9 @@ class VAddcCoU32Vop3SdstEnc : public Vop3SdstEnc {
 public:
   VAddcCoU32Vop3SdstEnc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.src2_is_wave_mask = true;
+  }
   Operand vdst;
   Operand sdst;
   Operand src0;
@@ -4052,6 +4059,9 @@ class VSubbCoU32Vop3SdstEnc : public Vop3SdstEnc {
 public:
   VSubbCoU32Vop3SdstEnc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.src2_is_wave_mask = true;
+  }
   Operand vdst;
   Operand sdst;
   Operand src0;
@@ -4063,6 +4073,9 @@ class VSubbrevCoU32Vop3SdstEnc : public Vop3SdstEnc {
 public:
   VSubbrevCoU32Vop3SdstEnc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.src2_is_wave_mask = true;
+  }
   Operand vdst;
   Operand sdst;
   Operand src0;

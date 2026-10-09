@@ -74,16 +74,26 @@
 #include "hipmodule_init_tester.hpp"
 #include "device_bitcode_tester.hpp"
 #include "library_info_tester.hpp"
+#include "buffer_register_symmetric_tester.hpp"
 #include "fence_ordering_tester.hpp"
 #include "tile_rma_tester.hpp"
 #include "tile_broadcast_tester.hpp"
 #include "tile_allgather_tester.hpp"
+#include "tile_reduce_tester.hpp"
 #include "reduce_on_stream_tester.hpp"
 #include "host_ctx_create_tester.hpp"
 #include "team_split_2d_tester.hpp"
 #include "host_team_sync_barrier_tester.hpp"
 #include "broadcast_wave_tester.hpp"
 #include "alltoall_wave_tester.hpp"
+#if defined(USE_GDA)
+#include "qp_ping_pong_tester.hpp"
+#include "qp_put_nbi_tester.hpp"
+#endif
+#if defined(USE_SDMA)
+#include "sdma_ping_pong_tester.hpp"
+#include "sdma_put_nbi_tester.hpp"
+#endif
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -156,7 +166,16 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WGPutNBITestType:
       case WGPutSignalTestType:
       case WGPutSignalNBITestType:
+      case QpPutNbiTestType:
+      case SdmaPutNbiTestType:
         max_msg_size = args.max_volume_size / args.num_wgs;
+        break;
+      case PingPongTestType:
+      case QpPingPongTestType:
+      case SdmaPingPongTestType:
+        if (args.op_type == 2) {
+          max_msg_size = args.max_volume_size / args.num_wgs;
+        }
         break;
       case TeamBroadcastTestType:
       case BroadcastWaveTestType:
@@ -201,6 +220,14 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
 
   BackendType backend_type = rocshmem_query_backend_type();
   TestType type = (TestType)args.algorithm;
+
+  if (args.num_wf > 0) {
+    int device_id;
+    hipDeviceProp_t props;
+    CHECK_HIP(hipGetDevice(&device_id));
+    CHECK_HIP(hipGetDeviceProperties(&props, device_id));
+    args.wg_size = props.warpSize * args.num_wf;
+  }
 
   switch (type) {
     case InitTestType:
@@ -652,7 +679,8 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
         testers.push_back(new AMOStandardTester<int>(args));
       break;
     case PingPongTestType:
-      test_name = "PingPong";
+      test_name = (args.num_wgs > 1) ? "PingPong (W>1: bidir BW)"
+                                     : "PingPong";
       testers.push_back(new PingPongTester(args));
       break;
     case PingAllTestType:
@@ -789,6 +817,18 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Wave Signal Fetch";
       testers.push_back(new SignalingOperationsTester(args));
       break;
+    case SignalAddTestType:
+      test_name = "Signal Add";
+      testers.push_back(new SignalingOperationsTester(args));
+      break;
+    case SignalSetTestType:
+      test_name = "Signal Set";
+      testers.push_back(new SignalingOperationsTester(args));
+      break;
+    case SignalWaitUntilTestType:
+      test_name = "Signal Wait Until";
+      testers.push_back(new SignalingOperationsTester(args));
+      break;
     case FloodPutTestType:
       test_name = "Flood Put (multidirectional)";
       testers.push_back(new FloodTester(args));
@@ -836,6 +876,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case LibraryInfoTestType:
       test_name = "Library Info Test";
       testers.push_back(new LibraryInfoTester(args));
+      break;
+    case BufferRegisterSymmetricTestType:
+      test_name = "Buffer Register Symmetric Test";
+      testers.push_back(new BufferRegisterSymmetricTester(args));
       break;
     case FenceOrderPutWaveSignalTestType:
       test_name = "Fence PutWaveSignal Ordering";
@@ -909,6 +953,38 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Tile Get Arbitrary Strides";
       testers.push_back(new TileRMATester(args));
       break;
+    case TilePutWaveRowMajorTestType:
+      test_name = "Tile Put Wave Row-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWaveColumnMajorTestType:
+      test_name = "Tile Put Wave Column-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWaveRowMajorTestType:
+      test_name = "Tile Get Wave Row-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWaveColumnMajorTestType:
+      test_name = "Tile Get Wave Column-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWGRowMajorTestType:
+      test_name = "Tile Put WG Row-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWGColumnMajorTestType:
+      test_name = "Tile Put WG Column-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWGRowMajorTestType:
+      test_name = "Tile Get WG Row-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWGColumnMajorTestType:
+      test_name = "Tile Get WG Column-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
     case HostTeamSyncBarrierTestType:
       test_name = "Host Team Sync/Barrier";
       testers.push_back(new HostTeamSyncBarrierTester(args));
@@ -920,6 +996,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case HostCtxCreateTestType:
       test_name = "Host CTX Create";
       testers.push_back(new HostCtxCreateTester(args));
+      break;
     case TeamSplit2DTestType:
       test_name = "Team Split 2D";
       testers.push_back(new TeamSplit2DTester(args));
@@ -948,6 +1025,89 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Tile Allgather Workgroup-Collective";
       testers.push_back(new TileAllgatherTester(args));
       break;
+    case TileReduceTestType:
+      test_name = "Tile Reduce";
+      // float, short, int, long × SUM, MAX, MIN
+#define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                     \
+      testers.push_back(new TileReduceTester<T, OP>(args,                    \
+          [](T &s, T &r) { s = INIT_S; r = INIT_R; },                       \
+          [](T v, int n_pes, [[maybe_unused]] int idx) { return VERIFY; }))
+      TILE_REDUCE_PUSH(float, ROCSHMEM_SUM,  1.0f, 0.0f, static_cast<int>(v) == n_pes);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MAX,  1.0f, 0.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MIN,  1.0f, 2.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(short, ROCSHMEM_SUM,  1,    0,    v == static_cast<short>(n_pes));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MAX,  1,    0,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MIN,  1,    2,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_SUM,  1,    0,    v == n_pes);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MAX,  1,    0,    v == 1);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MIN,  1,    2,    v == 1);
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_SUM,  1L,   0L,   v == static_cast<long>(n_pes));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MAX,  1L,   0L,   v == static_cast<long>(1));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MIN,  1L,   2L,   v == static_cast<long>(1));
+#undef TILE_REDUCE_PUSH
+      break;
+    case TileReduceWaveTestType:
+      test_name = "Tile Reduce Wave-Collective";
+#define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                     \
+      testers.push_back(new TileReduceTester<T, OP>(args,                    \
+          [](T &s, T &r) { s = INIT_S; r = INIT_R; },                       \
+          [](T v, int n_pes, [[maybe_unused]] int idx) { return VERIFY; }))
+      TILE_REDUCE_PUSH(float, ROCSHMEM_SUM,  1.0f, 0.0f, static_cast<int>(v) == n_pes);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MAX,  1.0f, 0.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MIN,  1.0f, 2.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(short, ROCSHMEM_SUM,  1,    0,    v == static_cast<short>(n_pes));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MAX,  1,    0,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MIN,  1,    2,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_SUM,  1,    0,    v == n_pes);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MAX,  1,    0,    v == 1);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MIN,  1,    2,    v == 1);
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_SUM,  1L,   0L,   v == static_cast<long>(n_pes));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MAX,  1L,   0L,   v == static_cast<long>(1));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MIN,  1L,   2L,   v == static_cast<long>(1));
+#undef TILE_REDUCE_PUSH
+      break;
+    case TileReduceWGTestType:
+      test_name = "Tile Reduce Workgroup-Collective";
+#define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                     \
+      testers.push_back(new TileReduceTester<T, OP>(args,                    \
+          [](T &s, T &r) { s = INIT_S; r = INIT_R; },                       \
+          [](T v, int n_pes, [[maybe_unused]] int idx) { return VERIFY; }))
+      TILE_REDUCE_PUSH(float, ROCSHMEM_SUM,  1.0f, 0.0f, static_cast<int>(v) == n_pes);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MAX,  1.0f, 0.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MIN,  1.0f, 2.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(short, ROCSHMEM_SUM,  1,    0,    v == static_cast<short>(n_pes));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MAX,  1,    0,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MIN,  1,    2,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_SUM,  1,    0,    v == n_pes);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MAX,  1,    0,    v == 1);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MIN,  1,    2,    v == 1);
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_SUM,  1L,   0L,   v == static_cast<long>(n_pes));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MAX,  1L,   0L,   v == static_cast<long>(1));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MIN,  1L,   2L,   v == static_cast<long>(1));
+#undef TILE_REDUCE_PUSH
+      break;
+#if defined(USE_GDA)
+    case QpPingPongTestType:
+      test_name = (args.num_wgs > 1) ? "QP-Direct PingPong (W>1: bidir BW)"
+                                     : "QP-Direct PingPong";
+      testers.push_back(new QpPingPongTester(args));
+      break;
+    case QpPutNbiTestType:
+      test_name = "QP-Direct Put NBI";
+      testers.push_back(new QpPutNbiTester(args));
+      break;
+#endif
+#if defined(USE_SDMA)
+    case SdmaPingPongTestType:
+      test_name = (args.num_wgs > 1) ? "SDMA-Direct PingPong (W>1: bidir BW)"
+                                     : "SDMA-Direct PingPong";
+      testers.push_back(new SdmaPingPongTester(args));
+      break;
+    case SdmaPutNbiTestType:
+      test_name = "SDMA-Direct Put NBI";
+      testers.push_back(new SdmaPutNbiTester(args));
+      break;
+#endif
     default:
       test_name = "Empty";
       break;
@@ -1092,6 +1252,9 @@ bool Tester::peLaunchesKernel() {
     case PutmemOnStreamTestType:
     case PutmemSignalOnStreamTestType:
     case SignalWaitUntilOnStreamTestType:
+    case SignalAddTestType:
+    case SignalSetTestType:
+    case SignalWaitUntilTestType:
     case FloodPutTestType:
     case FloodPutNBITestType:
     case FloodPTestType:
@@ -1103,6 +1266,7 @@ bool Tester::peLaunchesKernel() {
     case FloodFAddTestType:
     case FloodWaitAmoTestType:
     case DeviceBitcodeTestType:
+    case BufferRegisterSymmetricTestType:
     case FenceOrderPutWaveSignalTestType:
     case FenceOrderPutLargeSmallTestType:
     case FenceOrderFanoutTestType:
@@ -1115,6 +1279,11 @@ bool Tester::peLaunchesKernel() {
     case TileAllgatherWGTestType:
     case BroadcastWaveTestType:
     case AllToAllWaveTestType:
+    case TileReduceTestType:
+    case TileReduceWaveTestType:
+    case TileReduceWGTestType:
+    case QpPingPongTestType:
+    case SdmaPingPongTestType:
       is_launcher = true;
       break;
     case HostPutmemTestType:

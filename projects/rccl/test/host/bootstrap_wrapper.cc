@@ -13,6 +13,10 @@
 #include "socket.h"
 #include "proxy.h"
 
+// Needed even though bootstrap.cc never names it: it is the default argument for
+// ncclSocketInit()'s `magic`, so every call that omits it emits a reference here.
+uint64_t ncclSocketDefaultMagic(void) { return 0; }
+
 ncclResult_t ncclSocketInit(ncclSocket*, ncclSocketAddress const*, unsigned long,
                             ncclSocketType, unsigned int volatile*, int, int) { return ncclSuccess; }
 ncclResult_t ncclSocketListen(ncclSocket*) { return ncclSuccess; }
@@ -27,15 +31,21 @@ ncclResult_t ncclSocketGetAddr(ncclSocket*, ncclSocketAddress*) { return ncclSuc
 ncclResult_t ncclSocketGetAddrFromString(ncclSocketAddress*, char const*) { return ncclSuccess; }
 const char* ncclSocketToString(ncclSocketAddress const*, char* buf, int) { return buf; }
 ncclResult_t ncclSocketMultiOp(ncclSocketOp*, int) { return ncclSuccess; }
+void ncclSocketMove(ncclSocket* dst, ncclSocket* src) { *dst = *src; }
+ncclResult_t ncclGetCryptConnectionMode(bool* encrypted) {
+  *encrypted = false;
+  return ncclSuccess;
+}
 
 ncclResult_t ncclFindInterfaces(char*, ncclSocketAddress*, int, int, int*) { return ncclSuccess; }
 ncclResult_t ncclFindInterfaceMatchSubnet(char*, ncclSocketAddress*, ncclSocketAddress*, int, int*) { return ncclSuccess; }
 int parseStringList(char const*, netIf*, int) { return 0; }
-bool matchIfList(char const*, int, netIf*, int, bool) { return false; }
+bool matchIfList(char const*, int, netIf*, int, bool, int*) { return false; }
 
 ncclResult_t ncclProxyInit(ncclComm*, ncclSocket*, ncclSocketAddress*, unsigned long*) { return ncclSuccess; }
 ncclResult_t ncclRasAddRanks(rasRankInit*, int) { return ncclSuccess; }
 ncclResult_t ncclRasCommInit(ncclComm*, rasRankInit*) { return ncclSuccess; }
+int64_t ncclParamRasEnable() { return 1; }
 
 ncclResult_t ncclOsSetFilesLimit() { return ncclSuccess; }
 uint64_t ncclOsGetPid() { return 0; }

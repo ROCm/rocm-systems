@@ -44,7 +44,7 @@ Panel Config:
           peak: $max_mclk * 4 * $num_memory_channels * 4 * 1e6
           pct_of_peak: true
         GL2-Fabric Write BW:
-          value: SUM((GL2C_MC_WRREQ_sum - GL2C_EA_WRREQ_64B_sum) * 32 + GL2C_EA_WRREQ_64B_sum * 64) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          value: SUM(GL2C_EA_WRREQ_64B_sum * 64 + NOISE_CLAMP(GL2C_MC_WRREQ_sum - GL2C_EA_WRREQ_64B_sum, GL2C_MC_WRREQ_sum) * 32) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: $max_mclk * 4 * $num_memory_channels * 4 * 1e6
           pct_of_peak: true

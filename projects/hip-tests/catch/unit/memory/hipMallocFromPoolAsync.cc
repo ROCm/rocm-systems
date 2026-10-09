@@ -9,8 +9,20 @@
 #include <limits>
 
 static bool thread_results[NUMBER_OF_THREADS];
+// Detail about why a worker thread failed, reported by the parent after join.
+struct MThreadOutcome {
+  hipError_t error;   //!< First HIP error seen, hipSuccess if none
+  int iteration;      //!< Iteration the failure was seen on, -1 if none
+  int mismatchCount;  //!< Number of elements that did not match
+  int mismatchIndex;  //!< Index of the first mismatching element
+  int expected;
+  int actual;
+};
+static MThreadOutcome thread_outcome[NUMBER_OF_THREADS];
 static constexpr int streamPerAsic = 2;
 static hipMemPool_t mem_pool_common;
+// The common mempool tests operate on the default device.
+static constexpr int kCommonMpoolDevice = 0;
 
 /**
  * @addtogroup hipMallocFromPoolAsync hipMallocFromPoolAsync
@@ -178,8 +190,11 @@ static bool checkMempoolMultStreamSync(int N) {
  * for all the streams to complete and validate result.
  */
 static bool checkMempoolMultStreamConcurrentExec(int N, bool useDefStrm = true) {
-  streamMemAllocTest testObj[3] = {streamMemAllocTest(N), streamMemAllocTest(N),
-                                   streamMemAllocTest(N)};
+  // Distinct seeds: these three objects run concurrently on three streams out of
+  // one shared mempool, so their data must differ for aliasing to be detectable.
+  streamMemAllocTest testObj[3] = {streamMemAllocTest(N, false, 0),
+                                   streamMemAllocTest(N, false, 1),
+                                   streamMemAllocTest(N, false, 2)};
   // create multiple streams
   hipStream_t testStreams[3];
   HIP_CHECK(hipStreamCreate(&testStreams[0]));
@@ -440,56 +455,52 @@ static void threadQAsyncCommands(streamMemAllocTest* testObj, hipStream_t strm, 
   testObj->freeDevBuf(strm);
 }
 
-static void thread_Test1(hipStream_t stream, int N, enum eTestValue testtype, int threadNum) {
-  thread_results[threadNum] = checkMaximumAndDefaultThreshold(stream, N, testtype, 0, true);
-}
-
-static bool test_hipMallocFromPoolAsync_MThread(enum eTestValue testtype) {
-  // create a stream
-  constexpr int N = 1 << 20;
-  std::vector<std::thread> tests;
-  hipStream_t stream[NUMBER_OF_THREADS];
-  // Initialize and create streams
-  for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-    thread_results[idx] = false;
-    HIP_CHECK(hipStreamCreate(&stream[idx]));
-  }
-  // Spawn the test threads
-  for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-    tests.push_back(std::thread(thread_Test1, stream[idx], N, testtype, idx));
-  }
-  // Wait for all threads to complete
-  for (std::thread& t : tests) {
-    t.join();
-  }
-  HIP_CHECK_THREAD_FINALIZE();
-  // Wait for thread and destroy stream
-  bool status = true;
-  for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-    status = status & thread_results[idx];
-    HIP_CHECK(hipStreamDestroy(stream[idx]));
-  }
-  return status;
-}
-
 static void thread_Test2(hipMemPool_t mempool, hipStream_t stream, int N, int threadNum) {
-  streamMemAllocTest testObj(N, true);
+  MThreadOutcome& out = thread_outcome[threadNum];
+  // The common mempool belongs to kCommonMpoolDevice. A worker thread starts on
+  // the default device, so pin it explicitly rather than relying on that.
+  hipError_t err = hipSetDevice(kCommonMpoolDevice);
+  if (err != hipSuccess) {
+    out.error = err;
+    thread_results[threadNum] = false;
+    return;
+  }
+  // Seed the data with threadNum so every thread computes different values.
+  streamMemAllocTest testObj(N, true, threadNum);
   // Create host buffer with test data
   testObj.createHostBufferWithData();
   // Use the common mempool
   testObj.useCommonMempool(mempool);
-  bool results = true;
-  for (int iter = 0; iter < LAUNCH_ITERATIONS; iter++) {
+  bool results = testObj.hasHostBufs();
+  for (int iter = 0; results && (iter < LAUNCH_ITERATIONS); iter++) {
+    out.iteration = iter;
     // Allocate memory and initialize it on stream
     testObj.allocFromMempool(stream);
+    if (!testObj.hasDevBufs()) {
+      results = false;
+      break;
+    }
     testObj.transferToMempool(stream);
     testObj.runKernel(stream);
     testObj.transferFromMempool(stream);
     testObj.freeDevBuf(stream);
     // verify and validate
-    HIP_CHECK_THREAD(hipStreamSynchronize(stream));
+    err = hipStreamSynchronize(stream);
+    if (err != hipSuccess) {
+      out.error = err;
+      results = false;
+      break;
+    }
     results = testObj.validateResultThreadSafe();
     if (!results) {
+      out.mismatchCount = testObj.mismatchCount();
+      out.mismatchIndex = testObj.mismatchIndex();
+      out.expected = testObj.mismatchExpected();
+      out.actual = testObj.mismatchActual();
+      break;
+    }
+    if (TestContext::get().hasErrorOccured()) {
+      results = false;
       break;
     }
   }
@@ -503,13 +514,15 @@ static bool test_hipMallocFromPoolAsync_MThread_CommonMpool(enum eTestValue test
   constexpr int N = 1 << 20;
   std::vector<std::thread> tests;
   hipStream_t stream[NUMBER_OF_THREADS];
+  // The pool and the streams must live on the same device
+  HIP_CHECK(hipSetDevice(kCommonMpoolDevice));
   // Create common mempool
   if (bUseDefault) {
-    HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool_common, 0));
+    HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool_common, kCommonMpoolDevice));
   } else {
     hipMemPoolProps pool_props{};
     pool_props.allocType = hipMemAllocationTypePinned;
-    pool_props.location.id = 0;
+    pool_props.location.id = kCommonMpoolDevice;
     pool_props.location.type = hipMemLocationTypeDevice;
     HIP_CHECK(hipMemPoolCreate(&mem_pool_common, &pool_props));
   }
@@ -521,6 +534,7 @@ static bool test_hipMallocFromPoolAsync_MThread_CommonMpool(enum eTestValue test
   // Initialize and create streams
   for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
     thread_results[idx] = false;
+    thread_outcome[idx] = MThreadOutcome{hipSuccess, -1, 0, -1, 0, 0};
     HIP_CHECK(hipStreamCreate(&stream[idx]));
   }
   // Spawn the test threads
@@ -535,7 +549,16 @@ static bool test_hipMallocFromPoolAsync_MThread_CommonMpool(enum eTestValue test
   // Wait for thread and destroy stream
   bool status = true;
   for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-    status = status & thread_results[idx];
+    // Report which thread failed and why.
+    const MThreadOutcome& out = thread_outcome[idx];
+    INFO("Worker thread " << idx << ": " << (thread_results[idx] ? "pass" : "FAIL")
+                          << ", iteration " << out.iteration << " of " << LAUNCH_ITERATIONS
+                          << ", hip error: " << hipGetErrorString(out.error)
+                          << ", mismatching elements: " << out.mismatchCount << " of " << N
+                          << ", first at index " << out.mismatchIndex << " (expected "
+                          << out.expected << ", got " << out.actual << ")");
+    CHECK(thread_results[idx]);
+    status = status && thread_results[idx];
     HIP_CHECK(hipStreamDestroy(stream[idx]));
   }
   // Destroy common mempool

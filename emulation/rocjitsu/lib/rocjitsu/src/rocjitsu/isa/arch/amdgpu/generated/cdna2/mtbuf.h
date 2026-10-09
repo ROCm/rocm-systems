@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 
 namespace rocjitsu {
 namespace cdna2 {
@@ -18,162 +19,224 @@ class TbufferLoadFormatXMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatXMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadFormatXyMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatXyMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadFormatXyzMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatXyzMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadFormatXyzwMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatXyzwMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatXMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatXMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatXyMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatXyMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatXyzMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatXyzMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatXyzwMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatXyzwMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadFormatD16XMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatD16XMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false, 0xf, 0x3>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadFormatD16XyMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatD16XyMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadFormatD16XyzMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatD16XyzMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false, 0xf, 0x3>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadFormatD16XyzwMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatD16XyzwMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatD16XMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatD16XMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatD16XyMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatD16XyMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatD16XyzMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatD16XyzMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatD16XyzwMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatD16XyzwMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 } // namespace cdna2

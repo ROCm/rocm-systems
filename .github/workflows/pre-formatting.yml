@@ -50,10 +50,12 @@ jobs:
         id: detect
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           python .github/scripts/pr_detect_changed_subtrees.py \
-            --repo "${{ github.repository }}" \
-            --pr "${{ github.event.pull_request.number }}" \
+            --repo "$REPO" \
+            --pr "$PR_NUMBER" \
             --config ".github/repos-config.json"
 
       - name: Checkout full repo with changed subtrees
@@ -71,15 +73,19 @@ jobs:
       - name: Get list of changed files
         id: changed-files
         shell: bash
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          git fetch origin ${{ github.event.pull_request.base.ref }} --depth=1
+          git fetch --depth=1 origin -- "$BASE_REF"
           changed=$(git diff --name-only FETCH_HEAD HEAD)
           files=$(echo "$changed" | tr '\n' ' ' | sed 's/ *$//')
           echo "all_modified_files=$files" >> $GITHUB_OUTPUT
 
       - name: Show changed-files output
+        env:
+          ALL_MODIFIED_FILES: ${{ steps.changed-files.outputs.all_modified_files }}
         run: |
-          echo "Changed files are: ${{ steps.changed-files.outputs.all_modified_files }}"
+          echo "Changed files are: $ALL_MODIFIED_FILES"
 
       - name: Disable submodule recursion
         run: git config submodule.recurse false
@@ -89,9 +95,10 @@ jobs:
           GIT_AUTHOR_NAME: "systems-assistant[bot]"
           GIT_AUTHOR_EMAIL: "systems-assistant[bot]@users.noreply.github.com"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ALL_MODIFIED_FILES: ${{ steps.changed-files.outputs.all_modified_files }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
-          var="${{ steps.changed-files.outputs.all_modified_files }}"
-          read -r -a files <<<"$var"
+          read -r -a files <<<"$ALL_MODIFIED_FILES"
           if [ ${#files[@]} -eq 0 ]; then
             echo "No files changed, skipping pre-commit."
             exit 0
@@ -102,8 +109,8 @@ jobs:
           pre-commit run --files "${files[@]}" --show-diff-on-failure
           set -e
           git add "${files[@]}"
-          git fetch origin "${{github.head_ref}}"
+          git fetch origin -- "$HEAD_REF"
           if ! git diff --cached --quiet; then
             git commit -m "ci: apply pre-commit fixes"
-            git push --force-with-lease origin HEAD:${{ github.head_ref }}
+            git push --force-with-lease origin -- "HEAD:$HEAD_REF"
           fi

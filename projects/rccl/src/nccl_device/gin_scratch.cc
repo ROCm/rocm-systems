@@ -6,6 +6,7 @@
  *************************************************************************/
 
 #include "core.h"
+#include "nccl_device/host.h"
 #include "../device/symmetric/gin_scratch__funcs.h"
 
 NCCL_API(ncclResult_t, ncclGinOutboxCreateRequirement, int nBlocks, int size_log2, ncclGinOutboxHandle* outHandle,
@@ -16,11 +17,10 @@ ncclResult_t ncclGinOutboxCreateRequirement(int nBlocks, int size_log2, ncclGinO
   memset(outReq, 0, sizeof(*outReq));
   size_log2 = std::max<int>(size_log2, /*log2(128)=*/7);
   outHandle->size_log2 = size_log2;
-  outReq->bufferSize = nBlocks * (sizeof(ncclGinOutboxState) + alignUp(1 << size_log2, alignof(ncclGinOutboxState)));
+  outReq->bufferSize = nBlocks * (sizeof(ncclGinOutboxState) + ncclGinOutboxState::RequestBytes +
+                                  alignUp(1 << size_log2, alignof(ncclGinOutboxState)));
   outReq->bufferAlign = 128;
   outReq->outBufferHandle = &outHandle->bufHandle;
-  outReq->ginCounterCount = nBlocks << ncclGinScratchMaxBufs_log2;
-  outReq->outGinCounterStart = &outHandle->counter0;
   return ncclSuccess;
 }
 

@@ -27,6 +27,10 @@ void ncclSpaceConstruct(struct ncclSpace* a);
 void ncclSpaceDestruct(struct ncclSpace* a);
 ncclResult_t ncclSpaceAlloc(struct ncclSpace* a, int64_t spaceLimit, int64_t objSize, int objAlign,
                             int64_t* outObjOffset);
+// Same as ncclSpaceAlloc, but a full space is reported by the ncclInternalError return
+// alone. For callers where running out of space is an expected, benign outcome.
+ncclResult_t ncclSpaceTryAlloc(struct ncclSpace* a, int64_t spaceLimit, int64_t objSize, int objAlign,
+                               int64_t* outObjOffset);
 ncclResult_t ncclSpaceFree(struct ncclSpace* a, int64_t objOffset, int64_t objSize);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -43,7 +47,7 @@ struct ncclShadowPool {
 };
 
 void ncclShadowPoolConstruct(struct ncclShadowPool*);
-ncclResult_t ncclShadowPoolDestruct(struct ncclShadowPool*);
+ncclResult_t ncclShadowPoolDestruct(struct ncclShadowPool*, cudaStream_t stream);
 ncclResult_t ncclShadowPoolAlloc(struct ncclShadowPool*, size_t size, void** outDevObj, void** outHostObj,
                                  cudaStream_t stream);
 ncclResult_t ncclShadowPoolFree(struct ncclShadowPool*, void* devObj, cudaStream_t stream);

@@ -108,3 +108,37 @@ HIP_TEST_CASE(Contract_DeviceIdentity_HipDeviceCanAccessPeer_InvalidArgs_AreReje
   REQUIRE(hipDeviceCanAccessPeer(&can_access_peer, current_device, -1) != hipSuccess);
   REQUIRE(hipDeviceCanAccessPeer(&can_access_peer, current_device, device_count) != hipSuccess);
 }
+
+// @asserts: hipDeviceGetLuid - a well-formed query returns hipSuccess or the documented hipErrorNotSupported
+HIP_TEST_CASE(Contract_DeviceIdentity_HipDeviceGetLuid_Default_AcceptedOrUnsupported) {
+  int current_device = 0;
+  HIP_CHECK(hipGetDevice(&current_device));
+
+  hipDevice_t device = 0;
+  HIP_CHECK(hipDeviceGet(&device, current_device));
+
+  char luid[8] = {};
+  unsigned int node_mask = 0;
+  const hipError_t status = hipDeviceGetLuid(luid, &node_mask, device);
+  if (status == hipErrorNotSupported) {
+    HIP_SKIP_TEST("hipDeviceGetLuid is not supported on this platform.");
+  }
+  HIP_CHECK(status);
+}
+
+// @asserts: hipDeviceGetLuid - a null luid or node-mask out-pointer is rejected with a non-success status
+HIP_TEST_CASE(Contract_DeviceIdentity_HipDeviceGetLuid_NullArgs_AreRejected) {
+  int current_device = 0;
+  HIP_CHECK(hipGetDevice(&current_device));
+
+  hipDevice_t device = 0;
+  HIP_CHECK(hipDeviceGet(&device, current_device));
+
+  char luid[8] = {};
+  unsigned int node_mask = 0;
+
+  REQUIRE(hipDeviceGetLuid(nullptr, &node_mask, device) != hipSuccess);
+  (void)hipGetLastError();
+  REQUIRE(hipDeviceGetLuid(luid, nullptr, device) != hipSuccess);
+  (void)hipGetLastError();
+}

@@ -141,7 +141,9 @@ Panel Config:
     HBM Bandwidth: >-
       The total number of bytes read from and written to High-Bandwidth
       Memory (HBM) per second. The peak empirically measured bandwidth achievable
-      on the specific accelerator is displayed alongside for comparison.
+      on the specific accelerator is displayed alongside for comparison. It
+      reflects peak single-direction (read-only) bandwidth, so write-heavy or
+      mixed kernels fall below it.
     L2 Cache Bandwidth: The number of bytes looked up in the L2 cache per unit time.
       The number of bytes is calculated as the number of cache lines requested multiplied
       by the cache line size. This value does not consider partial requests, so e.g.,

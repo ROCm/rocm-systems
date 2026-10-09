@@ -70,7 +70,7 @@ class Settings : public device::Settings {
 
   //! Creates settings
   bool create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, bool coop_groups = false,
-              bool isXgmi = false);
+              bool isXgmi = false, bool isAPU = false);
 
  private:
   //! Disable copy constructor

@@ -20,6 +20,8 @@ This AMD SMI project supports Linux bare metal and Linux virtual machine guest
 environments. For documentation regarding virtualization on SR-IOV Linux hosts,
 refer to the [AMD SMI for Virtualization
 documentation](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/).
+Experimental WSL2 support is documented in [Using AMD SMI under
+WSL](./how-to/amdsmi-wsl-mode.md).
 ```
 
 ```{note}
@@ -42,6 +44,7 @@ AMD SMI is the successor to [ROCm SMI](https://github.com/ROCm/rocm-systems/tree
 * [CLI tool usage](./how-to/amdsmi-cli-tool.md)
 * [AI NIC integration](./how-to/amdsmi-nic-integration.md)
 * [Use AMD SMI in a Docker container](./how-to/setup-docker-container.md)
+* [Using AMD SMI under WSL (experimental)](./how-to/amdsmi-wsl-mode.md)
 :::
 
 :::{grid-item-card} Reference

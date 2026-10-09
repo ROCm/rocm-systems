@@ -11,7 +11,7 @@ The first domains are:
 - `driver_memcpy`: driver-style directed 1D synchronous and stream-ordered copy contracts
 - `driver_memcpy_2d`: driver-style struct-based 2D synchronous and stream-ordered copy contracts
 - `runtime`: runtime initialization, device visibility, version, and error-state contracts
-- `device`: portable current-device property contracts
+- `device`: portable current-device property contracts, plus GPUDirect RDMA write-flush accepted-or-unsupported and invalid-enumerator contracts
 - `device_identity`: device PCI identity, device selection, and single-device peer-query contracts
 - `device_texture_query`: image-gated device texture-width query contracts
 - `peer_query`: peer-to-peer attribute and AMD link-type query invalid-input contracts
@@ -103,7 +103,7 @@ The first domains are:
 - `context_mutation`: driver-style context create, set-current, push/pop, synchronize, and API-version contracts
 - `context_config`: driver-style context cache/shared-memory config, flags, and peer-access contracts
 - `device_config`: device configuration query, limit, flag, and stream-priority contracts
-- `device_lifecycle`: device flag, shared-memory-config, valid-device selection, and primary-context flag/reset lifecycle contracts
+- `device_lifecycle`: device flag, device initialization (`hipInitDevice`), shared-memory-config, valid-device selection, and primary-context flag/reset lifecycle contracts
 - `device_reset`: `hipDeviceReset` state-discard and device-still-usable contract (a single isolated test case, since the reset is process-global)
 - `green_context`: device/stream SM resource query, SM split, and green execution context creation, stream, and event contracts
 - `memory_pool_lifecycle`: explicit memory pool lifecycle, release-threshold, trim, and pool-specific async allocation contracts
@@ -119,9 +119,9 @@ The first domains are:
 - `module`: HIPRTC-backed module load, function, global, launch, and function-attribute contracts
 - `module_load_ex`: HIPRTC-backed module load-data-with-options contracts
 - `module_load_file`: module load-from-file and fat-binary invalid-input contracts
-- `module_exec`: HIPRTC-backed module function-count, occupancy, and cooperative launch contracts
+- `module_exec`: HIPRTC-backed module function-count, enumeration, occupancy, and cooperative launch contracts
 - `jit_link`: AMD-gated JIT linker lifecycle and invalid-input contracts
-- `library`: AMD-gated HIPRTC-backed library load, kernel, global, and kernel-object contracts
+- `library`: AMD-gated HIPRTC-backed library load, kernel, global, module, and kernel-object contracts
 - `kernel_object_attributes`: AMD-gated HIPRTC-backed hipKernel_t attribute and parameter-info contracts
 - `library_file`: AMD-gated HIPRTC-backed library load-from-file and managed-symbol contracts
 

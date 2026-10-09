@@ -16,9 +16,10 @@
 namespace rocjitsu {
 namespace cdna4 {
 
-class Operand : public IsaOperand<Isa> {
+class Operand final : public IsaOperand<Isa> {
 public:
   enum class Literal32Widening { ZeroExtend, SignExtend, Replicate32, F64HighBits };
+  static constexpr bool kStaticRegisterAccess = true;
   Operand(int size_bits, OperandType opr_type, int encoding_value);
   Operand(int size_bits, OperandType opr_type, int encoding_value, uint16_t literal16_display_value,
           bool has_literal16_display);
@@ -27,7 +28,9 @@ public:
   std::string name() const override;
   std::optional<uint64_t> literal64_value() const override;
   std::optional<uint64_t> const_value() const override;
+  bool has_register_selector() const override;
   std::optional<RegisterRef> to_register_ref() const override;
+  std::optional<RegClass> to_special_reg_class() const override;
   /// @brief Return the immutable full-simulator operand table.
   static const void *full_execution_backend();
   /// @brief Validate that every full-simulator operand callback is present.
@@ -35,6 +38,7 @@ public:
   bool simd_capable() const override;
 
 private:
+  friend class amdgpu::RegisterAccess;
   void read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
                        uint32_t *out) const override;
   void write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
@@ -49,8 +53,8 @@ private:
   void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const override;
   std::optional<uint32_t> simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const override;
   std::optional<uint32_t> simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) const override;
-  const amdgpu::VgprStorage *simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const override;
-  amdgpu::VgprStorage *simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const override;
+  amdgpu::ConstVgprStorage simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const override;
+  amdgpu::VgprStorage simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const override;
   amdgpu::ConstVgprStoragePair64
   simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const override;
   amdgpu::VgprStoragePair64 simd_vgpr_storage64_mut_impl(amdgpu::Wavefront &wf) const override;
@@ -84,9 +88,9 @@ private:
     void (Operand::*write_scalar64)(amdgpu::Wavefront &, uint64_t) const = nullptr;
     std::optional<uint32_t> (Operand::*simd_vgpr_base)(const amdgpu::Wavefront &) const = nullptr;
     std::optional<uint32_t> (Operand::*simd_vgpr_base_mut)(amdgpu::Wavefront &) const = nullptr;
-    const amdgpu::VgprStorage *(Operand::*simd_vgpr_storage)(const amdgpu::Wavefront &) const =
+    amdgpu::ConstVgprStorage (Operand::*simd_vgpr_storage)(const amdgpu::Wavefront &) const =
         nullptr;
-    amdgpu::VgprStorage *(Operand::*simd_vgpr_storage_mut)(amdgpu::Wavefront &) const = nullptr;
+    amdgpu::VgprStorage (Operand::*simd_vgpr_storage_mut)(amdgpu::Wavefront &) const = nullptr;
     amdgpu::ConstVgprStoragePair64 (Operand::*simd_vgpr_storage64)(
         const amdgpu::Wavefront &) const = nullptr;
     amdgpu::VgprStoragePair64 (Operand::*simd_vgpr_storage64_mut)(amdgpu::Wavefront &) const =
@@ -115,8 +119,8 @@ private:
   void write_scalar64_exec(amdgpu::Wavefront &, uint64_t) const;
   std::optional<uint32_t> simd_vgpr_base_exec(const amdgpu::Wavefront &) const;
   std::optional<uint32_t> simd_vgpr_base_mut_exec(amdgpu::Wavefront &) const;
-  const amdgpu::VgprStorage *simd_vgpr_storage_exec(const amdgpu::Wavefront &) const;
-  amdgpu::VgprStorage *simd_vgpr_storage_mut_exec(amdgpu::Wavefront &) const;
+  amdgpu::ConstVgprStorage simd_vgpr_storage_exec(const amdgpu::Wavefront &) const;
+  amdgpu::VgprStorage simd_vgpr_storage_mut_exec(amdgpu::Wavefront &) const;
   amdgpu::ConstVgprStoragePair64 simd_vgpr_storage64_exec(const amdgpu::Wavefront &) const;
   amdgpu::VgprStoragePair64 simd_vgpr_storage64_mut_exec(amdgpu::Wavefront &) const;
   void simd_notify_read_exec(const amdgpu::Wavefront &, uint64_t, uint8_t) const;

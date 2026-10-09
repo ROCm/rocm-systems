@@ -36,12 +36,15 @@ ExpandResult expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint32_t, uin
 }
 
 // Table MUST be sorted by (src_encoding_id, src_opcode) for binary search.
-const TranslationRule kExpandRules_cdna4_to_rdna3[] = {
+constexpr TranslationRule kExpandRules_cdna4_to_rdna3[] = {
     {cdna4::encoding::kSopp, cdna4::kSWaitcnt, RuleAction::Expand, 0, 0, nullptr,
      expand_waitcnt_gfx9_to_gfx11, nullptr, nullptr},
     {cdna4::encoding::kVop3OpHi4, cdna4::kVLshlAddU64, RuleAction::Expand, 0, 0, nullptr,
      expand_cdna4_v_lshl_add_u64_for_rdna, nullptr, nullptr},
 };
+
+static_assert(translation_rules_sorted(kExpandRules_cdna4_to_rdna3),
+              "the CDNA4-to-RDNA3 rule table must stay sorted by (encoding id, opcode)");
 
 } // namespace
 

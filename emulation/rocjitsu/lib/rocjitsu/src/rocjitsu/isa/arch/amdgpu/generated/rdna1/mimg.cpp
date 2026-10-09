@@ -6,7 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/mimg.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/execution_backend.h"
-#include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna1 {
@@ -22,7 +22,18 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageLoadMimg(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadMimg>(opcode);
+}
+} // namespace detail
 
 ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
     : Mimg("image_load_mip", reinterpret_cast<const OpEncoding *>(inst),
@@ -35,7 +46,19 @@ ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageLoadMipMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_mip", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadMipMimg>(opcode);
+}
+} // namespace detail
 
 ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
     : Mimg("image_load_pck", reinterpret_cast<const OpEncoding *>(inst),
@@ -48,7 +71,19 @@ ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageLoadPckMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadPckMimg>(opcode);
+}
+} // namespace detail
 
 ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
     : Mimg("image_load_pck_sgn", reinterpret_cast<const OpEncoding *>(inst),
@@ -61,7 +96,19 @@ ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageLoadPckSgnMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_pck_sgn", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadPckSgnMimg>(opcode);
+}
+} // namespace detail
 
 ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
     : Mimg("image_load_mip_pck", reinterpret_cast<const OpEncoding *>(inst),
@@ -74,7 +121,19 @@ ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageLoadMipPckMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_mip_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadMipPckMimg>(opcode);
+}
+} // namespace detail
 
 ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
     : Mimg("image_load_mip_pck_sgn", reinterpret_cast<const OpEncoding *>(inst),
@@ -87,7 +146,19 @@ ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageLoadMipPckSgnMimg(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_mip_pck_sgn", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadMipPckSgnMimg>(opcode);
+}
+} // namespace detail
 
 ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
     : Mimg("image_store", reinterpret_cast<const OpEncoding *>(inst),
@@ -100,7 +171,18 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageStoreMimg(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageStoreMimg>(opcode);
+}
+} // namespace detail
 
 ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
     : Mimg("image_store_mip", reinterpret_cast<const OpEncoding *>(inst),
@@ -113,7 +195,19 @@ ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageStoreMipMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store_mip", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageStoreMipMimg>(opcode);
+}
+} // namespace detail
 
 ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
     : Mimg("image_store_pck", reinterpret_cast<const OpEncoding *>(inst),
@@ -126,7 +220,19 @@ ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageStorePckMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageStorePckMimg>(opcode);
+}
+} // namespace detail
 
 ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
     : Mimg("image_store_mip_pck", reinterpret_cast<const OpEncoding *>(inst),
@@ -139,7 +245,19 @@ ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageStoreMipPckMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store_mip_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageStoreMipPckMimg>(opcode);
+}
+} // namespace detail
 
 ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
     : Mimg("image_get_resinfo", reinterpret_cast<const OpEncoding *>(inst),
@@ -152,231 +270,499 @@ ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGetResinfoMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_get_resinfo", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGetResinfoMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
     : Mimg("image_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicSwapMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageAtomicSwapMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_swap", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicSwapMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
     : Mimg("image_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicCmpswapMimg)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageAtomicCmpswapMimg(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_cmpswap", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicCmpswapMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
     : Mimg("image_atomic_add", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicAddMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageAtomicAddMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_add", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicAddMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
     : Mimg("image_atomic_sub", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicSubMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageAtomicSubMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_sub", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicSubMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
     : Mimg("image_atomic_smin", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicSminMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageAtomicSminMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_smin", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicSminMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
     : Mimg("image_atomic_umin", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicUminMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageAtomicUminMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_umin", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicUminMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
     : Mimg("image_atomic_smax", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicSmaxMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageAtomicSmaxMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_smax", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicSmaxMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
     : Mimg("image_atomic_umax", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicUmaxMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageAtomicUmaxMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_umax", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicUmaxMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
     : Mimg("image_atomic_and", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicAndMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageAtomicAndMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_and", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicAndMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
     : Mimg("image_atomic_or", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicOrMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageAtomicOrMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_or", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicOrMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
     : Mimg("image_atomic_xor", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicXorMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageAtomicXorMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_xor", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicXorMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
     : Mimg("image_atomic_inc", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicIncMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageAtomicIncMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_inc", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicIncMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
     : Mimg("image_atomic_dec", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicDecMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageAtomicDecMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_dec", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicDecMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicFcmpswapMimg::ImageAtomicFcmpswapMimg(const MachineInst *inst)
     : Mimg("image_atomic_fcmpswap", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicFcmpswapMimg)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageAtomicFcmpswapMimg(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_fcmpswap", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicFcmpswapMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicFminMimg::ImageAtomicFminMimg(const MachineInst *inst)
     : Mimg("image_atomic_fmin", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicFminMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageAtomicFminMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_fmin", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicFminMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicFmaxMimg::ImageAtomicFmaxMimg(const MachineInst *inst)
     : Mimg("image_atomic_fmax", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicFmaxMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageAtomicFmaxMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_fmax", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicFmaxMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
     : Mimg("image_sample", reinterpret_cast<const OpEncoding *>(inst),
@@ -391,7 +777,19 @@ ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleMimg(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleClMimg::ImageSampleClMimg(const MachineInst *inst)
     : Mimg("image_sample_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -406,7 +804,19 @@ ImageSampleClMimg::ImageSampleClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleClMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleClMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleDMimg::ImageSampleDMimg(const MachineInst *inst)
     : Mimg("image_sample_d", reinterpret_cast<const OpEncoding *>(inst),
@@ -421,7 +831,19 @@ ImageSampleDMimg::ImageSampleDMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleDMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_d", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleDClMimg::ImageSampleDClMimg(const MachineInst *inst)
     : Mimg("image_sample_d_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -436,7 +858,19 @@ ImageSampleDClMimg::ImageSampleDClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleDClMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_d_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDClMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleLMimg::ImageSampleLMimg(const MachineInst *inst)
     : Mimg("image_sample_l", reinterpret_cast<const OpEncoding *>(inst),
@@ -451,7 +885,19 @@ ImageSampleLMimg::ImageSampleLMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleLMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_l", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleLMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleBMimg::ImageSampleBMimg(const MachineInst *inst)
     : Mimg("image_sample_b", reinterpret_cast<const OpEncoding *>(inst),
@@ -466,7 +912,19 @@ ImageSampleBMimg::ImageSampleBMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleBMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_b", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleBMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleBClMimg::ImageSampleBClMimg(const MachineInst *inst)
     : Mimg("image_sample_b_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -481,7 +939,19 @@ ImageSampleBClMimg::ImageSampleBClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleBClMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_b_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleBClMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleLzMimg::ImageSampleLzMimg(const MachineInst *inst)
     : Mimg("image_sample_lz", reinterpret_cast<const OpEncoding *>(inst),
@@ -496,7 +966,19 @@ ImageSampleLzMimg::ImageSampleLzMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleLzMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_lz", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleLzMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCMimg::ImageSampleCMimg(const MachineInst *inst)
     : Mimg("image_sample_c", reinterpret_cast<const OpEncoding *>(inst),
@@ -511,7 +993,19 @@ ImageSampleCMimg::ImageSampleCMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCClMimg::ImageSampleCClMimg(const MachineInst *inst)
     : Mimg("image_sample_c_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -526,7 +1020,19 @@ ImageSampleCClMimg::ImageSampleCClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCClMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCClMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCDMimg::ImageSampleCDMimg(const MachineInst *inst)
     : Mimg("image_sample_c_d", reinterpret_cast<const OpEncoding *>(inst),
@@ -541,7 +1047,19 @@ ImageSampleCDMimg::ImageSampleCDMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCDMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_d", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCDClMimg::ImageSampleCDClMimg(const MachineInst *inst)
     : Mimg("image_sample_c_d_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -556,7 +1074,19 @@ ImageSampleCDClMimg::ImageSampleCDClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCDClMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_d_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDClMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCLMimg::ImageSampleCLMimg(const MachineInst *inst)
     : Mimg("image_sample_c_l", reinterpret_cast<const OpEncoding *>(inst),
@@ -571,7 +1101,19 @@ ImageSampleCLMimg::ImageSampleCLMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCLMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_l", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCLMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCBMimg::ImageSampleCBMimg(const MachineInst *inst)
     : Mimg("image_sample_c_b", reinterpret_cast<const OpEncoding *>(inst),
@@ -586,7 +1128,19 @@ ImageSampleCBMimg::ImageSampleCBMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCBMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_b", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCBMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCBClMimg::ImageSampleCBClMimg(const MachineInst *inst)
     : Mimg("image_sample_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -601,7 +1155,19 @@ ImageSampleCBClMimg::ImageSampleCBClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCBClMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_b_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCBClMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCLzMimg::ImageSampleCLzMimg(const MachineInst *inst)
     : Mimg("image_sample_c_lz", reinterpret_cast<const OpEncoding *>(inst),
@@ -616,7 +1182,19 @@ ImageSampleCLzMimg::ImageSampleCLzMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCLzMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_lz", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCLzMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleOMimg::ImageSampleOMimg(const MachineInst *inst)
     : Mimg("image_sample_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -631,7 +1209,19 @@ ImageSampleOMimg::ImageSampleOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleOMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleClOMimg::ImageSampleClOMimg(const MachineInst *inst)
     : Mimg("image_sample_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -646,7 +1236,19 @@ ImageSampleClOMimg::ImageSampleClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleClOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleDOMimg::ImageSampleDOMimg(const MachineInst *inst)
     : Mimg("image_sample_d_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -661,7 +1263,19 @@ ImageSampleDOMimg::ImageSampleDOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleDOMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_d_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleDClOMimg::ImageSampleDClOMimg(const MachineInst *inst)
     : Mimg("image_sample_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -676,7 +1290,19 @@ ImageSampleDClOMimg::ImageSampleDClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleDClOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_d_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleLOMimg::ImageSampleLOMimg(const MachineInst *inst)
     : Mimg("image_sample_l_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -691,7 +1317,19 @@ ImageSampleLOMimg::ImageSampleLOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleLOMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_l_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleLOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleBOMimg::ImageSampleBOMimg(const MachineInst *inst)
     : Mimg("image_sample_b_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -706,7 +1344,19 @@ ImageSampleBOMimg::ImageSampleBOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleBOMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_b_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleBOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleBClOMimg::ImageSampleBClOMimg(const MachineInst *inst)
     : Mimg("image_sample_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -721,7 +1371,19 @@ ImageSampleBClOMimg::ImageSampleBClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleBClOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_b_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleBClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleLzOMimg::ImageSampleLzOMimg(const MachineInst *inst)
     : Mimg("image_sample_lz_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -736,7 +1398,19 @@ ImageSampleLzOMimg::ImageSampleLzOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleLzOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_lz_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleLzOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCOMimg::ImageSampleCOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -751,7 +1425,19 @@ ImageSampleCOMimg::ImageSampleCOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCOMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCClOMimg::ImageSampleCClOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -766,7 +1452,19 @@ ImageSampleCClOMimg::ImageSampleCClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCClOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCDOMimg::ImageSampleCDOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_d_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -781,7 +1479,19 @@ ImageSampleCDOMimg::ImageSampleCDOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCDOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_d_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCDClOMimg::ImageSampleCDClOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -796,7 +1506,19 @@ ImageSampleCDClOMimg::ImageSampleCDClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCDClOMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_d_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCLOMimg::ImageSampleCLOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_l_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -811,7 +1533,19 @@ ImageSampleCLOMimg::ImageSampleCLOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCLOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_l_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCLOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCBOMimg::ImageSampleCBOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_b_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -826,7 +1560,19 @@ ImageSampleCBOMimg::ImageSampleCBOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCBOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_b_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCBOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCBClOMimg::ImageSampleCBClOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -841,7 +1587,19 @@ ImageSampleCBClOMimg::ImageSampleCBClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCBClOMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_b_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCBClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCLzOMimg::ImageSampleCLzOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -856,7 +1614,19 @@ ImageSampleCLzOMimg::ImageSampleCLzOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCLzOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_lz_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCLzOMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4Mimg::ImageGather4Mimg(const MachineInst *inst)
     : Mimg("image_gather4", reinterpret_cast<const OpEncoding *>(inst),
@@ -871,7 +1641,19 @@ ImageGather4Mimg::ImageGather4Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4Mimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4Mimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4ClMimg::ImageGather4ClMimg(const MachineInst *inst)
     : Mimg("image_gather4_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -886,7 +1668,19 @@ ImageGather4ClMimg::ImageGather4ClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4ClMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4ClMimg>(opcode);
+}
+} // namespace detail
 
 ImageLoadBy2Mimg::ImageLoadBy2Mimg(const MachineInst *inst)
     : Mimg("image_load_by2", reinterpret_cast<const OpEncoding *>(inst),
@@ -899,7 +1693,19 @@ ImageLoadBy2Mimg::ImageLoadBy2Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageLoadBy2Mimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_by2", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadBy2Mimg>(opcode);
+}
+} // namespace detail
 
 ImageLoadBy4Mimg::ImageLoadBy4Mimg(const MachineInst *inst)
     : Mimg("image_load_by4", reinterpret_cast<const OpEncoding *>(inst),
@@ -912,7 +1718,19 @@ ImageLoadBy4Mimg::ImageLoadBy4Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageLoadBy4Mimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_by4", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadBy4Mimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4LMimg::ImageGather4LMimg(const MachineInst *inst)
     : Mimg("image_gather4_l", reinterpret_cast<const OpEncoding *>(inst),
@@ -927,7 +1745,19 @@ ImageGather4LMimg::ImageGather4LMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4LMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_l", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4LMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4BMimg::ImageGather4BMimg(const MachineInst *inst)
     : Mimg("image_gather4_b", reinterpret_cast<const OpEncoding *>(inst),
@@ -942,7 +1772,19 @@ ImageGather4BMimg::ImageGather4BMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4BMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_b", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4BMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4BClMimg::ImageGather4BClMimg(const MachineInst *inst)
     : Mimg("image_gather4_b_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -957,7 +1799,19 @@ ImageGather4BClMimg::ImageGather4BClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4BClMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_b_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4BClMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4LzMimg::ImageGather4LzMimg(const MachineInst *inst)
     : Mimg("image_gather4_lz", reinterpret_cast<const OpEncoding *>(inst),
@@ -972,7 +1826,19 @@ ImageGather4LzMimg::ImageGather4LzMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4LzMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_lz", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4LzMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4CMimg::ImageGather4CMimg(const MachineInst *inst)
     : Mimg("image_gather4_c", reinterpret_cast<const OpEncoding *>(inst),
@@ -987,7 +1853,19 @@ ImageGather4CMimg::ImageGather4CMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4CMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4CClMimg::ImageGather4CClMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -1002,7 +1880,19 @@ ImageGather4CClMimg::ImageGather4CClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4CClMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CClMimg>(opcode);
+}
+} // namespace detail
 
 ImageLoadMipBy2Mimg::ImageLoadMipBy2Mimg(const MachineInst *inst)
     : Mimg("image_load_mip_by2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1015,7 +1905,19 @@ ImageLoadMipBy2Mimg::ImageLoadMipBy2Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageLoadMipBy2Mimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_mip_by2", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadMipBy2Mimg>(opcode);
+}
+} // namespace detail
 
 ImageLoadMipBy4Mimg::ImageLoadMipBy4Mimg(const MachineInst *inst)
     : Mimg("image_load_mip_by4", reinterpret_cast<const OpEncoding *>(inst),
@@ -1028,7 +1930,19 @@ ImageLoadMipBy4Mimg::ImageLoadMipBy4Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageLoadMipBy4Mimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_mip_by4", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadMipBy4Mimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4CLMimg::ImageGather4CLMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_l", reinterpret_cast<const OpEncoding *>(inst),
@@ -1043,7 +1957,19 @@ ImageGather4CLMimg::ImageGather4CLMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4CLMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c_l", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CLMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4CBMimg::ImageGather4CBMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_b", reinterpret_cast<const OpEncoding *>(inst),
@@ -1058,7 +1984,19 @@ ImageGather4CBMimg::ImageGather4CBMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4CBMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c_b", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CBMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4CBClMimg::ImageGather4CBClMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -1073,7 +2011,19 @@ ImageGather4CBClMimg::ImageGather4CBClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4CBClMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c_b_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CBClMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4CLzMimg::ImageGather4CLzMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_lz", reinterpret_cast<const OpEncoding *>(inst),
@@ -1088,7 +2038,19 @@ ImageGather4CLzMimg::ImageGather4CLzMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4CLzMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c_lz", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CLzMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4OMimg::ImageGather4OMimg(const MachineInst *inst)
     : Mimg("image_gather4_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1103,7 +2065,19 @@ ImageGather4OMimg::ImageGather4OMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4OMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4OMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4ClOMimg::ImageGather4ClOMimg(const MachineInst *inst)
     : Mimg("image_gather4_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1118,7 +2092,19 @@ ImageGather4ClOMimg::ImageGather4ClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4ClOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4ClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageStoreBy2Mimg::ImageStoreBy2Mimg(const MachineInst *inst)
     : Mimg("image_store_by2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1131,7 +2117,19 @@ ImageStoreBy2Mimg::ImageStoreBy2Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageStoreBy2Mimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store_by2", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageStoreBy2Mimg>(opcode);
+}
+} // namespace detail
 
 ImageStoreBy4Mimg::ImageStoreBy4Mimg(const MachineInst *inst)
     : Mimg("image_store_by4", reinterpret_cast<const OpEncoding *>(inst),
@@ -1144,7 +2142,19 @@ ImageStoreBy4Mimg::ImageStoreBy4Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageStoreBy4Mimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store_by4", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageStoreBy4Mimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4LOMimg::ImageGather4LOMimg(const MachineInst *inst)
     : Mimg("image_gather4_l_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1159,7 +2169,19 @@ ImageGather4LOMimg::ImageGather4LOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4LOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_l_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4LOMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4BOMimg::ImageGather4BOMimg(const MachineInst *inst)
     : Mimg("image_gather4_b_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1174,7 +2196,19 @@ ImageGather4BOMimg::ImageGather4BOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4BOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_b_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4BOMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4BClOMimg::ImageGather4BClOMimg(const MachineInst *inst)
     : Mimg("image_gather4_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1189,7 +2223,19 @@ ImageGather4BClOMimg::ImageGather4BClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4BClOMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_b_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4BClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4LzOMimg::ImageGather4LzOMimg(const MachineInst *inst)
     : Mimg("image_gather4_lz_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1204,7 +2250,19 @@ ImageGather4LzOMimg::ImageGather4LzOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4LzOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_lz_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4LzOMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4COMimg::ImageGather4COMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1219,7 +2277,19 @@ ImageGather4COMimg::ImageGather4COMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4COMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4COMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4CClOMimg::ImageGather4CClOMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1234,7 +2304,19 @@ ImageGather4CClOMimg::ImageGather4CClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4CClOMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageStoreMipBy2Mimg::ImageStoreMipBy2Mimg(const MachineInst *inst)
     : Mimg("image_store_mip_by2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1247,7 +2329,19 @@ ImageStoreMipBy2Mimg::ImageStoreMipBy2Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageStoreMipBy2Mimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store_mip_by2", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageStoreMipBy2Mimg>(opcode);
+}
+} // namespace detail
 
 ImageStoreMipBy4Mimg::ImageStoreMipBy4Mimg(const MachineInst *inst)
     : Mimg("image_store_mip_by4", reinterpret_cast<const OpEncoding *>(inst),
@@ -1260,7 +2354,19 @@ ImageStoreMipBy4Mimg::ImageStoreMipBy4Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageStoreMipBy4Mimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store_mip_by4", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageStoreMipBy4Mimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4CLOMimg::ImageGather4CLOMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_l_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1275,7 +2381,19 @@ ImageGather4CLOMimg::ImageGather4CLOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4CLOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c_l_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CLOMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4CBOMimg::ImageGather4CBOMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_b_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1290,7 +2408,19 @@ ImageGather4CBOMimg::ImageGather4CBOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4CBOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c_b_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CBOMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4CBClOMimg::ImageGather4CBClOMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1305,7 +2435,19 @@ ImageGather4CBClOMimg::ImageGather4CBClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4CBClOMimg(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c_b_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CBClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4CLzOMimg::ImageGather4CLzOMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1320,7 +2462,19 @@ ImageGather4CLzOMimg::ImageGather4CLzOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4CLzOMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c_lz_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CLzOMimg>(opcode);
+}
+} // namespace detail
 
 ImageGetLodMimg::ImageGetLodMimg(const MachineInst *inst)
     : Mimg("image_get_lod", reinterpret_cast<const OpEncoding *>(inst),
@@ -1335,7 +2489,19 @@ ImageGetLodMimg::ImageGetLodMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGetLodMimg(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_get_lod", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGetLodMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4hMimg::ImageGather4hMimg(const MachineInst *inst)
     : Mimg("image_gather4h", reinterpret_cast<const OpEncoding *>(inst),
@@ -1350,7 +2516,19 @@ ImageGather4hMimg::ImageGather4hMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4hMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4h", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4hMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4hPckMimg::ImageGather4hPckMimg(const MachineInst *inst)
     : Mimg("image_gather4h_pck", reinterpret_cast<const OpEncoding *>(inst),
@@ -1365,7 +2543,19 @@ ImageGather4hPckMimg::ImageGather4hPckMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather4hPckMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4h_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4hPckMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather8hPckMimg::ImageGather8hPckMimg(const MachineInst *inst)
     : Mimg("image_gather8h_pck", reinterpret_cast<const OpEncoding *>(inst),
@@ -1380,7 +2570,19 @@ ImageGather8hPckMimg::ImageGather8hPckMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageGather8hPckMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather8h_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather8hPckMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCdMimg::ImageSampleCdMimg(const MachineInst *inst)
     : Mimg("image_sample_cd", reinterpret_cast<const OpEncoding *>(inst),
@@ -1395,7 +2597,19 @@ ImageSampleCdMimg::ImageSampleCdMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCdMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_cd", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCdMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCdClMimg::ImageSampleCdClMimg(const MachineInst *inst)
     : Mimg("image_sample_cd_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -1410,7 +2624,19 @@ ImageSampleCdClMimg::ImageSampleCdClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCdClMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_cd_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCdClMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCCdMimg::ImageSampleCCdMimg(const MachineInst *inst)
     : Mimg("image_sample_c_cd", reinterpret_cast<const OpEncoding *>(inst),
@@ -1425,7 +2651,19 @@ ImageSampleCCdMimg::ImageSampleCCdMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCCdMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_cd", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCCdMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCCdClMimg::ImageSampleCCdClMimg(const MachineInst *inst)
     : Mimg("image_sample_c_cd_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -1440,7 +2678,19 @@ ImageSampleCCdClMimg::ImageSampleCCdClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCCdClMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_cd_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCCdClMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCdOMimg::ImageSampleCdOMimg(const MachineInst *inst)
     : Mimg("image_sample_cd_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1455,7 +2705,19 @@ ImageSampleCdOMimg::ImageSampleCdOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCdOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_cd_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCdOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCdClOMimg::ImageSampleCdClOMimg(const MachineInst *inst)
     : Mimg("image_sample_cd_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1470,7 +2732,19 @@ ImageSampleCdClOMimg::ImageSampleCdClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCdClOMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_cd_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCdClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCCdOMimg::ImageSampleCCdOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_cd_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1485,7 +2759,19 @@ ImageSampleCCdOMimg::ImageSampleCCdOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCCdOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_cd_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCCdOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCCdClOMimg::ImageSampleCCdClOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_cd_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1500,7 +2786,19 @@ ImageSampleCCdClOMimg::ImageSampleCCdClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCCdClOMimg(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_cd_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCCdClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageLoadPck2Mimg::ImageLoadPck2Mimg(const MachineInst *inst)
     : Mimg("image_load_pck2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1513,7 +2811,19 @@ ImageLoadPck2Mimg::ImageLoadPck2Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageLoadPck2Mimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_pck2", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadPck2Mimg>(opcode);
+}
+} // namespace detail
 
 ImageLoadPck4Mimg::ImageLoadPck4Mimg(const MachineInst *inst)
     : Mimg("image_load_pck4", reinterpret_cast<const OpEncoding *>(inst),
@@ -1526,7 +2836,19 @@ ImageLoadPck4Mimg::ImageLoadPck4Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageLoadPck4Mimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_pck4", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadPck4Mimg>(opcode);
+}
+} // namespace detail
 
 ImageLoadMipPck2Mimg::ImageLoadMipPck2Mimg(const MachineInst *inst)
     : Mimg("image_load_mip_pck2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1539,7 +2861,19 @@ ImageLoadMipPck2Mimg::ImageLoadMipPck2Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageLoadMipPck2Mimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_mip_pck2", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadMipPck2Mimg>(opcode);
+}
+} // namespace detail
 
 ImageLoadMipPck4Mimg::ImageLoadMipPck4Mimg(const MachineInst *inst)
     : Mimg("image_load_mip_pck4", reinterpret_cast<const OpEncoding *>(inst),
@@ -1552,7 +2886,19 @@ ImageLoadMipPck4Mimg::ImageLoadMipPck4Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageLoadMipPck4Mimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_mip_pck4", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadMipPck4Mimg>(opcode);
+}
+} // namespace detail
 
 ImageStorePck2Mimg::ImageStorePck2Mimg(const MachineInst *inst)
     : Mimg("image_store_pck2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1565,7 +2911,19 @@ ImageStorePck2Mimg::ImageStorePck2Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageStorePck2Mimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store_pck2", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageStorePck2Mimg>(opcode);
+}
+} // namespace detail
 
 ImageStorePck4Mimg::ImageStorePck4Mimg(const MachineInst *inst)
     : Mimg("image_store_pck4", reinterpret_cast<const OpEncoding *>(inst),
@@ -1578,7 +2936,19 @@ ImageStorePck4Mimg::ImageStorePck4Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageStorePck4Mimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store_pck4", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageStorePck4Mimg>(opcode);
+}
+} // namespace detail
 
 ImageStoreMipPck2Mimg::ImageStoreMipPck2Mimg(const MachineInst *inst)
     : Mimg("image_store_mip_pck2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1591,7 +2961,19 @@ ImageStoreMipPck2Mimg::ImageStoreMipPck2Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageStoreMipPck2Mimg(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store_mip_pck2", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageStoreMipPck2Mimg>(opcode);
+}
+} // namespace detail
 
 ImageStoreMipPck4Mimg::ImageStoreMipPck4Mimg(const MachineInst *inst)
     : Mimg("image_store_mip_pck4", reinterpret_cast<const OpEncoding *>(inst),
@@ -1604,7 +2986,19 @@ ImageStoreMipPck4Mimg::ImageStoreMipPck4Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageStoreMipPck4Mimg(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store_mip_pck4", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageStoreMipPck4Mimg>(opcode);
+}
+} // namespace detail
 
 ImageMsaaLoadMimg::ImageMsaaLoadMimg(const MachineInst *inst)
     : Mimg("image_msaa_load", reinterpret_cast<const OpEncoding *>(inst),
@@ -1617,7 +3011,19 @@ ImageMsaaLoadMimg::ImageMsaaLoadMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageMsaaLoadMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_msaa_load", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageMsaaLoadMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleDG16Mimg::ImageSampleDG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_d_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1632,7 +3038,19 @@ ImageSampleDG16Mimg::ImageSampleDG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleDG16Mimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_d_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDG16Mimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleDClG16Mimg::ImageSampleDClG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_d_cl_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1647,7 +3065,19 @@ ImageSampleDClG16Mimg::ImageSampleDClG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleDClG16Mimg(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_d_cl_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDClG16Mimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCDG16Mimg::ImageSampleCDG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_c_d_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1662,7 +3092,19 @@ ImageSampleCDG16Mimg::ImageSampleCDG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCDG16Mimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_d_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDG16Mimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCDClG16Mimg::ImageSampleCDClG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_c_d_cl_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1677,7 +3119,19 @@ ImageSampleCDClG16Mimg::ImageSampleCDClG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCDClG16Mimg(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_d_cl_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDClG16Mimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleDOG16Mimg::ImageSampleDOG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_d_o_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1692,7 +3146,19 @@ ImageSampleDOG16Mimg::ImageSampleDOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleDOG16Mimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_d_o_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDOG16Mimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleDClOG16Mimg::ImageSampleDClOG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_d_cl_o_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1707,7 +3173,19 @@ ImageSampleDClOG16Mimg::ImageSampleDClOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleDClOG16Mimg(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_d_cl_o_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDClOG16Mimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCDOG16Mimg::ImageSampleCDOG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_c_d_o_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1722,7 +3200,19 @@ ImageSampleCDOG16Mimg::ImageSampleCDOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCDOG16Mimg(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_d_o_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDOG16Mimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCDClOG16Mimg::ImageSampleCDClOG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_c_d_cl_o_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1737,7 +3227,19 @@ ImageSampleCDClOG16Mimg::ImageSampleCDClOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCDClOG16Mimg(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_d_cl_o_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDClOG16Mimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCdG16Mimg::ImageSampleCdG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_cd_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1752,7 +3254,19 @@ ImageSampleCdG16Mimg::ImageSampleCdG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCdG16Mimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_cd_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCdG16Mimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCdClG16Mimg::ImageSampleCdClG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_cd_cl_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1767,7 +3281,19 @@ ImageSampleCdClG16Mimg::ImageSampleCdClG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCdClG16Mimg(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_cd_cl_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCdClG16Mimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCCdG16Mimg::ImageSampleCCdG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_c_cd_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1782,7 +3308,19 @@ ImageSampleCCdG16Mimg::ImageSampleCCdG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCCdG16Mimg(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_cd_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCCdG16Mimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCCdClG16Mimg::ImageSampleCCdClG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_c_cd_cl_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1797,7 +3335,19 @@ ImageSampleCCdClG16Mimg::ImageSampleCCdClG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCCdClG16Mimg(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_cd_cl_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCCdClG16Mimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCdOG16Mimg::ImageSampleCdOG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_cd_o_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1812,7 +3362,19 @@ ImageSampleCdOG16Mimg::ImageSampleCdOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCdOG16Mimg(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_cd_o_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCdOG16Mimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCdClOG16Mimg::ImageSampleCdClOG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_cd_cl_o_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1827,7 +3389,19 @@ ImageSampleCdClOG16Mimg::ImageSampleCdClOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCdClOG16Mimg(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_cd_cl_o_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCdClOG16Mimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCCdOG16Mimg::ImageSampleCCdOG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_c_cd_o_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1842,7 +3416,19 @@ ImageSampleCCdOG16Mimg::ImageSampleCCdOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCCdOG16Mimg(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_cd_o_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCCdOG16Mimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCCdClOG16Mimg::ImageSampleCCdClOG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_c_cd_cl_o_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1857,7 +3443,19 @@ ImageSampleCCdClOG16Mimg::ImageSampleCCdClOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCCdClOG16Mimg(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_cd_cl_o_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCCdClOG16Mimg>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna1
 } // namespace rocjitsu

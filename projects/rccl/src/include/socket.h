@@ -23,7 +23,11 @@
 #endif
 
 #define MAX_IFS 16
+#if NCCL_OS_LINUX
 #define MAX_IF_NAME_SIZE 16
+#elif NCCL_OS_WINDOWS
+#define MAX_IF_NAME_SIZE 64
+#endif
 #if defined(__CUDA_ARCH__) || (!defined(NCCL_OS_WINDOWS) && !defined(NCCL_OS_LINUX))
 /* Device compilation or stub build (no OS): no system socket headers; use placeholder for union size. */
 #ifndef NI_MAXHOST
@@ -51,6 +55,8 @@ union ncclSocketAddress {
 };
 #endif
 
+struct ncclSocketCrypto;
+
 enum ncclSocketState {
   ncclSocketStateNone = 0,
   ncclSocketStateInitialized = 1,
@@ -63,7 +69,7 @@ enum ncclSocketState {
   ncclSocketStateTerminating = 8,
   ncclSocketStateClosed = 9,
   ncclSocketStateError = 10,
-  ncclSocketStateBadMagic = 11,
+  ncclSocketStateBadHandshake = 11,
   ncclSocketStateNum = 12
 };
 
@@ -73,9 +79,16 @@ enum ncclSocketType {
   ncclSocketTypeProxy = 2,
   ncclSocketTypeNetSocket = 3,
   ncclSocketTypeNetIb = 4,
-  ncclSocketTypeRasNetwork = 5
+  ncclSocketTypeRasNetwork = 5,
+  ncclSocketTypeNetNd = 6
 };
 
+// The stock hello: socket magic + type, sent by the connector as the first
+// application data. In encrypted mode it travels inside the TLS channel.
+#define NCCL_SOCKET_PLAIN_HELLO_BYTES (sizeof(uint64_t) + sizeof(enum ncclSocketType))
+
+// Contains owned OS and TLS state. Do not copy with raw struct assignment or
+// memcpy; use ncclSocketMove when transferring socket ownership.
 struct ncclSocket {
   ncclSocketDescriptor socketDescriptor;
   ncclSocketDescriptor acceptSocketDescriptor;
@@ -89,7 +102,8 @@ struct ncclSocket {
   enum ncclSocketType type;
   int customRetry;
   int finalizeCounter; // Used to keep track of initial handshake for async sockets.
-  char finalizeBuffer[sizeof(uint64_t)]; // Used to keep track of initial handshake for async sockets.
+  char finalizeBuffer[NCCL_SOCKET_PLAIN_HELLO_BYTES]; // Used to keep track of initial handshake for async sockets.
+  struct ncclSocketCrypto* crypto;
 #ifdef NCCL_OS_WINDOWS
   int socketBlockingMode; // 0 - blocking mode; 1 - non-blocking mode
 #endif
@@ -118,10 +132,15 @@ ncclResult_t ncclFindInterfaceMatchSubnet(char* ifName, union ncclSocketAddress*
 ncclResult_t ncclFindInterfaces(char* ifNames, union ncclSocketAddress* ifAddrs, int ifNameMaxSize, int maxIfs,
                                 int* nIfs);
 
+// Magic used for NCCL-internal TCP handshakes (bootstrap uses comm magic separately). Honors NCCL_SOCKET_MAGIC env.
+uint64_t ncclSocketDefaultMagic(void);
+
 // Initialize a socket
 ncclResult_t ncclSocketInit(struct ncclSocket* sock, const union ncclSocketAddress* addr = NULL,
-                            uint64_t magic = NCCL_SOCKET_MAGIC, enum ncclSocketType type = ncclSocketTypeUnknown,
+                            uint64_t magic = ncclSocketDefaultMagic(), enum ncclSocketType type = ncclSocketTypeUnknown,
                             volatile uint32_t* abortFlag = NULL, int asyncFlag = 0, int customRetry = 0);
+// Move an initialized socket into an uninitialized destination.
+void ncclSocketMove(struct ncclSocket* dst, struct ncclSocket* src);
 // Create a listening socket. sock->addr can be pre-filled with IP & port info. sock->fd is set after a successful call
 ncclResult_t ncclSocketListen(struct ncclSocket* sock);
 ncclResult_t ncclSocketGetAddr(struct ncclSocket* sock, union ncclSocketAddress* addr);
@@ -129,23 +148,25 @@ ncclResult_t ncclSocketGetAddr(struct ncclSocket* sock, union ncclSocketAddress*
 ncclResult_t ncclSocketConnect(struct ncclSocket* sock);
 // Return socket connection state.
 ncclResult_t ncclSocketReady(struct ncclSocket* sock, int* running);
-// Accept an incoming connection from listenSock->fd and keep the file descriptor in sock->fd, with the remote side IP/port in sock->addr.
-ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* ulistenSock, bool retryOnBadMagic = true);
-ncclResult_t ncclSocketGetFd(struct ncclSocket* sock, int* fd);
-ncclResult_t ncclSocketSetFd(int fd, struct ncclSocket* sock);
+// Accept an incoming connection from listenSock->socketDescriptor and keep the file descriptor in
+// sock->socketDescriptor, with the remote side IP/port in sock->addr.
+ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* ulistenSock, bool retry = true);
+ncclResult_t ncclSocketGetFd(struct ncclSocket* sock, ncclSocketDescriptor* socketDescriptor);
+ncclResult_t ncclSocketSetFd(ncclSocketDescriptor socketDescriptor, struct ncclSocket* sock);
 
 #define NCCL_SOCKET_SEND 0
 #define NCCL_SOCKET_RECV 1
 
 int ncclEnvSocketFamily(void);
-ncclResult_t ncclSocketProgress(int op, struct ncclSocket* sock, void* ptr, int size, int* offset, int* closed = NULL);
+ncclResult_t ncclSocketProgress(int op, struct ncclSocket* sock, void* ptr, int size, int* offset,
+                                bool* closed = nullptr);
 ncclResult_t ncclSocketWait(int op, struct ncclSocket* sock, void* ptr, int size, int* offset);
 ncclResult_t ncclSocketSend(struct ncclSocket* sock, void* ptr, int size);
 ncclResult_t ncclSocketRecv(struct ncclSocket* sock, void* ptr, int size);
 ncclResult_t ncclSocketSendRecv(struct ncclSocket* sendSock, void* sendPtr, int sendSize, struct ncclSocket* recvSock,
                                 void* recvPtr, int recvSize);
 ncclResult_t ncclSocketMultiOp(struct ncclSocketOp* ops, int numOps);
-ncclResult_t ncclSocketTryRecv(struct ncclSocket* sock, void* ptr, int size, int* closed, bool blocking);
+ncclResult_t ncclSocketTryRecv(struct ncclSocket* sock, void* ptr, int size, bool* closed, bool blocking);
 ncclResult_t ncclSocketShutdown(struct ncclSocket* sock, int how);
 ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool wait = false);
 uint16_t ncclSocketToPort(union ncclSocketAddress* addr);

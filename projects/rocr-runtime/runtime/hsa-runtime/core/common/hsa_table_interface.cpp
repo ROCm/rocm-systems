@@ -1450,6 +1450,23 @@ hsa_status_t HSA_API hsa_amd_queue_wait_external_semaphore(
   return amdExtTable->hsa_amd_queue_wait_external_semaphore_fn(queue, sem, value);
 }
 
+hsa_status_t HSA_API hsa_amd_svm_discard_and_prefetch_batch_async(
+    void** ptrs, size_t* sizes, uint32_t count,
+    const hsa_agent_t* dst_agents, uint32_t num_dst_agents,
+    uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+    hsa_signal_t completion_signal) {
+  return amdExtTable->hsa_amd_svm_discard_and_prefetch_batch_async_fn(
+      ptrs, sizes, count, dst_agents, num_dst_agents,
+      num_dep_signals, dep_signals, completion_signal);
+}
+
+// Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_agent_set_attribute(hsa_agent_t agent,
+                                                  hsa_amd_agent_attribute_t attribute,
+                                                  void* value) {
+  return amdExtTable->hsa_amd_agent_set_attribute_fn(agent, attribute, value);
+}
+
 // Tools only table interfaces.
 namespace rocr {
 

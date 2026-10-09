@@ -758,10 +758,6 @@ __CG_QUALIFIER__ void thread_group::sync() const {
       __hip_assert(false && "invalid cooperative group type");
     }
   }
-#if __has_builtin(__builtin_amdgcn_s_wait_asynccnt)
-  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_wait_asynccnt))
-    __builtin_amdgcn_s_wait_asynccnt(0);
-#endif
 }
 
 #endif
@@ -1435,13 +1431,37 @@ struct CGIdentity<T, cooperative_groups::bit_and<T>> {
   }
 };
 
+template <>
+struct CGIdentity<bool, cooperative_groups::bit_and<bool>> {
+  __CG_QUALIFIER__ bool operator()()
+  {
+    return true;
+  }
+};
+
+template <>
+struct CGIdentity<bool, cooperative_groups::bit_or<bool>> {
+  __CG_QUALIFIER__ bool operator()()
+  {
+    return false;
+  }
+};
+
 template <class T>
 struct CGIdentity<T, cooperative_groups::less<T>> {
   __CG_QUALIFIER__ T operator()()
   {
     // CUDA would return 0 in this case. But in our case we mimic what __ockl_wfscan_*
     // would do
-    return __hip_internal::NumericLimits<T>::maximum();
+    return __hip_internal::ExclusiveScanIdentity<T>::maximum();
+  }
+};
+
+template <>
+struct CGIdentity<bool, cooperative_groups::less<bool>> {
+  __CG_QUALIFIER__ bool operator()()
+  {
+    return true;
   }
 };
 
@@ -1449,7 +1469,15 @@ template <class T>
 struct CGIdentity<T, cooperative_groups::greater<T>> {
   __CG_QUALIFIER__ T operator()()
   {
-    return __hip_internal::NumericLimits<T>::minimum();
+    return __hip_internal::ExclusiveScanIdentity<T>::minimum();
+  }
+};
+
+template <>
+struct CGIdentity<bool, cooperative_groups::greater<bool>> {
+  __CG_QUALIFIER__ bool operator()()
+  {
+    return false;
   }
 };
 
@@ -1476,13 +1504,15 @@ __CG_QUALIFIER__ unsigned long long groupMask(const TyGroup& group)
 // for up to 32 bytes (__hip_ds_bpermute() can only do 4 bytes at a time,
 // this function calls it (or the floating point version) multiple times to
 // implement it for bigger sizes
-template <bool isPrimitiveType, class T, size_t NumPermutes, typename __hip_internal::enable_if<NumPermutes == 0, int>::type = 0>
+template <bool isPrimitiveType, class T, size_t NumPermutes,
+          typename __hip_internal::enable_if<NumPermutes == 0, int>::type = 0>
 __CG_QUALIFIER__ void bPermute(T&, T, int from)
 {
 }
 
 // trivial case: the type fits within the permute size
-template <bool IsPrimitiveType, class T, size_t NumPermutes, typename __hip_internal::enable_if<IsPrimitiveType && NumPermutes == 1, int>::type = 0>
+template <bool IsPrimitiveType, class T, size_t NumPermutes,
+          typename __hip_internal::enable_if<IsPrimitiveType && NumPermutes == 1, int>::type = 0>
 __CG_QUALIFIER__ void bPermute(T& permuteResult, T result, int from)
 {
   auto backwardPermute = [](int index, T arg) {
@@ -1494,11 +1524,11 @@ __CG_QUALIFIER__ void bPermute(T& permuteResult, T result, int from)
       }
     };
 
-  if constexpr (sizeof(T) == 2) {
+  if constexpr (sizeof(T) <= 2) {
     union {
       int i;
       T f;
-    } tmp;
+    } tmp = {};
 
     tmp.f = result;
     tmp.i = __hip_ds_bpermute(from << 2, tmp.i);

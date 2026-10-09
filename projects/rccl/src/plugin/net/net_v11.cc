@@ -42,7 +42,8 @@ static ncclResult_t ncclNet_getProperties(int dev, ncclNetProperties_t* props) {
 }
 
 static ncclResult_t ncclNet_makeVDevice(int* d, ncclNetVDeviceProps_t* props) {
-  // Safe cast: devs[] is at the end of the struct and NCCL limits ndevs to NCCL_NET_MAX_DEVS_PER_NIC_V11 for v11 plugins.
+  // Safe cast: devs[] is at the end of the struct and NCCL limits ndevs to
+  // NCCL_NET_MAX_DEVS_PER_NIC_V11 for v11 plugins.
   return ncclNet_v11->makeVDevice(d, (ncclNetVDeviceProps_v11_t*)props);
 }
 
@@ -109,6 +110,9 @@ static ncclResult_t ncclCollNet_getProperties(int dev, ncclNetProperties_t* prop
   props->maxP2pBytes = props_v11.maxP2pBytes;
   props->maxCollBytes = props_v11.maxCollBytes;
   props->maxMultiRequestSize = props_v11.maxMultiRequestSize;
+  // Undefined to be ignore in NCCL core
+  props->railId = NCCL_NET_ID_UNDEF;
+  props->planeId = NCCL_NET_ID_UNDEF;
   return ncclSuccess;
 }
 
@@ -130,7 +134,8 @@ static ncclResult_t ncclCollNet_ireducescatter(void* collComm, int nSendParts, n
 }
 
 static ncclResult_t ncclCollNet_makeVDevice(int* d, ncclNetVDeviceProps_t* props) {
-  // Safe cast: devs[] is at the end of the struct and NCCL limits ndevs to NCCL_NET_MAX_DEVS_PER_NIC_V11 for v11 plugins.
+  // Safe cast: devs[] is at the end of the struct and NCCL limits ndevs to
+  // NCCL_NET_MAX_DEVS_PER_NIC_V11 for v11 plugins.
   return ncclCollNet_v11->makeVDevice(d, (ncclNetVDeviceProps_v11_t*)props);
 }
 

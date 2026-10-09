@@ -6,7 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vinterp.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
-#include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna4 {
@@ -24,7 +24,19 @@ VInterpP10F32Vinterp::VInterpP10F32Vinterp(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
+
+namespace detail {
+DecodeResult decodeVInterpP10F32Vinterp(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vinterp::validate_encoding(
+      "v_interp_p10_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP10F32Vinterp>(opcode);
+}
+} // namespace detail
 
 VInterpP2F32Vinterp::VInterpP2F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p2_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -39,7 +51,19 @@ VInterpP2F32Vinterp::VInterpP2F32Vinterp(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
+
+namespace detail {
+DecodeResult decodeVInterpP2F32Vinterp(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vinterp::validate_encoding(
+      "v_interp_p2_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP2F32Vinterp>(opcode);
+}
+} // namespace detail
 
 VInterpP10F16F32Vinterp::VInterpP10F16F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p10_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -54,7 +78,19 @@ VInterpP10F16F32Vinterp::VInterpP10F16F32Vinterp(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
+
+namespace detail {
+DecodeResult decodeVInterpP10F16F32Vinterp(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vinterp::validate_encoding(
+      "v_interp_p10_f16_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP10F16F32Vinterp>(opcode);
+}
+} // namespace detail
 
 VInterpP2F16F32Vinterp::VInterpP2F16F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p2_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -69,7 +105,19 @@ VInterpP2F16F32Vinterp::VInterpP2F16F32Vinterp(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
+
+namespace detail {
+DecodeResult decodeVInterpP2F16F32Vinterp(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vinterp::validate_encoding(
+      "v_interp_p2_f16_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP2F16F32Vinterp>(opcode);
+}
+} // namespace detail
 
 void VInterpP2F16F32Vinterp::implicit_uses(RegisterSet &uses) const {
   Vinterp::implicit_uses(uses);
@@ -90,7 +138,20 @@ VInterpP10RtzF16F32Vinterp::VInterpP10RtzF16F32Vinterp(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
+
+namespace detail {
+DecodeResult decodeVInterpP10RtzF16F32Vinterp(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vinterp::validate_encoding("v_interp_p10_rtz_f16_f32",
+                                 reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP10RtzF16F32Vinterp>(opcode);
+}
+} // namespace detail
 
 VInterpP2RtzF16F32Vinterp::VInterpP2RtzF16F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p2_rtz_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -105,7 +166,19 @@ VInterpP2RtzF16F32Vinterp::VInterpP2RtzF16F32Vinterp(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
+
+namespace detail {
+DecodeResult decodeVInterpP2RtzF16F32Vinterp(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vinterp::validate_encoding(
+      "v_interp_p2_rtz_f16_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP2RtzF16F32Vinterp>(opcode);
+}
+} // namespace detail
 
 void VInterpP2RtzF16F32Vinterp::implicit_uses(RegisterSet &uses) const {
   Vinterp::implicit_uses(uses);

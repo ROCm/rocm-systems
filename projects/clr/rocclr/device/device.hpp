@@ -24,11 +24,9 @@
 #include "devsignal.hpp"
 #include "utils/nontemporal.hpp"
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 #include "devurilocator.hpp"
-#endif
-#endif
+#endif  // DEVICE_ADDRESS_SANITIZER
 
 #include <array>
 #include <cassert>
@@ -113,6 +111,19 @@ enum MemRangeAttribute : uint32_t {
                              ///< set for specified device
   LastPrefetchLocation = 4,  ///< The last location to which the range was prefetched
   CoherencyMode = 100,       ///< Current coherency mode for the specified range
+};
+
+// DMA-BUF mapping-type flags for GetHandleForAddressRange
+enum MemRangeDmaBufMappingType : uint64_t {
+  MemRangeDmaBufMappingTypePcie = 0x1,  ///< Maps dmabuf via pcie, requires large bar support
+};
+
+// DMA-BUF mapping results for GetHandleForAddressRange.
+// kNotSupported is returned on unsupported devices.
+enum HandleExportResult : uint32_t {
+  kSuccess = 0,   ///< Handle was exported.
+  kNotSupported,  ///< Request is valid but unsupported on this device.
+  kError,         ///< Export failed.
 };
 
 //! Maps hipFuncCache_t to group memory carveout percentage.
@@ -676,6 +687,10 @@ struct Info : public amd::EmbeddedObject {
   uint32_t driverNodeId_;
   //! Number of Physical SGPRs per SIMD
   uint32_t sgprsPerSimd_;
+  //! SGPR allocation granularity. Zero if the backend does not report it.
+  uint32_t sgprAllocGranularity_;
+  //! Per-wave SGPRs reserved by the trap handler. Zero if absent or unreported.
+  uint32_t sgprTrapHandlerReserve_;
 
   uint32_t numSDMAengines_;  //!< Number of available SDMA engines
 
@@ -692,6 +707,7 @@ struct Info : public amd::EmbeddedObject {
   bool hasExpertSchedMode_;  //! Device supports expert scheduling mode
 
   bool dmabufSupported_;  //!< DMABuf support flag
+  bool hostAllocDmabufSupported_;  //!< Host-alloc DMABuf support flag
   bool gpuDirectRdmaWithHipVmmSupported_;  //!< GPU Direct RDMA with HIP VMM (DMA-Buf + HIP VMM)
 
   uint32_t maxDynDataPrefetchRegions_;  //!< Max L2 prefetch regions (0 if unsupported)
@@ -754,6 +770,8 @@ class Settings {
   void enableExtension(uint name) { extensions_ |= static_cast<uint64_t>(1) << name; }
 
   size_t stagedXferSize_ = 0;     //!< Staged buffer size
+  size_t sdma_swap_alignment_ = 0;  //!< SDMA swap address alignment
+  size_t sdma_indirect_max_size_ = 0;  //!< Max SDMA indirect copy size
 
  private:
   //! Disable copy constructor
@@ -983,8 +1001,9 @@ class Memory {
   MemAccess GetAccess() const { return memAccess_; }
 
   //! Retrieves shareable handle for hipMalloc'ed address range.
-  virtual bool GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle) {
-    return false;
+  virtual HandleExportResult GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle,
+                                               unsigned long long flags) {
+    return HandleExportResult::kError;
   }
 
  protected:
@@ -1765,7 +1784,7 @@ class Device : public RuntimeObject {
   static constexpr size_t kP2PStagingSize = 4 * Mi;
   static constexpr size_t kMGSyncDataSize = sizeof(MGSyncData);
   static constexpr size_t kMGInfoSizePerDevice = kMGSyncDataSize + sizeof(MGSyncInfo);
-  static constexpr size_t kSGInfoSize = kMGSyncDataSize;
+  static constexpr size_t kSGInfoSize = sizeof(MGSyncInfo);
 
   // Max Scratch size is based on ISA and thus per device.
   // Def value is as per GFX9 being the least among supported devices.
@@ -2256,15 +2275,14 @@ class Device : public RuntimeObject {
     uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
     int hw_event_index;
     int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
-    // Segment that owns this patch (set at BuildSyncPlan time). At launch the
-    // graph layer resolves it to the actual stream's vGPU index into queue_index.
-    int segment_id = -1;
-    // vGPU (queue) index resolved at launch from segment_id. Read by
-    // ApplyHwEventPatches to attribute the signal to its execution stream.
-    uint32_t queue_index = std::numeric_limits<uint32_t>::max();
   };
 
-  virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
+  //! Create a barrier packet that waits on num_deps signals. num_deps == 1
+  //! yields a single-signal barrier where the device has one; otherwise a
+  //! barrier-AND (up to five dep_signal slots). dep_signal[0] and the
+  //! single-signal field share an offset, so callers patch slot 0 either way.
+  //! num_deps == 0 is a completion-only barrier.
+  virtual uint8_t* CreateBarrierPacket(int num_deps = 0) const { return nullptr; }
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const {}
 
@@ -2423,23 +2441,18 @@ class Device : public RuntimeObject {
   //! Sets the group memory carveout percentage hint for the device
   void UpdateGroupMemCarveout(uint8_t percent) { group_mem_carveout_hint_ = percent; }
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const = 0;
-#endif
-#endif
 
-#if defined(__linux__) && defined(__clang__)
-#if __has_feature(address_sanitizer)
   void reportDeviceMemoryLeaks();
   static void reportAllDeviceMemoryLeaks();
-#endif
 #endif
 
   static bool IsGPUInError() { return (gpu_error_.load(std::memory_order_relaxed) != CL_SUCCESS); }
   static cl_int GetGPUError() { return gpu_error_.load(std::memory_order_relaxed); }
 
-  bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle);
+  HandleExportResult GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
+                                              unsigned long long flags);
 
   // Registers a memory object allocated via hostcall for later cleanup.
   void TrackHostcallMemory(amd::Memory* memory);

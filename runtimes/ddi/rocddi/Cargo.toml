@@ -1,0 +1,18 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "rocddi"
+description = "Early-access private heterogeneous device interface for ROCm runtime frontends"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[lints]
+workspace = true

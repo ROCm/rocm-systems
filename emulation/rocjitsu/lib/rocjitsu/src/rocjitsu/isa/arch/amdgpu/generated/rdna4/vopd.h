@@ -9,6 +9,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
+#include "rocjitsu/isa/decode_result.h"
 #include <cstdint>
 #include <string>
 
@@ -18,6 +19,8 @@ namespace rdna4 {
 class Vopd : public IsaInstruction<Isa> {
 public:
   explicit Vopd(const MachineInst *inst);
+  static Result validate_encoding(const MachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error);
   void execute_impl(amdgpu::Wavefront &wf);
 
 private:

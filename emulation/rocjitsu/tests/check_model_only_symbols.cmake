@@ -36,7 +36,7 @@ endforeach()
 
 # Keep the denylist from passing vacuously if the model objects disappear from
 # the final link. Aggregate consumers provide a comma-separated architecture
-# list; existing gfx1250-only checks retain their decoder-symbol assertion.
+# list; existing cdna5-only checks retain their decoder-symbol assertion.
 if(REQUIRED_MODEL_ARCHES)
     string(REPLACE "," ";" _required_arches "${REQUIRED_MODEL_ARCHES}")
     foreach(_arch IN LISTS _required_arches)
@@ -53,7 +53,7 @@ if(REQUIRED_MODEL_ARCHES)
     endforeach()
 else()
     set(_required_symbol
-        "rocjitsu::gfx1250::Decoder::decode(unsigned int const*)"
+        "rocjitsu::cdna5::Decoder::decode(unsigned int const*, util::DiagnosticEmitter const&)"
     )
     string(FIND "${_symbols}" "${_required_symbol}" _match)
     if(_match EQUAL -1)

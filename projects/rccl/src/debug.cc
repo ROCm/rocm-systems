@@ -14,15 +14,15 @@
 #include <string.h>
 #include <chrono>
 #include "param.h"
+#include "param/param_tmp.h"
+#include "param/parsers.h"
 #include "compiler.h"
 #include <mutex>
 #include "os.h"
 #include "env.h"
 #include <cinttypes>
 
-#define NCCL_DEBUG_RESET_TRIGGERED (-2)
-
-__attribute__((visibility("default"))) int ncclDebugLevel = -1;
+__attribute__((visibility("default"))) uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;
 static uint32_t ncclDebugTimestampLevels = 0;     // bitmaps of levels that have timestamps turned on
 static char ncclDebugTimestampFormat[256];        // with space for subseconds
 static int ncclDebugTimestampSubsecondsStart;     // index where the subseconds starts
@@ -39,6 +39,89 @@ static std::chrono::steady_clock::time_point ncclEpoch;
 static bool ncclWarnSetDebugInfo = false;
 
 static thread_local int tid = -1;
+
+// clang-format off
+DEFINE_NCCL_PARAM(ncclParamDebugLevel, ncclDebugLogLevel, NCCL_DEBUG, NCCL_LOG_NONE,
+                  NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT,
+                  ncclParamOneOf<ncclDebugLogLevel>(makeOptions(
+                    makeOption("VERSION", NCCL_LOG_VERSION, "Prints NCCL version information only."),
+                    makeOption("WARN", NCCL_LOG_WARN, "Prints error messages."),
+                    makeOption("ATTN", NCCL_LOG_ATTN, "Prints error messages plus informational notices."),
+                    makeOption("INFO", NCCL_LOG_INFO, "Prints debug information."),
+                    makeOption("ABORT", NCCL_LOG_ABORT, ""),
+                    makeOption("TRACE", NCCL_LOG_TRACE, "Prints replayable trace information on all calls.")
+                  )), "Set the debug output level. Each level includes less-verbose levels.");
+
+DEFINE_NCCL_PARAM(ncclParamDebugLevels, uint32_t, NCCL_DEBUG_LEVELS, 0,
+                  NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT,
+                  ncclParamBitsetOf<uint32_t>(makeOptions(
+                    makeOption("VERSION", (1u << NCCL_LOG_VERSION), "Prints NCCL version information only."),
+                    makeOption("WARN", (1u << NCCL_LOG_WARN), "Prints error messages."),
+                    makeOption("ATTN", (1u << NCCL_LOG_ATTN), "Prints error messages plus informational notices."),
+                    makeOption("INFO", (1u << NCCL_LOG_INFO), "Prints debug information."),
+                    makeOption("ABORT", (1u << NCCL_LOG_ABORT), ""),
+                    makeOption("TRACE", (1u << NCCL_LOG_TRACE), "Prints replayable trace information on all calls."),
+                    makeOption("ALL", (1u << NCCL_LOG_VERSION | 1u << NCCL_LOG_WARN | 1u << NCCL_LOG_ATTN |
+                                      1u << NCCL_LOG_INFO | 1u << NCCL_LOG_ABORT | 1u << NCCL_LOG_TRACE),
+                               "Prints all debug messages")), ',', true),
+                  "Add comma-separated debug levels to NCCL_DEBUG.");
+
+DEFINE_NCCL_PARAM(ncclParamDebugSubsys, uint64_t, NCCL_DEBUG_SUBSYS,
+                  NCCL_INIT | NCCL_BOOTSTRAP | NCCL_ENV,
+                  NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT,
+                  (ncclParamBitsetOf<ncclDebugLogSubSys, uint64_t>(makeOptions(
+                    makeOption("INIT", NCCL_INIT, "NCCL and comm initialization (included in default)"),
+                    makeOption("COLL", NCCL_COLL, "Collective operations"),
+                    makeOption("P2P", NCCL_P2P, "Peer-to-peer transport"),
+                    makeOption("SHM", NCCL_SHM, "Shared memory transport"),
+                    makeOption("NET", NCCL_NET, "Network transport"),
+                    makeOption("GRAPH", NCCL_GRAPH, "Graph search and topology"),
+                    makeOption("TUNING", NCCL_TUNING, "Algorithm tuning"),
+                    makeOption("ENV", NCCL_ENV, "Parameter settings by config file, EnvVar or EnvPlugins (included in default)"),
+                    makeOption("ALLOC", NCCL_ALLOC, "Device memory allocation"),
+                    makeOption("ALLOC_HOST", NCCL_ALLOC_HOST, "Host memory allocation"),
+                    makeOption("CALL", NCCL_CALL, "API call tracing"),
+                    makeOption("PROXY", NCCL_PROXY, "Proxy thread operations"),
+                    makeOption("NVLS", NCCL_NVLS, "NVLink SHARP operations"),
+                    makeOption("BOOTSTRAP", NCCL_BOOTSTRAP, "Bootstrap network (included in default)"),
+                    makeOption("REG", NCCL_REG, "Buffer registration"),
+                    makeOption("PROFILE", NCCL_PROFILE,   "Profiling"),
+                    makeOption("RAS", NCCL_RAS, "Reliability, availability, serviceability"),
+                    makeOption("DESTROY", NCCL_DESTROY, "Communicator destroy, abort, revoke, and plugin unload/close operations"),
+                    makeOption("ALL", NCCL_ALL, "All categories")
+                  ))), "Filter debug output by (comma-separated)");
+
+DEFINE_NCCL_PARAM(ncclParamWarnEnableDebugInfo, bool, NCCL_WARN_ENABLE_DEBUG_INFO, false,
+                  NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT, NCCL_PARAM_DEFAULT,
+                  "If enabled, the debug level will be set to INFO after a WARN level debug message is logged.");
+
+DEFINE_NCCL_PARAM(ncclParamDebugTimestampLevel, uint32_t, NCCL_DEBUG_TIMESTAMP_LEVELS,
+                  (1u << NCCL_LOG_WARN) | (1u << NCCL_LOG_ATTN),
+                  NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT,
+                  ncclParamBitsetOf<uint32_t>(makeOptions(
+                    makeOption("VERSION", (1u << NCCL_LOG_VERSION), "NCCL version information"),
+                    makeOption("WARN", (1u << NCCL_LOG_WARN), "Error messages"),
+                    makeOption("ATTN", (1u << NCCL_LOG_ATTN), "Informational notices"),
+                    makeOption("INFO", (1u << NCCL_LOG_INFO), "Debug messages"),
+                    makeOption("ABORT", (1u << NCCL_LOG_ABORT), ""),
+                    makeOption("TRACE", (1u << NCCL_LOG_TRACE), "Replayable trace messages"),
+                    makeOption("ALL", (1u << NCCL_LOG_VERSION | 1u << NCCL_LOG_WARN | 1u << NCCL_LOG_ATTN |
+                                      1u << NCCL_LOG_INFO | 1u << NCCL_LOG_ABORT | 1u << NCCL_LOG_TRACE),
+                               "All messages")
+                  )), "Set the log levels that include timestamps.");
+// clang-format on
+
+DEFINE_NCCL_PARAM(ncclParamDebugTsFormat, const char*, NCCL_DEBUG_TIMESTAMP_FORMAT, "[%F %T] ",
+                  NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT, NCCL_PARAM_DEFAULT,
+                  "Set the format used when printing debug log messages");
+
+DEFINE_NCCL_PARAM(ncclParamDebugFile, const char*, NCCL_DEBUG_FILE, nullptr,
+                  NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT, NCCL_PARAM_DEFAULT,
+                  "Set the NCCL debug logging output to a file. The filename format can be set to "
+                  "filename.%h.%p where %h is replaced with the hostname "
+                  "and %p is replaced "
+                  "with the process PID. This does not accept the ~ character as part of the path, "
+                  "please convert to a relative or absolute path first.");
 
 typedef const char* (*ncclGetEnvFunc_t)(const char*);
 
@@ -60,13 +143,28 @@ static ncclResult_t getHostNameForLog(char* hostname, int maxlen, const char del
   return ncclSuccess;
 }
 
+// Convert the legacy scalar setting to its logical inclusive level set.
+static uint32_t ncclDebugLevelToMask(ncclDebugLogLevel level) {
+  if (level < NCCL_LOG_VERSION) return 0;
+  uint32_t mask = 1u << NCCL_LOG_VERSION;
+  if (level >= NCCL_LOG_INFO) mask |= 1u << NCCL_LOG_ATTN;
+  if (level == NCCL_LOG_ATTN) level = NCCL_LOG_WARN;
+  if (level >= NCCL_LOG_WARN) mask |= 1u << NCCL_LOG_WARN;
+  if (level >= NCCL_LOG_INFO) mask |= 1u << NCCL_LOG_INFO;
+  if (level >= NCCL_LOG_ABORT) mask |= 1u << NCCL_LOG_ABORT;
+  if (level >= NCCL_LOG_TRACE) mask |= 1u << NCCL_LOG_TRACE;
+  return mask;
+}
+
 // This function must be called with ncclDebugLock locked!
 static void ncclDebugInit() {
   ncclGetEnvFunc_t getEnvFunc = ncclEnvPluginInitialized() ? ncclGetEnv : (ncclGetEnvFunc_t)std::getenv;
   const char* nccl_debug = getEnvFunc("NCCL_DEBUG");
   int tempNcclDebugLevel = -1;
+  uint32_t tempNcclDebugLevelMask = 0;
   uint64_t tempNcclDebugMask = NCCL_INIT | NCCL_BOOTSTRAP | NCCL_ENV; // Default debug sub-system mask
-  if (ncclDebugLevel == NCCL_DEBUG_RESET_TRIGGERED && ncclDebugFile != stdout) {
+  if (COMPILER_ATOMIC_LOAD(&ncclDebugLevelMask, std::memory_order_relaxed) == NCCL_DEBUG_LEVEL_MASK_RESET_TRIGGERED &&
+      ncclDebugFile != stdout) {
     // Finish the reset initiated via ncclResetDebugInit().
     fclose(ncclDebugFile);
     ncclDebugFile = stdout;
@@ -80,6 +178,8 @@ static void ncclDebugInit() {
     tempNcclDebugLevel = NCCL_LOG_VERSION;
   } else if (strcasecmp(nccl_debug, "WARN") == 0) {
     tempNcclDebugLevel = NCCL_LOG_WARN;
+  } else if (strcasecmp(nccl_debug, "ATTN") == 0) {
+    tempNcclDebugLevel = NCCL_LOG_ATTN;
   } else if (strcasecmp(nccl_debug, "INFO") == 0) {
     tempNcclDebugLevel = NCCL_LOG_INFO;
   } else if (strcasecmp(nccl_debug, "ABORT") == 0) {
@@ -150,6 +250,44 @@ static void ncclDebugInit() {
       subsys = strtok(NULL, ",");
     }
     free(ncclDebugSubsys);
+  }
+
+  // Map the scalar NCCL_DEBUG level to its inclusive set of levels.
+  // An unrecognized NCCL_DEBUG value (-1) enables no levels.
+  if (tempNcclDebugLevel >= 0) tempNcclDebugLevelMask = ncclDebugLevelToMask((ncclDebugLogLevel)tempNcclDebugLevel);
+  // [RCCL] ERROR (fatal) messages are shown at every level except NONE.
+  if (tempNcclDebugLevel >= NCCL_LOG_ERROR) tempNcclDebugLevelMask |= (1u << NCCL_LOG_ERROR);
+
+  /* Parse the NCCL_DEBUG_LEVELS env var: a comma separated list of levels
+   * (e.g. WARN,ATTN) added on top of NCCL_DEBUG. Unknown entries are ignored.
+   */
+  const char* ncclDebugLevelsEnv = getEnvFunc("NCCL_DEBUG_LEVELS");
+  if (ncclDebugLevelsEnv != NULL) {
+    char* ncclDebugLevels = strdup(ncclDebugLevelsEnv);
+    char* level = strtok(ncclDebugLevels, ",");
+    while (level != NULL) {
+      if (strcasecmp(level, "ERROR") == 0) {
+        tempNcclDebugLevelMask |= (1u << NCCL_LOG_ERROR);
+      } else if (strcasecmp(level, "VERSION") == 0) {
+        tempNcclDebugLevelMask |= (1u << NCCL_LOG_VERSION);
+      } else if (strcasecmp(level, "WARN") == 0) {
+        tempNcclDebugLevelMask |= (1u << NCCL_LOG_WARN);
+      } else if (strcasecmp(level, "ATTN") == 0) {
+        tempNcclDebugLevelMask |= (1u << NCCL_LOG_ATTN);
+      } else if (strcasecmp(level, "INFO") == 0) {
+        tempNcclDebugLevelMask |= (1u << NCCL_LOG_INFO);
+      } else if (strcasecmp(level, "ABORT") == 0) {
+        tempNcclDebugLevelMask |= (1u << NCCL_LOG_ABORT);
+      } else if (strcasecmp(level, "TRACE") == 0) {
+        tempNcclDebugLevelMask |= (1u << NCCL_LOG_TRACE);
+      } else if (strcasecmp(level, "ALL") == 0) {
+        tempNcclDebugLevelMask |= (1u << NCCL_LOG_ERROR | 1u << NCCL_LOG_VERSION | 1u << NCCL_LOG_WARN |
+                                   1u << NCCL_LOG_ATTN | 1u << NCCL_LOG_INFO | 1u << NCCL_LOG_ABORT |
+                                   1u << NCCL_LOG_TRACE);
+      }
+      level = strtok(NULL, ",");
+    }
+    free(ncclDebugLevels);
   }
 
   const char* ncclWarnSetDebugInfoEnv = getEnvFunc("NCCL_WARN_ENABLE_DEBUG_INFO");
@@ -251,10 +389,11 @@ static void ncclDebugInit() {
 
   /* Parse and expand the NCCL_DEBUG_FILE path and
    * then create the debug file. But don't bother unless the
-   * NCCL_DEBUG level is > VERSION
+   * effective debug levels include more than VERSION.
    */
   const char* ncclDebugFileEnv = getEnvFunc("NCCL_DEBUG_FILE");
-  if (tempNcclDebugLevel > NCCL_LOG_VERSION && ncclDebugFileEnv != NULL) {
+  if ((tempNcclDebugLevelMask & ~((1u << NCCL_LOG_ERROR) | (1u << NCCL_LOG_VERSION))) != 0 &&
+      ncclDebugFileEnv != NULL) {
     int c = 0;
     char debugFn[PATH_MAX + 1] = "";
     char* dfn = debugFn;
@@ -303,23 +442,22 @@ static void ncclDebugInit() {
 
   ncclEpoch = std::chrono::steady_clock::now();
   ncclDebugMask = tempNcclDebugMask;
-  COMPILER_ATOMIC_STORE(&ncclDebugLevel, tempNcclDebugLevel, std::memory_order_release);
+  COMPILER_ATOMIC_STORE(&ncclDebugLevelMask, tempNcclDebugLevelMask, std::memory_order_release);
 }
 
-/* Common logging function used by the INFO, WARN and TRACE macros
+/* Common logging function used by the INFO, WARN, ATTN and TRACE macros
  * Also exported to the dynamically loadable Net transport modules so
  * they can share the debugging mechanisms and output files
  */
 void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* filefunc, int line, const char* fmt, ...) {
   bool locked = false; // Keeps track of the ncclDebugLock state.
-  int gotLevel = COMPILER_ATOMIC_LOAD(&ncclDebugLevel, std::memory_order_acquire);
 
   if (ncclDebugNoWarn != 0 && level == NCCL_LOG_WARN) {
     level = NCCL_LOG_INFO;
     flags = ncclDebugNoWarn;
   }
 
-  // Save the last error (WARN) as a human readable string
+  // Save the last error (WARN) as a human readable string. ATTN does not set lastError.
   if (level == NCCL_LOG_WARN) {
     pthread_mutex_lock(&ncclDebugLock);
     locked = true;
@@ -329,7 +467,7 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* file
     va_end(vargs);
   }
 
-  if (gotLevel >= 0 && (gotLevel < level || (flags & ncclDebugMask) == 0)) {
+  if (!ncclDebugShouldLog(level, flags, ncclDebugMask)) {
     if (locked) pthread_mutex_unlock(&ncclDebugLock);
     return;
   }
@@ -339,8 +477,10 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* file
     locked = true;
   }
   // From this point on ncclDebugLock is always locked so we don't need to check "locked" anymore.
-  if (ncclDebugLevel < 0) ncclDebugInit();
-  if (ncclDebugLevel < level || ((flags & ncclDebugMask) == 0)) {
+  uint32_t levelMask = COMPILER_ATOMIC_LOAD(&ncclDebugLevelMask, std::memory_order_relaxed);
+  if (levelMask == NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED || levelMask == NCCL_DEBUG_LEVEL_MASK_RESET_TRIGGERED)
+    ncclDebugInit();
+  if (!ncclDebugShouldLog(level, flags, ncclDebugMask)) {
     pthread_mutex_unlock(&ncclDebugLock);
     return;
   }
@@ -352,10 +492,10 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* file
   char buffer[1024];
   size_t len = 0;
 
-  // WARNs come with an extra newline at the beginning.
-  if (level == NCCL_LOG_WARN) {
+  // WARN and ATTN messages come with an extra newline at the beginning.
+  if (level == NCCL_LOG_WARN || level == NCCL_LOG_ATTN) {
     buffer[len++] = '\n';
-  };
+  }
 
   // Add the timestamp to the buffer if they are turned on for this level.
   if (ncclDebugTimestampLevels & (1 << level)) {
@@ -405,8 +545,13 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* file
   // Add level specific formatting.
   if (level == NCCL_LOG_WARN) {
     len += snprintf(buffer + len, sizeof(buffer) - len, "[%d] %s:%d NCCL WARN ", cudaDev, filefunc, line);
-    if (ncclWarnSetDebugInfo)
-      COMPILER_ATOMIC_STORE(&ncclDebugLevel, static_cast<int>(NCCL_LOG_INFO), std::memory_order_release);
+    if (ncclWarnSetDebugInfo) {
+      uint32_t levelMask = COMPILER_ATOMIC_LOAD(&ncclDebugLevelMask, std::memory_order_relaxed);
+      COMPILER_ATOMIC_STORE(&ncclDebugLevelMask, levelMask | ncclDebugLevelToMask(NCCL_LOG_INFO),
+                            std::memory_order_release);
+    }
+  } else if (level == NCCL_LOG_ATTN) {
+    len += snprintf(buffer + len, sizeof(buffer) - len, "[%d] %s:%d NCCL ATTN ", cudaDev, filefunc, line);
   } else if (level == NCCL_LOG_INFO) {
     len += snprintf(buffer + len, sizeof(buffer) - len, "[%d] NCCL INFO ", cudaDev);
   } else if (level == NCCL_LOG_TRACE && flags == NCCL_CALL) {
@@ -447,7 +592,7 @@ extern "C"
   // Use this after changing NCCL_DEBUG and related parameters in the environment.
   pthread_mutex_lock(&ncclDebugLock);
   // Let ncclDebugInit() know to complete the reset.
-  COMPILER_ATOMIC_STORE(&ncclDebugLevel, static_cast<int>(NCCL_DEBUG_RESET_TRIGGERED), std::memory_order_release);
+  COMPILER_ATOMIC_STORE(&ncclDebugLevelMask, NCCL_DEBUG_LEVEL_MASK_RESET_TRIGGERED, std::memory_order_release);
   pthread_mutex_unlock(&ncclDebugLock);
 }
 
@@ -480,7 +625,7 @@ void ncclSetThreadName(std::thread& thread, const char* fmt, ...) {
   // pthread_setname_np is nonstandard GNU extension
   // needs the following feature test macro
 #ifdef _GNU_SOURCE
-  if (ncclParamSetThreadName() != 1) return;
+  if (ncclParamSetThreadName() == false) return;
   char threadName[NCCL_THREAD_NAMELEN];
   va_list vargs;
   va_start(vargs, fmt);

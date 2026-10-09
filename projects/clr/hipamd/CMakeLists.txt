@@ -27,7 +27,7 @@ list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
 #############################
 # Options
 #############################
-option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" ON)
+option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" OFF)
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 option(THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS
   "Stamp git revisions into generated library version metadata"
@@ -120,7 +120,7 @@ if(GIT_FOUND)
 
   # get date information based on UTC
   # use the last two digits of year + week number + day in the week as HIP_VERSION_GITDATE
-  execute_process(COMMAND ${Python3_EXECUTABLE} -c "import time; print(time.strftime('%y%W%w', time.gmtime(${HIP_VERSION_UNIXDATE})))"
+  execute_process(COMMAND ${Python3_EXECUTABLE} -c "import time; print(time.strftime('%y%U%w', time.gmtime(${HIP_VERSION_UNIXDATE})))"
     RESULT_VARIABLE git_result
     OUTPUT_VARIABLE git_output
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

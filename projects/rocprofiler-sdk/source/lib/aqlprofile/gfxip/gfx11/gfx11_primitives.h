@@ -60,8 +60,9 @@ namespace gfx11
 class gfx11_cntx_prim
 {
 public:
-    static const uint32_t     GFXIP_LEVEL          = 11;
-    static const uint32_t     NUMBER_OF_BLOCKS     = LastCounterBlockId + 1;
+    static const uint32_t     GFXIP_LEVEL                    = 11;
+    static const bool         SPM_DELAY_PROGRAMMING_REQUIRED = false;
+    static const uint32_t     NUMBER_OF_BLOCKS               = LastCounterBlockId + 1;
     static constexpr Register GRBM_GFX_INDEX_ADDR  = REG_32B_ADDR(GC, 0, regGRBM_GFX_INDEX);
     static constexpr Register GRBMA_GFX_INDEX_ADDR = REG_32B_NULL;
     static constexpr Register COMPUTE_PERFCOUNT_ENABLE_ADDR =
@@ -82,7 +83,9 @@ public:
         REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL);
     static constexpr Register SQ_PERFCOUNTER_CTRL2_ADDR =
         REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL2);
-    static constexpr Register SQ_PERFCOUNTER_MASK_ADDR = Register(0xD9E1);
+    static constexpr Register SQG_PERFCOUNTER_CTRL2_ADDR =
+        REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER_CTRL2);
+    static constexpr Register SQ_PERFCOUNTER_MASK_ADDR{};
     static constexpr Register SQ_THREAD_TRACE_MASK_ADDR =
         REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_MASK);
     static constexpr Register SQ_THREAD_TRACE_PERF_MASK_ADDR{};
@@ -135,6 +138,7 @@ public:
         REG_32B_ADDR(GC, 0, regRLC_SPM_PERFMON_RING_SIZE);
     static constexpr Register RLC_SPM_PERFMON_SEGMENT_SIZE__ADDR =
         REG_32B_ADDR(GC, 0, regRLC_SPM_PERFMON_SEGMENT_SIZE);
+    static constexpr Register RLC_SPM_SAMPLE_CNT__ADDR = REG_32B_ADDR(GC, 0, regRLC_SPM_SAMPLE_CNT);
     static constexpr Register RLC_SPM_PERFMON_SEGMENT_SIZE_CORE1__ADDR{};
     static constexpr Register RLC_SPM_GLOBAL_MUXSEL_ADDR__ADDR =
         REG_32B_ADDR(GC, 0, regRLC_SPM_GLOBAL_MUXSEL_ADDR);
@@ -285,6 +289,11 @@ public:
         return grbm_gfx_index;
     }
 
+    static uint32_t decode_spm_instance_index(const GpuBlockInfo*, uint32_t block_index)
+    {
+        return block_index;
+    }
+
     // CP_PERFMON_CNTL value to reset counters
     static uint32_t cp_perfmon_cntl_reset_value()
     {
@@ -349,7 +358,7 @@ public:
         return sqg_cntr_sel;
     }
 
-    static uint32_t sq_spm_select_value(const counter_des_t& counter_des)
+    static uint32_t sq_spm_select_value(const counter_des_t& counter_des, const uint32_t&)
     {
         uint32_t sq_cntr_sel =
             // SET_REG_FIELD_BITS(SQ_PERFCOUNTER0_SELECT, SQC_BANK_MASK, 0xF) |
@@ -432,7 +441,7 @@ public:
     static uint32_t sq_control2_enable_value()
     {
         uint32_t sq_cntr_ctrl = SET_REG_FIELD_BITS(SQ_PERFCOUNTER_CTRL2, FORCE_EN, true) |
-                                SET_REG_FIELD_BITS(SQ_PERFCOUNTER_CTRL2, VMID_EN, 0xFFFF);
+                                SET_REG_FIELD_BITS(SQ_PERFCOUNTER_CTRL2, VMID_EN, 0xFF00);
         return sq_cntr_ctrl;
     }
 
@@ -594,7 +603,7 @@ public:
     {
         return 0;
     }
-    static uint32_t rlc_spm_perfmon_cntl_value(const uint32_t& sampling_rate)
+    static uint32_t rlc_spm_perfmon_cntl_value(const uint32_t& sampling_rate, const uint32_t&)
     {
         uint32_t value =
             SET_REG_FIELD_BITS(RLC_SPM_PERFMON_CNTL, PERFMON_SAMPLE_INTERVAL, sampling_rate);
@@ -602,11 +611,12 @@ public:
     }
 
     static uint32_t rlc_spm_perfmon_segment_size_value(const uint32_t& global_count,
-                                                       const uint32_t& se_count)
+                                                       const uint32_t& se_count,
+                                                       const uint32_t& se_number)
     {
         const uint32_t global_nlines = global_count;
         const uint32_t se_nlines     = se_count;
-        const uint32_t segment_size  = (global_nlines + (4 * se_nlines));
+        const uint32_t segment_size  = (global_nlines + (se_number * se_nlines));
         uint32_t       value =
             SET_REG_FIELD_BITS(RLC_SPM_PERFMON_SEGMENT_SIZE, TOTAL_NUM_SEGMENT, segment_size) |
             SET_REG_FIELD_BITS(RLC_SPM_PERFMON_SEGMENT_SIZE, GLOBAL_NUM_SEGMENT, global_nlines);
@@ -635,14 +645,6 @@ public:
 #endif
     }
 
-    static const uint32_t SQTT_TOKEN_REG_USERDATA = 1 << 3;
-    static const uint32_t SQTT_TOKEN_VALU         = 1 << 2;
-    static const uint32_t SQTT_TOKEN_WVRDY        = 1 << 3;
-    static const uint32_t SQTT_TOKEN_WAVE         = 1 << 4;
-    static const uint32_t SQTT_TOKEN_REG          = 1 << 5;
-    static const uint32_t SQTT_TOKEN_IMMED        = 1 << 6;
-    static const uint32_t SQTT_TOKEN_INST         = 1 << 8;
-
     // not supported in gfx11
     static uint32_t sqtt_perf_mask_value() { return 0; }
 
@@ -653,12 +655,15 @@ public:
 #if SQTT_PRIM_ENABLED
         uint32_t sq_thread_trace_token_mask =
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_EXCLUDE, 0x3) |
-            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_INCLUDE, SQTT_TOKEN_REG_USERDATA) |
+            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK,
+                               REG_INCLUDE,
+                               (SQ_TT_TOKEN_MASK_SQDEC_BIT | SQ_TT_TOKEN_MASK_SHDEC_BIT |
+                                SQ_TT_TOKEN_MASK_GFXUDEC_BIT | SQ_TT_TOKEN_MASK_CONTEXT_BIT |
+                                SQ_TT_TOKEN_MASK_COMP_BIT)) |
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK,
                                TOKEN_EXCLUDE,
-                               (SQTT_TOKEN_VALU | SQTT_TOKEN_WVRDY | SQTT_TOKEN_WAVE |
-                                SQTT_TOKEN_REG | SQTT_TOKEN_IMMED | SQTT_TOKEN_INST) ^
-                                   0x7FF);
+                               ((1 << SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT)));
         return sq_thread_trace_token_mask;
 #else
         return 0;
@@ -681,12 +686,24 @@ public:
     static uint32_t sqtt_token_mask_occupancy_value()
     {
 #if SQTT_PRIM_ENABLED
-        uint32_t sq_thread_trace_token_mask =
-            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_INCLUDE, SQTT_TOKEN_REG_USERDATA) |
-            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, INST_EXCLUDE, 0x3) |
+        uint32_t sq_thread_trace_token_mask{0};
+        sq_thread_trace_token_mask =
+            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_DETAIL_ALL, 1) |
+            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK,
+                               REG_INCLUDE,
+                               (SQ_TT_TOKEN_MASK_SQDEC_BIT | SQ_TT_TOKEN_MASK_SHDEC_BIT |
+                                SQ_TT_TOKEN_MASK_GFXUDEC_BIT | SQ_TT_TOKEN_MASK_CONTEXT_BIT |
+                                SQ_TT_TOKEN_MASK_COMP_BIT)) |
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK,
                                TOKEN_EXCLUDE,
-                               (SQTT_TOKEN_WAVE | SQTT_TOKEN_REG) ^ 0x7FF);
+                               ((1 << SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_WAVERDY_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_INST_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_UTILCTR_SHIFT))) |
+            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, INST_EXCLUDE, 0x3);
         return sq_thread_trace_token_mask;
 #else
         return 0;
@@ -773,7 +790,7 @@ public:
     }
 
     // SPM primitives
-    static uint16_t spm_timestamp_muxsel() { return 0xF0F0; }
+    static uint16_t spm_timestamp_muxsel(uint16_t) { return 0xF0F0; }
 
     enum ESQTT_STATUS_MASK
     {

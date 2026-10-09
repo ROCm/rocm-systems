@@ -7,7 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/smem.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
-#include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace cdna2 {
@@ -23,7 +23,7 @@ Operand make_smem_offset(const Smem::OpEncoding *enc) {
     return Operand(32, OperandType::OPR_SMEM_OFFSET, static_cast<int>(enc->soffset));
   if (enc->imm)
     return Operand(32, OperandType::OPR_SIMM32, static_cast<int>(enc->offset));
-  return Operand(32, OperandType::OPR_SIMM32, 0);
+  return Operand(32, OperandType::OPR_SMEM_OFFSET, static_cast<int>(enc->offset & 0x7F));
 }
 } // namespace
 
@@ -32,336 +32,778 @@ SLoadDwordSmem::SLoadDwordSmem(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SLoadDwordSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSLoadDwordSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_load_dword", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SLoadDwordSmem>(opcode);
+}
+} // namespace detail
 
 SLoadDwordx2Smem::SLoadDwordx2Smem(const MachineInst *inst)
     : Smem("s_load_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SLoadDwordx2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSLoadDwordx2Smem(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_load_dwordx2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SLoadDwordx2Smem>(opcode);
+}
+} // namespace detail
 
 SLoadDwordx4Smem::SLoadDwordx4Smem(const MachineInst *inst)
     : Smem("s_load_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SLoadDwordx4Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSLoadDwordx4Smem(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_load_dwordx4", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SLoadDwordx4Smem>(opcode);
+}
+} // namespace detail
 
 SLoadDwordx8Smem::SLoadDwordx8Smem(const MachineInst *inst)
     : Smem("s_load_dwordx8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SLoadDwordx8Smem)),
       sdata(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(256, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSLoadDwordx8Smem(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_load_dwordx8", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SLoadDwordx8Smem>(opcode);
+}
+} // namespace detail
 
 SLoadDwordx16Smem::SLoadDwordx16Smem(const MachineInst *inst)
     : Smem("s_load_dwordx16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SLoadDwordx16Smem)),
       sdata(512, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(512, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSLoadDwordx16Smem(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_load_dwordx16", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SLoadDwordx16Smem>(opcode);
+}
+} // namespace detail
 
 SScratchLoadDwordSmem::SScratchLoadDwordSmem(const MachineInst *inst)
     : Smem("s_scratch_load_dword", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SScratchLoadDwordSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSScratchLoadDwordSmem(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_scratch_load_dword", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SScratchLoadDwordSmem>(opcode);
+}
+} // namespace detail
 
 SScratchLoadDwordx2Smem::SScratchLoadDwordx2Smem(const MachineInst *inst)
     : Smem("s_scratch_load_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SScratchLoadDwordx2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSScratchLoadDwordx2Smem(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_scratch_load_dwordx2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SScratchLoadDwordx2Smem>(opcode);
+}
+} // namespace detail
 
 SScratchLoadDwordx4Smem::SScratchLoadDwordx4Smem(const MachineInst *inst)
     : Smem("s_scratch_load_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SScratchLoadDwordx4Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSScratchLoadDwordx4Smem(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_scratch_load_dwordx4", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SScratchLoadDwordx4Smem>(opcode);
+}
+} // namespace detail
 
 SBufferLoadDwordSmem::SBufferLoadDwordSmem(const MachineInst *inst)
     : Smem("s_buffer_load_dword", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBufferLoadDwordSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferLoadDwordSmem(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_load_dword", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferLoadDwordSmem>(opcode);
+}
+} // namespace detail
 
 SBufferLoadDwordx2Smem::SBufferLoadDwordx2Smem(const MachineInst *inst)
     : Smem("s_buffer_load_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBufferLoadDwordx2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferLoadDwordx2Smem(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_load_dwordx2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferLoadDwordx2Smem>(opcode);
+}
+} // namespace detail
 
 SBufferLoadDwordx4Smem::SBufferLoadDwordx4Smem(const MachineInst *inst)
     : Smem("s_buffer_load_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBufferLoadDwordx4Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferLoadDwordx4Smem(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_load_dwordx4", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferLoadDwordx4Smem>(opcode);
+}
+} // namespace detail
 
 SBufferLoadDwordx8Smem::SBufferLoadDwordx8Smem(const MachineInst *inst)
     : Smem("s_buffer_load_dwordx8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBufferLoadDwordx8Smem)),
       sdata(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(256, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferLoadDwordx8Smem(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_load_dwordx8", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferLoadDwordx8Smem>(opcode);
+}
+} // namespace detail
 
 SBufferLoadDwordx16Smem::SBufferLoadDwordx16Smem(const MachineInst *inst)
     : Smem("s_buffer_load_dwordx16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBufferLoadDwordx16Smem)),
       sdata(512, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(512, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferLoadDwordx16Smem(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_load_dwordx16", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferLoadDwordx16Smem>(opcode);
+}
+} // namespace detail
 
 SStoreDwordSmem::SStoreDwordSmem(const MachineInst *inst)
     : Smem("s_store_dword", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SStoreDwordSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 3;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSStoreDwordSmem(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_store_dword", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SStoreDwordSmem>(opcode);
+}
+} // namespace detail
 
 SStoreDwordx2Smem::SStoreDwordx2Smem(const MachineInst *inst)
     : Smem("s_store_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SStoreDwordx2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 3;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSStoreDwordx2Smem(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_store_dwordx2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SStoreDwordx2Smem>(opcode);
+}
+} // namespace detail
 
 SStoreDwordx4Smem::SStoreDwordx4Smem(const MachineInst *inst)
     : Smem("s_store_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SStoreDwordx4Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 3;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSStoreDwordx4Smem(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_store_dwordx4", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SStoreDwordx4Smem>(opcode);
+}
+} // namespace detail
 
 SScratchStoreDwordSmem::SScratchStoreDwordSmem(const MachineInst *inst)
     : Smem("s_scratch_store_dword", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SScratchStoreDwordSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 3;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSScratchStoreDwordSmem(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_scratch_store_dword", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SScratchStoreDwordSmem>(opcode);
+}
+} // namespace detail
 
 SScratchStoreDwordx2Smem::SScratchStoreDwordx2Smem(const MachineInst *inst)
     : Smem("s_scratch_store_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SScratchStoreDwordx2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 3;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSScratchStoreDwordx2Smem(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_scratch_store_dwordx2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SScratchStoreDwordx2Smem>(opcode);
+}
+} // namespace detail
 
 SScratchStoreDwordx4Smem::SScratchStoreDwordx4Smem(const MachineInst *inst)
     : Smem("s_scratch_store_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SScratchStoreDwordx4Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 3;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSScratchStoreDwordx4Smem(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_scratch_store_dwordx4", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SScratchStoreDwordx4Smem>(opcode);
+}
+} // namespace detail
 
 SBufferStoreDwordSmem::SBufferStoreDwordSmem(const MachineInst *inst)
     : Smem("s_buffer_store_dword", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBufferStoreDwordSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 3;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferStoreDwordSmem(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_store_dword", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferStoreDwordSmem>(opcode);
+}
+} // namespace detail
 
 SBufferStoreDwordx2Smem::SBufferStoreDwordx2Smem(const MachineInst *inst)
     : Smem("s_buffer_store_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBufferStoreDwordx2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 3;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferStoreDwordx2Smem(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_store_dwordx2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferStoreDwordx2Smem>(opcode);
+}
+} // namespace detail
 
 SBufferStoreDwordx4Smem::SBufferStoreDwordx4Smem(const MachineInst *inst)
     : Smem("s_buffer_store_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBufferStoreDwordx4Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 3;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferStoreDwordx4Smem(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_store_dwordx4", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferStoreDwordx4Smem>(opcode);
+}
+} // namespace detail
 
 SDcacheInvSmem::SDcacheInvSmem(const MachineInst *inst)
     : Smem("s_dcache_inv", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SDcacheInvSmem)) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSDcacheInvSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_dcache_inv", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SDcacheInvSmem>(opcode);
+}
+} // namespace detail
 
 SDcacheWbSmem::SDcacheWbSmem(const MachineInst *inst)
     : Smem("s_dcache_wb", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SDcacheWbSmem)) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSDcacheWbSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_dcache_wb", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SDcacheWbSmem>(opcode);
+}
+} // namespace detail
 
 SDcacheInvVolSmem::SDcacheInvVolSmem(const MachineInst *inst)
     : Smem("s_dcache_inv_vol", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SDcacheInvVolSmem)) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSDcacheInvVolSmem(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_dcache_inv_vol", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SDcacheInvVolSmem>(opcode);
+}
+} // namespace detail
 
 SDcacheWbVolSmem::SDcacheWbVolSmem(const MachineInst *inst)
     : Smem("s_dcache_wb_vol", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SDcacheWbVolSmem)) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSDcacheWbVolSmem(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_dcache_wb_vol", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SDcacheWbVolSmem>(opcode);
+}
+} // namespace detail
 
 SMemtimeSmem::SMemtimeSmem(const MachineInst *inst)
     : Smem("s_memtime", reinterpret_cast<const OpEncoding *>(inst),
@@ -370,7 +812,18 @@ SMemtimeSmem::SMemtimeSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   num_src_ = 0;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSMemtimeSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_memtime", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SMemtimeSmem>(opcode);
+}
+} // namespace detail
 
 SMemrealtimeSmem::SMemrealtimeSmem(const MachineInst *inst)
     : Smem("s_memrealtime", reinterpret_cast<const OpEncoding *>(inst),
@@ -379,12 +832,24 @@ SMemrealtimeSmem::SMemrealtimeSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   num_src_ = 0;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSMemrealtimeSmem(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_memrealtime", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SMemrealtimeSmem>(opcode);
+}
+} // namespace detail
 
 SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
     : Smem("s_atc_probe", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SAtcProbeSmem)),
-      sdata(32, OperandType::OPR_SIMM8, reinterpret_cast<const OpEncoding *>(inst)->sdata),
+      sdata(8, OperandType::OPR_SIMM8, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
@@ -392,12 +857,23 @@ SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtcProbeSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atc_probe", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtcProbeSmem>(opcode);
+}
+} // namespace detail
 
 SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
     : Smem("s_atc_probe_buffer", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SAtcProbeBufferSmem)),
-      sdata(32, OperandType::OPR_SIMM8, reinterpret_cast<const OpEncoding *>(inst)->sdata),
+      sdata(8, OperandType::OPR_SIMM8, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
@@ -405,7 +881,19 @@ SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtcProbeBufferSmem(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atc_probe_buffer", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtcProbeBufferSmem>(opcode);
+}
+} // namespace detail
 
 SDcacheDiscardSmem::SDcacheDiscardSmem(const MachineInst *inst)
     : Smem("s_dcache_discard", reinterpret_cast<const OpEncoding *>(inst),
@@ -416,7 +904,19 @@ SDcacheDiscardSmem::SDcacheDiscardSmem(const MachineInst *inst)
   src_operands_[1] = &soffset;
   num_src_ = 2;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSDcacheDiscardSmem(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_dcache_discard", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SDcacheDiscardSmem>(opcode);
+}
+} // namespace detail
 
 SDcacheDiscardX2Smem::SDcacheDiscardX2Smem(const MachineInst *inst)
     : Smem("s_dcache_discard_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -427,7 +927,19 @@ SDcacheDiscardX2Smem::SDcacheDiscardX2Smem(const MachineInst *inst)
   src_operands_[1] = &soffset;
   num_src_ = 2;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSDcacheDiscardX2Smem(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_dcache_discard_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SDcacheDiscardX2Smem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicSwapSmem::SBufferAtomicSwapSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
@@ -441,7 +953,19 @@ SBufferAtomicSwapSmem::SBufferAtomicSwapSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicSwapSmem(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_swap", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicSwapSmem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicCmpswapSmem::SBufferAtomicCmpswapSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
@@ -455,7 +979,19 @@ SBufferAtomicCmpswapSmem::SBufferAtomicCmpswapSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicCmpswapSmem(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_cmpswap", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicCmpswapSmem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicAddSmem::SBufferAtomicAddSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_add", reinterpret_cast<const OpEncoding *>(inst),
@@ -469,7 +1005,19 @@ SBufferAtomicAddSmem::SBufferAtomicAddSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicAddSmem(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_add", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicAddSmem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicSubSmem::SBufferAtomicSubSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_sub", reinterpret_cast<const OpEncoding *>(inst),
@@ -483,7 +1031,19 @@ SBufferAtomicSubSmem::SBufferAtomicSubSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicSubSmem(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_sub", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicSubSmem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicSminSmem::SBufferAtomicSminSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_smin", reinterpret_cast<const OpEncoding *>(inst),
@@ -497,7 +1057,19 @@ SBufferAtomicSminSmem::SBufferAtomicSminSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicSminSmem(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_smin", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicSminSmem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicUminSmem::SBufferAtomicUminSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_umin", reinterpret_cast<const OpEncoding *>(inst),
@@ -511,7 +1083,19 @@ SBufferAtomicUminSmem::SBufferAtomicUminSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicUminSmem(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_umin", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicUminSmem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicSmaxSmem::SBufferAtomicSmaxSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_smax", reinterpret_cast<const OpEncoding *>(inst),
@@ -525,7 +1109,19 @@ SBufferAtomicSmaxSmem::SBufferAtomicSmaxSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicSmaxSmem(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_smax", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicSmaxSmem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicUmaxSmem::SBufferAtomicUmaxSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_umax", reinterpret_cast<const OpEncoding *>(inst),
@@ -539,7 +1135,19 @@ SBufferAtomicUmaxSmem::SBufferAtomicUmaxSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicUmaxSmem(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_umax", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicUmaxSmem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicAndSmem::SBufferAtomicAndSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_and", reinterpret_cast<const OpEncoding *>(inst),
@@ -553,7 +1161,19 @@ SBufferAtomicAndSmem::SBufferAtomicAndSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicAndSmem(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_and", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicAndSmem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicOrSmem::SBufferAtomicOrSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_or", reinterpret_cast<const OpEncoding *>(inst),
@@ -567,7 +1187,19 @@ SBufferAtomicOrSmem::SBufferAtomicOrSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicOrSmem(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_or", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicOrSmem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicXorSmem::SBufferAtomicXorSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_xor", reinterpret_cast<const OpEncoding *>(inst),
@@ -581,7 +1213,19 @@ SBufferAtomicXorSmem::SBufferAtomicXorSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicXorSmem(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_xor", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicXorSmem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicIncSmem::SBufferAtomicIncSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_inc", reinterpret_cast<const OpEncoding *>(inst),
@@ -595,7 +1239,19 @@ SBufferAtomicIncSmem::SBufferAtomicIncSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicIncSmem(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_inc", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicIncSmem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicDecSmem::SBufferAtomicDecSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_dec", reinterpret_cast<const OpEncoding *>(inst),
@@ -609,7 +1265,19 @@ SBufferAtomicDecSmem::SBufferAtomicDecSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicDecSmem(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_dec", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicDecSmem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicSwapX2Smem::SBufferAtomicSwapX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_swap_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -623,7 +1291,19 @@ SBufferAtomicSwapX2Smem::SBufferAtomicSwapX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicSwapX2Smem(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_swap_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicSwapX2Smem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicCmpswapX2Smem::SBufferAtomicCmpswapX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_cmpswap_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -637,7 +1317,19 @@ SBufferAtomicCmpswapX2Smem::SBufferAtomicCmpswapX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicCmpswapX2Smem(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_cmpswap_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicCmpswapX2Smem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicAddX2Smem::SBufferAtomicAddX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_add_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -651,7 +1343,19 @@ SBufferAtomicAddX2Smem::SBufferAtomicAddX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicAddX2Smem(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_add_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicAddX2Smem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicSubX2Smem::SBufferAtomicSubX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_sub_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -665,7 +1369,19 @@ SBufferAtomicSubX2Smem::SBufferAtomicSubX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicSubX2Smem(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_sub_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicSubX2Smem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicSminX2Smem::SBufferAtomicSminX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_smin_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -679,7 +1395,19 @@ SBufferAtomicSminX2Smem::SBufferAtomicSminX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicSminX2Smem(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_smin_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicSminX2Smem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicUminX2Smem::SBufferAtomicUminX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_umin_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -693,7 +1421,19 @@ SBufferAtomicUminX2Smem::SBufferAtomicUminX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicUminX2Smem(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_umin_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicUminX2Smem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicSmaxX2Smem::SBufferAtomicSmaxX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_smax_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -707,7 +1447,19 @@ SBufferAtomicSmaxX2Smem::SBufferAtomicSmaxX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicSmaxX2Smem(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_smax_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicSmaxX2Smem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicUmaxX2Smem::SBufferAtomicUmaxX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_umax_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -721,7 +1473,19 @@ SBufferAtomicUmaxX2Smem::SBufferAtomicUmaxX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicUmaxX2Smem(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_umax_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicUmaxX2Smem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicAndX2Smem::SBufferAtomicAndX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_and_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -735,7 +1499,19 @@ SBufferAtomicAndX2Smem::SBufferAtomicAndX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicAndX2Smem(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_and_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicAndX2Smem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicOrX2Smem::SBufferAtomicOrX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_or_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -749,7 +1525,19 @@ SBufferAtomicOrX2Smem::SBufferAtomicOrX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicOrX2Smem(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_or_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicOrX2Smem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicXorX2Smem::SBufferAtomicXorX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_xor_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -763,7 +1551,19 @@ SBufferAtomicXorX2Smem::SBufferAtomicXorX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicXorX2Smem(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_xor_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicXorX2Smem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicIncX2Smem::SBufferAtomicIncX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_inc_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -777,7 +1577,19 @@ SBufferAtomicIncX2Smem::SBufferAtomicIncX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicIncX2Smem(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_inc_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicIncX2Smem>(opcode);
+}
+} // namespace detail
 
 SBufferAtomicDecX2Smem::SBufferAtomicDecX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_dec_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -791,7 +1603,19 @@ SBufferAtomicDecX2Smem::SBufferAtomicDecX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSBufferAtomicDecX2Smem(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_atomic_dec_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBufferAtomicDecX2Smem>(opcode);
+}
+} // namespace detail
 
 SAtomicSwapSmem::SAtomicSwapSmem(const MachineInst *inst)
     : Smem("s_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
@@ -805,7 +1629,19 @@ SAtomicSwapSmem::SAtomicSwapSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicSwapSmem(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_swap", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicSwapSmem>(opcode);
+}
+} // namespace detail
 
 SAtomicCmpswapSmem::SAtomicCmpswapSmem(const MachineInst *inst)
     : Smem("s_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
@@ -819,7 +1655,19 @@ SAtomicCmpswapSmem::SAtomicCmpswapSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicCmpswapSmem(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_cmpswap", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicCmpswapSmem>(opcode);
+}
+} // namespace detail
 
 SAtomicAddSmem::SAtomicAddSmem(const MachineInst *inst)
     : Smem("s_atomic_add", reinterpret_cast<const OpEncoding *>(inst),
@@ -833,7 +1681,18 @@ SAtomicAddSmem::SAtomicAddSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicAddSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_add", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicAddSmem>(opcode);
+}
+} // namespace detail
 
 SAtomicSubSmem::SAtomicSubSmem(const MachineInst *inst)
     : Smem("s_atomic_sub", reinterpret_cast<const OpEncoding *>(inst),
@@ -847,7 +1706,18 @@ SAtomicSubSmem::SAtomicSubSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicSubSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_sub", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicSubSmem>(opcode);
+}
+} // namespace detail
 
 SAtomicSminSmem::SAtomicSminSmem(const MachineInst *inst)
     : Smem("s_atomic_smin", reinterpret_cast<const OpEncoding *>(inst),
@@ -861,7 +1731,19 @@ SAtomicSminSmem::SAtomicSminSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicSminSmem(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_smin", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicSminSmem>(opcode);
+}
+} // namespace detail
 
 SAtomicUminSmem::SAtomicUminSmem(const MachineInst *inst)
     : Smem("s_atomic_umin", reinterpret_cast<const OpEncoding *>(inst),
@@ -875,7 +1757,19 @@ SAtomicUminSmem::SAtomicUminSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicUminSmem(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_umin", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicUminSmem>(opcode);
+}
+} // namespace detail
 
 SAtomicSmaxSmem::SAtomicSmaxSmem(const MachineInst *inst)
     : Smem("s_atomic_smax", reinterpret_cast<const OpEncoding *>(inst),
@@ -889,7 +1783,19 @@ SAtomicSmaxSmem::SAtomicSmaxSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicSmaxSmem(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_smax", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicSmaxSmem>(opcode);
+}
+} // namespace detail
 
 SAtomicUmaxSmem::SAtomicUmaxSmem(const MachineInst *inst)
     : Smem("s_atomic_umax", reinterpret_cast<const OpEncoding *>(inst),
@@ -903,7 +1809,19 @@ SAtomicUmaxSmem::SAtomicUmaxSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicUmaxSmem(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_umax", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicUmaxSmem>(opcode);
+}
+} // namespace detail
 
 SAtomicAndSmem::SAtomicAndSmem(const MachineInst *inst)
     : Smem("s_atomic_and", reinterpret_cast<const OpEncoding *>(inst),
@@ -917,7 +1835,18 @@ SAtomicAndSmem::SAtomicAndSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicAndSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_and", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicAndSmem>(opcode);
+}
+} // namespace detail
 
 SAtomicOrSmem::SAtomicOrSmem(const MachineInst *inst)
     : Smem("s_atomic_or", reinterpret_cast<const OpEncoding *>(inst),
@@ -931,7 +1860,18 @@ SAtomicOrSmem::SAtomicOrSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicOrSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_or", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicOrSmem>(opcode);
+}
+} // namespace detail
 
 SAtomicXorSmem::SAtomicXorSmem(const MachineInst *inst)
     : Smem("s_atomic_xor", reinterpret_cast<const OpEncoding *>(inst),
@@ -945,7 +1885,18 @@ SAtomicXorSmem::SAtomicXorSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicXorSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_xor", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicXorSmem>(opcode);
+}
+} // namespace detail
 
 SAtomicIncSmem::SAtomicIncSmem(const MachineInst *inst)
     : Smem("s_atomic_inc", reinterpret_cast<const OpEncoding *>(inst),
@@ -959,7 +1910,18 @@ SAtomicIncSmem::SAtomicIncSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicIncSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_inc", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicIncSmem>(opcode);
+}
+} // namespace detail
 
 SAtomicDecSmem::SAtomicDecSmem(const MachineInst *inst)
     : Smem("s_atomic_dec", reinterpret_cast<const OpEncoding *>(inst),
@@ -973,7 +1935,18 @@ SAtomicDecSmem::SAtomicDecSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicDecSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_dec", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicDecSmem>(opcode);
+}
+} // namespace detail
 
 SAtomicSwapX2Smem::SAtomicSwapX2Smem(const MachineInst *inst)
     : Smem("s_atomic_swap_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -987,7 +1960,19 @@ SAtomicSwapX2Smem::SAtomicSwapX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicSwapX2Smem(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_swap_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicSwapX2Smem>(opcode);
+}
+} // namespace detail
 
 SAtomicCmpswapX2Smem::SAtomicCmpswapX2Smem(const MachineInst *inst)
     : Smem("s_atomic_cmpswap_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1001,7 +1986,19 @@ SAtomicCmpswapX2Smem::SAtomicCmpswapX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicCmpswapX2Smem(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_cmpswap_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicCmpswapX2Smem>(opcode);
+}
+} // namespace detail
 
 SAtomicAddX2Smem::SAtomicAddX2Smem(const MachineInst *inst)
     : Smem("s_atomic_add_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1015,7 +2012,19 @@ SAtomicAddX2Smem::SAtomicAddX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicAddX2Smem(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_add_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicAddX2Smem>(opcode);
+}
+} // namespace detail
 
 SAtomicSubX2Smem::SAtomicSubX2Smem(const MachineInst *inst)
     : Smem("s_atomic_sub_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1029,7 +2038,19 @@ SAtomicSubX2Smem::SAtomicSubX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicSubX2Smem(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_sub_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicSubX2Smem>(opcode);
+}
+} // namespace detail
 
 SAtomicSminX2Smem::SAtomicSminX2Smem(const MachineInst *inst)
     : Smem("s_atomic_smin_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1043,7 +2064,19 @@ SAtomicSminX2Smem::SAtomicSminX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicSminX2Smem(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_smin_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicSminX2Smem>(opcode);
+}
+} // namespace detail
 
 SAtomicUminX2Smem::SAtomicUminX2Smem(const MachineInst *inst)
     : Smem("s_atomic_umin_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1057,7 +2090,19 @@ SAtomicUminX2Smem::SAtomicUminX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicUminX2Smem(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_umin_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicUminX2Smem>(opcode);
+}
+} // namespace detail
 
 SAtomicSmaxX2Smem::SAtomicSmaxX2Smem(const MachineInst *inst)
     : Smem("s_atomic_smax_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1071,7 +2116,19 @@ SAtomicSmaxX2Smem::SAtomicSmaxX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicSmaxX2Smem(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_smax_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicSmaxX2Smem>(opcode);
+}
+} // namespace detail
 
 SAtomicUmaxX2Smem::SAtomicUmaxX2Smem(const MachineInst *inst)
     : Smem("s_atomic_umax_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1085,7 +2142,19 @@ SAtomicUmaxX2Smem::SAtomicUmaxX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicUmaxX2Smem(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_umax_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicUmaxX2Smem>(opcode);
+}
+} // namespace detail
 
 SAtomicAndX2Smem::SAtomicAndX2Smem(const MachineInst *inst)
     : Smem("s_atomic_and_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1099,7 +2168,19 @@ SAtomicAndX2Smem::SAtomicAndX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicAndX2Smem(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_and_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicAndX2Smem>(opcode);
+}
+} // namespace detail
 
 SAtomicOrX2Smem::SAtomicOrX2Smem(const MachineInst *inst)
     : Smem("s_atomic_or_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1113,7 +2194,19 @@ SAtomicOrX2Smem::SAtomicOrX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicOrX2Smem(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_or_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicOrX2Smem>(opcode);
+}
+} // namespace detail
 
 SAtomicXorX2Smem::SAtomicXorX2Smem(const MachineInst *inst)
     : Smem("s_atomic_xor_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1127,7 +2220,19 @@ SAtomicXorX2Smem::SAtomicXorX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicXorX2Smem(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_xor_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicXorX2Smem>(opcode);
+}
+} // namespace detail
 
 SAtomicIncX2Smem::SAtomicIncX2Smem(const MachineInst *inst)
     : Smem("s_atomic_inc_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1141,7 +2246,19 @@ SAtomicIncX2Smem::SAtomicIncX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicIncX2Smem(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_inc_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicIncX2Smem>(opcode);
+}
+} // namespace detail
 
 SAtomicDecX2Smem::SAtomicDecX2Smem(const MachineInst *inst)
     : Smem("s_atomic_dec_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1155,7 +2272,19 @@ SAtomicDecX2Smem::SAtomicDecX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
+
+namespace detail {
+DecodeResult decodeSAtomicDecX2Smem(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atomic_dec_x2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtomicDecX2Smem>(opcode);
+}
+} // namespace detail
 
 } // namespace cdna2
 } // namespace rocjitsu

@@ -13,6 +13,7 @@
 /// with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
 /// In-process inactive lanes must stay preserved under full and partial EXEC.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -24,13 +25,19 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include "rocjitsu/vm/plugins/execution_plugin.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "util/simd.h"
 
 #include <array>
+#include <bit>
+#include <cfenv>
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -195,16 +202,20 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  Fixture() : gpu_mem("vop3_bin_simd_mem"), l2("vop3_bin_simd_l2") {
+  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4, uint32_t wave_size = 0,
+                   std::shared_ptr<ExecutionPluginGroup> plugins = {})
+      : gpu_mem("vop3_bin_simd_mem"), l2("vop3_bin_simd_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = arch;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     cu = amdgpu::ComputeUnitCore::create("cu_vop3_bin_simd", cfg, &gpu_mem, &l2);
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
-    wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
+    decoder = Decoder::create(arch);
+    if (plugins)
+      cu->set_plugin_group(std::move(plugins));
+    wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF, wave_size);
   }
 
   void seed_inputs(Kind k, uint64_t exec) {
@@ -227,7 +238,7 @@ struct Fixture {
 
   std::array<uint32_t, WF_SIZE> run(Instruction *inst, Kind k, uint64_t exec) {
     seed_inputs(k, exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     uint32_t vb = wf->vgpr_alloc().base;
     std::array<uint32_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -244,6 +255,162 @@ struct ForceScalarGuard {
   ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
 };
 
+// Hostile host state must survive both the scalar reference and SIMD execution.
+struct SubtractionHostEnvironment {
+  std::fenv_t saved{};
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+  uint32_t saved_mxcsr = _mm_getcsr();
+#endif
+  SubtractionHostEnvironment() {
+    EXPECT_EQ(std::feholdexcept(&saved), 0);
+    EXPECT_EQ(std::fesetround(FE_UPWARD), 0);
+    EXPECT_EQ(std::feraiseexcept(FE_DIVBYZERO), 0);
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+    _mm_setcsr(_mm_getcsr() | (1u << 6) | (1u << 15));
+#endif
+  }
+  ~SubtractionHostEnvironment() {
+    std::fesetenv(&saved);
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+    _mm_setcsr(saved_mxcsr);
+#endif
+  }
+  static std::array<int, 3> snapshot() {
+    int control = 0;
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+    control = static_cast<int>(_mm_getcsr());
+#endif
+    return {std::fegetround(), std::fetestexcept(FE_ALL_EXCEPT), control};
+  }
+};
+
+class SubtractionObserver : public ExecutionPlugin {
+public:
+  SubtractionObserver() : ExecutionPlugin("subtraction_fp_state") {}
+  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *, uint32_t reg, uint64_t lanes,
+                             uint8_t bytes) override {
+    record(false, reg, lanes, bytes);
+  }
+  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *, uint32_t reg, uint64_t lanes,
+                              uint8_t bytes) override {
+    record(true, reg, lanes, bytes);
+  }
+  void record(bool write, uint32_t reg, uint64_t lanes, uint8_t bytes) {
+    const auto state = SubtractionHostEnvironment::snapshot();
+    events.push_back({write, reg, lanes, bytes, static_cast<uint64_t>(state[0]),
+                      static_cast<uint64_t>(state[1]), static_cast<uint64_t>(state[2])});
+  }
+  std::vector<std::array<uint64_t, 7>> events;
+};
+
+TEST(Vop3BinarySimdCorrectness, SubtractionModesAndHostStateAcrossTargets) {
+  ForceScalarGuard gate_guard;
+  // Cancellation, signed zeros, rounding boundaries, overflow, and distinct
+  // signaling/quiet NaN payloads. Compare all bits; no exceptional-lane skips.
+  constexpr std::array<std::array<uint32_t, 2>, 16> inputs{{
+      {0x3f800000u, 0x33000000u},
+      {0xbf800000u, 0x33800000u},
+      {0x3f800000u, 0x3f800000u},
+      {0u, 0x80000000u},
+      {0x80000000u, 0u},
+      {0x7f7fffffu, 0xff7fffffu},
+      {0x00800000u, 1u},
+      {0x007fffffu, 0x80000001u},
+      {1u, 0x00800000u},
+      {0x7f800000u, 0x7f800000u},
+      {0xff800000u, 0x7f800000u},
+      {0x7fc01234u, 0xffc05678u},
+      {0x7f801234u, 0xffc05678u},
+      {0x7fc01234u, 0xff805678u},
+      {0x7f801234u, 0xff805678u},
+      {0x3f800000u, 0xff801234u},
+  }};
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA4}) {
+    const bool rdna = arch != ROCJITSU_CODE_ARCH_CDNA4;
+    for (unsigned form = 0; form < 4; ++form) {
+      const bool e64 = form & 2, reverse = form & 1;
+      // All 16 MODE combinations; rotate masks, aliases and modifiers rather
+      // than forming an additional Cartesian product. Finish with empty EXEC,
+      // register observers, and an attached debugger.
+      for (unsigned variant = 0; variant < 19; ++variant) {
+        const uint32_t mode = variant % 16;
+        SCOPED_TRACE(testing::Message()
+                     << "arch=" << arch << " form=" << form << " variant=" << variant);
+        auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+        auto observer_owner = std::make_unique<SubtractionObserver>();
+        auto *observer = observer_owner.get();
+        group->add(std::move(observer_owner));
+        Fixture fx(arch, rdna ? 32 : 64, variant == 17 ? group : nullptr);
+        ASSERT_NE(fx.wf, nullptr);
+        fx.cu->set_debug_active(variant == 18);
+        const uint32_t width = fx.wf->wf_size(), base = fx.wf->vgpr_alloc().base;
+        const uint64_t full = width == 64 ? ~uint64_t{0} : 0xffffffffu;
+        const uint64_t exec = variant == 16   ? 0
+                              : (variant & 1) ? full & 0xa55af00f87654321ULL
+                                              : full;
+        const uint32_t dst = std::array<uint32_t, 3>{4, 0, 1}[variant % 3];
+        uint32_t words[2]{};
+        const uint32_t op = (rdna ? 4u : 2u) + reverse;
+        if (e64) {
+          vop3_encode(256 + op, dst, 256, 257, variant % 4, (variant / 4) % 4, mode % 4,
+                      variant % 2, words);
+          if (rdna) {
+            words[0] |= 1u << 26;
+            words[1] |= 1u << 25;
+          }
+        } else {
+          words[0] = (op << 25) | (dst << 17) | (1u << 9) | 256u;
+        }
+        std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words));
+        ASSERT_NE(inst, nullptr);
+        auto run = [&](bool scalar) {
+          util::set_force_scalar_for_testing(scalar);
+          fx.wf->set_exec(exec);
+          fx.wf->set_mode_raw((mode & 3u) | ((mode >> 2) << 4));
+          std::array<uint32_t, WF_SIZE> out{};
+          for (uint32_t lane = 0; lane < width; ++lane) {
+            fx.cu->write_vgpr(base + 4, lane, DST_SENTINEL);
+            fx.cu->write_vgpr(base, lane, inputs[lane % inputs.size()][0]);
+            fx.cu->write_vgpr(base + 1, lane, inputs[lane % inputs.size()][1]);
+          }
+          observer->events.clear();
+          {
+            SubtractionHostEnvironment host;
+            const auto before = SubtractionHostEnvironment::snapshot();
+            const bool succeeded = fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded();
+            const auto after = SubtractionHostEnvironment::snapshot();
+            EXPECT_TRUE(succeeded);
+            EXPECT_EQ(after, before);
+          }
+          // Snapshotting storage must not add events to the observed execution.
+          const auto events = observer->events;
+          for (uint32_t lane = 0; lane < width; ++lane) {
+            out[lane] = fx.cu->read_vgpr(base + dst, lane);
+            if (!(exec & (uint64_t{1} << lane))) {
+              EXPECT_EQ(out[lane], dst == 4 ? DST_SENTINEL : inputs[lane % inputs.size()][dst]);
+            }
+          }
+          return std::pair{out, events};
+        };
+        const auto reference = run(true), actual = run(false);
+        EXPECT_EQ(actual, reference);
+        if (!e64 && (exec & 1u)) {
+          // 1 - 2^-25 is exactly halfway below 1. This independent rounding
+          // witness also catches GCC moving the SIMD subtraction across MODE.
+          const uint32_t round = mode & 3u;
+          const uint32_t expected = reverse
+                                        ? ((round == 0 || round == 2) ? 0xbf800000u : 0xbf7fffffu)
+                                        : (round < 2 ? 0x3f800000u : 0x3f7fffffu);
+          EXPECT_EQ(actual.first[0], expected);
+        }
+        if (variant == 17) {
+          EXPECT_FALSE(actual.second.empty());
+        }
+      }
+    }
+  }
+}
+
 void check(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t clamp,
            uint64_t exec) {
   ForceScalarGuard gate_guard;
@@ -258,7 +425,7 @@ void check(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t cl
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257, abs, neg, omod, clamp,
                 words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, c.kind, exec);
     delete inst;
@@ -316,6 +483,39 @@ TEST(Vop3BinarySimdCorrectness, F32_AllModifiers_PartialExec) {
       check_f32_all_mods(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
 
+TEST(Vop3BinarySimdCorrectness, F32OmodHonorsOutputDenormAndIeeeMode) {
+  ForceScalarGuard gate_guard;
+  struct ModeCase {
+    uint32_t mode;
+    float expected;
+  };
+  constexpr std::array<ModeCase, 3> kModes = {{
+      {0u, 5.0f},
+      {1u << 5, 2.5f},
+      {amdgpu::Wavefront::IEEE_BIT, 2.5f},
+  }};
+
+  for (bool force_scalar : {true, false}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    for (const auto &mode_case : kModes) {
+      Fixture fx;
+      ASSERT_NE(fx.cu, nullptr);
+      ASSERT_NE(fx.wf, nullptr);
+      fx.wf->set_mode_raw(mode_case.mode);
+      uint32_t words[2] = {};
+      vop3_encode(/*v_add_f32=*/257, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257,
+                  /*abs=*/0, /*neg=*/0, /*omod=*/1, /*clamp=*/0, words);
+      std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words));
+      ASSERT_NE(inst, nullptr);
+
+      const auto out = fx.run(inst.get(), Kind::F32, /*exec=*/~0ULL);
+
+      EXPECT_EQ(out[0], std::bit_cast<uint32_t>(mode_case.expected))
+          << "force_scalar=" << force_scalar << " mode=" << mode_case.mode;
+    }
+  }
+}
+
 TEST(Vop3BinarySimdCorrectness, Int_FullAndPartialExec) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
@@ -346,7 +546,7 @@ void check_f16(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257, abs, neg, omod, clamp,
                 words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, c.kind, exec);
     delete inst;
