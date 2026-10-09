@@ -43,6 +43,8 @@ test_categories:
       - "RasDiagnosticsMicrotest.*"
       # ras/diagnostics_gpu.cc
       - "RasDiagnosticsGpuMicrotest.*"
+      # ras/diagnostics_env.cc
+      - "RasDiagnosticsEnvMicrotest.*"
       # ras/client.cc
       - "RasClientMicrotest.*"
       # ras/ras_param.cc
