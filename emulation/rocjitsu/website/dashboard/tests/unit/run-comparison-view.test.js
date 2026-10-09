@@ -1,3 +1,4 @@
+import { fixtureRunPath } from '../fixtures/runPath.js';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, test, vi } from 'vitest';
@@ -57,7 +58,7 @@ test.each(['baseline', 'candidate'])('ST-only %s reports unpublished MT before c
   stOnly.configurations = stOnly.configurations.filter(({ threadingMode }) => threadingMode === 'ST');
   const both = source.runs[8];
   source.runs = [stOnly, both];
-  source.index.runFiles = source.runs.map(({ id }) => `runs/${id}.json`);
+  source.index.runFiles = source.runs.map(fixtureRunPath);
   const normalized = validatePublishedDashboardData(source).data;
   const props = {
     data: normalized,

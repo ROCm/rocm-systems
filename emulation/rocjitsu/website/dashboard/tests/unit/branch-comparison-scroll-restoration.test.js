@@ -8,7 +8,7 @@ import { validatePublishedDashboardData } from '../../src/data/dashboardValidati
 import { createSchema2Publication } from '../fixtures/schema2Dataset.js';
 
 const loader = vi.hoisted(() => ({ requests: [] }));
-vi.mock('../../src/data/publishedDataUrls.js', () => ({ resolvePublishedDataUrls: () => ({ metadataUrl: 'https://example.test/data/metadata.json', indexUrl: 'https://example.test/data/index.json' }) }));
+vi.mock('../../src/data/publishedDataUrls.js', () => ({ resolvePublishedDataUrls: () => ({ indexUrl: 'https://example.test/data/index.json' }) }));
 vi.mock('../../src/data/dashboardData.js', async (original) => ({
   ...(await original()),
   loadDashboardDataFiles: (options) => new Promise((resolve) => loader.requests.push({ options, resolve })),

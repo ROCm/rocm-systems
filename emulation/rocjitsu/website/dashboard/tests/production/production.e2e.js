@@ -1,3 +1,4 @@
+import { fixtureRunPath } from '../fixtures/runPath.js';
 import { readdir, readFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 import { createSchema2Publication } from '../fixtures/schema2Dataset.js';
@@ -23,7 +24,7 @@ test('production artifact contains application assets but no fictional publicati
       .not.toMatch(/fictional-develop-\d|fictional-branch-\d|Fictional GEMM|fictional-current\.json/);
   }
   // A Vite SPA fallback may return HTML with 200; it must never return fixture JSON.
-  const response = await request.get('/data/metadata.json');
+  const response = await request.get('/data/index.json');
   expect(response.headers()['content-type'] ?? '').not.toMatch(/json/i);
   expect(await response.text()).not.toContain('fictional');
 });
@@ -41,7 +42,7 @@ test('production consumer reads deterministic intercepted schema 2 at the publis
   await expect(page.getByTestId('baseline-run-selected-identity')).toContainText('fictional-develop-20');
   await expect(page.getByRole('img', { name: 'Performance change by benchmark comparison chart' })).toBeVisible();
   expect(await downloadSource(page)).toEqual(publication);
-  expect(requests).toContain(`${RAW_DATA_PREFIX}metadata.json`);
+  expect(requests.some((url) => new URL(url).pathname.endsWith('/metadata.json'))).toBe(false);
   expect(requests).toContain(`${RAW_DATA_PREFIX}index.json`);
   expect(requests.filter((url) => url.startsWith(`${RAW_DATA_PREFIX}runs/`))).toHaveLength(publication.runs.length);
   expect(requests.some((url) => url.startsWith(`${RAW_DATA_PREFIX}test-catalogs/`))).toBe(true);
@@ -53,14 +54,14 @@ test('production consumer reads deterministic intercepted schema 2 at the publis
   const generation = await page.evaluate(() => localStorage.getItem('rocjitsu-data-cache-generation'));
   expect(generation).toBeTruthy();
   const refreshed = requests.filter((url) => new URL(url).searchParams.has('reload'));
-  expect(refreshed).toHaveLength(publication.runs.length + Object.keys(publication.catalogs).length + 2);
+  expect(refreshed).toHaveLength(publication.runs.length + Object.keys(publication.catalogs).length + 1);
   expect(refreshed.every((url) => new URL(url).searchParams.get('reload') === generation)).toBe(true);
   expect(await downloadSource(page)).toEqual(publication);
 });
 
-test('production rejects schema 1 with generic no-data UI and no fixture substitution', async ({ page }) => {
+test('production rejects unsupported run version 99 with generic no-data UI and no fixture substitution', async ({ page }) => {
   const publication = createSchema2Publication();
-  publication.metadata.schemaVersion = 1;
+  publication.runs[0].schemaVersion = 99;
   const { requests } = await installPublication(page, { prefix: RAW_DATA_PREFIX, publication });
   await page.goto('/');
   await expect(page.getByTestId('dashboard-data-error')).toContainText('No available test data');
@@ -72,9 +73,38 @@ test('production rejects schema 1 with generic no-data UI and no fixture substit
   await expect(page.getByRole('img')).toHaveCount(0);
   // The document preloads index.json; a no-store consumer fetch may request it
   // again. Assert the resource boundary, not an incidental preload hit count.
-  expect([...new Set(requests)].sort()).toEqual([`${RAW_DATA_PREFIX}index.json`, `${RAW_DATA_PREFIX}metadata.json`]);
+  expect(requests).toContain(`${RAW_DATA_PREFIX}index.json`);
+  expect([...new Set(requests.filter((url) => url.startsWith(`${RAW_DATA_PREFIX}runs/`)))].sort())
+    .toEqual(publication.index.runFiles.map((file) => `${RAW_DATA_PREFIX}${file}`).sort());
   await page.getByRole('tab', { name: 'Branch Runs', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'No published branch runs' })).toBeVisible();
   await expect(page.getByTestId('dashboard-data-error')).toBeVisible();
   await expect(page.getByTestId('branch-config-gfx1250-ST')).toHaveCount(0);
+});
+
+test('a newer publication is available on reload without rebuilding the website or fetching metadata', async ({ page }) => {
+  const dataRequests = [];
+  page.on('request', (request) => {
+    if (request.url().startsWith(RAW_DATA_PREFIX)) dataRequests.push(request.url());
+  });
+  const first = createSchema2Publication();
+  await installPublication(page, { prefix: RAW_DATA_PREFIX, publication: first });
+  await openDashboard(page);
+  expect(await downloadSource(page)).toEqual(first);
+
+  const next = createSchema2Publication();
+  next.index.generatedAt = '2026-10-06T12:00:00.000Z';
+  const run = structuredClone(next.runs[23]);
+  run.id = 'fictional-next-publication';
+  run.source.commit = 'b'.repeat(40);
+  run.source.committedAt = '2026-10-06T10:00:00.000Z';
+  run.execution.completedAt = '2026-10-06T11:00:00.000Z';
+  next.runs.push(run);
+  next.index.runFiles.push(fixtureRunPath(run));
+  await installPublication(page, { prefix: RAW_DATA_PREFIX, publication: next });
+  await page.getByRole('button', { name: 'Reload all data' }).click();
+  await ready(page);
+  expect(await downloadSource(page)).toEqual(next);
+  await expect(page.getByTestId('recent-runs-table').locator('tbody tr').first()).toHaveAttribute('data-run-id', run.id);
+  expect(dataRequests.some((url) => new URL(url).pathname.endsWith('/metadata.json'))).toBe(false);
 });

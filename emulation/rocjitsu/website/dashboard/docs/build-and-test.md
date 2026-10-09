@@ -27,7 +27,8 @@ labels and native hover titles describe each action.
 ## Data and test boundaries
 
 Published data must satisfy the [data contract](website-data-contract.md),
-including explicit ST/MT configurations. Invalid or unavailable data produces
+including explicit ST/MT configurations for new runs and the documented
+schema-1-to-MT migration for legacy Vanilla runs. Invalid or unavailable data produces
 **No available test data**, with Retry and disabled export.
 
 Fictional measurements live only under `tests/fixtures/`. Fixture builds show
@@ -127,6 +128,15 @@ for fixtures and one for production; retries are zero.
 
 ## Local preview and processing
 
+Production, fixture and local-data builds share the source-controlled
+`src/config/metadata.json`, imported as `DASHBOARD_SITE_CONFIG` by
+`src/config/siteConfig.js`; settings changes require a rebuild. The validator and processor use the same bundled defaults. Each data
+root needs an index with `generatedAt` and `runFiles`, plus referenced runs/catalogs.
+New run files have numeric `schemaVersion: 2`; index/catalog files are unversioned.
+Runs are grouped in `runs/default-branch/` and flat `runs/side-branches/`.
+Publication-side `metadata.json` is neither read nor required; a legacy copy is
+ignored and is not automatically deleted.
+
 ```bash
 npm run dev:fixtures -- --host 127.0.0.1
 npm run dev:data -- /absolute/path/to/staged/data --host 127.0.0.1
@@ -146,7 +156,7 @@ For the default production URL, use `npm run build` then
 `npm run preview -- --host 127.0.0.1` (port 4173). The generic
 **No available test data** banner is expected for unavailable or
 incompatible data.
-**Reload all data** fetches a fresh metadata/index and cache-busts indexed runs and
+**Reload all data** fetches a fresh index and cache-busts indexed runs and
 catalogs; after successful validation its generation is reused for later loads.
 Errors disable raw export rather than retaining stale measurements.
 

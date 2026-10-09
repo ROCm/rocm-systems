@@ -1,7 +1,8 @@
 # Rocjitsu Simulation Performance Data Contract
 
 The dashboard consumes published benchmark attempts, immutable workload catalogs
-and repository metadata. This contract defines their JSON fields, validation
+and an index manifest. Site settings are bundled separately with the website.
+This contract defines the publication JSON fields, validation
 rules and derived consumer behavior. Producers must record explicit ST/MT
 configurations and actual measurements; the dashboard does not infer execution
 mode or generate benchmark results.
@@ -16,6 +17,8 @@ This document is the authoritative field and consumer-behavior reference.
 Implementation references (paths relative to this document):
 
 - [Validator and normalizer](../src/data/dashboardValidation.js).
+- [Bundled metadata](../src/config/metadata.json) and [site configuration](../src/config/siteConfig.js).
+- [Supported run versions and schema-1 migration](../src/data/runSchema.js).
 - [HTTP loader](../src/data/dashboardData.js) and
   [execution/commit ordering](../src/data/runOrdering.js).
 - [Canonical selectors](../src/data/selectors.js),
@@ -46,16 +49,18 @@ The following paths are relative to the **data root**, not the repository root:
 
 | Path | Contents | Mutability |
 | --- | --- | --- |
-| `metadata.json` | Schema version and repository/site settings | Mutable |
-| `index.json` | Publication timestamp and reachable run filenames | Mutable snapshot |
+| `index.json` | Publication timestamp and reachable run filenames; no schema version | Mutable snapshot |
 | `test-catalogs/<catalog-id>.json` | Workload definitions and target/mode membership | Immutable |
-| `runs/<run-id>.json` | One published attempt with its explicitly included configurations | Immutable |
+| `runs/default-branch/<run-id>.json` | Versioned attempt whose source branch is `develop` | Immutable |
+| `runs/side-branches/<run-id>.json` | Versioned attempt from any other source branch; flat directory | Immutable |
 
-Run paths must match `^runs/[A-Za-z0-9._-]+\.json$`; catalog paths must match
-`^test-catalogs/[A-Za-z0-9._-]+\.json$`. These permit one filename component, not
-subdirectories, absolute URLs, query strings, percent-encoded traversal or
-`../` traversal. A run's filename must be exactly `runs/${run.id}.json`; a
-catalog's `id` must equal the filename stem after `test-catalogs/` and before
+New run paths must match `^runs/(default-branch|side-branches)/[A-Za-z0-9._-]+\.json$`;
+catalog paths must match `^test-catalogs/[A-Za-z0-9._-]+\.json$`. The branch-class
+directory must agree with `source.branch`, and the filename must be `${run.id}.json`.
+No per-branch subdirectories, absolute URLs, query strings, encoded traversal or
+`../` traversal are allowed. Historical schema-1 runs may retain flat
+`runs/<id>.json` paths; this is a read-only compatibility rule, not a new-write layout.
+A catalog's `id` must equal the filename stem after `test-catalogs/` and before
 `.json`. IDs are ordinary tokens, **not hashes or content-addressed IDs**. The
 validator does not prescribe a hash algorithm, hash prefix or digest length for
 run/catalog identity, and does not compute a catalog semantic hash.
@@ -70,12 +75,13 @@ obligation; validation of one snapshot cannot prove it.
 
 ### Loading, cache and failure behavior
 
-Metadata and index are fetched with `cache: 'no-store'`. Immutable run/catalog
+The browser fetches only `index.json` with `cache: 'no-store'` before loading its
+reachable runs and catalogs; it never fetches `metadata.json`. Immutable run/catalog
 requests normally use `cache: 'force-cache'`. Where host configuration permits,
 revalidate mutable resources and give immutable resources long-lived immutable
 cache headers; the website build itself does not configure hosting headers.
 
-**Reload all data** cache-busts the mutable URLs and every reachable immutable URL
+**Reload all data** cache-busts the index URL and every reachable immutable URL
 with one `reload` token and requests immutable resources with `cache: 'reload'`.
 The successful cache generation can be persisted for subsequent loads. This is
 a recovery mechanism, not permission to overwrite immutable records.
@@ -88,7 +94,10 @@ JSON and schema errors are not retried as transient failures.
 
 Loading fails closed: one invalid, missing or unreadable indexed run, or a bad
 referenced catalog, rejects the whole snapshot. No partial history is displayed.
-Missing metadata/index, transient unavailability, and invalid published content
+The explicit product-policy exception is non-Vanilla plugin files: their
+measurements are excluded, never relabeled as Vanilla; plugin-only catalogs are
+not requested. Raw indexed plugin files remain in the export.
+Missing index, transient unavailability, and invalid published content
 remain distinguishable loader errors, not measured benchmark failures. An empty
 valid index and a valid branch-only snapshot are accepted; neither requires a
 canonical develop run. A failed load/reload does not expose stale downloadable
@@ -124,19 +133,19 @@ fields specified here, not UI aggregates.
 
 | URL field | Implemented validation |
 | --- | --- |
-| `metadata.repository` | Parseable absolute HTTP or HTTPS URL with no username/password; not restricted to GitHub |
+| `siteConfig.repository` | Parseable absolute HTTP or HTTPS URL with no username/password; not restricted to GitHub |
 | `source.pullRequest.url` | HTTPS, hostname exactly `github.com`, no username/password, pathname ending exactly `/pull/<number>` for the accompanying PR number |
 
-GitHub URLs are **not** required to refer to `metadata.repository`; there is no
+GitHub URLs are **not** required to refer to `siteConfig.repository`; there is no
 owner/repository allowlist, API lookup or existence check. Query strings and
 fragments are not forbidden. The check uses the URL's hostname, not a separately
 restricted port. HTTP GitHub URLs, other GitHub-related hosts, credentialed URLs
 and non-HTTP schemes fail these optional GitHub-link checks. Passing a URL check
 proves its accepted shape, not that its destination exists or is authoritative.
 
-## 3. `metadata.json`
+## 3. Bundled site configuration
 
-Illustrative settings:
+Source-controlled `src/config/metadata.json` contains:
 
 ```json
 {
@@ -147,16 +156,30 @@ Illustrative settings:
 }
 ```
 
+`schemaVersion` is the source of truth for the target **run** format the website
+wants to consume, not a version of metadata itself. `src/data/runSchema.js` reads
+that value; supported input formats and explicit migrations remain in website code.
+Changing the target does not implement a new format or relabel existing measurements.
+A run without an implemented migration to the requested target fails explicitly.
+`src/config/siteConfig.js` exports the site settings as `DASHBOARD_SITE_CONFIG`
+without checking a metadata format version. Production, fixture and local-data builds
+bundle this same JSON. Changing settings requires rebuilding the website, not
+editing benchmark data. Local validation and processing use the same defaults.
+A publication-side `metadata.json` is never fetched, read, generated or required;
+a legacy copy is ignored, not automatically deleted. Keep it for cached old
+clients during the [rollout](data-generation-guide.md#5-bundled-site-config-rollout).
+Only metadata.json selects the target run version and run files declare their
+actual versions; index and catalog files have no schema version.
+
 | Field | Requirement |
 | --- | --- |
-| `schemaVersion` | Required numeric value exactly `2` |
 | `repository` | Required URL satisfying the scope above |
-| `isBeta` | Required boolean; retained in normalized/raw exports even if no Beta badge is rendered |
+| `isBeta` | Required boolean; retained in normalized data, not raw exports, even if no Beta badge is rendered |
 | `canonicalBranch` | Required string exactly `develop` |
 
-There is no inline branch directory, result matrix or catalog in
-metadata. `canonicalBranch` defines long-term history, not a restriction on every
-run's source branch.
+`canonicalBranch` defines long-term history, not a restriction on every run's
+source branch. These settings are not wire-publication fields and do not appear
+as synthetic metadata or configuration in raw downloads.
 
 ## 4. `index.json`
 
@@ -166,11 +189,14 @@ Illustrative index for the catalog and run examples below:
 {
   "generatedAt": "2026-10-03T12:00:00.000Z",
   "runFiles": [
-    "runs/illustrative-branch-01.json"
+    "runs/side-branches/illustrative-branch-01.json"
   ]
 }
 ```
 
+- No `schemaVersion`: the index is a version-independent manifest. Each run
+  declares its own version; an old index-level version is ignored and never
+  substitutes for a run's version.
 - `generatedAt`: required strict timestamp for the publication snapshot.
 - `runFiles`: required array of unique run paths matching the pattern above.
   An empty array is valid. Array order binds each loaded raw run to its filename;
@@ -246,6 +272,9 @@ of its own included configurations, not the size of a later catalog.
 
 ## 6. Immutable run files
 
+Each new run requires numeric `schemaVersion: 2`. Supported versions and explicit
+migrations live in website code, not the index or external metadata.
+
 A run is one uniquely identified published attempt for a source revision,
 machine and environment, with one or more explicitly measured
 configurations. It may include a subset of its catalog's configurations. It need
@@ -253,12 +282,13 @@ not represent all targets/modes in the catalog or an entire four-configuration
 workflow. An absent configuration means **not published**, not success, failure
 or zero.
 
-This illustrative run belongs at `runs/illustrative-branch-01.json`. All duration
+This illustrative run belongs at `runs/side-branches/illustrative-branch-01.json`. All duration
 values and diagnostics are fictional; the zero demonstrates a valid measured
 value, not a real zero-runtime claim. The GitHub URLs demonstrate syntax only.
 
 ```json
 {
+  "schemaVersion": 2,
   "id": "illustrative-branch-01",
   "testCatalog": "test-catalogs/illustrative-catalog.json",
   "source": {
@@ -454,19 +484,47 @@ Raw result identity is `(run id, target, threadingMode, logical testId)`. Compar
 matching requires the exact target, mode and logical workload; ST and MT are
 never paired implicitly.
 
+### Legacy schema-1 migration
+
+The website supports run schemas 1 and 2 explicitly. Historical schema-1 files
+without a `schemaVersion` field are treated as schema 1 and passed to the explicit
+migration. The migration still requires the legacy targets/plugin contract; it does
+not guess missing fields. Unversioned configurations-style runs fail schema-1
+validation, and explicitly unknown versions are errors, not implicit upgrades.
+
+- A nonempty `plugin.id` other than `vanilla` excludes the whole file from the
+  normalized dataset. Raw indexed files are retained in downloads. Such files
+  cannot contribute ordinary timings or workload definitions, and plugin-only
+  catalogs are not loaded.
+- A Vanilla schema-1 file requires its legacy `comparisonId`, plugin name,
+  target groups and matching catalog `targets` memberships. Ambiguous mixed
+  target/configuration envelopes and incomplete results fail validation.
+- The migration maps every `targets[].id` to `configurations[].target`
+  with `threadingMode: "MT"`, and every catalog target membership to `<target>:MT`.
+  Result values, diagnostics, workload definitions and provenance remain unchanged.
+  No durations are guessed, discarded or rewritten. Legacy completed durations
+  must remain positive as required by schema 1; schema 2 permits measured zero.
+- Migration is in memory. It does not edit immutable source files or rewrite
+  downloaded raw data. The ordinary current validator checks migrated results;
+  malformed Vanilla measurements fail the whole snapshot.
+- Version-1 and version-2 runs may coexist in one manifest. Newly prepared runs
+  always use schema 2 and the branch-class directory layout.
+
 ## 7. Normalized and export envelopes
 
-`validatePublishedDashboardData` returns `{ data, sourceData }`. The HTTP loader
+`validatePublishedManifest(index)` validates the index manifest.
+`validatePublishedDashboardData({index,runs,catalogs,siteConfig?})` returns
+`{ data, sourceData }`; omitted `siteConfig` defaults to `DASHBOARD_SITE_CONFIG`,
+as does normalization. The HTTP loader
 adds a consumer-only `cacheGeneration` field alongside those two keys. Neither
 normalized data nor cache state is a new wire-publication format.
 
-### `sourceData`: validated raw download
+### `sourceData`: raw download
 
 The dashboard's **Download JSON** exports this envelope, unfiltered:
 
 ```text
 {
-  metadata: <metadata.json object>,
   index: <index.json object>,
   catalogs: { "test-catalogs/<id>.json": <referenced catalog object>, ... },
   runs: [<raw indexed run objects, in index order>, ...]
@@ -475,18 +533,22 @@ The dashboard's **Download JSON** exports this envelope, unfiltered:
 
 It preserves indexed develop/branch attempts, optional source
 and execution metadata, generic environments, configurations, diagnostics and
-zero durations. It includes only referenced catalogs. It is not the filtered
+zero durations. Schema-1 files remain unchanged here, including excluded plugin
+files; exclusion is a display policy, not validation of those files' measurements.
+It includes fetched referenced catalogs (not plugin-only catalogs), and no synthetic metadata
+or bundled site configuration. It is not the filtered
 chart, the comparison's matched subset, or `{data,sourceData}` from processing.
 
 ### `data`: normalized consumer model
 
 | Field | Meaning |
 | --- | --- |
-| `schemaVersion`, `repository`, `isBeta`, `canonicalBranch` | Metadata fields |
+| `schemaVersion` | Current normalized consumer schema (`2`), after migrations |
+| `repository`, `isBeta`, `canonicalBranch` | Site settings retained separately from the raw source envelope; default to bundled configuration |
 | `generatedAt` | Index publication timestamp |
-| `catalogs` | Authoritative referenced catalog envelopes keyed by relative path; required for reloading every referenced run |
+| `catalogs` | Validated, migrated catalog envelopes keyed by relative path; required for reloading every included run |
 | `testCatalog` | Union of referenced catalog definitions, keyed logically by workload ID |
-| `allRuns` | All attempts, including non-develop branches, ascending execution order |
+| `allRuns` | All included Vanilla attempts, including non-develop branches, ascending execution order; plugin runs excluded |
 | `runs` | Develop attempts only, ascending execution order |
 | `targets` | Sorted unique targets present in `allRuns`, not all catalog-only targets |
 | `suites` | Sorted unique suites in the union `testCatalog` |
@@ -816,7 +878,7 @@ Before releasing a dataset:
 - [ ] Enforce source-to-completion-to-publication chronology and consistent
   source timestamps. Verify URL destinations and provenance independently where
   needed; passing shape validation is not attestation.
-- [ ] Stage the full intended metadata/index and every reachable run/catalog.
+- [ ] Stage the full intended schema-2 index and every reachable run/catalog.
   Audit unindexed/orphan files separately; the CLI cannot certify them. Run
   `npm run validate:data -- <staged-data-root>` with the actual consumer validator
   and require exit status 0 before publication.
@@ -827,7 +889,7 @@ Before releasing a dataset:
 - [ ] Publish to `gh-pages-rocjitsu/rocjitsu-dashboard/data/`, not the application
   assets branch. Upload new catalogs and runs before the new index; preserve
   immutable historical resources for cached-index readers.
-- [ ] Read back the exact published metadata/index and all referenced resources,
+- [ ] Read back the exact published index and all referenced resources,
   validate the published snapshot, and verify fetch/cache/reload behavior through
   the consumer. A successful upload or passing fixture suite alone is not enough.
 - [ ] Keep application release and data release acceptance separate. Passing

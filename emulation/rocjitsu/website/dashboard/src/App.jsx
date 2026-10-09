@@ -21,12 +21,13 @@ import BranchRunsView from './components/views/BranchRunsView';
 import { isLoadCancelled, loadDashboardDataFiles } from './data/dashboardData';
 import { summarizeDashboardDataError } from './data/dashboardDataError';
 import { resolvePublishedDataUrls } from './data/publishedDataUrls';
+import { DASHBOARD_SITE_CONFIG } from './config/siteConfig';
 import { selectOverview } from './data/selectors';
 import { useDashboardState } from './hooks/useDashboardState';
 import { visuallyHiddenStyles } from './theme/styles';
 import { createDashboardTheme } from './theme/theme';
 
-const { metadataUrl: dataMetadataUrl, indexUrl: dataIndexUrl } = resolvePublishedDataUrls();
+const { indexUrl: dataIndexUrl } = resolvePublishedDataUrls();
 const DATA_CACHE_GENERATION_STORAGE_KEY = 'rocjitsu-data-cache-generation';
 
 function readCacheGeneration() {
@@ -96,10 +97,8 @@ function LoadingDataState({ progress }) {
 
 const emptyDashboardData = {
   schemaVersion: null,
-  repository: null,
+  ...DASHBOARD_SITE_CONFIG,
   generatedAt: null,
-  isBeta: false,
-  canonicalBranch: 'develop',
   runs: [],
   allRuns: [],
   modes: [],
@@ -266,7 +265,6 @@ export default function App() {
   useEffect(() => {
     const controller = new AbortController();
     loadDashboardDataFiles({
-      metadataUrl: dataMetadataUrl,
       indexUrl: dataIndexUrl,
       signal: controller.signal,
       reloadAll: loadRequest.reloadAll,

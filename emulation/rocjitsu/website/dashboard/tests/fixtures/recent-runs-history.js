@@ -1,3 +1,4 @@
+import { fixtureRunPath } from './runPath.js';
 // Fictional, test-only attempts derived from the schema-2 publication.
 import { createSchema2Publication } from './schema2Dataset.js';
 import { validatePublishedDashboardData } from '../../src/data/dashboardValidation.js';
@@ -14,7 +15,7 @@ export function createRecentRunsHistory(count = 65) {
     return run;
   });
   publication.runs = [...attempts, ...publication.runs.filter((run) => run.source.branch !== 'develop')];
-  publication.index.runFiles = publication.runs.map(({ id }) => `runs/${id}.json`);
+  publication.index.runFiles = publication.runs.map(fixtureRunPath);
   const data = validatePublishedDashboardData(publication).data;
   return { publication, data };
 }

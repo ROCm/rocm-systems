@@ -17,12 +17,13 @@ test('accepts historical environment changes in an otherwise valid publication',
 test('accepts an empty publication without run or catalog directories', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'dashboard-empty-'));
   try {
-    await cp(path.join(fixtureDataDirectory, 'metadata.json'), path.join(directory, 'metadata.json'));
     const index = JSON.parse(await readFile(path.join(fixtureDataDirectory, 'index.json'), 'utf8'));
     await writeFile(path.join(directory, 'index.json'), JSON.stringify({ ...index, runFiles: [] }));
     const result = await validateDashboardDataDirectory(directory);
     expect(result.sourceData.runs).toEqual([]);
     expect(result.data.runs).toEqual([]);
+    await writeFile(path.join(directory, 'metadata.json'), 'not valid JSON');
+    expect(await validateDashboardDataDirectory(directory)).toEqual(result);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

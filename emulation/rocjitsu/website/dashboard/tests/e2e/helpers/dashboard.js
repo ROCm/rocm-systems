@@ -38,9 +38,9 @@ export async function installPublication(page, {
   publication = createSchema2Publication(), prefix = '/data/', beforeResponse,
 } = {}) {
   const files = {
-    'metadata.json': publication.metadata, 'index.json': publication.index,
+    'index.json': publication.index,
     ...publication.catalogs,
-    ...Object.fromEntries(publication.runs.map((run) => [`runs/${run.id}.json`, run])),
+    ...Object.fromEntries(publication.runs.map((run, index) => [publication.index.runFiles[index], run])),
   };
   const requests = [];
   await page.route(prefix.startsWith('https:') ? `${prefix}**` : '**/data/**', async (route) => {

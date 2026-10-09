@@ -10,13 +10,18 @@ that boundary in the production build gate).
 
 `schema2Dataset.js` is the source generator for `data/`: 24 canonical develop
 attempts, 20 original fictional non-develop branches,
-two immutable catalogs, metadata and index. This gives at least 20 recent
-canonical rows and a scrollable 20-branch picker without imposing a production
+two immutable catalogs and an unversioned index. Every current run declares numeric
+`schemaVersion: 2`; catalogs carry no schema version. Develop runs live in
+`runs/default-branch/`, and every other branch uses the flat `runs/side-branches/`.
+This gives at least 20 recent canonical rows and a scrollable 20-branch picker without imposing a production
 branch-count limit. The publication time is fixed, not the viewer's clock.
+Site settings use the same bundled `src/config/metadata.json` as production and
+local-data builds; fixtures do not supply `metadata.json` or export synthetic
+site settings in raw `{index,catalogs,runs}` downloads.
 
 The additive v11 overlay `createFeedbackPublication()` in `publishedData.js` adds
 `users/RattataKing/test-branch`, giving 21 branches without renaming the original
-20. Its wire record is `data/runs/fictional-rattataking-test-branch.json` and the
+20. Its wire record is `data/runs/side-branches/fictional-rattataking-test-branch.json` and the
 index includes that record. The overlay clones an existing valid test measurement
 with a unique fictional full SHA and exact develop base. The base generator command
 below recreates only the original 20 branches; preserve/reapply this overlay and
@@ -47,7 +52,7 @@ are retired. No semantic coverage was removed merely to make tests green.
 
 | Retired assumption or over-specific assertion | Replacement coverage |
 | --- | --- |
-| Schema 1 accepted; implicit target-only results | Explicit migration failure; schema-2 modes, configuration membership and normalized identities |
+| Implicit target-only legacy results | Schema-1 Vanilla migration to ST; non-Vanilla skip with raw export retention; current schema-2 modes and configuration identities |
 | Every run must be develop on one machine | Canonical history separated from branch attempts; generic environment/machine differences preserved |
 | Zero duration rejected or treated as missing | Measured zero retained; zero-baseline percentages unavailable; tiny nonzero measurements stay nonzero |
 | Latest successful result replaces catalog anchors | First success in current catalog, independently target/mode; failures/timeouts and missing configurations remain gaps |
@@ -57,8 +62,11 @@ are retired. No semantic coverage was removed merely to make tests green.
 
 Useful loader concurrency, cache directives/generations, retry/Retry-After,
 progress, timeout, cancellation, malformed/missing resource and error-envelope
-tests remain. New loader checks reject schema 1 before immutable requests and
-accept empty snapshots. Directory validation and processing tests exercise the
+tests remain. Loader checks reject unsupported run versions (not index versions)
+and accept empty snapshots. Historical schema-1 target/plugin records, with an
+explicit version or no version, migrate to ST; only those records may use old
+`runs/<id>.json` paths. Non-Vanilla records are explicitly skipped while their raw
+files remain in source exports. Unversioned current runs are rejected. Directory validation and processing tests exercise the
 same validator, input symlink escape rejection, fail-before-output and preserving
 the complete raw-export envelope.
 

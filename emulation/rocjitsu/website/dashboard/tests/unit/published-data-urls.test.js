@@ -7,13 +7,14 @@ const dataBranchBase = (
   + 'refs/heads/gh-pages-rocjitsu/rocjitsu-dashboard/data/'
 );
 
-test('uses the configured data-branch URL for metadata and index', () => {
+test('uses the configured data-branch URL for the index', () => {
   const urls = resolvePublishedDataUrls({
     dataBaseUrl: dataBranchBase,
     baseURI: pagesBase,
   });
 
-  expect(urls.metadataUrl).toBe(`${dataBranchBase}metadata.json`);
+  expect(urls).not.toHaveProperty('metadataUrl');
+  expect(urls.dataBaseUrl).toBe(dataBranchBase);
   expect(urls.indexUrl).toBe(`${dataBranchBase}index.json`);
 });
 
@@ -24,7 +25,7 @@ test('falls back to same-origin data next to the app when unset', () => {
     baseURI: pagesBase,
   });
 
-  expect(urls.metadataUrl).toBe(`${pagesBase}data/metadata.json`);
+  expect(urls).not.toHaveProperty('metadataUrl');
   expect(urls.indexUrl).toBe(`${pagesBase}data/index.json`);
 });
 
@@ -34,5 +35,6 @@ test('adds a trailing slash so a branch root is treated as a directory', () => {
     baseURI: pagesBase,
   });
 
-  expect(urls.metadataUrl).toBe(`${dataBranchBase}metadata.json`);
+  expect(urls).not.toHaveProperty('metadataUrl');
+  expect(urls.dataBaseUrl).toBe(dataBranchBase);
 });

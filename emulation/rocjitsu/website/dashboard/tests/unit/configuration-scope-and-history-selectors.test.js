@@ -1,3 +1,4 @@
+import { fixtureRunPath } from '../fixtures/runPath.js';
 import { expect, test } from 'vitest';
 import { validatePublishedDashboardData } from '../../src/data/dashboardValidation.js';
 import { selectOverview, selectRecentRuns, selectBenchmarkSeries, selectBenchmarkRecords, selectBenchmarkCatalog, selectRunComparison } from '../../src/data/selectors.js';
@@ -87,7 +88,7 @@ test('empty mode scope and empty snapshot do not manufacture totals', () => {
 test.each(['gfx1250', 'gfx950'])('DATA-03 preserves historical %s MT scope when the latest catalog is ST-only', (target) => {
   const source = createSchema2Publication();
   source.runs = source.runs.slice(0, 2);
-  source.index.runFiles = source.runs.map(({ id }) => `runs/${id}.json`);
+  source.index.runFiles = source.runs.map(fixtureRunPath);
   const [earlier, latest] = source.runs;
   const key = `${target}:ST`;
   const catalog = structuredClone(source.catalogs[latest.testCatalog]);
@@ -119,7 +120,7 @@ test.each(['gfx1250', 'gfx950'])('DATA-03 preserves historical %s MT scope when 
 test('DATA-03 resolves each selected configuration catalog by commit rather than execution order', () => {
   const source = createSchema2Publication();
   source.runs = source.runs.slice(0, 3);
-  source.index.runFiles = source.runs.map(({ id }) => `runs/${id}.json`);
+  source.index.runFiles = source.runs.map(fixtureRunPath);
   const [earlier, mtRun, stRun] = source.runs;
   mtRun.execution.completedAt = '2026-09-14T06:00:00.000Z';
   const memberships = { 'gfx1250:MT': ['b', 'c'], 'gfx1250:ST': ['a', 'b'] };

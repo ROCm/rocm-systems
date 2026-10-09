@@ -59,13 +59,16 @@ test('fatal load and failed refresh discard stale exports; Retry restores raw sc
   await ready(page);
   const source = await downloadSource(page);
   expect(source).toEqual(publication);
-  expect(source.metadata).toMatchObject({ schemaVersion: 2, isBeta: true });
+  expect(source.index).not.toHaveProperty('schemaVersion');
+  expect(source.runs.every((run) => run.schemaVersion === 2)).toBe(true);
+  expect(source).not.toHaveProperty('metadata');
+  expect(source).not.toHaveProperty('siteConfig');
   expect(source.runs.every((run) => !('plugin' in run) && !('comparisonId' in run))).toBe(true);
   expect(source.runs.some((run) => run.source.branch.startsWith('fictional/'))).toBe(true);
   const policies = await fetchPolicies(page);
   const initialImmutable = policies.filter(({ url }) => /\/(runs|test-catalogs)\//.test(url));
   expect(initialImmutable).toHaveLength(publication.runs.length + Object.keys(publication.catalogs).length);
-  expect(policies.filter(({ url }) => /\/(metadata|index)\.json/.test(url)).every(({ cache }) => cache === 'no-store')).toBe(true);
+  expect(policies.filter(({ url }) => /\/index\.json/.test(url)).every(({ cache }) => cache === 'no-store')).toBe(true);
   expect(initialImmutable.every(({ cache }) => cache === 'force-cache')).toBe(true);
 
   const before = indexFailures;
@@ -93,7 +96,7 @@ test('fatal load and failed refresh discard stale exports; Retry restores raw sc
   const immutable = normal.filter(({ url }) => /\/(runs|test-catalogs)\//.test(url));
   expect(immutable.length).toBeGreaterThan(0);
   expect(immutable.every(({ url, cache }) => cache === 'force-cache' && new URL(url).searchParams.get('reload') === generation)).toBe(true);
-  expect(normal.filter(({ url }) => /\/(metadata|index)\.json/.test(url)).every(({ url, cache }) => cache === 'no-store' && !new URL(url).searchParams.has('reload'))).toBe(true);
+  expect(normal.filter(({ url }) => /\/index\.json/.test(url)).every(({ url, cache }) => cache === 'no-store' && !new URL(url).searchParams.has('reload'))).toBe(true);
 });
 
 test('one invalid indexed run fails the entire publication instead of exposing partial measurements', async ({ page }) => {
@@ -121,5 +124,7 @@ test('optional storage failure cannot discard a successfully refreshed publicati
   await openDashboard(page);
   await page.getByRole('button', { name: 'Reload all data' }).click();
   await ready(page);
-  expect((await downloadSource(page)).metadata.schemaVersion).toBe(2);
+  const source = await downloadSource(page);
+  expect(source.index).not.toHaveProperty('schemaVersion');
+  expect(source.runs.every((run) => run.schemaVersion === 2)).toBe(true);
 });

@@ -1,7 +1,9 @@
+import { CURRENT_RUN_SCHEMA_VERSION, isExcludedPluginRun, migrateSchema1Run, publishedRunPath, runSchemaVersion } from './runSchema.js';
+import { DASHBOARD_SITE_CONFIG } from '../config/siteConfig.js';
 import { backfillRunIds, compareRunExecution, sortRunsByCommit } from './runOrdering.js';
 
-export const CURRENT_SCHEMA_VERSION = 2;
-export const RUN_FILE_PATTERN = /^runs\/[A-Za-z0-9._-]+\.json$/;
+export const CURRENT_SCHEMA_VERSION = CURRENT_RUN_SCHEMA_VERSION;
+export const RUN_FILE_PATTERN = /^runs\/(?:(?:default-branch|side-branches)\/)?[A-Za-z0-9._-]+\.json$/;
 export const CATALOG_FILE_PATTERN = /^test-catalogs\/[A-Za-z0-9._-]+\.json$/;
 const SHA = /^[0-9a-f]{40}$/i;
 const TOKEN = /^[A-Za-z0-9._-]+$/;
@@ -40,16 +42,17 @@ function safeUrl(value, github = false) {
   } catch { return false; }
 }
 
-export function validatePublishedManifest(metadata, index) {
-  if (metadata?.schemaVersion === 1) throw new Error('Dashboard schema 1 requires migration to schema 2 with explicitly declared ST/MT configurations');
-  if (metadata?.schemaVersion !== 2) throw new Error(`Unsupported dashboard schema version ${metadata?.schemaVersion ?? '(missing)'}; expected schema 2`);
-  if (!safeUrl(metadata.repository)) throw new Error('Expected dashboard metadata to contain a safe HTTP repository URL');
-  if (typeof metadata.isBeta !== 'boolean' || metadata.canonicalBranch !== 'develop') throw new Error('Expected metadata isBeta boolean and canonicalBranch develop');
+export function validatePublishedManifest(index) {
   if (!isIsoTimestamp(index?.generatedAt) || !Array.isArray(index?.runFiles)) throw new Error('Expected index generatedAt strict ISO timestamp and runFiles array');
   for (const name of index.runFiles) {
     if (typeof name !== 'string' || !RUN_FILE_PATTERN.test(name)) throw new Error(`Invalid run filename: ${String(name)}`);
   }
   if (new Set(index.runFiles).size !== index.runFiles.length) throw new Error('Duplicate run filename');
+}
+
+export function validateDashboardSiteConfig(siteConfig) {
+  if (!safeUrl(siteConfig?.repository)) throw new Error('Expected dashboard site configuration to contain a safe HTTP repository URL');
+  if (typeof siteConfig.isBeta !== 'boolean' || siteConfig.canonicalBranch !== 'develop') throw new Error('Expected site configuration isBeta boolean and canonicalBranch develop');
 }
 
 function validateCatalog(catalog, file) {
@@ -156,7 +159,7 @@ export function loadDashboardData(raw) {
         throw new Error(`Run ${run.runId} has an invalid normalized test identity`);
       }
     }
-    return { id: run.runId, testCatalog: run.testCatalog,
+    return { schemaVersion: CURRENT_SCHEMA_VERSION, id: run.runId, testCatalog: run.testCatalog,
       source: { branch: run.branch, commit: run.provenance?.rocjitsuCommitSha, committedAt: run.commitTimestamp,
         ...(Object.hasOwn(run.provenance ?? {}, 'commitMessage') ? { message: run.provenance.commitMessage } : {}),
         ...(run.sourceBase ? { base: run.sourceBase } : {}), ...(run.pullRequest ? { pullRequest: run.pullRequest } : {}) },
@@ -167,23 +170,44 @@ export function loadDashboardData(raw) {
           .map(({ logicalTestId, status, durationSeconds, error }) => ({ testId: logicalTestId, status, durationSeconds, error })) })),
     };
   });
-  const metadata = { schemaVersion: raw.schemaVersion, repository: raw.repository, isBeta: raw.isBeta, canonicalBranch: shape.canonicalBranch };
-  return validatePublishedDashboardData({ metadata, index: { generatedAt: raw.generatedAt, runFiles: runs.map(({ id }) => `runs/${id}.json`) }, runs, catalogs }).data;
+  const siteConfig = { repository: raw.repository, isBeta: raw.isBeta, canonicalBranch: shape.canonicalBranch };
+  return validatePublishedDashboardData({ siteConfig, index: { generatedAt: raw.generatedAt, runFiles: runs.map((run) => publishedRunPath(run, siteConfig.canonicalBranch)) }, runs, catalogs }).data;
 }
 
-export function validatePublishedDashboardData({ metadata, index, runs, runErrors = [], catalogs = {}, catalogErrors = {} }) {
-  validatePublishedManifest(metadata, index);
+export function validatePublishedDashboardData({ index, runs, runErrors = [], catalogs = {}, catalogErrors = {}, siteConfig = DASHBOARD_SITE_CONFIG }) {
+  validatePublishedManifest(index);
+  validateDashboardSiteConfig(siteConfig);
   if (!Array.isArray(runs) || runs.length !== index.runFiles.length) throw new Error('Loaded runs must match index runFiles');
-  const normalizedCatalogs = new Map(); const normalizedRuns = []; const failures = [];
+  const normalizedCatalogs = new Map(); const sourceCatalogs = new Map();
+  const normalizedRuns = []; const failures = []; const sourceIds = new Set();
   index.runFiles.forEach((file, indexPosition) => {
     try {
       if (runErrors[indexPosition]) throw runErrors[indexPosition];
-      const run = runs[indexPosition];
-      if (file !== `runs/${run?.id}.json`) throw new Error(`Run ${run?.id ?? '(unknown)'} filename must match its ID`);
-      if (typeof run.testCatalog !== 'string' || !CATALOG_FILE_PATTERN.test(run.testCatalog)) throw new Error(`Run ${run.id} references an invalid test catalog`);
-      if (catalogErrors[run.testCatalog]) throw catalogErrors[run.testCatalog];
-      if (!normalizedCatalogs.has(run.testCatalog)) normalizedCatalogs.set(run.testCatalog, validateCatalog(catalogs[run.testCatalog], run.testCatalog));
-      normalizedRuns.push(normalizeRun(run, normalizedCatalogs.get(run.testCatalog), index.generatedAt));
+      const sourceRun = runs[indexPosition];
+      if (typeof sourceRun?.id !== 'string' || !TOKEN.test(sourceRun.id)) throw new Error('Run does not match the schema-2 run contract: invalid ID');
+      if (sourceIds.has(sourceRun.id)) throw new Error(`Duplicate run ID ${sourceRun.id}`);
+      sourceIds.add(sourceRun.id);
+      if (file.split('/').at(-1) !== `${sourceRun.id}.json`) throw new Error(`Run ${sourceRun.id} filename must match its ID`);
+      const catalogFile = sourceRun.testCatalog;
+      if (typeof catalogFile === 'string' && CATALOG_FILE_PATTERN.test(catalogFile) && Object.hasOwn(catalogs, catalogFile)) {
+        sourceCatalogs.set(catalogFile, catalogs[catalogFile]);
+      }
+      if (isExcludedPluginRun(sourceRun)) return;
+      const version = runSchemaVersion(sourceRun);
+      if (file !== publishedRunPath(sourceRun, siteConfig.canonicalBranch)
+        && !(version === 1 && file === `runs/${sourceRun.id}.json`)) {
+        throw new Error(`Run ${sourceRun.id} filename must match its ID and branch directory`);
+      }
+      if (typeof catalogFile !== 'string' || !CATALOG_FILE_PATTERN.test(catalogFile)) throw new Error(`Run ${sourceRun.id} references an invalid test catalog`);
+      if (catalogErrors[catalogFile]) throw catalogErrors[catalogFile];
+      const migrated = version === 1 ? migrateSchema1Run(sourceRun, catalogs[catalogFile])
+        : { run: sourceRun, catalog: catalogs[catalogFile] };
+      if (migrated.run.schemaVersion !== CURRENT_RUN_SCHEMA_VERSION) {
+        throw new Error(`Run ${sourceRun.id} has no migration from schema ${version} to requested schema ${CURRENT_RUN_SCHEMA_VERSION}`);
+      }
+      const catalog = validateCatalog(migrated.catalog, catalogFile);
+      normalizedCatalogs.set(catalogFile, catalog);
+      normalizedRuns.push(normalizeRun(migrated.run, catalog, index.generatedAt));
     } catch (error) { failures.push(`- ${file}: ${error.message}`); }
   });
   if (failures.length) throw new Error(`Dashboard data failed validation:\n${failures.join('\n')}`);
@@ -200,7 +224,7 @@ export function validatePublishedDashboardData({ metadata, index, runs, runError
     if (previous && definitionIdentity(previous) !== definitionIdentity(definition)) throw new Error(`Test ${definition.id} is defined differently in ${file}; publish a new test ID`);
     definitions.set(definition.id, definition);
   }
-  const sourceData = { metadata, index, catalogs: Object.fromEntries(normalizedCatalogs), runs };
-  const data = buildDashboardData({ ...metadata, generatedAt: index.generatedAt, testCatalog: [...definitions.values()], catalogs: sourceData.catalogs, runs: normalizedRuns });
+  const sourceData = { index, catalogs: Object.fromEntries(sourceCatalogs), runs };
+  const data = buildDashboardData({ repository: siteConfig.repository, isBeta: siteConfig.isBeta, canonicalBranch: siteConfig.canonicalBranch, schemaVersion: CURRENT_SCHEMA_VERSION, generatedAt: index.generatedAt, testCatalog: [...definitions.values()], catalogs: Object.fromEntries(normalizedCatalogs), runs: normalizedRuns });
   return { data, sourceData };
 }

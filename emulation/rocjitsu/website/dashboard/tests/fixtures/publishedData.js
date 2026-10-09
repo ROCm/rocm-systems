@@ -1,3 +1,4 @@
+import { fixtureRunPath } from './runPath.js';
 import { readFileSync } from 'node:fs';
 import { validatePublishedDashboardData } from '../../src/data/dashboardValidation.js';
 import { createSchema2Publication } from './schema2Dataset.js';
@@ -13,14 +14,13 @@ export function createFeedbackPublication() {
   };
   run.execution.completedAt = '2026-10-05T11:20:00.000Z';
   publication.runs.push(run);
-  publication.index.runFiles.push(`runs/${run.id}.json`);
+  publication.index.runFiles.push(fixtureRunPath(run));
   return publication;
 }
 
 const dataDirectory = new URL('./data/', import.meta.url);
 const readJson = (name) => JSON.parse(readFileSync(new URL(name, dataDirectory), 'utf8'));
 
-export const dataMetadata = readJson('metadata.json');
 export const dataIndex = readJson('index.json');
 export const publishedRuns = dataIndex.runFiles.map(readJson);
 export const publishedCatalogs = Object.fromEntries([...new Set(
@@ -29,7 +29,6 @@ export const publishedCatalogs = Object.fromEntries([...new Set(
 export const publishedRunErrors = publishedRuns.map(() => null);
 
 export const publishedResult = validatePublishedDashboardData({
-  metadata: dataMetadata,
   index: dataIndex,
   runs: publishedRuns,
   runErrors: publishedRunErrors,

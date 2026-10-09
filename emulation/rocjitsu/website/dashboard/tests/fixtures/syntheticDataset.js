@@ -11,7 +11,7 @@ const catalog = {
 function syntheticRun(index) {
   const day = new Date(Date.UTC(2026, 0, 1) + index * 86400_000).toISOString();
   const id = `synthetic-run-${String(index).padStart(4, '0')}`;
-  return { id, testCatalog: CATALOG_PATH,
+  return { schemaVersion: 2, id, testCatalog: CATALOG_PATH,
     source: { branch: 'develop', commit: index.toString(16).padStart(40, '0'), committedAt: day, message: `Fictional queue test ${index}` },
     execution: { completedAt: day, trigger: 'auto', machine: 'fictional-queue-node' },
     environment: [{ key: 'sdk', label: 'Fictional SDK', value: 'test-only' }],
@@ -23,12 +23,11 @@ function syntheticRun(index) {
 }
 // Request-queue stress data, generated in memory only; not shipped by Vite.
 export function createSyntheticDataset(runCount = 500) {
-  const runFiles = Array.from({ length: runCount }, (_, index) => `runs/synthetic-run-${String(index).padStart(4, '0')}.json`);
+  const runFiles = Array.from({ length: runCount }, (_, index) => `runs/default-branch/synthetic-run-${String(index).padStart(4, '0')}.json`);
   const bodies = new Map([
-    ['https://dashboard.test/data/metadata.json', { schemaVersion: 2, repository: 'https://example.test/repo', isBeta: false, canonicalBranch: 'develop' }],
     ['https://dashboard.test/data/index.json', { generatedAt: '2027-06-01T00:00:00.000Z', runFiles }],
     [`https://dashboard.test/data/${CATALOG_PATH}`, catalog],
   ]);
   runFiles.forEach((runFile, index) => bodies.set(`https://dashboard.test/data/${runFile}`, syntheticRun(index)));
-  return { runCount, runFiles, catalogPath: CATALOG_PATH, metadataUrl: 'https://dashboard.test/data/metadata.json', indexUrl: 'https://dashboard.test/data/index.json', bodies };
+  return { runCount, runFiles, catalogPath: CATALOG_PATH, indexUrl: 'https://dashboard.test/data/index.json', bodies };
 }

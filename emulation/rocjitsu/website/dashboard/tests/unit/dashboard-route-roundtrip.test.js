@@ -1,3 +1,4 @@
+import { fixtureRunPath } from '../fixtures/runPath.js';
 import { describe, expect, it } from 'vitest';
 import * as dashboardState from '../../src/hooks/useDashboardState.js';
 import { loadDashboardData, validatePublishedDashboardData } from '../../src/data/dashboardValidation.js';
@@ -8,7 +9,7 @@ it('UI-002 round-trips exact long validated attempt and branch identities', () =
   const run = source.runs.find(({ id }) => id === 'fictional-branch-01');
   run.id = `fictional-${'x'.repeat(192)}`;
   run.source.branch = `fictional/${'b'.repeat(192)}`;
-  source.index.runFiles = source.runs.map(({ id }) => `runs/${id}.json`);
+  source.index.runFiles = source.runs.map(fixtureRunPath);
   expect(validatePublishedDashboardData(source).data.allRuns.some(({ runId }) => runId === run.id)).toBe(true);
   const route = dashboardState.readDashboardRoute('https://example.test/app/?view=branch');
   const selection = { ...route, branchSelection: { ...route.branchSelection, branch: run.source.branch, candidateId: run.id, referenceId: run.id, manual: true }, comparisonCandidateId: run.id, comparisonBaselineId: run.id };

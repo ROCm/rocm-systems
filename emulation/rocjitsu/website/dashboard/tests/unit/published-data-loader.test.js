@@ -44,21 +44,22 @@ function createFetchDouble({ delayMs = 0, behavior = () => null } = {}) {
 
 function loadSynthetic(fetchImpl, overrides = {}) {
   return loadDashboardDataFiles({
-    metadataUrl: dataset.metadataUrl,
     indexUrl: dataset.indexUrl,
     fetch: fetchImpl,
     ...overrides,
   });
 }
 
-test('rejects schema 1 before requesting immutable details or emitting a valid manifest', async () => {
+test('rejects an unsupported run version after loading the unversioned manifest', async () => {
   dataset = createSyntheticDataset(2);
-  dataset.bodies.get(dataset.metadataUrl).schemaVersion = 1;
+  const runUrl = `https://dashboard.test/data/${dataset.runFiles[0]}`;
+  dataset.bodies.get(runUrl).schemaVersion = 99;
   const { fetchImpl, state } = createFetchDouble();
   const onManifest = vi.fn();
-  await expect(loadSynthetic(fetchImpl, { onManifest })).rejects.toThrow(/schema.?1.*migrat/i);
-  expect(state.urls).toHaveLength(2);
-  expect(onManifest).not.toHaveBeenCalled();
+  await expect(loadSynthetic(fetchImpl, { onManifest })).rejects.toThrow(/schema.*99/i);
+  expect(state.urls).toContain(runUrl);
+  expect(state.urls.filter((url) => url.includes('/runs/'))).toHaveLength(2);
+  expect(onManifest).toHaveBeenCalledTimes(1);
 });
 
 test('loads an empty snapshot without immutable requests and preserves its raw export envelope', async () => {
@@ -68,8 +69,8 @@ test('loads an empty snapshot without immutable requests and preserves its raw e
   expect(data.runs).toEqual([]);
   expect(data.allRuns).toEqual([]);
   expect(sourceData.index.runFiles).toEqual([]);
-  expect(sourceData.metadata.schemaVersion).toBe(2);
-  expect(state.urls).toHaveLength(2);
+  expect(sourceData.index).not.toHaveProperty('schemaVersion');
+  expect(state.urls).toHaveLength(1);
 });
 
 beforeEach(() => {
@@ -83,10 +84,10 @@ test('loads 500 runs in index order with at most eight run requests in flight', 
 
   expect(data.runs).toHaveLength(dataset.runCount);
   expect(data.runs.map((run) => run.runId)).toEqual(
-    dataset.runFiles.map((runFile) => runFile.replace(/^runs\/|\.json$/g, '')),
+    dataset.runFiles.map((runFile) => runFile.split('/').at(-1).replace(/\.json$/, '')),
   );
   expect(state.peak).toBeLessThanOrEqual(MAX_CONCURRENT_RUN_REQUESTS);
-  expect(state.urls).toHaveLength(dataset.runCount + 3);
+  expect(state.urls).toHaveLength(dataset.runCount + 2);
 });
 
 test('honors a caller-supplied concurrency limit', async () => {
@@ -102,7 +103,6 @@ test('revalidates mutable documents and reuses cached immutable files', async ()
 
   await loadSynthetic(fetchImpl);
 
-  expect(state.options.get(dataset.metadataUrl).cache).toBe('no-store');
   expect(state.options.get(dataset.indexUrl).cache).toBe('no-store');
   expect(state.options.get(`https://dashboard.test/data/${dataset.runFiles[0]}`).cache).toBe('force-cache');
   expect(state.options.get(`https://dashboard.test/data/${dataset.catalogPath}`).cache).toBe('force-cache');
@@ -134,7 +134,7 @@ test('reloads a fresh index before every file it names and saves a new cache gen
   const firstRunRequest = requestUrls.findIndex((url) => url.pathname.includes('/runs/'));
 
   expect(data.runs.map((run) => `${run.runId}.json`)).toEqual(
-    freshRunFiles.map((runFile) => runFile.replace('runs/', '')),
+    freshRunFiles.map((runFile) => runFile.split('/').at(-1)),
   );
   expect(requestUrls.filter((url) => url.pathname.includes('/runs/')).map(
     (url) => url.pathname.replace('/data/', ''),
@@ -145,7 +145,7 @@ test('reloads a fresh index before every file it names and saves a new cache gen
   expect(indexRequest).toBeGreaterThanOrEqual(0);
   expect(firstRunRequest).toBeGreaterThan(indexRequest);
   expect([...state.options].every(([url, options]) => (
-    url.includes('/metadata.json') || url.includes('/index.json')
+    url.includes('/index.json')
       ? options.cache === 'no-store'
       : options.cache === 'reload'
   ))).toBe(true);
@@ -159,7 +159,7 @@ test('reuses a saved cache generation on the next normal load', async () => {
 
   const requestUrls = state.urls.map((url) => new URL(url));
   const mutableRequests = requestUrls.filter((url) => (
-    url.pathname.endsWith('/metadata.json') || url.pathname.endsWith('/index.json')
+    url.pathname.endsWith('/index.json')
   ));
   const immutableRequests = requestUrls.filter((url) => !mutableRequests.includes(url));
 
@@ -413,33 +413,36 @@ test('an external abort cancels the whole load instead of skipping runs', async 
   expect(state.urls.length).toBeLessThan(dataset.runCount);
 });
 
-test.each(['metadata', 'index'])('a fatal %s failure aborts its pending sibling without retrying', async (failedManifest) => {
+test('a terminal progress callback failure cancels pending run requests without retrying', async () => {
+  dataset = createSyntheticDataset(8);
   const controller = new AbortController();
-  const failedUrl = failedManifest === 'metadata' ? dataset.metadataUrl : dataset.indexUrl;
-  let siblingSignal;
-  let settleSibling;
+  const signals = [];
+  const settle = [];
+  const failure = new Error('Progress owner failed');
   const { fetchImpl, state } = createFetchDouble({
     behavior: (url, { signal }) => {
-      if (url === failedUrl) return Promise.resolve({ ok: false, status: 404, statusText: 'Not Found' });
-      siblingSignal = signal;
+      if (!url.includes('/runs/') || url.endsWith(dataset.runFiles[0])) return null;
+      signals.push(signal);
       return new Promise((resolve, reject) => {
-        settleSibling = () => resolve(jsonResponse(dataset.bodies.get(url)));
+        settle.push(() => resolve(jsonResponse(dataset.bodies.get(url))));
         signal.addEventListener('abort', () => reject(new TypeError('Request aborted')), { once: true });
       });
     },
   });
   try {
-    const failure = await loadSynthetic(fetchImpl, { signal: controller.signal, retryDelaysMs: [0] })
-      .catch((error) => error);
-    expect(failure.dashboardDataErrorCode).toBe('missing');
-    expect(isLoadCancelled(failure)).toBe(false);
-    expect(siblingSignal.aborted).toBe(true);
+    const result = await loadSynthetic(fetchImpl, {
+      signal: controller.signal, retryDelaysMs: [0],
+      onProgress: ({ loaded }) => { if (loaded > 0) throw failure; },
+    }).catch((error) => error);
+    expect(result).toBe(failure);
+    expect(signals).toHaveLength(7);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
     controller.abort();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(state.urls).toHaveLength(2);
+    expect(state.urls).toHaveLength(9);
     expect(state.active).toBe(0);
   } finally {
-    settleSibling();
+    settle.forEach((resolve) => resolve());
   }
 });
 

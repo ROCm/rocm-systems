@@ -12,29 +12,41 @@ Use an isolated data root containing:
 
 ```text
 data/
-  metadata.json
   index.json
   test-catalogs/<catalog-id>.json
-  runs/<run-id>.json
+  runs/
+    default-branch/<run-id>.json
+    side-branches/<run-id>.json
 ```
 
-Use the four complete JSON examples in contract sections 3–6 to understand the
+Use the three complete JSON examples in contract sections 4–6 to understand the
 shape. They are fictional and must not be published as real benchmark results.
 Supply actual measurement and provenance values from your execution system.
 
-- `metadata.json`: set numeric `schemaVersion: 2`, the repository URL,
-  boolean `isBeta`, and `canonicalBranch: "develop"`.
 - Catalog: define logical workloads (`id`, `suite`, `name`, scalar `problem`
   object) and membership for explicit `<target>:ST` / `<target>:MT` keys. Use a
   new immutable catalog ID whenever the snapshot changes. Reusing a workload
   ID across catalogs requires identical definition facts; changed definitions
   need new workload IDs.
-- Run: give each attempt a unique `id` matching its filename, reference its
+- Run: set numeric `schemaVersion: 2`, give each attempt a unique `id` matching
+  its filename, reference its
   immutable catalog, record `source`, `execution`,
   `environment`, and the actual measured `configurations`.
-- Index: record a strict `generatedAt` timestamp and the unique
-  `runs/<run-id>.json` paths for the complete intended snapshot, not just the
-  latest upload. Only indexed runs and their referenced catalogs are loaded.
+- Directory: use `runs/default-branch/` when `source.branch` is exactly `develop`,
+  otherwise `runs/side-branches/`. Do not create per-branch subdirectories.
+- Index: record a strict `generatedAt` timestamp and unique relative run paths
+  for the complete intended snapshot, not just the latest upload. Neither index
+  nor catalogs have `schemaVersion`; each run declares its own format.
+  Only indexed runs and the catalogs needed by included runs are loaded.
+
+Site settings are not publication inputs. The source-controlled
+`src/config/metadata.json` selects the target run format with `schemaVersion: 2`; its settings
+are exposed by `src/config/siteConfig.js` as `DASHBOARD_SITE_CONFIG`, supplying the repository URL,
+Beta flag and canonical branch to production, fixture and local-data builds;
+changing these settings requires a rebuild. New publications do not generate or
+require publication-side `metadata.json`; any legacy copy is ignored, not
+automatically deleted. Supported versions and migrations live in website code,
+not in publication configuration.
 
 Read contract sections 2–6 for exact types, allowed URLs and optional-field rules.
 Filenames and references are relative to the data root; do not put absolute paths or URLs in `runFiles` or `testCatalog`.
@@ -78,6 +90,8 @@ npm run dev:data -- /absolute/path/to/staged/data --host 127.0.0.1
 
 Require validator exit status 0. One bad indexed run or referenced catalog
 rejects the entire snapshot; the browser does not display partial history.
+The intentional exception is non-Vanilla plugin files, which are excluded
+without being relabeled as ordinary runs. Their plugin-only catalogs are not loaded.
 Unindexed files are not audited by this validator. Preview against your staged
 input, not fixtures. Check ST/MT availability, zero/failure gaps, branch metadata,
 record details and raw Download JSON. Branch-only or empty valid datasets are
@@ -92,7 +106,9 @@ npm run process:data -- /absolute/path/to/staged/data \
 
 The processor validates and creates a new `{data,sourceData}` envelope. It
 refuses overwrite and output inside the input directory. That envelope is a
-local consumer/debugging artifact, not a wire file to publish. These commands
+local consumer/debugging artifact, not a wire file to publish. `sourceData` contains
+only `{index,catalogs,runs}`; normalized `data` retains site settings separately
+using the same bundled defaults as the browser. These commands
 do not run benchmarks or publish data.
 
 ## 4. Publication handoff
@@ -105,15 +121,42 @@ https://raw.githubusercontent.com/ROCm/rocm-systems/refs/heads/gh-pages-rocjitsu
 ```
 
 Application assets are separate on `gh-pages/rocjitsu-dashboard/`; a website
-build does not publish data. The workflow owner must implement and verify the
-producer/publisher independently.
+build does not publish data. The staging scripts must be integrated and verified
+by the publication workflow owner; generating files is not a live deployment.
 
 After validation, publish new immutable catalogs first, then new immutable runs,
 and the mutable index last. Do not overwrite existing run/catalog filenames;
-retain resources referenced by older cached indexes. Coordinate metadata changes
-with the publication snapshot. Read back and validate the exact published
-snapshot and verify the real consumer's fetch/reload behavior. Shape validation
+retain resources referenced by older cached indexes. Site-setting changes belong
+to a website rebuild, not the publication snapshot. Read back and validate the
+exact published snapshot and verify the real consumer's fetch/reload behavior. Shape validation
 cannot attest execution semantics, experiment equivalence or provenance.
 
 Use the [publication checklist](website-data-contract.md#13-publication-checklist)
 before releasing a dataset.
+
+## 5. Bundled-site-config rollout
+
+This is an explicit release procedure, not a record of a live deployment. No live
+deployment was performed as part of the refactor.
+
+1. Inspect the existing publication and stage a copy; a schema number declares
+   format, not provenance. New runs must declare numeric `schemaVersion: 2` and
+   use the two branch-class directories. Do not stamp old target groups as schema 2.
+2. Historical schema-1 Vanilla runs are migrated by the website: `targets[].id`
+   becomes `configurations[].target`, catalog target memberships become `<target>:MT`,
+   and all legacy results retain their values and become MT. Historical runs lacking
+   a version are treated as schema 1, then validated against the legacy targets/plugin envelope. Non-Vanilla
+   plugin files are excluded. Old flat `runs/<id>.json` paths remain supported for
+   legacy schema-1 files; new writes never use that layout.
+3. Unversioned configurations-style records are not presumed to be schema 2.
+   Validate their actual format before explicitly creating versioned schema-2 copies
+   in the appropriate new directory and changing index references. Keep old files
+   unchanged for cached clients. Unknown versions and invalid Vanilla data reject.
+4. Keep publication-side legacy `metadata.json` available for cached old clients.
+   The new browser, local tools and publisher neither require nor read it, and the
+   publisher does not automatically delete it. The website uses its bundled
+   `src/config/metadata.json` instead.
+5. Run `npm run validate:data -- <staged-data-root>` and require exit status 0.
+   Publish catalogs and runs before the updated unversioned index. Read back and
+   validate the snapshot, then deploy the rebuilt website and verify loading,
+   reload and raw export against that real publication separately from fixture tests.

@@ -18,7 +18,7 @@ test('local processing validates before output and preserves source, modes and s
     expect(result.data.allRuns).toHaveLength(44);
     expect(result.data.backfillRunIds).toContain('fictional-develop-21');
     expect(JSON.parse(await readFile(output, 'utf8'))).toEqual(result);
-    await expect(processing.processDashboardDataDirectory(path.join(root, 'input'), { output: path.join(root, 'input', 'metadata.json') })).rejects.toThrow(/outside.*input/i);
+    await expect(processing.processDashboardDataDirectory(path.join(root, 'input'), { output: path.join(root, 'input', 'index.json') })).rejects.toThrow(/outside.*input/i);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

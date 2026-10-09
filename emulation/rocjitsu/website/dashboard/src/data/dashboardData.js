@@ -1,7 +1,11 @@
+import { isExcludedPluginRun } from './runSchema.js';
+import { DASHBOARD_SITE_CONFIG } from '../config/siteConfig.js';
 import {
   CATALOG_FILE_PATTERN,
   RUN_FILE_PATTERN,
   validatePublishedManifest,
+  validateDashboardSiteConfig,
+  CURRENT_SCHEMA_VERSION,
   validatePublishedDashboardData,
 } from './dashboardValidation.js';
 
@@ -146,7 +150,7 @@ async function fetchJsonResource(url, {
       if (!isRetryableStatus(response.status) || attempt >= retryDelaysMs.length) {
         cleanup();
         const code = response.status === 404
-          && (resourceType === 'dashboard metadata' || resourceType === 'dashboard data index')
+          && (resourceType === 'dashboard data index')
           ? 'missing'
           : isRetryableStatus(response.status)
             ? 'unavailable'
@@ -165,7 +169,7 @@ async function fetchJsonResource(url, {
       && !normalizedContentType.startsWith('text/plain')
     ) {
       cleanup();
-      if (resourceType === 'dashboard metadata' || resourceType === 'dashboard data index') {
+      if (resourceType === 'dashboard data index') {
         throw dashboardDataError('missing', 'No available test data');
       }
       throw dashboardDataError(
@@ -245,8 +249,8 @@ async function mapWithConcurrency(items, limit, worker) {
 }
 
 export async function loadDashboardDataFiles({
-  metadataUrl,
   indexUrl,
+  siteConfig = DASHBOARD_SITE_CONFIG,
   onManifest,
   onProgress,
   signal,
@@ -272,7 +276,7 @@ export async function loadDashboardDataFiles({
     : null;
 
   try {
-  // Mutable documents must revalidate on every load. Runs and catalogs are immutable by
+  // The mutable index must revalidate on every load. Runs and catalogs are immutable by
   // contract, so cached copies remain valid beyond the hosting service's freshness window. An
   // explicit reload changes every URL as well as bypassing the browser cache, which also bypasses
   // shared CDN entries that the browser cannot purge.
@@ -287,17 +291,12 @@ export async function loadDashboardDataFiles({
     random,
     cache: 'no-store',
   };
-  const [metadata, index] = await Promise.all([
-    fetchJsonResource(withReloadToken(metadataUrl, reloadToken), {
-      ...mutableRequest,
-      resourceType: 'dashboard metadata',
-    }),
-    fetchJsonResource(withReloadToken(indexUrl, reloadToken), {
-      ...mutableRequest,
-      resourceType: 'dashboard data index',
-    }),
-  ]);
-  validatePublishedManifest(metadata, index);
+  validateDashboardSiteConfig(siteConfig);
+  const index = await fetchJsonResource(withReloadToken(indexUrl, reloadToken), {
+    ...mutableRequest,
+    resourceType: 'dashboard data index',
+  });
+  validatePublishedManifest(index);
   const immutableBaseUrl = new URL('./', indexUrl);
   const immutableRequest = {
     fetchImpl,
@@ -307,7 +306,7 @@ export async function loadDashboardDataFiles({
     random,
     cache: reloadAll ? 'reload' : 'force-cache',
   };
-  onManifest?.({ ...metadata, generatedAt: index.generatedAt });
+  onManifest?.({ ...siteConfig, schemaVersion: CURRENT_SCHEMA_VERSION, generatedAt: index.generatedAt });
 
   const total = index.runFiles.length;
   let loaded = 0;
@@ -339,6 +338,7 @@ export async function loadDashboardDataFiles({
   });
 
   const catalogPaths = [...new Set(runResults
+    .filter((result) => !isExcludedPluginRun(result.run))
     .map((result) => result.run?.testCatalog)
     .filter((catalogPath) => hasText(catalogPath) && CATALOG_FILE_PATTERN.test(catalogPath)))];
   const catalogResults = await mapWithConcurrency(catalogPaths, concurrency, async (catalogPath) => {
@@ -373,7 +373,7 @@ export async function loadDashboardDataFiles({
 
   return {
     ...validatePublishedDashboardData({
-    metadata,
+    siteConfig,
     index,
     runs: runResults.map((result) => result.run),
     runErrors: runResults.map((result) => result.error),
@@ -391,7 +391,7 @@ export async function loadDashboardDataFiles({
     }
     throw error;
   } finally {
-    // Promise.all may reject while a sibling request or retry still belongs to this load.
+    // Terminal exits also cancel owned requests or retries still in flight.
     loadController.abort();
     if (loadTimer) clearTimeout(loadTimer);
     signal?.removeEventListener('abort', forwardAbort);

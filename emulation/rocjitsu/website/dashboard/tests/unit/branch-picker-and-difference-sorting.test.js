@@ -66,7 +66,7 @@ test('exact requested fictional branch is schema-valid and preserves all origina
   const generated = fixtures.createFeedbackPublication();
   expect(generated.runs.find((run) => run.source.branch === branch)).toEqual(wire);
   expect(generated.index).toEqual(fixtures.dataIndex);
-  const checkedIn = JSON.parse(readFileSync(new URL('../fixtures/data/runs/fictional-rattataking-test-branch.json', import.meta.url), 'utf8'));
+  const checkedIn = JSON.parse(readFileSync(new URL('../fixtures/data/runs/side-branches/fictional-rattataking-test-branch.json', import.meta.url), 'utf8'));
   expect(checkedIn).toEqual(wire);
 });
 

@@ -30,7 +30,7 @@ async function startStream() {
       return source;
     });
   });
-  createDashboardDataMiddleware(directory)({ url: '/data/metadata.json' }, response, () => {});
+  createDashboardDataMiddleware(directory)({ url: '/data/index.json' }, response, () => {});
   await started;
   return { source, response };
 }

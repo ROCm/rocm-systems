@@ -1,3 +1,4 @@
+import { fixtureRunPath } from '../fixtures/runPath.js';
 import { expect, test } from '@playwright/test';
 import { createSchema2Publication } from '../fixtures/schema2Dataset.js';
 import { formatDuration } from '../../src/utils/formatters.js';
@@ -12,7 +13,7 @@ test('grid picker bounds search and eight slots while draft cancel, pointer remo
   // One fictional run is enough to test a catalog larger than the visible window.
   const run = publication.runs.find((entry) => entry.id === 'fictional-develop-23');
   publication.runs = [run];
-  publication.index.runFiles = [`runs/${run.id}.json`];
+  publication.index.runFiles = [fixtureRunPath(run)];
   const catalog = publication.catalogs[run.testCatalog];
   const extras = Array.from({ length: 55 }, (_, index) => ({ id: `picker-${index}`, name: `Fictional picker ${String(index).padStart(2, '0')}`, suite: 'Triton', problem: { size: index, ...(index === 54 ? { dataType: 64 } : {}) } }));
   catalog.tests.push(...extras);

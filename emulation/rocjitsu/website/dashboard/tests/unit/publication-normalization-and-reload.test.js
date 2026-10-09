@@ -1,13 +1,17 @@
+import { fixtureRunPath } from '../fixtures/runPath.js';
 import { expect, test } from 'vitest';
 import { selectAutomaticReference, selectPublishedBranches } from '../../src/data/branchSelectors.js';
 import { loadDashboardData, validatePublishedDashboardData } from '../../src/data/dashboardValidation.js';
 import { selectRecentRuns } from '../../src/data/selectors.js';
 import { createSchema2Publication } from '../fixtures/schema2Dataset.js';
 
-test('normalizes only schema 2 with explicit modes and keeps branch source envelopes', () => {
+test('normalizes current runs with explicit modes and keeps branch source envelopes', () => {
   const source = createSchema2Publication();
   const { data, sourceData } = validatePublishedDashboardData(source);
   expect(data.schemaVersion).toBe(2);
+  expect(sourceData.index).not.toHaveProperty('schemaVersion');
+  for (const catalog of Object.values(sourceData.catalogs)) expect(catalog).not.toHaveProperty('schemaVersion');
+  for (const run of sourceData.runs) expect(run.schemaVersion).toBe(2);
   expect(data.runs).toHaveLength(24);
   expect(data.allRuns).toHaveLength(44);
   expect(data).not.toHaveProperty('pluginRuns');
@@ -35,14 +39,14 @@ test('normalizes only schema 2 with explicit modes and keeps branch source envel
 test.each([123, true, false, ['attempt-1']].map((id) => ({ id })))('rejects non-string attempt ID $id before normalization', ({ id }) => {
   const source = createSchema2Publication();
   source.runs = [{ ...source.runs[0], id }];
-  source.index.runFiles = [`runs/${id}.json`];
+  source.index.runFiles = [`runs/default-branch/${id}.json`];
   expect(() => validatePublishedDashboardData(source)).toThrow(/does not match the schema-2 run contract/);
 });
 
-test('schema 1 reports an explicit migration error', () => {
+test('unsupported run version reports an explicit schema error', () => {
   const source = createSchema2Publication();
-  source.metadata.schemaVersion = 1;
-  expect(() => validatePublishedDashboardData(source)).toThrow(/schema.?1.*migrat/i);
+  source.runs[0].schemaVersion = 99;
+  expect(() => validatePublishedDashboardData(source)).toThrow(/schema.*99/i);
 });
 
 test('empty and branch-only snapshots remain valid', () => {
@@ -53,7 +57,7 @@ test('empty and branch-only snapshots remain valid', () => {
   expect(data.latestRun).toBeNull();
   const branches = createSchema2Publication();
   branches.runs = branches.runs.filter(({ source }) => source.branch !== 'develop');
-  branches.index.runFiles = branches.runs.map(({ id }) => `runs/${id}.json`);
+  branches.index.runFiles = branches.runs.map(fixtureRunPath);
   expect(validatePublishedDashboardData(branches).data.allRuns).toHaveLength(20);
 });
 
@@ -76,7 +80,7 @@ test('configuration targets must be declared strings, not coerced numbers', () =
   run.configurations = [run.configurations[0]];
   run.configurations[0].target = 123;
   source.catalogs[run.testCatalog].configurations = { '123:ST': ['a', 'b', 'c'] };
-  source.runs = [run]; source.index.runFiles = [`runs/${run.id}.json`];
+  source.runs = [run]; source.index.runFiles = [fixtureRunPath(run)];
   expect(() => validatePublishedDashboardData(source)).toThrow(/configuration/);
 });
 
@@ -86,7 +90,7 @@ test.each([
 ])('DATA-01 rejects coerced array threadingMode $threadingMode', ({ threadingMode }) => {
   const source = createSchema2Publication();
   const run = source.runs[0];
-  source.runs = [run]; source.index.runFiles = [`runs/${run.id}.json`];
+  source.runs = [run]; source.index.runFiles = [fixtureRunPath(run)];
   run.configurations = [run.configurations[0]];
   Object.assign(run.configurations[0], { threadingMode });
   expect(() => validatePublishedDashboardData(source)).toThrow(/invalid.*configuration/i);
@@ -95,7 +99,7 @@ test.each([
 test('DATA-02 result extensions cannot replace authoritative catalog definitions', () => {
   const source = createSchema2Publication();
   const run = source.runs[0];
-  source.runs = [run]; source.index.runFiles = [`runs/${run.id}.json`];
+  source.runs = [run]; source.index.runFiles = [fixtureRunPath(run)];
   const result = run.configurations[0].results[0];
   const definition = source.catalogs[run.testCatalog].tests.find(({ id }) => id === result.testId);
   Object.assign(result, { id: 'shadow-id', suite: 'not-a-catalog-suite', name: 'shadow name', problem: { size: 'shadow' } });
@@ -107,7 +111,7 @@ test('DATA-02 result extensions cannot replace authoritative catalog definitions
 test('DATA-02 result suite extensions cannot hide a failed workload from coverage', () => {
   const source = createSchema2Publication();
   const run = source.runs.find(({ id }) => id === 'fictional-develop-08');
-  source.runs = [run]; source.index.runFiles = [`runs/${run.id}.json`];
+  source.runs = [run]; source.index.runFiles = [fixtureRunPath(run)];
   run.configurations[0].results.find(({ testId }) => testId === 'd').suite = 'not-a-catalog-suite';
   const { data } = validatePublishedDashboardData(source);
   const recent = selectRecentRuns(data, { targets: ['gfx1250'], modes: ['ST'], suites: data.suites });
@@ -117,7 +121,7 @@ test('DATA-02 result suite extensions cannot hide a failed workload from coverag
 test.each(['absent map', 'empty map', 'missing referenced envelope'])('DATA-04 rejects normalized reload with %s', (missing) => {
   const source = createSchema2Publication();
   source.runs = [source.runs[0]];
-  source.index.runFiles = source.runs.map(({ id }) => `runs/${id}.json`);
+  source.index.runFiles = source.runs.map(fixtureRunPath);
   const normalized = structuredClone(validatePublishedDashboardData(source).data);
   if (missing === 'absent map') delete normalized.catalogs;
   else if (missing === 'empty map') normalized.catalogs = {};
@@ -128,7 +132,7 @@ test.each(['absent map', 'empty map', 'missing referenced envelope'])('DATA-04 r
 test('DATA-04 missing catalogs cannot conceal omitted required normalized workloads', () => {
   const source = createSchema2Publication();
   source.runs = [source.runs[0]];
-  source.index.runFiles = source.runs.map(({ id }) => `runs/${id}.json`);
+  source.index.runFiles = source.runs.map(fixtureRunPath);
   const normalized = structuredClone(validatePublishedDashboardData(source).data);
   delete normalized.catalogs;
   normalized.allRuns[0].tests = normalized.allRuns[0].tests.filter(({ logicalTestId }) => logicalTestId !== 'c');
@@ -146,7 +150,7 @@ test('DATA-04 normalized JSON round trips retain authoritative catalog membershi
 test.each(['publication', 'normalized reload'])('DATA-06 rejects array source.commit SHA via %s', (entrypoint) => {
   const source = createSchema2Publication();
   const run = source.runs.find(({ id }) => id === 'fictional-branch-01');
-  source.runs = [run]; source.index.runFiles = [`runs/${run.id}.json`];
+  source.runs = [run]; source.index.runFiles = [fixtureRunPath(run)];
   const input = entrypoint === 'publication' ? source
     : JSON.parse(JSON.stringify(validatePublishedDashboardData(source).data));
   const identity = entrypoint === 'publication' ? run.source : input.allRuns[0].provenance;
@@ -159,7 +163,7 @@ test.each(['publication', 'normalized reload'])('DATA-06 rejects array source.co
 test.each(['publication', 'normalized reload'])('DATA-06 rejects array source.base.commit SHA via %s', (entrypoint) => {
   const source = createSchema2Publication();
   const run = source.runs.find(({ id }) => id === 'fictional-branch-01');
-  source.runs = [run]; source.index.runFiles = [`runs/${run.id}.json`];
+  source.runs = [run]; source.index.runFiles = [fixtureRunPath(run)];
   const input = entrypoint === 'publication' ? source
     : JSON.parse(JSON.stringify(validatePublishedDashboardData(source).data));
   const base = entrypoint === 'publication' ? run.source.base : input.allRuns[0].sourceBase;
@@ -171,7 +175,7 @@ test.each(['publication', 'normalized reload'])('DATA-06 rejects array source.ba
 test.each(['publication', 'normalized reload'])('DATA-06 preserves primitive full SHAs for branch search and exact base via %s', (entrypoint) => {
   const source = createSchema2Publication();
   source.runs = source.runs.filter(({ id }) => ['fictional-branch-01', 'fictional-develop-20', 'fictional-develop-21'].includes(id));
-  source.index.runFiles = source.runs.map(({ id }) => `runs/${id}.json`);
+  source.index.runFiles = source.runs.map(fixtureRunPath);
   const branch = source.runs.find(({ id }) => id === 'fictional-branch-01');
   branch.source.commit = branch.source.commit.toUpperCase();
   const normalized = validatePublishedDashboardData(source).data;

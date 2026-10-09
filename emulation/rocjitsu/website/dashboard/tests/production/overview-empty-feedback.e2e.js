@@ -4,7 +4,9 @@ import { installPublication } from '../e2e/helpers/dashboard.js';
 import { PUBLISHED_DATA_BASE_URL } from '../../scripts/dashboard-data-source.mjs';
 
 test('empty production dashboard suppresses migration detail and makes all four icons gray', async ({ page }) => {
-  await page.route('https://raw.githubusercontent.com/ROCm/rocm-systems/**', (route) => route.fulfill({ json: { schemaVersion: 1 } }));
+  const publication = createSchema2Publication();
+  publication.runs[0].schemaVersion = 99;
+  await installPublication(page, { publication, prefix: PUBLISHED_DATA_BASE_URL });
   await page.goto('/');
   const banner = page.getByTestId('dashboard-data-error');
   await expect(banner).toContainText('No available test data');

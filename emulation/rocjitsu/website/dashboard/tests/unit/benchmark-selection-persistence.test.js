@@ -1,3 +1,4 @@
+import { fixtureRunPath } from '../fixtures/runPath.js';
 import { act, Children, createElement, isValidElement, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -9,7 +10,7 @@ import { validatePublishedDashboardData } from '../../src/data/dashboardValidati
 import { createSchema2Publication } from '../fixtures/schema2Dataset.js';
 
 const loader = vi.hoisted(() => ({ requests: [] }));
-vi.mock('../../src/data/publishedDataUrls.js', () => ({ resolvePublishedDataUrls: () => ({ metadataUrl: 'https://example.test/data/metadata.json', indexUrl: 'https://example.test/data/index.json' }) }));
+vi.mock('../../src/data/publishedDataUrls.js', () => ({ resolvePublishedDataUrls: () => ({ indexUrl: 'https://example.test/data/index.json' }) }));
 vi.mock('../../src/data/dashboardData.js', async (original) => ({
   ...(await original()),
   loadDashboardDataFiles: (options) => new Promise((resolve, reject) => loader.requests.push({ options, resolve, reject })),
@@ -131,7 +132,7 @@ it.each(['removed', 'empty', 'unavailable'])('UI-004 retains %s workload choice 
     expected = [retained.id];
     const publication = createSchema2Publication();
     publication.runs = publication.runs.filter((run) => run.testCatalog !== 'test-catalogs/fictional-old.json');
-    publication.index.runFiles = publication.runs.map(({ id }) => `runs/${id}.json`);
+    publication.index.runFiles = publication.runs.map(fixtureRunPath);
     nextData = validatePublishedDashboardData(publication).data;
     expect(nextData.testCatalog.some((test) => test.id === retained.id)).toBe(false);
   }

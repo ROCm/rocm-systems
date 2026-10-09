@@ -1,3 +1,4 @@
+import { fixtureRunPath } from '../fixtures/runPath.js';
 import { expect, test } from '@playwright/test';
 import { createSchema2Publication } from '../fixtures/schema2Dataset.js';
 import { formatDuration } from '../../src/utils/formatters.js';
@@ -92,7 +93,7 @@ test('branch-only publications keep comparison filters usable and long linked id
   const [candidate, baseline] = publication.runs;
   candidate.id = `fictional-candidate-${'x'.repeat(220)}`;
   baseline.id = `fictional-baseline-${'y'.repeat(220)}`;
-  publication.index.runFiles = publication.runs.map((run) => `runs/${run.id}.json`);
+  publication.index.runFiles = publication.runs.map(fixtureRunPath);
   // Valid fictional HTTP publication, with no develop attempts or disk fixture.
   await installPublication(page, { publication });
   const query = new URLSearchParams({ view: 'compare', compareCandidate: candidate.id, compareBaseline: baseline.id, targets: 'gfx1250', modes: 'ST' });

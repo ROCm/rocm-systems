@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, expect, it, vi } from 'vitest';
 import App from '../../src/App.jsx';
 
-vi.mock('../../src/data/publishedDataUrls.js', () => ({ resolvePublishedDataUrls: () => ({ metadataUrl: 'https://example.test/data/metadata.json', indexUrl: 'https://example.test/data/index.json' }) }));
+vi.mock('../../src/data/publishedDataUrls.js', () => ({ resolvePublishedDataUrls: () => ({ indexUrl: 'https://example.test/data/index.json' }) }));
 vi.mock('../../src/components/views/BranchRunsView.jsx', () => ({ default: () => 'branch-surface-without-published-data' }));
 afterEach(() => vi.unstubAllGlobals());
 it('renders a usable shell when browser storage is denied', () => {

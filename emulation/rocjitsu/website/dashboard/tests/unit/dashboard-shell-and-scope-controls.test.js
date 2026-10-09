@@ -1,3 +1,4 @@
+import { fixtureRunPath } from '../fixtures/runPath.js';
 import { Children, createElement, isValidElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ThemeProvider } from '@mui/material';
@@ -19,7 +20,7 @@ it.each([
 ])('UI-003 gates %s scope using its own published runs (loading=%s)', (tab, loading, disabled) => {
   const publication = createSchema2Publication();
   publication.runs = publication.runs.filter(({ source }) => source.branch !== 'develop');
-  publication.index.runFiles = publication.runs.map(({ id }) => `runs/${id}.json`);
+  publication.index.runFiles = publication.runs.map(fixtureRunPath);
   const branchOnly = validatePublishedDashboardData(publication).data;
   expect(branchOnly.runs).toHaveLength(0);
   expect(branchOnly.allRuns).toHaveLength(20);
@@ -81,7 +82,7 @@ describe('v10 publication header', () => {
   it('executes reload/theme callbacks and exports the unmodified raw JSON envelope', async () => {
     const onReloadData = vi.fn();
     const onToggleMode = vi.fn();
-    const raw = { metadata: { schemaVersion: 2, isBeta: true }, runs: [{ id: 'unit-attempt' }] };
+    const raw = { index: { generatedAt: '2026-10-05T12:00:00Z', runFiles: ['runs/default-branch/unit-attempt.json'] }, runs: [{ schemaVersion: 2, id: 'unit-attempt' }] };
     const anchor = { click: vi.fn() };
     const createObjectURL = vi.fn(() => 'blob:unit-export');
     const revokeObjectURL = vi.fn();

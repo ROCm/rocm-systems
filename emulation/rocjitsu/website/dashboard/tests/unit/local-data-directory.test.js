@@ -118,10 +118,11 @@ function request(middleware, url) {
 test('serves JSON from the mounted /data/ path and blocks escapes', async () => {
   const middleware = createDashboardDataMiddleware(fixtureDataDirectory);
 
-  const metadata = await request(middleware, '/data/metadata.json');
-  expect(metadata.status).toBe(200);
-  expect(metadata.headers['Content-Type']).toMatch(/application\/json/);
-  expect(JSON.parse(metadata.body.toString())).toMatchObject({ schemaVersion: 2 });
+  const index = await request(middleware, '/data/index.json');
+  expect(index.status).toBe(200);
+  expect(index.headers['Content-Type']).toMatch(/application\/json/);
+  expect(JSON.parse(index.body.toString())).not.toHaveProperty('schemaVersion');
+  expect(JSON.parse(index.body.toString()).runFiles[0]).toBe('runs/default-branch/fictional-develop-00.json');
 
   const escaped = await request(middleware, '/data/../README.md');
   expect(escaped.status).toBe(400);

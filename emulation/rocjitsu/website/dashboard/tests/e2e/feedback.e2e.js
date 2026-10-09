@@ -129,7 +129,7 @@ test('feedback: static trend explanation, connected missing slots, blue commit l
   const publication = createSchema2Publication();
   const source = publication.runs.find((run) => run.id === runId).source;
   const commit = row.locator('td').first().getByRole('link');
-  await expect(commit).toHaveAttribute('href', `${source.repository ?? publication.metadata.repository}/commit/${source.commit}`);
+  await expect(commit).toHaveAttribute('href', `${source.repository ?? 'https://github.com/ROCm/rocm-systems'}/commit/${source.commit}`);
   await expect(commit).toHaveAttribute('target', '_blank');
   await expect(commit).toHaveAttribute('rel', /noopener/);
   await expect(commit).toHaveAttribute('rel', /noreferrer/);

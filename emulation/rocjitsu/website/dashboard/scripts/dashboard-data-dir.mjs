@@ -10,8 +10,7 @@ import {
 import path from 'node:path';
 
 function isDashboardDataDirectory(directory) {
-  return existsSync(path.join(directory, 'metadata.json'))
-    && existsSync(path.join(directory, 'index.json'));
+  return existsSync(path.join(directory, 'index.json'));
 }
 
 export function resolveDashboardDataDirectory(input) {
@@ -27,7 +26,7 @@ export function resolveDashboardDataDirectory(input) {
   if (isDashboardDataDirectory(resolved)) return resolved;
   if (isDashboardDataDirectory(nested)) return nested;
   throw new Error(
-    `Expected a dashboard data directory with metadata.json and index.json: ${resolved}`,
+    `Expected a dashboard data directory with index.json: ${resolved}`,
   );
 }
 

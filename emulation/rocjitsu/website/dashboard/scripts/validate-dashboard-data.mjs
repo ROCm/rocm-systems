@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { isExcludedPluginRun } from '../src/data/runSchema.js';
 import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -25,10 +26,9 @@ async function readJson(file, label, root) {
 
 export async function validateDashboardDataDirectory(directory) {
   const root = await realpath(path.resolve(directory));
-  const metadata = await readJson(path.join(root, 'metadata.json'), 'dashboard metadata', root);
   const index = await readJson(path.join(root, 'index.json'), 'dashboard data index', root);
 
-  validatePublishedManifest(metadata, index);
+  validatePublishedManifest(index);
 
   const runResults = await Promise.all(index.runFiles.map(async (runFile) => {
     if (typeof runFile !== 'string' || !RUN_FILE_PATTERN.test(runFile)) {
@@ -45,6 +45,7 @@ export async function validateDashboardDataDirectory(directory) {
   }));
 
   const catalogPaths = [...new Set(runResults
+    .filter((result) => !isExcludedPluginRun(result.run))
     .map((result) => result.run?.testCatalog)
     .filter((catalogPath) => (
       typeof catalogPath === 'string' && CATALOG_FILE_PATTERN.test(catalogPath)
@@ -62,7 +63,6 @@ export async function validateDashboardDataDirectory(directory) {
   }));
 
   const result = validatePublishedDashboardData({
-    metadata,
     index,
     runs: runResults.map(({ run }) => run),
     runErrors: runResults.map(({ error }) => error),

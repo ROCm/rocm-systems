@@ -3,9 +3,9 @@ import { loadDashboardData, validatePublishedDashboardData, validatePublishedRes
 import { createSchema2Publication } from '../fixtures/schema2Dataset.js';
 
 const invalidCases = [
-  ['unsafe repository', (s) => { s.metadata.repository = 'javascript:alert(1)'; }, /repository URL/],
-  ['credential URL', (s) => { s.metadata.repository = 'https://name:secret@example.test/'; }, /repository URL/],
-  ['noncanonical branch metadata', (s) => { s.metadata.canonicalBranch = 'main'; }, /canonicalBranch/],
+  ['unsafe repository', (s) => { s.siteConfig = { repository: 'javascript:alert(1)', isBeta: true, canonicalBranch: 'develop' }; }, /repository URL/],
+  ['credential URL', (s) => { s.siteConfig = { repository: 'https://name:secret@example.test/', isBeta: true, canonicalBranch: 'develop' }; }, /repository URL/],
+  ['noncanonical site branch', (s) => { s.siteConfig = { repository: 'https://example.test/repo', isBeta: true, canonicalBranch: 'main' }; }, /canonicalBranch/],
   ['impossible calendar day', (s) => { s.index.generatedAt = '2026-02-30T12:00:00Z'; }, /ISO/],
   ['unsafe run path', (s) => { s.index.runFiles[0] = 'runs/../../escape.json'; }, /filename/],
   ['duplicate file', (s) => { s.index.runFiles[1] = s.index.runFiles[0]; }, /Duplicate/],

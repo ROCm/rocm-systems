@@ -1,3 +1,4 @@
+import { fixtureRunPath } from './runPath.js';
 // Fictional deterministic schema-2 measurements. Test/fixtures mode ONLY.
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -31,7 +32,7 @@ export function createSchema2Publication() {
     const testCatalog = `test-catalogs/fictional-${current ? 'current' : 'old'}.json`;
     const id = `fictional-develop-${String(index).padStart(2, '0')}`;
     return {
-      id, testCatalog,
+      schemaVersion: 2, id, testCatalog,
       source: { branch: 'develop', commit: sha(index + 1), committedAt: iso(index, 4), message: `FICTIONAL develop measurement ${index}` },
       execution: { completedAt: index === 21 ? '2026-10-05T10:00:00.000Z' : iso(index), trigger: index === 21 ? 'manual' : 'auto', machine: index < 16 ? 'fictional-node-a' : 'fictional-node-b' },
       environment: [{ key: 'sdk', label: 'Fictional SDK', value: index < 16 ? 'test-a' : 'test-b' }, { key: 'enabled', label: 'Feature enabled', value: true }, { key: 'cores', label: 'CPU cores', value: 32 }],
@@ -66,8 +67,7 @@ export function createSchema2Publication() {
   });
   const runs = [...canonical, ...branches];
   return {
-    metadata: { schemaVersion: 2, repository: 'https://github.com/ROCm/rocm-systems', isBeta: true, canonicalBranch: 'develop' },
-    index: { generatedAt: '2026-10-05T12:00:00.000Z', runFiles: runs.map(({ id }) => `runs/${id}.json`) },
+    index: { generatedAt: '2026-10-05T12:00:00.000Z', runFiles: runs.map(fixtureRunPath) },
     catalogs, runs,
   };
 }
@@ -77,8 +77,8 @@ export async function writeSchema2FixtureDirectory(directory) {
   await mkdir(directory, { recursive: true });
   // This function deliberately targets test data only; never point it at published data.
   for (const entry of await readdir(directory)) await rm(path.join(directory, entry), { recursive: true, force: true });
-  const files = { 'metadata.json': publication.metadata, 'index.json': publication.index, ...publication.catalogs,
-    ...Object.fromEntries(publication.runs.map((run) => [`runs/${run.id}.json`, run])), };
+  const files = { 'index.json': publication.index, ...publication.catalogs,
+    ...Object.fromEntries(publication.runs.map((run, index) => [publication.index.runFiles[index], run])), };
   for (const [name, value] of Object.entries(files)) {
     await mkdir(path.dirname(path.join(directory, name)), { recursive: true });
     await writeFile(path.join(directory, name), `${JSON.stringify(value, null, 2)}\n`);

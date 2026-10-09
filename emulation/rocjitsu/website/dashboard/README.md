@@ -7,13 +7,15 @@ the `gh-pages-rocjitsu branch` in the `ROCm/rocm-systems` repository.
 
 **Live website:** [RocJitsu Performance Dashboard](https://rocm.github.io/rocm-systems/rocjitsu-dashboard/)
 
-The consumer accepts **schema 2 only**, with explicitly declared ST/MT
-`configurations[].threadingMode` values. Schema-1 data requires migration and is
-not inferred or adapted. The local fixtures are fictional test input, not
+New runs use **schema 2**, with explicitly declared ST/MT
+`configurations[].threadingMode` values. The website explicitly migrates legacy
+schema-1 Vanilla target groups to MT and excludes non-Vanilla plugin files.
+Other incompatible measurements fail the load instead of being silently skipped. The local fixtures are fictional test input, not
 performance measurements; passing fixture tests does not verify a live publication. See the
 [schema-2 data contract](docs/website-data-contract.md) for fields, normalization,
 branch-reference rules, local processing and future publisher acceptance. This
-package does not implement that producer or publisher.
+package includes the prepare/publish staging scripts under `scripts/dashboard-data/`;
+benchmark execution and deployment remain separate responsibilities.
 
 ## Quick start: preview with dummy data
 
@@ -33,9 +35,21 @@ fixture preview always uses port 4174; the production preview uses port 4173.
 
 The production build writes application files to `dist/` without dummy data and loads
 JSON from the [`gh-pages-rocjitsu` branch](https://github.com/ROCm/rocm-systems/tree/gh-pages-rocjitsu/rocjitsu-dashboard/data).
-The data directory must contain `metadata.json`, `index.json`, and all run and catalog
-resources referenced by the publication. An empty publication with no indexed runs
-does not require `test-catalogs/` or `runs/` directories.
+The data directory must contain `index.json` with `generatedAt`, `runFiles`,
+and the referenced run/catalog resources. New runs declare numeric
+`schemaVersion: 2` individually and live in `runs/default-branch/` (develop) or
+flat `runs/side-branches/`. Indexes and catalogs carry no schema version. An empty
+publication with no indexed runs does not require `test-catalogs/` or `runs/`
+directories.
+
+Site settings and the target run schema version come from source-controlled
+`src/config/metadata.json`, imported by `src/config/siteConfig.js` and bundled in
+production, fixture and local-data builds. Changing settings requires rebuilding
+the website; publication-side legacy `metadata.json` is ignored, not automatically deleted.
+See the [rollout procedure](docs/data-generation-guide.md#5-bundled-site-config-rollout)
+before publishing the new website against existing data. No live deployment is
+performed by this refactor.
+
 Before any future data publication, validate the complete staged data directory:
 
 ```bash
@@ -70,6 +84,7 @@ for GitHub App secrets, permissions, and Pages configuration.
 | `index.html`, `src/main.jsx` | Browser entry points |
 | `src/components/`, `src/hooks/` | Views, shared components, interaction state |
 | `src/data/` | Data loading, validation, selectors, comparison logic |
+| `src/config/metadata.json`, `src/config/siteConfig.js` | Bundled target run schema, repository URL, Beta flag and canonical branch |
 | `src/theme/`, `src/utils/`, `src/index.css` | Theme, chart/display helpers, styles |
 | `package.json`, `package-lock.json` | Commands and reproducible dependency installation |
 | `*.config.js` | Vite, ESLint, Vitest, and Playwright configuration |
