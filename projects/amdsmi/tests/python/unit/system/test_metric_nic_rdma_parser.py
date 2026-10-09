@@ -110,7 +110,3 @@ class TestMetricNicRdmaParser(unittest.TestCase):
         with mock.patch.object(self.parser, "exit", side_effect=SystemExit(2)):
             with self.assertRaises(SystemExit):
                 self._parse("--rdma", "--extended")
-
-
-if __name__ == "__main__":
-    unittest.main()

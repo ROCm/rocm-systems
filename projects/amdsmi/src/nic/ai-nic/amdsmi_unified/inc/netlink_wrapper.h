@@ -14,9 +14,8 @@
 #include <netlink/msg.h>
 #include <netlink/netlink.h>
 
+#include <cstdint>
 #include <functional>
-#include <memory>
-#include <optional>
 #include <string>
 #include <vector>
 

@@ -12,16 +12,16 @@
 
 #include <cerrno>
 #include <cstring>
+#include <utility>
 
 namespace amd::nic::netlink {
 
-namespace transport = ::amd::smi::nic::transport;
-
+namespace {
 template <typename T>
 struct QueryContext {
   transport::Result<T>* result;
-  std::string iface;
 };
+}  // namespace
 
 EthtoolNetlinkClient::EthtoolNetlinkClient() : client_(), family_id_(-1), initialized_(false) {}
 
@@ -130,14 +130,14 @@ transport::Result<transport::LinkSettings> EthtoolNetlinkClient::get_link_settin
     return result;
   }
 
-  QueryContext<transport::LinkSettings> ctx{&result, iface};
+  QueryContext<transport::LinkSettings> ctx{&result};
 
   auto build_fn = [this, &iface](NLMessage& msg) -> int {
     return build_header(msg, iface, ETHTOOL_A_LINKMODES_HEADER);
   };
 
-  int ret = client_.query(family_id_, ETHTOOL_MSG_LINKMODES_GET, 1, build_fn, link_settings_handler,
-                          &ctx);
+  int ret = client_.query(family_id_, ETHTOOL_MSG_LINKMODES_GET, ETHTOOL_GENL_VERSION, build_fn,
+                          link_settings_handler, &ctx);
 
   if ((ret < 0) && !result.success) {
     result.error_code = -ret;
@@ -197,13 +197,14 @@ transport::Result<transport::PauseParams> EthtoolNetlinkClient::get_pause_params
     return result;
   }
 
-  QueryContext<transport::PauseParams> ctx{&result, iface};
+  QueryContext<transport::PauseParams> ctx{&result};
 
   auto build_fn = [this, &iface](NLMessage& msg) -> int {
     return build_header(msg, iface, ETHTOOL_A_PAUSE_HEADER);
   };
 
-  int ret = client_.query(family_id_, ETHTOOL_MSG_PAUSE_GET, 1, build_fn, pause_handler, &ctx);
+  int ret = client_.query(family_id_, ETHTOOL_MSG_PAUSE_GET, ETHTOOL_GENL_VERSION, build_fn,
+                          pause_handler, &ctx);
 
   if ((ret < 0) && !result.success) {
     result.error_code = -ret;
@@ -287,7 +288,7 @@ static int fec_stats_handler(struct nl_msg* msg, void* arg) {
   add_stat(ETHTOOL_A_FEC_STAT_CORR_BITS, "corrected_bits");
 
   ctx->result->success = true;
-  ctx->result->value = stats;
+  ctx->result->value = std::move(stats);
   ctx->result->error_code = 0;
 
   return NL_OK;
@@ -302,13 +303,14 @@ transport::Result<transport::FecStatistics_t> EthtoolNetlinkClient::get_fec_stat
     return result;
   }
 
-  QueryContext<transport::FecStatistics_t> ctx{&result, iface};
+  QueryContext<transport::FecStatistics_t> ctx{&result};
 
   auto build_fn = [this, &iface](NLMessage& msg) -> int {
     return build_header(msg, iface, ETHTOOL_A_FEC_HEADER, ETHTOOL_FLAG_STATS);
   };
 
-  int ret = client_.query(family_id_, ETHTOOL_MSG_FEC_GET, 1, build_fn, fec_stats_handler, &ctx);
+  int ret = client_.query(family_id_, ETHTOOL_MSG_FEC_GET, ETHTOOL_GENL_VERSION, build_fn,
+                          fec_stats_handler, &ctx);
 
   if ((ret < 0) && !result.success) {
     result.error_code = -ret;

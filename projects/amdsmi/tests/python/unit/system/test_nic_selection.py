@@ -108,7 +108,3 @@ class TestNicSelection(unittest.TestCase):
 
     def test_first_failure_stops_the_selection(self):
         self.assertEqual(self._select(["1", "9", "2"]), (False, "9"))
-
-
-if __name__ == "__main__":
-    unittest.main()

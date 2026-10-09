@@ -18,6 +18,8 @@
 
 namespace amd::smi::nic::transport {
 
+namespace {
+
 /**
  * Ethtool netlink transport backend (kernel 5.6+). Reports unavailable if the
  * client fails to initialize; driver info, statistics, and permanent address
@@ -25,7 +27,7 @@ namespace amd::smi::nic::transport {
  */
 class NetlinkBackend : public NicTransport {
  public:
-  NetlinkBackend() : client_(), initialized_(false) { initialized_ = (client_.init() == 0); }
+  NetlinkBackend() : initialized_(client_.init() == 0) {}
 
   ~NetlinkBackend() override = default;
 
@@ -75,12 +77,8 @@ class NetlinkBackend : public NicTransport {
 
  private:
   ::amd::nic::netlink::EthtoolNetlinkClient client_;
-  bool initialized_;
+  const bool initialized_;
 };
-
-namespace ioctl_internal {
-extern std::shared_ptr<NicTransport> create_ioctl_backend();
-}
 
 /**
  * Prefers netlink for the operations it supports and falls back to ioctl for
@@ -153,6 +151,8 @@ class AutoBackend : public NicTransport {
   std::unique_ptr<NetlinkBackend> netlink_backend_;
   std::shared_ptr<NicTransport> ioctl_backend_;
 };
+
+}  // namespace
 
 namespace internal {
 

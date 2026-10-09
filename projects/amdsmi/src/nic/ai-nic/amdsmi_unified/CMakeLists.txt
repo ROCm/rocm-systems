@@ -89,7 +89,9 @@ target_include_directories(amdsminic PRIVATE "${NIC_SOURCE_DIR}/vendors")
 if(LIBNL3_FOUND)
     target_compile_definitions(amdsminic PRIVATE HAVE_LIBNL3)
     target_include_directories(amdsminic PRIVATE ${LIBNL3_INCLUDE_DIRS})
-    target_link_libraries(amdsminic PRIVATE ${LIBNL3_LIBRARIES})
+    # Absolute paths: bare -lnl-3 names resolve to the system libnl and load it next to the
+    # bundled one the rest of the link uses, which crashes at startup (see src/ualoe_lib).
+    target_link_libraries(amdsminic PRIVATE ${LIBNL3_LINK_LIBRARIES})
 endif()
 
 target_include_directories(

@@ -112,7 +112,3 @@ class TestNicRdmaPortStatistics(unittest.TestCase):
     def test_non_handle_is_rejected(self):
         with self.assertRaises(exceptions.AmdSmiParameterException):
             iface.amdsmi_get_nic_rdma_port_statistics("not-a-handle", 0)
-
-
-if __name__ == "__main__":
-    unittest.main()

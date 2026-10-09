@@ -33,7 +33,7 @@ void SmiNicSystem::register_subsystem(std::unique_ptr<SmiNicSubsystem> subsystem
   subsystems_.push_back(std::move(subsystem));
 }
 
-bool SmiNicSystem::has_interface(const std::string& iface) {
+bool SmiNicSystem::has_interface(const std::string& iface) const {
   std::error_code ec;
   return fs::exists(fs::path(net_path_) / fs::path(iface).string(), ec);
 }

@@ -23,8 +23,15 @@ import types
 import unittest
 from unittest import mock
 
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-_MODULE_PATH = os.path.join(_REPO_ROOT, "amdsmi_cli", "subcommands", "list_devices.py")
+from common.common import amdsmi_path, cli_search_order, find_cli_dir
+
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
+_MODULE_PATH = os.path.join(_CLI_DIR, "subcommands", "list_devices.py") if _CLI_DIR else None
+
+if not _MODULE_PATH or not os.path.isfile(_MODULE_PATH):
+    raise unittest.SkipTest(
+        f"amd-smi CLI list_devices.py not found (looked in {_CLI_DIR or amdsmi_path})"
+    )
 
 
 def _load_list_devices():
@@ -206,7 +213,3 @@ class TestListNicVpdHint(unittest.TestCase):
         # A note on stderr is harmless, but JSON/CSV consumers get no prose.
         err = self._run_list_ainic(_summary("N/A", "N/A", "N/A"), euid=1000, human=False)
         self.assertEqual(err, "")
-
-
-if __name__ == "__main__":
-    unittest.main()

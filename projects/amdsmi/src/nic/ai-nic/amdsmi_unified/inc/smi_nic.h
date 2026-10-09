@@ -13,6 +13,7 @@
 
 #include "smi_nic_stats.h"
 #include "smi_nic_transport.h"
+#include "smi_nic_vpd.h"
 
 /**
  * @brief Convert BDF string format to uint64_t
@@ -254,6 +255,12 @@ class SmiNic {
   std::string sysfs_bus_path_;
   std::string mgmt_bdf_;
   std::vector<SmiNicPort> ports_;
+
+ private:
+  // The four identity accessors answer from one VPD read. add_nic_port drops it, since a port's
+  // VPD fills in what the NIC's own lacks. Not thread-safe: callers hold the context mutex.
+  const amd::smi::nic::vpd::VpdFields& identity_vpd() const;
+  mutable std::optional<amd::smi::nic::vpd::VpdFields> identity_vpd_cache_;
 };
 
 class SmiNicPensando : public SmiNic {

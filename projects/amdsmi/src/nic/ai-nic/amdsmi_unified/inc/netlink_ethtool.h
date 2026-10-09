@@ -33,8 +33,8 @@ class EthtoolNetlinkClient {
 
   EthtoolNetlinkClient(const EthtoolNetlinkClient&) = delete;
   EthtoolNetlinkClient& operator=(const EthtoolNetlinkClient&) = delete;
-  EthtoolNetlinkClient(EthtoolNetlinkClient&&) = default;
-  EthtoolNetlinkClient& operator=(EthtoolNetlinkClient&&) = default;
+  EthtoolNetlinkClient(EthtoolNetlinkClient&&) = delete;
+  EthtoolNetlinkClient& operator=(EthtoolNetlinkClient&&) = delete;
 
   // Connects the socket and resolves the ethtool family. Returns 0 or -errno.
   int init();
