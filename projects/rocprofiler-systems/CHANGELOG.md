@@ -12,6 +12,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   the profiler output. Enable collection with `ROCPROFSYS_USE_HIPFILE` and select metrics with
   `ROCPROFSYS_HIPFILE_METRICS`. See
   [hipFile Infinity Storage I/O telemetry](./docs/how-to/hipfile-telemetry.rst).
+- Agent skills for choosing a profiling preset, discovering configuration options, and
+  instrumenting binaries are now installed in `share/rocprofiler-systems/skills`. Run the
+  bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
+  agent's personal skills folder.
 
 ### Resolved issues
 
