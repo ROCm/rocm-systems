@@ -52,6 +52,8 @@ HBM_BOUND = 0.70  # achieved/peak DRAM bandwidth at which a kernel is memory-bou
 OCCUPANCY_LOW = 25.0  # OccupancyPercent below this cannot hide memory latency
 VALU_HEAVY = 70.0  # VALUBusy at or above this is a compute-bound signature
 MFMA_HEAVY = 50.0  # MfmaUtil at or above this is a matrix-core-bound signature
+# PerfXpert memory_hierarchy.yaml bank_conflict_warn_pct; small conflict rates are noise.
+LDS_CONFLICT_WARN = 10.0
 
 # The widest per-lane global access is 16 bytes (dwordx4), so one fully
 # coalesced wave instruction with no cache reuse moves at most
@@ -572,7 +574,7 @@ def derive(k: KernelStat, report: Report) -> Derived:
                 f"{unit}-bound; that work can overlap a saturated memory pipeline."
             )
     lds_conflict = k.mean("LDSBankConflict")
-    if lds_conflict and lds_conflict.mean > 0:
+    if lds_conflict and lds_conflict.mean >= LDS_CONFLICT_WARN:
         d.flags.append(
             f"LDSBankConflict {lds_conflict.mean:.1f}%: LDS accesses collide on banks; pad shared "
             "arrays (for example [N][N+1]) or swizzle indices."

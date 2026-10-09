@@ -183,7 +183,7 @@ class ReportTest(unittest.TestCase):
             [
                 (1, "k", "VALUBusy", 150.0, 1000),
                 (1, "k", "OccupancyPercent", 10.0, 1000),
-                (1, "k", "LDSBankConflict", 5.0, 1000),
+                (1, "k", "LDSBankConflict", 15.0, 1000),
             ],
         )
         report = analyze.build_report([self.dir / "run_results.db"], None)
@@ -335,6 +335,10 @@ class ReportTest(unittest.TestCase):
     def test_low_occupancy_alone_asks_for_more_data(self):
         flags = self.derive_flags([(1, "k", "OccupancyPercent", 10.0, DURATION_NS)])
         self.assertIn("and VALUBusy to tell whether that limits the kernel", flags)
+
+    def test_small_lds_bank_conflict_rate_is_not_flagged(self):
+        flags = self.derive_flags([(1, "k", "LDSBankConflict", 5.0, DURATION_NS)])
+        self.assertNotIn("LDSBankConflict", flags)
 
     def test_kernel_filter(self):
         make_db(

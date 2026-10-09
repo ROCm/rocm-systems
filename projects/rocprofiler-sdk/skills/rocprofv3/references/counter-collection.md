@@ -17,8 +17,10 @@ Contents:
 13. [Troubleshooting](#troubleshooting)
 
 Sources: rocprofiler-sdk counter definitions (`share/rocprofiler-sdk/config.yaml`), the
-rocprofiler-sdk how-to guides, PerfXpert's `knowledge/pmc_limits.yaml` and
-`metric_thresholds.yaml`, and runs on an AMD Instinct MI325X (gfx942, rocprofv3 1.4.1).
+rocprofiler-sdk how-to guides, PerfXpert's knowledge base (`pmc_limits.yaml`,
+`rocprofv3_counter_limits.yaml`, `metric_thresholds.yaml`, `memory_hierarchy.yaml`,
+`vgpr_occupancy_tables.yaml`, `gpu_specs.yaml`), and runs on an AMD Instinct MI325X (gfx942,
+rocprofv3 1.4.1).
 
 ## Interpreting the counters
 
@@ -35,7 +37,7 @@ directories (it merges every `pass_N/`). Options: `--kernel NAME`, `--top N`,
 | `OccupancyPercent` under 25% (with low bandwidth and low VALU) | Latency-bound: too few waves | Reduce VGPR/AGPR or LDS per workgroup, launch more workgroups, check `__launch_bounds__`. Very short kernels read low because of ramp-up. |
 | `VALUBusy` high, low DRAM bandwidth | Compute-bound on vector ALU | Cut instruction count (strength reduction, fast intrinsics, lower precision) or use MFMA. |
 | `MfmaUtil` 50% or more | Matrix-core-bound | Lower precision formats or less matrix work. |
-| `LDSBankConflict` above 0 | LDS bank conflicts | Pad shared arrays (`[N][N+1]`) or swizzle indices. |
+| `LDSBankConflict` 10% or more | LDS bank conflicts | Pad shared arrays (`[N][N+1]`) or swizzle indices. |
 | Scratch above 0 | Register spills or stack arrays | Reduce register pressure, avoid dynamically indexed local arrays. |
 
 Caveats to state when relevant:
@@ -47,6 +49,17 @@ Caveats to state when relevant:
   Compare them between kernels, not against 100%.
 - Counters are aggregates over the whole dispatch. For which source line causes the problem, follow
   up with PC sampling or thread trace.
+
+Register use caps occupancy. On CDNA2 to CDNA4 (gfx90a, gfx942, gfx950) VGPRs and AGPRs share one
+512-entry file per SIMD lane, so add the kernel's VGPR and AGPR counts (both in the report) and
+read the waves per SIMD (the hardware maximum is 8, that is 32 per CU):
+
+| VGPR + AGPR per thread | 64 or fewer | 80 | 96 | 128 | 160 | 256 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Waves per SIMD | 8 | 6 | 5 | 4 | 3 | 2 |
+
+LDS per workgroup and the workgroup size cap occupancy the same way. If the register count is
+the cap and occupancy is the limiter, reduce live values or set `__launch_bounds__`.
 
 Report, per hot kernel: the limiter, the evidence (two or three numbers), the code change, and the
 expected effect. If the data is inconclusive, say which counter group to add.
@@ -116,9 +129,11 @@ Measured example on MI325X (16M floats): a coalesced copy showed 256 B per instr
   GRBM 2, GDS 4 counters. RDNA3.5 (gfx1151): SQ 8, TCP 4, SPI 6, GL1A/GL1C/GL2A/GL2C 4, TA 2,
   GRBM 2, CPC 2, GCEA 2.
 - Derived metrics expand to their raw inputs: `FETCH_SIZE` uses three TCC counters and
-  `WRITE_SIZE` two, so they never fit together. Keep each derived metric in a small group and
-  confirm with `rocprofv3-avail -d <gpu> pmc-check C1 C2 ...`. Use `C:device=1` to check a counter
-  on another GPU.
+  `WRITE_SIZE` two, which together exceed the TCC limit. Give each of them its own pass with no
+  other counters (the isolation rule PerfXpert's pass planner enforces); some combinations
+  pass `pmc-check` on gfx942, but isolation is safe on every architecture. Keep other derived
+  metrics in small groups and confirm with `rocprofv3-avail -d <gpu> pmc-check C1 C2 ...`. Use
+  `C:device=1` to check a counter on another GPU.
 - Counters with dimensions (for example per-channel `TCC_HIT[0:15]`) are collected as the sum.
   Bracket notation is not accepted; use JSON output for per-instance values.
 - Error 38, "Request exceeds the capabilities of the hardware to collect", means a group does

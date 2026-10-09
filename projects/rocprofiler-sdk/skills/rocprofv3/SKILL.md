@@ -125,8 +125,8 @@ python3 <this-skill-dir>/scripts/analyze_counters.py rocprof_pmc
   set the performance level to `STABLE_STD` first (`sudo amd-smi set --perf-level STABLE_STD`). On
   RDNA4 (gfx1200, gfx1201) also drop the `WRITE_SIZE` group: the counter is not defined there, so
   the report shows read bandwidth only.
-- `FETCH_SIZE` and `WRITE_SIZE` never fit in one group. A group that does not fit fails with
-  "Request exceeds the capabilities of the hardware"; split it.
+- Give `FETCH_SIZE` and `WRITE_SIZE` each their own group with no other counters, as above. A
+  group that does not fit fails with "Request exceeds the capabilities of the hardware"; split it.
 - The workload must be deterministic across runs. Otherwise use
   `--replay-mode kernel --kernel-replay-beta-enabled` (beta) to replay each dispatch in one run.
 - The script merges the `pass_N/` databases and reports L2 hit rate, DRAM bandwidth (and % of
