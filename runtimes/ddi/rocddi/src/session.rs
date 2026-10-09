@@ -9,7 +9,7 @@
 //! Creating a session does not activate a device or acquire a driver context.
 //! Device, memory, and queue owners live in their respective modules.
 
-use crate::device::Device;
+use crate::device::{Device, DeviceResources};
 use crate::driver::{self, DriverInstance};
 use crate::host_storage::{Allocator, Buffer, Shared};
 use crate::memory::{HostAllocation, VirtualAddress};
@@ -425,21 +425,13 @@ impl Session {
         })?;
         let driver_state = entry.driver.activate(endpoint)?;
         let endpoint = endpoint.clone();
-        // Only GPU devices need the shared copy-resource pool. Build it before
-        // publishing Device so allocation failure leaves no partial handle.
-        let copy_pool = endpoint
-            .gpu()
-            .map(|_| {
-                Shared::new(
-                    crate::gpu::CopyResourcePool::default(),
-                    driver_state.allocator(),
-                )
-            })
-            .transpose()?;
+        // Construct family-owned services before publishing the device so a
+        // metadata allocation failure cannot leave a partial public handle.
+        let resources = DeviceResources::for_activated(&endpoint, &driver_state)?;
         Ok(Device {
             driver_state,
             endpoint,
-            copy_pool,
+            resources,
         })
     }
 

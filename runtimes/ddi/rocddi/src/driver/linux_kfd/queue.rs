@@ -14,12 +14,12 @@ use std::sync::atomic::{Ordering, fence};
 
 use super::memory::{BufferKind, DeviceVm, KfdAllocation};
 use super::{errno, error, native_error, os_memory, sys, sysfs, uapi};
-use crate::memory::AllocationDesc;
-use crate::memory::DeviceAccess;
-use crate::queue::{
+use crate::device::gpu::queue::{
     QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority, QueueProducerMode,
     QueueRequest, QueueRingMemory, QueueScratch, QueueTransport, SdmaEngineSelection,
 };
+use crate::memory::AllocationDesc;
+use crate::memory::DeviceAccess;
 use crate::session::DriverContextLifetime;
 
 use crate::{Error, ErrorKind};

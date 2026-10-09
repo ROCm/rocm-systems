@@ -9,9 +9,6 @@
 //! subscribers that register after an operation observed it.
 //! Frontends own callback dispatch, error policy, and any worker threads.
 
-#[cfg(target_os = "linux")]
-pub(crate) mod linux;
-
 use crate::Error;
 use crate::device::Device;
 use crate::driver;

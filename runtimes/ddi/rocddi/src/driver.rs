@@ -36,14 +36,16 @@ pub(crate) use resources::{
     VirtualHostMappingState, VirtualMemoryState,
 };
 
+use crate::device::gpu::kernel_queue::{
+    KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait,
+};
+use crate::device::gpu::profiling::ClockCounters;
+use crate::device::gpu::queue::{QueueRequest, QueueScratch, QueueTransport};
 use crate::host_storage::{Allocator, Owned};
-use crate::kernel_queue::{KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait};
 use crate::memory::{
     AllocationInfo, DeviceAccess, HostRegistration, OwnedMemoryKind, VirtualAddressInfo,
     VirtualMemoryInfo,
 };
-use crate::profiling::ClockCounters;
-use crate::queue::{QueueRequest, QueueScratch, QueueTransport};
 use crate::session::DriverContextLifetime;
 use crate::topology::{Endpoint, GpuPresentation};
 use crate::{Error, ErrorKind};
@@ -213,7 +215,10 @@ pub(crate) trait UserQueueResource: CachedInfo<Info = QueueTransport> {
     fn check(&self) -> Result<(), Error>;
     fn progress(&self) -> Result<(u64, u64), Error>;
     fn inactivate(&mut self) -> Result<(), Error>;
-    fn set_priority(&mut self, priority: crate::queue::QueuePriority) -> Result<(), Error>;
+    fn set_priority(
+        &mut self,
+        priority: crate::device::gpu::queue::QueuePriority,
+    ) -> Result<(), Error>;
     fn set_cu_mask(&mut self, mask: &[u32]) -> Result<(), Error>;
     /// # Safety
     /// The command processor has stopped the queue. The caller retains the new

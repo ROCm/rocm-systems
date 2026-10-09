@@ -24,7 +24,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use rocddi::device::Device;
-use rocddi::gpu::queue::{
+use rocddi::device::gpu::queue::{
     QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority, QueueProducerMode,
     QueueRequest, QueueRingMemory, QueueScratch, QueueTransport, SdmaEngineSelection,
 };
@@ -158,7 +158,7 @@ impl QueueEventSignal {
 /// `teardown_started` makes destruction resumable: once native inactivation
 /// succeeds, a later retry proceeds directly to final queue destruction.
 pub(crate) struct Queue {
-    pub(crate) native: rocddi::gpu::queue::Queue,
+    pub(crate) native: rocddi::device::gpu::queue::Queue,
     _doorbell: Box<AmdSignal>,
     inactive_signal: Arc<QueueEventSignal>,
     event_alive: Arc<AtomicBool>,
@@ -203,7 +203,7 @@ fn stop_queue_event_worker(
 }
 
 fn destroy_native_queue(
-    native: &mut rocddi::gpu::queue::Queue,
+    native: &mut rocddi::device::gpu::queue::Queue,
     teardown_started: &mut bool,
 ) -> Result<(), rocddi::Error> {
     if !*teardown_started {
@@ -225,7 +225,7 @@ pub(crate) fn destroy_runtime_sdma_queue(queue: &mut SdmaQueue) -> Result<(), ro
 }
 
 fn abandon_unpublished_queue<D: 'static>(
-    native: rocddi::gpu::queue::Queue,
+    native: rocddi::device::gpu::queue::Queue,
     dependencies: D,
     status: Status,
 ) -> Status {
@@ -340,7 +340,7 @@ const _: () = assert!(std::mem::offset_of!(SdmaQueueControl, header) == SDMA_QUE
 
 /// One SDMA public handle borrowing the ring and indices of its native owner.
 pub(crate) struct SdmaQueue {
-    pub(crate) native: rocddi::gpu::queue::Queue,
+    pub(crate) native: rocddi::device::gpu::queue::Queue,
     _control: Box<SdmaQueueControl>,
     _doorbell: Box<AmdSignal>,
     agent: HsaAgent,

@@ -3,11 +3,11 @@
 
 //! Linux KFD signal-event interoperability.
 
+use crate::device::gpu::GpuDevice;
+use crate::device::gpu::queue::QueueErrorEvent;
 use crate::driver;
-use crate::gpu::GpuDevice;
 use crate::host_storage::Owned;
 use crate::memory::Allocation;
-use crate::queue::QueueErrorEvent;
 use crate::{Error, ErrorKind};
 
 /// KFD identity and mailbox slot assigned to one interrupt-capable signal.

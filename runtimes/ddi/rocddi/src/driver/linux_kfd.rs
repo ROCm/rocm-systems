@@ -21,13 +21,17 @@ use crate::os::linux::{
 };
 mod vmem;
 
+use crate::device::gpu::kernel_queue::{
+    KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait,
+};
+use crate::device::gpu::profiling::ClockCounters;
+use crate::device::gpu::queue::{QueuePriority, QueueRequest, QueueScratch, QueueTransport};
 use crate::driver::{
     AddressSpaceInfo, AllocationOperations, CachedInfo, Driver, EndpointSelector, GpuDriver,
     KernelQueueResource, UserQueueResource, VirtualMemoryOperations,
 };
 use crate::error::error;
 use crate::host_storage::{Allocator, Owned, Shared};
-use crate::kernel_queue::{KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait};
 use crate::memory::interop::linux::{
     AisFileOperation, AisFileResult, DmaBuf, KfdIpcMemoryHandle, KfdSvmAccess, KfdSvmAttribute,
     KfdSvmLocation,
@@ -37,8 +41,6 @@ use crate::memory::{
     MemoryKind, OwnedMemoryKind, VirtualAddressInfo, VirtualMemoryInfo,
 };
 use crate::os::native_error;
-use crate::profiling::ClockCounters;
-use crate::queue::{QueuePriority, QueueRequest, QueueScratch, QueueTransport};
 use crate::session::DriverContextLifetime;
 use crate::topology::{Endpoint, GpuPresentation};
 use crate::{Error, ErrorKind};

@@ -15,7 +15,7 @@ use std::sync::Arc;
 fn shared<T>(value: T) -> Shared<T> {
     Shared::new(value, Allocator::default()).unwrap()
 }
-use crate::queue::{QueueProducerMode, QueueRingMemory, SdmaEngineSelection};
+use crate::device::gpu::queue::{QueueProducerMode, QueueRingMemory, SdmaEngineSelection};
 use std::collections::{BTreeMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -1542,7 +1542,7 @@ fn native_create_result_controls_frontend_dependency_lifetime() {
         let fixture = Fixture::new(true);
         fixture.state.lock().unwrap().create_errno = Some(errno);
         let drops = Arc::new(AtomicUsize::new(0));
-        let result = crate::queue::retain_create_dependencies(
+        let result = crate::device::gpu::queue::retain_create_dependencies(
             || fixture.create(desc),
             ExternalBacking(drops.clone()),
         );
@@ -1553,7 +1553,7 @@ fn native_create_result_controls_frontend_dependency_lifetime() {
 
     let fixture = Fixture::new(true);
     let drops = Arc::new(AtomicUsize::new(0));
-    let (mut queue, dependency) = crate::queue::retain_create_dependencies(
+    let (mut queue, dependency) = crate::device::gpu::queue::retain_create_dependencies(
         || fixture.create(desc),
         ExternalBacking(drops.clone()),
     )
@@ -1580,7 +1580,7 @@ fn pre_create_scratch_failure_releases_new_external_backing() {
     let drops = Arc::new(AtomicUsize::new(0));
     let desc = descriptor(aql(QueueProducerMode::Single));
     for _ in 0..2 {
-        let error = crate::queue::retain_create_dependencies(
+        let error = crate::device::gpu::queue::retain_create_dependencies(
             || fixture.create(desc),
             ExternalBacking(drops.clone()),
         )
@@ -1605,7 +1605,7 @@ fn native_create_unwind_retains_external_backing() {
     let result = std::panic::catch_unwind({
         let dependency = ExternalBacking(drops.clone());
         move || {
-            let _ = crate::queue::retain_create_dependencies(
+            let _ = crate::device::gpu::queue::retain_create_dependencies(
                 || -> Result<(), Error> { panic!("injected native creation unwind") },
                 dependency,
             );
@@ -1637,10 +1637,11 @@ fn unpublished_native_rollback_retains_external_backing_on_failure() {
                 .push_back(errno::EIO);
         }
         let drops = Arc::new(AtomicUsize::new(0));
-        let result =
-            crate::queue::abandon_unpublished(queue, ExternalBacking(drops.clone()), |queue| {
-                queue.destroy()
-            });
+        let result = crate::device::gpu::queue::abandon_unpublished(
+            queue,
+            ExternalBacking(drops.clone()),
+            |queue| queue.destroy(),
+        );
         if destroy_fails {
             assert_eq!(result.unwrap_err().kind(), ErrorKind::Driver);
             assert_eq!(drops.load(Ordering::Acquire), 0);
@@ -1669,7 +1670,7 @@ fn unpublished_rollback_retains_both_owners_if_cleanup_unwinds() {
         let queue = DropProbe(drops.clone());
         let external = DropProbe(drops.clone());
         move || {
-            let _ = crate::queue::abandon_unpublished(queue, external, |_queue| {
+            let _ = crate::device::gpu::queue::abandon_unpublished(queue, external, |_queue| {
                 panic!("injected native cleanup unwind");
             });
         }

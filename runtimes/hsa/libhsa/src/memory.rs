@@ -31,7 +31,7 @@ use crate::platform::memory::{
     KfdSvmAttribute as SvmAttribute, KfdSvmLocation as SvmLocation,
 };
 use rocddi::device::Device;
-use rocddi::gpu::{CopyRect, GpuCopySequence, GpuCopyTimestamps};
+use rocddi::device::gpu::{CopyRect, GpuCopySequence, GpuCopyTimestamps};
 use rocddi::memory::{
     Allocation, DeviceAccess, HostMappingPolicy, MemoryKind, VirtualAddress, VirtualDeviceMapping,
     VirtualHostMapping, VirtualMemory,
@@ -4721,8 +4721,8 @@ impl CopyRouteFailure {
     }
 }
 
-impl From<rocddi::gpu::CopyFailure> for CopyRouteFailure {
-    fn from(failure: rocddi::gpu::CopyFailure) -> Self {
+impl From<rocddi::device::gpu::CopyFailure> for CopyRouteFailure {
+    fn from(failure: rocddi::device::gpu::CopyFailure) -> Self {
         Self {
             status: map_error(failure.error),
             operands_may_be_live: failure.operands_may_be_live,
@@ -5141,7 +5141,7 @@ fn resolve_sync_gpu_copy(
     }
 }
 
-fn copy_gpu(device: &Device) -> Result<rocddi::gpu::GpuDevice<'_>, CopyRouteFailure> {
+fn copy_gpu(device: &Device) -> Result<rocddi::device::gpu::GpuDevice<'_>, CopyRouteFailure> {
     device
         .gpu()
         .map_err(|error| CopyRouteFailure::retired(map_error(error)))

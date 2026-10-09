@@ -3,7 +3,7 @@
 
 //! Linux KFD and descriptor translation for the HSA frontend.
 
-pub(crate) use rocddi::gpu::event::linux as event;
+pub(crate) use rocddi::device::gpu::event::linux as event;
 pub(crate) use rocddi::memory::interop::linux as memory;
 use rocddi::topology::Endpoint;
 pub(crate) use rocddi::topology::platform::linux::host;

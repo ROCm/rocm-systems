@@ -16,17 +16,19 @@ use crate::Error;
 #[cfg(test)]
 use crate::ErrorKind;
 use crate::device::Device;
-use crate::host_storage::{Owned, Shared};
-use crate::kernel_queue::{
+use crate::device::gpu::kernel_queue::{
     DriverKernelQueue, KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait,
 };
+use crate::device::gpu::queue::{
+    DriverQueue, QueuePriority, QueueRequest, QueueScratch, QueueTransport,
+};
+use crate::host_storage::{Owned, Shared};
 use crate::memory::{
     Allocation, AllocationInfo, DeviceAccess, DriverAllocation, DriverVirtualAddress,
     DriverVirtualDeviceMapping, DriverVirtualHostMapping, DriverVirtualMemory, HostRegistration,
     MemoryKind, OwnedMemoryKind, VirtualAddressInfo, VirtualMapRequest, VirtualMemory,
     VirtualMemoryInfo, set_device_access_for,
 };
-use crate::queue::{DriverQueue, QueuePriority, QueueRequest, QueueScratch, QueueTransport};
 
 #[cfg(test)]
 fn unsupported_memory<T>() -> Result<T, Error> {

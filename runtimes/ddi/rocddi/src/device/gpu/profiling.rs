@@ -7,7 +7,7 @@
 //! registration state remains privately owned by the selected platform driver.
 
 use crate::Error;
-use crate::gpu::GpuDevice;
+use crate::device::gpu::GpuDevice;
 
 /// Correlated device and system clocks returned by the native driver.
 #[doc(hidden)]

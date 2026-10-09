@@ -14,9 +14,9 @@ use super::{
     AddressSpaceInfo, AllocationOperations, Driver, GpuDriver, KfdDriver, KfdEventSubscription,
     linux_kfd,
 };
-use crate::event::DeviceEvent;
+use crate::device::event::DeviceEvent;
+use crate::device::gpu::profiling::ClockCounters;
 use crate::host_storage::Shared;
-use crate::profiling::ClockCounters;
 use crate::session::DriverContextLifetime;
 use crate::topology::{Endpoint, GpuPresentation};
 use crate::{Error, ErrorKind};

@@ -7,7 +7,7 @@
 //! Linux process connection retains its exact render files through exit for
 //! later activation; secondary bindings are released with their session.
 use super::{drm, errno, error, native_error, os_file, os_memory, sys, sysfs, uapi};
-use crate::event::{
+use crate::device::event::{
     DeviceEvent, GpuHardwareException, GpuMemoryFault, GpuMemoryFaultCause, GpuResetCause,
     GpuResetScope,
 };
