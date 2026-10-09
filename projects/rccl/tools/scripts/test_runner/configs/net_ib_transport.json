@@ -71,7 +71,7 @@
       "num_nodes": 1,
       "num_gpus": 1,
       "timeout": 60,
-      "description": "NCCL_NET name resolution. Pure logic, single rank, no NIC/GPU required.",
+      "description": "NCCL_NET name resolution. Pure logic, single rank, no NIC required.",
       "tests": [
         {
           "name": "NetPlugin_Selection",
@@ -1040,7 +1040,7 @@
     },
     {
       "name": "NET - Plugin selection from NCCL_NET",
-      "description": "NCCL_NET name resolution guardrails: case-insensitive matching, the ROCM-IB alias, and no silent fallback to plain IB on an unknown name (single rank, no NIC/GPU required)",
+      "description": "NCCL_NET name resolution guardrails: case-insensitive matching, the ROCM-IB alias, and no silent fallback to plain IB on an unknown name (single rank, no NIC required)",
       "config": "net_plugin_selection",
       "enabled": true
     },

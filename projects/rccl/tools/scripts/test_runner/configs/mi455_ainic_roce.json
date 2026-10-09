@@ -201,7 +201,7 @@
       "num_nodes": 1,
       "num_gpus": 1,
       "timeout": 60,
-      "description": "NCCL_NET name resolution. Pure logic, single rank, no NIC/GPU required.",
+      "description": "NCCL_NET name resolution. Pure logic, single rank, no NIC required.",
       "tests": [
         {
           "name": "NetPlugin_Selection",
@@ -302,6 +302,11 @@
           "name": "NetIB_Init_PluginMatchesEnv",
           "description": "The plugin the fixture loaded is the one NCCL_NET names; inherited by the ib-cast and rocm-ib variants, which is where the strcmp mismatch used to go unnoticed",
           "test_filter": "NetIbMPITest.PluginMatchesNcclNetEnv"
+        },
+        {
+          "name": "NetIB_Init_DefaultPluginIsIbCastOnAinic",
+          "description": "With NCCL_NET unset the fixture picks IB-CAST, the AINIC default; skips in the variants that set NCCL_NET",
+          "test_filter": "NetIbMPITest.DefaultPluginIsIbCastOnAinic"
         }
       ]
     },
@@ -3628,7 +3633,7 @@
     },
     {
       "name": "NET - Plugin selection from NCCL_NET",
-      "description": "NCCL_NET name resolution guardrails: case-insensitive matching, the ROCM-IB alias, and no silent fallback to plain IB on an unknown name (single rank, no NIC/GPU required)",
+      "description": "NCCL_NET name resolution guardrails: case-insensitive matching, the ROCM-IB alias, and no silent fallback to plain IB on an unknown name (single rank, no NIC required)",
       "config": "net_plugin_selection",
       "enabled": true
     },
