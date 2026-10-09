@@ -7,9 +7,7 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_AIE_SECTION_H_
 #define HSA_RUNTIME_CORE_INC_AMD_AIE_SECTION_H_
 
-#include <atomic>
 #include <cstdint>
-#include <memory>
 #include <vector>
 
 #include "core/inc/amd_aie_elf.h"
@@ -111,7 +109,7 @@ struct AieKernelDescriptor {
   /// blob is immutable, so the handle is stable for the object's lifetime.
   uint32_t insts_bo_handle;
   /// @brief XDNA BO handle of the PDI blob, resolved once at load. PdiInsts only; FullElf kernels
-  /// keep theirs in @ref pdis.
+  /// keep theirs in @ref pdi_bo_handles.
   uint32_t pdi_bo_handle;
   /// @brief Kernel argument buffer size in bytes.
   uint32_t kernarg_size;
@@ -119,34 +117,20 @@ struct AieKernelDescriptor {
   /// checked it is at least 1 and no more than the agent has; dispatch sizes the hardware context
   /// to the most any kernel in it declares.
   uint32_t num_cols;
-  /// @brief Pristine control code, in host memory. FullElf only; empty for PdiInsts.
+  /// @brief Control code with the PDI addresses already in place, in host memory. FullElf only;
+  /// empty for PdiInsts.
   ///
-  /// The NPU never fetches this. It is only a memcpy source for the per-dispatch buffer the
-  /// driver allocates, so it needs neither device memory nor alignment.
+  /// The loader writes each PDI's device address into its sites at load; the argument sites keep
+  /// what the ELF shipped, since their patches are additive. The NPU never fetches this. It is
+  /// only a memcpy source for the per-dispatch buffer the driver allocates, so it needs neither
+  /// device memory nor alignment.
   std::vector<uint8_t> ctrl_code;
-  /// @brief A PDI a FullElf kernel loads.
-  struct Pdi {
-    /// @brief XDNA BO handle of the PDI, resolved once at load.
-    uint32_t bo_handle = 0;
-    /// @brief Byte offsets in the control code taking this PDI's device address.
-    ///
-    /// The loader leaves the sites holding whatever the ELF shipped: only the driver can turn a
-    /// BO handle into the address the NPU fetches from, so the driver writes it into each
-    /// dispatch's copy. Validated by the ELF parser as non-zero, 4-byte aligned and within the
-    /// control code.
-    std::vector<uint32_t> patch_offsets;
-    /// @brief The PDI's device address, resolved on first dispatch and cached.
-    ///
-    /// A BO's device address is fixed for its lifetime, so this is resolved once rather than per
-    /// dispatch. Mutable and atomic because the descriptor is shared across queues and reached
-    /// through a const pointer; concurrent resolvers race only to store the same value.
-    mutable std::atomic<uint64_t> dev_addr{0};
-  };
-  /// @brief The PDIs the control code loads, each placed once. FullElf only; empty otherwise.
-  /// Sized once at load: the atomics make the elements immovable.
-  std::unique_ptr<Pdi[]> pdis;
-  /// @brief Number of entries in @ref pdis.
-  uint32_t num_pdis = 0;
+  /// @brief XDNA BO handles of the PDIs the control code loads, each placed once. FullElf only;
+  /// empty otherwise.
+  ///
+  /// The control code reaches the PDIs only through the addresses written into it, so a dispatch
+  /// lists these for the driver to keep the PDIs resident.
+  std::vector<uint32_t> pdi_bo_handles;
   /// @brief Patch sites per argument the control code references; FullElf only, empty otherwise.
   ///
   /// Indexed by argument; the outer size is the argument count. Nested rather than flattened

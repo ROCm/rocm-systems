@@ -381,26 +381,6 @@ static hsa_status_t ResolveBOHandle(void* mem, const core::Agent& agent, uint32_
   return HSA_STATUS_SUCCESS;
 }
 
-/// @brief Queries the device address the NPU sees for @p bo_handle.
-///
-/// @param[in] fd driver file descriptor
-/// @param[in] bo_handle BO to query
-/// @param[out] dev_addr device address, or 0 if the BO has none. A BO shared with the host has
-/// none: the NPU walks the same page tables, so its host VA is already the address the hardware
-/// uses.
-static hsa_status_t GetBODevAddr(int fd, uint32_t bo_handle, uint64_t* dev_addr) {
-  amdxdna_drm_get_bo_info get_bo_info_args;
-  const hsa_status_t err = GetBOInfo(fd, bo_handle, &get_bo_info_args);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
-  }
-
-  *dev_addr = (get_bo_info_args.xdna_addr == AMDXDNA_INVALID_ADDR) ? 0 : get_bo_info_args.xdna_addr;
-  return HSA_STATUS_SUCCESS;
-}
-
-
-
 /// @brief Returns true if @p vaddr lies within the device heap mapping at @p heap_base.
 ///
 /// Dev heap BOs carve their VA out of the device heap and borrow its mapping, so DestroyBOHandle
@@ -1842,15 +1822,14 @@ static hsa_status_t BuildPdiInstsCommand(const hsa_amd_aie_kernel_dispatch_packe
 
 /// @brief Builds an ERT_START_NPU_PREEMPT_ELF command for a full-ELF packet.
 ///
-/// Copies the kernel's pristine control code into a fresh device buffer, patches this dispatch's
-/// PDI and argument addresses into the copy, and points the command at it. Every packet needs its
+/// Copies the kernel's control code into a fresh device buffer, patches this dispatch's argument
+/// addresses into the copy, and points the command at it. Every packet needs its
 /// own copy: @ref aie_elf::PatchShimDma48 adds to the buffer descriptor already in place, so
 /// patching a shared buffer would accumulate, and two packets of one kernel with different
 /// arguments would both run with whichever was patched last.
 ///
-/// The PDI addresses are patched here rather than by the loader because only the driver can turn
-/// a BO handle into an address the NPU fetches from. The PDI BOs are also listed so the driver
-/// keeps them resident for the dispatch.
+/// The loader has already written the PDI addresses into the control code; the PDI BOs are still
+/// listed so the driver keeps them resident for the dispatch.
 ///
 /// @param[in] fd driver file descriptor
 /// @param[in] heap_base device heap mapping base, for the control-code allocation
@@ -1898,31 +1877,9 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
   // Recorded before anything else can fail, so the caller's cleanup owns it from here on.
   ctrl_buffers->push_back(ctrl);
 
-  // Always start from the pristine control code, since the argument patches are additive.
+  // Always start from the descriptor's control code, since the argument patches are additive. The
+  // loader has already written the PDI addresses into it.
   std::memcpy(ctrl.ptr(), desc.ctrl_code.data(), desc.ctrl_code.size());
-
-  for (uint32_t p = 0; p < desc.num_pdis; ++p) {
-    const AieKernelDescriptor::Pdi& pdi = desc.pdis[p];
-    // A BO's device address is fixed for its lifetime, so it is resolved on the first dispatch
-    // and cached on the descriptor. Racing threads store the same value, which is harmless.
-    uint64_t pdi_dev_addr = pdi.dev_addr.load(std::memory_order_relaxed);
-    if (pdi_dev_addr == 0) {
-      err = GetBODevAddr(fd, pdi.bo_handle, &pdi_dev_addr);
-      if (err != HSA_STATUS_SUCCESS) {
-        return err;
-      }
-      if (pdi_dev_addr == 0) {
-        log_warning_n(10, "AIE: full-ELF PDI must be allocated from device memory.\n");
-        return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-      }
-      pdi.dev_addr.store(pdi_dev_addr, std::memory_order_relaxed);
-    }
-    // Unlike the argument sites this is a plain store, not an additive patch. A site is the low
-    // dword then the high dword, which on a little-endian host is the address's own byte order.
-    for (const uint32_t offset : pdi.patch_offsets) {
-      std::memcpy(static_cast<uint8_t*>(ctrl.ptr()) + offset, &pdi_dev_addr, sizeof(pdi_dev_addr));
-    }
-  }
 
   const auto* kernarg_address = static_cast<const uint64_t*>(pkt->kernarg_address);
   for (size_t arg = 0; arg < desc.arg_sites.size(); ++arg) {
@@ -1938,9 +1895,7 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
   // The PDIs are reached only through the addresses written into the control code above, so the
   // command still has to list them for the driver to keep them resident. The loader refuses a
   // full-ELF kernel that loads no PDI, so there is always at least one.
-  for (uint32_t p = 0; p < desc.num_pdis; ++p) {
-    bo_handles->push_back(desc.pdis[p].bo_handle);
-  }
+  bo_handles->insert(bo_handles->end(), desc.pdi_bo_handles.begin(), desc.pdi_bo_handles.end());
 
   const uint32_t cmd_dwords = 1 +  // CU mask
       sizeof(ert_npu_preempt_data) / sizeof(uint32_t) + ELF_CMD_ARG_DWORDS;

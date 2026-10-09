@@ -1458,11 +1458,11 @@ TEST_F(DispatchTest, ConcurrentQueuesIndependentExecution) {
 // ===========================================================================
 // Full-ELF dispatch
 //
-// The runtime reads the ELF at load: it places the PDI in device memory, keeps a pristine copy of
-// the control code, and records where the arguments go. A dispatch names the kernel object and
-// nothing else. The runtime copies the control code per packet, patches the packet's arguments
-// into the copy, and dispatches that. The application cannot tell this apart from a PDI dispatch
-// except by which artifacts its hsaco was built from.
+// The runtime reads the ELF at load: it places the PDI in device memory, keeps a copy of the
+// control code with the PDI's address written in, and records where the arguments go. A dispatch
+// names the kernel object and nothing else. The runtime copies the control code per packet, patches
+// the packet's arguments into the copy, and dispatches that. The application cannot tell this apart
+// from a PDI dispatch except by which artifacts its hsaco was built from.
 //
 // Supported on aie2p only.
 // ===========================================================================

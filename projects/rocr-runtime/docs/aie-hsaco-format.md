@@ -296,9 +296,9 @@ Preemption save and restore sections, control packets and scalar arguments are n
 
 ### 7.5 Patch schemes
 
-The driver applies the patches at dispatch time, on a new copy of the control code. It never patches the original copy, because `ShimDma48` adds to the existing value.
+The loader applies the PDI patches once, at load time, to its copy of the control code. The driver applies the argument patches at dispatch time, on a new copy of that control code. It never patches the loader's copy, because `ShimDma48` adds to the existing value.
 
-**`Address64` (8), for a PDI.** The driver writes the 64-bit device address of the PDI BO at each patch site of that PDI. The low word is first. This is a store, not an addition.
+**`Address64` (8), for a PDI.** The loader writes the 64-bit device address of the PDI at each patch site of that PDI. The low word is first. This is a store, not an addition.
 
 **`ShimDma48` (5), for arguments.** The patch site is three 32-bit words, `w[0]`, `w[1]` and `w[2]`. The driver does these steps, with `addr = argument address + addend`:
 
