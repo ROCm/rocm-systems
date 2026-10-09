@@ -1869,9 +1869,6 @@ SIMD_VOP3_BINARY_TRUE16_SRC: dict[str, tuple[str, str]] = {
         'uint32_t',
         '[](auto a, auto b) { return (a & 0xFFFFu) | ((b & 0xFFFFu) << 16); }',
     ),
-    # The NORM functors widen each half with f16_to_f32_simd as read. gfx1201
-    # flushes a subnormal half to zero before widening when MODE disables F16
-    # input denormals; these functors convert the subnormal value instead.
     'v_cvt_pk_norm_i16_f16_vop3': (
         'uint32_t',
         '[](auto a, auto b) {'
@@ -2584,10 +2581,25 @@ _PACKED_NORMALIZED_VOP3 = (
 _PACKED_RTZ_VOP3 = ('v_cvt_pkrtz_f16_f32_vop3', 'v_cvt_pk_rtz_f16_f32_vop3')
 
 
-def _modified_conversion_op(cpp_op: str, *, bits: int, arity: int = 2) -> str:
+def _modified_conversion_op(
+    cpp_op: str, *, bits: int, arity: int = 2, flush_f16_inputs: bool = False
+) -> str:
     """Apply floating source signs before a raw-word SIMD conversion."""
     operands = ('a', 'b')[:arity]
     parameters = ', '.join(f'auto {operand}' for operand in operands)
+    if flush_f16_inputs:
+        prepare = ''.join(
+            f' {operand} = amdgpu::prepare_f16_input_simd('
+            f'{operand}, inst.inst_.abs & {1 << i}u, '
+            f'inst.inst_.neg & {1 << i}u, f16_denorm_mode);'
+            for i, operand in enumerate(operands)
+        )
+        return (
+            '[&inst, f16_denorm_mode = wf.fp_denorm_mode_f16_f64()]'
+            f'({parameters}) {{'
+            + prepare
+            + f' return ({cpp_op})({", ".join(operands)}); }}'
+        )
     sign = f'0x{1 << (bits - 1):x}u'
     modifiers = ''.join(
         f' if (inst.inst_.abs & {1 << i}u) {operand} &= ~{sign};'
@@ -3024,7 +3036,7 @@ def _simd_probe_line(
     if spec3bin16 is not None:
         cpp_t, cpp_op = spec3bin16
         if template_name in _PACKED_NORMALIZED_VOP3:
-            cpp_op = _modified_conversion_op(cpp_op, bits=16)
+            cpp_op = _modified_conversion_op(cpp_op, bits=16, flush_f16_inputs=True)
         return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC({cpp_t}, {cpp_op});'
     spec3binx = SIMD_VOP3_BINARY_INT_EXTRA.get(template_name)
     if spec3binx is not None:

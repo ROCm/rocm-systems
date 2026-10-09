@@ -701,6 +701,16 @@ inline util::native<uint32_t> finalize_omod_f16_bits_simd(util::native<uint32_t>
   return value;
 }
 
+/// @brief Apply F16 source modifiers and MODE input flushing to raw SIMD lanes.
+inline util::native<uint32_t> prepare_f16_input_simd(util::native<uint32_t> value, bool absolute,
+                                                     bool negate, uint32_t denorm_mode) {
+  return util::native<uint32_t>([&](auto index) {
+    return static_cast<uint32_t>(fp_mode::detail::flush_input_f16(
+        fp_mode::detail::modify_f16(static_cast<uint16_t>(value[index]), absolute, negate),
+        denorm_mode));
+  });
+}
+
 /// @brief Execute a native-width batch of architectural F16 fused multiply-adds.
 /// @details The raw F16 operands remain in 32-bit SIMD lanes. Each native-width
 /// batch is split into double-width chunks and retains an exact-sum residual

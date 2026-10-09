@@ -1412,24 +1412,28 @@ def gen_vector_cvt_pk(
         )
     elif cls == 'vector_cvt_pknorm':
         if dtype == 'f16':
-            # The halves are widened without MODE input-denormal handling.
-            # gfx1201 flushes a subnormal half to zero before widening when MODE
-            # disables F16 input denormals; this body converts the subnormal
-            # value instead.
+            L.insert(
+                1, '  const uint32_t f16_denorm_mode = wf.fp_denorm_mode_f16_f64();'
+            )
             if is_vop3:
-                L.append(
-                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>({_read_vop3_true16_src(src[0], opsel, 0)}));'
-                )
-                L.append(
-                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>({_read_vop3_true16_src(src[1], opsel, 1)}));'
-                )
+                reads = [_read_vop3_true16_src(src[i], opsel, i) for i in range(2)]
             else:
+                reads = [
+                    f'amdgpu::RegisterAccess(wf).read_lane({src[i]}, lane)'
+                    for i in range(2)
+                ]
+            for i, read in enumerate(reads):
+                absolute = f'inst_.abs & (1u << {i})' if has_abs else 'false'
                 L.append(
-                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)));'
+                    f'    uint16_t s{i}_bits = amdgpu::fp_mode::detail::modify_f16('
+                    f'static_cast<uint16_t>({read}), {absolute}, '
+                    f'inst_.neg & (1u << {i}));'
                 )
                 L.append(
-                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane)));'
+                    f'    s{i}_bits = amdgpu::fp_mode::detail::flush_input_f16('
+                    f's{i}_bits, f16_denorm_mode);'
                 )
+                L.append(f'    float s{i} = util::f16_to_f32(s{i}_bits);')
         else:
             L.append(
                 f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
@@ -1437,7 +1441,7 @@ def gen_vector_cvt_pk(
             L.append(
                 f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
             )
-        if is_vop3:
+        if is_vop3 and dtype != 'f16':
             L.extend(vop3_src_mod('s0', 0, has_abs))
             L.extend(vop3_src_mod('s1', 1, has_abs))
         # Round to nearest even under every MODE.FP_ROUND setting. The ISA applies
