@@ -413,7 +413,7 @@ class cli_analysis(OmniAnalyze_Base):
             if not selected_ids:
                 console_warning(
                     "ml api trace",
-                    f"No {labels} operators matched the -k filter: {args.kernel}",
+                    f"No {labels} operators matched the -k filter: {args.gpu_kernel}",
                 )
                 return
         workload.filter_kernel_ids = selected_ids
