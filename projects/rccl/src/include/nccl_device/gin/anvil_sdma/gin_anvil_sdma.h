@@ -484,7 +484,8 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     (void)hasDescriptor;
     (void)descriptor;
     (void)ord;
-    (void)abortFlag;
+    using nccl::gin::anvil::detail::dirtyChannelMask;
+    using nccl::gin::anvil::detail::drainChannels;
     using nccl::utility::loadConst;
     ncclGinAnvilSdmaGPUContext* rsCtx = (ncclGinAnvilSdmaGPUContext*)ctx.handle;
     if (!nccl::gin::anvil::detail::anvilCtxValid(rsCtx)) {
@@ -497,21 +498,11 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
       dirty = __scoped_atomic_load_n(sdmaDirty, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     }
     if (dirty != 0) {
-      auto** handles = (::sdma_anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
-      int nr = ctx.nRanks;
       int numCh = loadConst(&rsCtx->numChannels);
-      if (handles != nullptr) {
 #pragma unroll 1
-        for (int p = coop.thread_rank(); p < nr; p += coop.size()) {
-          uint64_t peerMask = ((1ULL << numCh) - 1) << (p * numCh);
-          if ((dirty & peerMask) == 0) continue;
-          for (int ch = 0; ch < numCh; ++ch) {
-            uint64_t bit = 1ULL << (p * numCh + ch);
-            if ((dirty & bit) == 0) continue;
-            auto* h = loadConst(handles + p * numCh + ch);
-            if (h != nullptr) ::sdma_anvil::quiet(*h);
-          }
-        }
+      for (int p = coop.thread_rank(); p < ctx.nRanks; p += coop.size()) {
+        uint32_t mask = dirtyChannelMask(dirty, p, numCh);
+        if (mask != 0) (void)drainChannels</*HasTimeout=*/false>(rsCtx, p, mask, abortFlag, 0, 0);
       }
       coop.sync();
       if (coop.thread_rank() == 0 && sdmaDirty != nullptr) {

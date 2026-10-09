@@ -8,7 +8,7 @@
 
 namespace sdma_anvil {
 
-// Declared here. The single definitions live in anvil_stub_quiet_count.cpp
+// Declared here; the single definition lives in anvil_stub_quiet_count.cpp
 // because every TU that includes gin_anvil_sdma.h would otherwise emit one.
 // test/CMakeLists.txt compiles IPC, Suite H and that TU -fgpu-rdc and
 // device-links rccl-UnitTestsFixtures whenever ENABLE_ROCSHMEM_GIN is on.
@@ -48,14 +48,14 @@ __device__ __forceinline__ bool sdmaStubRecord(SdmaStubOp op, void* dst, void* s
   return true;
 }
 
-// quietTarget() returns the write index. isFlushed() reports busy for the given
-// number of polls, then compares the read index against the target.
-extern __device__ unsigned long long g_sdmaStubWriteIndex;
-extern __device__ unsigned long long g_sdmaStubReadIndex;
-extern __device__ unsigned long long g_sdmaStubBusyPolls;
-
+// quietTarget() returns writeIndex. isFlushed() reports busy for busyPolls polls, then checks whether the
+// read index, readLag behind writeIndex, has reached the target. A zeroed handle has nothing in flight.
 struct SdmaQueueDeviceHandle {
   int tag;
+  unsigned long long writeIndex;
+  unsigned long long readLag;
+  unsigned long long busyPolls;
+  unsigned long long polls;
 };
 
 struct SdmaQueueSingleProducerDeviceHandle {
@@ -93,18 +93,17 @@ __device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) {
 }
 
 __device__ __forceinline__ uint64_t quietTarget(SdmaQueueDeviceHandle& handle) {
-  (void)handle;
-  return g_sdmaStubWriteIndex;
+  return handle.writeIndex;
 }
 
 __device__ __forceinline__ bool isFlushed(SdmaQueueDeviceHandle& handle, uint64_t upToIndex) {
-  (void)handle;
   atomicAdd(&g_sdmaStubQuietCount, 1ULL);
-  if (g_sdmaStubBusyPolls != 0) {
-    --g_sdmaStubBusyPolls;
+  ++handle.polls;
+  if (handle.busyPolls != 0) {
+    --handle.busyPolls;
     return false;
   }
-  return g_sdmaStubReadIndex >= upToIndex;
+  return handle.writeIndex - handle.readLag >= upToIndex;
 }
 
 }  // namespace sdma_anvil
