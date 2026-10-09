@@ -245,7 +245,7 @@ class StaticCommands:
                 args.profile,
             ]
 
-        if self.helpers.is_linux() and not self.helpers.is_virtual_os():
+        if self.helpers.is_linux():
             if numa:
                 args.numa = numa
             current_platform_args += ["numa"]

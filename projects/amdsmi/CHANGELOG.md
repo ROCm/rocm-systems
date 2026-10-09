@@ -19,6 +19,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amd-smi`, `amd-smi version`, and `amd-smi static --driver` include the DKMS build in the amdgpu version**.  
   - For example `6.19.14.31400000-2370381`. Labels and JSON/CSV keys are unchanged.
 
+- **`amd-smi static --numa` is available on Linux guests**.  
+  - Previously limited to Linux baremetal and passthrough guests. Default `amd-smi static` output on guests now also includes the NUMA section.
+
 ### Resolved Issues
 
 - **Fixed a one-byte overrun when reading the memory partition into a small buffer**.  
