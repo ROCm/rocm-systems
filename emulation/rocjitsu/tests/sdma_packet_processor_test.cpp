@@ -157,9 +157,9 @@ std::array<uint32_t, 13> linear_rect_packet(bool gfx12_rect, uint64_t source, ui
                                             uint32_t rect_z, uint32_t src_pitch_bytes,
                                             uint32_t dst_pitch_bytes, uint32_t src_slice_bytes = 0,
                                             uint32_t dst_slice_bytes = 0, uint32_t src_off_x = 0,
-                                            uint32_t dst_off_x = 0, uint32_t src_off_z = 0,
-                                            uint32_t dst_off_z = 0, uint32_t src_off_y = 0,
-                                            uint32_t dst_off_y = 0) {
+                                            uint32_t dst_off_x = 0, uint32_t src_off_y = 0,
+                                            uint32_t dst_off_y = 0, uint32_t src_off_z = 0,
+                                            uint32_t dst_off_z = 0) {
   const uint32_t element_bytes = 1u << element;
   const uint32_t src_pitch_elements = src_pitch_bytes / element_bytes;
   const uint32_t dst_pitch_elements = dst_pitch_bytes / element_bytes;
@@ -645,7 +645,8 @@ TEST(SdmaPacketProcessorTest, LinearRectUsesZOriginWhenTheCopyIsOneSlice) {
         linear_rect_packet(test_case.gfx12_rect, kSource, kDestination, /*element=*/0,
                            /*rect_x=*/4, /*rect_y=*/1, /*rect_z=*/1, /*src_pitch_bytes=*/4,
                            /*dst_pitch_bytes=*/4, /*src_slice_bytes=*/32, /*dst_slice_bytes=*/32,
-                           /*src_off_x=*/0, /*dst_off_x=*/0, /*src_off_z=*/1, /*dst_off_z=*/0);
+                           /*src_off_x=*/0, /*dst_off_x=*/0, /*src_off_y=*/0, /*dst_off_y=*/0,
+                           /*src_off_z=*/1, /*dst_off_z=*/0);
     SdmaPacketProcessor processor(test_case.dialect);
     const SdmaPacketProcessResult result =
         processor.process({.available_dwords = packet,
@@ -685,8 +686,8 @@ TEST(SdmaPacketProcessorTest, LinearRectAppliesSourceAndDestinationYOrigins) {
     const std::array<uint32_t, 13> packet = linear_rect_packet(
         test_case.gfx12_rect, kSource, kDestination, /*element=*/0, /*rect_x=*/4, /*rect_y=*/2,
         /*rect_z=*/1, /*src_pitch_bytes=*/8, /*dst_pitch_bytes=*/16, /*src_slice_bytes=*/0,
-        /*dst_slice_bytes=*/0, /*src_off_x=*/0, /*dst_off_x=*/0, /*src_off_z=*/0,
-        /*dst_off_z=*/0, /*src_off_y=*/1, /*dst_off_y=*/2);
+        /*dst_slice_bytes=*/0, /*src_off_x=*/0, /*dst_off_x=*/0, /*src_off_y=*/1,
+        /*dst_off_y=*/2, /*src_off_z=*/0, /*dst_off_z=*/0);
     SdmaPacketProcessor processor(test_case.dialect);
     const SdmaPacketProcessResult result =
         processor.process({.available_dwords = packet,
