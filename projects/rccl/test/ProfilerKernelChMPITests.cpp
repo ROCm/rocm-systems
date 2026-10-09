@@ -204,14 +204,29 @@ protected:
         return recorderNotLoadedReason();
     }
 
+    // A failure, not a skip: the same outcome comes from RCCL rejecting the
+    // recorder, which is exactly the broken integration this suite exists to catch.
     std::string recorderNotLoadedReason()
     {
         bool notLoaded = initCount_() == 0;
-        return mpiCoordinatedSkipReason(
-            notLoaded,
-            "RCCL did not load the recorder plugin; an earlier communicator in this process "
-            "already failed a profiler load. Run this suite with NCCL_PROFILER_PLUGIN set "
-            "for the whole process (see the profiler_kernelch config)");
+        if(!onAnyRank(notLoaded)) return {};
+        ADD_FAILURE() << (notLoaded ? "RCCL did not load the recorder plugin: it rejected it, or an earlier "
+                                      "communicator in this process settled the profiler without it. Run this "
+                                      "suite in a process of its own (see the profiler_kernelch categories)"
+                                    : "RCCL did not load the recorder plugin on another rank");
+        return "recorder plugin not loaded";
+    }
+
+    // Non-blocking communicators return ncclInProgress from init and enqueue;
+    // wait until the pending operation has settled.
+    static ncclResult_t settle(ncclComm_t comm, ncclResult_t res)
+    {
+        while(res == ncclInProgress)
+        {
+            if(ncclCommGetAsyncError(comm, &res) != ncclSuccess) return ncclInternalError;
+            if(res == ncclInProgress) std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+        return res;
     }
 
     // A communicator built from a config the test controls, destroyed in TearDown
@@ -226,6 +241,7 @@ protected:
         MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD);
         ncclResult_t res =
             ncclCommInitRankConfig(out, MPIEnvironment::world_size, id, MPIEnvironment::world_rank, config);
+        if(res == ncclInProgress) res = settle(*out, res);
         if(res == ncclSuccess) ownedComms_.push_back(*out);
         return res;
     }
@@ -803,23 +819,25 @@ INSTANTIATE_TEST_SUITE_P(Share, ProfilerKernelChSplitMPITest, ::testing::Values(
 // it, so a thread stuck waiting on counters that will never advance hangs abort.
 // The core drops ops whose kernels will never finish without stopping their
 // KernelCh, so after the abort a KernelCh may be left unstopped, but none may be
-// stopped twice.
+// stopped twice. Abort is only supported on non-blocking communicators.
 TEST_F(ProfilerKernelChMPITest, AbortWithWorkInFlightReturns)
 {
     KCH_REQUIRE_RECORDER();
     if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
+    ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+    config.blocking = 0;
     ncclComm_t comm = nullptr;
     hipStream_t stream = nullptr;
-    KCH_SKIP_IF_NEEDED(createCommWithRecorder(&comm, &stream));
+    KCH_SKIP_IF_NEEDED(createConfiguredCommWithRecorder(&config, &comm, &stream));
     ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 22));
 
     // Shows the communicator is timed at all, which the abort itself cannot.
-    EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
+    EXPECT_EQ(ncclSuccess, settle(comm, allReduce(comm, stream)));
     EXPECT_EQ(hipSuccess, hipStreamSynchronize(stream));
     KernelChStats warm = checkBalanced(waitForDrain(1), "before abort");
     EXPECT_EQ(1u, warm.tasks);
 
-    for(int i = 0; i < 64; i++) EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
+    for(int i = 0; i < 64; i++) EXPECT_EQ(ncclSuccess, settle(comm, allReduce(comm, stream)));
     // Otherwise only an idle teardown is exercised.
     EXPECT_EQ(hipErrorNotReady, hipStreamQuery(stream)) << "the work drained before ncclCommAbort was called";
     auto t0 = std::chrono::steady_clock::now();
