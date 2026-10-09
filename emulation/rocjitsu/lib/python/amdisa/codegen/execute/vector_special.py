@@ -1323,6 +1323,13 @@ def gen_vector_permlane_family(dst: list[str], src: list[str], op: str | None) -
     L.append(
         f'  uint32_t lane_group_width = amdgpu::RegisterAccess(wf).read_scalar({src[2]});'
     )
+    L.append(
+        '  if (exec && inst_.src2 < 256 && '
+        '(!lane_group_width || (lane_group_width & (lane_group_width - 1))))'
+    )
+    L.append(
+        '    wf.report_undefined_behavior("permlane group width is not a power of two");'
+    )
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     L.append(

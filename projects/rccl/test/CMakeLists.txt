@@ -229,8 +229,16 @@ if(BUILD_TESTS)
     dl
     fmt::fmt-header-only
   )
+  set(RCCL_COMMON_BUILD_RPATH "")
   if(OPENMP_TESTS_ENABLED)
-    list(APPEND RCCL_COMMON_LINK_LIBS "${OpenMP_CXX_FLAGS}")
+    list(APPEND RCCL_COMMON_LINK_LIBS OpenMP::OpenMP_CXX)
+    foreach(openmpLibrary IN LISTS OpenMP_CXX_LIBRARIES)
+      if(IS_ABSOLUTE "${openmpLibrary}" AND NOT "${openmpLibrary}" MATCHES "\\.a$")
+        get_filename_component(openmpLibraryDir "${openmpLibrary}" DIRECTORY)
+        list(APPEND RCCL_COMMON_BUILD_RPATH "${openmpLibraryDir}")
+      endif()
+    endforeach()
+    list(REMOVE_DUPLICATES RCCL_COMMON_BUILD_RPATH)
   endif()
   if(ENABLE_MPI_TESTS AND MPI_CXX_LIBRARIES)
     list(APPEND RCCL_COMMON_LINK_LIBS ${MPI_CXX_LIBRARIES})
@@ -268,6 +276,7 @@ if(BUILD_TESTS)
     CollImplInfoTests.cpp
     DeviceResourceRequirementTests.cpp
     DoneEventOrderingTests.cpp
+    Fp8VerifiableTests.cpp
     GatherTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
@@ -278,6 +287,7 @@ if(BUILD_TESTS)
     ScatterTests.cpp
     TeamTopologyTests.cpp
     P2pChannelScalingTests.cpp
+    PipeUtilsTests.cpp
     VersionGateTests.cpp
     SendRecvTests.cpp
     StandaloneTests.cpp
@@ -300,6 +310,8 @@ if(BUILD_TESTS)
     common/TestBed.cpp
     common/TestBedChild.cpp
     common/StandaloneUtils.cpp
+    common/VerifiableData.cpp
+    common/VerifiableFp8.cpp
     proxy_trace/ProxyTraceUnitTests.cpp
     ../src/misc/proxy_trace/proxy_trace.cc
     latency_profiler/LatencyProfilerUnitTest.cpp
@@ -382,6 +394,7 @@ if(BUILD_TESTS)
       device/TestAsyncCopy.cpp
       device/TestLdsTransfer.cpp
       device/GinDeviceTests.cpp
+      device/GinBackendMaskDispatch_test.cpp
       device/GinAnvilIpcDevice_test.cpp
       device/HierarchicalShuffleTests.cpp
       DeviceApiTests.cpp
@@ -1096,6 +1109,9 @@ if(BUILD_TESTS)
       target_compile_definitions(${test_executable} PRIVATE RCCL_DEVICE_LINKER)
     endif()
     target_link_libraries(${test_executable} PRIVATE ${RCCL_COMMON_LINK_LIBS})
+    if(RCCL_COMMON_BUILD_RPATH)
+      set_property(TARGET ${test_executable} APPEND PROPERTY BUILD_RPATH ${RCCL_COMMON_BUILD_RPATH})
+    endif()
     if(BUILD_ADDRESS_SANITIZER)
       target_compile_options(${test_executable} PRIVATE -fsanitize=address)
       target_link_options(${test_executable} PRIVATE -fsanitize=address -shared-libasan)
