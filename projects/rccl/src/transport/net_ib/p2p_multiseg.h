@@ -5,10 +5,22 @@
  * See LICENSE.txt for more license information
  *************************************************************************/
 
-// RCCL: classic NET/IB multi-segment send, CTS side table and flush. Included by
-// p2p.cc only, after IB_WRITE_CHUNK_ALIGNMENT.
+// RCCL: classic NET/IB multi-segment send, CTS side table and flush. Included by p2p.cc only.
 #ifndef NET_IB_P2P_MULTISEG_H_
 #define NET_IB_P2P_MULTISEG_H_
+
+#include <algorithm>
+#include <atomic>
+#include "p2p.h"
+
+// p2p.cc defines this before the include; the fallback only serves standalone parsing.
+#ifndef IB_WRITE_CHUNK_ALIGNMENT
+#define IB_WRITE_CHUNK_ALIGNMENT 128
+#endif
+
+extern int64_t ncclIbArThreshold;
+RCCL_PARAM_DECLARE(IbSplitDataThreshold);
+RCCL_PARAM_DECLARE(IbGdrFlushGpuMemNoRelaxedOrdering);
 
 // Select the MR covering [addr, addr+len) for device devIndex.
 // - Single-segment handles return the legacy mrs[devIndex].
@@ -42,7 +54,7 @@ static inline uint32_t ncclIbQpChunkSize(int size, int64_t splitDataThreshold, i
 // segment boundary uses the correct per-segment lkey/rkey. Invoked only when at
 // least one request's local or remote buffer is multi-segment; the
 // single-segment fast path in p2p.cc stays byte-for-byte unchanged.
-static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int slot) {
+static inline ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int slot) {
   struct ncclIbRequest** reqs = comm->sendReqs[slot];
   volatile struct ncclIbSendFifo* slots = comm->ctsFifo[slot];
   volatile struct ncclIbSegLayout* side = comm->segLayoutFifo[slot];
@@ -358,7 +370,7 @@ static inline struct ibv_send_wr* rcclIbPostFifoSideWr(struct ncclIbRecvComm* co
   return wrSide;
 }
 
-// A NULL handle or missing per-device MR would publish a zero rkey in the CTS.
+// A NULL handle or per-device MR would be dereferenced for the CTS rkey.
 static inline ncclResult_t rcclIbIrecvCheckHandle(struct ncclIbRecvComm* comm, struct ncclIbMrHandle* mh, int i) {
   if (mh == NULL) {
     WARN("NET/IB: irecv[%d] has a NULL mhandle", i);
@@ -409,34 +421,27 @@ static inline void rcclIbCtsFlagSideTable(struct ncclIbSendFifo* localElem, int 
 }
 
 static inline bool rcclIbIflushNeedsMultiSeg(int n, int* sizes, void** mhandles) {
-  if (n > NCCL_NET_IB_MAX_RECVS) return true;
   for (int i = 0; i < n; i++)
     if (sizes[i] && mhandles[i] != NULL && ((struct ncclIbMrHandle*)mhandles[i])->nSegments > 1) return true;
   return false;
 }
 
-// ncclIbIflush with one RDMA read per receive per overlapped segment.
-static ncclResult_t rcclIbIflushMultiSeg(void* recvComm, int n, void** data, int* sizes, void** mhandles,
-                                         void** request) {
+// ncclIbIflush with one RDMA read per receive per overlapped segment. Reached only when
+// rcclIbIflushNeedsMultiSeg found a multi-segment handle; the request/iflushFail scaffold tracks ncclIbIflush.
+static inline ncclResult_t rcclIbIflushMultiSeg(void* recvComm, int n, void** data, int* sizes, void** mhandles,
+                                                void** request) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
   ncclResult_t ret = ncclSuccess;
   ncclResult_t iflushRet = ncclSuccess;
   struct ncclIbRequest* req = NULL;
-  struct ncclIbMrHandle* mhandle = NULL;
   int last = -1;
-  bool anyMultiSeg = false;
   if (n > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
   for (int i = 0; i < n; i++) {
-    if (sizes[i] == 0) continue;
-    last = i;
-    if (mhandles[i] != NULL && ((struct ncclIbMrHandle*)mhandles[i])->nSegments > 1) anyMultiSeg = true;
+    if (sizes[i] != 0) last = i;
   }
   if (comm->flushEnabled == 0 || last == -1) return ncclSuccess;
   NCCLCHECK(ncclIbCreateFlushQp(comm));
 
-  // Only flush once using the last non-zero receive, unless a multi-segment
-  // handle is involved (see below).
-  mhandle = (struct ncclIbMrHandle*)mhandles[last];
   NCCLCHECKGOTO(ncclIbGetRequest(&comm->base, &req), ret, iflushFail);
   req->type = NCCL_NET_IB_REQ_FLUSH;
   req->sock = &comm->base.sock;
@@ -465,8 +470,7 @@ static ncclResult_t rcclIbIflushMultiSeg(void* recvComm, int n, void** data, int
       struct ibv_send_wr* badWriteWr;
       NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &badWriteWr), ret, iflushFail);
     }
-    // The scratchpad and single-segment cases post one read. A multi-segment
-    // handle may span several MRs, so then every non-zero entry and every
+    // The scratchpad posts one read. Otherwise every non-zero entry and every
     // segment it overlaps gets a read, posted as one chain.
     struct ibv_send_wr flushWrs[NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS];
     int nFlushWrs = 0;
@@ -474,11 +478,6 @@ static ncclResult_t rcclIbIflushMultiSeg(void* recvComm, int n, void** data, int
       memset(&flushWrs[0], 0, sizeof(flushWrs[0]));
       flushWrs[0].wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       flushWrs[0].wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
-      nFlushWrs = 1;
-    } else if (!anyMultiSeg) {
-      memset(&flushWrs[0], 0, sizeof(flushWrs[0]));
-      flushWrs[0].wr.rdma.remote_addr = (uint64_t)data[last];
-      flushWrs[0].wr.rdma.rkey = mhandle->mrs[i]->rkey;
       nFlushWrs = 1;
     } else {
       for (int r = 0; r < n; r++) {
