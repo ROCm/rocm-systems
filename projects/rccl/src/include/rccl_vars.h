@@ -27,11 +27,6 @@ THE SOFTWARE.
 
 RCCL_PARAM_DECLARE(EnableHipGraph);  // Opt-in environment variable for enabling hipGraph
 
-// UALoE/UALink fabric telemetry. Only declared here: RCCL_PARAM emits a mutex
-// definition alongside the accessor, so the definitions live in amdsmi_wrap.cc.
-RCCL_PARAM_DECLARE(FabricTelemetryEnable);      // Opt-in: sample and log amd_smi fabric telemetry
-RCCL_PARAM_DECLARE(FabricTelemetryIntervalMs);  // Sampling period for the above, in milliseconds
-
 /* Expose needed static functions for rccl-tests (or unit-testing in future). */
 #ifndef RCCL_EXPOSE_STATIC
 #define RCCL_EXPOSE_STATIC

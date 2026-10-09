@@ -16,9 +16,11 @@
 
 #include "amdsmi_wrap.h"
 #include "alt_rsmi.h"
+#include "common/LogCapture.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
@@ -350,6 +352,40 @@ TEST(AmdSmiWrapFabricPaths, LibraryPathMatchesSysfs)
 // process.
 // ---------------------------------------------------------------------------
 
+namespace
+{
+
+// Acquire returns ncclSuccess whichever gate declines, so the out-param alone cannot
+// say which one did. Neither child loads amd_smi, which leaves every pfn_ null and
+// makes the "exports no fabric telemetry entry points" exit reachable in both; a test
+// that checked only the out-param would pass through that exit and still pass with
+// the gate it meant to cover deleted. Each caller below therefore names its gate in
+// the log. Runs the release too: for such a comm commCleanup() skips it, so releasing
+// a device that was never acquired has to be harmless rather than underflow a count.
+std::string acquireExpectingNothing()
+{
+    bool         acquired = true; // must be cleared even on the early return
+    ncclResult_t res      = ncclSuccess;
+
+    // WARN goes to ncclDebugFile, which is stdout unless NCCL_DEBUG_FILE moves it,
+    // and ncclDebugLog does not flush. Without the flush inside the capture the text
+    // is still in the FILE buffer when gtest puts the descriptor back.
+    const std::string log = CaptureStdout([&]() {
+        res = amd_smi_fabricTelemetryAcquire(0, 0xabcd, 0, &acquired);
+        fflush(stdout);
+    });
+
+    EXPECT_EQ(res, ncclSuccess);
+    EXPECT_FALSE(acquired);
+    EXPECT_EQ(amd_smi_fabricTelemetryRelease(0), ncclSuccess);
+    return log;
+}
+
+} // namespace
+
+// NCCL_DEBUG=WARN in both children because an unset NCCL_DEBUG means NCCL_LOG_ERROR,
+// which is below WARN and would leave every log assertion below trivially satisfied.
+
 // clearVariable rather than setting the key to 0: the child inherits the parent
 // environment, and the point is the RCCL_PARAM default, not an explicit zero.
 TEST(AmdSmiFabricTelemetryAcquire, DisabledByDefaultAcquiresNothing)
@@ -357,32 +393,35 @@ TEST(AmdSmiFabricTelemetryAcquire, DisabledByDefaultAcquiresNothing)
     RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig(
                            "DisabledByDefaultAcquiresNothing",
                            []() {
-                               bool acquired = true; // must be cleared even on the early return
-                               EXPECT_EQ(amd_smi_fabricTelemetryAcquire(0, 0xabcd, 0, &acquired), ncclSuccess);
-                               EXPECT_FALSE(acquired) << "telemetry is opt-in, so an unset enable acquires nothing";
-
-                               // What commFree() skips for such a comm, called anyway: releasing a
-                               // device never acquired has to be harmless, not underflow a count.
-                               EXPECT_EQ(amd_smi_fabricTelemetryRelease(0), ncclSuccess);
+                               const std::string log = acquireExpectingNothing();
+                               // The enable check precedes preflight, so an unset key
+                               // reports nothing whatsoever. Flipped to 1, this child
+                               // would reach preflight and warn from there instead.
+                               EXPECT_FALSE(LogHas(log, "fabric telemetry"))
+                                   << "telemetry is opt-in, so an unset enable does not get as far as a "
+                                      "complaint; got: "
+                                   << log;
                            })
                            .setVariable("RCCL_USE_AMD_SMI_LIB", "1")
+                           .setVariable("NCCL_DEBUG", "WARN")
                            .clearVariable("RCCL_FABRIC_TELEMETRY_ENABLE"));
 }
 
 TEST(AmdSmiFabricTelemetryAcquire, EnabledWithoutAmdSmiLibAcquiresNothing)
 {
-    RUN_ISOLATED_TEST_WITH_ENV(
-        "EnabledWithoutAmdSmiLibAcquiresNothing",
-        []() {
-            // The counters are only reachable through amd_smi, so enabling telemetry
-            // while RCCL is on its sysfs path has to be declined, not attempted.
-            bool acquired = true;
-            EXPECT_EQ(amd_smi_fabricTelemetryAcquire(0, 0xabcd, 0, &acquired), ncclSuccess);
-            EXPECT_FALSE(acquired);
-            EXPECT_EQ(amd_smi_fabricTelemetryRelease(0), ncclSuccess);
-        },
-        {{"RCCL_USE_AMD_SMI_LIB", "0"}, {"RCCL_FABRIC_TELEMETRY_ENABLE", "1"}}
-    );
+    RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig(
+                           "EnabledWithoutAmdSmiLibAcquiresNothing",
+                           []() {
+                               // The counters are only reachable through amd_smi, so
+                               // enabling telemetry while RCCL is on its sysfs path has
+                               // to be declined, not attempted.
+                               const std::string log = acquireExpectingNothing();
+                               EXPECT_TRUE(LogHas(log, "requires RCCL_USE_AMD_SMI_LIB=1"))
+                                   << "declined, but not at the RCCL_USE_AMD_SMI_LIB gate; got: " << log;
+                           })
+                           .setVariable("RCCL_FABRIC_TELEMETRY_ENABLE", "1")
+                           .setVariable("RCCL_USE_AMD_SMI_LIB", "0")
+                           .setVariable("NCCL_DEBUG", "WARN"));
 }
 
 } // namespace RcclUnitTesting

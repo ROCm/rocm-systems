@@ -61,7 +61,6 @@ static int is_wsl2 = -1;
 RCCL_PARAM(UseAmdSmiLib, "USE_AMD_SMI_LIB",
            0); // Opt-in environment variable for enabling using amd_smi_lib instead of internal code
 
-// Declared in rccl_vars.h; defined here because RCCL_PARAM also defines a mutex.
 RCCL_PARAM(FabricTelemetryEnable, "FABRIC_TELEMETRY_ENABLE", 0); // Opt-in: sample and log fabric telemetry
 RCCL_PARAM(FabricTelemetryIntervalMs, "FABRIC_TELEMETRY_INTERVAL_MS", 1000); // Sampling period in milliseconds
 
@@ -952,6 +951,21 @@ void fabricTelemetryReportLocked(FabricTelemetryDevice* dev, amdsmiFabricTelemet
   }
 }
 
+// Caller holds telemetryLock. The one place the session reads a sample, so the rule
+// that fabricLock is held across an amd_smi call -- and only across the call, never
+// across the reduction that follows -- is stated once. The alloc and free in this
+// section take fabricLock the same way.
+//
+// Deliberately not amd_smi_getFabricTelemetryData(), the public wrapper: that one
+// resolves the processor handle on every call, and getProcessorHandle walks every
+// socket and every processor to do it. The session resolves the handle once when the
+// device is probed and keeps it in dev->handle, which is what makes a per-tick read
+// cheap enough to run on a timer.
+amdsmi_status_t fabricTelemetryReadLocked(FabricTelemetryDevice* dev) {
+  std::lock_guard<std::mutex> locked(fabricLock);
+  return pfn_amdsmi_get_fabric_telemetry_data(dev->handle, dev->telemetry);
+}
+
 // Caller holds telemetryLock. Reports what this device's counters did over the whole
 // time it was sampled, so a run too short for the firmware to publish more than one
 // generation still produces output. Takes a fresh sample first: the periodic ticks
@@ -959,11 +973,7 @@ void fabricTelemetryReportLocked(FabricTelemetryDevice* dev, amdsmiFabricTelemet
 void fabricTelemetryFinalReportLocked(FabricTelemetryDevice* dev) {
   if (dev->telemetry == nullptr) return;
 
-  amdsmi_status_t status;
-  {
-    std::lock_guard<std::mutex> locked(fabricLock);
-    status = pfn_amdsmi_get_fabric_telemetry_data(dev->handle, dev->telemetry);
-  }
+  const amdsmi_status_t status = fabricTelemetryReadLocked(dev);
   if (status != AMDSMI_STATUS_SUCCESS) {
     INFO(NCCL_INIT, "fabric telemetry: GPU %u final read returned %s, no closing report", dev->index,
          fabricTelemetryStatusString(status));
@@ -1003,11 +1013,7 @@ void fabricTelemetrySamplerMain() {
     if (telemetryStopFlag) return;
 
     for (FabricTelemetryDevice& dev : telemetryDevices) {
-      amdsmi_status_t status;
-      {
-        std::lock_guard<std::mutex> locked(fabricLock);
-        status = pfn_amdsmi_get_fabric_telemetry_data(dev.handle, dev.telemetry);
-      }
+      const amdsmi_status_t status = fabricTelemetryReadLocked(&dev);
       if (status != AMDSMI_STATUS_SUCCESS) {
         if (!dev.warnedSampleFailure) {
           dev.warnedSampleFailure = true;
@@ -1062,9 +1068,12 @@ bool fabricTelemetryPreflightLocked() {
          requestedMs);
     return false;
   }
-  if (intervalMs != requestedMs) {
+  if (intervalMs > requestedMs) {
     WARN("fabric telemetry: RCCL_FABRIC_TELEMETRY_INTERVAL_MS=%ld is below the %ld ms floor, using the floor",
          requestedMs, kAmdSmiFabricTelemetryMinIntervalMs);
+  } else if (intervalMs < requestedMs) {
+    WARN("fabric telemetry: RCCL_FABRIC_TELEMETRY_INTERVAL_MS=%ld is above the %ld ms ceiling, using the ceiling",
+         requestedMs, kAmdSmiFabricTelemetryMaxIntervalMs);
   }
 
   telemetryIntervalMs = intervalMs;
@@ -1100,10 +1109,7 @@ bool fabricTelemetryProbeDeviceLocked(uint32_t index, uint64_t commHash, int ran
   // which is root-only by default, so fabricSupported is not a sufficient gate.
   // Read once here so an unusable device is dropped at init rather than warning
   // on every tick.
-  {
-    std::lock_guard<std::mutex> locked(fabricLock);
-    status = pfn_amdsmi_get_fabric_telemetry_data(dev.handle, dev.telemetry);
-  }
+  status = fabricTelemetryReadLocked(&dev);
   if (status != AMDSMI_STATUS_SUCCESS) {
     INFO(NCCL_INIT,
          "fabric telemetry: GPU %u reports an active fabric but its first read returned %s, skipping this device "
@@ -1141,6 +1147,27 @@ bool fabricTelemetryAddDeviceLocked(uint32_t index, uint64_t commHash, int rank)
   return true;
 }
 
+// Caller holds telemetryLifecycleLock and must not hold telemetryLock: the sampler
+// holds telemetryLock whenever it is awake, so joining under it would deadlock.
+// telemetryLifecycleLock is what stops an acquire from starting a second session
+// while this one is between the move and the join.
+//
+// Returns false if there was no sampler running, which both callers reach: the last
+// release of a session that never started one, and atexit after that release.
+bool fabricTelemetryStopSampler() {
+  std::thread sampler;
+  {
+    std::lock_guard<std::mutex> lock(telemetryLock);
+    if (!telemetrySamplerThread.joinable()) return false;
+    telemetryStopFlag = true;
+    sampler = std::move(telemetrySamplerThread);
+  }
+
+  telemetryStopCv.notify_all();
+  sampler.join();
+  return true;
+}
+
 // Stops the session from atexit(). An application may exit with communicators still
 // alive, which leaves telemetrySamplerThread joinable; destroying a joinable
 // std::thread calls std::terminate, so without this the process aborts at exit
@@ -1149,19 +1176,16 @@ bool fabricTelemetryAddDeviceLocked(uint32_t index, uint64_t commHash, int rank)
 // Registered only once the sampler exists, so it runs ahead of the atexit handlers
 // and static destructors registered earlier, including amd_smi's own teardown. That
 // ordering is what makes the frees below safe.
+//
+// Only the exiting process is handled. A fork() leaves the child with a joinable
+// telemetrySamplerThread that no longer exists and, if the sampler held either lock
+// at the fork, with that lock held forever; a child that exits normally then hangs
+// here. RCCL does not support using a communicator across a fork, and rasTerminate
+// has the same shape, so this is left as a known limitation rather than papered over
+// with a pthread_atfork handler that could not report anything useful either.
 void fabricTelemetryTerminate() {
   std::lock_guard<std::mutex> lifecycle(telemetryLifecycleLock);
-
-  std::thread sampler;
-  {
-    std::lock_guard<std::mutex> lock(telemetryLock);
-    if (!telemetrySamplerThread.joinable()) return;
-    telemetryStopFlag = true;
-    sampler = std::move(telemetrySamplerThread);
-  }
-
-  telemetryStopCv.notify_all();
-  sampler.join();
+  if (!fabricTelemetryStopSampler()) return;
 
   // No closing reports here. Exit-time logging is unreliable, and the point of this
   // path is only to leave no joinable thread behind.
@@ -1196,7 +1220,25 @@ ncclResult_t amd_smi_fabricTelemetryAcquire(uint32_t deviceIndex, uint64_t commH
   // for the first one.
   if (!telemetrySamplerThread.joinable()) {
     telemetryStopFlag = false;
-    telemetrySamplerThread = std::thread(fabricTelemetrySamplerMain);
+    // std::thread throws when the system will not give us one, and this runs under
+    // commAlloc inside the C API, where an escaping exception terminates the process.
+    // A diagnostic aid must not be what kills a job, so the device added just above
+    // is rolled back and telemetry gives up for the run: at a thread limit, retrying
+    // on every later communicator would re-probe each GPU for nothing. Written out
+    // because STDTHREADCREATE wants an argument to pass the thread and this takes none.
+    try {
+      telemetrySamplerThread = std::thread(fabricTelemetrySamplerMain);
+    } catch (const std::exception& e) {
+      WARN("fabric telemetry: could not start the sampler thread (%s); telemetry disabled", e.what());
+      auto added = fabricTelemetryFindLocked(deviceIndex);
+      if (added != telemetryDevices.end()) {
+        fabricTelemetryFreeDeviceLocked(&*added);
+        telemetryDevices.erase(added);
+      }
+      telemetryUnsupported = true;
+      *acquired = false;
+      return ncclSuccess;
+    }
     ncclSetThreadName(telemetrySamplerThread, "RCCL FabricTelem");
     // Once per process: atexit registrations cannot be undone, and the handler is a
     // no-op when the session has already been stopped by the last release.
@@ -1217,7 +1259,6 @@ ncclResult_t amd_smi_fabricTelemetryAcquire(uint32_t deviceIndex, uint64_t commH
 ncclResult_t amd_smi_fabricTelemetryRelease(uint32_t deviceIndex) {
   std::lock_guard<std::mutex> lifecycle(telemetryLifecycleLock);
 
-  std::thread sampler;
   uint64_t stoppedCommHash = 0;
   int stoppedRank = -1;
   {
@@ -1231,16 +1272,11 @@ ncclResult_t amd_smi_fabricTelemetryRelease(uint32_t deviceIndex) {
     fabricTelemetryFreeDeviceLocked(&*dev);
     telemetryDevices.erase(dev);
     if (!telemetryDevices.empty()) return ncclSuccess;
-
-    telemetryStopFlag = true;
-    sampler = std::move(telemetrySamplerThread);
   }
 
-  // Joined without telemetryLock, which the sampler holds whenever it is awake.
-  // telemetryLifecycleLock keeps an acquire from starting a second session here.
-  telemetryStopCv.notify_all();
-  if (sampler.joinable()) sampler.join();
-  INFO(NCCL_INIT, "fabric telemetry: stopped, last device was GPU %u for comm 0x%lx rank %d", deviceIndex,
-       stoppedCommHash, stoppedRank);
+  if (fabricTelemetryStopSampler()) {
+    INFO(NCCL_INIT, "fabric telemetry: stopped, last device was GPU %u for comm 0x%lx rank %d", deviceIndex,
+         stoppedCommHash, stoppedRank);
+  }
   return ncclSuccess;
 }

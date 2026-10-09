@@ -216,6 +216,7 @@ in the following table.
           more information.
       - | Default ``1000``.
         | Values below ``100`` are raised to ``100``.
+        | Values above ``3600000`` (one hour) are lowered to ``3600000``.
         | ``0`` or less disables telemetry.
 
 .. _check-mode:

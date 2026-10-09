@@ -6,6 +6,8 @@
 
 #include "amdsmi_wrap.h"
 
+#include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <set>
@@ -153,6 +155,26 @@ const char* FakeTelemName(uint64_t telemId)
 
 using Reports = amdsmiFabricTelemetryCategoryReport[AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX];
 
+// Every reduction case walks the same two pieces of state: a baseline the samples
+// accumulate into, and the report array the call fills. Owning both here leaves each
+// test holding only the sample it is actually about, and keeps the call under test
+// down to the one name that matters.
+class AmdSmiFabricTelemetryDiff : public ::testing::Test
+{
+protected:
+    /// Reduce @p s against the fixture's baseline. Returns the number of categories reported.
+    int Diff(FakeSample& s) { return amdSmiFabricTelemetryDiff(s.Get(), &baseline, FakeTelemName, reports); }
+
+    /// Reduce @p s against @p b, for the cases that keep a second reference point.
+    int Diff(FakeSample& s, amdsmiFabricTelemetryBaseline& b)
+    {
+        return amdSmiFabricTelemetryDiff(s.Get(), &b, FakeTelemName, reports);
+    }
+
+    amdsmiFabricTelemetryBaseline baseline{};
+    Reports                       reports{};
+};
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -220,6 +242,24 @@ TEST(AmdSmiFabricTelemetryInterval, PeriodAtOrAboveFloorIsKept)
     EXPECT_EQ(amdSmiFabricTelemetryResolveIntervalMs(kAmdSmiFabricTelemetryMinIntervalMs),
               kAmdSmiFabricTelemetryMinIntervalMs);
     EXPECT_EQ(amdSmiFabricTelemetryResolveIntervalMs(1000), 1000);
+    EXPECT_EQ(amdSmiFabricTelemetryResolveIntervalMs(kAmdSmiFabricTelemetryMaxIntervalMs),
+              kAmdSmiFabricTelemetryMaxIntervalMs);
+}
+
+// The sampler waits with steady_clock, whose nanosecond count is a signed 64-bit
+// value: a period near its limit overflows the deadline, the wait expires at once
+// and the sampler spins on full fabric reads with its locks held. The ceiling is
+// what keeps the arithmetic in range.
+TEST(AmdSmiFabricTelemetryInterval, PeriodAboveCeilingIsClampedToCeiling)
+{
+    EXPECT_EQ(amdSmiFabricTelemetryResolveIntervalMs(kAmdSmiFabricTelemetryMaxIntervalMs + 1),
+              kAmdSmiFabricTelemetryMaxIntervalMs);
+    EXPECT_EQ(amdSmiFabricTelemetryResolveIntervalMs(INT64_MAX), kAmdSmiFabricTelemetryMaxIntervalMs);
+
+    // The clamped period has to survive the conversion the sampler actually performs.
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(amdSmiFabricTelemetryResolveIntervalMs(INT64_MAX));
+    EXPECT_GT(deadline, std::chrono::steady_clock::now()) << "the clamped period still overflowed the deadline";
 }
 
 // ---------------------------------------------------------------------------
@@ -229,16 +269,13 @@ TEST(AmdSmiFabricTelemetryInterval, PeriodAtOrAboveFloorIsKept)
 // Nothing can be reported from a single sample of a cumulative counter, so the
 // first one only records values. Reporting it would present a counter's
 // since-boot total as if it were traffic from one interval.
-TEST(AmdSmiFabricTelemetryDiff, FirstSampleOnlyEstablishesBaseline)
+TEST_F(AmdSmiFabricTelemetryDiff, FirstSampleOnlyEstablishesBaseline)
 {
     FakeSample sample;
     sample.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 100, {{10, 20, 30}});
 
-    amdsmiFabricTelemetryBaseline baseline{};
-    Reports                       reports;
-
     EXPECT_FALSE(baseline.established);
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample), 1);
 
     EXPECT_EQ(reports[0].changedCount, 0);
     EXPECT_EQ(reports[0].moverCount, 0);
@@ -248,21 +285,19 @@ TEST(AmdSmiFabricTelemetryDiff, FirstSampleOnlyEstablishesBaseline)
     EXPECT_EQ(baseline.values.size(), 3u);
 }
 
-TEST(AmdSmiFabricTelemetryDiff, SecondSampleReportsOnlyCountersThatMoved)
+TEST_F(AmdSmiFabricTelemetryDiff, SecondSampleReportsOnlyCountersThatMoved)
 {
     FakeSample sample;
     sample.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 100, {{10, 20, 30}});
 
-    amdsmiFabricTelemetryBaseline baseline{};
-    Reports                       reports;
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample), 1);
 
     // Counter 0 gains 5, counter 2 gains 70, counter 1 stands still.
     sample.SetValue(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 0, 0, 15);
     sample.SetValue(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 0, 2, 100);
     sample.SetGeneration(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 101);
 
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample), 1);
     EXPECT_EQ(reports[0].changedCount, 2);
     EXPECT_EQ(reports[0].itemCount, 3);
     EXPECT_EQ(reports[0].generation, 101u);
@@ -276,17 +311,15 @@ TEST(AmdSmiFabricTelemetryDiff, SecondSampleReportsOnlyCountersThatMoved)
     EXPECT_STREQ(reports[0].movers[1].name, "COUNTER_ONE");
 }
 
-TEST(AmdSmiFabricTelemetryDiff, IdenticalSampleReportsNothing)
+TEST_F(AmdSmiFabricTelemetryDiff, IdenticalSampleReportsNothing)
 {
     FakeSample sample;
     sample.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC, 100, {{10, 20}});
 
-    amdsmiFabricTelemetryBaseline baseline{};
-    Reports                       reports;
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample), 1);
 
     sample.SetGeneration(AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC, 101);
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample), 1);
     EXPECT_EQ(reports[0].changedCount, 0);
     EXPECT_EQ(reports[0].moverCount, 0);
 }
@@ -294,18 +327,16 @@ TEST(AmdSmiFabricTelemetryDiff, IdenticalSampleReportsNothing)
 // An unchanged generation count means the firmware has not republished the
 // dataset, so any apparent movement is a torn or repeated read rather than
 // traffic. Reporting it would invent deltas the fabric never saw.
-TEST(AmdSmiFabricTelemetryDiff, StaleGenerationSuppressesDeltas)
+TEST_F(AmdSmiFabricTelemetryDiff, StaleGenerationSuppressesDeltas)
 {
     FakeSample sample;
     sample.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO, 100, {{10, 20}});
 
-    amdsmiFabricTelemetryBaseline baseline{};
-    Reports                       reports;
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample), 1);
 
     // Values move but the generation count does not.
     sample.SetValue(AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO, 0, 0, 999);
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample), 1);
 
     EXPECT_TRUE(reports[0].stale);
     EXPECT_EQ(reports[0].changedCount, 0);
@@ -314,7 +345,7 @@ TEST(AmdSmiFabricTelemetryDiff, StaleGenerationSuppressesDeltas)
     // measured from the value actually last seen, not from the pre-stale one.
     sample.SetValue(AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO, 0, 0, 1000);
     sample.SetGeneration(AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO, 101);
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample), 1);
     EXPECT_FALSE(reports[0].stale);
     ASSERT_EQ(reports[0].moverCount, 1);
     EXPECT_EQ(reports[0].movers[0].delta, 1u);
@@ -325,35 +356,34 @@ TEST(AmdSmiFabricTelemetryDiff, StaleGenerationSuppressesDeltas)
 // ticks advance their own. Diffing it once at the end covers the whole span, which
 // is what makes a run shorter than the firmware's publication interval still
 // report something.
-TEST(AmdSmiFabricTelemetryDiff, SeparateBaselineMeasuresTheWholeSpan)
+TEST_F(AmdSmiFabricTelemetryDiff, SeparateBaselineMeasuresTheWholeSpan)
 {
     FakeSample sample;
     sample.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 100, {{10}});
 
     amdsmiFabricTelemetryBaseline tick{};
     amdsmiFabricTelemetryBaseline span{};
-    Reports                       reports;
 
     // Both reference points are established from the same first sample.
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &tick, FakeTelemName, reports), 1);
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &span, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample, tick), 1);
+    ASSERT_EQ(Diff(sample, span), 1);
     EXPECT_EQ(reports[0].changedCount, 0);
 
     // Two periodic ticks, which only advance their own reference point.
     sample.SetValue(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 0, 0, 15);
     sample.SetGeneration(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 101);
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &tick, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample, tick), 1);
     ASSERT_EQ(reports[0].moverCount, 1);
     EXPECT_EQ(reports[0].movers[0].delta, 5u);
 
     sample.SetValue(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 0, 0, 23);
     sample.SetGeneration(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 102);
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &tick, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample, tick), 1);
     ASSERT_EQ(reports[0].moverCount, 1);
     EXPECT_EQ(reports[0].movers[0].delta, 8u);
 
     // The untouched reference point reports both ticks together.
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &span, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample, span), 1);
     ASSERT_EQ(reports[0].moverCount, 1);
     EXPECT_EQ(reports[0].movers[0].delta, 13u);
 }
@@ -361,51 +391,48 @@ TEST(AmdSmiFabricTelemetryDiff, SeparateBaselineMeasuresTheWholeSpan)
 // The case the closing report exists for: the generation advances once, after the
 // only periodic tick has already run. The tick sees a stale dataset and stays
 // quiet, but the span still has something to say.
-TEST(AmdSmiFabricTelemetryDiff, SpanReportsWhenEveryTickFoundTheDatasetStale)
+TEST_F(AmdSmiFabricTelemetryDiff, SpanReportsWhenEveryTickFoundTheDatasetStale)
 {
     FakeSample sample;
     sample.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 100, {{700}});
 
     amdsmiFabricTelemetryBaseline tick{};
     amdsmiFabricTelemetryBaseline span{};
-    Reports                       reports;
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &tick, FakeTelemName, reports), 1);
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &span, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample, tick), 1);
+    ASSERT_EQ(Diff(sample, span), 1);
 
     // The one tick that fits in the run lands before the firmware republishes.
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &tick, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample, tick), 1);
     EXPECT_TRUE(reports[0].stale);
     EXPECT_EQ(reports[0].changedCount, 0);
 
     // Destroy happens just after the republish.
     sample.SetValue(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 0, 0, 900);
     sample.SetGeneration(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 101);
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &span, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample, span), 1);
     ASSERT_EQ(reports[0].moverCount, 1);
     EXPECT_EQ(reports[0].movers[0].delta, 200u);
 }
 
 // A counter that goes backwards means the firmware restarted. Subtracting would
 // underflow to an enormous delta, so the sample becomes the new reference point.
-TEST(AmdSmiFabricTelemetryDiff, CounterGoingBackwardsReportsNoWrappedDelta)
+TEST_F(AmdSmiFabricTelemetryDiff, CounterGoingBackwardsReportsNoWrappedDelta)
 {
     FakeSample sample;
     sample.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 100, {{5000}});
 
-    amdsmiFabricTelemetryBaseline baseline{};
-    Reports                       reports;
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample), 1);
 
     sample.SetValue(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 0, 0, 7);
     sample.SetGeneration(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 101);
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample), 1);
     EXPECT_EQ(reports[0].changedCount, 0);
     EXPECT_EQ(reports[0].moverCount, 0);
 
     // Counting resumes from the post-restart value.
     sample.SetValue(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 0, 0, 9);
     sample.SetGeneration(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 102);
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample), 1);
     ASSERT_EQ(reports[0].moverCount, 1);
     EXPECT_EQ(reports[0].movers[0].delta, 2u);
 }
@@ -413,14 +440,12 @@ TEST(AmdSmiFabricTelemetryDiff, CounterGoingBackwardsReportsNoWrappedDelta)
 // The baseline is a flat array indexed by traversal order, so a category
 // appearing or disappearing shifts every index after it. Continuing to diff
 // across that shift would compare unrelated counters.
-TEST(AmdSmiFabricTelemetryDiff, SampleLayoutChangeInvalidatesBaseline)
+TEST_F(AmdSmiFabricTelemetryDiff, SampleLayoutChangeInvalidatesBaseline)
 {
     FakeSample first;
     first.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 100, {{10, 20}});
 
-    amdsmiFabricTelemetryBaseline baseline{};
-    Reports                       reports;
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(first.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(first), 1);
     ASSERT_TRUE(baseline.established);
     ASSERT_EQ(baseline.values.size(), 2u);
 
@@ -429,14 +454,14 @@ TEST(AmdSmiFabricTelemetryDiff, SampleLayoutChangeInvalidatesBaseline)
     grown.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 101, {{10, 20}});
     grown.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 101, {{1, 2, 3}});
 
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(grown.Get(), &baseline, FakeTelemName, reports), 2);
+    ASSERT_EQ(Diff(grown), 2);
     EXPECT_FALSE(baseline.established) << "a layout change must drop the stale reference point";
     EXPECT_EQ(baseline.values.size(), 5u);
     EXPECT_EQ(reports[0].changedCount, 0) << "deltas against a shifted baseline must not be reported";
     EXPECT_EQ(reports[1].changedCount, 0);
 
     // The next sample of the new shape re-establishes, still reporting nothing.
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(grown.Get(), &baseline, FakeTelemName, reports), 2);
+    ASSERT_EQ(Diff(grown), 2);
     EXPECT_TRUE(baseline.established);
     EXPECT_EQ(reports[0].changedCount, 0);
     EXPECT_EQ(reports[1].changedCount, 0);
@@ -444,7 +469,7 @@ TEST(AmdSmiFabricTelemetryDiff, SampleLayoutChangeInvalidatesBaseline)
     // And the one after that diffs normally against it.
     grown.SetValue(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 0, 1, 42);
     grown.SetGeneration(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 102);
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(grown.Get(), &baseline, FakeTelemName, reports), 2);
+    ASSERT_EQ(Diff(grown), 2);
     EXPECT_EQ(reports[1].changedCount, 1);
     ASSERT_EQ(reports[1].moverCount, 1);
     EXPECT_EQ(reports[1].movers[0].delta, 40u);
@@ -453,14 +478,12 @@ TEST(AmdSmiFabricTelemetryDiff, SampleLayoutChangeInvalidatesBaseline)
 // The dangerous shape of a layout change: the new category sorts ahead of the
 // existing one, so the surviving counters land on flat indices that used to hold
 // something else entirely. Diffing those would publish large fabricated deltas.
-TEST(AmdSmiFabricTelemetryDiff, CategoryAppearingAheadOfExistingOneReportsNoFabricatedDeltas)
+TEST_F(AmdSmiFabricTelemetryDiff, CategoryAppearingAheadOfExistingOneReportsNoFabricatedDeltas)
 {
     FakeSample first;
     first.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 100, {{10, 20}});
 
-    amdsmiFabricTelemetryBaseline baseline{};
-    Reports                       reports;
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(first.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(first), 1);
     ASSERT_TRUE(baseline.established);
 
     // UALOE is category 0, so it is walked before NETPORT and takes over flat slots
@@ -469,36 +492,34 @@ TEST(AmdSmiFabricTelemetryDiff, CategoryAppearingAheadOfExistingOneReportsNoFabr
     grown.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 101, {{1000, 2000}});
     grown.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 101, {{10, 20}});
 
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(grown.Get(), &baseline, FakeTelemName, reports), 2);
+    ASSERT_EQ(Diff(grown), 2);
     EXPECT_FALSE(baseline.established);
     EXPECT_EQ(reports[0].changedCount, 0) << "1000-10 and 2000-20 are not real deltas";
     EXPECT_EQ(reports[1].changedCount, 0);
 
     // Once re-established, the counters diff against their own history again.
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(grown.Get(), &baseline, FakeTelemName, reports), 2);
+    ASSERT_EQ(Diff(grown), 2);
     ASSERT_TRUE(baseline.established);
     grown.SetValue(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 0, 0, 1001);
     grown.SetGeneration(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 102);
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(grown.Get(), &baseline, FakeTelemName, reports), 2);
+    ASSERT_EQ(Diff(grown), 2);
     ASSERT_EQ(reports[0].moverCount, 1);
     EXPECT_EQ(reports[0].movers[0].delta, 1u);
 }
 
 // A category that shrinks has to invalidate too: the stored baseline is longer
 // than the sample, so the trailing entries describe counters no longer present.
-TEST(AmdSmiFabricTelemetryDiff, ShrinkingSampleInvalidatesBaseline)
+TEST_F(AmdSmiFabricTelemetryDiff, ShrinkingSampleInvalidatesBaseline)
 {
     FakeSample wide;
     wide.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 100, {{10, 20, 30, 40}});
 
-    amdsmiFabricTelemetryBaseline baseline{};
-    Reports                       reports;
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(wide.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(wide), 1);
     ASSERT_EQ(baseline.values.size(), 4u);
 
     FakeSample narrow;
     narrow.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 101, {{10, 20}});
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(narrow.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(narrow), 1);
 
     EXPECT_FALSE(baseline.established);
     EXPECT_EQ(baseline.values.size(), 2u);
@@ -508,15 +529,13 @@ TEST(AmdSmiFabricTelemetryDiff, ShrinkingSampleInvalidatesBaseline)
 // nothing wrong. One category gave up a counter and another took one on, which slides
 // every slot after the shrink down by one and lines each survivor up against its
 // neighbour's history.
-TEST(AmdSmiFabricTelemetryDiff, ShiftThatKeepsTheTotalCountReportsNoFabricatedDeltas)
+TEST_F(AmdSmiFabricTelemetryDiff, ShiftThatKeepsTheTotalCountReportsNoFabricatedDeltas)
 {
     FakeSample first;
     first.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 100, {{10, 20}});
     first.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 100, {{1, 2}});
 
-    amdsmiFabricTelemetryBaseline baseline{};
-    Reports                       reports;
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(first.Get(), &baseline, FakeTelemName, reports), 2);
+    ASSERT_EQ(Diff(first), 2);
     ASSERT_TRUE(baseline.established);
     ASSERT_EQ(baseline.values.size(), 4u);
 
@@ -526,18 +545,18 @@ TEST(AmdSmiFabricTelemetryDiff, ShiftThatKeepsTheTotalCountReportsNoFabricatedDe
     shifted.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 101, {{10}});
     shifted.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 101, {{1, 2, 3}});
 
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(shifted.Get(), &baseline, FakeTelemName, reports), 2);
+    ASSERT_EQ(Diff(shifted), 2);
     EXPECT_EQ(baseline.values.size(), 4u) << "the shift is invisible to a count comparison";
     EXPECT_FALSE(baseline.established);
     EXPECT_EQ(reports[0].changedCount, 0);
     EXPECT_EQ(reports[1].changedCount, 0) << "neighbouring counters must not be diffed against each other";
 
     // Re-established on the new shape, and diffing its own history again.
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(shifted.Get(), &baseline, FakeTelemName, reports), 2);
+    ASSERT_EQ(Diff(shifted), 2);
     ASSERT_TRUE(baseline.established);
     shifted.SetValue(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 0, 2, 9);
     shifted.SetGeneration(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 102);
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(shifted.Get(), &baseline, FakeTelemName, reports), 2);
+    ASSERT_EQ(Diff(shifted), 2);
     ASSERT_EQ(reports[1].moverCount, 1);
     EXPECT_EQ(reports[1].movers[0].delta, 6u);
 }
@@ -545,7 +564,7 @@ TEST(AmdSmiFabricTelemetryDiff, ShiftThatKeepsTheTotalCountReportsNoFabricatedDe
 // Counter IDs repeat across instances of the same kind, so a slot's identity has to
 // include which instance it came from. Here the sample keeps its counts and its IDs
 // and only re-labels an instance, as a device would after re-enumerating a link.
-TEST(AmdSmiFabricTelemetryDiff, InstanceBeingRelabelledReportsNoFabricatedDeltas)
+TEST_F(AmdSmiFabricTelemetryDiff, InstanceBeingRelabelledReportsNoFabricatedDeltas)
 {
     FakeSample first;
     first.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 100, {{10}, {20}}, "netport");
@@ -555,9 +574,7 @@ TEST(AmdSmiFabricTelemetryDiff, InstanceBeingRelabelledReportsNoFabricatedDeltas
     ASSERT_EQ(first.ItemId(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 0, 0),
               first.ItemId(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 1, 0));
 
-    amdsmiFabricTelemetryBaseline baseline{};
-    Reports                       reports;
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(first.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(first), 1);
     ASSERT_TRUE(baseline.established);
 
     // Same two instances by position and by counter ID, but the first is a different
@@ -566,7 +583,7 @@ TEST(AmdSmiFabricTelemetryDiff, InstanceBeingRelabelledReportsNoFabricatedDeltas
     relabelled.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 101, {{30}, {20}}, "netport");
     relabelled.SetLabel(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 0, "netport7", sizeof("netport7"));
 
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(relabelled.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(relabelled), 1);
     EXPECT_FALSE(baseline.established);
     EXPECT_EQ(reports[0].changedCount, 0) << "a counter from another instance is not this one's history";
 }
@@ -575,7 +592,7 @@ TEST(AmdSmiFabricTelemetryDiff, InstanceBeingRelabelledReportsNoFabricatedDeltas
 // string for every instance, so it cannot be the only thing identifying them. Here
 // two unnamed instances with the same counter IDs swap positions, which leaves the
 // counter total unchanged and so is invisible to a count comparison too.
-TEST(AmdSmiFabricTelemetryDiff, UnnamedInstancesSwappingPositionsReportNoFabricatedDeltas)
+TEST_F(AmdSmiFabricTelemetryDiff, UnnamedInstancesSwappingPositionsReportNoFabricatedDeltas)
 {
     FakeSample first;
     first.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 100, {{10}, {20}});
@@ -584,9 +601,7 @@ TEST(AmdSmiFabricTelemetryDiff, UnnamedInstancesSwappingPositionsReportNoFabrica
     first.SetLogicalIdx(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 0, 6);
     first.SetLogicalIdx(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 1, 7);
 
-    amdsmiFabricTelemetryBaseline baseline{};
-    Reports                       reports;
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(first.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(first), 1);
     ASSERT_TRUE(baseline.established);
 
     // The same two ports, reported in the other order. Port 7's 20 now sits in the
@@ -598,20 +613,18 @@ TEST(AmdSmiFabricTelemetryDiff, UnnamedInstancesSwappingPositionsReportNoFabrica
     swapped.SetLogicalIdx(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 0, 7);
     swapped.SetLogicalIdx(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 1, 6);
 
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(swapped.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(swapped), 1);
     EXPECT_FALSE(baseline.established);
     EXPECT_EQ(reports[0].changedCount, 0) << "the logical index is all that separates unnamed instances";
 }
 
-TEST(AmdSmiFabricTelemetryDiff, OnlyPresentCategoriesAreReported)
+TEST_F(AmdSmiFabricTelemetryDiff, OnlyPresentCategoriesAreReported)
 {
     FakeSample sample;
     sample.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH, 7, {{1}});
     sample.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT, 9, {{2}});
 
-    amdsmiFabricTelemetryBaseline baseline{};
-    Reports                       reports;
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &baseline, FakeTelemName, reports), 2);
+    ASSERT_EQ(Diff(sample), 2);
 
     // Reported in category order, each tagged with the category it came from, so
     // the caller's log line cannot attribute counters to the wrong category.
@@ -621,14 +634,12 @@ TEST(AmdSmiFabricTelemetryDiff, OnlyPresentCategoriesAreReported)
     EXPECT_EQ(reports[1].generation, 9u);
 }
 
-TEST(AmdSmiFabricTelemetryDiff, CountersAreSummedAcrossEveryInstance)
+TEST_F(AmdSmiFabricTelemetryDiff, CountersAreSummedAcrossEveryInstance)
 {
     FakeSample sample;
     sample.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 100, {{1, 2}, {3, 4}, {5, 6}});
 
-    amdsmiFabricTelemetryBaseline baseline{};
-    Reports                       reports;
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample), 1);
 
     EXPECT_EQ(reports[0].itemCount, 6);
     EXPECT_EQ(baseline.values.size(), 6u);
@@ -636,7 +647,7 @@ TEST(AmdSmiFabricTelemetryDiff, CountersAreSummedAcrossEveryInstance)
     // A mover is attributed to the instance that owns it, not the first one.
     sample.SetValue(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 2, 1, 106);
     sample.SetGeneration(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 101);
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample), 1);
     ASSERT_EQ(reports[0].moverCount, 1);
     EXPECT_STREQ(reports[0].movers[0].instance, "inst2");
     EXPECT_EQ(reports[0].movers[0].delta, 100u);
@@ -644,15 +655,13 @@ TEST(AmdSmiFabricTelemetryDiff, CountersAreSummedAcrossEveryInstance)
 
 // amd_smi enumerates instances it cannot populate with a null item array. A walk
 // that dereferenced it would fault inside a sampler thread.
-TEST(AmdSmiFabricTelemetryDiff, InstanceWithNoItemsIsSkipped)
+TEST_F(AmdSmiFabricTelemetryDiff, InstanceWithNoItemsIsSkipped)
 {
     FakeSample sample;
     sample.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 100, {{1, 2}, {3, 4}});
     sample.ClearInstanceItems(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 0);
 
-    amdsmiFabricTelemetryBaseline baseline{};
-    Reports                       reports;
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_EQ(Diff(sample), 1);
 
     // Only the populated instance contributes.
     EXPECT_EQ(reports[0].itemCount, 2);
@@ -661,29 +670,25 @@ TEST(AmdSmiFabricTelemetryDiff, InstanceWithNoItemsIsSkipped)
 
 // A non-zero instance_count with no instance array would otherwise be walked as if
 // the pointer were valid.
-TEST(AmdSmiFabricTelemetryDiff, CategoryWithNoInstanceArrayIsReportedEmpty)
+TEST_F(AmdSmiFabricTelemetryDiff, CategoryWithNoInstanceArrayIsReportedEmpty)
 {
     FakeSample sample;
     sample.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 100, {{1, 2}});
     sample.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 100, {{3, 4}});
     sample.ClearInstances(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE);
 
-    amdsmiFabricTelemetryBaseline baseline{};
-    Reports                       reports;
-    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &baseline, FakeTelemName, reports), 2);
+    ASSERT_EQ(Diff(sample), 2);
 
     EXPECT_EQ(reports[0].itemCount, 0) << "the category is still reported, just with nothing in it";
     EXPECT_EQ(reports[1].itemCount, 2) << "the category after it must still be walked";
     EXPECT_EQ(baseline.values.size(), 2u);
 }
 
-TEST(AmdSmiFabricTelemetryDiff, EmptySampleReportsNoCategories)
+TEST_F(AmdSmiFabricTelemetryDiff, EmptySampleReportsNoCategories)
 {
     FakeSample                    sample; // every dataset pointer left null
-    amdsmiFabricTelemetryBaseline baseline{};
-    Reports                       reports;
 
-    EXPECT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &baseline, FakeTelemName, reports), 0);
+    EXPECT_EQ(Diff(sample), 0);
     EXPECT_TRUE(baseline.values.empty());
 }
 

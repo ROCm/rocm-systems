@@ -810,6 +810,14 @@ constexpr uint32_t kAmdSmiFabricTelemetryAllCategories = (1u << AMDSMI_FABRIC_TE
 // an unbounded period would let a diagnostic aid disturb the fabric it measures.
 constexpr int64_t kAmdSmiFabricTelemetryMinIntervalMs = 100;
 
+// Ceiling on the sampling period. steady_clock counts nanoseconds in a signed 64-bit
+// count, so a period past about 9.2e12 ms overflows the deadline wait_for() computes
+// from it; the wait then expires immediately and the sampler spins, reading the fabric
+// flat out while holding its locks. An hour is already past the point of usefulness --
+// the closing report covers the whole run, so a period longer than the process merely
+// removes the periodic reports -- and leaves six orders of magnitude of headroom.
+constexpr int64_t kAmdSmiFabricTelemetryMaxIntervalMs = 3600000;
+
 // Counters reported per category per sample. A category holds up to a few thousand
 // counters and an active fabric moves hundreds of them per interval, so a report
 // carries only the largest movers.
@@ -825,7 +833,8 @@ constexpr size_t kAmdSmiFabricTelemetryLabelSize = sizeof(amdsmi_fabric_label_t:
  */
 inline int64_t amdSmiFabricTelemetryResolveIntervalMs(int64_t requestedMs) {
   if (requestedMs <= 0) return 0;
-  return requestedMs < kAmdSmiFabricTelemetryMinIntervalMs ? kAmdSmiFabricTelemetryMinIntervalMs : requestedMs;
+  if (requestedMs < kAmdSmiFabricTelemetryMinIntervalMs) return kAmdSmiFabricTelemetryMinIntervalMs;
+  return requestedMs > kAmdSmiFabricTelemetryMaxIntervalMs ? kAmdSmiFabricTelemetryMaxIntervalMs : requestedMs;
 }
 
 inline const char* amdSmiFabricTelemetryCategoryName(unsigned category) {

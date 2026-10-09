@@ -492,22 +492,6 @@ static ncclResult_t commFree(ncclComm_t comm) {
   /* commFree() should not involve any sync among ranks. */
   if (comm == NULL) return ncclSuccess;
 
-#ifdef USE_AMDSMI
-  // This device's last reference frees its telemetry; the session's last device
-  // stops the sampler. Guarded by the per-comm flag so a comm that never joined
-  // (telemetry disabled, or an init that failed before acquiring) does not
-  // unbalance the count.
-  //
-  // First, because everything below is an NCCLCHECK and teardown is expected to
-  // fail on abort. Returning early from any of those would leave this device in
-  // telemetryDevices and the sampler polling a GPU whose comm is gone. It needs
-  // only comm->nvmlDev, which commAlloc sets.
-  if (comm->fabricTelemetryAcquired) {
-    NCCLCHECK(amd_smi_fabricTelemetryRelease((uint32_t)comm->nvmlDev));
-    comm->fabricTelemetryAcquired = false;
-  }
-#endif
-
   NCCLCHECK(ncclCeFinalize(comm));
   NCCLCHECK(ncclRmaCeFinalize(comm));
 
@@ -4327,6 +4311,27 @@ fail:
 }
 
 static ncclResult_t commCleanup(ncclComm_t comm) {
+#ifdef USE_AMDSMI
+  // This device's last reference frees its telemetry; the session's last device
+  // stops the sampler. Guarded by the per-comm flag so a comm that never joined
+  // (telemetry disabled, or an init that failed before acquiring) does not
+  // unbalance the count.
+  //
+  // Ahead of everything else because teardown is expected to fail on abort, and
+  // every step below can return early -- including the three before commFree, whose
+  // only caller this is. Any of them bailing would leave the device in
+  // telemetryDevices with the sampler polling a GPU whose comm is gone. This needs
+  // only comm->nvmlDev, which commAlloc sets.
+  //
+  // A comm whose intraComm0 is NULL never reaches commReclaim's teardown at all, so
+  // it never reaches here either; the atexit handler is the backstop for that case
+  // and for any process that exits with comms still alive.
+  if (comm->fabricTelemetryAcquired) {
+    NCCLCHECK(amd_smi_fabricTelemetryRelease((uint32_t)comm->nvmlDev));
+    comm->fabricTelemetryAcquired = false;
+  }
+#endif
+
   CUDACHECK(cudaSetDevice(comm->cudaDev));
   // Stop the counter monitor before freeing counter buffers.
   NCCLCHECK(ncclProgressCounterMonitorDestroy(comm));

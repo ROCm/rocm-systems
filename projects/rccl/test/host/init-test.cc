@@ -2351,10 +2351,11 @@ TEST_F(InitMicrotest, CommCleanup_CommFreeFails_PropagatesError) {
 }
 
 #ifdef USE_AMDSMI
-// --- fabric telemetry release sits ahead of every NCCLCHECK in commFree ---
-// Teardown is expected to fail on abort, so a release placed after any of those
-// would leave the sampler thread polling a GPU whose comm is already gone.
-TEST_F(InitMicrotest, CommFree_TelemetryAcquired_ReleasesEvenWhenTeardownFails) {
+// --- fabric telemetry release sits ahead of every fallible step of teardown ---
+// Teardown is expected to fail on abort, and cudaSetDevice is the earliest step that
+// can bail. A release behind it would leave the sampler polling a GPU whose comm is
+// gone, so this pins it ahead of even that one.
+TEST_F(InitMicrotest, CommCleanup_TelemetryAcquired_ReleasesEvenWhenTeardownFails) {
   ScopedHook acquire(g_amdSmiFabricTelemetryAcquire,
                      [](uint32_t, uint64_t, int, bool* acquired) {
                        *acquired = true;
@@ -2364,15 +2365,22 @@ TEST_F(InitMicrotest, CommFree_TelemetryAcquired_ReleasesEvenWhenTeardownFails) 
   CleanupComm c;
   ASSERT_NO_FATAL_FAILURE(MakeCleanupComm(c, /*withTuner=*/false));
   ASSERT_TRUE(c.comm->fabricTelemetryAcquired) << "commAlloc never recorded the session ref";
-  g_ncclCeFinalizeResult = ncclInternalError;  // first NCCLCHECK after the release; bails before free(comm)
 
-  EXPECT_EQ(ncclInternalError, commFree(c.comm));
+  ncclResult_t res = ncclSuccess;
+  std::string log;
+  {
+    // Scoped so the hook is back to normal before ReleaseUncleanedComm runs.
+    ScopedHook setDevice(g_hipSetDevice, [](int) { return hipErrorInvalidDevice; });
+    log = RcclUnitTesting::CaptureLog([&] { res = commCleanup(c.comm); });
+  }
 
-  EXPECT_EQ(1, release.calls);
-  EXPECT_FALSE(c.comm->fabricTelemetryAcquired) << "a second commFree would double-release";
+  EXPECT_EQ(ncclUnhandledCudaError, res);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "HIP failure:"));  // the step really did fail
+  EXPECT_EQ(1, release.calls) << "a failing teardown stranded the device in the sampler's device list";
+  EXPECT_FALSE(c.comm->fabricTelemetryAcquired) << "a retried teardown would double-release";
 
   ASSERT_NO_FATAL_FAILURE(ReleaseUncleanedComm(c));
-  EXPECT_EQ(1, release.calls) << "the retried commFree released the same device twice";
+  EXPECT_EQ(1, release.calls) << "the retry released the same device twice";
 }
 #endif  // USE_AMDSMI
 
