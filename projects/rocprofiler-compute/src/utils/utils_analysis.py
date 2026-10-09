@@ -762,7 +762,7 @@ def _validate_all_markers_nested(
                 MarkerNotNestedError(
                     operator_name=str(row.Operator_Name),
                     thread_id=thread_id,
-                    start_timestamp=row.Start_Timestamp,
+                    start_timestamp=float(row.Start_Timestamp),
                 ),
             )
 
