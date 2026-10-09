@@ -12,6 +12,7 @@ subtrees:
   - caption: How to
     entries:
       - file: how-to/configure-topology
+      - file: how-to/qemu-vfio
       - file: how-to/checkpoint-restore
       - file: how-to/regenerate-isa-codegen
   - caption: Tutorials

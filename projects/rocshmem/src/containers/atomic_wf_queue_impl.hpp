@@ -89,7 +89,7 @@ AtomicWFQueue<TYPE>::active_logical_lane_id() {
   uint64_t inverted_mask{~lane_mask};
   uint64_t lower_active_lanes{ballot & inverted_mask};
   unsigned int my_logical_lane_id{__popcll(lower_active_lanes)};
-  return my_logical_lane_id; 
+  return my_logical_lane_id;
 }
 
 template <typename TYPE>

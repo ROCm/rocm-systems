@@ -5,6 +5,7 @@
 #include "common/path.hpp"
 #include "logger/debug.hpp"
 
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 
 #include <algorithm>
@@ -13,6 +14,7 @@
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -23,9 +25,9 @@ namespace
 {
 struct attach_options
 {
-    int                      pid            = -1;
-    std::string              output_path    = {};
-    std::vector<std::string> profile_format = {};
+    int                      pid = -1;
+    std::string              output_path;
+    std::vector<std::string> profile_format;
 };
 
 void
@@ -52,10 +54,8 @@ print_usage(const char* prog_name)
 }
 
 void
-setup_tool_library_env()
+setup_session_env()
 {
-    const auto* attach_tool_library_env_name = "ROCPROF_ATTACH_TOOL_LIBRARY";
-    const auto* rocp_tool_libraries_env_name = "ROCP_TOOL_LIBRARIES";
     const auto* output_use_current_time_env_name =
         rocprofsys::env_vars::OUTPUT_USE_CURRENT_TIME;
     const auto* reattach_add_session_id_env_name =
@@ -66,23 +66,50 @@ setup_tool_library_env()
 
     // enable the re-attach to add a session ID to the output path
     setenv(reattach_add_session_id_env_name, "true", 1);
+}
 
-    const auto* existing = std::getenv(attach_tool_library_env_name);
-    if(existing != nullptr)
+/**
+ * Picks the tool library path, as seen by process @p pid: the user's
+ * ROCPROF_ATTACH_TOOL_LIBRARY, else this installation's library if the target can see it,
+ * else the library shipped next to the target's own librocprofiler-register (e.g. inside
+ * a container with its own ROCm installation).
+ */
+std::optional<std::string>
+resolve_tool_library(pid_t pid)
+{
+    namespace path = rocprofsys::common::path;
+
+    if(const auto* user_library = std::getenv("ROCPROF_ATTACH_TOOL_LIBRARY"))
     {
-        setenv(rocp_tool_libraries_env_name, existing, 0);
-        LOG_INFO("Using tool library: {}", existing);
-        return;
+        if(!path::is_missing_in_target(pid, user_library))
+        {
+            return std::string{ user_library };
+        }
+        LOG_ERROR("Tool library '{}' from ROCPROF_ATTACH_TOOL_LIBRARY does not exist in "
+                  "the mount namespace of process {}.",
+                  user_library, pid);
+        return std::nullopt;
     }
 
-    const auto path =
-        rocprofsys::common::path::get_internal_libpath("librocprof-sys-dl.so");
-    if(!path.empty())
+    const auto own_library = path::get_internal_libpath("librocprof-sys-dl.so");
+    if(!path::is_missing_in_target(pid, own_library))
     {
-        setenv(attach_tool_library_env_name, path.c_str(), 0);
-        setenv(rocp_tool_libraries_env_name, path.c_str(), 0);
-        LOG_INFO("Using tool library: {}", path);
+        return own_library;
     }
+
+    if(auto target_library = path::find_library_in_loaded_dir(
+           pid, "librocprof-sys-dl.so", "librocprofiler-register.so"))
+    {
+        LOG_INFO("Found tool library in the ROCm installation of process {}", pid);
+        return target_library;
+    }
+
+    LOG_ERROR(
+        "Tool library '{}' does not exist in the mount namespace of process {}, and "
+        "no librocprof-sys-dl.so was found in its ROCm installation. Set "
+        "ROCPROF_ATTACH_TOOL_LIBRARY to the path as seen by the target.",
+        own_library, pid);
+    return std::nullopt;
 }
 
 void
@@ -106,10 +133,13 @@ setup_output_env(const std::string& output_path)
 void
 setup_output_format_env(const std::vector<std::string>& formats)
 {
-    if(formats.empty()) return;
+    if(formats.empty())
+    {
+        return;
+    }
 
-    auto has_format = [&formats](const std::string& fmt) {
-        return std::find(formats.begin(), formats.end(), fmt) != formats.end();
+    auto const has_format = [&formats](const std::string& fmt) {
+        return std::ranges::find(formats, fmt) != formats.end();
     };
 
     // setenv("ROCPROFSYS_PROFILE", "false", 1);
@@ -244,7 +274,7 @@ main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    auto opts = parse_args(argc, argv);
+    auto const opts = parse_args(argc, argv);
 
     if(opts.pid < 0)
     {
@@ -253,11 +283,20 @@ main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    setup_tool_library_env();
+    setup_session_env();
     setup_output_env(opts.output_path);
     setup_output_format_env(opts.profile_format);
 
     const auto pid = opts.pid;
+
+    const auto tool_library = resolve_tool_library(pid);
+    if(!tool_library)
+    {
+        return EXIT_FAILURE;
+    }
+    LOG_INFO("Using tool library: {}", *tool_library);
+    setenv("ROCPROF_ATTACH_TOOL_LIBRARY", tool_library->c_str(), 1);
+    setenv("ROCP_TOOL_LIBRARIES", tool_library->c_str(), 1);
 
     LOG_INFO("Trying to attach to process {}", pid);
 

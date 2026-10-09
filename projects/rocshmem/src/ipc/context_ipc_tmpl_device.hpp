@@ -419,8 +419,8 @@ __device__ void IPCContext::internal_ring_allreduce_wg(
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
-      detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                             detail::atomic::memory_order_acquire>();
+      atomic::threadfence<atomic::memory_scope::system,
+                          atomic::memory_order::acquire>();
       __syncthreads();
 
       ipc_compute_reduce<T, Op>(&pWrk[off_recv], &dst[off_seg + off_recv],
@@ -440,8 +440,8 @@ __device__ void IPCContext::internal_ring_allreduce_wg(
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
-      detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                             detail::atomic::memory_order_acquire>();
+      atomic::threadfence<atomic::memory_scope::system,
+                          atomic::memory_order::acquire>();
 
       __syncthreads();
     }
@@ -493,8 +493,8 @@ __device__ void IPCContext::internal_ring_allreduce_wave(
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
       }
       wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
-      detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                             detail::atomic::memory_order_acquire>();
+      atomic::threadfence<atomic::memory_scope::system,
+                          atomic::memory_order::acquire>();
       __builtin_amdgcn_wave_barrier();
 
       for (int j = wf_tid; j < chunk_size; j += wave_size) {
@@ -511,14 +511,14 @@ __device__ void IPCContext::internal_ring_allreduce_wave(
                       chunk_size * sizeof(T), send_pe);
       __builtin_amdgcn_wave_barrier();
       fence(send_pe);
-      
+
       wait_val = seg + 10;
       if (is_thread_zero_in_wave()) {
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
       }
       wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
-      detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                             detail::atomic::memory_order_acquire>();
+      atomic::threadfence<atomic::memory_scope::system,
+                          atomic::memory_order::acquire>();
       __builtin_amdgcn_wave_barrier();
     }
   }
@@ -699,7 +699,7 @@ __device__ int IPCContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
   int chunk_size = max(1, pWrk_elems / PE_size);
   int n_chunks   = (nreduce + chunk_size - 1) / chunk_size;
   int finish = PE_start + stride * PE_size;
-  
+
   for (int c = 0; c < n_chunks; c++) {
     int offset = c * chunk_size;
     int count  = min(chunk_size, nreduce - offset);
@@ -743,7 +743,7 @@ __device__ int IPCContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
         threadfence_system();
       }
     }
-    
+
     sync_wave(team);
     __builtin_amdgcn_wave_barrier();
 
@@ -780,8 +780,8 @@ __device__ void IPCContext::internal_get_broadcast_wave(
 template <typename T>
 __device__ int IPCContext::broadcast_wave(rocshmem_team_t team,
                               T *dest, const T *source, int nelems, int PE_root) {
-  if (dest == nullptr || 
-    source == nullptr || 
+  if (dest == nullptr ||
+    source == nullptr ||
     team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 
@@ -814,7 +814,7 @@ __device__ void IPCContext::internal_broadcast_wave(T *dst, const T *src, int ne
   // Synchronize on completion of broadcast
   internal_sync_wave(my_pe, pe_start, stride, pe_size, p_sync);
 }
-  
+
 template <typename T>
 __device__ void IPCContext::broadcast_wg(rocshmem_team_t team, T *dst,
                                       const T *src, int nelems, int pe_root) {
@@ -835,7 +835,7 @@ template <typename T>
 __device__ void IPCContext::alltoall_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
 #if defined(USE_SDMA)
-  if (sizeof(T) * nelems < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
+  if (sizeof(T) * nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
 #else
   if (sizeof(T) * nelems < 512)
 #endif
@@ -944,7 +944,7 @@ __device__ int IPCContext::fcollect_wave(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
   if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
-  
+
   fcollectmem_linear_wave(team, dst, src, nelems * sizeof(T));
 
   return ROCSHMEM_SUCCESS;
@@ -1020,6 +1020,7 @@ __device__ inline int IPCContext::tile_put(void* dst_data, const void* src_data,
                                            const size_t* start_coord, const size_t* boundary,
                                            int ndim, size_t element_size, int pe,
                                            [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(dst_data, pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1037,6 +1038,7 @@ __device__ inline int IPCContext::tile_put_wave(void* dst_data, const void* src_
                                                 const size_t* start_coord, const size_t* boundary,
                                                 int ndim, size_t element_size, int pe,
                                                 [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(dst_data, pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1056,6 +1058,7 @@ __device__ inline int IPCContext::tile_put_wg(void* dst_data, const void* src_da
                                               const size_t* start_coord, const size_t* boundary,
                                               int ndim, size_t element_size, int pe,
                                               [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(dst_data, pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1077,6 +1080,7 @@ __device__ inline int IPCContext::tile_get(void* dst_data, const void* src_data,
                                            const size_t* start_coord, const size_t* boundary,
                                            int ndim, size_t element_size, int pe,
                                            [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1094,6 +1098,7 @@ __device__ inline int IPCContext::tile_get_wave(void* dst_data, const void* src_
                                                 const size_t* start_coord, const size_t* boundary,
                                                 int ndim, size_t element_size, int pe,
                                                 [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1113,6 +1118,7 @@ __device__ inline int IPCContext::tile_get_wg(void* dst_data, const void* src_da
                                               const size_t* start_coord, const size_t* boundary,
                                               int ndim, size_t element_size, int pe,
                                               [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1414,7 +1420,7 @@ __device__ inline int IPCContext::tile_reduce_typed_impl(
   const int my_pe_in_team = team_obj->my_pe;
   const int root_pe_world = team_obj->get_pe_in_world(root);
 
-  if (root < 0 || root >= team_size || ndim <= 0) {
+  if (root < 0 || root >= team_size || ndim < 1 || ndim > 2) {
     LOGD_WARN("Invalid tile reduce arguments for IPC backend");
     return ROCSHMEM_ERROR;
   }

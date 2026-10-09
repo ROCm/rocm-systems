@@ -61,8 +61,16 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-hsa-runtime)
 
 set(ROCPROFILER_LIB_COUNTER_TEST_SOURCES
-    metrics_test.cpp evaluate_ast_test.cpp dimension.cpp core.cpp code_object_loader.cpp
-    device_counting.cpp firmware_restrictions_test.cpp local_context.cpp)
+    metrics_test.cpp
+    evaluate_ast_test.cpp
+    dimension.cpp
+    core.cpp
+    code_object_loader.cpp
+    device_counting.cpp
+    firmware_restrictions_test.cpp
+    queue_hooks_test.cpp
+    per_agent_scoping_test.cpp
+    local_context.cpp)
 set(ROCPROFILER_LIB_COUNTER_TEST_HEADERS code_object_loader.hpp device_counting.hpp)
 
 add_executable(counter-tests)
@@ -99,8 +107,33 @@ rocprofiler_add_unit_test(
         "rocprofiler_device_counting_pmc"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     SKIP_REGULAR_EXPRESSION
-        "Running non-intercept test(.*)could not be locked for profiling due to lack of permissions.*"
+        "Running non-intercept test(.*)could not be locked for profiling due to lack of permissions.*|\\[  SKIPPED \\]"
     )
+
+set(ROCPROFILER_LIB_COUNTER_METRICS_LOADER_TEST_SOURCES metrics_loader_test.cpp)
+
+add_executable(counter-metrics-loader-tests)
+target_sources(counter-metrics-loader-tests
+               PRIVATE ${ROCPROFILER_LIB_COUNTER_METRICS_LOADER_TEST_SOURCES})
+target_link_libraries(
+    counter-metrics-loader-tests
+    PRIVATE rocprofiler-sdk::counter-test-constants
+            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
+            rocprofiler-sdk::rocprofiler-sdk-hip
+            rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
+            rocprofiler-sdk::rocprofiler-sdk-static-library
+            GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET counter-metrics-loader-tests
+    SOURCES ${ROCPROFILER_LIB_COUNTER_METRICS_LOADER_TEST_SOURCES}
+    TIMEOUT 45
+    ENVIRONMENT
+        "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 set(ROCPROFILER_LIB_CONSUMER_TEST_SOURCES consumer_test.cpp)
 

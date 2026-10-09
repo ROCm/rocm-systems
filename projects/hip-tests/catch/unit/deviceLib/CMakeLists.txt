@@ -61,6 +61,7 @@ set(AMD_TEST_SRC
     hipVectorTypesDevice.cc
     hipTestHalf.cc
     hipTestHalfConstexpr.cc
+    hipTestHalfIntegralAssign_test.cc
     hipComplex.cc
     hipTestFMA.cc
     hipTestNativeHalf.cc
@@ -214,8 +215,8 @@ function(CheckAcceptedArchs OFFLOAD_ARCH_STR_LOCAL)
 endfunction()  # CheckAcceptedArchs
 
 if(HIP_PLATFORM MATCHES "amd")
-  # Do not enable arch specific tests for ASAN.
-  if (DEFINED OFFLOAD_ARCH_STR AND NOT (ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN"))
+  # Do not enable arch specific tests for device ASAN, which rewrites the arch to xnack+.
+  if (DEFINED OFFLOAD_ARCH_STR AND NOT (ENABLE_SANITIZER STREQUAL "ASAN"))
     CheckAcceptedArchs(${OFFLOAD_ARCH_STR})
   elseif(DEFINED $ENV{HCC_AMDGPU_TARGET})
     CheckAcceptedArchs($ENV{HCC_AMDGPU_TARGET})

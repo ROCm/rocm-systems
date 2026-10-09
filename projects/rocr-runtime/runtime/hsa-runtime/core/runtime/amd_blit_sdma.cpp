@@ -218,8 +218,10 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
   }
 
   // Allocate queue buffer.
-  queue_start_addr_ =
-      (char*)agent_->system_allocator()(kQueueSize, 0x1000, core::MemoryRegion::AllocateExecutable);
+  // NonPaged: queue buffer, resolved via amdgpu_vm_bo_lookup_mapping().
+  queue_start_addr_ = (char*)agent_->system_allocator()(
+      kQueueSize, 0x1000,
+      core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateNonPaged);
 
   if (queue_start_addr_ == NULL) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -1988,7 +1990,7 @@ char* BlitSdma<useGCR, scopeFields>::AcquireWriteAddress(uint32_t cmd_size, uint
 
     // CAS failed -- reuse the observed value directly, skip redundant atomic Load.
     curr_index = observed;
-    _mm_pause();
+    cpu_relax();
   }
 
   return nullptr;
@@ -2063,7 +2065,7 @@ void BlitSdma<useGCR, scopeFields>::PadRingToEnd(uint64_t curr_index) {
   // Check whether the engine has finished using this region.
   if (CanWriteUpto(new_index) == false) {
     // Engine hasn't freed this region yet.  Pause briefly.
-    _mm_pause();
+    cpu_relax();
     return;
   }
 

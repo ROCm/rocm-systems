@@ -4,16 +4,70 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
+
+### Added
+
+- AMD Infinity Storage I/O telemetry. Per-GPU I/O counters are sampled into
+  the profiler output. Enable collection with `ROCPROFSYS_USE_HIPFILE` and select metrics with
+  `ROCPROFSYS_HIPFILE_METRICS`. See
+  [hipFile Infinity Storage I/O telemetry](./docs/how-to/hipfile-telemetry.rst).
+- `rocprof-sys-attach` finds the tool library in the target's own ROCm installation when the
+  target cannot see this installation's library (for example, inside a container), so
+  `ROCPROF_ATTACH_TOOL_LIBRARY` is no longer needed there.
+
+### Resolved issues
+
+- Fixed a crash (`SIGSEGV`) in `rocprof-sys-instrument` when instrumenting Fortran+HIP
+  programs compiled with `gfortran -g` or `-g -O0`. gfortran encodes assumed-shape and
+  allocatable array bounds as DWARF location expression blocks rather than integer
+  constants at debug optimization levels; DynInst was treating these block-form
+  attributes as errors and dereferencing a null pointer in `parseSubrange()`.
+  Fixed in [ROCm/dyninst#33](https://github.com/ROCm/dyninst/pull/33).
+- Fixed `rocprof-sys-attach` aborting the target process when attaching to a process
+  running in a different mount namespace (for example, a container). The tool library
+  path is now validated against the target's mount namespace before attaching, failing
+  cleanly with a diagnostic instead.
+
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
 
 ### Changed
 
+- Minimum supported GCC raised from 10 to **GCC 11**, the first release with the
+  C++20 support this project relies on. GCC 10 is no longer tested; configuring
+  with an older GCC now emits a CMake warning. The RHEL 8 CI and release
+  containers moved from `gcc-toolset-10` to `gcc-toolset-11`.
+- `ROCPROFSYS_MONOCHROME` and `MONOCHROME` now treat any value other than a recognized
+  false token (`off`/`false`/`no`/`n`/`f`/`0`) as `true`, instead of only recognizing a
+  fixed set of true tokens.
+- Perfetto trace output now defaults to the `.pftrace` extension instead of
+  `.proto`, and `--output-format pftrace` is the canonical token for
+  requesting it (`proto` is kept as a permanent backward-compatible alias).
+- Remove oneTBB as a Dyninst dependency by replacing TBB concurrent containers
+  with C++ standard library equivalents; the bundled oneTBB submodule and the
+  `ROCPROFSYS_BUILD_TBB` CMake option are removed.
+
+### Resolved issues
+
+- Fixed per-link XGMI and device-level JPEG AMD SMI metrics missing from rocpd output
+  because PMC metadata names did not match the sample insertion path.
+- `--trace-clock-id` no longer crashes the profiled process; the option is
+  now restricted to its two documented, supported values (realtime,
+  cputime), and an invalid value now fails cleanly at startup instead of
+  aborting mid-run.
+- Fix a deadlock that may occur in libunwind when call-stack sampling is enabled.
+  Timemory commit: [ROCm/timemory@8fefbca](https://github.com/ROCm/timemory/commit/8fefbca)
+
+## ROCm Systems Profiler 1.9.0 for ROCm 10.1
+
+### Changed
+
 - **rocpd is now the default output format.** When no output format is specified,
-profiling data is emitted as a rocpd SQLite database (`rocpd.db`). Perfetto (`.proto`)
-output must now be explicitly enabled via `--output-format proto`. Requires
-ROCProfiler-SDK 1.0.0 or later (ROCm 7.0.0+).
+  profiling data is emitted as a rocpd SQLite database (`rocpd.db`). Perfetto (`.proto`)
+  output must now be explicitly enabled via `--output-format proto`. Requires
+  ROCProfiler-SDK 1.0.0 or later (ROCm 7.0.0+).
 - `ROCPROFSYS_PROFILE` (timemory backend) now defaults to `false`, since rocpd
-replaces Perfetto as the primary trace output.
+  replaces Perfetto as the primary trace output.
 - All built-in presets that perform tracing (`--balanced`, `--detailed`, `--sys-trace`,
   `--runtime-trace`, `--trace-gpu`, `--trace-hpc`, `--trace-hw-counters`, `--trace-openmp`,
   `--workload-trace`) now produce a rocpd database by default, because rocpd is the new
@@ -33,6 +87,19 @@ replaces Perfetto as the primary trace output.
   loaded, so its settings take effect. A configuration file already named by
   `ROCPROFSYS_CONFIG_FILE` is preserved, and the one given on the command line is
   appended to it.
+
+- Pausing sampling now stops the underlying per-thread timers instead of only
+  discarding the samples they produce. Previously a paused sampler kept delivering
+  timer signals, so the profiled application's sleeps were still interrupted
+  throughout a window in which no data was being collected.
+
+### Fixed
+
+- `ROCPROFSYS_TRACE_DELAY`/`ROCPROFSYS_TRACE_DURATION` now actually gate GPU context
+  startup, producing a real gap in cached GPU/RocPD data. Previously they only
+  suppressed downstream category emission. For GPU-only tracing with no marker
+  domain or trace region configured, the configured delay had no effect at all on
+  when GPU data collection actually began.
 
 ### Removed
 
@@ -57,7 +124,7 @@ replaces Perfetto as the primary trace output.
     `COMPONENTS causal-api`. The `user` component no longer exists, so requesting
     it now fails at configure time.
 
-## ROCm Systems Profiler 1.8.0 for ROCm 10.0 (unreleased)
+## ROCm Systems Profiler 1.8.0 for ROCm 10.0
 
 ### Added
 

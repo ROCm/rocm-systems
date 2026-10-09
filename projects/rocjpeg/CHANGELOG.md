@@ -3,7 +3,19 @@
 Documentation for rocJPEG is available at
 [https://rocm.docs.amd.com/projects/rocJPEG/en/latest/](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/)
 
-## (unreleased) rocJPEG 1.9.0
+## (unreleased) rocJPEG 1.12.0
+
+### Added
+
+* Added HIP-based color conversion kernels to the batched decode path, improving batched decoding performance.
+
+## rocJPEG 1.11.0
+
+### Changed
+
+* Changed the HIP YUV-to-RGB color conversion kernels from the BT.709 standard to BT.601 for color space conversion.
+
+## rocJPEG 1.9.0
 
 ### Added
 

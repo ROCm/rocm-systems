@@ -76,7 +76,7 @@ ROOF_ONLY_FILES = sorted([
 ])
 
 METRIC_THRESHOLDS = {
-    "2.1.11": {"absolute": 0, "relative": 8},
+    "2.1.10": {"absolute": 0, "relative": 8},
     "3.1.1": {"absolute": 0, "relative": 10},
     "3.1.10": {"absolute": 0, "relative": 10},
     "3.1.11": {"absolute": 0, "relative": 1},
@@ -193,6 +193,12 @@ def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True, param_id=N
     return output_dir
 
 
+def read_counter_results(workload_dir):
+    """Load the long-form rocpd counter artifacts of a workload into one frame."""
+    result_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
+    return pd.concat([pd.read_csv(result_file) for result_file in result_files])
+
+
 def check_csv_files(output_dir, num_devices, num_kernels):
     """Check profiling output csv files for expected
     number of entries (based on kernel invocations)
@@ -207,19 +213,21 @@ def check_csv_files(output_dir, num_devices, num_kernels):
     """
     files_in_workload = os.listdir(output_dir)
 
-    # results_*.csv is written compressed, so accept either form. read_csv
-    # infers gzip from the .gz suffix.
+    # Profile counter artifacts are gzip; sysinfo.csv and the other plain
+    # profile CSVs are not.
     def is_csv(name):
-        return name.endswith(".csv") or name.endswith(".csv.gz")
+        if name.startswith("results_"):
+            return name.endswith(".csv.gz")
+        return name.endswith(".csv")
 
-    # Validate PMC data exists (profile creates pmc_perf_*.csv or results_*.csv)
+    # Validate PMC data exists (profile creates pmc_perf_*.csv or results_*.csv.gz)
     has_separate = any(
         f.startswith("pmc_perf_") and is_csv(f) for f in files_in_workload
     )
     has_results = any(f.startswith("results_") and is_csv(f) for f in files_in_workload)
 
     assert has_separate or has_results, (
-        "Expected pmc_perf_*.csv or results_*.csv from profile mode"
+        "Expected pmc_perf_*.csv or results_*.csv.gz from profile mode"
     )
 
     # Validate row counts for PMC files (but don't add to return dict)
@@ -254,7 +262,7 @@ def check_non_pmc_files(output_dir, num_devices, num_kernels):
 
     # Load non-PMC files into return dict
     for file in files_in_workload:
-        # Skip PMC files (already validated above), compressed or not
+        # Skip PMC files, already validated above
         if file.startswith("pmc_perf_") or file.startswith("results_"):
             continue
 

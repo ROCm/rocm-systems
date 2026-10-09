@@ -81,8 +81,8 @@ bool rcclIsArchSupportedForFunc(struct ncclTaskColl*, char const*) {
   return g_rcclIsArchSupportedForFunc;
 }
 
-bool g_rcclCeAllReduceAllowed = false;
-bool rcclCeAllReduceAllowed(struct ncclComm*) { return g_rcclCeAllReduceAllowed; }
+bool g_rcclCeArGraphSafe = false;
+bool rcclCeArGraphSafe(struct ncclComm*) { return g_rcclCeArGraphSafe; }
 int g_rcclCeAllReduceGraphLatchTickCalls = 0;
 bool g_rcclCeAllReduceGraphLatchTickLastCapturing = false;
 void rcclCeAllReduceGraphLatchTick(struct ncclComm*, bool ceCapturing) {
@@ -123,12 +123,46 @@ ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm*, struct ncclTaskColl*, size_t
 int g_rcclSetWarpSpeedCUsCalls = 0;
 void rcclSetWarpSpeedCUs(struct ncclComm*, int, int, int&) { ++g_rcclSetWarpSpeedCUsCalls; }
 
+int64_t g_rcclParamWarpSpeedForceEnable = 0;  // rccl_wrap.cc:81 RCCL_PARAM default
+int g_rcclParamWarpSpeedForceEnableCalls = 0;
+int64_t rcclParamWarpSpeedForceEnable() {                      // rccl_wrap.cc:78
+  ++g_rcclParamWarpSpeedForceEnableCalls;
+  return g_rcclParamWarpSpeedForceEnable;
+}
+
+bool g_rcclCanUseWarpSpeedAutoResult = false;
+int g_rcclCanUseWarpSpeedAutoCalls = 0;
+bool rcclCanUseWarpSpeedAuto(struct ncclComm*, int) {
+  ++g_rcclCanUseWarpSpeedAutoCalls;
+  return g_rcclCanUseWarpSpeedAutoResult;
+}
+
+static size_t DefaultHierarchicalTempBufferSize(int, bool, bool) { return 32 * 1024 * 1024; }
+std::function<size_t(int, bool, bool)> g_rcclHierarchicalTempBufferSize = DefaultHierarchicalTempBufferSize;
+size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceScatter) {
+  return g_rcclHierarchicalTempBufferSize(nNodes, allGather, reduceScatter);
+}
+int64_t g_rcclParamHierarchicalAllGather = 1;      // RCCL_PARAM(HierarchicalAllGather) default
+int64_t rcclParamHierarchicalAllGather() { return g_rcclParamHierarchicalAllGather; }
+int64_t g_rcclParamHierarchicalReduceScatter = 0;  // RCCL_PARAM(HierarchicalReduceScatter) default
+int64_t rcclParamHierarchicalReduceScatter() { return g_rcclParamHierarchicalReduceScatter; }
+int64_t g_rcclParamCeAllReduce = -1;               // rccl_wrap.cc:65 RCCL_PARAM default
+int64_t rcclParamCeAllReduce() { return g_rcclParamCeAllReduce; }
+int64_t g_rcclParamCeArStagingBytes = -1;          // rccl_wrap.cc:70 RCCL_PARAM default
+int64_t rcclParamCeArStagingBytes() { return g_rcclParamCeArStagingBytes; }
+
 void ResetRcclWrapFakes() {
   g_rcclUpdateCollectiveProtocol = DefaultNoOpTune;
   g_rcclSetPipelining = DefaultNoOpTune;
   g_rcclOverrideChannels = DefaultOverrideChannels;
   g_rcclOverrideChannelsCalls = 0;
   g_rcclIsArchSupportedForFunc = true;
+  g_rcclParamDirectReduceScatterThreshold = 8388608;
+  g_rcclHierarchicalTempBufferSize = DefaultHierarchicalTempBufferSize;
+  g_rcclParamHierarchicalAllGather = 1;
+  g_rcclParamHierarchicalReduceScatter = 0;
+  g_rcclParamCeAllReduce = -1;
+  g_rcclParamCeArStagingBytes = -1;
   g_rcclUpdateCollectiveProtocolCalls = 0;
   g_rcclSetPipeliningCalls = 0;
   g_rcclUpdateThreadThresholdCalls = 0;
@@ -137,7 +171,7 @@ void ResetRcclWrapFakes() {
   g_rcclOverrideProtocolResult = ncclSuccess;
   g_rcclOverrideAlgorithmCalls = 0;
   g_rcclOverrideProtocolCalls = 0;
-  g_rcclCeAllReduceAllowed = false;
+  g_rcclCeArGraphSafe = false;
   g_rcclCeAllReduceGraphLatchTickCalls = 0;
   g_rcclCeAllReduceGraphLatchTickLastCapturing = false;
   g_rcclWarpSpeedSupported = false;
@@ -146,7 +180,33 @@ void ResetRcclWrapFakes() {
   g_rcclSetWarpSpeedAutoResult = ncclSuccess;
   g_rcclSetWarpSpeedAutoCalls = 0;
   g_rcclSetWarpSpeedCUsCalls = 0;
+  g_rcclParamWarpSpeedForceEnable = 0;
+  g_rcclParamWarpSpeedForceEnableCalls = 0;
+  g_rcclCanUseWarpSpeedAutoResult = false;
+  g_rcclCanUseWarpSpeedAutoCalls = 0;
+  g_validHsaScratch = true;
+  g_lastHsaScratchEnv = nullptr;
+  g_firmwareVersion = 0;
 }
+
+bool g_validHsaScratch = true;
+// Records the argument so a test can observe that checkHsaEnvSetting actually read the environment.
+const char* g_lastHsaScratchEnv = nullptr;
+bool validHsaScratchEnvSetting(const char* hsaScratchEnv, int /*hipRuntimeVersion*/,
+                               int /*firmwareVersion*/, const char* /*gcnArchName*/) {
+  g_lastHsaScratchEnv = hsaScratchEnv;
+  return g_validHsaScratch;
+}
+
+int g_firmwareVersion = 0;
+int getFirmwareVersion() { return g_firmwareVersion; }
+
+void rcclSetDefaultBuffSizes(struct ncclComm*, int* defaults) {
+  defaults[0] = 1 << 18;  // LL
+  defaults[1] = 1 << 18;  // LL128
+  defaults[2] = 1 << 22;  // SIMPLE
+}
+void rcclSetP2pNetChunkSize(struct ncclComm*, int& sz) { sz = 1 << 17; }
 
 // ===========================================================================
 // Fail-loud floor -- rccl_wrap.cc entry points no host-only microtest executes.
@@ -154,21 +214,13 @@ void ResetRcclWrapFakes() {
 // path must be loud. A bare ::abort() here would print nothing.
 // ===========================================================================
 
-size_t rcclHierarchicalTempBufferSize(int, bool, bool) {
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclHierarchicalTempBufferSize");
-}
-bool rcclCanUseWarpSpeedAuto(struct ncclComm*, int) {
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclCanUseWarpSpeedAuto");
-}
 ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCommSetP2pShiftSize");
 }
-int64_t rcclParamWarpSpeedForceEnable() {                      // rccl_wrap.cc:78
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclParamWarpSpeedForceEnable");
+int64_t rcclParamHierarchicalLazyInit() {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclParamHierarchicalLazyInit");
 }
-int64_t rcclParamHierarchicalAllGather() {                     // rccl_wrap.cc:704
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclParamHierarchicalAllGather");
-}
-int64_t rcclParamHierarchicalReduceScatter() {                 // rccl_wrap.cc:1357
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclParamHierarchicalReduceScatter");
+int64_t g_rcclParamDirectReduceScatterThreshold = 8388608;     // rccl_wrap.cc:51 default
+int64_t rcclParamDirectReduceScatterThreshold() {              // rccl_wrap.cc:51
+  return g_rcclParamDirectReduceScatterThreshold;
 }

@@ -4,6 +4,7 @@
 #ifndef AMD_SMI_INCLUDE_AMD_SMI_PROCESSOR_H_
 #define AMD_SMI_INCLUDE_AMD_SMI_PROCESSOR_H_
 
+#include <cstdint>
 #include <string>
 
 #include "amd_smi/amdsmi.h"
@@ -23,7 +24,8 @@ class AMDSmiProcessor {
 
  private:
   amdsmi_processor_type_t processor_type_;
-  uint32_t pindex_;
+  // Out-of-range sentinel so the CPU and Core APIs can reject an unset index.
+  uint32_t pindex_{UINT32_MAX};
   std::string processor_identifier_;
 };
 }  // namespace amd::smi

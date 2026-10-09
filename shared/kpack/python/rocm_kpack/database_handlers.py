@@ -15,7 +15,7 @@ from typing import Optional, List
 # Compile regex patterns once at module level
 # Matches architecture IDs like gfx908, gfx90a, gfx942-xnack+, gfx90a-xnack-
 # Note: Tensile filenames use hyphens (gfx90a-xnack+), not colons (gfx90a:xnack+)
-_GFX_ARCH_PATTERN = re.compile(r"gfx\d+[a-z]*(?:-xnack[+-])?")
+_GFX_ARCH_PATTERN = re.compile(r"gfx\d+[a-z]*(?:-strict)?(?:-xnack[+-])?")
 
 # MIOpen-specific arch pattern. MIOpen filenames concatenate arch ID + CU count
 # without a separator (e.g., gfx90878 = gfx908 + 78 CUs, gfx942130 = gfx942 + 130).
@@ -27,7 +27,7 @@ _GFX_ARCH_PATTERN = re.compile(r"gfx\d+[a-z]*(?:-xnack[+-])?")
 _MIOPEN_ARCH_PATTERN = re.compile(
     r"gfx(?:"
     r"90a|900|906|908|940|941|942|950"
-    r"|1010|1030|1100|1101|1102|1150|1151|1200|1201"
+    r"|1010|1030|1100|1101|1102|1150|1151|1200|1201|1250(?:-strict)?"
     r")"
 )
 
@@ -35,6 +35,28 @@ _MIOPEN_ARCH_PATTERN = re.compile(
 # Matches libMIOpenCK<name>_<arch>.so (Linux) and MIOpenCK<name>_<arch>.dll (Windows).
 _MIOPEN_CK_SO_PATTERN = re.compile(
     r"^(?:lib)?MIOpenCK\w+_(" + _GFX_ARCH_PATTERN.pattern + r")\.(?:so|dll)"
+)
+
+# Composable Kernel per-target convolution libraries and their CMake exports.
+# <token> is the target id sanitized by ck_sanitize_arch, which mirrors MIOpen's
+# miopen_sanitize_arch (":"->"_", "+"->"p", "-"->"_"). Group "arch" is the bare
+# arch and group "strict" the sanitized "-strict"; xnack/sramecc are dropped.
+# Generic (gfx11_generic) and SPIR-V (amdgcnspirv) tokens do not match and stay
+# in the generic artifact.
+_CK_CONV_TOKEN = (
+    r"(?P<arch>gfx\d+[a-z]?)(?P<strict>_strict)?(?:_(?:xnack|sramecc)[p_])*"
+)
+_CK_CONV_PATTERNS = (
+    # libdevice_conv_operations_<token>.a (Linux),
+    # device_conv_operations_<token>.lib (Windows).
+    re.compile(r"(?:lib)?device_conv_operations_" + _CK_CONV_TOKEN + r"\.(?:a|lib)"),
+    # composable_kerneldevice_conv_operations_<token>Targets.cmake and its
+    # per-configuration companion, e.g. ...Targets-release.cmake.
+    re.compile(
+        r"composable_kerneldevice_conv_operations_"
+        + _CK_CONV_TOKEN
+        + r"Targets(?:-[a-z]+)?\.cmake"
+    ),
 )
 
 
@@ -280,17 +302,53 @@ class MIOpenHandler(DatabaseHandler):
         return None
 
 
-class HipKernelProviderRockeHandler(DatabaseHandler):
+class ComposableKernelHandler(DatabaseHandler):
+    """Handler for Composable Kernel per-target convolution libraries.
+
+    CK emits one copy of its unified archive per target, each with its own
+    CMake export, and both belong in that target's artifact:
+        lib/libdevice_conv_operations_gfx950_xnackp.a
+        lib/cmake/composable_kernel/
+            composable_kerneldevice_conv_operations_gfx950_xnackpTargets.cmake
+            composable_kerneldevice_conv_operations_gfx950_xnackpTargets-release.cmake
+    composable_kernelConfig.cmake discovers the installed exports, so it and
+    the unsuffixed libdevice_conv_operations.a are not matched and stay generic.
+    Contents are opaque; classification is by filename only.
+    """
+
+    def name(self) -> str:
+        return "composablekernel"
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        """Return the bare arch (e.g. gfx1250-strict) for a CK per-target file."""
+        filename = Path(self._relative_path(path, prefix_root)).name
+        for pattern in _CK_CONV_PATTERNS:
+            match = pattern.fullmatch(filename)
+            if match:
+                return match["arch"] + ("-strict" if match["strict"] else "")
+        return None
+
+
+class HipKernelProviderArchContentHandler(DatabaseHandler):
     """Handler for hipKernelProvider per-architecture kernel content.
 
-    Engines install ISA-specific content under a generic ``arch_content``
-    container in the plugin engines dir, keyed by an arch directory:
-        .../hipdnn_plugins/engines/arch_content/rocke/gfx942/rocke_client_gfx942.kpack
-        .../hipdnn_plugins/engines/arch_content/rocke/gfx950/rocke_client_gfx950.kpack
-    The container is ``arch_content`` (not ``hip_kernel_provider/``, whose name
-    would collide with the plugin file and shadow it from hipDNN's loader), so
-    future engines drop under ``arch_content/<engine>/`` with no handler change.
+    Content lives under a container in the plugin engines dir: ``arch_content``
+    for runtime, ``test_arch_content`` for the test component. The container is
+    the anchor -- the bundle key is the first arch directory at any depth beneath
+    it, and the producer segment in between is a convention this handler does not
+    inspect, so a new producer needs no handler change. Example paths:
+        .../engines/arch_content/hip-kernel-provider/<arch>/...
+        .../engines/arch_content/rocke/<arch>/...
+        .../engines/test_arch_content/hip-kernel-provider/unit/shared/<arch>/...
+        .../engines/arch_content/<arch>/...
+
+    Both containers split per arch. Content that is not detected here stays generic,
+    where the last per-arch build to upload overwrites same-named content from
+    the others.
     """
+
+    #: Containers under ``engines/`` whose arch subdirectories are split per arch.
+    _ARCH_CONTAINERS = ("arch_content", "test_arch_content")
 
     def name(self) -> str:
         return "hipkernelprovider"
@@ -299,9 +357,12 @@ class HipKernelProviderRockeHandler(DatabaseHandler):
         """
         Detect per-arch content by its arch directory.
 
-        Pattern: */engines/arch_content/[.../]<arch>/...  The ``engines`` parent
-        scopes the match to the plugin engines dir (matching TheRock's
-        ``**/engines/arch_content/**`` include).
+        Pattern: */engines/<container>/[.../]<arch>/... for each container in
+        ``_ARCH_CONTAINERS``.  In an installed tree that dir is hipDNN's plugin
+        engine dir, ``lib/hipdnn_plugins/engines/``, but only the immediate
+        ``engines`` parent is required -- ``hipdnn_plugins`` is not matched, so
+        any engines dir qualifies. TheRock's ``**/engines/arch_content/**`` and
+        ``**/engines/test_arch_content/**`` includes are anchored the same way.
 
         Returns:
             Bundle key (the gfx arch directory, e.g. 'gfx942') or None.
@@ -311,13 +372,13 @@ class HipKernelProviderRockeHandler(DatabaseHandler):
             (
                 i
                 for i in range(1, len(parts))
-                if parts[i] == "arch_content" and parts[i - 1] == "engines"
+                if parts[i] in self._ARCH_CONTAINERS and parts[i - 1] == "engines"
             ),
             None,
         )
         if root is None:
             return None
-        # First arch dir under arch_content with a file beneath it is the key.
+        # First arch dir under the container with a file beneath it is the key.
         for i in range(root + 1, len(parts) - 1):
             if _GFX_ARCH_PATTERN.fullmatch(parts[i]):
                 return parts[i]
@@ -362,7 +423,8 @@ AVAILABLE_HANDLERS = {
     "hipsparselt": HipSparseLtHandler,
     "aotriton": AotritonHandler,
     "miopen": MIOpenHandler,
-    "hipkernelprovider": HipKernelProviderRockeHandler,
+    "composablekernel": ComposableKernelHandler,
+    "hipkernelprovider": HipKernelProviderArchContentHandler,
     "hotswap_cache": HotswapCacheHandler,
 }
 

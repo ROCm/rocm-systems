@@ -336,13 +336,11 @@ class NullDevice : public amd::Device {
   void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const override {};
   void ReleaseGlobalSignal(void* signal) const override {}
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const {
     ShouldNotReachHere();
     return nullptr;
   }
-#endif
 #endif
 
  private:
@@ -396,6 +394,9 @@ class Device : public NullDevice {
   }
 
   void setupCpuAgent();  // Setup the CPU agent which has the least NUMA distance to this GPU
+  //! Whether the agent shares physical memory with the CPU. Distinct from a FULL profile:
+  //! MI300A reports BASE while still being an APU.
+  static bool agentIsAPU(hsa_agent_t agent);
 
   void checkAtomicSupport();  //!< Check the support for pcie atomics
 
@@ -477,6 +478,14 @@ class Device : public NullDevice {
   //! to the calling thread's current node (HostNumaCurrent). Returns 0 on failure.
   uint64_t hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const;
 
+  //! Recovers the location, owning device and size of a VMM allocation from its
+  //! ROCr handle. Returns false when ROCr cannot report them - an imported handle
+  //! whose placement the kernel could not describe, or (under ROCR_DLL_LOAD) a
+  //! ROCr too old to export hsa_amd_vmem_get_vmem_info - leaving the caller on
+  //! its default.
+  bool getVmmAllocInfo(amd::Memory& amd_mem_obj, amd::Device::VmmLocationType* location_type,
+                       int* device_id, size_t* size) const override;
+
   void* deviceLocalAlloc(size_t size,
                         const AllocationFlags& flags = AllocationFlags{}, bool allowAllAgentsAccess = true) const override;
   void* reserveMemory(size_t size, size_t alignment) const;
@@ -528,7 +537,7 @@ class Device : public NullDevice {
   virtual void DestroyHwEvent(void* hw_event) const override;
   virtual void ResetHwEvents(const std::vector<void*>& hw_events) const override;
   virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const override;
-  virtual uint8_t* CreateBarrierPacket() const override;
+  virtual uint8_t* CreateBarrierPacket(int num_deps) const override;
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
@@ -824,6 +833,7 @@ class Device : public NullDevice {
   uint32_t maxSdmaReadMask_;
   uint32_t maxSdmaWriteMask_;
   bool isXgmi_;  //!< Flag to indicate if there is XGMI between CPU<->GPU
+  bool isAPU_ = false;  //!< Flag to indicate the agent shares physical memory with the CPU
   bool pm4_emulation_ = false;  //!< Flag to indicate if PM4 emulation is enabled
   uint32_t numHwPipes_;  //!< Number of hardware pipes
 
@@ -831,6 +841,8 @@ class Device : public NullDevice {
   struct SdmaEngineAllocator {
     amd::Monitor lock_;  //!< Protects the allocation state
     std::unordered_map<VirtualGPU*, uint32_t> vgpu_to_engine_;  //!< VirtualGPU -> engine mask
+    //! Peer agent handle -> engines ROCr has reported as usable for P2P with that peer
+    std::unordered_map<uint64_t, uint32_t> peer_engine_mask_;
     std::atomic<uint32_t> next_rr_engine_{0};  //!< RR counter for sdma engine selection
     const Device& device_;  //!< Reference to parent device for accessing masks
 
@@ -861,10 +873,8 @@ class Device : public NullDevice {
     return (engine_type == HwQueueEngine::SdmaD2H) ? maxSdmaReadMask_ : maxSdmaWriteMask_;
   }
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const;
-#endif
 #endif
 };  // class roc::Device
 

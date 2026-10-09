@@ -53,15 +53,9 @@ except ImportError:
     except ImportError as e:
         print(f"Unhandled import error: {e}")
         print(f"Unable to import amdsmi_cli files. Check {cli_files_path} if they are present.")
-        sys.exit(1)
+        from amdsmi_cli_exceptions import AmdSmiExitCode
 
-
-def _error_text(exc, logger):
-    # JSON consumers parse stdout, so the class-name prefix would corrupt the document.
-    message = str(exc)
-    if logger.is_json_format():
-        return message
-    return f"{type(exc).__module__}.{type(exc).__name__}: {message}"
+        sys.exit(int(AmdSmiExitCode.IMPORT_ERROR))
 
 
 def _print_error(e, destination):
@@ -137,7 +131,15 @@ if __name__ == "__main__":
         sys.tracebacklimit = -1
 
     amd_smi_helpers = AMDSMIHelpers()
-    amd_smi_commands = AMDSMICommands(helpers=amd_smi_helpers)
+    # Device init below can fail before argv is parsed, and it still has to
+    # report in the format the user asked for. Neither flag has a short form.
+    if "--json" in sys.argv:
+        init_format = "json"
+    elif "--csv" in sys.argv:
+        init_format = "csv"
+    else:
+        init_format = "human_readable"
+    amd_smi_commands = AMDSMICommands(format=init_format, helpers=amd_smi_helpers)
     amd_smi_parser = AMDSMIParser(
         amd_smi_commands.version,
         amd_smi_commands.list_devices,
@@ -219,14 +221,6 @@ if __name__ == "__main__":
             processed_argv.append(arg)
     sys.argv = processed_argv
 
-    # Set the output format from raw argv before parsing, so error handlers below
-    # see the correct format even when parse_args() itself raises.
-    output_format = amd_smi_helpers.get_output_format()
-    if output_format == "json":
-        amd_smi_commands.logger.format = amd_smi_commands.logger.LoggerFormat.json.value
-    elif output_format == "csv":
-        amd_smi_commands.logger.format = amd_smi_commands.logger.LoggerFormat.csv.value
-
     try:
         if len(sys.argv) == 1:
             args = amd_smi_parser.parse_args(args=["default"])
@@ -235,26 +229,38 @@ if __name__ == "__main__":
         elif sys.argv[1] in valid_commands:
             args = amd_smi_parser.parse_args(args=None)
         else:
+            # Raised before args are parsed, so the format comes from sys.argv.
             raise amdsmi_cli_exceptions.AmdSmiInvalidSubcommandException(
-                sys.argv[1], amd_smi_commands.logger.format
+                sys.argv[1], amd_smi_helpers.get_output_format()
             )
 
         # Handle command modifiers before subcommand execution
+        # human readable is the default output format
+        if hasattr(args, "json") and args.json:
+            amd_smi_commands.logger.format = amd_smi_commands.logger.LoggerFormat.json.value
+        if hasattr(args, "csv") and args.csv:
+            amd_smi_commands.logger.format = amd_smi_commands.logger.LoggerFormat.csv.value
         if hasattr(args, "file") and args.file:
             amd_smi_commands.logger.destination = args.file
         configure_logging_and_execute(args, amd_smi_commands)
+
+        sys.exit(amd_smi_helpers.error_collector.resolve_exit_code())
     except amdsmi_cli_exceptions.AmdSmiException as e:
-        _print_error(_error_text(e, amd_smi_commands.logger), amd_smi_commands.logger.destination)
+        _print_error(str(e), amd_smi_commands.logger.destination)
         sys.exit(abs(e.value))
     except amdsmi_exception.AmdSmiLibraryException as e:
+        # A library error that escaped the single-device path. Print it, record
+        # it as a device failure, and finalize so the exit code matches the
+        # multi-device path (the underlying AMDSMI_STATUS_* code).
         exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
             amd_smi_commands.logger.format, e.get_error_code()
         )
-        _print_error(_error_text(exc, amd_smi_commands.logger), amd_smi_commands.logger.destination)
-        sys.exit(abs(exc.value))
+        _print_error(str(exc), amd_smi_commands.logger.destination)
+        amd_smi_helpers.error_collector.record_library_error(e.get_error_code())
+        sys.exit(amd_smi_helpers.error_collector.resolve_exit_code())
     except PermissionError as e:
         command = sys.argv[1] if len(sys.argv) > 1 else ""
         outputformat = amd_smi_commands.logger.format
         exc = amdsmi_cli_exceptions.AmdSmiPermissionDeniedException(command, outputformat)
-        _print_error(_error_text(exc, amd_smi_commands.logger), amd_smi_commands.logger.destination)
+        _print_error(str(exc), amd_smi_commands.logger.destination)
         sys.exit(abs(exc.value))

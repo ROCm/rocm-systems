@@ -274,8 +274,7 @@ TEST(Gfx1250ConfigTest, ConfigLoadsTopology) {
   EXPECT_EQ(cu->config().lds_size_kb, kGfx1250LdsSizeKb);
   EXPECT_TRUE(cu->sram_ecc());
   EXPECT_EQ(cu->config().target, ROCJITSU_CODE_TARGET_GFX1250);
-  EXPECT_EQ(soc->xcd(0)->command_processor()->sdma_packet_dialect(),
-            amdgpu::SdmaPacketDialect::Gfx1250);
+  EXPECT_EQ(soc->sdma_queue_scheduler().packet_dialect(), amdgpu::SdmaPacketDialect::Gfx1250);
 }
 
 TEST(Gfx1250CodeObjectTest, MachineFlagMapsToTarget) {
@@ -343,7 +342,7 @@ TEST(Gfx1250DecodeTest, RejectsGfx1251VMovB64Dpp) {
   std::unique_ptr<Instruction> inst(decode_valid(*gfx1251, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_mov_b64_e32");
-  EXPECT_EQ(inst->execute, nullptr);
+  EXPECT_NE(inst->execute, nullptr);
 }
 
 TEST(Gfx1250DecodeTest, Gfx1251InstructionsAreTargetGated) {
@@ -379,7 +378,7 @@ TEST(Gfx1250DecodeTest, Gfx1251InstructionsAreTargetGated) {
     std::unique_ptr<Instruction> decoded(decode_valid(*gfx1251, words.data()));
     ASSERT_NE(decoded, nullptr) << mnemonic;
     EXPECT_EQ(decoded->mnemonic(), mnemonic);
-    EXPECT_EQ(decoded->execute, nullptr) << mnemonic;
+    EXPECT_NE(decoded->execute, nullptr) << mnemonic;
   }
 }
 
@@ -411,7 +410,7 @@ TEST(Gfx1250DecodeTest, Gfx1251ImpliedLiteralIdentifiersAreTargetGated) {
     ASSERT_NE(decoded, nullptr) << mnemonic;
     EXPECT_EQ(decoded->mnemonic(), mnemonic);
     EXPECT_EQ(decoded->size(), 12) << mnemonic;
-    EXPECT_EQ(decoded->execute, nullptr) << mnemonic;
+    EXPECT_NE(decoded->execute, nullptr) << mnemonic;
   }
 }
 
@@ -550,14 +549,14 @@ TEST(Gfx1250DecodeTest, AllLlvmGfx1251DppFormsAreTargetGated) {
       expected_mnemonic += "_e32";
     }
     EXPECT_EQ(decoded->mnemonic(), expected_mnemonic) << name;
-    EXPECT_EQ(decoded->execute, nullptr) << name;
+    EXPECT_NE(decoded->execute, nullptr) << name;
   }
 }
 
 TEST(Gfx1250DecodeTest, CommonInstructionDecodesForBothVariants) {
   constexpr uint32_t kSEndpgm[] = {0xBFB00000u};
   for (const auto &[target, expects_execution] :
-       std::array<std::pair<std::string_view, bool>, 2>{{{"gfx1250", true}, {"gfx1251", false}}}) {
+       std::array<std::pair<std::string_view, bool>, 2>{{{"gfx1250", true}, {"gfx1251", true}}}) {
     auto decoder = Decoder::create(default_isa_target_registry(), target);
     ASSERT_NE(decoder, nullptr) << target;
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, kSEndpgm));
@@ -1153,10 +1152,69 @@ TEST(Gfx1250ExecutionTest, WmmaScaleExecutesAllMatrixFormatPairs) {
             build_scaled_wmma_words(0x35, matrix_a_fmt, matrix_b_fmt, 0, 0, 128, 128);
         std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
         ASSERT_NE(inst, nullptr);
-        cu->execute_instruction(inst.get(), *wf);
+        EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
         for (uint32_t reg = 0; reg < 8; ++reg)
           for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
             EXPECT_EQ(cu->read_vgpr(vgpr_base + 64 + reg, lane), std::bit_cast<uint32_t>(128.0f));
+      }
+    }
+  }
+}
+
+TEST(Gfx1250ExecutionTest, WmmaMixedFormatsPairTheSameKElements) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = sim.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0xffffffffu);
+  const uint32_t base = wf->vgpr_alloc().base;
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  ForceScalarGuard scalar_guard;
+
+  for (bool force_scalar : {true, false}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    for (uint32_t afmt = 0; afmt <= 4; ++afmt) {
+      for (uint32_t bfmt = 0; bfmt <= 4; ++bfmt) {
+        if ((afmt < 2) == (bfmt < 2))
+          continue;
+        SCOPED_TRACE(::testing::Message()
+                     << "scalar=" << force_scalar << " A=" << afmt << " B=" << bfmt);
+        for (uint32_t reg = 0; reg < 72; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            cu->write_vgpr(base + reg, lane, 0);
+        // A single nonzero product in each row/column isolates K pairing.
+        // These independent physical locations also cover 6-bit word crossings.
+        for (uint32_t row = 0; row < 16; ++row) {
+          const uint32_t k = 5u + 7u * row;
+          write_wmma_packed(*cu, base,
+                            manual_block_scaled_wmma_loc(16, row, k, wmma_format_bits(afmt)),
+                            encode_wmma_one(afmt));
+          write_wmma_packed(*cu, base + 32,
+                            manual_block_scaled_wmma_loc(16, row, k, wmma_format_bits(bfmt)),
+                            encode_wmma_one(bfmt));
+        }
+        for (unsigned variant : {0u, 1u, 2u}) {
+          SCOPED_TRACE(::testing::Message() << "scale variant=" << variant);
+          for (uint32_t reg = 64; reg < 72; ++reg)
+            for (uint32_t lane = 0; lane < 32; ++lane)
+              cu->write_vgpr(base + reg, lane, 0);
+          const auto words =
+              build_scaled_wmma_execution_words(16, variant == 2, afmt, bfmt, 128, 128, 0, 0);
+          // Exercise ordinary, scale32, and scale16 with neutral inline scales.
+          std::unique_ptr<Instruction> inst(
+              decode_valid(*decoder, words.data() + (variant ? 0 : 2)));
+          ASSERT_NE(inst, nullptr);
+          ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+          for (uint32_t row = 0; row < 16; ++row)
+            for (uint32_t col = 0; col < 16; ++col) {
+              const uint32_t lane = col + 16u * (row / 8u);
+              const float expected = row == col ? 1.0f : 0.0f;
+              EXPECT_EQ(cu->read_vgpr(base + 64 + row % 8u, lane),
+                        std::bit_cast<uint32_t>(expected))
+                  << "row=" << row << " col=" << col;
+            }
+        }
       }
     }
   }
@@ -1205,9 +1263,9 @@ TEST(Gfx1250ExecutionTest, WmmaRegularScaleInlineZeroMatchesNeutralScalarSources
   ASSERT_NE(scalar_inst, nullptr);
   ASSERT_NE(inline_inst, nullptr);
   ASSERT_NE(llvm_inst, nullptr);
-  cu->execute_instruction(scalar_inst.get(), *wf);
-  cu->execute_instruction(inline_inst.get(), *wf);
-  cu->execute_instruction(llvm_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(scalar_inst.get(), *wf).succeeded());
+  EXPECT_TRUE(cu->execute_instruction(inline_inst.get(), *wf).succeeded());
+  EXPECT_TRUE(cu->execute_instruction(llvm_inst.get(), *wf).succeeded());
 
   for (uint32_t reg = 0; reg < 8; ++reg)
     for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
@@ -1244,8 +1302,8 @@ TEST(Gfx1250ExecutionTest, WmmaScale16InlineZeroAndSgprUseNeutralScaleForEveryBl
   std::unique_ptr<Instruction> inline_inst(decode_valid(*decoder, inline_words.data()));
   ASSERT_NE(scalar_inst, nullptr);
   ASSERT_NE(inline_inst, nullptr);
-  cu->execute_instruction(scalar_inst.get(), *wf);
-  cu->execute_instruction(inline_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(scalar_inst.get(), *wf).succeeded());
+  EXPECT_TRUE(cu->execute_instruction(inline_inst.get(), *wf).succeeded());
 
   for (uint32_t reg = 0; reg < 8; ++reg)
     for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
@@ -1277,7 +1335,7 @@ TEST(Gfx1250ExecutionTest, WmmaScaleDecodesE5m3ForFp4Operand) {
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   for (uint32_t reg = 0; reg < 8; ++reg)
     for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
       EXPECT_EQ(cu->read_vgpr(vgpr_base + 64 + reg, lane), std::bit_cast<uint32_t>(128.0f));
@@ -1332,7 +1390,7 @@ TEST(Gfx1250ExecutionTest, WmmaNonE8ScalesApplyAfterEachBlockDot) {
             build_scaled_wmma_words(scale16 ? 0x3a : 0x35, 4, 0, scale.format, 0, 0, 1);
         std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
         ASSERT_NE(inst, nullptr);
-        cu->execute_instruction(inst.get(), *wf);
+        EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
         float expected = kAccumulator;
         const uint32_t block_size = scale16 ? 16 : 32;
@@ -1454,7 +1512,7 @@ TEST(Gfx1250ExecutionTest, WmmaScaledExecutionMatchesManualLayoutAndDistinctBloc
       EXPECT_NE(inst, nullptr);
       if (!inst)
         return std::vector<uint32_t>{};
-      cu->execute_instruction(inst.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
       std::vector<uint32_t> output;
       output.reserve(tc.M * N);
       for (uint32_t row = 0; row < tc.M; ++row)

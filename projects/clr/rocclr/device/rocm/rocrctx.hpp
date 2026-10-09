@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <mutex>
 #include "top.hpp"
 
@@ -116,11 +117,12 @@ struct RocrEntryPoints {
   decltype(hsa_amd_svm_attributes_get)* hsa_amd_svm_attributes_get_;
   decltype(hsa_amd_svm_prefetch_async)* hsa_amd_svm_prefetch_async_;
   decltype(hsa_amd_svm_discard_batch_async)* hsa_amd_svm_discard_batch_async_;
-  decltype(hsa_amd_portable_export_dmabuf)* hsa_amd_portable_export_dmabuf_;
+  decltype(hsa_amd_portable_export_dmabuf_v2)* hsa_amd_portable_export_dmabuf_v2_;
   decltype(hsa_amd_portable_close_dmabuf)* hsa_amd_portable_close_dmabuf_;  // CLR doesn't use it?
   decltype(hsa_amd_vmem_address_reserve)* hsa_amd_vmem_address_reserve_;
   decltype(hsa_amd_vmem_address_free)* hsa_amd_vmem_address_free_;
   decltype(hsa_amd_vmem_handle_create)* hsa_amd_vmem_handle_create_;
+  decltype(hsa_amd_vmem_get_vmem_info)* hsa_amd_vmem_get_vmem_info_;
   decltype(hsa_amd_vmem_handle_release)* hsa_amd_vmem_handle_release_;
   decltype(hsa_amd_vmem_map)* hsa_amd_vmem_map_;
   decltype(hsa_amd_vmem_unmap)* hsa_amd_vmem_unmap_;
@@ -159,10 +161,15 @@ struct RocrEntryPoints {
   }
 #define GET_ROCR_OPTIONAL_SYMBOL(NAME)                                                            \
   cep_.NAME##_ = reinterpret_cast<NAME##_fn*>(Os::getSymbol(cep_.handle, #NAME));
+// Same as GET_ROCR_OPTIONAL_SYMBOL, for entry points declared with decltype()
+// in RocrEntryPoints rather than a hand-written NAME_fn typedef.
+#define GET_ROCR_OPTIONAL_SYMBOL_DECLTYPE(NAME)                                                   \
+  cep_.NAME##_ = reinterpret_cast<decltype(NAME)*>(Os::getSymbol(cep_.handle, #NAME));
 #else
 #define ROCR_DYN(NAME) NAME
 #define GET_ROCR_SYMBOL(NAME)
 #define GET_ROCR_OPTIONAL_SYMBOL(NAME)
+#define GET_ROCR_OPTIONAL_SYMBOL_DECLTYPE(NAME)
 #endif
 
 class Hsa : public amd::AllStatic {
@@ -502,9 +509,9 @@ class Hsa : public amd::AllStatic {
     return ROCR_DYN(hsa_amd_svm_discard_batch_async)(ptrs, sizes, count, num_dep_signals,
         dep_signals, completion_signal);
   }
-  static hsa_status_t portable_export_dmabuf(const void* ptr, size_t size, int* dmabuf,
-    uint64_t* offset) {
-    return ROCR_DYN(hsa_amd_portable_export_dmabuf)(ptr, size, dmabuf, offset);
+  static hsa_status_t portable_export_dmabuf_v2(const void* ptr, size_t size, int* dmabuf,
+    uint64_t* offset, uint64_t flags) {
+    return ROCR_DYN(hsa_amd_portable_export_dmabuf_v2)(ptr, size, dmabuf, offset, flags);
   }
   static hsa_status_t vmem_address_reserve(void** ptr, size_t size, uint64_t address,
     uint64_t flags) {
@@ -516,6 +523,27 @@ class Hsa : public amd::AllStatic {
   static hsa_status_t vmem_handle_create(hsa_amd_memory_pool_t pool, size_t size,
     hsa_amd_memory_type_t type, uint64_t flags, hsa_amd_vmem_alloc_handle_t* memory_handle) {
     return ROCR_DYN(hsa_amd_vmem_handle_create)(pool, size, type, flags, memory_handle);
+  }
+  // hsa_amd_vmem_get_vmem_info is an enhancement: an older ROCr will not export
+  // it, and callers fall back to their legacy behaviour rather than failing.
+  static bool vmem_get_vmem_info_available() {
+#ifdef ROCR_DYN_DLL
+    return ROCR_DYN(hsa_amd_vmem_get_vmem_info) != nullptr;
+#else
+    return true;
+#endif
+  }
+  static hsa_status_t vmem_get_vmem_info(
+    hsa_amd_vmem_alloc_handle_t memory_handle, hsa_amd_vmem_handle_info_t* info) {
+#ifdef ROCR_DYN_DLL
+    auto fn = ROCR_DYN(hsa_amd_vmem_get_vmem_info);
+    if (fn == nullptr) {
+      return HSA_STATUS_ERROR;
+    }
+    return fn(memory_handle, info);
+#else
+    return hsa_amd_vmem_get_vmem_info(memory_handle, info);
+#endif
   }
   static hsa_status_t vmem_handle_release(hsa_amd_vmem_alloc_handle_t memory_handle) {
     return ROCR_DYN(hsa_amd_vmem_handle_release)(memory_handle);

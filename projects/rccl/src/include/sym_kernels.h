@@ -29,6 +29,16 @@ constexpr int ncclSymkMaxBlocks = 64;
 constexpr int ncclSymkMaxThreads = 256;
 constexpr int ncclSymkLLMaxEltSize = 8;
 
+// [RCCL] Launch width for the GIN and Tma symmetric kernels. The rest default to ncclSymkMaxThreads.
+// This was tuned for TDM, so if you need to change it, please add a constexpr function that 
+// selects an appropriate value for the architecture and method of transfer (TDM or non-TDM).
+constexpr int ncclSymkWarpsPerBlock = 16;
+
+// Widest LL block the gfx950 symmetric kernels launch, worth 5 to 10% at the sizes where it removes an
+// epoch, since an LL epoch carries one element per thread. This bounds the shared slot buffer the
+// host allocates; the kernels take their slot stride from blockDim.
+constexpr int ncclSymkGfx950LLThreads = 512;
+
 constexpr __host__ __device__ int ncclSymkLLMaxSlots(int eltSize = ncclSymkLLMaxEltSize) {
   return ncclSymkMaxThreads * ncclSymkLLMaxEltSize / eltSize;
 }
@@ -58,6 +68,28 @@ enum ncclSymkKernelId {
   ncclSymkKernelId_Count
 };
 
+constexpr char const* ncclSymKernelStr[] = {
+  // Must align with enum ncclSymkKernelId definition in src/include/sym_kernels.h
+  "AllReduce_AGxLL_R",
+  "AllReduce_AGxLLMC_R",
+  "AllReduce_RSxTmaLD_AGxTmaST",
+  "AllReduce_RSxLD_AGxST",
+  "AllReduce_RSxLDMC_AGxSTMC",
+  "AllGather_LL",
+  "AllGather_LLMC",
+  "AllGather_TmaST",
+  "AllGather_ST",
+  "AllGather_TmaSTMC",
+  "AllGather_STMC",
+  "AllGather_RailRing_LsaSTMC",
+  "ReduceScatter_LL",
+  "ReduceScatter_TmaLD",
+  "ReduceScatter_LD",
+  "ReduceScatter_LDMC",
+  "ReduceScatter_RailA2A_LsaLD",
+  "ReduceScatter_RailA2A_LsaLDMC"
+};
+
 struct ncclSymkDevComm {
   struct ncclDevComm devComm;
   struct ncclLLA2AHandle lsaLLA2A;
@@ -66,6 +98,11 @@ struct ncclSymkDevComm {
   struct ncclGinSyncHandle ginSyncHandle;
   ncclDevResourceHandle rsGinAccumBuf;
   uint32_t rsGinAccumBytesPerBlock;
+  // Profiler counters (host-pinned), indexed by channel id and per-channel slot.
+  // workPhases holds per-phase timestamps published behind a fence.
+  struct ncclDevProfiler* workStarted;
+  struct ncclDevProfiler* workCompleted;
+  struct ncclDevProfilerPhases* workPhases;
 };
 
 struct ncclSymkState {
@@ -90,20 +127,37 @@ struct alignas(16) ncclSymkDevWork {
   uint64_t sChannelId:16, nChannels:16, padding:32;
 };
 
+// Device-side profiling requested for a launch; KernelPhase implies KernelCh. Only the
+// symmetric kernels stamp phases, and they read these bits at runtime.
+enum ncclDevProfilerMode : uint8_t {
+  ncclDevProfilerModeNone = 0,
+  ncclDevProfilerModeKernelCh = 1 << 0,
+  ncclDevProfilerModeKernelPhase = 1 << 1,
+};
+
 struct alignas(16) ncclSymkDevWorkArgs {
   struct ncclSymkDevComm kcomm;
   int nMaxChannels;
   int maxDynamicSmem;
-  // starting of channelWorkRange will be aligned to 16 bytes
-  // channelWorkRange[nChannels];
-  // ncclSymDevWork[nWorks];
+  // int, not uint8_t: masking a narrower field in the symmetric-kernel prologue misaligns their hot loops.
+  int profilerMode; // ncclDevProfilerMode bits; nonzero means profilerWorkCounters[nMaxChannels] follows
+  // Variable-length trailing data layout:
+  //   if profilerMode: uint64_t profilerWorkCounters[nMaxChannels] (aligned to 16)
+  //   ncclSymkChannelWorkRange[nChannels] (aligned to 16)
+  //   ncclSymkDevWork[nWorks]
   // aux functions
-  __host__ static constexpr size_t calcArgsSize(int nChannels, int nWorks) {
+  __host__ static constexpr size_t calcArgsSize(int nChannels, int nWorks, bool profiler = false) {
     return alignUp(sizeof(struct ncclSymkDevWorkArgs), 16) +
+           (profiler ? alignUp(nChannels * sizeof(uint64_t), 16) : size_t(0)) +
            alignUp(nChannels * sizeof(struct ncclSymkChannelWorkRange), 16) + nWorks * sizeof(struct ncclSymkDevWork);
   }
+  __host__ __device__ uint64_t* getProfilerCounters() const {
+    return (uint64_t*)((uint8_t*)this + alignUp(sizeof(struct ncclSymkDevWorkArgs), 16));
+  }
   __host__ __device__ struct ncclSymkChannelWorkRange* getWorkRange() const {
-    return (struct ncclSymkChannelWorkRange*)((uint8_t*)this + alignUp(sizeof(struct ncclSymkDevWorkArgs), 16));
+    size_t off = alignUp(sizeof(struct ncclSymkDevWorkArgs), 16);
+    if (profilerMode) off += alignUp(nMaxChannels * sizeof(uint64_t), 16);
+    return (struct ncclSymkChannelWorkRange*)((uint8_t*)this + off);
   }
   __host__ __device__ struct ncclSymkDevWork* getWorks(int nChannels) const {
     return (struct ncclSymkDevWork*)((uint8_t*)this->getWorkRange() +
@@ -130,15 +184,34 @@ ncclResult_t ncclSymkFinalize(struct ncclComm* comm);
 
 bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                        size_t nElts);
-ncclResult_t ncclSymkPickKernel(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                                size_t nEltsTotal, size_t nEltsMax, int nWorks, ncclSymRegType_t winRegType,
-                                float* estTimeUs, ncclSymkKernelId* kernelId, int* nBlocks, int* nWarps, bool* forced);
+uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
+                      size_t nElts, bool symAligned16B = true);
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+bool ncclSymkIsGfx950(struct ncclComm* comm);
+#endif
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// Block width the gfx950 symmetric kernels launch at, split out of the symmetric tuning model so the
+// size bands can be unit tested. Returns ncclSymkMaxThreads for any collective without width bands.
+int ncclSymkGfx950BlockThreads(ncclFunc_t coll, bool isLL, int nRanks, size_t nBytes);
+// Whether AllGather should take the store kernel over LL on gfx950, where the shared cost model
+// keeps LL well past the point the store kernel overtakes it.
+bool ncclSymkGfx950AllGatherPrefersStore(int nRanks, size_t nBytes);
+#endif
 
 ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* task, struct ncclSymkDevWork* outDevWork);
+bool ncclSymkTmaAvailable(struct ncclComm* comm);
+// NCCL_SYM_TMA_ENABLE=2: take the DMA-staged kernel regardless of predicted time or message size.
+bool ncclSymkTmaForced(struct ncclComm* comm);
+bool ncclSymkTmaDeepEligible(struct ncclComm* comm, ncclSymkKernelId k, size_t nBytes, int nBlocks);
 
 // Generated by src/device/symmetric/generate.py
 extern int const ncclSymkKernelCount;
 extern void* ncclSymkKernelList[/*ncclSymkKernelCount*/];
+// Instrumented variants, indexed identically to ncclSymkKernelList. Selected
+// (instead of ncclSymkKernelList) only when kernel-channel profiling is active.
+extern void* ncclSymkKernelListProfile[/*ncclSymkKernelCount*/];
 extern int ncclSymkKernelRequirements[/*ncclSymkKernelCount*/];
 extern int ncclSymkKernelMaxDynamicSmem[/*ncclSymkKernelCount*/]; // initialized by ncclInitKernelsForDevice()
 int ncclSymkGetKernelIndex(ncclSymkKernelId kernelId, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty);
@@ -149,6 +222,68 @@ bool rcclSymkKernelIdIsLL(int kernelId);
 
 int ncclSymkLLKernelMask();
 int ncclSymkDynamicSmemKernelMask();
+int ncclSymkTmaKernelMask();
+int ncclSymkGinKernelMask();
+int ncclSymkLsaKernelMask();
+int ncclSymkAGKernelMask();
+int ncclSymkARKernelMask();
+int ncclSymkRSKernelMask();
+size_t ncclSymkRsGinChunkBytes();
 
 constexpr int ncclSymkAllGather_RailRing_ChunkSize = 1 << 20;
+
+constexpr int ncclSymkMinWarpsPerBlock = 4;
+constexpr int ncclSymkBytePerPack = 16;
+constexpr __host__ __device__ int ncclSymkGetBytesPerChunk(int nWarps, int unrollPacks) {
+  return nWarps * unrollPacks * WARP_SIZE * ncclSymkBytePerPack;
+}
+
+// SM kernel unroll packs
+constexpr int ncclSymkUnrollPacks = 4;
+constexpr int ncclSymkBytePerChunk = ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, ncclSymkUnrollPacks);
+
+// TMA kernel unroll packs, by element size.
+//
+// [RCCL] The reduce deep loops carry acc0[UnrollPacks] of T plus acc1[UnrollPacks] of the
+// accumulator, and AccPack is BytePack<ncclSymkBytePerPack * sizeof(Acc) / sizeof(T)> with
+// Acc always float -- so a narrower T makes each accumulator pack WIDER: 32 B/pack at f32,
+// 48 B at 2-byte types, 80 B at 1-byte. A single pack count therefore cannot suit all of
+// them; at 16 packs everything below f32 spills the register file. Scaling the count the
+// other way holds the per-lane accumulator footprint roughly flat (~512 B), so each type
+// gets the widest tile it can actually hold.
+constexpr __host__ __device__ int ncclSymkDeepUnrollPacks(int eltSize) {
+  return eltSize >= 4 ? 16 : eltSize == 2 ? 8 : 4;
+}
+constexpr __host__ __device__ int ncclSymkDeepBytePerChunk(int eltSize) {
+  return ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, ncclSymkDeepUnrollPacks(eltSize));
+}
+// [RCCL] ncclSymkTmaDeepEligible() has no datatype, so it bars on the widest chunk any
+// element size produces. That is the safe direction: a narrower type's chunk is smaller,
+// so it needs fewer bytes to fill one, and the picker only ever asks for more than
+// necessary. The deep loops below still size themselves from their own sizeof(T).
+constexpr int ncclSymkDeepMaxUnrollPacks = ncclSymkDeepUnrollPacks(4);
+constexpr int ncclSymkDeepMaxBytePerChunk = ncclSymkDeepBytePerChunk(4);
+
+// Multimem bcast deep loop (single warp). A pure relay with no accumulators, so it takes
+// the widest tile regardless of type.
+constexpr int ncclSymkMultimemDeepBytePerChunk = ncclSymkGetBytesPerChunk(1, ncclSymkDeepMaxUnrollPacks);
+
+// Spread concurrent MC operations across different addresses to avoid contention.
+constexpr int ncclSymkMcPerRankOffsetBytes = 32 * 1024 * 1024;
+static_assert(ncclSymkMcPerRankOffsetBytes % ncclSymkMultimemDeepBytePerChunk == 0);
+
+// Deep loop when input/output are 256 B-aligned. AllGather stages a tile it never reduces,
+// so it carries no accumulator and can take double the packs without register pressure.
+constexpr int ncclSymkAlign256BDeepUnrollPacks = 32;
+constexpr int ncclSymkAlign256BDeepBytePerChunk =
+  ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, ncclSymkAlign256BDeepUnrollPacks);
+
+// [RCCL] Core asserts for TDM-powered kernels.  Do not remove the static asserts.
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+constexpr int ncclSymkTileSmemBudget = 320 << 10; // gfx1250 has 320KiB of LDS
+static_assert(ncclSymkWarpsPerBlock * ncclTmaShmemScratchWarpSize() <= ncclSymkTileSmemBudget,
+              "async-tile staging windows do not fit gfx1250's per-block LDS budget");
+static_assert(ncclSymkWarpsPerBlock == 16, "TDM symmetric kernels expect a 16-warp launch");
+#endif
+
 #endif
