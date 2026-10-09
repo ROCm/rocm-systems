@@ -670,6 +670,13 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
   if (init_flag_ & AMDSMI_INIT_AMD_NICS) {
     smi_nic_destroy_context(ainic_ctx_);
     ainic_ctx_ = nullptr;
+    // The sockets own the devices. The GPU and CPU branches above already emptied sockets_, so
+    // this frees them only for a NIC-only init; either way the set's pointers are now dangling.
+    ainic_processors_.clear();
+    for (uint32_t i = 0; i < sockets_.size(); i++) {
+      delete sockets_[i];
+    }
+    sockets_.clear();
   }
   return AMDSMI_STATUS_SUCCESS;
 }

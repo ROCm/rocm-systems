@@ -28,12 +28,36 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 #include "smi_ethtool_ioctl.h"
+#include "smi_nic_driver_stats.h"
 #include "smi_nic_transport.h"
 
 namespace amd::smi::nic::transport {
+
+namespace {
+
+// ETHTOOL_GLINKSETTINGS trails the struct with supported, advertising and lp_advertising masks.
+constexpr size_t kLinkModeMaskCount = 3;
+constexpr size_t kMacLen = ETH_ALEN;
+static_assert(sizeof(PermanentAddress::mac) == kMacLen, "PermanentAddress::mac must hold one MAC");
+
+struct FreeDeleter {
+  void operator()(void* ptr) const { std::free(ptr); }
+};
+
+template <typename T>
+using ZeroedPtr_t = std::unique_ptr<T, FreeDeleter>;
+
+// Zero-filled heap block of `bytes` for the variable-length ethtool structs.
+template <typename T>
+ZeroedPtr_t<T> make_zeroed(size_t bytes) {
+  return ZeroedPtr_t<T>(static_cast<T*>(std::calloc(1, bytes)));
+}
+
+}  // namespace
 
 Result<PermanentAddress> parse_perm_addr(uint32_t reported_size, const uint8_t* mac_bytes) {
   PermanentAddress result{};
@@ -43,6 +67,79 @@ Result<PermanentAddress> parse_perm_addr(uint32_t reported_size, const uint8_t* 
   std::copy(mac_bytes, mac_bytes + result.mac.size(), result.mac.begin());
   return {true, result, 0};
 }
+
+namespace ioctl_internal {
+
+namespace {
+
+// The driver's count can change between the three requests. Kernels that check the input count
+// answer 0 on a mismatch; older ones write their current count whatever size we allocated, so the
+// headroom is best effort there. Either way a mismatch is a reason to start over.
+constexpr int kMaxStatsAttempts = 3;
+constexpr size_t kStatsHeadroom = 64;
+
+}  // namespace
+
+Result<VendorStatistics> read_driver_statistics(const DriverStatsIoctls_t& ioctls) {
+  for (int attempt = 0; attempt < kMaxStatsAttempts; ++attempt) {
+    auto count = ioctls.get_count();
+    if (!count.success) {
+      return {false, {}, count.error_code};
+    }
+
+    const uint32_t stats_num = count.value;
+    if (stats_num == 0) {
+      return {true, {{}, {}}, 0};
+    }
+
+    /**
+     * ethtool_gstrings/ethtool_stats are variable-length: a fixed header
+     * followed by `capacity` trailing entries.
+     */
+    const size_t capacity = static_cast<size_t>(stats_num) + kStatsHeadroom;
+    auto strings =
+        make_zeroed<ethtool_gstrings>(sizeof(ethtool_gstrings) + capacity * ETH_GSTRING_LEN);
+    auto stats = make_zeroed<ethtool_stats>(sizeof(ethtool_stats) + capacity * sizeof(uint64_t));
+    if (!strings || !stats) {
+      return {false, {}, ENOMEM};
+    }
+
+    strings->cmd = ETHTOOL_GSTRINGS;
+    strings->string_set = ETH_SS_STATS;
+    strings->len = static_cast<__u32>(stats_num);
+    if (ioctls.get_strings(strings.get(), capacity) != 0) {
+      return {false, {}, errno};
+    }
+
+    stats->cmd = ETHTOOL_GSTATS;
+    stats->n_stats = static_cast<__u32>(stats_num);
+    if (ioctls.get_stats(stats.get(), capacity) != 0) {
+      return {false, {}, errno};
+    }
+
+    if ((strings->len != stats_num) || (stats->n_stats != stats_num)) {
+      continue;
+    }
+
+    VendorStatistics result;
+    result.names.reserve(stats_num);
+    result.values.reserve(stats_num);
+
+    for (uint32_t i = 0; i < stats_num; i++) {
+      const char* name_ptr = reinterpret_cast<const char*>(&strings->data[i * ETH_GSTRING_LEN]);
+      result.names.emplace_back(name_ptr, strnlen(name_ptr, ETH_GSTRING_LEN));
+      result.values.push_back(stats->data[i]);
+    }
+
+    return {true, result, 0};
+  }
+
+  return {false, {}, EAGAIN};
+}
+
+}  // namespace ioctl_internal
+
+namespace {
 
 /**
  * Ioctl (SIOCETHTOOL) transport backend. Works on all ethtool-capable kernels.
@@ -95,9 +192,9 @@ class IoctlBackend : public NicTransport {
       return {false, {}, EINVAL};
     }
 
-    size_t len = sizeof(ethtool_link_settings) + 3 * static_cast<size_t>(nwords) * sizeof(uint32_t);
-    std::unique_ptr<ethtool_link_settings, decltype(&std::free)> link(
-        static_cast<ethtool_link_settings*>(std::calloc(1, len)), &std::free);
+    size_t len = sizeof(ethtool_link_settings) +
+                 (kLinkModeMaskCount * static_cast<size_t>(nwords) * sizeof(uint32_t));
+    auto link = make_zeroed<ethtool_link_settings>(len);
 
     if (!link) {
       return {false, {}, ENOMEM};
@@ -142,65 +239,18 @@ class IoctlBackend : public NicTransport {
   }
 
   Result<VendorStatistics> get_statistics(const std::string& iface) override {
-    auto drvinfo_result = get_driver_info(iface);
-    if (!drvinfo_result.success) {
-      return {false, {}, drvinfo_result.error_code};
-    }
-
-    uint32_t stats_num = drvinfo_result.value.n_stats;
-    if (stats_num == 0) {
-      return {true, {{}, {}}, 0};
-    }
-
-    /**
-     * ethtool_gstrings/ethtool_stats are variable-length: a fixed header
-     * followed by stats_num trailing entries.
-     */
-    size_t strings_len =
-        sizeof(ethtool_gstrings) + static_cast<size_t>(stats_num) * ETH_GSTRING_LEN;
-    std::unique_ptr<ethtool_gstrings, decltype(&std::free)> strings(
-        static_cast<ethtool_gstrings*>(std::calloc(1, strings_len)), &std::free);
-
-    if (!strings) {
-      return {false, {}, ENOMEM};
-    }
-
-    strings->cmd = ETHTOOL_GSTRINGS;
-    strings->string_set = ETH_SS_STATS;
-    strings->len = static_cast<__u32>(stats_num);
-
-    int ret = smi_ethtool_ioctl(iface, strings.get());
-    if (ret != 0) {
-      return {false, {}, errno};
-    }
-
-    size_t stats_len = sizeof(ethtool_stats) + stats_num * sizeof(uint64_t);
-    std::unique_ptr<ethtool_stats, decltype(&std::free)> stats(
-        static_cast<ethtool_stats*>(std::calloc(1, stats_len)), &std::free);
-
-    if (!stats) {
-      return {false, {}, ENOMEM};
-    }
-
-    stats->cmd = ETHTOOL_GSTATS;
-    stats->n_stats = static_cast<__u32>(stats_num);
-
-    ret = smi_ethtool_ioctl(iface, stats.get());
-    if (ret != 0) {
-      return {false, {}, errno};
-    }
-
-    VendorStatistics result;
-    result.names.reserve(stats_num);
-    result.values.reserve(stats_num);
-
-    for (uint32_t i = 0; i < stats_num; i++) {
-      const char* name_ptr = reinterpret_cast<const char*>(&strings->data[i * ETH_GSTRING_LEN]);
-      result.names.emplace_back(name_ptr, strnlen(name_ptr, ETH_GSTRING_LEN));
-      result.values.push_back(stats->data[i]);
-    }
-
-    return {true, result, 0};
+    ioctl_internal::DriverStatsIoctls_t ioctls;
+    ioctls.get_count = [this, &iface]() -> Result<uint32_t> {
+      const auto drvinfo = get_driver_info(iface);
+      return {drvinfo.success, drvinfo.value.n_stats, drvinfo.error_code};
+    };
+    ioctls.get_strings = [&iface](ethtool_gstrings* strings, size_t) {
+      return smi_ethtool_ioctl(iface, strings);
+    };
+    ioctls.get_stats = [&iface](ethtool_stats* stats, size_t) {
+      return smi_ethtool_ioctl(iface, stats);
+    };
+    return ioctl_internal::read_driver_statistics(ioctls);
   }
 
   Result<FecStatistics_t> get_fec_statistics(const std::string& /* iface */) override {
@@ -213,11 +263,11 @@ class IoctlBackend : public NicTransport {
      * both. Heap-allocate so the storage is suitably aligned for the struct's
      * __u32 fields (a plain uint8_t[] would be alignment-1).
      */
-    std::vector<uint8_t> buffer(sizeof(ethtool_perm_addr) + 6, 0);
+    std::vector<uint8_t> buffer(sizeof(ethtool_perm_addr) + kMacLen, 0);
 
     auto* perm = reinterpret_cast<ethtool_perm_addr*>(buffer.data());
     perm->cmd = ETHTOOL_GPERMADDR;
-    perm->size = 6;
+    perm->size = kMacLen;
 
     int ret = smi_ethtool_ioctl(iface, perm);
     if (ret != 0) {
@@ -230,6 +280,8 @@ class IoctlBackend : public NicTransport {
 
   std::string backend_name() const override { return "ioctl"; }
 };
+
+}  // namespace
 
 namespace ioctl_internal {
 std::shared_ptr<NicTransport> create_ioctl_backend() { return std::make_shared<IoctlBackend>(); }

@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
-#include <stdexcept>
 
 #include "pensando_stats.h"
 #include "smi_nic_log.h"
@@ -30,19 +29,12 @@ bool SmiNicSubsystemPensando::is_pci_bridge_class(const std::string& sysfs_bus_p
     return false;
   }
 
-  uint32_t pci_class = 0;
-  try {
-    if (std::holds_alternative<int>(class_val)) {
-      pci_class = static_cast<uint32_t>(std::get<int>(class_val));
-    } else if (std::holds_alternative<std::string>(class_val)) {
-      pci_class = static_cast<uint32_t>(std::stoul(std::get<std::string>(class_val), nullptr, 0));
-    }
-  } catch (const std::invalid_argument&) {
-    return false;
-  } catch (const std::out_of_range&) {
+  const auto parsed_class = parse_sysfs_uint(class_val);
+  if (!parsed_class.has_value()) {
     return false;
   }
 
+  const auto pci_class = static_cast<uint32_t>(*parsed_class);
   return ((pci_class >> PCI_CLASS_SHIFT) == PCI_CLASS_PCI_BRIDGE);
 }
 
@@ -165,16 +157,11 @@ bool SmiNicSubsystemPensando::is_downstream_port(const std::string& port_bdf,
     return false;
   }
 
-  try {
-    std::string port_canon_path = fs::canonical(port_path, ec).string();
-    if (ec) {
-      return false;
-    }
-
-    std::string bridge = "/" + bridge_bdf + "/";
-    return port_canon_path.find(bridge) != std::string::npos;
-
-  } catch (const fs::filesystem_error&) {
+  std::string port_canon_path = fs::canonical(port_path, ec).string();
+  if (ec) {
     return false;
   }
+
+  std::string bridge = "/" + bridge_bdf + "/";
+  return port_canon_path.find(bridge) != std::string::npos;
 }

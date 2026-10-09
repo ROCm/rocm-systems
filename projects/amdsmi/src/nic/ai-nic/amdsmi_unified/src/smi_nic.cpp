@@ -24,22 +24,44 @@
 #include "smi_nic_vpd.h"
 #include "smi_sysfs.h"
 
+// BDF text layout: "DDDD:BB:DD.F"
+static constexpr size_t kBdfLength = 12;
+static constexpr size_t kBdfBusSepPos = 4;
+static constexpr size_t kBdfDeviceSepPos = 7;
+static constexpr size_t kBdfFunctionSepPos = 10;
+static constexpr size_t kBdfDomainPos = 0;
+static constexpr size_t kBdfDomainDigits = 4;
+static constexpr size_t kBdfBusPos = 5;
+static constexpr size_t kBdfBusDigits = 2;
+static constexpr size_t kBdfDevicePos = 8;
+static constexpr size_t kBdfDeviceDigits = 2;
+static constexpr size_t kBdfFunctionPos = 11;
+static constexpr size_t kBdfFunctionDigits = 1;
+static constexpr int kHexBase = 16;
+// Packed layout: domain[..:16] bus[15:8] device[7:3] function[2:0]
+static constexpr unsigned kBdfDomainShift = 16;
+static constexpr unsigned kBdfBusShift = 8;
+static constexpr unsigned kBdfDeviceShift = 3;
+
 uint64_t parse_bdf(const std::string& bdf) {
-  if (bdf.length() != 12) {
+  if (bdf.length() != kBdfLength) {
     return 0;
   }
 
-  if ((bdf[4] != ':') || (bdf[7] != ':') || (bdf[10] != '.')) {
+  if ((bdf[kBdfBusSepPos] != ':') || (bdf[kBdfDeviceSepPos] != ':') ||
+      (bdf[kBdfFunctionSepPos] != '.')) {
     return 0;
   }
 
   try {
-    uint64_t domain = std::stoul(bdf.substr(0, 4), nullptr, 16);
-    uint64_t bus = std::stoul(bdf.substr(5, 2), nullptr, 16);
-    uint64_t device = std::stoul(bdf.substr(8, 2), nullptr, 16);
-    uint64_t function = std::stoul(bdf.substr(11, 1), nullptr, 16);
+    uint64_t domain = std::stoul(bdf.substr(kBdfDomainPos, kBdfDomainDigits), nullptr, kHexBase);
+    uint64_t bus = std::stoul(bdf.substr(kBdfBusPos, kBdfBusDigits), nullptr, kHexBase);
+    uint64_t device = std::stoul(bdf.substr(kBdfDevicePos, kBdfDeviceDigits), nullptr, kHexBase);
+    uint64_t function =
+        std::stoul(bdf.substr(kBdfFunctionPos, kBdfFunctionDigits), nullptr, kHexBase);
 
-    return (domain << 16) | (bus << 8) | (device << 3) | function;
+    return (domain << kBdfDomainShift) | (bus << kBdfBusShift) | (device << kBdfDeviceShift) |
+           function;
   } catch (const std::exception&) {
     return 0;
   }
@@ -78,17 +100,13 @@ static std::optional<T> get_sysfs_data(const std::string& path) {
       if (std::holds_alternative<std::string>(val)) {
         /**
          * A numeric field can legitimately hold a non-numeric string (e.g. the
-         * PCI core reports "Unknown speed" for links it cannot classify).
-         * stoul would throw across the extern "C" boundary, so treat an
-         * unparsable value as absent rather than propagating the exception.
+         * PCI core reports "Unknown speed" for links it cannot classify), which
+         * parse_sysfs_uint reports as absent instead of throwing across the C ABI.
          */
-        try {
-          return static_cast<T>(std::stoul(std::get<std::string>(val), nullptr, 0));
-        } catch (const std::invalid_argument&) {
-          return std::nullopt;
-        } catch (const std::out_of_range&) {
-          return std::nullopt;
+        if (const auto parsed = parse_sysfs_uint(val)) {
+          return static_cast<T>(*parsed);
         }
+        return std::nullopt;
       }
     }
   }
@@ -103,23 +121,19 @@ static amd::smi::nic::vpd::VpdFields read_device_vpd(const std::string& sysfs_bu
   const std::string vpd_path = sysfs_bus_path + "/vpd";
   std::ifstream file(vpd_path, std::ios::binary);
   if (!file) {
-    if (amd::smi::nic::log::is_enabled()) {
-      NIC_LOG_DEBUG("vpd read " + vpd_path + " -> FAIL cannot open");
-    }
+    NIC_LOG_DEBUG("vpd read " + vpd_path + " -> FAIL cannot open");
     return {};
   }
   std::vector<uint8_t> image((std::istreambuf_iterator<char>(file)),
                              std::istreambuf_iterator<char>());
   auto fields = amd::smi::nic::vpd::parse_pci_vpd(image);
   fields.is_vpd_readable = true;
-  if (amd::smi::nic::log::is_enabled()) {
-    NIC_LOG_DEBUG("vpd read " + vpd_path + " -> SUCCESS bytes=" + std::to_string(image.size()) +
-                  " product=" + fields.product_name.value_or("absent") +
-                  " part=" + fields.part_number.value_or("absent") + " serial=" +
-                  (fields.serial_number.has_value()
-                       ? amd::smi::nic::log::mask_tail(fields.serial_number.value())
-                       : "absent"));
-  }
+  NIC_LOG_DEBUG("vpd read " + vpd_path + " -> SUCCESS bytes=" + std::to_string(image.size()) +
+                " product=" + fields.product_name.value_or("absent") +
+                " part=" + fields.part_number.value_or("absent") + " serial=" +
+                (fields.serial_number.has_value()
+                     ? amd::smi::nic::log::mask_tail(fields.serial_number.value())
+                     : "absent"));
   return fields;
 }
 
@@ -327,16 +341,20 @@ std::map<std::string, uint64_t> SmiNicPort::get_vendor_stats_map(StatTier_t scop
 void SmiNicPort::collect_standard_statistics() const {
   std::string stats_path = sysfs_class_path_ + "/statistics";
 
-  if (!std::filesystem::exists(stats_path) || !std::filesystem::is_directory(stats_path)) {
+  // Error codes throughout: this runs under a C API, where a throw means std::terminate, and
+  // a sysfs error other than "absent" (e.g. a symlink loop) should read as no data.
+  std::error_code ec;
+  if (!std::filesystem::exists(stats_path, ec) || !std::filesystem::is_directory(stats_path, ec)) {
     return;
   }
 
-  std::error_code ec;
   // Manual increment(ec): operator++ on directory_iterator throws on a
   // mid-scan read error; the non-throwing form only guards construction.
   for (auto it = std::filesystem::directory_iterator(stats_path, ec);
        (!ec && (it != std::filesystem::directory_iterator())); it.increment(ec)) {
-    if (it->is_regular_file()) {
+    // Separate from ec: one unreadable entry must not end the scan.
+    std::error_code entry_ec;
+    if (it->is_regular_file(entry_ec)) {
       std::string stat_name = it->path().filename().string();
       auto stat_value = get_sysfs_data<uint64_t>(it->path().string());
       if (stat_value.has_value()) {
@@ -402,15 +420,17 @@ void SmiInfiniBandPort::collect_hw_counters() const {
   std::map<std::string, uint64_t> collected;
   std::string hw_counters_path = sysfs_path_ + "/hw_counters";
 
-  if (std::filesystem::exists(hw_counters_path) &&
-      std::filesystem::is_directory(hw_counters_path)) {
-    std::error_code ec;
+  // Error codes throughout, as in collect_standard_statistics().
+  std::error_code ec;
+  if (std::filesystem::exists(hw_counters_path, ec) &&
+      std::filesystem::is_directory(hw_counters_path, ec)) {
     // Manual increment(ec): operator++ on directory_iterator throws on a
     // mid-scan read error; the non-throwing form only guards construction.
     for (auto it = std::filesystem::directory_iterator(hw_counters_path, ec);
          (!ec && (it != std::filesystem::directory_iterator())); it.increment(ec)) {
       std::string counter_name = it->path().filename().string();
-      if (it->is_regular_file() && (counter_name != kHwCountersLifespanFile)) {
+      std::error_code entry_ec;
+      if (it->is_regular_file(entry_ec) && (counter_name != kHwCountersLifespanFile)) {
         auto counter_value = get_sysfs_data<uint64_t>(it->path().string());
         if (counter_value.has_value()) {
           collected[counter_name] = counter_value.value();
@@ -506,6 +526,7 @@ void SmiNic::add_nic_port(const SmiNicPort& port) {
       ports_.begin(), ports_.end(), key,
       [](uint64_t lhs, const SmiNicPort& rhs) { return lhs < parse_bdf(rhs.bdf()); });
   ports_.insert(pos, port);
+  identity_vpd_cache_.reset();
 }
 
 const std::vector<SmiNicPort>& SmiNic::nic_ports() const { return ports_; }
@@ -630,21 +651,20 @@ static amd::smi::nic::vpd::VpdFields read_identity_vpd(const std::string& sysfs_
   return fields;
 }
 
-std::optional<std::string> SmiNic::product_name() const {
-  return read_identity_vpd(sysfs_bus_path_, ports_).product_name;
+const amd::smi::nic::vpd::VpdFields& SmiNic::identity_vpd() const {
+  if (!identity_vpd_cache_.has_value()) {
+    identity_vpd_cache_ = read_identity_vpd(sysfs_bus_path_, ports_);
+  }
+  return *identity_vpd_cache_;
 }
 
-std::optional<std::string> SmiNic::part_number() const {
-  return read_identity_vpd(sysfs_bus_path_, ports_).part_number;
-}
+std::optional<std::string> SmiNic::product_name() const { return identity_vpd().product_name; }
 
-std::optional<std::string> SmiNic::serial_number() const {
-  return read_identity_vpd(sysfs_bus_path_, ports_).serial_number;
-}
+std::optional<std::string> SmiNic::part_number() const { return identity_vpd().part_number; }
 
-bool SmiNic::is_vpd_readable() const {
-  return read_identity_vpd(sysfs_bus_path_, ports_).is_vpd_readable;
-}
+std::optional<std::string> SmiNic::serial_number() const { return identity_vpd().serial_number; }
+
+bool SmiNic::is_vpd_readable() const { return identity_vpd().is_vpd_readable; }
 
 std::optional<std::string> SmiNic::vendor_name() const {
   // Vendors with richer sources (e.g. Pensando VPD) override this; the base
@@ -676,9 +696,7 @@ std::optional<std::string> SmiNic::hwmon_temp_path(NicTempSensor sensor) const {
   const std::string hwmon_root = telemetry_sysfs_bus_path() + "/hwmon";
   std::error_code ec;
   if (!std::filesystem::is_directory(hwmon_root, ec)) {
-    if (amd::smi::nic::log::is_enabled()) {
-      NIC_LOG_DEBUG("hwmon scan " + hwmon_root + " -> FAIL not a directory");
-    }
+    NIC_LOG_DEBUG("hwmon scan " + hwmon_root + " -> FAIL not a directory");
     return std::nullopt;
   }
 
@@ -688,15 +706,11 @@ std::optional<std::string> SmiNic::hwmon_temp_path(NicTempSensor sensor) const {
        (!ec && (it != std::filesystem::directory_iterator())); it.increment(ec)) {
     std::filesystem::path input = it->path() / "temp1_input";
     if (std::filesystem::exists(input, ec)) {
-      if (amd::smi::nic::log::is_enabled()) {
-        NIC_LOG_DEBUG("hwmon scan " + hwmon_root + " -> SUCCESS " + input.string());
-      }
+      NIC_LOG_DEBUG("hwmon scan " + hwmon_root + " -> SUCCESS " + input.string());
       return input.string();
     }
   }
-  if (amd::smi::nic::log::is_enabled()) {
-    NIC_LOG_DEBUG("hwmon scan " + hwmon_root + " -> FAIL no temp1_input");
-  }
+  NIC_LOG_DEBUG("hwmon scan " + hwmon_root + " -> FAIL no temp1_input");
   return std::nullopt;
 }
 

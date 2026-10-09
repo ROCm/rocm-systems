@@ -16,10 +16,15 @@ import types
 import unittest
 from unittest import mock
 
-_CLI_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "amdsmi_cli")
-)
-_MODULE_PATH = os.path.join(_CLI_DIR, "subcommands", "metric.py")
+from common.common import amdsmi_path, cli_search_order, find_cli_dir
+
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
+_MODULE_PATH = os.path.join(_CLI_DIR, "subcommands", "metric.py") if _CLI_DIR else None
+
+if not _MODULE_PATH or not os.path.isfile(_MODULE_PATH):
+    raise unittest.SkipTest(
+        f"amd-smi CLI metric.py not found (looked in {_CLI_DIR or amdsmi_path})"
+    )
 
 
 def _load_metric():
@@ -196,7 +201,3 @@ class TestMetricNicRdma(unittest.TestCase):
         port = self._stored(command)["RDMA_PORTS"]["PORT_0"]
         self.assertEqual(port["STATISTICS"], {})
         self.assertEqual(port["RDMA_DEVICE"], "ionic_0")
-
-
-if __name__ == "__main__":
-    unittest.main()

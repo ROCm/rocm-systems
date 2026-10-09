@@ -21,8 +21,15 @@ import types
 import unittest
 from unittest import mock
 
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-_MODULE_PATH = os.path.join(_REPO_ROOT, "amdsmi_cli", "amdsmi_init.py")
+from common.common import amdsmi_path, cli_search_order, find_cli_dir
+
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
+_MODULE_PATH = os.path.join(_CLI_DIR, "amdsmi_init.py") if _CLI_DIR else None
+
+if not _MODULE_PATH or not os.path.isfile(_MODULE_PATH):
+    raise unittest.SkipTest(
+        f"amd-smi CLI amdsmi_init.py not found (looked in {_CLI_DIR or amdsmi_path})"
+    )
 
 
 def _make_amdsmi_stub():
@@ -81,14 +88,20 @@ def _load_amdsmi_init(amdsmi_stub):
 
 
 class TestInitNicOnlyGating(unittest.TestCase):
+    def _patch_gates(self, module, gpu, hsmp, nic_present):
+        for name, value in (
+            ("check_amdgpu_driver", gpu),
+            ("check_amd_hsmp_driver", hsmp),
+            ("_any_nic_present", nic_present),
+        ):
+            patcher = mock.patch.object(module, name, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def _run_init(self, gpu, hsmp, nic_present):
         module = _load_amdsmi_init(_make_amdsmi_stub())
-        with (
-            mock.patch.object(module, "check_amdgpu_driver", return_value=gpu),
-            mock.patch.object(module, "check_amd_hsmp_driver", return_value=hsmp),
-            mock.patch.object(module, "_any_nic_present", return_value=nic_present),
-        ):
-            return module.amdsmi_cli_init()
+        self._patch_gates(module, gpu, hsmp, nic_present)
+        return module.amdsmi_cli_init()
 
     def test_nic_only_host_initializes(self):
         flag = self._run_init(gpu=False, hsmp=False, nic_present=True)
@@ -96,10 +109,13 @@ class TestInitNicOnlyGating(unittest.TestCase):
         self.assertFalse(flag & 1)  # no GPU
         self.assertFalse(flag & 2)  # no CPU
 
-    def test_empty_host_exits(self):
+    def test_empty_host_exits_with_drivers_not_loaded(self):
+        module = _load_amdsmi_init(_make_amdsmi_stub())
+        self._patch_gates(module, gpu=False, hsmp=False, nic_present=False)
         with self.assertRaises(SystemExit) as ctx:
-            self._run_init(gpu=False, hsmp=False, nic_present=False)
-        self.assertEqual(ctx.exception.code, -1)
+            module.amdsmi_cli_init()
+        # -1 would reach the shell as 255, the library's unknown-error code.
+        self.assertEqual(ctx.exception.code, int(module.AmdSmiExitCode.DRIVERS_NOT_LOADED))
 
     def test_gpu_host_initializes_without_nic(self):
         flag = self._run_init(gpu=True, hsmp=False, nic_present=False)
@@ -108,14 +124,10 @@ class TestInitNicOnlyGating(unittest.TestCase):
 
     def test_gpu_host_skips_nic_probe(self):
         module = _load_amdsmi_init(_make_amdsmi_stub())
-        with (
-            mock.patch.object(module, "check_amdgpu_driver", return_value=True),
-            mock.patch.object(module, "check_amd_hsmp_driver", return_value=False),
-            mock.patch.object(module, "_any_nic_present") as nic_probe,
-        ):
-            module.amdsmi_cli_init()
+        self._patch_gates(module, gpu=True, hsmp=False, nic_present=False)
+        module.amdsmi_cli_init()
         # GPU present short-circuits the gate; the NIC probe is not needed.
-        nic_probe.assert_not_called()
+        module._any_nic_present.assert_not_called()
 
 
 class TestAnyNicPresentHelper(unittest.TestCase):
@@ -130,33 +142,24 @@ class TestAnyNicPresentHelper(unittest.TestCase):
     def _load(self):
         return _load_amdsmi_init(_make_amdsmi_stub())
 
+    def _patch_one_socket(self, module, processor_handles):
+        for name, value in (
+            ("amdsmi_get_socket_handles", [object()]),
+            ("amdsmi_get_processor_handles_by_type", {"processor_handles": processor_handles}),
+        ):
+            patcher = mock.patch.object(module.amdsmi_interface, name, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def test_true_when_a_socket_has_nic_handles(self):
         module = self._load()
-        with (
-            mock.patch.object(
-                module.amdsmi_interface, "amdsmi_get_socket_handles", return_value=[object()]
-            ),
-            mock.patch.object(
-                module.amdsmi_interface,
-                "amdsmi_get_processor_handles_by_type",
-                return_value={"processor_handles": [object()]},
-            ),
-        ):
-            self.assertTrue(module._any_nic_present())
+        self._patch_one_socket(module, [object()])
+        self.assertTrue(module._any_nic_present())
 
     def test_false_when_no_socket_has_nic_handles(self):
         module = self._load()
-        with (
-            mock.patch.object(
-                module.amdsmi_interface, "amdsmi_get_socket_handles", return_value=[object()]
-            ),
-            mock.patch.object(
-                module.amdsmi_interface,
-                "amdsmi_get_processor_handles_by_type",
-                return_value={"processor_handles": []},
-            ),
-        ):
-            self.assertFalse(module._any_nic_present())
+        self._patch_one_socket(module, [])
+        self.assertFalse(module._any_nic_present())
 
     def test_false_when_discovery_raises(self):
         module = self._load()
@@ -166,7 +169,3 @@ class TestAnyNicPresentHelper(unittest.TestCase):
             side_effect=module.amdsmi_exception.AmdSmiException("discovery failed"),
         ):
             self.assertFalse(module._any_nic_present())
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -12,6 +12,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <utility>
 
 #include "smi_nic_log.h"
 
@@ -20,6 +21,7 @@ namespace amd::nic::netlink {
 namespace {
 // "family=<int> cmd=<u8> flags=0x<u16>" fits well within this.
 constexpr size_t kQueryHeadTextLen = 64;
+constexpr int kNlBufferBytes = 32768;
 }  // namespace
 
 GenericNetlinkClient::GenericNetlinkClient() : socket_(), connected_(false) {}
@@ -34,7 +36,7 @@ int GenericNetlinkClient::connect() {
     return ret;
   }
 
-  socket_.set_buffer_size(32768, 32768);
+  socket_.set_buffer_size(kNlBufferBytes, kNlBufferBytes);
   socket_.disable_auto_ack();
 
   connected_ = true;
@@ -54,8 +56,9 @@ std::optional<int> GenericNetlinkClient::resolve_family_id(const std::string& fa
   return family_id;
 }
 
+namespace {
 // C-style callback wrapper to bridge to C++ std::function
-static int callback_wrapper(struct nl_msg* msg, void* arg) {
+int callback_wrapper(struct nl_msg* msg, void* arg) {
   if (!arg) {
     return NL_SKIP;
   }
@@ -70,6 +73,7 @@ static int callback_wrapper(struct nl_msg* msg, void* arg) {
 
   return (*handler)(msg, user_arg);
 }
+}  // namespace
 
 int GenericNetlinkClient::query(int family_id, uint8_t cmd, uint8_t version,
                                 std::function<int(NLMessage&)> build_fn, MessageHandler handler,
@@ -110,9 +114,12 @@ int GenericNetlinkClient::query_impl(int family_id, uint8_t cmd, uint8_t version
   NLCallback cb;
 
   std::pair<MessageHandler*, void*> cb_arg(&handler, arg);
-  cb.set(NL_CB_VALID, NL_CB_CUSTOM, callback_wrapper, &cb_arg);
+  int ret = cb.set(NL_CB_VALID, NL_CB_CUSTOM, callback_wrapper, &cb_arg);
+  if (ret < 0) {
+    return ret;
+  }
 
-  int ret = nl_send_auto(socket_.get(), msg.get());
+  ret = nl_send_auto(socket_.get(), msg.get());
   if (ret < 0) {
     return ret;
   }

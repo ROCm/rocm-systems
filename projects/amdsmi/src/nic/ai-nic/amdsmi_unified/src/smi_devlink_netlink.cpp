@@ -15,9 +15,11 @@
 #include <linux/devlink.h>
 #include <netlink/errno.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "smi_nic_log.h"
@@ -54,6 +56,21 @@ struct HealthDumpContext {
  */
 constexpr uint8_t kStateHealthy = 0;
 
+constexpr const char* kPciBusName = "pci";
+
+// Builds the pci/<dev> bus and device attributes every devlink request here carries.
+// `dev` is captured by reference and must outlive the returned callable.
+auto make_dev_request_builder(const std::string& dev) {
+  return [&dev](NLMessage& msg) -> int {
+    NLAttributes attrs(msg);
+    const int r = attrs.put_string(DEVLINK_ATTR_BUS_NAME, kPciBusName);
+    if (r < 0) {
+      return r;
+    }
+    return attrs.put_string(DEVLINK_ATTR_DEV_NAME, dev);
+  };
+}
+
 /**
  * Invoked once per reporter across the dump. Filters to the target device and
  * appends each of its reporters to the context vector.
@@ -83,7 +100,7 @@ int health_dump_handler(struct nl_msg* msg, void* arg) {
 
   // The reporter's fields live in a nested attribute.
   struct nlattr* rtb[DEVLINK_ATTR_MAX + 1];
-  if (nla_parse_nested(rtb, DEVLINK_ATTR_MAX, rep, nullptr) < 0 ||
+  if ((NLAttributes::parse_nested(rep, rtb, DEVLINK_ATTR_MAX, nullptr) < 0) ||
       !NLAttributes::is_present(rtb[DEVLINK_ATTR_HEALTH_REPORTER_NAME])) {
     return NL_SKIP;
   }
@@ -95,13 +112,13 @@ int health_dump_handler(struct nl_msg* msg, void* arg) {
   out.healthy = 1;
   if (NLAttributes::is_present(rtb[DEVLINK_ATTR_HEALTH_REPORTER_STATE])) {
     out.healthy =
-        NLAttributes::get_u8(rtb[DEVLINK_ATTR_HEALTH_REPORTER_STATE]) == kStateHealthy ? 1 : 0;
+        (NLAttributes::get_u8(rtb[DEVLINK_ATTR_HEALTH_REPORTER_STATE]) == kStateHealthy) ? 1 : 0;
   }
 
   out.error_count = 0;
   if (NLAttributes::is_present(rtb[DEVLINK_ATTR_HEALTH_REPORTER_ERR_COUNT])) {
     const uint64_t errs = nla_get_u64(rtb[DEVLINK_ATTR_HEALTH_REPORTER_ERR_COUNT]);
-    out.error_count = errs > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(errs);
+    out.error_count = static_cast<uint32_t>(std::min<uint64_t>(errs, UINT32_MAX));
   }
 
   ctx->out->push_back(out);
@@ -169,14 +186,7 @@ transport::Result<std::vector<DevlinkReporter>> DevlinkNetlinkClient::get_health
   std::vector<DevlinkReporter> reporters;
   HealthDumpContext ctx{dev, &reporters};
 
-  auto build_fn = [&dev](NLMessage& msg) -> int {
-    NLAttributes attrs(msg);
-    int r = attrs.put_string(DEVLINK_ATTR_BUS_NAME, "pci");
-    if (r < 0) {
-      return r;
-    }
-    return attrs.put_string(DEVLINK_ATTR_DEV_NAME, dev);
-  };
+  auto build_fn = make_dev_request_builder(dev);
 
   ret = client_.query(family_id_, DEVLINK_CMD_HEALTH_REPORTER_GET, DEVLINK_GENL_VERSION, build_fn,
                       health_dump_handler, &ctx, NLM_F_REQUEST | NLM_F_DUMP);
@@ -268,14 +278,7 @@ transport::Result<DevlinkPortSplit> DevlinkNetlinkClient::get_port_split(const s
   PortDumpContext ctx;
   ctx.dev = dev;
 
-  auto build_fn = [&dev](NLMessage& msg) -> int {
-    NLAttributes attrs(msg);
-    int r = attrs.put_string(DEVLINK_ATTR_BUS_NAME, "pci");
-    if (r < 0) {
-      return r;
-    }
-    return attrs.put_string(DEVLINK_ATTR_DEV_NAME, dev);
-  };
+  auto build_fn = make_dev_request_builder(dev);
 
   ret = client_.query(family_id_, DEVLINK_CMD_PORT_GET, DEVLINK_GENL_VERSION, build_fn,
                       port_dump_handler, &ctx, NLM_F_REQUEST | NLM_F_DUMP);
@@ -313,7 +316,7 @@ void append_version(struct nlattr* version_attr, DevlinkVersionType type, Devlin
     return;
   }
   struct nlattr* vtb[DEVLINK_ATTR_MAX + 1];
-  if (nla_parse_nested(vtb, DEVLINK_ATTR_MAX, version_attr, nullptr) < 0 ||
+  if ((NLAttributes::parse_nested(version_attr, vtb, DEVLINK_ATTR_MAX, nullptr) < 0) ||
       !NLAttributes::is_present(vtb[DEVLINK_ATTR_INFO_VERSION_NAME]) ||
       !NLAttributes::is_present(vtb[DEVLINK_ATTR_INFO_VERSION_VALUE])) {
     return;
@@ -398,14 +401,7 @@ transport::Result<DevlinkDeviceInfo> DevlinkNetlinkClient::get_device_info(const
   DevlinkDeviceInfo info{};
   DeviceInfoContext ctx{dev, &info};
 
-  auto build_fn = [&dev](NLMessage& msg) -> int {
-    NLAttributes attrs(msg);
-    int r = attrs.put_string(DEVLINK_ATTR_BUS_NAME, "pci");
-    if (r < 0) {
-      return r;
-    }
-    return attrs.put_string(DEVLINK_ATTR_DEV_NAME, dev);
-  };
+  auto build_fn = make_dev_request_builder(dev);
 
   ret = client_.query(family_id_, DEVLINK_CMD_INFO_GET, DEVLINK_GENL_VERSION, build_fn,
                       device_info_handler, &ctx, NLM_F_REQUEST | NLM_F_DUMP);

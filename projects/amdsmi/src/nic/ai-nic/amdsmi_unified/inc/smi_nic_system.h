@@ -34,7 +34,7 @@ class SmiNicSystem {
   bool is_driver_loaded(const std::string& bdf, DriverType driver_type) const;
 
   std::vector<std::string> list_bdfs();
-  bool has_interface(const std::string& iface);
+  bool has_interface(const std::string& iface) const;
   const std::vector<const SmiNic*>& get_nics() const;
   const SmiNic* get_nic_by_interface(const std::string& iface) const;
   const SmiNic* get_nic_by_bdf(const std::string& bdf) const;

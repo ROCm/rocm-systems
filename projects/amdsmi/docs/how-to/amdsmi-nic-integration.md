@@ -351,7 +351,7 @@ typedef struct {
 - `revision`: `/sys/bus/pci/devices/<BDF>/revision`
 - `product_name`, `part_number`, `serial_number`: VPD data, parsed from `/sys/bus/pci/devices/<BDF>/vpd` when present. When the device exposes no sysfs VPD entry, `product_name` and `part_number` are reported as unavailable; `serial_number` falls back to the devlink board serial (`DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER`) and is reported as unavailable only when that is also absent. The devlink `DEVLINK_ATTR_INFO_SERIAL_NUMBER` attribute is deliberately *not* used; it is a MAC-derived EUI, not the physical board serial.
 - `capability`: bitmask of `amdsmi_nic_capability_bits_t`: `AMDSMI_NIC_CAP_FWCTL` (firmware-control management function, e.g. Pensando/POLLARA) and `AMDSMI_NIC_CAP_NETDEV` (host network port(s) present). Derived from the discovered device, not sysfs.
-- ``type``: an ``amdsmi_nic_type_t`` value, derived from the discovered device, not sysfs. It is a ``uint8_t`` and not the enum so it fits the alignment padding before ``capability``: ``sizeof(amdsmi_nic_asic_info_t)`` and every other offset are unchanged.
+- ``type``: an ``amdsmi_nic_type_t`` value, derived from the discovered device, not sysfs. It is a ``uint8_t`` and not the enum so it fits the alignment padding before ``capability`` and adds no size beyond ``capability`` itself. Together they take ``sizeof(amdsmi_nic_asic_info_t)`` from 1290 to 1296 bytes versus the previous release.
 
 ### NIC type
 
@@ -705,7 +705,9 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(
 
 1. Call with `stats = NULL` to get `num_stats` (count of available statistics).
 2. Allocate an array of `num_stats` elements.
-3. Call again with the allocated array.
+3. Call again with the allocated array. If there are more statistics than the array holds, the
+   first ones are filled, `num_stats` is set to the count needed, and the call returns
+   `AMDSMI_STATUS_INSUFFICIENT_SIZE`.
 
 The statistics are the driver's RDMA hardware counters, the same set as
 ``rdma statistic show link DEV/PORT``, and are read on every call.
@@ -746,7 +748,9 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(
 
 1. Call with `stats = NULL` to get `num_stats` (count of available statistics for the port).
 2. Allocate an array of `num_stats` elements.
-3. Call again with the allocated array.
+3. Call again with the allocated array. If there are more statistics than the array holds, the
+   first ones are filled, `num_stats` is set to the count needed, and the call returns
+   `AMDSMI_STATUS_INSUFFICIENT_SIZE`.
 
 ---
 
@@ -1407,6 +1411,11 @@ The BM AMD SMI library uses CMake (≥ 3.15) with a C++17-compatible compiler.
 The NIC library (`amdsminic`) is built as part of the main library. The netlink
 transport backend is compiled only when libnl-3 is present (detected via
 `pkg-config`, guarded by `HAVE_LIBNL3`); otherwise the ioctl backend is used.
+The netlink sources also need Linux UAPI headers from kernel 5.6 or newer
+(`linux/ethtool_netlink.h` and the `DEVLINK_ATTR_PORT_SPLITTABLE` and
+`DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER` devlink attributes). The build does not
+detect their absence, so a build host with older headers, such as Ubuntu 20.04
+(kernel 5.4 headers), is not supported.
 The host AMD SMI library has its own build system, documented in its repository
 linked above.
 
@@ -1421,7 +1430,7 @@ linked above.
 The following runtime dependencies are relevant to the BM AMD SMI NIC library:
 
 - Linux kernel sysfs (PCIe device info, netdev, InfiniBand/RDMA, VPD)
-- libnl-3 (optional; enables the netlink ethtool transport backend)
+- libnl-3 (optional; enables the netlink ethtool transport backend; requires kernel UAPI headers 5.6 or newer at build time)
 - The relevant NIC vendor kernel driver (required for that vendor's device discovery)
 
 ---

@@ -12,6 +12,7 @@
 
 #include <array>
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -106,6 +107,12 @@ class LogFixture_t {
   fs::path m_dir;
 };
 
+// snprintf always NUL-terminates, unlike strncpy at sizeof(dst) - 1 on a non-zeroed buffer.
+template <size_t N>
+auto set_cstr(char (&dst)[N], const std::string& src) -> void {
+  std::snprintf(dst, N, "%s", src.c_str());
+}
+
 auto test_no_sink_is_disabled_and_silent() -> void {
   std::cout << "\nSeam: no sink installed\n";
   g_captured.clear();
@@ -199,6 +206,42 @@ auto test_sysfs_logs_raw_text_not_parsed_number() -> void {
         (std::holds_alternative<int>(value) && (std::get<int>(value) == 0x1022)));
 }
 
+auto test_sysfs_reads_counters_above_int_max() -> void {
+  std::cout << "\nSysfs: a counter above INT_MAX is read in full, not dropped\n";
+  const auto fx = LogFixture_t{};
+  constexpr auto kAboveIntMax = uint64_t{3000000000};
+  constexpr auto kHexAboveIntMax = uint64_t{0xFFFFFFFFFF};
+  constexpr auto kIntMax = uint64_t{2147483647};
+
+  const auto read_uint = [&fx](const std::string& name, const std::string& text) {
+    auto value = SmiSysfsReader::SysfsValue{};
+    const auto status = SmiSysfsReader::readLine(fx.write(name, text + "\n"), value);
+    return std::pair{status, (status == SmiSysfsReader::SysfsStatus::Success)
+                                 ? parse_sysfs_uint(value)
+                                 : std::optional<uint64_t>{}};
+  };
+
+  const auto [dec_status, dec_value] = read_uint("rx_bytes", std::to_string(kAboveIntMax));
+  check("decimal above INT_MAX reads as Success",
+        (dec_status == SmiSysfsReader::SysfsStatus::Success));
+  check("decimal above INT_MAX keeps its value", (dec_value == kAboveIntMax));
+
+  const auto [hex_status, hex_value] = read_uint("hw_counter", "0xFFFFFFFFFF");
+  check("hex above INT_MAX reads as Success", (hex_status == SmiSysfsReader::SysfsStatus::Success));
+  check("hex above INT_MAX keeps its value", (hex_value == kHexAboveIntMax));
+
+  const auto [max_status, max_value] = read_uint("tx_bytes", std::to_string(kIntMax));
+  check("INT_MAX still reads exactly",
+        (max_value == kIntMax) && (max_status == SmiSysfsReader::SysfsStatus::Success));
+
+  auto all = std::vector<SmiSysfsReader::SysfsValue>{};
+  const auto all_status = SmiSysfsReader::readAll(fx.write("multi", "3000000000\n7\n"), all);
+  check("readAll accepts a value above INT_MAX",
+        (all_status == SmiSysfsReader::SysfsStatus::Success) && (all.size() == 2));
+  check("readAll keeps the large value",
+        (all.size() == 2) && (parse_sysfs_uint(all[0]) == kAboveIntMax));
+}
+
 auto test_sysfs_rdma_guids_are_masked() -> void {
   std::cout << "\nSysfs: MAC-derived RDMA GUIDs are masked in the log\n";
   const auto fx = LogFixture_t{};
@@ -280,19 +323,15 @@ auto test_discovery_pci_scan_logs_failures_only() -> void {
 
 auto test_sysfs_silent_without_sink() -> void {
   std::cout << "\nSysfs: no sink means no logging and an unchanged result\n";
-  g_captured.clear();
-  nlog::set_sink(nullptr);
-  const auto dir = fs::temp_directory_path() / ("nic_log_nosink_" + std::to_string(::getpid()));
-  fs::create_directories(dir);
-  std::ofstream(dir / "x") << "7\n";
+  const auto fx = LogFixture_t{};
+  nlog::set_sink(nullptr);  // the fixture installs the capture sink; this test needs none
+  const auto path = fx.write("x", "7\n");
 
   auto value = SmiSysfsReader::SysfsValue{};
-  const auto status = SmiSysfsReader::readLine((dir / "x").string(), value);
+  const auto status = SmiSysfsReader::readLine(path, value);
 
   check("read succeeds", (status == SmiSysfsReader::SysfsStatus::Success));
   check("nothing captured", g_captured.empty());
-  auto ec = std::error_code{};
-  fs::remove_all(dir, ec);
 }
 
 auto test_ioctl_failure_logged() -> void {
@@ -423,16 +462,16 @@ auto test_devlink_describe_device_info_masks_serials() -> void {
   std::cout << "\nDevlink describe: serials are masked, versions are shown\n";
   const auto eui_serial = std::string{"0490 81b4eee0"};
   auto info = nl::DevlinkDeviceInfo{};
-  std::strncpy(info.driver_name, "ifoe", sizeof(info.driver_name) - 1);
-  std::strncpy(info.serial_number, eui_serial.c_str(), sizeof(info.serial_number) - 1);
-  std::strncpy(info.board_serial_number, kSerialText.c_str(), sizeof(info.board_serial_number) - 1);
+  set_cstr(info.driver_name, "ifoe");
+  set_cstr(info.serial_number, eui_serial);
+  set_cstr(info.board_serial_number, kSerialText);
   info.version_count = 2;
   info.versions[0].type = static_cast<uint8_t>(nl::DevlinkVersionType::Running);
-  std::strncpy(info.versions[0].name, "fw.mgmt", sizeof(info.versions[0].name) - 1);
-  std::strncpy(info.versions[0].value, "0.21.6.0", sizeof(info.versions[0].value) - 1);
+  set_cstr(info.versions[0].name, "fw.mgmt");
+  set_cstr(info.versions[0].value, "0.21.6.0");
   info.versions[1].type = static_cast<uint8_t>(nl::DevlinkVersionType::Fixed);
-  std::strncpy(info.versions[1].name, "board.serial_number", sizeof(info.versions[1].name) - 1);
-  std::strncpy(info.versions[1].value, kSerialText.c_str(), sizeof(info.versions[1].value) - 1);
+  set_cstr(info.versions[1].name, "board.serial_number");
+  set_cstr(info.versions[1].value, kSerialText);
 
   const auto text = nl::devlink_describe(info);
 
@@ -637,6 +676,7 @@ int main() {
   test_sysfs_missing_file_logged();
   test_sysfs_mac_is_masked();
   test_sysfs_logs_raw_text_not_parsed_number();
+  test_sysfs_reads_counters_above_int_max();
   test_sysfs_rdma_guids_are_masked();
   test_discovery_pci_scan_logs_failures_only();
   test_ioctl_preserves_errno_across_logging();

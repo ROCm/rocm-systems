@@ -186,19 +186,11 @@ def amdsmi_cli_init():
         (amdsmi_interface.AmdSmiLibraryException, amdsmi_interface.AmdSmiParameterException),
     ):
         e = init_result["exception"]
-        # Normalize "drivers not loaded" to one CLI code, reached two ways:
-        # 1) Library returns NOT_INIT/DRIVER_NOT_LOADED
-        # 2) No drivers detected up front -> init_flag == 0. (amdsmi_init raises
-        #    AmdSmiParameterException with err_code=None, which won't match (1)'s
-        #    tuple, so the init_flag == 0 check catches it.)
-        # We don't want to clash with library error codes, so we use a CLI code (AmdSmiExitCode.DRIVERS_NOT_LOADED) for this case.
-        if (
-            e.err_code
-            in (
-                amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
-                amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
-            )
-            or init_flag == 0
+        # Normalize the library's NOT_INIT/DRIVER_NOT_LOADED to one CLI code. We don't want to
+        # clash with library error codes, so we use a CLI code (AmdSmiExitCode.DRIVERS_NOT_LOADED).
+        if e.err_code in (
+            amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
+            amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
         ):
             logging.error(
                 "Drivers not loaded (amdgpu, amd_hsmp, ionic, bnxt_en drivers not found in modules)"
@@ -214,7 +206,7 @@ def amdsmi_cli_init():
     # on such a host, so NIC presence is confirmed here rather than assumed.
     if not mandatory_drivers_present and not _any_nic_present():
         logging.error("Drivers not loaded (amdgpu, amd_hsmp drivers not found in modules)")
-        sys.exit(-1)
+        sys.exit(int(AmdSmiExitCode.DRIVERS_NOT_LOADED))
 
     logging.debug(
         f"AMDSMI initialized with at least one driver successfully | init flag: {init_flag}"

@@ -173,6 +173,28 @@ int main() {
     check("oversized resource length: no crash, no fields", !f.product_name.has_value());
   }
 
+  // VPD strings are ASCII; any other byte must not reach callers as raw text, where it can
+  // break a UTF-8 decode or inject terminal escapes and log lines.
+  {
+    std::vector<uint8_t> vpd_r;
+    put_keyword(vpd_r, "PN", "PN\x1b[31m");
+    put_keyword(vpd_r, "SN",
+                "AB\xE9\x1b"
+                "C1  ");
+
+    std::vector<uint8_t> img;
+    put_large(img, kIdentifier, bytes("Card\nname\xFF"));
+    put_large(img, kVpdR, vpd_r);
+    img.push_back(kEndTag);
+
+    auto f = vpd::parse_pci_vpd(img);
+    check("non-ASCII and control bytes in serial_number become '?'",
+          is_equal(f.serial_number, "AB??C1"));
+    check("escape byte in part_number becomes '?'", is_equal(f.part_number, "PN?[31m"));
+    check("newline and high byte in product_name become '?'",
+          is_equal(f.product_name, "Card?name?"));
+  }
+
   // Empty image yields all-absent fields.
   {
     auto f = vpd::parse_pci_vpd({});

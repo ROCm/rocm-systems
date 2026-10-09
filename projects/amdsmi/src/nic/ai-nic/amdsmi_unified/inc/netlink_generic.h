@@ -11,6 +11,7 @@
 #ifndef AMDSMI_UNIFIED_NETLINK_GENERIC_H_
 #define AMDSMI_UNIFIED_NETLINK_GENERIC_H_
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -34,8 +35,8 @@ class GenericNetlinkClient {
   GenericNetlinkClient(const GenericNetlinkClient&) = delete;
   GenericNetlinkClient& operator=(const GenericNetlinkClient&) = delete;
 
-  GenericNetlinkClient(GenericNetlinkClient&&) = default;
-  GenericNetlinkClient& operator=(GenericNetlinkClient&&) = default;
+  GenericNetlinkClient(GenericNetlinkClient&&) = delete;
+  GenericNetlinkClient& operator=(GenericNetlinkClient&&) = delete;
 
   int connect();
 

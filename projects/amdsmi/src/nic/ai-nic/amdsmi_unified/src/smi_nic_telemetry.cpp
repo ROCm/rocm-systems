@@ -5,6 +5,7 @@
 
 #include <cerrno>
 #include <cstdio>
+#include <iterator>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -51,6 +52,10 @@ std::shared_ptr<IDevlinkClient> create_devlink_client() {
 
 namespace amd::smi::nic::telemetry {
 
+namespace {
+constexpr int kMilliDegreesPerDegree = 1000;
+}  // namespace
+
 NicTelemetry::NicTelemetry(std::shared_ptr<::amd::nic::netlink::IDevlinkClient> devlink)
     : devlink_(std::move(devlink)) {}
 
@@ -61,8 +66,10 @@ transport::Result<NicTemperature> NicTelemetry::get_temperature(const ::SmiNic& 
                                    NicTempSensor::Board};
   uint16_t* const fields[] = {&temp.asic_temp_c, &temp.transceiver_temp_c, &temp.board_temp_c};
 
+  static_assert(std::size(sensors) == std::size(fields), "one field per sensor");
+
   bool any_supported = false;
-  for (size_t i = 0; i < 3; ++i) {
+  for (size_t i = 0; i < std::size(sensors); ++i) {
     const auto path = nic.hwmon_temp_path(sensors[i]);
     if (!path.has_value()) {
       continue;  // this vendor does not expose this sensor
@@ -80,7 +87,7 @@ transport::Result<NicTemperature> NicTelemetry::get_temperature(const ::SmiNic& 
     if (millidegrees < 0) {
       continue;
     }
-    *fields[i] = static_cast<uint16_t>(millidegrees / 1000);
+    *fields[i] = static_cast<uint16_t>(millidegrees / kMilliDegreesPerDegree);
   }
 
   if (!any_supported) {
@@ -110,7 +117,7 @@ transport::Result<NicHealth> NicTelemetry::get_health(const ::SmiNic& nic) const
   const char* name = reporters.value.front().name;
   for (const auto& r : reporters.value) {
     error_sum += r.error_count;
-    if (!r.healthy && health.state != static_cast<uint8_t>(HealthState::Error)) {
+    if (!r.healthy && (health.state != static_cast<uint8_t>(HealthState::Error))) {
       health.state = static_cast<uint8_t>(HealthState::Error);
       name = r.name;
     }
@@ -122,7 +129,7 @@ transport::Result<NicHealth> NicTelemetry::get_health(const ::SmiNic& nic) const
    */
   constexpr uint32_t kMaxErrorCount = kErrorCountUnsupported - 1;
   health.error_count =
-      error_sum >= kMaxErrorCount ? kMaxErrorCount : static_cast<uint32_t>(error_sum);
+      (error_sum >= kMaxErrorCount) ? kMaxErrorCount : static_cast<uint32_t>(error_sum);
   std::snprintf(health.reporter, sizeof(health.reporter), "%s", name);
   return {true, health, 0};
 }

@@ -9,6 +9,10 @@
 
 namespace fs = std::filesystem;
 
+namespace {
+constexpr const char* kBnxtDriverName = "bnxt_en";
+}  // namespace
+
 NicVendor SmiNicSubsystemBroadcom::vendor() const { return NicVendor::Broadcom; }
 
 bool SmiNicSubsystemBroadcom::is_driver_loaded(const std::string& bdf,
@@ -48,8 +52,8 @@ void SmiNicSubsystemBroadcom::discover(
     }
 
     const std::string sysfs_bus_path = pci_path + "/" + bdf;
-    auto [vendor_id, device_id] = read_pci_ids(sysfs_bus_path);
-    (void)device_id;  // bnxt spans many device ids; vendor + driver bind identify it.
+    // bnxt spans many device ids; vendor + driver bind identify it.
+    [[maybe_unused]] auto [vendor_id, device_id] = read_pci_ids(sysfs_bus_path);
     if ((vendor_id != VENDOR_ID) || !is_bound_to_bnxt_en(sysfs_bus_path)) {
       continue;
     }
@@ -70,7 +74,7 @@ bool SmiNicSubsystemBroadcom::is_bound_to_bnxt_en(const std::string& sysfs_bus_p
   if (!fs::is_symlink(driver_link, ec)) {
     return false;
   }
-  return fs::read_symlink(driver_link, ec).filename().string() == "bnxt_en" && !ec;
+  return ((fs::read_symlink(driver_link, ec).filename().string() == kBnxtDriverName) && !ec);
 }
 
 const std::vector<std::unique_ptr<SmiNic>>& SmiNicSubsystemBroadcom::get_nics() const {
