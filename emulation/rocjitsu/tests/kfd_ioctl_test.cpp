@@ -839,30 +839,6 @@ TEST_F(KfdIoctlTest, CreateQueueAcceptsOlderAndNewerPayloadSizes) {
   }
 }
 
-// A compute queue created through KFD is replicated onto every XCD so its
-// dispatches can be spread across the whole device; the XCD that owns the queue
-// still reads the ring alone. An SDMA queue is per-engine and is not replicated.
-TEST_F(KfdIoctlTest, MetadataRingOverflowDoesNotChangeGpuMappings) {
-  auto process = driver_->find_process(driver_->local_process_id());
-  ASSERT_NE(process, nullptr);
-  const auto pages = process->page_table_.size();
-  const auto next_queue = process->next_queue_id_;
-  alignas(8) uint64_t pointers[2]{};
-  kfd_ioctl_create_queue_args args{};
-  args.gpu_id = kGpuId;
-  args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
-  args.ring_base_address = UINT64_MAX - 255;
-  args.ring_size = 256;
-  args.metadata_ring_size = 256;
-  args.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
-  args.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
-  args.queue_percentage = 100;
-  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), -EINVAL);
-  EXPECT_EQ(process->page_table_.size(), pages);
-  EXPECT_EQ(process->next_queue_id_, next_queue);
-  EXPECT_EQ(args.queue_id, 0u);
-}
-
 TEST_F(KfdIoctlTest, QueueIdentityMappingsPreservePartialPageBacking) {
   auto process = driver_->find_process(driver_->local_process_id());
   ASSERT_NE(process, nullptr);
@@ -926,7 +902,7 @@ TEST_F(KfdIoctlTest, UnsupportedMetadataQueueDoesNotChangeProcessState) {
   args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
   args.ring_base_address = ring_va;
   args.ring_size = 1024;
-  args.metadata_ring_size = 1024;
+  args.metadata_ring_size = 4096;
   args.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
   args.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
   args.queue_percentage = 100;
@@ -949,10 +925,10 @@ protected:
 
 TEST_P(KfdBoQueueTest, DispatchPreservesBackingWithSeparateCpuAlias) {
   using namespace rocr::llvm::amdhsa;
-  constexpr size_t bytes = 8192;
+  constexpr size_t bytes = 12288;
   void *reservation = ::mmap(nullptr, bytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   ASSERT_NE(reservation, MAP_FAILED);
-  const auto unmap_bo = [](void *address) { ::munmap(address, 8192); };
+  const auto unmap_bo = [](void *address) { ::munmap(address, bytes); };
   std::unique_ptr<void, decltype(unmap_bo)> reserved(reservation, unmap_bo);
   const uint64_t base = reinterpret_cast<uint64_t>(reservation);
   kfd_ioctl_alloc_memory_of_gpu_args alloc{};
@@ -997,7 +973,8 @@ TEST_P(KfdBoQueueTest, DispatchPreservesBackingWithSeparateCpuAlias) {
   queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
   queue.ring_base_address = base + 4096;
   queue.ring_size = 1024;
-  queue.metadata_ring_size = metadata ? 256 : 0;
+  queue.metadata_ring_size =
+      metadata ? queue.ring_size * rocjitsu::amdgpu::aql_metadata::kBlocks : 0;
   queue.read_pointer_address = base + offsetof(amd_queue_t, read_dispatch_id);
   queue.write_pointer_address = base + offsetof(amd_queue_t, write_dispatch_id);
   queue.queue_percentage = 100;
@@ -1018,9 +995,12 @@ TEST_P(KfdBoQueueTest, DispatchPreservesBackingWithSeparateCpuAlias) {
   packet->completion_signal.handle = base + 2048;
   if (metadata) {
     auto *companion = reinterpret_cast<uint32_t *>(cpu + 4096 + 1024);
-    std::memcpy(companion + 2, code.data() + 16, 48);
-    for (uint32_t block = 0; block < 4; ++block)
-      std::atomic_ref<uint32_t>(companion[block * 16])
+    namespace metadata_abi = rocjitsu::amdgpu::aql_metadata;
+    std::memcpy(companion + metadata_abi::kDescriptorWord,
+                code.data() + metadata_abi::kKernelDescriptorOffset,
+                metadata_abi::kDescriptorBytes);
+    for (uint32_t block = 0; block < metadata_abi::kBlocks; ++block)
+      std::atomic_ref<uint32_t>(companion[metadata_abi::header_word(block)])
           .store(HSA_PACKET_TYPE_KERNEL_DISPATCH, std::memory_order_release);
   }
   std::atomic_ref<uint16_t>(packet->header)
@@ -1055,6 +1035,9 @@ INSTANTIATE_TEST_SUITE_P(
                       std::tuple{"gfx1250_mi455x.json", KFD_IOC_ALLOC_MEM_FLAGS_VRAM},
                       std::tuple{"gfx1250_mi455x.json", KFD_IOC_ALLOC_MEM_FLAGS_GTT}));
 
+// A compute queue created through KFD is replicated onto every XCD so its
+// dispatches can be spread across the whole device; the XCD that owns the queue
+// still reads the ring alone. An SDMA queue is per-engine and is not replicated.
 TEST_F(KfdIoctlTest, CreateQueueReplicatesComputeQueueAcrossXcds) {
   const uint32_t num_xcds = soc_->num_xcds();
   ASSERT_GT(num_xcds, 1u);
@@ -2080,6 +2063,52 @@ protected:
   void expect_failed_runtime_exception(bool reject_overlapping_debug_notification,
                                        bool unmap_status_on_interrupt = false);
 };
+
+TEST_F(KfdIoctlCdna5Test, MetadataRingOverflowDoesNotChangeGpuMappings) {
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  const auto pages = process->page_table_.size();
+  const auto next_queue = process->next_queue_id_;
+  alignas(8) uint64_t pointers[2]{};
+  kfd_ioctl_create_queue_args args{};
+  args.gpu_id = kCdna5GpuId;
+  args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  args.ring_base_address = UINT64_MAX - 255;
+  args.ring_size = 1024;
+  args.metadata_ring_size = 4096;
+  args.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
+  args.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
+  args.queue_percentage = 100;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), -EINVAL);
+  EXPECT_EQ(process->page_table_.size(), pages);
+  EXPECT_EQ(process->next_queue_id_, next_queue);
+  EXPECT_EQ(args.queue_id, 0u);
+}
+
+TEST_F(KfdIoctlCdna5Test, MetadataCapacityMismatchDoesNotChangeProcessState) {
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  alignas(4096) std::array<std::byte, 12288> ring{};
+  alignas(8) uint64_t pointers[2]{};
+  const auto pages = process->page_table_;
+  const auto next_queue = process->next_queue_id_;
+  for (uint32_t metadata_size : {256u, 2048u, 8192u}) {
+    SCOPED_TRACE(metadata_size);
+    kfd_ioctl_create_queue_args args{};
+    args.gpu_id = kCdna5GpuId;
+    args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+    args.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+    args.ring_size = 1024;
+    args.metadata_ring_size = metadata_size;
+    args.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
+    args.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
+    args.queue_percentage = 100;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), -EINVAL);
+    EXPECT_EQ(process->page_table_, pages);
+    EXPECT_EQ(process->next_queue_id_, next_queue);
+    EXPECT_EQ(args.queue_id, 0u);
+  }
+}
 
 TEST_F(KfdIoctlCdna5Test, SdmaCreateNormalizesSmallRingsAndRejectsNonPowersOfTwo) {
   alignas(4096) std::array<std::byte, 4096> ring{};

@@ -99,6 +99,8 @@ public:
   struct GpuAllocation {
     uint64_t gpu_va = 0;
     uint64_t size = 0;
+    // VRAM/GTT: private driver GPU backing, distinct from client CPU mmap aliases.
+    // Local USERPTR: the caller's pages. host_ptr_owned controls teardown ownership.
     void *host_ptr = nullptr;
     uint32_t flags = 0;
     uint64_t handle = 0;

@@ -2759,8 +2759,9 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   if (!ring_size)
     return -EINVAL;
   args->ring_size = *ring_size;
-  if (args->metadata_ring_size && (!is_aql_compute || args->metadata_ring_size < 256 ||
-                                   (args->metadata_ring_size & (args->metadata_ring_size - 1))))
+  if ((args->metadata_ring_size && !is_aql_compute) ||
+      !amdgpu::aql_metadata::valid_ring_layout(args->ring_base_address, args->ring_size,
+                                               args->metadata_ring_size))
     return -EINVAL;
 
   const uint64_t mapped_ring_size = uint64_t{args->ring_size} + args->metadata_ring_size;
