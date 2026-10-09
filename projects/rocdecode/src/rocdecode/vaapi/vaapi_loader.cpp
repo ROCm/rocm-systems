@@ -168,8 +168,9 @@ void VaapiLoader::LoadSym(LibHandle handle, const char *name, T *&fn_ptr) {
 #ifdef _WIN32
     fn_ptr = reinterpret_cast<T *>(GetProcAddress(handle, name));
     if (!fn_ptr) {
+        DWORD error = GetLastError();
         throw std::runtime_error(std::string("VaapiLoader: GetProcAddress('") + name + "'): " +
-                                 Win32ErrorString(GetLastError()));
+                                 Win32ErrorString(error));
     }
 #else
     dlerror(); // clear any prior error
@@ -187,6 +188,21 @@ void VaapiLoader::LoadSym(LibHandle handle, const char *name, T *&fn_ptr) {
 // ---------------------------------------------------------------------------
 
 VaapiLoader::VaapiLoader() {
+    // The destructor does not run when a constructor throws, so release any
+    // library loaded before the failure here.
+    try {
+        Load();
+    } catch (...) {
+        Unload();
+        throw;
+    }
+}
+
+VaapiLoader::~VaapiLoader() {
+    Unload();
+}
+
+void VaapiLoader::Load() {
     std::filesystem::path va_display_path = FindVaDisplayLibPath();
 #ifdef _WIN32
     if (va_display_path.empty()) {
@@ -209,8 +225,9 @@ VaapiLoader::VaapiLoader() {
     constexpr DWORD load_flags = LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
     va_win32_handle_ = LoadLibraryExW(va_display_path.c_str(), nullptr, load_flags);
     if (!va_win32_handle_) {
+        DWORD error = GetLastError();
         throw std::runtime_error(std::string("VaapiLoader: LoadLibraryExW('") + va_display_path.u8string() +
-                                 "'): " + Win32ErrorString(GetLastError()));
+                                 "'): " + Win32ErrorString(error));
     }
 
     // GetProcAddress, unlike dlsym, only searches the given module and not its
@@ -220,8 +237,9 @@ VaapiLoader::VaapiLoader() {
     std::filesystem::path va_core_path = va_display_path.parent_path() / L"rocm_sysdeps_va.dll";
     va_handle_ = LoadLibraryExW(va_core_path.c_str(), nullptr, load_flags);
     if (!va_handle_) {
+        DWORD error = GetLastError();
         throw std::runtime_error(std::string("VaapiLoader: LoadLibraryExW('") + va_core_path.u8string() +
-                                 "'): " + Win32ErrorString(GetLastError()));
+                                 "'): " + Win32ErrorString(error));
     }
 
     LoadSym(va_win32_handle_, "vaGetDisplayWin32", fn.vaGetDisplayWin32);
@@ -306,7 +324,8 @@ VaapiLoader::VaapiLoader() {
     LoadSym(va_core_handle, "vaExportSurfaceHandle",    fn.vaExportSurfaceHandle);
 }
 
-VaapiLoader::~VaapiLoader() {
+void VaapiLoader::Unload() noexcept {
+    fn = {};
 #ifdef _WIN32
     if (va_handle_) {
         FreeLibrary(va_handle_);

@@ -147,6 +147,11 @@ private:
     //   Fallbacks: %ROCM_PATH%/lib/rocm_sysdeps/bin/, then a PATH search.
     static std::filesystem::path FindVaDisplayLibPath();
 
+    // Loads the libraries and resolves all symbols; throws on failure.
+    void Load();
+    // Releases every library handle and clears the function table.
+    void Unload() noexcept;
+
     template <typename T>
     void LoadSym(LibHandle handle, const char *name, T *&fn_ptr);
 };

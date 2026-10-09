@@ -47,8 +47,18 @@ rocDecCreateDecoder(rocDecDecoderHandle *decoder_handle, RocDecoderCreateInfo *d
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_NOT_INITIALIZED;
     }
+    rocDecStatus ret = ROCDEC_SUCCESS;
+    try {
+        // Constructs the VaContext singleton on first use, which loads the VA-API libraries and can throw.
+        ret = static_cast<DecHandle *>(handle)->roc_decoder_->InitializeDecoder();
+    }
+    catch(const std::exception& e) {
+        CriticalLog(g_rocdec_logger, "Error: Failed to initialize the decoder, " + ROCDEC_STR(e.what()));
+        delete static_cast<DecHandle *>(handle);
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_NOT_INITIALIZED;
+    }
     *decoder_handle = handle;
-    rocDecStatus ret = static_cast<DecHandle *>(handle)->roc_decoder_->InitializeDecoder();
     FunctionExitLog(g_rocdec_logger);
     return ret;
 }
@@ -84,9 +94,17 @@ rocDecGetDecoderCaps(RocdecDecodeCaps *pdc) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
     }
-    VaContext& va_ctx = VaContext::GetInstance();
     rocDecStatus ret = ROCDEC_SUCCESS;
-    if ((ret = va_ctx.CheckDecCapForCodecType(pdc)) != ROCDEC_SUCCESS) {
+    try {
+        // Constructs the VaContext singleton on first use, which loads the VA-API libraries and can throw.
+        ret = VaContext::GetInstance().CheckDecCapForCodecType(pdc);
+    }
+    catch(const std::exception& e) {
+        CriticalLog(g_rocdec_logger, "Error: Failed to initialize VA-API, " + ROCDEC_STR(e.what()));
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_NOT_INITIALIZED;
+    }
+    if (ret != ROCDEC_SUCCESS) {
         CriticalLog(g_rocdec_logger, "Error: Failed to obtain decoder capabilities from driver.");
         FunctionExitLog(g_rocdec_logger);
         return ret;
