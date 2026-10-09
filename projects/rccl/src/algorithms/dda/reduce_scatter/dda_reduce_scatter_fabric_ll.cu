@@ -60,9 +60,12 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
+  // Same bank split as all-reduce / all-gather LL. Bank 1 must start at
+  // bankSize so this launch cannot overwrite a line those tiers are polling.
+  const size_t bankSize = dda::common::ddaBankSize(comm->ddaScratchBytes);
 
-  INFO(NCCL_COLL, "DDA fabric ReduceScatter LL: nRanks=%d shardBytes=%zu nPk=%zu grid=%u block=%u", nRanks, bytes, nPk,
-       grid.x, block.x);
+  INFO(NCCL_COLL, "DDA fabric ReduceScatter LL: nRanks=%d shardBytes=%zu nPk=%zu grid=%u block=%u bankSize=%zu", nRanks,
+       bytes, nPk, grid.x, block.x, bankSize);
 
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback.
@@ -70,17 +73,17 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void
   case 4:
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          recvcount, comm->rank, nRanks, epochDev, epochLen);
+                          recvcount, comm->rank, nRanks, epochDev, epochLen, bankSize);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          recvcount, comm->rank, nRanks, epochDev, epochLen);
+                          recvcount, comm->rank, nRanks, epochDev, epochLen, bankSize);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          recvcount, comm->rank, nRanks, epochDev, epochLen);
+                          recvcount, comm->rank, nRanks, epochDev, epochLen, bankSize);
     break;
   }
 

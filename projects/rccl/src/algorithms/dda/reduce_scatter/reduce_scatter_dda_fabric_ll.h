@@ -32,11 +32,11 @@
 namespace dda::common {
 
 // Per-shard staging slot capacity and hard per-shard cap (enforced in the
-// eligibility check). Fixes the slot stride at compile time so the
-// double-buffered layout is identical on every rank and call.
-// Footprint = 2 banks * nRanks * (kDdaLLRsMaxBytes * 2) for the 8B->16B
-// expansion; 16 MiB at 1 MiB/rank * 4 ranks * 2 banks * 2 (LL overhead),
-// within the 10 GiB DDA fabric scratch on gfx1250.
+// eligibility check). The slot stride is fixed so every rank addresses the
+// same geometry. Bank 1 starts at bankSize, the same byte offset as the
+// other DDA LL tiers that share this scratch and epoch counter.
+// One bank holds nRanks * (kDdaLLRsMaxBytes * 2) bytes for the 8B->16B
+// expansion; 8 MiB at 1 MiB/rank * 4 ranks * 2 (LL overhead).
 constexpr size_t kDdaLLRsMaxBytes = 1ULL*1024*1024;         // 1 MiB per-rank (= 4 MiB total at 4 ranks)
 constexpr size_t kDdaLLRsSlotStridePkts = kDdaLLRsMaxBytes / 8;   // 131072
 
@@ -48,7 +48,8 @@ constexpr size_t kDdaLLRsSlotStridePkts = kDdaLLRsMaxBytes / 8;   // 131072
 // Phase 2 (reduce): rank selfRank seeds the accumulator with its own self-chunk
 // (sendbuff[selfRank]), polls its own scratch slot for each other rank (waiting
 // on the flag), and sums those into recvbuff. Flag polling provides cross-rank
-// ordering, so no GPU barrier is used. Scratch is double-buffered: bank = flag & 1.
+// ordering, so no GPU barrier is used. Scratch is double-buffered: bank = flag & 1,
+// and bank 1 starts at bankSize (half the scratch), matching the other LL tiers.
 template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
@@ -59,7 +60,8 @@ __launch_bounds__(512)
                                            size_t recvcount, // per-rank shard element count
                                            int selfRank, int nRanksRt,
                                            uint32_t* __restrict__ epochDev, // per-block LL epoch cells
-                                           int epochLen) { // number of cells in epochDev
+                                           int epochLen, // number of cells in epochDev
+                                           size_t bankSize) { // scratch bank size (from host)
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = recvcount * sizeof(T);
@@ -68,7 +70,9 @@ __launch_bounds__(512)
   const size_t chunkWords = nPk * 2; // uint32 words per shard chunk
 
   const uint32_t flag = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
-  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot;
+  // ddaBankSize() floors the bank to a multiple of 16B, so this is a whole
+  // number of LL packets and bank 1 starts at the same byte as all-reduce LL.
+  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (bankSize / sizeof(LLPacket16));
 
   const size_t gtid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
   const size_t stride = (size_t)gridDim.x * blockDim.x;
