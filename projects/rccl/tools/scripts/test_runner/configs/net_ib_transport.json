@@ -450,6 +450,9 @@
 
     "net_ib_wqe_lat_unit": {
       "extends": "net_ib_base",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
       "timeout": 120,
       "tests": [
         {

@@ -8,7 +8,7 @@
 
 #ifdef MPI_TESTS_ENABLED
 
-#include "net_ib_wqe_lat_inspect.h"
+#include "NetIbWqeLatInspect.hpp"
 
 /*
  * Functional coverage of the net_ib per-QP WQE post-to-poll latency monitor
@@ -33,30 +33,6 @@
 namespace {
 
 constexpr uint64_t kNoSlowThresholdNs = UINT64_MAX;
-
-// See ScopedWqeLatGlobals in NetIbWqeLatMonUnitTests.cpp: fire the env-driven
-// std::call_once before saving, so it can not clobber the override later.
-// Must outlive every connection created under it.
-struct ScopedWqeLatGlobals {
-    bool savedEnabled;
-    uint64_t savedThresholdNs;
-    bool savedReport;
-    ScopedWqeLatGlobals(bool enabled, uint64_t thresholdNs) {
-        struct ncclIbWqeLatMon dummy;
-        ncclIbWqeLatMonInit(&dummy);
-        savedEnabled = ncclIbWqeLatEnabled;
-        savedThresholdNs = ncclIbWqeLatThresholdNs;
-        savedReport = ncclIbWqeLatReportEnabled;
-        ncclIbWqeLatEnabled = enabled;
-        ncclIbWqeLatThresholdNs = enabled ? thresholdNs : 0;
-        ncclIbWqeLatReportEnabled = enabled;
-    }
-    ~ScopedWqeLatGlobals() {
-        ncclIbWqeLatEnabled = savedEnabled;
-        ncclIbWqeLatThresholdNs = savedThresholdNs;
-        ncclIbWqeLatReportEnabled = savedReport;
-    }
-};
 
 struct WqeLatTotals {
     uint64_t count = 0;
@@ -101,6 +77,25 @@ protected:
         net_ = &ncclNetIb;
     }
 
+    // Agreed across ranks before either acts on it: a rank returning alone
+    // would leave its peer blocked in the next MPI_Barrier until the suite
+    // timeout.
+    bool AllRanksOk(bool localOk) {
+        int local = localOk ? 1 : 0, all = 0;
+        if (MPI_Allreduce(&local, &all, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD) != MPI_SUCCESS) return false;
+        return all != 0;
+    }
+
+    // Allocates and registers a host buffer on comm. Returns false on every
+    // rank if either rank failed, after recording the failure locally.
+    bool AllocAndRegister(void* comm, size_t size, void** buf, void** mhandle) {
+        *buf = malloc(size);
+        *mhandle = nullptr;
+        const bool ok = *buf != nullptr && RegisterMemory(comm, *buf, size, NCCL_PTR_HOST, mhandle) == ncclSuccess;
+        EXPECT_TRUE(ok) << "malloc/register of " << size << " bytes failed";
+        return AllRanksOk(ok);
+    }
+
     // One send/recv round trip per size, each fully completed (both ranks
     // polled to done) before the next is posted. buf must hold the largest size.
     // Polls without sleeping: the sleeping wait's 10 ms backoff would become
@@ -133,14 +128,14 @@ protected:
         SetupConnectionWithGuard(0, pair, connGuard);
 
         const size_t kMaxSize = 1 << 20;
-        void* buf = malloc(kMaxSize);
-        ASSERT_NE(buf, nullptr);
-        HostBufferAutoGuard bufGuard = makeHostBufferAutoGuard(buf);
-        memset(buf, 0x5a, kMaxSize);
         void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+        void* buf = nullptr;
         void* mhandle = nullptr;
-        ASSERT_EQ(RegisterMemory(comm, buf, kMaxSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+        const bool ok = AllocAndRegister(comm, kMaxSize, &buf, &mhandle);
+        HostBufferAutoGuard bufGuard = makeHostBufferAutoGuard(buf);
         NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
+        if (!ok) return;
+        memset(buf, 0x5a, kMaxSize);
 
         // Small sends exercise the zero-length WRs posted on the extra QPs
         // under split-data; 1 MB exercises the real split.
@@ -238,13 +233,13 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonDisabledRecordsNothing) {
     NetConnectionGuard connGuard(net_);
     SetupConnectionWithGuard(0, pair, connGuard);
 
-    void* buf = malloc(kSmallBufferSize);
-    ASSERT_NE(buf, nullptr);
-    HostBufferAutoGuard bufGuard = makeHostBufferAutoGuard(buf);
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+    void* buf = nullptr;
     void* mhandle = nullptr;
-    ASSERT_EQ(RegisterMemory(comm, buf, kSmallBufferSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+    const bool ok = AllocAndRegister(comm, kSmallBufferSize, &buf, &mhandle);
+    HostBufferAutoGuard bufGuard = makeHostBufferAutoGuard(buf);
     NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
+    if (!ok) return;
 
     RunSyncTransfers(pair, buf, mhandle, std::vector<size_t>(20, kSmallBufferSize), kWqeLatTagBase);
 
@@ -295,13 +290,13 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonDelayedPollIsSlow) {
     NetConnectionGuard connGuard(net_);
     SetupConnectionWithGuard(0, pair, connGuard);
 
-    void* buf = malloc(kSmallBufferSize);
-    ASSERT_NE(buf, nullptr);
-    HostBufferAutoGuard bufGuard = makeHostBufferAutoGuard(buf);
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+    void* buf = nullptr;
     void* mhandle = nullptr;
-    ASSERT_EQ(RegisterMemory(comm, buf, kSmallBufferSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+    const bool ok = AllocAndRegister(comm, kSmallBufferSize, &buf, &mhandle);
+    HostBufferAutoGuard bufGuard = makeHostBufferAutoGuard(buf);
     NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
+    if (!ok) return;
 
     void* request = nullptr;
     struct ncclIbWqeLatCommState before{};
@@ -360,13 +355,13 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonPipelinedSendsSampleOncePerQp) {
     SetupConnectionWithGuard(0, pair, connGuard);
 
     const size_t bufSize = kSmallBufferSize * kPipelined;
-    void* buf = malloc(bufSize);
-    ASSERT_NE(buf, nullptr);
-    HostBufferAutoGuard bufGuard = makeHostBufferAutoGuard(buf);
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+    void* buf = nullptr;
     void* mhandle = nullptr;
-    ASSERT_EQ(RegisterMemory(comm, buf, bufSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+    const bool ok = AllocAndRegister(comm, bufSize, &buf, &mhandle);
+    HostBufferAutoGuard bufGuard = makeHostBufferAutoGuard(buf);
     NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
+    if (!ok) return;
 
     std::vector<void*> requests(kPipelined, nullptr);
     for (int i = 0; i < kPipelined; i++) {
@@ -432,6 +427,10 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonEnvEnabledRecordsSends) {
     if (thrEnv == nullptr || strtoll(thrEnv, nullptr, 0) <= 0) {
         GTEST_SKIP() << "NCCL_IB_WQE_LATENCY_THRESHOLD_NS not set > 0";
     }
+    // The globals are only parsed on the first ncclIbWqeLatMonInit, which in
+    // the library runs at QP creation; fire it before asserting on them.
+    struct ncclIbWqeLatMon dummy;
+    ncclIbWqeLatMonInit(&dummy);
     AssertInitAndGetDevices(nullptr);
     ASSERT_TRUE(ncclIbWqeLatEnabled);
 

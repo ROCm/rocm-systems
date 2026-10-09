@@ -7,13 +7,14 @@
 #include <gtest/gtest.h>
 
 #ifdef MPI_TESTS_ENABLED
-#include "net_ib_wqe_lat_inspect.h"
-
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <random>
+#include <utility>
 #include <vector>
+
+#include "NetIbWqeLatInspect.hpp"
 
 /*
  * CPU-only unit coverage for the net_ib per-QP WQE post-to-poll latency
@@ -35,29 +36,13 @@ constexpr uint64_t kOneSecondNs = 1000000000ULL;
 // Arbitrary non-zero base so post/poll timestamps never wrap below zero.
 constexpr uint64_t kBaseNs = 1000 * kOneSecondNs;
 
-// The monitor's globals are set once per process from the environment via
-// std::call_once (ensureInitialized, triggered by ncclIbWqeLatMonInit). Fire
-// that first so it can not overwrite the override later, then restore on exit.
-struct ScopedWqeLatGlobals {
-  bool savedEnabled;
-  uint64_t savedThresholdNs;
-  bool savedReport;
-  explicit ScopedWqeLatGlobals(uint64_t thresholdNs) {
-    struct ncclIbWqeLatMon dummy;
-    ncclIbWqeLatMonInit(&dummy);
-    savedEnabled = ncclIbWqeLatEnabled;
-    savedThresholdNs = ncclIbWqeLatThresholdNs;
-    savedReport = ncclIbWqeLatReportEnabled;
-    ncclIbWqeLatEnabled = true;
-    ncclIbWqeLatThresholdNs = thresholdNs;
-    ncclIbWqeLatReportEnabled = true;
-  }
-  ~ScopedWqeLatGlobals() {
-    ncclIbWqeLatEnabled = savedEnabled;
-    ncclIbWqeLatThresholdNs = savedThresholdNs;
-    ncclIbWqeLatReportEnabled = savedReport;
-  }
-};
+// Fixed-seed Fisher-Yates shuffle. std::shuffle's algorithm is unspecified,
+// so its order (and the P^2 estimates fed from it) would differ across
+// standard libraries; mt19937's output sequence is fixed by the standard.
+void shuffleDeterministic(std::vector<uint64_t>& v, uint32_t seed) {
+  std::mt19937 rng(seed);
+  for (size_t i = v.size() - 1; i > 0; i--) std::swap(v[i], v[rng() % (i + 1)]);
+}
 
 // Puts m in the state StampSend leaves behind for a single signaled WR posted
 // at postNs on an idle QP, then completes it at postNs + deltaNs.
@@ -130,10 +115,12 @@ TEST(NetIbWqeLatMonUnit, InitClearsAllState) {
 // Test: WelfordMeanStddevAndMax
 //
 // {100,200,300,400,500} ns: mean 300, sample stddev (n-1 divisor)
-// sqrt(25000) ~= 158.1139, max 500.
+// sqrt(25000) ~= 158.1139, max 500. The fifth sample initialises the P^2
+// markers from the sorted values, and every estimate then reads the middle
+// marker: all four percentiles are 300.
 // =============================================================================
 TEST(NetIbWqeLatMonUnit, WelfordMeanStddevAndMax) {
-  ScopedWqeLatGlobals g(kOneSecondNs);
+  ScopedWqeLatGlobals g(true, kOneSecondNs);
   struct ncclIbWqeLatMon m;
   ncclIbWqeLatMonInit(&m);
   recordSamples(&m, {300, 100, 500, 200, 400});
@@ -144,6 +131,10 @@ TEST(NetIbWqeLatMonUnit, WelfordMeanStddevAndMax) {
   EXPECT_NEAR(s.stddevNs, 158.11388300841898, 1e-6);
   EXPECT_EQ(s.maxNs, 500u);
   EXPECT_EQ(s.slowCount, 0u);
+  EXPECT_EQ(s.p50Ns, 300u);
+  EXPECT_EQ(s.p90Ns, 300u);
+  EXPECT_EQ(s.p99Ns, 300u);
+  EXPECT_EQ(s.p999Ns, 300u);
 }
 
 // =============================================================================
@@ -153,7 +144,7 @@ TEST(NetIbWqeLatMonUnit, WelfordMeanStddevAndMax) {
 // percentile equals the sample.
 // =============================================================================
 TEST(NetIbWqeLatMonUnit, SingleSampleHasZeroStddev) {
-  ScopedWqeLatGlobals g(kOneSecondNs);
+  ScopedWqeLatGlobals g(true, kOneSecondNs);
   struct ncclIbWqeLatMon m;
   ncclIbWqeLatMonInit(&m);
   recordSamples(&m, {1234});
@@ -178,7 +169,7 @@ TEST(NetIbWqeLatMonUnit, SingleSampleHasZeroStddev) {
 // = 400.
 // =============================================================================
 TEST(NetIbWqeLatMonUnit, SmallCountPercentilesUseNearestRank) {
-  ScopedWqeLatGlobals g(kOneSecondNs);
+  ScopedWqeLatGlobals g(true, kOneSecondNs);
   struct ncclIbWqeLatMon m;
   ncclIbWqeLatMonInit(&m);
   recordSamples(&m, {400, 100, 300});
@@ -200,12 +191,11 @@ TEST(NetIbWqeLatMonUnit, SmallCountPercentilesUseNearestRank) {
 // the ladder p50 <= p90 <= p99 <= p99.9 <= max that the summary line relies on.
 // =============================================================================
 TEST(NetIbWqeLatMonUnit, P2PercentilesTrackUniformDistribution) {
-  ScopedWqeLatGlobals g(UINT64_MAX);
+  ScopedWqeLatGlobals g(true, UINT64_MAX);
   constexpr uint64_t kN = 10000;
   std::vector<uint64_t> deltas(kN);
   for (uint64_t i = 0; i < kN; i++) deltas[i] = i + 1;
-  std::mt19937 rng(20132013);
-  std::shuffle(deltas.begin(), deltas.end(), rng);
+  shuffleDeterministic(deltas, 20132013);
 
   struct ncclIbWqeLatMon m;
   ncclIbWqeLatMonInit(&m);
@@ -234,12 +224,11 @@ TEST(NetIbWqeLatMonUnit, P2PercentilesTrackUniformDistribution) {
 // CQE" pattern): p50/p90 stay in the fast mode, max reports the slow mode.
 // =============================================================================
 TEST(NetIbWqeLatMonUnit, P2PercentilesSeparateBimodalTail) {
-  ScopedWqeLatGlobals g(UINT64_MAX);
+  ScopedWqeLatGlobals g(true, UINT64_MAX);
   std::vector<uint64_t> deltas;
   for (int i = 0; i < 9900; i++) deltas.push_back(1000 + (i % 100));
   for (int i = 0; i < 100; i++) deltas.push_back(1000000 + i);
-  std::mt19937 rng(7);
-  std::shuffle(deltas.begin(), deltas.end(), rng);
+  shuffleDeterministic(deltas, 7);
 
   struct ncclIbWqeLatMon m;
   ncclIbWqeLatMonInit(&m);
@@ -262,7 +251,7 @@ TEST(NetIbWqeLatMonUnit, P2PercentilesSeparateBimodalTail) {
 // sample: it only decrements inflight, which must also not underflow at 0.
 // =============================================================================
 TEST(NetIbWqeLatMonUnit, CompletionWithoutTrackingOnlyDrainsInflight) {
-  ScopedWqeLatGlobals g(0);
+  ScopedWqeLatGlobals g(true, 0);
   struct ncclIbWqeLatMon m;
   ncclIbWqeLatMonInit(&m);
   m.inflight = 2;
@@ -290,7 +279,7 @@ TEST(NetIbWqeLatMonUnit, CompletionWithoutTrackingOnlyDrainsInflight) {
 // sample with delta measured from the tracked post time.
 // =============================================================================
 TEST(NetIbWqeLatMonUnit, PendingBeforeSkipsOlderCompletions) {
-  ScopedWqeLatGlobals g(UINT64_MAX);
+  ScopedWqeLatGlobals g(true, UINT64_MAX);
   struct ncclIbWqeLatMon m;
   ncclIbWqeLatMonInit(&m);
   m.tracking = true;
@@ -323,7 +312,7 @@ TEST(NetIbWqeLatMonUnit, PendingBeforeSkipsOlderCompletions) {
 // wrapped huge delta.
 // =============================================================================
 TEST(NetIbWqeLatMonUnit, PollBeforePostClampsDeltaToZero) {
-  ScopedWqeLatGlobals g(0);
+  ScopedWqeLatGlobals g(true, 0);
   struct ncclIbWqeLatMon m;
   ncclIbWqeLatMonInit(&m);
   m.tracking = true;
@@ -347,7 +336,7 @@ TEST(NetIbWqeLatMonUnit, PollBeforePostClampsDeltaToZero) {
 // =============================================================================
 TEST(NetIbWqeLatMonUnit, SlowThresholdIsStrict) {
   constexpr uint64_t kThr = 5000;
-  ScopedWqeLatGlobals g(kThr);
+  ScopedWqeLatGlobals g(true, kThr);
   struct ncclIbWqeLatMon m;
   ncclIbWqeLatMonInit(&m);
 
@@ -370,7 +359,7 @@ TEST(NetIbWqeLatMonUnit, SlowThresholdIsStrict) {
 // =============================================================================
 TEST(NetIbWqeLatMonUnit, SlowReportsAreRateLimitedButAllCounted) {
   constexpr uint64_t kThr = 1000;
-  ScopedWqeLatGlobals g(kThr);
+  ScopedWqeLatGlobals g(true, kThr);
   struct ncclIbWqeLatMon m;
   ncclIbWqeLatMonInit(&m);
 
@@ -406,7 +395,7 @@ TEST(NetIbWqeLatMonUnit, SlowReportsAreRateLimitedButAllCounted) {
 // =============================================================================
 TEST(NetIbWqeLatMonUnit, StallCheckBoundaryAndRateLimit) {
   constexpr uint64_t kThr = 1000000;
-  ScopedWqeLatGlobals g(kThr);
+  ScopedWqeLatGlobals g(true, kThr);
   struct ncclIbWqeLatMon m;
   ncclIbWqeLatMonInit(&m);
   m.tracking = true;
@@ -441,7 +430,7 @@ TEST(NetIbWqeLatMonUnit, StallCheckBoundaryAndRateLimit) {
 // stall regardless of how much time has passed.
 // =============================================================================
 TEST(NetIbWqeLatMonUnit, StallCheckIgnoresUntrackedQp) {
-  ScopedWqeLatGlobals g(1);
+  ScopedWqeLatGlobals g(true, 1);
   struct ncclIbWqeLatMon m;
   ncclIbWqeLatMonInit(&m);
   m.inflight = 3;
@@ -489,7 +478,7 @@ TEST(NetIbWqeLatMonUnit, StampSendIgnoresUnsignaledWrs) {
 // CQEs only drain inflight.
 // =============================================================================
 TEST(NetIbWqeLatMonUnit, StampSendTracksFirstSignaledWrOnly) {
-  ScopedWqeLatGlobals g(UINT64_MAX);
+  ScopedWqeLatGlobals g(true, UINT64_MAX);
   struct ncclIbWqeLatMon m;
   ncclIbWqeLatMonInit(&m);
 
@@ -523,7 +512,7 @@ TEST(NetIbWqeLatMonUnit, StampSendTracksFirstSignaledWrOnly) {
 // Exactly two samples are recorded and inflight returns to 0.
 // =============================================================================
 TEST(NetIbWqeLatMonUnit, PipelinedPostsSampleOnePerTrackingWindow) {
-  ScopedWqeLatGlobals g(UINT64_MAX);
+  ScopedWqeLatGlobals g(true, UINT64_MAX);
   struct ncclIbWqeLatMon m;
   ncclIbWqeLatMonInit(&m);
   auto a = makeWrChain({true});

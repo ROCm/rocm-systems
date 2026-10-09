@@ -39,4 +39,4 @@ ncclResult_t ncclIbWqeLatGetCommState(void* comm, struct ncclIbWqeLatCommState* 
 /* Runs ncclIbWqeLatMonStampSend on m as if m were the latMon of a QP posting head. */
 ncclResult_t ncclIbWqeLatTestStampSend(struct ncclIbWqeLatMon* m, struct ibv_send_wr* head);
 
-#endif
+#endif /* RCCL_NET_IB_WQE_LAT_INSPECT_H_ */
