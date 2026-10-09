@@ -2,8 +2,12 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+import os
+import queue
 import signal
+import sys
 import threading
+import time
 
 from amdsmi import amdsmi_exception, amdsmi_interface
 
@@ -31,35 +35,35 @@ class EventCommands:
         print("EVENT LISTENING:\n")
         print("Press q and hit ENTER when you want to stop.")
         self.stop = False
+        result_queue = queue.Queue()
         threads = []
         for device_handle in range(len(args.gpu)):
-            x = threading.Thread(target=self._event_thread, args=(self, device_handle))
+            x = self.EventListenerThread(
+                target=self._event_thread, args=(self, device_handle), result_queue=result_queue
+            )
             threads.append(x)
             x.start()
+
+        stdin_reader = threading.Thread(target=self._read_stdin, args=(result_queue,), daemon=True)
+        stdin_reader.start()
 
         previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
         system_exit_exc = None
         signal.signal(signal.SIGTERM, self._event_sigterm_handler)
         try:
-            while True:
-                try:
-                    user_input = input()
-                except EOFError:
-                    self.stop = True
-                    break
-                except KeyboardInterrupt:
-                    self.stop = True
-                    break
-
-                if self.stop:
-                    break
-
-                if user_input == "q":
-                    print("Escape Sequence Detected; Exiting")
-                    self.stop = True
-                    break
+            kind, payload = result_queue.get()
+            if kind == "exception":
+                if isinstance(payload, amdsmi_exception.AmdSmiLibraryException):
+                    raise payload
+                raise payload
+            if kind == "quit":
+                print("Escape Sequence Detected; Exiting")
+            if kind == "eof" or kind == "interrupt":
+                print("Input stream closed or interrupted; Exiting")
         except SystemExit as exc:
             system_exit_exc = exc
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            raise e
         finally:
             self.stop = True
             for thread in threads:
@@ -72,6 +76,37 @@ class EventCommands:
     def _event_sigterm_handler(self, signum, frame):
         self.stop = True
         raise SystemExit(128 + signum)
+
+    def _read_stdin(self, result_queue):
+        try:
+            os.set_blocking(sys.stdin.fileno(), False)
+        except (AttributeError, OSError, ValueError):
+            # stdin is closed or invalid (e.g. 0<&-); nothing to read.
+            result_queue.put(("eof", None))
+            return
+
+        try:
+            while not self.stop:
+                try:
+                    line = sys.stdin.readline()
+                except BlockingIOError:
+                    time.sleep(0.1)
+                    continue
+                except (OSError, ValueError):
+                    result_queue.put(("eof", None))
+                    return
+                except KeyboardInterrupt:
+                    result_queue.put(("interrupt", None))
+                    return
+
+                if line == "":
+                    result_queue.put(("eof", None))
+                    return
+                if line.strip() == "q":
+                    result_queue.put(("quit", None))
+                    return
+        except Exception as e:  # safety net: always unblock the main thread's get()
+            result_queue.put(("exception", e))
 
     def _event_thread(self, commands, i):
         devices = commands.device_handles
@@ -112,3 +147,17 @@ class EventCommands:
                 print(e)
 
         listener.stop()
+
+    # Thread class for capture exceptions from event listener threads which will be passed to main thread
+    class EventListenerThread(threading.Thread):
+        def __init__(self, target, args, result_queue):
+            super().__init__()
+            self.target = target
+            self.args = args
+            self.result_queue = result_queue
+
+        def run(self):
+            try:
+                self.target(*self.args)
+            except Exception as e:
+                self.result_queue.put(("exception", e))
