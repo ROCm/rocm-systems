@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
 #include "core/output/output_summary.hpp"
@@ -139,9 +140,8 @@ TEST_F(PerfettoSinkTest, nested_directory_write_succeeds_and_registers_file)
                                 std::istreambuf_iterator<char>{} };
     EXPECT_EQ(contents, data);
 
-    const auto rows = rocprofsys::output::registry::instance().rows();
-    ASSERT_EQ(rows.size(), 1u);
-    EXPECT_EQ(rows.front().path, path.string());
+    const auto out = rocprofsys::output::registry::instance().format_summary();
+    EXPECT_THAT(out, ::testing::HasSubstr(path.string()));
 
     std::filesystem::remove_all(root);
 }
@@ -151,7 +151,7 @@ TEST_F(PerfettoSinkTest, empty_filename_fails_and_does_not_register)
     const std::string data{ "x" };
     EXPECT_FALSE(rocprofsys::core::write_proto_to("", data.data(), data.size()));
 
-    EXPECT_TRUE(rocprofsys::output::registry::instance().rows().empty());
+    EXPECT_TRUE(rocprofsys::output::registry::instance().format_summary().empty());
 }
 
 TEST_F(PerfettoSinkTest, unwritable_parent_directory_fails_and_does_not_register)
@@ -174,7 +174,7 @@ TEST_F(PerfettoSinkTest, unwritable_parent_directory_fails_and_does_not_register
     EXPECT_FALSE(
         rocprofsys::core::write_proto_to(path.string(), data.data(), data.size()));
 
-    EXPECT_TRUE(rocprofsys::output::registry::instance().rows().empty());
+    EXPECT_TRUE(rocprofsys::output::registry::instance().format_summary().empty());
 
     std::filesystem::permissions(root, std::filesystem::perms::owner_all);
     std::filesystem::remove_all(root);
@@ -189,7 +189,7 @@ TEST_F(PerfettoSinkTest, write_failure_after_open_fails_and_does_not_register)
     const std::string data{ "abc" };
     EXPECT_FALSE(rocprofsys::core::write_proto_to("/dev/full", data.data(), data.size()));
 
-    EXPECT_TRUE(rocprofsys::output::registry::instance().rows().empty());
+    EXPECT_TRUE(rocprofsys::output::registry::instance().format_summary().empty());
 }
 
 // ----------------------------------------------------------------------------

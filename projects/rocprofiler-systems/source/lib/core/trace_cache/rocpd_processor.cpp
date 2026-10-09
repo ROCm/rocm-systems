@@ -1151,8 +1151,7 @@ rocpd_processor_t::finalize_processing()
         return;
     }
 
-    output::registry::instance().register_file(m_db_output_path,
-                                               output::output_format::rocpd);
+    output::registry::instance().register_file(m_db_output_path);
 
     if(m_dropped_pmc_events_count > 0)
     {
