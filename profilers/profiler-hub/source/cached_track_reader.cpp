@@ -65,8 +65,8 @@ to_ph_event(const reader_types::timeline_event_t& event)
                        .end   = event.end_timestamp,
                        .name =
                            event.display_name.empty() ? "" : event.display_name.data(),
-                       .type  = to_ph_event_type(event.unique_identifier.type),
-                       .depth = 0 };
+                       .type          = to_ph_event_type(event.unique_identifier.type),
+                       .nesting_depth = 0 };
 }
 
 ph_sample_t
@@ -114,7 +114,8 @@ assign_depths(std::vector<ph_event_t>& events)
     depth_tracker tracker;
     for(auto& event : events)
     {
-        event.depth = static_cast<std::uint32_t>(tracker.add(event.start, event.end));
+        event.nesting_depth =
+            static_cast<std::uint32_t>(tracker.add(event.start, event.end));
     }
 }
 
@@ -232,9 +233,9 @@ cached_track_reader::nesting_depth(const reader_types::track_info_ptr_t& track)
 
     const auto deepest = std::max_element(
         whole.begin(), whole.end(), [](const auto& lhs, const auto& rhs) {
-            return lhs.depth < rhs.depth;
+            return lhs.nesting_depth < rhs.nesting_depth;
         });
-    return deepest == whole.end() ? 0 : deepest->depth;
+    return deepest == whole.end() ? 0 : deepest->nesting_depth;
 }
 
 ph_sample_list_t
@@ -318,12 +319,12 @@ cached_track_reader::read_thread_track_in_parts(
                             reader_types::timestamp_ns_t             end,
                             std::string_view                         name) {
         static_cast<std::vector<ph_event_t>*>(context)->push_back(
-            ph_event_t{ .id    = id.id,
-                        .start = start,
-                        .end   = end,
-                        .name  = name.empty() ? "" : name.data(),
-                        .type  = to_ph_event_type(id.type),
-                        .depth = 0 });
+            ph_event_t{ .id            = id.id,
+                        .start         = start,
+                        .end           = end,
+                        .name          = name.empty() ? "" : name.data(),
+                        .type          = to_ph_event_type(id.type),
+                        .nesting_depth = 0 });
     };
 
     std::atomic<size_t> next{ 0 };

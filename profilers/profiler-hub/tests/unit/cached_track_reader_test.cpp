@@ -376,11 +376,11 @@ TEST_F(cached_track_reader_test, events_carry_their_depth_in_the_whole_track)
     const auto list = reader.events(track, 0, 0);
 
     ASSERT_EQ(list.list_size, 5U);
-    EXPECT_EQ(list.events[0].depth, 1U);
-    EXPECT_EQ(list.events[1].depth, 2U);
-    EXPECT_EQ(list.events[2].depth, 3U);
-    EXPECT_EQ(list.events[3].depth, 2U);
-    EXPECT_EQ(list.events[4].depth, 1U);
+    EXPECT_EQ(list.events[0].nesting_depth, 1U);
+    EXPECT_EQ(list.events[1].nesting_depth, 2U);
+    EXPECT_EQ(list.events[2].nesting_depth, 3U);
+    EXPECT_EQ(list.events[3].nesting_depth, 2U);
+    EXPECT_EQ(list.events[4].nesting_depth, 1U);
 }
 
 TEST_F(cached_track_reader_test, the_nesting_depth_is_the_deepest_event_of_the_track)
@@ -434,8 +434,8 @@ TEST_F(cached_track_reader_test, a_windowed_event_keeps_its_depth_from_the_whole
     const auto list = reader.events(track, 45, 60);
 
     ASSERT_EQ(list.list_size, 2U);
-    EXPECT_EQ(list.events[0].depth, 1U);
-    EXPECT_EQ(list.events[1].depth, 2U);
+    EXPECT_EQ(list.events[0].nesting_depth, 1U);
+    EXPECT_EQ(list.events[1].nesting_depth, 2U);
 }
 
 TEST_F(cached_track_reader_test, events_carry_their_id_and_type)
@@ -688,7 +688,7 @@ TEST_F(large_thread_track_test, parts_get_their_depth_after_the_merge)
     ASSERT_EQ(list.list_size, 10U);
     for(uint32_t i = 0; i < list.list_size; ++i)
     {
-        EXPECT_EQ(list.events[i].depth, 1U);
+        EXPECT_EQ(list.events[i].nesting_depth, 1U);
     }
 }
 

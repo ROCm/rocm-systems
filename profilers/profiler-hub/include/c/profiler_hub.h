@@ -117,7 +117,7 @@ extern "C"
      *       treated as read-only. Events of a whole track are ordered by
      *       ph_event_t::start. A request with a time window gets its own
      *       private storage; its events are the overlapping ones of the whole
-     *       track, in the same order, with the same ph_event_t::depth.
+     *       track, in the same order, with the same ph_event_t::nesting_depth.
      */
     ph_result_t ph_get_track_events(ph_ctx_t         ctx,
                                     uint32_t         track_id,

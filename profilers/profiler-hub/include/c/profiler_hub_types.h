@@ -98,8 +98,8 @@ extern "C"
         ph_value_range_t value_range; /**< Sample value range. Only valid for
                                             PH_TRACK_CATEGORY_PMC_AGENT tracks with
                                             at least one sample value. */
-        uint32_t nesting_depth;       /**< Largest ph_event_t::depth of the track's
-                                            events; 0 for PMC tracks. */
+        uint32_t nesting_depth; /**< Largest ph_event_t::nesting_depth of the track's
+                                      events; 0 for PMC tracks. */
     } ph_track_t;
 
     /**
@@ -197,7 +197,7 @@ extern "C"
      * @note name points into memory owned by the producing ph_ctx_t.
      * @note id is only unique together with type: every event type has its
      *       own id space.
-     * @note depth is the number of events of the same track, this one
+     * @note nesting_depth is the number of events of the same track, this one
      *       included, that are active when this event starts (1 = not
      *       overlapped). It is relative to the whole track, also for a
      *       time-windowed request.
@@ -209,7 +209,7 @@ extern "C"
         uint64_t        end;
         const char*     name;
         ph_event_type_t type;
-        uint32_t        depth;
+        uint32_t        nesting_depth;
     } ph_event_t;
 
     /** @brief A list of duration events; same lifetime rule as

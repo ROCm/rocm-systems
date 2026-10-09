@@ -41,7 +41,7 @@ public:
                                          uint64_t                              end_ts);
 
     /**
-     * The largest ph_event_t::depth of the whole track; 0 for a null track, a PMC
+     * The largest ph_event_t::nesting_depth of the whole track; 0 for a null track, a PMC
      * track or a track without events. Reads and caches the whole track if needed.
      */
     [[nodiscard]] uint32_t nesting_depth(const reader_types::track_info_ptr_t& track);

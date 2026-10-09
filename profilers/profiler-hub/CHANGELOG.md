@@ -52,12 +52,12 @@ downstream consumer of the library.
 - `track_info_t::value_range` and `ph_track_t::value_range` (`ph_value_range_t { min, max, is_valid }`)
   expose the smallest and largest sample value of PMC counter tracks. Other
   tracks, and counters with no non-NULL sample, have `value_range.is_valid == 0`.
-- `ph_event_t` gains `id`, `type` (new `ph_event_type_t`) and `depth`. `id` is only
-  unique together with `type`. `depth` is the number of events of the track, itself
+- `ph_event_t` gains `id`, `type` (new `ph_event_type_t`) and `nesting_depth`. `id` is only
+  unique together with `type`. `nesting_depth` is the number of events of the track, itself
   included, that are active when the event starts, relative to the whole track. A
   `ph_get_track_events()` request with a time window is now served from the
-  whole-track events, so its events keep that depth and come ordered by start.
-- `ph_track_t::nesting_depth` is the largest `ph_event_t::depth` of the track (0 for
+  whole-track events, so its events keep that nesting depth and come ordered by start.
+- `ph_track_t::nesting_depth` is the largest `ph_event_t::nesting_depth` of the track (0 for
   PMC tracks).
 - `ph_ctx_create()` now reads the events of every track and the samples of every PMC
   track and keeps them in memory until `ph_ctx_free()`. Opening a trace takes longer
