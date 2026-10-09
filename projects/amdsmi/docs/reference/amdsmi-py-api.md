@@ -3172,14 +3172,14 @@ finally:
 
 Description: Returns the NPM balancing mode for a node: Power Balancing (`"PB"`,
 the default) or Frequency Balancing (`"FB"`). This is not gated on NPM
-enablement; it returns `"N/A"` only if the underlying value is missing or
-unreadable (not an error).
+enablement; it raises `AmdSmiLibraryException` (`AMDSMI_STATUS_NOT_SUPPORTED`)
+if the underlying value is missing or unreadable.
 
 Input parameters:
 
 * `node_handle` node handle obtained from `amdsmi_get_node_handle`
 
-Output: `str` — `"PB"`, `"FB"`, or `"N/A"` (value missing or unreadable)
+Output: `str` — `"PB"` or `"FB"`
 
 Exceptions that can be thrown by `amdsmi_get_npm_balancing_mode` function:
 

@@ -15,9 +15,11 @@ around the new C API, per the frozen contract:
     def amdsmi_get_npm_balancing_mode(node_handle: processor_handle_t) -> str
 
 which validates node_handle, calls amdsmi_wrapper.amdsmi_get_npm_balancing_mode
-(always AMDSMI_STATUS_SUCCESS per the C contract), and maps the returned
-amdsmi_npm_balancing_mode_t value to "PB" / "FB" / "N/A" (INVALID, e.g. when
-NPM is disabled on the node); and
+and funnels the returned status through the standard _check_res() mapping
+(AmdSmiLibraryException on any non-SUCCESS status, e.g.
+AMDSMI_STATUS_NOT_SUPPORTED when the underlying sysfs value is missing or
+unreadable), then on success maps the returned amdsmi_npm_balancing_mode_t
+value to "PB" / "FB"; and
 
     def amdsmi_set_npm_balancing_mode(node_handle: processor_handle_t, mode: str) -> None
 
@@ -93,8 +95,11 @@ class TestAmdSmiGetNpmBalancingModeStringMapping(unittest.TestCase):
         self.assertEqual(result, "FB")
 
     def test_invalid_maps_to_na(self):
-        # AMDSMI_NPM_BALANCING_MODE_INVALID -- e.g. NPM disabled on the node --
-        # is always AMDSMI_STATUS_SUCCESS per the C contract, never an error.
+        # Defensive coverage for _NPM_BALANCING_MODE_TO_STR: the C layer no
+        # longer returns AMDSMI_STATUS_SUCCESS with mode=INVALID (missing/
+        # unreadable now surfaces as AMDSMI_STATUS_NOT_SUPPORTED instead), but
+        # the mapping should still degrade to "N/A" rather than KeyError if
+        # INVALID is ever seen.
         result, _ = self._get_with_mocked_c_call(amdsmi.AmdSmiNpmBalancingMode.INVALID)
         self.assertEqual(result, "N/A")
 

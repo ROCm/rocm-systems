@@ -3327,15 +3327,6 @@ rsmi_status_t rsmi_dev_npm_balancing_mode_get(uint32_t dv_ind, uintptr_t node_ha
 
   std::string mode_str;
   rsmi_status_t ret = amd::smi::get_npm_board_mode(*board_path_str, &mode_str);
-  if (ret == RSMI_STATUS_NOT_SUPPORTED) {
-    // mode file missing or unreadable: report N/A rather than a guessed
-    // value, matching set_npm_board_mode()'s RSMI_STATUS_NOT_SUPPORTED for
-    // this same state. Get is never gated on NPM enablement.
-    *mode = RSMI_NPM_BALANCING_MODE_INVALID;
-    ss << __PRETTY_FUNCTION__ << " | mode file unavailable -> mode = INVALID";
-    LOG_DEBUG(ss);
-    return RSMI_STATUS_SUCCESS;
-  }
   if (ret != RSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__ << " | get_npm_board_mode failed: " << getRSMIStatusString(ret);
     LOG_INFO(ss);

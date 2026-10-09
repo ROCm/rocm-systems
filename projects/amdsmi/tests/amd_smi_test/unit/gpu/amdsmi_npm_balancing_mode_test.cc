@@ -174,7 +174,7 @@ TEST(GpuUnit, GetNpmBalancingModeEnabledDefaultsToPowerBalancing) {
   EXPECT_EQ(mode, AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING);
 }
 
-TEST(GpuUnit, GetNpmBalancingModeEnabledMissingModeFileIsInvalidMode) {
+TEST(GpuUnit, GetNpmBalancingModeEnabledMissingModeFileIsNotSupported) {
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -183,17 +183,15 @@ TEST(GpuUnit, GetNpmBalancingModeEnabledMissingModeFileIsInvalidMode) {
 
   TempBoardDir board;
   board.WriteFile("npm_status", "enabled");
-  // Deliberately do not create board/mode: the sysfs node absent/
-  // unreadable must report N/A (INVALID), not a fabricated PB, and must
-  // agree with amdsmi_set_npm_balancing_mode()'s NOT_SUPPORTED for the
-  // identical state (see SetNpmBalancingModeRootMissingModeFileIsNotSupported).
+  // Deliberately do not create board/mode: the sysfs node absent/unreadable
+  // must report NOT_SUPPORTED, agreeing with amdsmi_set_npm_balancing_mode()
+  // for the identical state (see SetNpmBalancingModeRootMissingModeFileIsNotSupported).
   std::string board_path = board.path().string();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
   amdsmi_npm_balancing_mode_t mode = AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING;
-  EXPECT_EQ(amdsmi_get_npm_balancing_mode(handle, &mode), AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(mode, AMDSMI_NPM_BALANCING_MODE_INVALID);
+  EXPECT_EQ(amdsmi_get_npm_balancing_mode(handle, &mode), AMDSMI_STATUS_NOT_SUPPORTED);
 }
 
 TEST(GpuUnit, GetNpmBalancingModeGarbageValueIsUnexpectedData) {
