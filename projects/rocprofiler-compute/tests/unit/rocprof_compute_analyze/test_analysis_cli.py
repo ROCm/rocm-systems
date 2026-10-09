@@ -171,16 +171,18 @@ def test_parse_operator_patterns_generic_attr():
     """parse_operator_patterns reads the given dest attribute."""
     from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
 
-    args = argparse.Namespace(triton_operator=["*matmul*,*softmax*"], torch_operator=None)
+    args = argparse.Namespace(
+        triton_operator=["*matmul*,*softmax*"], torch_operator=None
+    )
     assert parse_operator_patterns(args, ["triton"]) == {
         "triton": ["*matmul*", "*softmax*"]
     }
     assert parse_operator_patterns(args, ["triton"]) != parse_operator_patterns(
         args, ["torch"]
     )
-    assert parse_operator_patterns(argparse.Namespace(triton_operator=[]), ["triton"]) == {
-        "triton": ["**"]
-    }
+    assert parse_operator_patterns(
+        argparse.Namespace(triton_operator=[]), ["triton"]
+    ) == {"triton": ["**"]}
 
 
 def test_parse_patterns_star():
