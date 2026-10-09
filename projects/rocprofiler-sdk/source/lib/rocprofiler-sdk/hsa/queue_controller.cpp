@@ -144,8 +144,8 @@ create_queue(hsa_agent_t        agent,
             return HSA_STATUS_SUCCESS;
         }
     }
-    ROCP_FATAL << "Could not find agent - " << agent.handle;
-    return HSA_STATUS_ERROR_FATAL;
+    return controller->get_core_table().hsa_queue_create_fn(
+        agent, size, type, callback, data, private_segment_size, group_segment_size, queue);
 }
 
 hsa_status_t
@@ -904,7 +904,7 @@ enable_queue_intercept()
 {
     for(const auto& itr : context::get_registered_contexts())
     {
-        constexpr auto expected_context_size = 224UL;
+        constexpr auto expected_context_size = 232UL;
         static_assert(
             sizeof(context::context) == expected_context_size,
             "If you added a new field to context struct, make sure there is a check here if it "
@@ -928,7 +928,8 @@ enable_queue_intercept()
                                      itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_EVENT);
 
         if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
-           itr->dispatch_spm || has_scratch_reporting || itr->device_counter_collection ||
+           itr->dispatch_spm || itr->device_spm || has_scratch_reporting ||
+           itr->device_counter_collection ||
            (itr->device_thread_trace && itr->device_thread_trace->requires_queue_intercept()) ||
            itr->dispatch_thread_trace || has_hip_graph_tracing || has_kernel_replay ||
            has_hip_event_tracing)

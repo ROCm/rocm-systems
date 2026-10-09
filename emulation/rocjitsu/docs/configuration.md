@@ -16,11 +16,26 @@ Pre-built simulator configs are in `configs/`:
 | `gfx950_mi355x.json` | Single CDNA4 GPU (standalone simulation) |
 | `gfx950_mi355x_kmd.json` | Single CDNA4 GPU (daemon/KFD mode) |
 | `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
-| `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone simulation, no KMD) |
+| `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone or PCI/VFIO simulation) |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four MI455X GPUs (multi-GPU daemon mode) |
+| `gfx1251_synthetic.json` | Minimal synthetic gfx1251 topology for functional simulation; not a product model |
 | `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
 | `gfx1201_r9700.json` | Single RDNA4 GPU (standalone simulation) |
+
+### PCI/VFIO guest compatibility
+
+The gfx1250 PCI profile intentionally advertises no UVD, VCN, or JPEG hardware.
+Compute-only guests therefore require an AMDGPU kernel containing commit
+`4e07da515d1c` (`drm/amdgpu: enumerate UMSCH HW IP`) or an equivalent backport.
+That change makes multimedia discovery accept a device with no VCN instance.
+Rocjitsu does not emulate a placeholder media block, and adding one would expand
+the device contract beyond the compute functionality modeled here.
+
+The generic `scripts/run-vfio-guest.py` launcher requires externally prepared
+guest kernel and initramfs artifacts. See
+[QEMU VFIO-user compute](qemu-vfio.md) for the supported guest contract, the
+complete launch command, GEMM qualification criteria, and troubleshooting.
 
 ## DBT guest configs
 
@@ -74,12 +89,21 @@ The example above is intentionally minimal.
 |---|---|---|
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
 | `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned). Omit for the default. |
-| `cpu_dispatch_threads` | int | Inclusive functional dispatch width per SoC. Omitted/0 selects a preferred allocation; 1 forces serial dispatch. Clamped to per-CP CU capacity. |
-| `cpu_thread_budget` | int | Automatic selection ceiling. Omitted/0 uses CPU affinity, with engine/dispatch cost capped at 32 and additive preset helpers up to 48 total; a positive value overrides the budget. |
+| `cpu_dispatch_threads` | int | Inclusive functional dispatch width per SoC. Omitted/0 selects a preferred allocation; 1 forces serial dispatch. Clamped to the shared SoC pool capacity. |
+| `cpu_thread_budget` | int | Automatic selection ceiling. Omitted/0 uses CPU affinity and the target allocation table; a positive value overrides the budget. |
 | `async_helper_threads` | int | Shared MMA helpers per VM. Omitted/-1 selects the table; 0 disables; explicit values are 0–128. |
+| `wait_checking` | string | Override wait diagnostics on every CU: `on`, `off`, or `all`. Omission preserves per-CU settings and defaults. |
 | `thread_allocations` | array | Preferred `num_threads` / `cpu_dispatch_threads` / `async_helper_threads` triples, selected by total execution-thread cost. |
 | `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
-| `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
+| `vm.arch` | string | ISA architecture family: `cdna3`, `cdna4`, `cdna5`, etc. |
+| `vm.target` | string | Optional concrete GPU target, such as `gfx1250` or `gfx1251`. |
+
+`vm.target` selects target-specific instruction legality and behavior within an
+ISA architecture family. When it is present, it must belong to `vm.arch`. If
+both the target binding and `vm.gpu.device.gfx_target_version` provide nonzero
+packed versions, they must match. CDNA5 currently defaults an omitted target to
+`gfx1250` for compatibility; new configs for an architecture with multiple
+concrete targets should specify the target explicitly.
 
 `exec_mode` is matched literally: only the exact string `"clocked"` selects
 clocked mode. If the field is omitted, set to `"functional"`, or given any
@@ -100,14 +124,17 @@ selects the largest effective allocation fitting the budget, after applying
 explicit knob overrides and topology limits. A budget between table entries
 uses the lower entry; it does not create workers merely to exhaust the budget.
 Later entries break ties. The automatic total budget is CPU affinity, with a
-minimum of one. Engine/dispatch cost stays capped at 32; helper entries may
-use additional affinity. Shipped presets stop at 48 total. A positive
-`cpu_thread_budget` overrides the budget, including the engine/dispatch cap. A config without a table uses serial defaults for unspecified
-knobs. Clocked mode uses only engines, capped by affinity/budget and XCD count.
+minimum of one; the target table sets the preferred allocation ceiling. A
+positive `cpu_thread_budget` overrides the budget. A config without a table
+uses serial defaults for unspecified knobs. Clocked mode uses only engines,
+capped automatically at 32, by affinity/budget and by XCD count.
 
-Explicit engine, dispatch and helper values take precedence and may exceed the automatic
-ceiling. Engines are clamped to aggregate XCD count, and dispatch width to each
-SoC's largest per-CP CU count. No workload inspection is involved.
+Explicit engine, dispatch and helper values take precedence and may exceed the
+automatic ceiling. Engines are clamped to aggregate XCD count. Each SoC's pool
+width is bounded by one plus the sum of CUs-1 across nonempty XCDs; individual
+submissions use at most their active CU count. This is the maximum concurrent
+capacity; fewer engine partitions may leave workers idle. No workload inspection
+is involved.
 
 Two separate contracts constrain consumers, and only the first is about the
 config file.
@@ -140,11 +167,11 @@ the same reason, though the hang has only been characterised on the 2-GPU
 config. Remove the pins once it is fixed.
 
 Raising `num_threads` only pays off if the work reaches more than one XCD, which
-is decided by `HwQueue::xcd_fanout` rather than by how the queue was created (see
+is decided by `AqlQueueConfig::xcd_fanout` rather than by how the queue was created (see
 *Queue ownership and XCD fan-out* in `vm-design.md`). KFD sets the flag for
-compute queues, and a test can opt in when it registers a queue directly; a queue
-without the flag keeps its whole grid on its owning XCD and leaves the other
-partitions idle no matter how `num_threads` is set.
+supported AQL compute queues, and a test can opt in when it registers a queue
+directly; a queue without the flag keeps its whole grid on its owning XCD and
+leaves the other partitions idle no matter how `num_threads` is set.
 
 Setting the flag is not a guarantee that every partition gets work. The grid is
 split in dispatch chunks, and a chunk is a whole cluster for a clustered
@@ -172,13 +199,15 @@ The single-GPU tables retain these synchronous engine/dispatch pairs (H=0):
 | 4 | 2/3 | 1/4 | 1/4 |
 | 8 | 2/7 | 2/7 | 1/8 |
 | 16 | 8/9 | 8/9 | 1/16 |
-| 24 | 8/17 | 8/17 | 1/16 |
-| 32 | 8/25 | 8/25 | 1/32 |
+| 24 | 8/17 | 8/17 | 1/24 |
+| 32 | 8/17 | 8/25 | 1/24 |
+| 40 and above | 8/17 | 8/33 | 1/24 |
 
 The gfx950/gfx1250 tables also contain the [async MMA triples](async-instructions.md#thread-policy).
-Both keep 8/25/0 at 32 threads. Affinity above 32 selects additive helper rows
-at totals 34, 36, 40 and 48 (2, 4, 8 and 16 helpers). Larger hosts still select
-48. `async_helper_threads: 0` retains the synchronous choices above.
+gfx950 adds eight helpers at budget 32, selecting 8/17/8; gfx1250 adds eight
+at budget 48, selecting 8/33/8. Larger hosts retain those allocations.
+`async_helper_threads: 0` retains the synchronous choices above. Desktop and MI210 tables stop at 1/24/0;
+CDNA3 stops at 8/17/0.
 A budget of 12 selects the eight-thread row.
 
 Print allocations for any target without constructing a simulated GPU:
@@ -189,8 +218,16 @@ rocjitsu --config configs/gfx950_mi355x.json --thread-budget-table
 
 The configured row reflects the file's budget and current affinity. Remaining
 rows show explicit budget ceilings while retaining the file's knob overrides.
-The total column reports actual allocation, which may be below the ceiling or
-above it when explicitly overridden.
+`rocjitsu --cpu-thread-budget N` (or `--cpu-thread-budget=N`) replaces JSON
+`cpu_thread_budget` for that invocation, including the Configured row of
+`--thread-budget-table`. The named file is never rewritten: the launcher copies
+it to `effective_config.json` in the invocation's runtime directory, applies the
+budget there, and launches from the copy, which is removed with the rest of that
+directory. The flag is refused with `--attach`, which joins a daemon that has
+already built its machine, and with a config whose `dbt_guest.simulator_config`
+names a separate host config — the budget belongs in that file instead. The total
+column reports actual allocation, which may be below the ceiling or above it when
+explicitly overridden.
 
 For multiple GPUs, selection counts every retained dispatch pool, so the same
 pair costs more than on a single GPU. Useful parallelism depends on work reaching
@@ -222,7 +259,9 @@ selects them by the agent's GPU target and GPU count. The hardware agent format 
 host scheduling policy. Unknown targets use the serial fallback. For multiple
 GPUs, it uses the matching native preset when available. Other GPU counts
 convert each single-GPU granule's budget B to E=1, D=1+floor((B-1)/GPUs) and H=0,
-then leave selection to rocjitsu.
+then leave selection to rocjitsu. B includes helper slots, which become dispatch
+workers in this opt-in path: derived gfx950 tables use a budget of 32 and
+gfx1250 uses 48, while desktop and CDNA3 tables use 24.
 Its multi-GPU configurations default to E=1/D=1/H=0 for the same reasons. A positive
 engine override can change that pin;
 `num_threads: 0` retains it. Profile options may override `cpu_thread_budget`,
@@ -252,6 +291,65 @@ Components are defined hierarchically under `topology.root`. Range
 expansion (`xcd[0:8]`) creates multiple instances. Links connect
 component ports using pattern expressions with loop variables.
 
+gfx1250 `WAVE_HW_ID1.WGP_ID` reads require a shader-array width
+(`vm.gpu.device.num_cu_per_sh`) of 1–16. Every shader engine, including groups
+with direct CU children, must have `num_shader_arrays_per_engine * num_cu_per_sh`
+compute units. If this geometry disagrees with the component hierarchy, the
+loader warns once per GPU and leaves the shader-array width unknown. Reads
+with unknown or unrepresentable geometry issue an `s_getreg_b32` warning and
+write zero.
+
+Omitted geometry fields inherit defaults selected by `gfx_target_version`.
+For a smaller topology, set both `num_cu_per_sh` and
+`num_shader_arrays_per_engine` to match its CU groups; for example, two arrays
+of two CUs match a four-CU group. The topology need not grow to the generation's
+default size to support WGP-ID reads.
+
+The topology has no shader-array level. Within each shader engine, the first
+`num_cu_per_sh` CU children form array 0, the next form array 1, and so on.
+The WGP ID is the CU's shader-engine-local index modulo `num_cu_per_sh`.
+For gfx1250 shader engines, KFD CU-mask bit order varies XCD fastest, followed
+by shader engine, array, and WGP. Within an engine, array `a` and WGP `w` select
+CU child `a * num_cu_per_sh + w`, which reports `WGP_ID = w`. The KFD mask loop
+does not select direct-CU groups; their WGP IDs still follow CU child order.
+
+### Memory wait diagnostics
+
+Ordinary memory wait diagnostics are enabled by default; gfx1250 XCNT replay-source
+checks are off. Compute units warn when an instruction reads or overwrites a pending
+memory result without a sufficient wait. Execution continues with eagerly computed values.
+
+If warnings appear incorrect or checking slows a workload, disable both checks:
+
+```sh
+rocjitsu --config /path/to/config.json --wait-checking=off -- <command>
+```
+
+`--wait-checking MODE` and `--wait-checking=MODE` accept:
+
+| Mode | Ordinary checks | gfx1250 XCNT checks |
+|---|---|---|
+| `on` | Enabled | Disabled |
+| `off` | Disabled | Disabled |
+| `all` | Enabled | Enabled |
+
+The flag overrides both settings on every CU and GPU for this launch. It uses the
+same config-copy mechanism as `--cpu-thread-budget`, leaving the source file unchanged.
+Omitting it preserves the JSON settings and defaults. No rebuild is needed.
+Both flags also work with `mirage run`, for profiles and explicit `--config`
+files, in daemon and in-process modes. They compose in either order.
+The native `rocjitsu` CLI refuses them with `--attach`, which joins an existing
+daemon. Both CLIs refuse these overrides when an enabled DBT guest names an
+external `dbt_guest.simulator_config`; configure the daemon or host simulator instead.
+
+For a persistent override, set top-level `"wait_checking": "off"` (or `"on"` / `"all"`).
+Without a global override, each `compute_unit` node's `config` array accepts
+`memory_wait_diagnostics` (`warn` by default) and `xcnt_diagnostics` (`off` by default),
+each with values `warn` or `off`. Invalid per-CU values are rejected even with a
+global override. Checkpoints preserve each CU's effective diagnostic settings;
+older checkpoints without these fields use the defaults. See
+[memory wait diagnostics](memory-wait-diagnostics.md) for coverage and limitations.
+
 ### KFD device sections
 
 KFD device identity can be defined by `vm.gpu.device` for a simulated GPU and
@@ -269,6 +367,12 @@ The JSON config is validated against FlatBuffers schemas in `schemas/`:
 
 - `simulation_config.fbs` — topology and simulation parameters
 - `checkpoint.fbs` — simulation state checkpointing
+
+Checkpoints preserve the shader-array width used by gfx1250 `WAVE_HW_ID1.WGP_ID`
+reads. Older checkpoints lack this geometry, so WGP-ID reads after restoring
+them issue an `s_getreg_b32` warning and write zero; the simulator cannot infer a
+shader-array-local ID from the shader-engine CU count alone. Saving such a restored
+checkpoint again preserves that unknown geometry.
 
 ## Multi-GPU
 

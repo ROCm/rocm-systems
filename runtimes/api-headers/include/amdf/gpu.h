@@ -1,8 +1,5 @@
-// Copyright 2026 The IREE Authors
-//
-// Licensed under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef AMDF_GPU_H_
 #define AMDF_GPU_H_
@@ -146,6 +143,13 @@ typedef struct amdf_gpu_device_info_t {
 ///
 /// The primary ring contains native type-3 PM4 packets. Transfer commands use
 /// six-dword COPY_DATA and WRITE_DATA with a four-dword prefix and payload.
+/// GFX11.5.1 MEC also supports seven-dword DMA_DATA incrementing L2 copies
+/// between owned coherent SYSTEM ranges, with a direct byte count and write
+/// confirmation. The caller follows each
+/// copy sequence with the zero-byte DMA_DATA drain, explicit cache work and
+/// a completion marker before releasing its operands; ring consumption alone
+/// does not complete a transfer. This does not admit PFP controls, other DMA
+/// selectors or DMA_DATA on kernel-publication or AQL-carried PM4 transports.
 /// Cache-control encoding is described by the reported PM4 format features.
 /// Indices occupy naturally aligned 64-bit storage. The write index is a
 /// monotonic dword count; the native read index wraps at the ring capacity
@@ -160,7 +164,10 @@ typedef struct amdf_gpu_device_info_t {
 /// ring storage can be reused; command completion requires a separate fence.
 /// Each publication ends on an eight-dword boundary, padded with type-3 NOP
 /// packets when necessary; packets never straddle ring wrap.
-/// Kernel publication accepts an immutable dword-aligned command stream.
+/// Kernel publication accepts an immutable dword-aligned first-level IB.
+/// A USER primary ring can call a first-level IB and resume after it. KERNEL
+/// submits that IB directly; placing the ring's call inside a KERNEL buffer
+/// would request unsupported compute IB2 nesting.
 #define AMDF_GPU_PM4_QUEUE_FORMAT_VERSION_1 1u
 
 /// Native PM4 encoding features reported in `format_features`.
@@ -185,24 +192,127 @@ enum amdf_gpu_pm4_format_feature_bits_e {
 /// 64-bit doorbell. An acquire load of a read index at least that value proves
 /// the corresponding ring bytes are no longer in use by the queue. Packets
 /// are dword-aligned and never straddle ring wrap. NOP dwords have value zero.
-/// Cache-control and memory-scope encodings use the reported format features.
+/// Optional commands and field layouts use the reported format features.
 /// Kernel publication accepts an immutable dword-aligned command stream.
 #define AMDF_GPU_SDMA_QUEUE_FORMAT_VERSION_1 1u
 
 /// Native SDMA encoding features reported in `format_features`.
 enum amdf_gpu_sdma_format_feature_bits_e {
-  /// Five-dword GCR packet with the 19-bit control field beginning at bit 16
-  /// of dword 2. This names that encoding, not other GCR packet layouts.
-  AMDF_GPU_SDMA_FORMAT_FEATURE_GCR = UINT64_C(1) << 0,
+  /// Five-dword USER_GCR, opcode 17 and suboperation 1. Whole-cache data
+  /// acquire uses control 0xc3c0 and release uses 0x8040 in dword 2 bits
+  /// 31:16, with every other operand zero. Dependency waits precede acquire;
+  /// release follows the data commands and precedes completion. These are
+  /// queue GLOBAL ACQUIRE_FROM_SYSTEM/RELEASE_TO_SYSTEM operations. This
+  /// contract admits neither address ranges nor explicit VMID selection.
+  AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR = UINT64_C(1) << 0,
   /// FENCE uses a two-bit memory type at header bit 16 and an explicit system
-  /// bit at bit 20. A fence to system memory sets that bit. Without this
-  /// feature FENCE uses the three-bit memory-type encoding at bit 16.
+  /// bit at bit 20. A fence to system memory sets that bit. This feature and
+  /// FENCE_MEMORY_TYPE are mutually exclusive. When neither is reported,
+  /// callers leave the optional memory-type and system bits zero.
   AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM = UINT64_C(1) << 1,
   /// COPY_LINEAR source/destination scope fields occupy bits 26/18 of dword 2;
-  /// FENCE scope occupies header bits 25:24. Scope 3 denotes the system.
-  /// COPY_LINEAR's NPD bit at header bit 28 disables prefetch past that copy.
-  /// Without this feature these scope and NPD bits remain zero.
+  /// COPY_LINEAR_RECT uses those positions in dword 12 when its WIDE layout
+  /// is reported. Each scope field is two bits wide.
+  /// FENCE, CONSTANT_FILL and TIMESTAMP_GET_GLOBAL scope occupies header bits
+  /// 25:24; WRITE_LINEAR uses dword 3 bits 27:26; POLL_REGMEM uses dword 5
+  /// bits 29:28. Scope 3 denotes the system.
+  /// NPD (no prior dependency) occupies COPY_LINEAR/COPY_LINEAR_RECT header
+  /// bit 28 and CONSTANT_FILL header bit 29. Field availability does not
+  /// establish dependencies or completion. Without this feature scope and
+  /// NPD are zero.
+  /// Data commands using system scope realize the site's payload visibility
+  /// without a separate stream cache operation. Execution dependencies and
+  /// completion remain explicit; this establishes no system atomic reach.
   AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE = UINT64_C(1) << 2,
+  /// FENCE uses the classic three-bit memory type at header bits 18:16.
+  /// Memory type 3 denotes uncached access; callers leave the system bit at
+  /// bit 20 zero. This feature and FENCE_SYSTEM are mutually exclusive.
+  AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_MEMORY_TYPE = UINT64_C(1) << 3,
+  /// Thirteen-dword COPY_LINEAR_RECT, opcode 1 and suboperation 4. Header
+  /// bits 31:29 encode log2(element bytes), from 0 through 4. Source and
+  /// destination byte addresses occupy dwords 1:2 and 6:7, low word first.
+  /// Bases and byte pitches are dword-aligned. X coordinates, width, row
+  /// pitch and slice pitch count elements; Y/height count rows and Z/depth
+  /// count slices. Coordinates are direct; positive pitches and extents
+  /// are encoded minus one. Source and destination regions must not overlap.
+  ///
+  /// The classic layout packs source/destination X in bits 13:0 and Y in
+  /// bits 29:16 of dwords 3/8. Dwords 4/9 contain Z in bits 10:0 and row
+  /// pitch in bits 31:13. Dwords 5/10 contain slice pitch in bits 27:0.
+  /// Dword 11 contains width in bits 13:0 and height in bits 29:16; dword 12
+  /// contains depth in bits 10:0. EXTENDED_Z and WIDE modify these fields.
+  /// Other fields are zero unless separately admitted by MEMORY_SCOPE.
+  ///
+  /// Each side addresses base + element_bytes * (x + y * row_pitch +
+  /// z * slice_pitch). The caller owns every selected row and retains all
+  /// accessed backing through completion. Cross-queue producer dependencies,
+  /// the memory-site cache contract and explicit completion still apply.
+  AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT = UINT64_C(1) << 4,
+  /// Classic COPY_LINEAR_RECT with 13-bit Z coordinates and depth-minus-one
+  /// in dwords 4, 9 and 12 bits 12:0. Requires COPY_LINEAR_RECT and is mutually
+  /// exclusive with COPY_LINEAR_RECT_WIDE. All other classic fields remain.
+  AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_EXTENDED_Z = UINT64_C(1) << 5,
+  /// Wide COPY_LINEAR_RECT geometry. Dwords 3/8 contain 16-bit X and Y at
+  /// bits 15:0 and 31:16. Dwords 4/9 contain 14-bit Z at bits 13:0 and
+  /// 16-bit row pitch at bits 31:16. Slice pitch uses all 32 bits of dwords
+  /// 5/10, representing positive counts through 2^32 elements. Dword 11
+  /// contains 16-bit width and height at bits 15:0 and 31:16; dword 12 has
+  /// 14-bit depth at bits 13:0. Addresses, units and minus-one encoding are
+  /// unchanged. Requires COPY_LINEAR_RECT and is mutually exclusive with
+  /// COPY_LINEAR_RECT_EXTENDED_Z. MEMORY_SCOPE independently admits scopes.
+  AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_WIDE = UINT64_C(1) << 6,
+};
+
+/// First directly published AQL queue format.
+///
+/// The ring contains native 64-byte AMD HSA packets, initially INVALID (type
+/// 1). Both 64-bit indices count packets monotonically. Producers reserve
+/// through the write index (atomic fetch-add for MULTI), wait until the
+/// reserved slot is below acquired read_index + ring_byte_length / 64, and
+/// write the packet body before release-storing its header/setup dword. A
+/// release store of the packet's reservation index to the 64-bit doorbell
+/// notifies firmware. MULTI producers may notify out of order; an unpublished
+/// earlier slot blocks later consumption. SINGLE producers notify
+/// monotonically. Firmware invalidates retired packet slots. Consumption
+/// releases ring storage, not code, kernargs, scratch, or kernel data: those
+/// require native execution completion.
+///
+/// Dispatches use AMD kernel descriptors and caller-owned kernargs. Completion
+/// and barrier dependencies use native 64-byte AMD signal blocks, not bare
+/// counters or handles created by libamdf. Callers initialize USER kind (1), a
+/// signed 64-bit value at byte offset 8, and zero unused fields; the packet
+/// carries the block's GPU address. Firmware decrements dispatch completion
+/// once after all workgroups complete. System acquire/release fence scopes
+/// provide the advertised global cache transitions. This contract does not
+/// enable HSA runtime services, dynamic scratch growth, or device enqueue.
+///
+/// AMD vendor format 1 carries a four-dword INDIRECT_BUFFER at packet byte 4,
+/// remaining-dword count 10 at byte 20, zero reserved words, and the native
+/// completion signal address at byte 56. The jump uses a dword-aligned 48-bit
+/// byte address, a positive 20-bit dword count and VALID at bit 23. Its entire
+/// extent fits the executable backing and address field. The caller keeps
+/// that extent immutable until execution completes on every participating XCC.
+///
+/// TRANSFER permits confirmed WRITE_DATA and COPY_DATA in that vendor buffer.
+/// The caller selects the target's PM4 field encodings, including transfer
+/// width, address alignment, and cache policy. Memory-pair queries describe
+/// the required payload visibility; SYSTEM packet fences implement the
+/// advertised global actions. With multiple XCCs, a two-dword PRED_EXEC
+/// prefix selects virtual XCC 0 for a body that must execute once: mask 1 at
+/// bit 24 and a positive 14-bit body dword count excluding the prefix. A
+/// single-XCC buffer needs no such prefix. Confirmed GPU-clock COPY_DATA
+/// observes command-processor progress and does not complete shader work.
+#define AMDF_GPU_AQL_QUEUE_FORMAT_VERSION_1 1u
+
+/// Optional native AQL packets reported in `format_features`.
+enum amdf_gpu_aql_format_feature_bits_e {
+  /// AMD vendor format 2 BARRIER_VALUE waits until (signal_value & mask)
+  /// satisfies the signed 64-bit HSA comparison against its reference value.
+  /// The dependency and optional completion are native AMD signal blocks.
+  /// All reserved packet fields are zero. Signal storage remains live through
+  /// the last dependent execution completion. Ordinary dispatch, BARRIER_AND,
+  /// and BARRIER_OR support does not imply this vendor extension.
+  AMDF_GPU_AQL_FORMAT_FEATURE_BARRIER_VALUE = UINT64_C(1) << 4,
 };
 
 /// Scratch backing borrowed by one directly published compute queue.
@@ -212,6 +322,18 @@ enum amdf_gpu_sdma_format_feature_bits_e {
 /// device and provide read/write permission and a stable GPU address. The queue
 /// borrows the memory without lifetime tracking. The caller keeps the scratch
 /// backing live until queue destruction succeeds.
+///
+/// AQL format 1 retains fixed scratch across dispatches. Let C be
+/// compute_unit_count, E be xcc_count * shader_engine_count_per_xcc, and S be
+/// maximum_scratch_wave_count_per_compute_unit. Its physical slot count is
+/// ceil(C / E) * E * S, including padding for asymmetric CU harvesting. Set
+/// maximum_wave_count to this slot count; smaller pools requiring firmware
+/// scratch reclamation are unsupported. The GPU base is 4096-byte aligned.
+/// Each slot receives the requested per-workitem private byte length
+/// times 64, rounded up to 1024 bytes. Backing must cover every wave; excess
+/// backing does not change the configured capacity. Every submitted dispatch
+/// fits the configured per-workitem private limit. Scratch is exclusive to the
+/// queue until its final execution completion and successful destruction.
 typedef struct amdf_gpu_queue_scratch_t {
   /// Memory resource borrowed for the queue lifetime, or NULL when disabled.
   amdf_memory_t* memory;
@@ -225,7 +347,7 @@ typedef struct amdf_gpu_queue_scratch_t {
   uint64_t byte_length;
   /// Maximum private-segment bytes per workitem accepted by the queue.
   uint32_t maximum_private_segment_byte_length;
-  /// Number of simultaneously scratch-backed waves.
+  /// Physical scratch slot capacity, including shader-engine rounding.
   uint32_t maximum_wave_count;
 } amdf_gpu_queue_scratch_t;
 
@@ -272,6 +394,9 @@ typedef struct amdf_gpu_kernel_command_t {
   uint64_t byte_length;
 } amdf_gpu_kernel_command_t;
 
+/// Default pending capacity for kernel-mediated GPU queues.
+#define AMDF_GPU_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT 4096u
+
 /// Parameters used to acquire one kernel-mediated GPU queue.
 typedef struct amdf_gpu_kernel_queue_create_info_t {
   /// Must be `AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO`.
@@ -282,8 +407,10 @@ typedef struct amdf_gpu_kernel_queue_create_info_t {
   const void* next;
   /// Endpoint-local PM4 or SDMA family supporting kernel publication.
   uint32_t queue_family_ordinal;
-  /// Reserved for compatible growth and must be zero.
-  uint32_t reserved;
+  /// Maximum accepted submissions that may remain unretired, or zero for
+  /// AMDF_GPU_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT. This admission
+  /// bound does not reserve native driver capacity or retain command memory.
+  uint32_t maximum_pending_submission_count;
 } amdf_gpu_kernel_queue_create_info_t;
 
 /// One bounded kernel-mediated GPU submission.
@@ -378,13 +505,20 @@ typedef struct amdf_gpu_api_t {
   /// Native rejection leaves `out_submission` unchanged. Because command bytes
   /// are opaque, the caller keeps every indirectly referenced memory or native
   /// object live until the submission retires.
+  /// Successful calls return increasing queue-local completion points. Callers
+  /// use returned points without assuming a starting value or dense numbering.
+  /// A successful wait for one point covers all earlier accepted submissions
+  /// on this queue, not independently scheduled work on other queues.
   ///
   /// This hot path takes no library lock and performs no lazy initialization,
   /// mapping, pinning or indirect-buffer scan. It is thread-safe with other
-  /// submissions and progress operations. Queue-slot contention returns BUSY
-  /// rather than waiting. This is not a wait-free guarantee. Native publication
-  /// may enter the driver; it does not initialize a host scheduler or translate
-  /// commands.
+  /// submissions and progress operations. Concurrent publication returns BUSY
+  /// rather than waiting. The publication claim ends when the native call
+  /// returns, not when execution completes. At the configured pending bound,
+  /// one nonblocking native progress check reclaims completed capacity before
+  /// returning BUSY if the queue remains full. No intermediate host wait is
+  /// required. This is not a wait-free guarantee. Native publication may enter
+  /// the driver; it does not initialize a host scheduler or translate commands.
   amdf_status_t(AMDF_CALL* kernel_queue_submit)(
       amdf_kernel_queue_t* queue,
       const amdf_gpu_kernel_queue_submission_info_t* submission_info,

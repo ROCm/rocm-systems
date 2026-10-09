@@ -45,6 +45,7 @@
 #include <string>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -78,6 +79,9 @@ struct thread_trace_parameter_pack
     /// 1 = single buffer (synchronous, no async copy).
     /// Values >= 3 enable the async copy pipeline. 2 is rejected at the API layer.
     size_t num_buffers = 1;
+
+    rocprofiler_thread_trace_resource_mode_t resource_mode =
+        ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT;
 
     bool bSerialize = false;
 
@@ -124,6 +128,11 @@ public:
     signal_ptr_t stop_thread_trace();
 
 private:
+    /// Allocate GPU resources once the configured initialization event occurs.
+    void initialize_resources();
+    /// Start with trace_resources_mut held and resources already initialized.
+    signal_ptr_t start_thread_trace_locked();
+
     /// Acquire a copy of the control packet, with optional increment to active_traces
     std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart = false);
 
@@ -156,6 +165,9 @@ public:
     void resource_init();
     void resource_deinit();
 
+    bool collects_on(rocprofiler_agent_id_t agent_id) const;
+    bool intersects(const DispatchThreadTracer& rhs) const;
+
     void add_agent(rocprofiler_agent_id_t agent, thread_trace_parameter_pack pack)
     {
         auto lk       = std::unique_lock{agents_map_mut};
@@ -173,13 +185,23 @@ public:
                                  const hsa::packet_data_t&        packet_data);
     const auto& get_agents() const { return agents; }
 
+    /// Number of injected trace packets still awaiting post_kernel_call.
+    int pending_post_moves() const { return post_move_data.load(); }
+
+    std::unordered_set<rocprofiler_agent_id_t> configured_agents() const;
+
 private:
+    /// Hands out a value that is never reused, so a packet outliving its tracer cannot be
+    /// mistaken for one produced by a later tracer that happens to occupy the same address.
+    static uint64_t allocate_tracer_id();
+
     std::unordered_map<rocprofiler_agent_id_t, std::unique_ptr<ThreadTracerAgent>> agents{};
     std::unordered_map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params{};
 
-    std::shared_mutex agents_map_mut{};
-    std::atomic<int>  post_move_data{0};
-    std::atomic<bool> enabled{false};
+    const uint64_t            tracer_id = allocate_tracer_id();
+    mutable std::shared_mutex agents_map_mut{};
+    std::atomic<int>          post_move_data{0};
+    std::atomic<bool>         enabled{false};
 };
 
 class DeviceThreadTracer

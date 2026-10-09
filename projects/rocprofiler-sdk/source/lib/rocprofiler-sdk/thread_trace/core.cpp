@@ -35,6 +35,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -51,6 +52,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -78,11 +80,9 @@ struct cbdata_t
     rocprofiler_thread_trace_shader_data_callback_t cb_fn      = nullptr;
     const rocprofiler_user_data_t*                  userdata   = nullptr;
     uint64_t                                        next_chunk = 0;
-};
 
-// Keeps track of a single client registering for serialized thread trace
-// operations so we can gate new traces while one is active.
-common::Synchronized<std::optional<int64_t>> client;
+    aqlprofile_handle_t handle{};
+};
 
 // True once the HSA runtime is registered. Gates start_context() so pre-init
 // start requests are deferred and replayed by start_active_contexts().
@@ -98,6 +98,9 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
 {
     auto& cb_data = *static_cast<cbdata_t*>(callback_data);
 
+    // Clock storage is per XCC; select it using this callback's shader engine.
+    auto clock = hsa::get_gpu_clock(cb_data.handle, shader);
+
     auto shader_data             = rocprofiler_thread_trace_shader_data_t{};
     shader_data.size             = sizeof(shader_data);
     shader_data.data             = buffer;
@@ -107,6 +110,8 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
     shader_data.read_offset      = 0;
     shader_data.agent            = cb_data.agent;
     shader_data.flags            = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END;
+    shader_data.start_timestamp  = convert_timestamp(cb_data.agent, clock.start);
+    shader_data.end_timestamp    = convert_timestamp(cb_data.agent, clock.latest);
 
     cb_data.cb_fn(shader_data, *cb_data.userdata);
     // The iterator guarantees the last chunk is tagged with END; here we just
@@ -144,8 +149,22 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
 : params(std::move(_params))
 , agent_id(cache)
 {
-    // Allocate and configure all heavy-weight objects up front: subsequent
-    // start calls reuse the queue and packet factory without additional setup.
+    if(params.resource_mode != ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT)
+        initialize_resources();
+
+    codeobj_reg = std::make_unique<code_object::CodeobjCallbackRegistry>(
+        [this](rocprofiler_agent_id_t _agent, uint64_t codeobj_id, uint64_t addr, uint64_t size) {
+            if(_agent == this->agent_id) this->load_codeobj(codeobj_id, addr, size);
+        },
+        [this](uint64_t codeobj_id) { this->unload_codeobj(codeobj_id); });
+
+    codeobj_reg->IterateLoaded();
+}
+
+void
+ThreadTracerAgent::initialize_resources()
+{
+    // Subsequent starts reuse the queue and packet factory.
     ROCP_TRACE << "Constructing ATT instance for agent " << agent_id.handle;
     const bool   multi_buffer = params.num_buffers > 1;
     const size_t staging_n    = multi_buffer ? params.num_buffers : 0;
@@ -173,19 +192,15 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
     }
 #endif
 
-    queue = make_att_queue(agent_id, params.buffer_size, staging_n, memory);
-    if(!queue) throw std::runtime_error{"Could not create thread-trace queue"};
-    factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(
-        agent_id, params, memory, queue->kfd_copy_queue);
-    control_packet = factory->construct_control_packet();
+    auto new_queue = make_att_queue(agent_id, params.buffer_size, staging_n, memory);
+    if(!new_queue) throw std::runtime_error{"Could not create thread-trace queue"};
+    auto new_factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(
+        agent_id, params, memory, new_queue->kfd_copy_queue);
+    auto new_control_packet = new_factory->construct_control_packet();
 
-    codeobj_reg = std::make_unique<code_object::CodeobjCallbackRegistry>(
-        [this](rocprofiler_agent_id_t _agent, uint64_t codeobj_id, uint64_t addr, uint64_t size) {
-            if(_agent == this->agent_id) this->load_codeobj(codeobj_id, addr, size);
-        },
-        [this](uint64_t codeobj_id) { this->unload_codeobj(codeobj_id); });
-
-    codeobj_reg->IterateLoaded();
+    queue          = std::move(new_queue);
+    factory        = std::move(new_factory);
+    control_packet = std::move(new_control_packet);
 }
 
 ThreadTracerAgent::~ThreadTracerAgent()
@@ -206,7 +221,7 @@ ThreadTracerAgent::~ThreadTracerAgent()
     }
     // Packet/marker destructors share the pool. Close the engines while all
     // command, signal and trace allocations are still owned.
-    if(queue->kfd_copy_queue) queue->kfd_copy_queue->close();
+    if(queue && queue->kfd_copy_queue) queue->kfd_copy_queue->close();
 }
 
 /**
@@ -230,6 +245,7 @@ std::unique_ptr<hsa::TraceControlAQLPacket>
 ThreadTracerAgent::get_start_packet()
 {
     auto lock = std::unique_lock{trace_resources_mut};
+    if(!control_packet) return nullptr;
     return get_control(true);
 }
 
@@ -240,7 +256,8 @@ ThreadTracerAgent::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_dat
 
     cbdata_t cb_dt{};
 
-    cb_dt.agent = agent_id;
+    cb_dt.agent  = agent_id;
+    cb_dt.handle = handle;
     // Walk each buffer produced by the ATT runtime and forward it to the
     // registered shader callback.
     cb_dt.cb_fn    = params.shader_cb_fn;
@@ -262,6 +279,7 @@ ThreadTracerAgent::iterate_data()
     if(params.num_buffers > 1) return;
 
     auto lock = std::unique_lock{trace_resources_mut};
+    if(!control_packet) return;
     iterate_data(control_packet->GetHandle(), params.callback_userdata);
 }
 
@@ -270,11 +288,36 @@ ThreadTracerAgent::load_codeobj(code_object_id_t id, uint64_t addr, uint64_t siz
 {
     auto lk = std::unique_lock{trace_resources_mut};
 
+    if(!queue)
+    {
+        try
+        {
+            initialize_resources();
+        } catch(const std::exception& e)
+        {
+            // A deferred allocation failure must not escape the HSA code-object callback.
+            ROCP_ERROR << "Unable to initialize thread-trace resources for agent "
+                       << agent_id.handle << ": " << e.what();
+            return;
+        }
+    }
+
     control_packet->add_codeobj(id, addr, size);
     // Keep shader metadata in sync while traces are live so symbol resolution
     // remains accurate in the emitted stream.
 
-    if(!queue || active_traces.load() < 1) return;
+    if(active_traces.load() < 1)
+    {
+        // A device context may have started before this agent loaded any code objects.
+        // Include the first code-object marker in the start packets and wait before
+        // allowing the application's code-object load to finish.
+        if(worker_flag && worker_flag->load() == WORKER_FLAG_RUNNING)
+        {
+            auto sig = start_thread_trace_locked();
+            if(sig) signal_wait(*sig);
+        }
+        return;
+    }
 
     auto packet = factory->construct_load_marker_packet(id, addr, size);
     auto sig    = att_queue_submit(*queue, &packet->packet, true);
@@ -286,7 +329,7 @@ ThreadTracerAgent::unload_codeobj(code_object_id_t id)
 {
     auto lk = std::unique_lock{trace_resources_mut};
 
-    if(!control_packet->remove_codeobj(id)) return;
+    if(!control_packet || !control_packet->remove_codeobj(id)) return;
     // Tear down metadata when code objects disappear to avoid dangling
     // references in the trace stream.
     if(!queue || active_traces.load() < 1) return;
@@ -299,16 +342,22 @@ ThreadTracerAgent::unload_codeobj(code_object_id_t id)
 signal_ptr_t
 ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
 {
+    auto lock   = std::unique_lock{trace_resources_mut};
+    worker_flag = std::move(_flag);
+    if(!queue) return nullptr;
+    return start_thread_trace_locked();
+}
+
+signal_ptr_t
+ThreadTracerAgent::start_thread_trace_locked()
+{
     ROCP_TRACE << "Starting thread trace for agent " << agent_id.handle;
-    auto lock = std::unique_lock{trace_resources_mut};
     if(!att_queue_enabled(*queue))
     {
         ROCP_WARNING << "Cannot restart thread trace after GPU buffer overflow for agent "
                      << agent_id.handle;
         return nullptr;
     }
-    worker_flag = std::move(_flag);
-
     signal_ptr_t                               producer_signal;
     std::unique_ptr<hsa::SQTTBufferingPackets> buffer_packet;
     if(params.num_buffers > 1)
@@ -402,8 +451,13 @@ signal_ptr_t
 ThreadTracerAgent::stop_thread_trace()
 {
     ROCP_TRACE << "Stopping Thread trace for agent " << agent_id.handle;
+    auto lock = std::unique_lock{trace_resources_mut};
 
-    if(active_traces.load() == 0) return nullptr;
+    if(active_traces.load() == 0)
+    {
+        worker_flag = nullptr;
+        return nullptr;
+    }
 
     if(params.num_buffers > 1)
     {
@@ -411,9 +465,11 @@ ThreadTracerAgent::stop_thread_trace()
         worker_flag->compare_exchange_strong(expected, WORKER_FLAG_STOP);
 
         // agent_mut serializes lifecycle calls; the producer may lock resources while finishing.
+        lock.unlock();
         if(producer.joinable()) producer.join();
         for(auto& t : consumers)
             if(t.joinable()) t.join();
+        lock.lock();
         consumers.clear();
         active_traces.fetch_sub(1);
         worker_flag = nullptr;
@@ -421,7 +477,7 @@ ThreadTracerAgent::stop_thread_trace()
     }
     else
     {
-        auto lock = std::unique_lock{trace_resources_mut};
+        worker_flag = nullptr;
         control_packet->clear();
         control_packet->populate_after();
         // Submit without waiting; DeviceThreadTracer::stop_context fans out
@@ -459,24 +515,32 @@ DispatchThreadTracer::resource_init()
     }
 }
 
+uint64_t
+DispatchThreadTracer::allocate_tracer_id()
+{
+    static auto _counter = std::atomic<uint64_t>{1};
+    return _counter.fetch_add(1, std::memory_order_relaxed);
+}
+
 void
 DispatchThreadTracer::resource_deinit()
 {
-    auto was_enabled = enabled.exchange(false, std::memory_order_acq_rel);
-
-    if(auto* controller = hsa::get_queue_controller())
+    if(enabled.exchange(false, std::memory_order_acq_rel))
     {
-        client.wlock([&](auto& client_id) {
-            if(!client_id) return;
-            controller->remove_callback(*client_id);
-            client_id = std::nullopt;
-        });
-        if(was_enabled) controller->disable_serialization();
+        const auto serialization_agents = configured_agents();
+        if(auto* controller = hsa::get_queue_controller())
+            controller->disable_serialization(serialization_agents);
     }
 
     ROCP_TRACE << "Clearing agents";
-    auto lk = std::unique_lock{agents_map_mut};
-    agents.clear();
+    // Destroy the agents only after releasing agents_map_mut: a completion can be waiting for it
+    // in post_kernel_call on ROCr's async signal handler thread, and on the HSA backend an
+    // agent's destructor calls hsa_queue_destroy(), which waits on that same thread.
+    auto retired = decltype(agents){};
+    {
+        auto lk = std::unique_lock{agents_map_mut};
+        retired.swap(agents);
+    }
 }
 
 /**
@@ -499,8 +563,6 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
     }
     // TODO: Get external
 
-    if(!enabled.load(std::memory_order_acquire)) return {nullptr, false};
-
     std::shared_lock<std::shared_mutex> lk(agents_map_mut);
 
     auto it = agents.find(queue.get_agent().get_rocp_agent()->id);
@@ -509,6 +571,12 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
 
     auto&       agent      = *CHECK_NOTNULL(it->second);
     const auto& parameters = agent.params;
+
+    // stop_context() clears enabled before it drops the serialization reference, and the context
+    // stays in the active array until both are done. A dispatch in that window is treated like an
+    // untraced one: with SERIALIZE_ALL it must still take the barriers, or it overlaps a traced
+    // dispatch that is still running. Once serialization is disabled the serializer ignores it.
+    if(!enabled.load(std::memory_order_acquire)) return {nullptr, parameters.bSerialize};
 
     // Kernel-replay localized context control: a replay pass may disable this ATT context for the
     // pass -- skip the trace (but keep serialization) when it's forced off. No-op outside a replay
@@ -528,6 +596,8 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
         return {nullptr, parameters.bSerialize};
 
     auto packet = agent.get_start_packet();
+    if(!packet) return {nullptr, parameters.bSerialize};
+    packet->SetOwner(tracer_id);
     post_move_data.fetch_add(1);
     packet->populate_before();
     packet->populate_after();
@@ -543,8 +613,11 @@ DispatchThreadTracer::post_kernel_call(DispatchThreadTracer::inst_pkt_t& aql,
 
     for(auto& aql_pkt : aql)
     {
+        if(aql_pkt.second != hsa::queue_hooks::THREAD_TRACE_CLIENT_ID) continue;
+
         auto* pkt = dynamic_cast<hsa::TraceControlAQLPacket*>(aql_pkt.first.get());
         if(!pkt) continue;
+        if(pkt->GetOwner() != tracer_id) continue;
 
         std::shared_lock<std::shared_mutex> lk(agents_map_mut);
         post_move_data.fetch_sub(1);
@@ -557,55 +630,62 @@ DispatchThreadTracer::post_kernel_call(DispatchThreadTracer::inst_pkt_t& aql,
     }
 }
 
-void
-DispatchThreadTracer::start_context()
+std::unordered_set<rocprofiler_agent_id_t>
+DispatchThreadTracer::configured_agents() const
 {
-    using corr_id_map_t = hsa::queue_info_session_t::external_corr_id_map_t;
+    auto                                result = std::unordered_set<rocprofiler_agent_id_t>{};
+    std::shared_lock<std::shared_mutex> lk(agents_map_mut);
+    for(const auto& [agent_id, _] : params)
+        result.insert(agent_id);
+    return result;
+}
 
-    // Only installs queue-controller callbacks (cached and applied to queues as
-    // they are created), so this is safe to call before hsa_init.
-    CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization();
-    enabled.store(true, std::memory_order_release);
+bool
+DispatchThreadTracer::collects_on(rocprofiler_agent_id_t agent_id) const
+{
+    std::shared_lock<std::shared_mutex> lk(agents_map_mut);
+    return params.count(agent_id) > 0;
+}
 
-    // Only one thread should be attempting to enable/disable this context
-    client.wlock([&](auto& client_id) {
-        if(client_id) return;
+bool
+DispatchThreadTracer::intersects(const DispatchThreadTracer& rhs) const
+{
+    if(this == &rhs)
+    {
+        std::shared_lock<std::shared_mutex> lk(agents_map_mut);
+        return !params.empty();
+    }
 
-        auto&& _callbacks = hsa::queue_callbacks_t{
-            .batch_packets = []() { return false; },
-            .write_interceptor =
-                [=](const hsa::Queue& q,
-                    const hsa::rocprofiler_packet& /* kern_pkt */,
-                    rocprofiler_kernel_id_t   kernel_id,
-                    rocprofiler_dispatch_id_t dispatch_id,
-                    rocprofiler_user_data_t*  user_data,
-                    const corr_id_map_t& /* extern_corr_ids */,
-                    const context::correlation_id* corr_id) {
-                    return this->pre_kernel_call(q, kernel_id, dispatch_id, user_data, corr_id);
-                },
-            .signal_completion =
-                [=](const hsa::Queue& /* q */,
-                    hsa::rocprofiler_packet /* kern_pkt */,
-                    std::shared_ptr<hsa::queue_info_session_t>& session,
-                    hsa::packet_data_t&                         packet_data,
-                    inst_pkt_t&                                 aql,
-                    kernel_dispatch::profiling_time) {
-                    this->post_kernel_call(aql, *session, packet_data);
-                }};
-
-        client_id = CHECK_NOTNULL(hsa::get_queue_controller())
-                        ->add_callback(std::nullopt, std::move(_callbacks));
-    });
+    auto lk     = std::shared_lock<std::shared_mutex>{agents_map_mut, std::defer_lock};
+    auto lk_rhs = std::shared_lock<std::shared_mutex>{rhs.agents_map_mut, std::defer_lock};
+    std::lock(lk, lk_rhs);
+    for(const auto& [agent_id, _] : params)
+    {
+        if(rhs.params.count(agent_id) > 0) return true;
+    }
+    return false;
 }
 
 void
-DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-functions-to-static)
+DispatchThreadTracer::start_context()
 {
-    // Stop injecting ATT packets before transitioning serialization. Completion callbacks remain
-    // registered so packets already in the queues can drain through the serializer transition.
+    // An empty agent set means every agent.
+    const auto serialization_agents = configured_agents();
+    CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization(serialization_agents);
+    enabled.store(true, std::memory_order_release);
+}
+
+void
+DispatchThreadTracer::stop_context()
+{
+    // Stop injecting ATT packets before transitioning serialization. Completion hooks continue
+    // to route already-tagged packets via kernel_dispatch_phase_exit_hook even after the context
+    // stops.
     if(!enabled.exchange(false, std::memory_order_acq_rel)) return;
 
-    if(auto* controller = hsa::get_queue_controller()) controller->disable_serialization();
+    const auto serialization_agents = configured_agents();
+    if(auto* controller = hsa::get_queue_controller())
+        controller->disable_serialization(serialization_agents);
 }
 
 DeviceThreadTracer::DeviceThreadTracer()

@@ -313,6 +313,20 @@ get_contexts_mutex()
 }
 
 bool
+spm_dispatch_counter_collection_service::intersects(
+    const spm_dispatch_counter_collection_service& rhs) const
+{
+    if(agents.empty() || rhs.agents.empty()) return true;
+    const auto& small = (agents.size() < rhs.agents.size()) ? agents : rhs.agents;
+    const auto& large = (agents.size() < rhs.agents.size()) ? rhs.agents : agents;
+    for(const auto& agent_id : small)
+    {
+        if(large.count(agent_id) > 0) return true;
+    }
+    return false;
+}
+
+bool
 dispatch_counter_collection_service::intersects(
     const dispatch_counter_collection_service& rhs) const
 {
@@ -540,6 +554,21 @@ start_context(rocprofiler_context_id_t context_id)
                 // still conflicts with any other counter-collection context.
                 return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
             }
+            else if(cfg->dispatch_spm && itr->dispatch_spm &&
+                    cfg->dispatch_spm->intersects(*itr->dispatch_spm))
+            {
+                // Two SPM dispatch contexts can run concurrently as long as they target disjoint
+                // sets of GPU agents. A context with no agent restriction claims every agent.
+                return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+            }
+            else if(cfg->dispatch_thread_trace && itr->dispatch_thread_trace &&
+                    cfg->dispatch_thread_trace->intersects(*itr->dispatch_thread_trace))
+            {
+                // Two dispatch ATT contexts can run concurrently as long as they target disjoint
+                // sets of GPU agents. Overlapping agent sets would cross-talk in
+                // post_kernel_call.
+                return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+            }
         }
 
         // try to find a nullptr slot first
@@ -623,6 +652,7 @@ start_context(rocprofiler_context_id_t context_id)
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
     if(cfg->pc_sampler) status = rocprofiler::pc_sampling::start_service(cfg);
 #endif
+    if(cfg->device_spm) status = rocprofiler::SPM::spm_start_agent_ctx(cfg);
 
     return status;
 }
@@ -724,6 +754,10 @@ stop_context(rocprofiler_context_id_t idx)
     if(_expected->device_counter_collection)
     {
         rocprofiler::counters::stop_agent_ctx(const_cast<context*>(_expected));
+    }
+    if(_expected->device_spm)
+    {
+        rocprofiler::SPM::spm_stop_agent_ctx(_expected);
     }
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0

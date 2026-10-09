@@ -1,8 +1,5 @@
-// Copyright 2026 The IREE Authors
-//
-// Licensed under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef AMDF_MEMORY_H_
 #define AMDF_MEMORY_H_
@@ -137,7 +134,7 @@ enum amdf_atomic_scope_e {
   AMDF_ATOMIC_SCOPE_DEVICE = 1,
   /// One correlated device fabric.
   AMDF_ATOMIC_SCOPE_FABRIC = 2,
-  /// Host and every reported device participant.
+  /// System-wide atomic scope, including host CPUs and devices.
   AMDF_ATOMIC_SCOPE_SYSTEM = 3,
 };
 
@@ -948,7 +945,9 @@ typedef struct amdf_memory_pair_info_t {
   amdf_cache_transition_t acquire;
   /// Width-specific mutually atomic reach shared by both execution sites. This
   /// does not imply operation support; callers also intersect both the queue
-  /// family and target-memory operation masks.
+  /// family and target-memory operation masks. Other mapped accesses retain
+  /// their own operation and reach requirements; a mapping alone does not
+  /// grant atomic support.
   amdf_atomic_reach_t atomic_reach;
   /// Informational fixed transition cost in nanoseconds. The value is valid
   /// only when `AMDF_MEMORY_PAIR_FLAG_FIXED_COST_KNOWN` is set.

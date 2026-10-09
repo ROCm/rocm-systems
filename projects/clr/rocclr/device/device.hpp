@@ -764,6 +764,8 @@ class Settings {
   void enableExtension(uint name) { extensions_ |= static_cast<uint64_t>(1) << name; }
 
   size_t stagedXferSize_ = 0;     //!< Staged buffer size
+  size_t sdma_swap_alignment_ = 0;  //!< SDMA swap address alignment
+  size_t sdma_indirect_max_size_ = 0;  //!< Max SDMA indirect copy size
 
  private:
   //! Disable copy constructor
@@ -2269,7 +2271,12 @@ class Device : public RuntimeObject {
     int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
   };
 
-  virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
+  //! Create a barrier packet that waits on num_deps signals. num_deps == 1
+  //! yields a single-signal barrier where the device has one; otherwise a
+  //! barrier-AND (up to five dep_signal slots). dep_signal[0] and the
+  //! single-signal field share an offset, so callers patch slot 0 either way.
+  //! num_deps == 0 is a completion-only barrier.
+  virtual uint8_t* CreateBarrierPacket(int num_deps = 0) const { return nullptr; }
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const {}
 

@@ -13,7 +13,11 @@
 #include "flatbuffers/idl.h"
 #include "simulation_config_generated.h"
 
+#include <algorithm>
+#include <charconv>
+#include <cstdint>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -22,6 +26,30 @@
 
 namespace rocjitsu {
 namespace config {
+
+/// @brief Launch override: disable checks, enable ordinary checks, or also enable XCNT.
+enum class WaitChecking { Off, On, All };
+
+/// @brief Parse the on/off/all launch modes, distinct from per-CU warn/off policies.
+inline std::optional<WaitChecking> parse_wait_checking(std::string_view value) {
+  if (value == "off")
+    return WaitChecking::Off;
+  if (value == "on")
+    return WaitChecking::On;
+  if (value == "all")
+    return WaitChecking::All;
+  return std::nullopt;
+}
+
+/// @brief Parse a complete unsigned 32-bit decimal value.
+inline std::optional<uint32_t> parse_uint32(std::string_view text) {
+  uint32_t value = 0;
+  const std::from_chars_result result =
+      std::from_chars(text.data(), text.data() + text.size(), value);
+  if (result.ec != std::errc{} || result.ptr != text.data() + text.size())
+    return std::nullopt;
+  return value;
+}
 
 inline std::string read_config_file(const std::string &path) {
   std::ifstream file(path);
@@ -80,9 +108,8 @@ inline PciDeviceConfig pci_device_from_fb(const fb::PciDeviceInfo *pci) {
 
 /// @brief Convert a FlatBuffers KFD identity table into the runtime config form.
 ///
-/// @details This copies only scalar/string topology values. The resulting
-/// config owns its marketing-name string so it is safe after the FlatBuffers
-/// parser storage goes out of scope.
+/// @details The resulting config owns its strings and IP versions so it is safe
+/// after the FlatBuffers parser storage goes out of scope.
 /// @param json_path JSON path of @p device, used in validation diagnostics.
 inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device,
                                           std::string_view json_path) {
@@ -157,6 +184,20 @@ inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device,
   config.capability = device->capability();
   config.capability2 = device->capability2();
   config.debug_prop = device->debug_prop();
+  if (const auto *versions = device->ip_versions()) {
+    for (const auto *version : *versions) {
+      if (version->hardware_id() == 0 || version->major() == 0)
+        throw std::runtime_error(std::string(json_path) +
+                                 ".ip_versions requires nonzero hardware_id and major");
+      if (std::ranges::any_of(config.ip_versions, [&](const DeviceIpVersion &existing) {
+            return existing.hardware_id == version->hardware_id();
+          }))
+        throw std::runtime_error(std::string(json_path) +
+                                 ".ip_versions contains a duplicate hardware_id");
+      config.ip_versions.push_back(
+          {version->hardware_id(), version->major(), version->minor(), version->revision()});
+    }
+  }
   return config;
 }
 

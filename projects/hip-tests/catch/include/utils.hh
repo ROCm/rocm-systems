@@ -140,6 +140,16 @@ static __global__ void Delay(uint32_t interval, const uint32_t ticks_per_ms) {
   }
 }
 
+// Spins until the host stores a nonzero value to `release`, which keeps the stream busy for as
+// long as the host decides, independent of any timing. `release` must point to host memory that
+// is coherent with the device, such as hipHostMalloc memory allocated with default flags. The
+// host must set the flag before any check that can throw, otherwise the cleanup that follows
+// waits forever for the kernel.
+[[maybe_unused]] static __global__ void WaitForHostRelease(volatile int* release) {
+  while (*release == 0) {
+  }
+}
+
 template <typename T>
 __global__ void Iota(T* const out, size_t pitch, size_t w, size_t h, size_t d) {
   const auto x = blockIdx.x * blockDim.x + threadIdx.x;
