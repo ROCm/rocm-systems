@@ -227,8 +227,9 @@ static bool resolve_archive_path(const std::string& input, std::string& resolved
 //   [+12..23] block[3] (uint32_t[3])
 //   [+24..27] shared_mem (uint32_t)
 //   [+28..29] num_args (uint16_t)
-//   [+30..31] num_snapshots (uint16_t, always 0)
+//   [+30..31] num_snapshots (uint16_t)
 //   per arg: u8 value_kind, u16 size, <size> bytes data
+//   per snapshot (v8, 41 bytes): see BufferSnapshot; the attribute tail follows
 // ---------------------------------------------------------------------------
 
 static bool parse_kernel_launch(const uint8_t* data, size_t len,
@@ -287,7 +288,7 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
     kl.args.push_back(std::move(arg));
   }
 
-  // buffer snapshots (always 0 in in-tree captures)
+  // pinned host snapshots
   for (uint16_t i = 0; i < num_snapshots; i++) {
     if (p + 41 > end) return false;
     BufferSnapshot snap;

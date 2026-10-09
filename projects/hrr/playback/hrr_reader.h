@@ -92,7 +92,8 @@ struct KernelArg {
   std::vector<uint16_t> ptr_offsets;  // only for value_kind == 3
 };
 
-// Buffer snapshot (always empty in in-tree captures)
+// Pinned host snapshot (v8): the blob replay writes to [offset, offset +
+// length) of the pinned allocation recorded at ptr_handle before the launch.
 struct BufferSnapshot {
   uint64_t ptr_handle;
   uint64_t offset;

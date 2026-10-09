@@ -422,11 +422,47 @@ hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_nam
 //   [+12..23] block[3] (uint32_t[3])
 //   [+24..27] shared_mem (uint32_t)
 //   [+28..29] num_args (uint16_t)
-//   [+30..31] num_snapshots (uint16_t, always 0)
+//   [+30..31] num_snapshots (uint16_t)
 //   per arg:  u8 value_kind, u16 size, <size> bytes data
 //             value_kind: 0=scalar, 1=gpu-pointer, 2=hidden,
 //                         3=scalar/struct with embedded gpu pointer(s);
 //             kind 3 appends u16 n_ptrs then n_ptrs * u16 byte offsets.
+//   per snapshot (v8): u64 ptr_handle, u64 offset, u64 length, u64 hash_lo,
+//             u64 hash_hi, u8 direction (0)
+//   u32 num_attrs, u32 attr stride, num_attrs * stride bytes
+
+// Write a launch's pinned host snapshots back before it runs, once the work
+// already queued on its stream is done. Not inside a graph capture, where the
+// kernel runs only when the graph is launched.
+static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* rec,
+                                   uint16_t n, hipStream_t stream,
+                                   const std::string& kernel_name) {
+    if (ctx.in_graph_capture) {
+        ctx.host_snapshots_skipped += n;
+        return;
+    }
+    bool synced = false;
+    for (uint16_t i = 0; i < n; i++, rec += kHostSnapRecordSize) {
+        uint64_t hash[2];
+        memcpy(hash, rec + 24, 16);
+        size_t blob_len = 0;
+        const void* blob = ctx.load_blob(hash[0], hash[1], &blob_len);
+        const char* why  = nullptr;
+        void* dst = hrr_host_snapshot_target(ctx, rec, blob, blob_len, &why);
+        if (!dst) {
+            ctx.host_snapshots_refused++;
+            fprintf(stderr, "[HRR] '%s': pinned host snapshot %u %s — refused\n",
+                    compact_kernel_name(kernel_name).c_str(), i, why);
+            continue;
+        }
+        if (!synced) (void)HRR_HIP_CHECK(hipStreamSynchronize(stream));
+        synced = true;
+        uint64_t len;
+        memcpy(&len, rec + 16, 8);
+        memcpy(dst, blob, len);
+        ctx.host_snapshots_restored++;
+    }
+}
 
 // ext_global_worksize: the captured grid[] holds *global work-item counts*
 // (HSA/OpenCL semantics, as passed to hipExtModuleLaunchKernel), NOT workgroup
@@ -1001,6 +1037,15 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                        arg_storage, &rls, dbg_dump_ptrs ? &dbg_ptrs : nullptr,
                        dbg_dump_ptrs ? &dbg_args : nullptr);
 
+    const uint8_t* snapshots = p;
+    if (p > end || static_cast<size_t>(end - p) / kHostSnapRecordSize < num_snapshots) {
+        fprintf(stderr, "[HRR] '%s': %u pinned host snapshot records run past the "
+                "event — refused\n", kernel_name.c_str(), num_snapshots);
+        ctx.host_snapshots_refused += num_snapshots;
+        num_snapshots = 0;
+    }
+    p += static_cast<size_t>(num_snapshots) * kHostSnapRecordSize;
+
     // Launch-attribute tail: u32 count, u32 per-entry stride, then the
     // entries. Every launch payload carries it (count 0 for a plain launch).
     std::vector<hipLaunchAttribute> launch_attrs;
@@ -1048,6 +1093,8 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     hipStream_t stream = ctx.translate_stream(stream_rec);
     const size_t kernel_ordinal =
         ctx.kernels_launched.load(std::memory_order_relaxed) + 1;
+    if (num_snapshots)
+        restore_host_snapshots(ctx, snapshots, num_snapshots, stream, kernel_name);
 
     if (ctx.audit_host_args) {
         for (auto& [idx, rec, live] : dbg_ptrs) {
