@@ -2148,6 +2148,7 @@ rj_add_interposer_test_suite(
     GemMetadataRoundTripsOnABuffer
     GemOpReportsTheCreateSize
     GemOpSetPlacementChangesTheReportedDomain
+    IpcImportSharesThePagesOfTheExportedAllocation
     KfdBufferKeepsItsMetadataAfterEveryHandleCloses
     KfdExportKeepsItsMetadataAfterTheAllocationIsFreed
     OpensWithinCurrentDescriptorLimit
