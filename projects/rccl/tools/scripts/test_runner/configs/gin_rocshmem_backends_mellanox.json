@@ -200,7 +200,7 @@
         { "name": "BarrierFence_IpcSignalInc", "description": "Sub-threshold IPC SignalInc is visible when waitSignal returns (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_IpcSignalIncMakesPutVisible_SingleNode" },
         { "name": "GetFlush_Visibility", "description": "gin.flush makes prior gets visible in the same kernel (8 B - 4 MiB)", "test_filter": "GinMPIDeviceTests.GetFlush_Visibility" },
         { "name": "GetFlushAsyncWait_Visibility", "description": "gin.flushAsync + gin.wait makes prior gets visible in the same kernel", "test_filter": "GinMPIDeviceTests.GetFlushAsyncWait_Visibility" },
-        { "name": "GetFlush_ConcurrentBlocks", "description": "8 CTAs get + flush concurrently on one GIN context", "test_filter": "GinMPIDeviceTests.GetFlush_ConcurrentBlocks" }
+        { "name": "GetFlush_ConcurrentBlocks", "description": "8 CTAs get + flush concurrently on one GIN context. Skipped on Anvil SDMA until a per-queue submission counter covers the shared dirty bit", "test_filter": "GinMPIDeviceTests.GetFlush_ConcurrentBlocks" }
       ]
     },
     "gin_devmpi_gda": {
