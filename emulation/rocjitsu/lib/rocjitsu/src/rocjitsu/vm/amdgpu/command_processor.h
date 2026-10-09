@@ -165,6 +165,7 @@ public:
   /// @param rank This CP's XCD index.
   /// @param peers All XCD command processors of the SoC, in XCD index order.
   void set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers);
+  /// Instruction-visible XCC identity, using the configured XCD rank.
   uint32_t xcc_id() const { return xcd_rank_; }
 
   [[nodiscard]] uint64_t register_pm4_queue(Pm4QueueConfig config);

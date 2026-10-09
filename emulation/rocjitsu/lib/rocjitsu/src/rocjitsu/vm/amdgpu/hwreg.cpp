@@ -655,7 +655,9 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
   if (desc->state == HwregState::IdentityGfx12) {
     // WAVE_ID[4:0], SIMD_ID[9:8], WGP_ID[13:10], SA_ID[16]; RDNA4 adds SE_ID[20:18].
     const uint32_t known_mask =
-        0x00013f1fu | (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? 0u : 0x001c0000u);
+        field_value(~0u, 0, 5) | field_value(~0u, 8, 2) | field_value(~0u, 10, 4) |
+        field_value(~0u, 16, 1) |
+        (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? 0u : field_value(~0u, 18, 3));
     if (decoded.size != 32 && ((decoded.mask << decoded.offset) & ~known_mask)) {
       value = 0;
       return HwregAccessResult::Unsupported;

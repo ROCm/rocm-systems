@@ -766,8 +766,7 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     };
     VmAccessOutcome scratch_outcome = scratch_range_outcome(false);
 
-    if (!pkt.pm4_abi && scratch_allocator_ &&
-        (cu->arch() != ROCJITSU_CODE_ARCH_CDNA5 || pkt.scratch_wave_stride_per_se == 0)) {
+    if (!pkt.pm4_abi && scratch_allocator_ && pkt.scratch_wave_stride_per_se == 0) {
       // Size against the whole grid, not this XCD's share: every XCD of a
       // fanned-out dispatch shares the allocation. CDNA5 uses the complete
       // physical XCC/SE/scoreboard address space instead of logical grid slots.
@@ -3766,6 +3765,17 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
       const AtomicLoadResult loaded = read_gpu_u64(transaction_access, scratch_loc_va);
       if (loaded.outcome != VmAccessOutcome::Complete)
         return admission_from_vm_outcome(loaded.outcome);
+      uint32_t compute_tmpring_size = 0;
+      outcome = read_gpu_block(transaction_access,
+                               queue_ptr + offsetof(amd_queue_t, compute_tmpring_size),
+                               &compute_tmpring_size, sizeof(compute_tmpring_size));
+      if (outcome != VmAccessOutcome::Complete)
+        return admission_from_vm_outcome(outcome);
+      if (queue.simulator_scratch &&
+          (loaded.value != queue.simulator_scratch->backing_address ||
+           compute_tmpring_size != queue.simulator_scratch->tmpring_size))
+        queue.simulator_scratch.reset();
+      const bool simulator_scratch = loaded.value == 0 || queue.simulator_scratch.has_value();
       scratch_backing_addr = loaded.value;
       if (scratch_backing_addr == 0 && scratch_resolver_)
         scratch_backing_addr = scratch_resolver_(queue.process_id);
@@ -3779,23 +3789,31 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
       const auto scratch_wave_limit = [&](uint32_t tmpring_size) -> std::optional<uint32_t> {
         const uint32_t provisioned_waves = tmpring_size & 0xFFFu;
         const uint32_t provisioned_wavesize = (tmpring_size >> 12) & wavesize_mask;
-        if (provisioned_wavesize == 0 || provisioned_wavesize < required_wavesize ||
-            (arch == ROCJITSU_CODE_ARCH_CDNA5 && provisioned_waves == 0)) {
+        if (provisioned_waves == 0 || provisioned_wavesize < required_wavesize)
           return std::nullopt;
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+          // A workgroup stays on one CU; insufficient scratch is a runtime
+          // replacement request, not a fault after consuming the packet.
+          if (provisioned_waves < wfs_per_wg)
+            return std::nullopt;
+          return provisioned_waves;
         }
-        return arch == ROCJITSU_CODE_ARCH_CDNA5 ? provisioned_waves
-                                                : std::numeric_limits<uint32_t>::max();
+        // ROCr FillComputeTmpRingSize publishes waves per XCC;
+        // Gfx11/Gfx12 publish waves per shader engine. Older AQL execution
+        // uses logical grid slots, so admit only grids fitting that backing.
+        const bool waves_per_se = arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+                                  arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                                  arch == ROCJITSU_CODE_ARCH_RDNA4;
+        const uint64_t capacity =
+            uint64_t{provisioned_waves} * scratch_xcc_count_ *
+            (waves_per_se ? std::max(scratch_wave_divisor_, scratch_shader_engine_count_) : 1u);
+        if (uint64_t{total_wgs} * wfs_per_wg > capacity)
+          return std::nullopt;
+        return std::numeric_limits<uint32_t>::max();
       };
-      bool main_scratch_usable = scratch_backing_addr != 0;
+      bool main_scratch_usable = !simulator_scratch && scratch_backing_addr != 0;
       bool requires_dynamic_scratch = !main_scratch_usable;
       if (!requires_dynamic_scratch) {
-        uint32_t compute_tmpring_size = 0;
-        outcome = read_gpu_block(transaction_access,
-                                 queue_ptr + offsetof(amd_queue_t, compute_tmpring_size),
-                                 &compute_tmpring_size, sizeof(compute_tmpring_size));
-        if (outcome != VmAccessOutcome::Complete)
-          return admission_from_vm_outcome(outcome);
-
         const std::optional<uint32_t> wave_limit = scratch_wave_limit(compute_tmpring_size);
         main_scratch_usable = wave_limit.has_value();
         if (main_scratch_usable) {
@@ -3884,9 +3902,10 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
           return admission_from_vm_outcome(outcome);
       }
 
-      // The runtime may reclaim rejected async scratch. Request replacement
-      // through its protocol instead of provisioning fallback at the expired VA.
-      if (requires_dynamic_scratch && (async_scratch || !scratch_allocator_)) {
+      // Runtime backing is finite and may be reclaimed. Only simulator-owned
+      // backing may grow; request replacement for rejected runtime scratch.
+      if (requires_dynamic_scratch &&
+          (async_scratch || !scratch_allocator_ || !simulator_scratch)) {
         constexpr uint64_t kInsufficientScratchWave64 = 0x1;
         constexpr uint64_t kInsufficientScratchWave32 = 0x401;
         const uint64_t status =
@@ -4042,7 +4061,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
           dp.scratch_wave_stride_per_se == 0 && !scratch_uses_alternate) {
         const uint64_t per_wave_bytes =
             static_cast<uint64_t>(dp.private_segment_fixed_size) * wave_size;
-        // Encode the actual stride used by setup_wavefront(), using the target's
+        // Encode the actual stride used by init_wavefront_regs(), using the target's
         // allocation granule and this dispatch's wave width. This keeps flat_scratch
         // consistent with rocm-dbgapi for every scoreboard slot after slot zero.
         const auto properties = isa_properties(arch);
@@ -4073,6 +4092,8 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
         (void)write_gpu_block(transaction_access,
                               dp.queue_ptr + offsetof(amd_queue_t, compute_tmpring_size), &tmpring,
                               sizeof(tmpring));
+        queue.simulator_scratch =
+            ComputeQueueRecord::SimulatorScratch{dp.scratch_backing_addr, tmpring};
       }
     }
   }
