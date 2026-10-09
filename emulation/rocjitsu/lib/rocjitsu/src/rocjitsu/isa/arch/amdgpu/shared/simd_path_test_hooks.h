@@ -5,6 +5,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 
+#include <atomic>
 #include <cstdint>
 
 namespace rocjitsu::amdgpu {
