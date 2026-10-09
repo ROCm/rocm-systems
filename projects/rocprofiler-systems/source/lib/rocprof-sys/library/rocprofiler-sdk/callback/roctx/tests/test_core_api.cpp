@@ -20,6 +20,7 @@ namespace rocprofsys::domains::callback::roctx
 namespace
 {
 
+using ::testing::_;
 using ::testing::A;
 using ::testing::Eq;
 using ::testing::InSequence;
@@ -50,21 +51,17 @@ constexpr std::uint64_t k_enter_ts             = 1500;
 constexpr std::uint64_t k_exit_ts              = 2000;
 constexpr std::uint64_t k_thread_id            = 7;
 constexpr std::uint64_t k_correlation_internal = 31;
-constexpr std::uint64_t k_correlation_external = 32;
+constexpr std::uint64_t k_parent_stack_id      = 33;
 constexpr std::int32_t  k_ppid                 = 100;
 constexpr std::int32_t  k_pid                  = 200;
 
-constexpr std::string_view k_trigger_name  = "roctx";
-constexpr std::string_view k_category_name = "rocm_marker_api";
-// The shared mock backend resolves every (kind, operation) to this name.
-constexpr std::string_view k_table_name = "operation";
-// Not any marker core/control operation id.
-constexpr std::size_t k_unmapped_operation = 99;
+constexpr std::string_view k_trigger_name       = "roctx";
+constexpr std::string_view k_category_name      = "rocm_marker_api";
+constexpr std::string_view k_table_name         = "operation";
+constexpr std::size_t      k_unmapped_operation = 99;
 
-// Serialization of the single argument fed through iterate_args by populate_one_arg.
 constexpr std::string_view k_serialized_arg = "0;;int;;x;;42;;";
 
-// Gives the SDK-side argument iteration one populated argument, as the real SDK does.
 void
 populate_one_arg(std::uint64_t kind, std::uint32_t operation,
                  sdk::callback_tracing_operation_args_cb_t callback, void* data)
@@ -77,12 +74,11 @@ sdk::callback_tracing_record_t
 make_record(std::size_t kind, std::size_t operation, void* payload)
 {
     sdk::callback_tracing_record_t record{};
-    record.kind                          = kind;
-    record.operation                     = static_cast<std::uint32_t>(operation);
-    record.thread_id                     = k_thread_id;
-    record.correlation_id.internal       = k_correlation_internal;
-    record.correlation_id.external.value = k_correlation_external;
-    record.payload                       = payload;
+    record.kind                    = kind;
+    record.operation               = static_cast<std::uint32_t>(operation);
+    record.thread_id               = k_thread_id;
+    record.correlation_id.internal = k_correlation_internal;
+    record.payload                 = payload;
     return record;
 }
 
@@ -98,8 +94,6 @@ make_control_record(std::size_t operation)
     return make_record(sdk::CALLBACK_TRACING_MARKER_CONTROL_API, operation, nullptr);
 }
 
-// Runs @p body on a fresh thread so the thread_local range stacks start empty and
-// nothing a test leaves on them reaches another test.
 template <typename Body>
 void
 on_fresh_thread(Body&& body)
@@ -137,8 +131,6 @@ expect_timemory_push(std::string_view name)
     EXPECT_CALL(*g_externals_mock, tracing_push_timemory(Eq(name)));
 }
 
-// Everything write_end() sends to the metadata registry, the SDK and the buffer
-// storage regardless of the timemory switch.
 void
 expect_end_sinks(std::size_t operation, std::string_view name, std::uint64_t begin_ts,
                  std::string_view args = {})
@@ -159,14 +151,15 @@ expect_end_sinks(std::size_t operation, std::string_view name, std::uint64_t beg
         iterate_expectation.WillOnce(populate_one_arg);
     }
 
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_))
+        .WillOnce(Return(k_parent_stack_id));
     EXPECT_CALL(*g_buffer_storage_mock,
-                store_region_sample(
-                    Eq(k_thread_id), Eq(std::string{ name }), Eq(k_correlation_internal),
-                    Eq(k_correlation_external), Eq(begin_ts), Eq(k_exit_ts),
-                    Eq(std::string{ args }), Eq(std::string{ k_category_name })));
+                store_region_sample(Eq(k_thread_id), Eq(std::string{ name }),
+                                    Eq(k_correlation_internal), Eq(k_parent_stack_id),
+                                    Eq(begin_ts), Eq(k_exit_ts), Eq(std::string{ args }),
+                                    Eq(std::string{ k_category_name })));
 }
 
-// write_end() with timemory on.
 void
 expect_write_end(std::size_t operation, std::string_view name, std::uint64_t begin_ts)
 {
@@ -205,8 +198,6 @@ protected:
 
 }  // namespace
 
-// ─── Descriptors / configure ────────────────────────────────────────────────────
-
 TEST_F(roctx_core_api_test, core_api_descriptor_reports_marker_core_metadata)
 {
     constexpr const auto& k_domain = k_core_api<sdk, ext>;
@@ -227,8 +218,6 @@ TEST_F(roctx_core_api_test, on_configure_registers_marker_category_string_exactl
 
     k_domain.on_configure();
 }
-
-// ─── Core enter ─────────────────────────────────────────────────────────────────
 
 TEST_F(roctx_core_api_test,
        range_push_enter_opens_range_and_writes_begin_when_writes_allowed)
@@ -483,8 +472,6 @@ TEST_F(roctx_core_api_test, enter_without_trigger_is_noop)
     EXPECT_EQ(m_user_data.value, k_untouched);
 }
 
-// ─── Core exit ──────────────────────────────────────────────────────────────────
-
 TEST_F(roctx_core_api_test,
        range_pop_exit_writes_end_region_and_stops_range_with_pushed_id)
 {
@@ -492,8 +479,7 @@ TEST_F(roctx_core_api_test,
         make_core_record(sdk::MARKER_CORE_API_ID_roctxRangePop, &m_payload);
     constexpr std::uint64_t k_range_id = 555;
     constexpr std::uint64_t k_name_id  = 11;
-    // The pushed range carries its own begin timestamp; user_data must be ignored.
-    m_user_data.value = 9999;
+    m_user_data.value                  = 9999;
 
     EXPECT_CALL(*g_externals_mock, lookup_string(Eq(k_name_id)))
         .WillOnce(Return("range_a"));
@@ -737,8 +723,6 @@ TEST_F(roctx_core_api_test, exit_without_trigger_is_noop)
     });
 }
 
-// ─── write_end outputs (driven through the mark exit) ───────────────────────────
-
 TEST_F(roctx_core_api_test, mark_exit_skips_timemory_pop_when_timemory_disabled)
 {
     m_payload.args.roctxMarkA.message = "mark_a";
@@ -768,14 +752,11 @@ TEST_F(roctx_core_api_test, mark_exit_stores_region_with_serialized_sdk_argument
                                                      k_exit_ts);
 }
 
-// ─── Core dispatch ──────────────────────────────────────────────────────────────
-
 TEST_F(roctx_core_api_test, core_on_record_dispatches_enter_exit_and_ignores_none_phase)
 {
     constexpr const auto&   k_domain      = k_core_api<sdk, ext>;
     constexpr std::uint64_t k_dispatch_ts = 1234;
 
-    // Exactly two timestamps are taken: one for ENTER, one for EXIT. NONE takes none.
     EXPECT_CALL(*g_tracing_backend_mock, get_timestamp())
         .WillOnce(Return(k_dispatch_ts))
         .WillOnce(Return(k_dispatch_ts + 1));

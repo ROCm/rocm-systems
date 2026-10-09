@@ -12,8 +12,6 @@
 namespace rocprofsys::domains::callback::roctx
 {
 
-// roctxProfilerPause is acted on when the call begins, roctxProfilerResume once it has
-// returned.
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline void

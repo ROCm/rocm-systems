@@ -126,19 +126,6 @@ public:
         }
     }
 
-    /// Starts the roctx marker context if roctx tracing was configured. Unlike
-    /// start()/pause() this context is not part of the pausable main context: the
-    /// roctxProfilerPause/Resume and region callbacks must keep firing while the main
-    /// context is paused, otherwise profiling could never be resumed from roctx.
-    void start_roctx()
-    {
-        if(SdkBackend::context_is_valid(m_roctx_context) &&
-           !SdkBackend::context_is_active(m_roctx_context))
-        {
-            SdkBackend::start_context(m_roctx_context);
-        }
-    }
-
 private:
     std::vector<domains::domain_info>                 m_available_domains;
     std::vector<domains::domain_configuration>        m_configuration;
@@ -259,9 +246,6 @@ private:
         }
     }
 
-    // The marker domains are not in the registry, so they are never user-selectable:
-    // they follow Externals::is_roctx_enabled() and run on their own context. The
-    // context is only created and wired up here; start_roctx() starts it.
     void configure_roctx_domains()
     {
         if(!Externals::is_roctx_enabled())
@@ -282,6 +266,7 @@ private:
                 { SdkBackend::MARKER_CONTROL_API_ID_roctxProfilerPause,
                   SdkBackend::MARKER_CONTROL_API_ID_roctxProfilerResume });
         }
+        SdkBackend::start_context(m_roctx_context);
     }
 
     void configure_roctx_domain(

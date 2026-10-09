@@ -28,7 +28,6 @@ namespace detail
 
 constexpr std::int32_t k_args_max_deref_depth = 2;
 
-// Begin-side data of a range whose end has not been received yet.
 template <policies::domain_service::externals Externals>
 struct open_range
 {
@@ -42,7 +41,6 @@ template <policies::domain_service::externals Externals>
 using range_stack_t =
     std::stack<open_range<Externals>, std::vector<open_range<Externals>>>;
 
-// Interval of a completed region.
 template <policies::domain_service::backend SdkBackend>
 struct region_span
 {
@@ -50,7 +48,6 @@ struct region_span
     SdkBackend::timestamp_t end;
 };
 
-// Where a range starts: its timestamp and the id its trigger knows it by.
 struct range_origin
 {
     std::uint64_t begin_timestamp;
@@ -60,18 +57,11 @@ struct range_origin
 template <policies::domain_service::externals Externals>
 struct open_ranges
 {
-    // Ranges opened by roctxRangePush and closed by roctxRangePop. Both calls happen on
-    // the same thread, so the stack is per thread.
     static inline thread_local auto s_pushed = range_stack_t<Externals>{};
 
-    // Ranges opened by roctxRangeStart and closed by roctxRangeStop, kept per thread as
-    // the roctx client did.
     static inline thread_local auto s_started = range_stack_t<Externals>{};
 };
 
-// Synthetic range ids for roctxRangePush/Pop. Starts at UINT64_MAX and decrements to
-// stay well away from SDK-allocated roctxRangeStart ids, which count upward from small
-// values.
 inline std::atomic<std::uint64_t>&
 push_range_id_counter()
 {
@@ -79,15 +69,12 @@ push_range_id_counter()
     return s_counter;
 }
 
-// The application may pass a null message (e.g. roctxMarkA(nullptr)).
 [[nodiscard]] constexpr const char*
 message_or_empty(const char* message) noexcept
 {
     return message != nullptr ? message : "";
 }
 
-// Marker-write gate: the roctx trigger allows writes and no other trigger holds the
-// session paused.
 template <policies::domain_service::externals Externals, typename Trigger>
 [[nodiscard]] bool
 should_write(const Trigger& trigger)
@@ -107,25 +94,25 @@ collect_args(const typename SdkBackend::callback_tracing_record_t& record)
     return get_args_string(args);
 }
 
-// Records a completed range or marker into the trace cache: registers the thread-info
-// metadata and stores the region sample, mirroring
-// domains::callback::on_tracing_api_exit's tail.
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals,
           template <typename> class Category>
 void
-emit_region(std::string_view name, const region_span<SdkBackend>& span,
+emit_region(std::string_view name, const region_span<SdkBackend>& timespan,
             const typename SdkBackend::callback_tracing_record_t& record)
 {
+    constexpr const char* k_empty_json = "{}";
+
     constexpr std::uint32_t k_unknown_time = 0;
     Externals::get_metadata_registry().add_thread_info(
         { Externals::get_ppid(), Externals::get_pid(), record.thread_id, k_unknown_time,
-          k_unknown_time, "{}" });
+          k_unknown_time, k_empty_json });
 
     Externals::get_buffer_storage().store(typename Externals::region_sample{
         record.thread_id, name, record.correlation_id.internal,
-        record.correlation_id.external.value, span.begin, span.end, "{}",
-        collect_args<SdkBackend>(record), Category<Externals>::k_name });
+        SdkBackend::get_parent_stack_id(record.correlation_id), timespan.begin,
+        timespan.end, k_empty_json, collect_args<SdkBackend>(record),
+        Category<Externals>::k_name });
 }
 
 template <policies::domain_service::externals Externals,
@@ -154,7 +141,6 @@ end_region(std::string_view name, const region_span<SdkBackend>& span,
     emit_region<SdkBackend, Externals, Category>(name, span, record);
 }
 
-// Closes the innermost open range of @p ranges and writes it out.
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals,
           template <typename> class Category>
@@ -175,7 +161,6 @@ close_range(range_stack_t<Externals>&                             ranges,
     }
 }
 
-// Opens a range on @p ranges; whether it is written is decided once, when it opens.
 template <policies::domain_service::externals Externals,
           template <typename> class Category, typename Trigger>
 void
@@ -246,8 +231,8 @@ exit_range_pop(Trigger&                                              trigger,
     auto& ranges = open_ranges<Externals>::s_pushed;
     if(ranges.empty())
     {
-        LOG_CRITICAL("roctxRangePop does not have corresponding roctxRangePush "
-                     "(skipping)");
+        LOG_WARNING("roctxRangePop does not have corresponding roctxRangePush "
+                    "(skipping)");
         return;
     }
 
@@ -267,8 +252,8 @@ exit_range_stop(Trigger& trigger, const typename SdkBackend::marker_payload_t& d
     auto& ranges = open_ranges<Externals>::s_started;
     if(ranges.empty())
     {
-        LOG_CRITICAL("roctxRangeStop does not have corresponding roctxRangeStart "
-                     "(skipping)");
+        LOG_WARNING("roctxRangeStop does not have corresponding roctxRangeStart "
+                    "(skipping)");
         return;
     }
 
@@ -291,8 +276,6 @@ exit_mark(const Trigger& trigger, const typename SdkBackend::marker_payload_t& d
     }
 }
 
-// The SDK assigns the id of a roctxRangeStart only once the call has returned, so the
-// range is opened on exit, stamped with the enter timestamp.
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals,
           template <typename> class Category, typename Trigger>
@@ -360,10 +343,6 @@ on_roctx_core_enter(
         case SdkBackend::MARKER_CORE_API_ID_roctxMarkA:
             detail::enter_mark<SdkBackend, Externals, Category>(*trigger, data);
             break;
-        // The matching exit handlers own these: roctxRangeStartA registers its range
-        // once the SDK has assigned an id, roctxRangePop/Stop close an existing range.
-        // They must not fall into default's begin_region, which would open a spurious,
-        // never-closed scope nested under the range being closed.
         case SdkBackend::MARKER_CORE_API_ID_roctxRangeStartA:
         case SdkBackend::MARKER_CORE_API_ID_roctxRangePop:
         case SdkBackend::MARKER_CORE_API_ID_roctxRangeStop: break;
@@ -408,7 +387,6 @@ on_roctx_core_exit(
             detail::exit_mark<SdkBackend, Externals, Category>(*trigger, data, record,
                                                                span);
             break;
-        // roctxRangePushA has nothing to do on exit: its range was opened on enter.
         case SdkBackend::MARKER_CORE_API_ID_roctxRangePushA: break;
         case SdkBackend::MARKER_CORE_API_ID_roctxRangeStartA:
             detail::exit_range_start<SdkBackend, Externals, Category>(*trigger, data,

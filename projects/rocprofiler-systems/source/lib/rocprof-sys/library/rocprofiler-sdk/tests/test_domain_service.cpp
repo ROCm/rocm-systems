@@ -227,8 +227,7 @@ protected:
               mock_sdk::MARKER_CONTROL_API_ID_roctxProfilerResume });
     }
 
-    // Configures roctx (core domain only) on @p roctx_context, returning an unstarted
-    // service.
+    // Configures roctx (core domain only) on @p roctx_context, which configure() starts.
     void configure_roctx_core_only(roctx_sut_t&                  service,
                                    const mock_sdk::context_id_t& roctx_context)
     {
@@ -236,6 +235,7 @@ protected:
         expect_code_object_domain_configured<externals_with_roctx_config>();
         expect_create_context(roctx_context);
         expect_roctx_core_configured(roctx_context);
+        expect_start_context(roctx_context);
 
         service.configure(std::vector<domain_selection>{});
     }
@@ -271,6 +271,7 @@ protected:
             domains::callback::hip::k_runtime_api<mock_sdk, externals_with_roctx_config>.on_record,
             {});
         expect_roctx_core_configured(roctx_context);
+        expect_start_context(roctx_context);
 
         service.configure(std::vector<domain_selection>{
             domain_selection{ .name       = "hip_runtime_api",
@@ -855,7 +856,6 @@ TEST_F(domain_service_test,
 
     const mock_sdk::context_id_t roctx_context{ 7 };
 
-    // Only wired up: no start_context expectation, so starting it would fail the test.
     configure_roctx_core_only(service, roctx_context);
 }
 
@@ -871,6 +871,7 @@ TEST_F(domain_service_test,
     expect_create_context(roctx_context);
     expect_roctx_core_configured(roctx_context);
     expect_roctx_control_configured(roctx_context);
+    expect_start_context(roctx_context);
 
     service.configure(std::vector<domain_selection>{});
 }
@@ -884,47 +885,6 @@ TEST_F(domain_service_test, roctx_context_is_separate_from_the_main_context)
     const mock_sdk::context_id_t roctx_context{ 2 };
 
     configure_main_and_roctx(service, main_context, roctx_context);
-}
-
-TEST_F(domain_service_test, start_roctx_starts_valid_inactive_roctx_context)
-{
-    roctx_sut_t service;
-
-    const mock_sdk::context_id_t roctx_context{ 9 };
-    configure_roctx_core_only(service, roctx_context);
-
-    EXPECT_CALL(*g_mock, context_is_valid(Eq(roctx_context))).WillOnce(Return(true));
-    EXPECT_CALL(*g_mock, context_is_active(Eq(roctx_context))).WillOnce(Return(false));
-    expect_start_context(roctx_context);
-
-    service.start_roctx();
-}
-
-TEST_F(domain_service_test, start_roctx_skips_already_active_roctx_context)
-{
-    roctx_sut_t service;
-
-    const mock_sdk::context_id_t roctx_context{ 9 };
-    configure_roctx_core_only(service, roctx_context);
-
-    EXPECT_CALL(*g_mock, context_is_valid(Eq(roctx_context))).WillOnce(Return(true));
-    EXPECT_CALL(*g_mock, context_is_active(Eq(roctx_context))).WillOnce(Return(true));
-
-    service.start_roctx();
-}
-
-TEST_F(domain_service_test, start_roctx_is_noop_when_roctx_was_not_configured)
-{
-    roctx_sut_t service;
-
-    EXPECT_CALL(*g_externals_mock, is_roctx_enabled()).WillOnce(Return(false));
-    expect_code_object_domain_configured<externals_with_roctx_config>();
-    service.configure(std::vector<domain_selection>{});
-
-    EXPECT_CALL(*g_mock, context_is_valid(Eq(mock_sdk::context_id_t{})))
-        .WillOnce(Return(false));
-
-    service.start_roctx();
 }
 
 TEST_F(domain_service_test, pause_stops_only_the_main_context_not_the_roctx_context)

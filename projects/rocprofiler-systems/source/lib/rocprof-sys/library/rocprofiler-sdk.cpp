@@ -196,8 +196,10 @@ has_marker_domain()
         config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
             .value_or(std::string{}),
         " ,;:\t\n");
-    return std::ranges::find(domains, "marker_api") != domains.end() ||
-           std::ranges::find(domains, "roctx") != domains.end();
+
+    return std::ranges::any_of(domains, [](const auto& domain) {
+        return domain == "marker_api" || domain == "roctx";
+    });
 }
 
 // roctx handling is needed for the marker domains and for region-filtered tracing.
@@ -551,17 +553,6 @@ thread_postcreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
     state::thread::pop();
 }
 
-#if(ROCPROFILER_VERSION < 700)
-/**
- * @brief Stream ID.
- */
-typedef struct rocprofiler_stream_id_t
-{
-    std::uint64_t handle;
-} rocprofiler_stream_id_t;
-
-#endif
-
 // this function creates a rocprofiler profile config on the first entry
 std::vector<rocprofiler_counter_id_t>
 create_agent_profile(rocprofiler_agent_id_t          agent_id,
@@ -695,42 +686,6 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
     data->agent_counter_profiles.emplace(agent_id, profile);
 
     return counters_v;
-}
-
-template <typename CorrelationIdType>
-std::uint64_t
-get_parent_stack_id([[maybe_unused]] const CorrelationIdType& correlation_id)
-{
-#if(ROCPROFILER_VERSION >= 700)
-    if constexpr(std::is_same_v<rocprofiler_correlation_id_t, CorrelationIdType>)
-    {
-        return correlation_id.ancestor;
-    }
-    else
-    {
-        return 0;
-    }
-#else
-    return 0;
-#endif
-}
-
-template <typename Category>
-void
-cache_category()
-{
-    trace_cache::get_metadata_registry().add_string(trait::name<Category>::value);
-}
-
-void
-cache_add_thread_info(std::uint64_t tid)
-{
-    trace_cache::get_metadata_registry().add_thread_info({ .parent_process_id = getppid(),
-                                                           .process_id        = getpid(),
-                                                           .thread_id         = tid,
-                                                           .start             = 0,
-                                                           .end               = 0,
-                                                           .extdata           = "{}" });
 }
 
 // The cached samples carry the SDK operation name, so every name the SDK can
@@ -1110,8 +1065,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         _data->initialize_event_info();
     }
 
-    ROCPROFILER_CALL(rocprofiler_create_context(&_data->primary_ctx));
-
     // Insert the default stream and queue info to ensure that the default entry exists
     {
         trace_cache::get_metadata_registry().add_stream(0);
@@ -1490,13 +1443,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         }
     }
 
-    if(!is_valid(_data->primary_ctx))
-    {
-        // notify rocprofiler that initialization failed and all the contexts,
-        // buffers, etc. created should be ignored
-        return -1;
-    }
-
     gpu::add_device_metadata();
 
     if(config::get_use_process_sampling())
@@ -1510,7 +1456,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     // Evaluated before the roctx context starts: it reads the trigger's initial state.
     const bool defer_main_contexts = should_defer_main_contexts();
-    g_domain_service->start_roctx();
 
     if(!defer_main_contexts)
     {
