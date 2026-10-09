@@ -51,6 +51,8 @@ using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;
 
+extern int ncclCuMemRuntimeSupported();
+
 // Test Configuration
 namespace RegTestConfig {
     constexpr size_t SMALL_COUNT  = 1024;           // 4KB for float
@@ -430,14 +432,26 @@ TEST_F(UBR_AllGather, OutOfPlace_MultiNode)
 //
 // coco UnitTestsMPI defaults NCCL_CUMEM_ENABLE=0 and splits this suite with
 // --gtest_filter=GdrFlush_CuMem.* without the gdr_flush_cumem_multinode env.
-// Opt the suite in itself so the regression guard actually runs.
+// Opt the suite in itself so the regression guard actually runs. NCCL_PARAM
+// caches per process, so this only reaches the library when no earlier suite
+// has already latched CUMEM=0; MpiEnvGuard restores the launcher env afterward.
 class GdrFlush_CuMem : public RegistrationTestBase {
 protected:
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> cuMemGuard_;
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> dmaBufGuard_;
+
     void SetUp() override
     {
-        setenv("NCCL_CUMEM_ENABLE", "1", 1);
-        setenv("NCCL_DMABUF_ENABLE", "1", 1);
+        cuMemGuard_  = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_CUMEM_ENABLE", "1");
+        dmaBufGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DMABUF_ENABLE", "1");
         RegistrationTestBase::SetUp();
+    }
+
+    void TearDown() override
+    {
+        RegistrationTestBase::TearDown();
+        dmaBufGuard_.reset();
+        cuMemGuard_.reset();
     }
 };
 
@@ -449,6 +463,17 @@ TEST_F(GdrFlush_CuMem, AllGatherUnregistered_MultiNode)
 
     ASSERT_TRUE(isCuMemEnabled())
         << "NCCL_CUMEM_ENABLE must be set to 1 (exercises the cuMem GDR flush path)";
+
+    // getenv can be 1 after SetUp while ncclParamCuMemEnable is still 0 from an
+    // earlier communicator in this process. Skip that case; do not skip when the
+    // runtime itself cannot enable cuMem (e.g. kernel < 6.8), where the flush is
+    // a no-op and AllGather should still complete.
+    if (!ncclCuMemEnable() && ncclCuMemRuntimeSupported()) {
+        GTEST_SKIP() << "NCCL_CUMEM_ENABLE was already cached as 0 by an earlier "
+                        "communicator in this process; run with "
+                        "--gtest_filter=GdrFlush_CuMem.* or launch with "
+                        "NCCL_CUMEM_ENABLE=1";
+    }
 
     using T = RegTestConfig::DefaultType;
 
