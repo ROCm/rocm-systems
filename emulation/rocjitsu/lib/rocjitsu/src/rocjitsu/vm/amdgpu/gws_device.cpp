@@ -13,33 +13,9 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-// Global Wave Sync (GWS) scheduling policy (authoritative description).
-//
-// GWS state is device-global, matching hardware: one resource table is kept per
-// process (keyed by process_id) and shared by every workgroup of every dispatch
-// of that process, on any registered CU. A signal/arrival from any wave reaches
-// the same entry and wakes a waiter parked by any other wave -- the model is
-// event-driven, so no producer-identity guess is needed, and a signal on one CU
-// really reaches a cross-CU waiter. The table persists across dispatches, so an
-// init kernel in an earlier dispatch seeds a resource consumed by a later one.
-//
-//  * Barrier: hardware/LLVM program the resource with (participants - 1); the
-//    CDNA/RDNA barrier pseudocode queues an arrival while the counter is
-//    positive and, on the arrival that observes zero, releases every queued
-//    arrival and reloads the counter from that arrival's own value (so
-//    consecutive phases may differ in size). A blocking arrival is gated on the
-//    outstanding counter: the still-required participant set is (counter + 1),
-//    and we only park when that whole set is provably resident in the dispatch
-//    (summed across all CUs); larger sets fall back to a non-blocking structural
-//    no-op.
-//  * Semaphore: V/BR add credits and wake queued P waiters; P consumes a credit
-//    or parks until any wave of the process signals the resource. Because the
-//    state is shared, a cross-CU producer reaches the parked P.
-//  * Deadlock-escape (escape_deadlocks): a parked GWS wave is released only when
-//    every non-halted wave of the whole dispatch -- across all CUs -- is blocked
-//    in GWS_WAIT or at an s_barrier (true quiescence, where no wave can ever
-//    signal/arrive). This is a genuine-deadlock backstop (the step budget must
-//    terminate); it never fires while any wave can still run and reach a signal.
+// The authoritative GWS scheduling policy (scope, per-operation behavior, and
+// synchronization) lives in the GwsDevice class documentation in gws_device.h.
+// The comments below note only implementation-specific details.
 
 void GwsDevice::register_compute_unit(ComputeUnitCore *cu) {
   std::lock_guard<std::mutex> lock(mutex_);

@@ -23,6 +23,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gws_device.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
@@ -564,9 +565,9 @@ TEST_P(DsGwsTest, SemaphoreRidSumWrapsToSameResource) {
   wf1->halt();
 }
 
-// GWS state is dispatch-global, so a P parked by one workgroup is released by a
-// V issued from another workgroup of the same dispatch -- the hardware
-// rendezvous the workgroup-private model could not express.
+// GWS resources are shared per process, so a P parked by one workgroup is
+// released by a V issued from another workgroup sharing the resource -- the
+// hardware rendezvous the workgroup-private model could not express.
 TEST_P(DsGwsTest, CrossWorkgroupSemaphorePWakesOnCrossWgV) {
   const auto arch = GetParam();
   amdgpu::GpuMemory mem("ds_gws_xwg_mem");
@@ -588,7 +589,7 @@ TEST_P(DsGwsTest, CrossWorkgroupSemaphorePWakesOnCrossWgV) {
   run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *wf0, /*count=*/0);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
 
-  // wf1 (wg1) signals the same dispatch-global resource and wakes wf0.
+  // wf1 (wg1) signals the same shared process resource and wakes wf0.
   run_gws(*cu, *decoder, arch, GwsOp::kSemaV, *wf1, /*count=*/0);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
 
@@ -596,9 +597,9 @@ TEST_P(DsGwsTest, CrossWorkgroupSemaphorePWakesOnCrossWgV) {
   wf1->halt();
 }
 
-// INIT seeds a semaphore credit on the shared resource: with a second resident
-// wave, the first P consumes that credit and keeps running, while the second P
-// finds no credit and parks. Guards the `res.credits = count` write in gws_init.
+// INIT seeds a semaphore credit on the shared process resource: with a second
+// resident wave, the first P consumes that credit and keeps running, while the
+// second P finds no credit and parks. Guards the credit seed in GwsDevice::init.
 TEST_P(DsGwsTest, InitSeedsCreditFirstPConsumesSecondParks) {
   const auto arch = GetParam();
   amdgpu::GpuMemory mem("ds_gws_initcredit_mem");
@@ -670,7 +671,7 @@ TEST_P(DsGwsTest, PollingSiblingDoesNotBlockCrossWgSemaphoreWake) {
   producer->halt();
 }
 
-// GWS barriers are dispatch-global too: two single-wave workgroups that each
+// GWS barriers share the process resource too: two single-wave workgroups that each
 // arrive at a barrier programmed for two participants rendezvous across the
 // workgroup boundary (the early arrival parks, the second releases it).
 TEST_P(DsGwsTest, CrossWorkgroupBarrierReleasesBothParticipants) {
