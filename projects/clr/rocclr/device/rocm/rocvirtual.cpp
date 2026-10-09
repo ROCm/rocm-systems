@@ -5606,10 +5606,12 @@ void *VirtualGPU::getOrCreateHostcallBuffer() {
     return nullptr;
   }
 
-  // ROCr's synchronous fill avoids the cooperative transfer queue, which may be
-  // unavailable while debugging.
-  if (Hsa::memory_fill(reinterpret_cast<void*>(occupiedMem->virtualAddress()), 0, occupiedWords) !=
-      HSA_STATUS_SUCCESS) {
+  uint32_t zero = 0;
+  VirtualGPU* queue = dev().xferQueue();
+  // The transfer queue is synchronous, so the fill completes before any kernel reads it.
+  if (queue == nullptr || !queue->blitMgr().fillBuffer(
+                              *occupiedMem, &zero, sizeof(zero), amd::Coord3D(occupiedSize, 1, 1),
+                              amd::Coord3D(0, 0, 0), amd::Coord3D(occupiedSize, 1, 1), true)) {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
             "Failed to zero-initialize hostcall occupied bitfield");
     occupiedBuf->release();
