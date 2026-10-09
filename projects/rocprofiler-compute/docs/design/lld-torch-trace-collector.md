@@ -205,7 +205,7 @@ validation. No exact wheel identity or paired ELF build-ID gate is used.
 
 ## Tests
 
-- `tests/integration/test_profile_torch_trace.py`: verifies end-to-end
-  `--torch-trace` marker and counter CSVs on a sample workload.
-- `tests/unit/utils/test_utils_analysis.py`: verifies Function parse and
-  `Thread_Id` interval nest.
+Live profile covers torch, triton, and combined ML API traces, plus operator
+coverage against the native collector. Unit tests cover inject_roctx wraps,
+Function parse, join, nest, and operator list/filter.
+
