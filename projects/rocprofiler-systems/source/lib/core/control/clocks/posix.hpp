@@ -19,6 +19,7 @@
 namespace rocprofsys::control::clocks
 {
 /// Clock backed by a POSIX clock (clock_gettime / clock_nanosleep).
+/// Used for time-window delay/duration sleeps, not absolute event stamps.
 class posix
 {
 public:
