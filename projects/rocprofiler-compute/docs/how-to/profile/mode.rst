@@ -1013,8 +1013,9 @@ Each Function cell is one ROCTX range:
 when that suffix is absent (user-defined ROCTX ranges).
 
 The across-pass stitch key keeps ``seqNr``, ``tid``, and ``ftid`` and omits
-``ltid``, plus ``function_ordinal``. ``Correlation_ID`` is the per-pass join
-key of a marker range to kernel dispatches.
+``ltid``, plus ``function_ordinal``. The on-disk per-pass join column is
+``Correlation_Id``. Analyze canonicalizes it to ``Correlation_ID`` before
+joining a marker range to kernel dispatches.
 
 Analyze reads those files and prints an operator call tree and a per-operator
 summary (for example with ``--list-torch-operators`` or ``--torch-operator``).

@@ -788,8 +788,9 @@ PyTorch operator analysis
    ``--list-torch-operators`` or ``--torch-operator`` as needed.
 
 ``--list-*-operators`` and ``--*-operator`` load each profiling pass's marker
-and counter CSV pair and full-outer-join on ``Correlation_ID`` (plus ``GUID``
-when both files have that column). Matching operator calls are then
+and counter CSV pair. The on-disk join column is ``Correlation_Id``; analyze
+canonicalizes it to ``Correlation_ID`` before the full-outer-join (plus
+``GUID`` when both files have that column). Matching operator calls are then
 consolidated across passes using a stitch key that keeps ``seqNr``, ``tid``,
 and ``ftid`` and omits ``ltid``, plus ``function_ordinal``. Collapsed GPU time
 and kernel lists come from pass 0. Analyze parses

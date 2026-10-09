@@ -90,12 +90,14 @@ between those formats.
 ## Analysis path
 
 Profile copies marker CSVs unchanged. `--list-*-operators` / `--*-operator`
-full-outer-join each pass on `Correlation_ID` (plus `GUID` when both files
-have that column), consolidate matching operator calls, parse Function, then
-nest marker intervals per `Thread_Id`.
+rename on-disk `Correlation_Id` to `Correlation_ID`, then full-outer-join
+each pass on `Correlation_ID` (plus `GUID` when both files have that column),
+consolidate matching operator calls, parse Function, then nest marker
+intervals per `Thread_Id`.
 
 The across-pass stitch key keeps `seqNr`, `tid`, and `ftid` and omits `ltid`,
-plus `function_ordinal`. `Correlation_ID` is the per-pass join key only.
+plus `function_ordinal`. `Correlation_ID` is the in-memory per-pass join key
+after that rename.
 
 Those flags record `UnaccountedKernelError` when a kernel's `Correlation_ID`
 is not in the marker CSV, and report it after the call tree. Plain analyze

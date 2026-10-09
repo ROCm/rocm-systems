@@ -149,8 +149,9 @@ marker syntax require the flat-marker analysis update.
 
 1. Pair each `ml_api_trace_*_marker_api_trace.csv` with its sibling
    `_counter_collection.csv`.
-2. Full-outer-join unique dispatches to markers on `Correlation_ID` (plus
-   `GUID` when both files have that column).
+2. Rename on-disk `Correlation_Id` to `Correlation_ID`, then full-outer-join
+   unique dispatches to markers on `Correlation_ID` (plus `GUID` when both
+   files have that column).
 3. Record `UnaccountedKernelError` when a kernel's `Correlation_ID` is not
    in the marker CSV (reported after the call tree). Plain analyze without
    those flags does not join and does not report that error.
