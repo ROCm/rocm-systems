@@ -91,13 +91,13 @@ The Triton equivalent is `--list-triton-operators`.
 ```bash
 rocprof-compute analyze \
     --path ./workloads/<name>/<gpu_model> \
-    --experimental --torch-operator '*conv2d*'
+    --experimental --torch-operator '*relu*'
 ```
 
 Patterns are shell-style globs, not regexes, matched against a `/`-separated
-operator hierarchy. `*relu` ends with relu, `*conv*` contains conv,
-`*/*functional*/*` matches an intermediate component, and `all` or `'*'`
-matches everything. Several patterns can be given, space or comma separated.
+operator hierarchy. `*relu*` contains relu, `*/aten::addmm` is an addmm leaf
+on the reconstructed path, and `all` or `'*'` matches everything. Several
+patterns can be given, space or comma separated.
 Quote patterns so the shell does not expand them.
 
 Combine with `-k` to intersect an operator with specific kernel ids, and with
