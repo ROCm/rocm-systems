@@ -1038,6 +1038,8 @@ public:
     barrier_complete_.fill(false);
     waiting_barrier_bit_ = kNoBarrierWait;
     gws_wait_rid_ = kNoGwsWait;
+    gws_wait_is_barrier_ = false;
+    gws_wait_generation_ = 0;
     if (memory_wait_scoreboard_)
       memory_wait_scoreboard_->clear();
     wait_counters_ = {};
@@ -1159,6 +1161,8 @@ private:
   uint8_t waiting_barrier_bit_ = kNoBarrierWait; ///< Completion bit awaited by split wait.
   static constexpr uint32_t kNoGwsWait = 0xffffffff;
   uint32_t gws_wait_rid_ = kNoGwsWait; ///< GWS resource id this wave is parked on.
+  bool gws_wait_is_barrier_ = false;   ///< Parked at a GWS barrier (vs a semaphore P).
+  uint64_t gws_wait_generation_ = 0;   ///< Resource release generation observed at park.
   WfState state_ = WfState::HALTED;    ///< Current execution state.
   MemoryWaitShadow memory_wait_shadow_;
   std::unique_ptr<MemoryWaitScoreboard> memory_wait_scoreboard_;

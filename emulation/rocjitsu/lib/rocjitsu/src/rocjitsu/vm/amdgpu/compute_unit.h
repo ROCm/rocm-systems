@@ -422,12 +422,32 @@ public:
   /// run a dispatch must share one store for cross-CU wakeups and quiescence.
   /// Passing nullptr restores this CU's private default store (standalone use).
   /// The CU registers itself with the store so its waves participate in shared
-  /// wake and deadlock-escape.
+  /// wake and deadlock-escape. This non-owning overload requires the caller to
+  /// keep @p device alive for this CU's lifetime; production wiring should prefer
+  /// the shared_ptr overload below.
   void set_gws_device(GwsDevice *device) {
     GwsDevice *replacement = device ? device : &default_gws_device_;
+    gws_device_owner_.reset();
     if (replacement == gws_device_)
       return;
     gws_device_->unregister_compute_unit(this);
+    gws_device_ = replacement;
+    gws_device_->register_compute_unit(this);
+  }
+
+  /// @brief Share a reference-counted device-global GWS store (production path).
+  /// @details Holding the shared_ptr guarantees the store outlives this CU, so
+  /// ~ComputeUnitCore can unregister safely even when the owning device tears its
+  /// components down in an arbitrary order. Passing nullptr restores the private
+  /// default store. See GwsDevice (gws_device.h) for the scheduling policy.
+  void set_gws_device(std::shared_ptr<GwsDevice> device) {
+    GwsDevice *replacement = device ? device.get() : &default_gws_device_;
+    if (replacement == gws_device_) {
+      gws_device_owner_ = std::move(device);
+      return;
+    }
+    gws_device_->unregister_compute_unit(this);
+    gws_device_owner_ = std::move(device);
     gws_device_ = replacement;
     gws_device_->register_compute_unit(this);
   }
@@ -1430,9 +1450,12 @@ protected:
   /// @details GWS state is device-global, matching hardware: the store is shared
   /// across every CU that can run a dispatch (via set_gws_device) and persists
   /// across dispatches. Standalone CUs use the embedded default store so single-CU
-  /// use needs no wiring. The store scans this CU's wfs_ / active_wgs_ for shared
-  /// wakeups and the dispatch-wide quiescence backstop, so it is a friend.
+  /// use needs no wiring. The store reads this CU's wfs_ / active_wgs_ / wave
+  /// activity for shared wakeups and the process-wide quiescence backstop (always
+  /// on this CU's own thread), so it is a friend.
   GwsDevice default_gws_device_;
+  /// Pins an injected shared store so it outlives this CU (see set_gws_device).
+  std::shared_ptr<GwsDevice> gws_device_owner_;
   GwsDevice *gws_device_ = &default_gws_device_;
 
   uint64_t shared_aperture_base_ = 0;

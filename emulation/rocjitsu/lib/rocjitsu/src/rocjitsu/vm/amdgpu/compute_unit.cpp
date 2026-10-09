@@ -388,6 +388,12 @@ void ComputeUnitCore::free_wavefront_resources(Wavefront &wf) {
     sgpr_file_.free(wf.sgpr_alloc().base);
     free_vgprs(wf.vgpr_alloc().base);
   }
+  // A wave halted or aborted while parked at a GWS rendezvous never went through
+  // the store's wake path, so reconcile the device-global parked bookkeeping here
+  // while the wave is still in GWS_WAIT -- reset() below clears its park state and
+  // process id (see GwsDevice).
+  if (wf.state() == WfState::GWS_WAIT)
+    gws_device_->notify_parked_wave_gone(wf);
   wf.trace_inst_count_ = 0;
   wf.reset();
 }
@@ -484,6 +490,10 @@ void ComputeUnitCore::begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint
 
   const uint64_t key = wg_key(dispatch_id, wg_id);
   active_wgs_[key] = wf_count;
+  // Mirror the resident wave count into the device-global GWS store so the GWS
+  // barrier's provable-participant bound is summed across CUs without racing on
+  // peer CU state (see GwsDevice).
+  gws_device_->add_resident(dispatch_id, wf_count);
   if (wf_count <= 1) {
     // Single-wave workgroups are not allocated workgroup or named barriers.
     barrier_wgs_.erase(key);
@@ -690,19 +700,23 @@ void ComputeUnitCore::gws_init(Wavefront &wf, uint32_t rid, uint32_t count) {
 }
 
 void ComputeUnitCore::gws_barrier_arrive(Wavefront &wf, uint32_t rid, uint32_t count) {
-  gws_device_->barrier_arrive(wf, rid, count);
+  gws_device_->barrier_arrive(*this, wf, rid, count);
 }
 
-void ComputeUnitCore::gws_sema_v(Wavefront &wf, uint32_t rid) { gws_device_->sema_v(wf, rid); }
+void ComputeUnitCore::gws_sema_v(Wavefront &wf, uint32_t rid) {
+  gws_device_->sema_v(*this, wf, rid);
+}
 
-void ComputeUnitCore::gws_sema_p(Wavefront &wf, uint32_t rid) { gws_device_->sema_p(wf, rid); }
+void ComputeUnitCore::gws_sema_p(Wavefront &wf, uint32_t rid) {
+  gws_device_->sema_p(*this, wf, rid);
+}
 
 void ComputeUnitCore::gws_sema_br(Wavefront &wf, uint32_t rid, uint32_t count) {
-  gws_device_->sema_br(wf, rid, count);
+  gws_device_->sema_br(*this, wf, rid, count);
 }
 
 void ComputeUnitCore::gws_sema_release_all(Wavefront &wf, uint32_t rid) {
-  gws_device_->sema_release_all(wf, rid);
+  gws_device_->sema_release_all(*this, wf, rid);
 }
 
 void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
@@ -727,17 +741,21 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
   }
 
   auto it = active_wgs_.find(key);
-  if (it != active_wgs_.end() && --it->second == 0) {
-    active_wgs_.erase(it);
-    barrier_wgs_.erase(key);
-    // GWS state is device-global and persists across dispatches (see GwsDevice),
-    // so it is deliberately not torn down on workgroup/dispatch retirement.
-    // Queued rather than sent: notify_wg_complete() takes the CP's
-    // hw_queue_mutex_, and this runs under the wave-state lock, which the CP
-    // takes in the other order when it dispatches. WaveStateGuard delivers it
-    // once the lock is dropped.
-    if (cp_ && notice == Wavefront::CpCompletionNotice::Send)
-      pending_wg_completions_.emplace_back(dispatch_id, wg_id);
+  if (it != active_wgs_.end()) {
+    // One wave of this dispatch retired: drop it from the GWS residency bound.
+    // GWS resource state itself is device-global and persists across dispatches
+    // (see GwsDevice), so only the residency accounting is updated here.
+    gws_device_->remove_resident(dispatch_id, 1);
+    if (--it->second == 0) {
+      active_wgs_.erase(it);
+      barrier_wgs_.erase(key);
+      // Queued rather than sent: notify_wg_complete() takes the CP's
+      // hw_queue_mutex_, and this runs under the wave-state lock, which the CP
+      // takes in the other order when it dispatches. WaveStateGuard delivers it
+      // once the lock is dropped.
+      if (cp_ && notice == Wavefront::CpCompletionNotice::Send)
+        pending_wg_completions_.emplace_back(dispatch_id, wg_id);
+    }
   }
   // The whole workgroup's per-WG LDS region can be reclaimed once the CU has fully
   // drained and no cluster peer can still multicast into it.
@@ -755,9 +773,15 @@ void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
     if (w && !w->is_halted() && w->dispatch_id() == dispatch_id && w->wg_id() == wg_id)
       free_wavefront_resources(*w);
   }
-  active_wgs_.erase(wg_key(dispatch_id, wg_id));
-  barrier_wgs_.erase(wg_key(dispatch_id, wg_id));
-  // GWS state is device-global and persists across dispatches (see GwsDevice).
+  const uint64_t key = wg_key(dispatch_id, wg_id);
+  auto it = active_wgs_.find(key);
+  if (it != active_wgs_.end()) {
+    // Drop the WG's not-yet-retired waves from the GWS residency bound. GWS
+    // resource state is device-global and persists across dispatches.
+    gws_device_->remove_resident(dispatch_id, it->second);
+    active_wgs_.erase(it);
+  }
+  barrier_wgs_.erase(key);
   maybe_reset_lds_alloc();
 }
 
@@ -768,14 +792,21 @@ void ComputeUnitCore::abort_dispatch(uint32_t dispatch_id) {
       free_wavefront_resources(*wavefront);
   }
 
+  // Drop only this CU's contribution to the dispatch's device-global GWS
+  // residency bound (peers abort their own share); GWS resource state is
+  // device-global and persists across dispatches (see GwsDevice), so a faulted
+  // dispatch does not reset the device's shared GWS resources.
+  uint32_t resident_here = 0;
+  for (const auto &entry : active_wgs_)
+    if (static_cast<uint32_t>(entry.first >> 32) == dispatch_id)
+      resident_here += entry.second;
+  gws_device_->remove_resident(dispatch_id, resident_here);
   std::erase_if(active_wgs_, [dispatch_id](const auto &entry) {
     return static_cast<uint32_t>(entry.first >> 32) == dispatch_id;
   });
   std::erase_if(barrier_wgs_, [dispatch_id](const auto &entry) {
     return static_cast<uint32_t>(entry.first >> 32) == dispatch_id;
   });
-  // GWS state is device-global and persists across dispatches (see GwsDevice);
-  // a faulted dispatch does not reset the device's shared GWS resources.
   std::erase_if(pending_wg_completions_,
                 [dispatch_id](const auto &completion) { return completion.first == dispatch_id; });
   maybe_reset_lds_alloc();
@@ -1460,13 +1491,14 @@ void ComputeUnitCore::update_wf_states() {
     }
   }
 
-  // GWS deadlock-escape: GWS state is device-global, so a parked GWS_WAIT wave is
-  // normally woken by a signal/arrival from any wave of the process, on any CU.
-  // The only case that cannot resolve is true quiescence -- every non-halted wave
-  // of a dispatch, across all CUs sharing the store, is already blocked -- which
-  // the shared store detects dispatch-wide so a still-running wave on any CU keeps
-  // the backstop from firing prematurely.
-  gws_device_->escape_deadlocks();
+  // GWS per-step maintenance (runs on this CU's own thread, under the wave-state
+  // lock held by step_impl): apply cross-CU wakeups to this CU's own parked waves
+  // (credits/generation left by signals on other CUs), publish this CU's
+  // signalable-wave snapshot, and run the process-wide genuine-deadlock backstop
+  // for this CU's own parked waves. A lock-free fast path makes this a no-op when
+  // nothing is parked anywhere, so no-GWS workloads pay only one atomic load. See
+  // GwsDevice (gws_device.h) for the authoritative policy and thread-safety model.
+  gws_device_->step_maintenance(*this);
 }
 
 AsyncInstructionWindow::AsyncInstructionWindow(ComputeUnitCore &cu, Wavefront &wf,
