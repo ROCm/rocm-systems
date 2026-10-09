@@ -4691,6 +4691,8 @@ TEST_F(InitMicrotest, ParseCommConfig_OnlyMinCTAsAboveChannelLimit_IsAcceptedAnd
   EXPECT_EQ(MAXCHANNELS, c.config().maxCTAs);
   const std::string capped = "minCTAs " + std::to_string(MAXCHANNELS + 1) + " is larger than #channels upper limit";
   EXPECT_TRUE(LogHas(log, capped.c_str())) << "actual log:\n" << log;
+  // The min > max clamp would also end at MAXCHANNELS/MAXCHANNELS; it must not be the branch taken.
+  EXPECT_FALSE(LogHas(log, "is larger than maxCTAs")) << "actual log:\n" << log;
 }
 TEST_F(InitMicrotest, ParseCommConfig_OnlyMinCTAsZero_IsRejected) {
   ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.minCTAs = 0; },
