@@ -212,11 +212,10 @@ TEST_F(HipFileAsyncOp, enqueueAsync_unsupported_emits_inline)
     enqueueAsync(backend, IoType::Read, file, buffer, &size, &file_offset, &buffer_offset, &bytes, stream);
 }
 
-TEST_F(HipFileAsyncOp, enqueueAsync_compensates_signal_when_dispatch_fails)
+TEST_F(HipFileAsyncOp, enqueueAsync_rolls_back_signal_target_when_dispatch_fails)
 {
     StrictMock<MAsyncMonitor> mmon;
     auto                      backend       = std::make_shared<StrictMock<MBackend>>();
-    uint64_t                  slot_storage  = 0;
     size_t                    size          = 100;
     hoff_t                    file_offset   = 0;
     hoff_t                    buffer_offset = 0;
@@ -226,7 +225,7 @@ TEST_F(HipFileAsyncOp, enqueueAsync_compensates_signal_when_dispatch_fails)
     EXPECT_CALL(*stream, getHipStream).WillRepeatedly(Return(hip_stream));
     EXPECT_CALL(*stream, canUseStreamWaitValue).WillRepeatedly(Return(true));
     EXPECT_CALL(*stream, nextSignalTarget).WillOnce(Return(1));
-    EXPECT_CALL(*stream, signalSlot).WillRepeatedly(Return(&slot_storage));
+    EXPECT_CALL(*stream, releaseSignalTarget);
     EXPECT_CALL(*stream, getLock);
     EXPECT_CALL(mhip, hipLaunchHostFunc(hip_stream, Eq(&async_dispatch), _))
         .WillOnce(Throw(Hip::RuntimeError(hipErrorInvalidHandle)));
@@ -234,7 +233,6 @@ TEST_F(HipFileAsyncOp, enqueueAsync_compensates_signal_when_dispatch_fails)
     EXPECT_THROW(enqueueAsync(backend, IoType::Read, file, buffer, &size, &file_offset, &buffer_offset,
                               &bytes, stream),
                  Hip::RuntimeError);
-    ASSERT_EQ(slot_storage, 1u);
 }
 
 TEST_F(HipFileAsyncOp, enqueueAsync_throws_on_invalid_params)

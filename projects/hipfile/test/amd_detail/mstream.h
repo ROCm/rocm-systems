@@ -23,6 +23,7 @@ public:
     MOCK_METHOD(hipStream_t, copyStream, (), (const, override));
     MOCK_METHOD(uint64_t *, signalSlot, (), (const, override));
     MOCK_METHOD(uint64_t, nextSignalTarget, (), (override));
+    MOCK_METHOD(void, releaseSignalTarget, (), (override));
 };
 
 }

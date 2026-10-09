@@ -139,6 +139,12 @@ Stream::nextSignalTarget()
     return ++signal_counter;
 }
 
+void
+Stream::releaseSignalTarget()
+{
+    --signal_counter;
+}
+
 Stream::~Stream()
 {
     try {

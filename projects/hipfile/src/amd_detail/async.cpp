@@ -147,7 +147,7 @@ enqueueAsync(std::shared_ptr<Backend> backend, IoType type, std::shared_ptr<IFil
         if (!launched) {
             std::unique_ptr<AsyncOp> owned{raw};
             if (targeted) {
-                std::atomic_ref<uint64_t>{*stream->signalSlot()}.fetch_add(1, std::memory_order_release);
+                stream->releaseSignalTarget();
             }
         }
         throw;
