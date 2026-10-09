@@ -2364,6 +2364,8 @@ initialize_rocprofv3()
 void
 initialize_signal_handler(sigaction_func_t sigaction_func)
 {
+    if(!tool::get_config().enable_signal_handlers) return;
+
     if(sigaction_func == nullptr) sigaction_func = &sigaction;
 
     struct sigaction sig_act = {};
