@@ -17,6 +17,43 @@ from configure_rust import cmake_set, rust_flags, validate_host
 
 
 class ConfigureTests(unittest.TestCase):
+    def test_static_native_response_path_preserves_spaces_and_commas(self):
+        module = Path(__file__).resolve().parents[1] / "RuntimeRust.cmake"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "build with spaces, and comma"
+            # A real native archive needs libm after the archive on the link line.
+            # Only artifact production is substituted; the CMake linking helper
+            # under test supplies the actual imported target and response argument.
+            (root / "library.c").write_text(
+                "#include <math.h>\ndouble fixture(double x) { return sin(x); }\n"
+            )
+            (root / "main.c").write_text(
+                "double fixture(double);\nint main(void) { return fixture(0.0) != 0.0; }\n"
+            )
+            (root / "CMakeLists.txt").write_text(
+                f"""cmake_minimum_required(VERSION 3.25)
+project(StaticClosureFixture LANGUAGES C)
+include("{module.as_posix()}")
+set(_runtime_library_dir "${{CMAKE_BINARY_DIR}}/native artifacts")
+add_library(native STATIC library.c)
+set_target_properties(native PROPERTIES OUTPUT_NAME fixture
+  ARCHIVE_OUTPUT_DIRECTORY "${{_runtime_library_dir}}")
+add_custom_target(rocm_runtime_rust DEPENDS native)
+runtime_rust_library(imported PACKAGE fixture LIBRARY fixture TYPE STATIC OUTPUT_NAME fixture)
+file(WRITE "${{_runtime_library_dir}}/imported-native-libs.rsp" "-lm\\n")
+add_executable(consumer main.c)
+target_link_libraries(consumer PRIVATE imported)
+"""
+            )
+            for command in (
+                ["cmake", "-S", root, "-B", binary, "-G", "Ninja"],
+                ["cmake", "--build", binary],
+                [binary / "consumer"],
+            ):
+                result = subprocess.run(command, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_cargo_config_paths_survive_working_directory_changes(self):
         helpers = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as directory:

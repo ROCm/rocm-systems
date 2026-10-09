@@ -33,7 +33,7 @@ unreachable = "deny"
 unwrap_used = "deny"
 
 [workspace]
-members = ["ddi/rocddi", "ddi/libamdf", "hsa/libhsa"]
+members = ["ddi/rocddi", "ddi/libamdf", "hsa/libhsa", "testing/ddi/rocddi"]
 resolver = "3"
 
 [workspace.package]

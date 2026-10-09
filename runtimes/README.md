@@ -21,6 +21,9 @@ part of the repository's default build or installation yet.
   builds a static library. Its shared ABI is an alias of the shared image.
 - [`hsa/libhsa`](hsa/libhsa/README.md) implements the HSA C ABI and builds a
   shared ABI in the same image. It consumes rocddi directly, not through AMDF.
+- [`testing`](testing/README.md) independently builds public API, direct DDI
+  and KFD contract tests, with one initial required test per family and a
+  relocatable CTest execution interface.
 
 Component directories own implementation and local tests. The root owns the
 shared-image linker package, lockfile, toolchain, Rust profiles, and common
