@@ -917,11 +917,11 @@ threshold table introduced for gfx1250.
     * - | ``RCCL_CE_AR_STAGING_BYTES``
         | Overrides the total allocation size of the CE AllReduce staging buffer
           (``ceARTmpBuf``). When ``-1`` (default), the buffer is allocated at the
-          compile-time constant ``NCCL_CE_AR_STAGING_BYTES`` (16 MiB). Increasing
+          compile-time constant ``NCCL_CE_AR_STAGING_BYTES`` (256 MiB). Increasing
           this reduces pipelining overhead for large messages but raises per-rank
           GPU memory usage. This variable sizes the buffer only; the selector cap
           is controlled separately by ``RCCL_CE_AR_2SHOT_MAX_BYTES``.
-      - | ``-1``: Use the compile-time default of 16 MiB (default).
+      - | ``-1``: Use the compile-time default of 256 MiB (default).
         | ``N`` (bytes): Set the per-slot payload capacity to ``N``; ``ceARTmpBuf`` is ``NCCL_CE_NUM_SLOTS`` (2) times that.
 
     * - | ``RCCL_CE_AR_2SHOT_MIN_BYTES``
