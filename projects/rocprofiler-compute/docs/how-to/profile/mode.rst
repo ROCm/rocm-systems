@@ -1021,10 +1021,13 @@ Analyze reads those files and prints an operator call tree and a per-operator
 summary (for example with ``--list-torch-operators`` or ``--torch-operator``).
 Analyze no longer writes ``ml_api_trace/consolidated.csv``.
 
-Performance counter data file
------------------------------
+Performance counter data
+------------------------
 
-The ``pmc_perf.csv.gz`` file contains the standard performance counter data (same as non-torch profiling). This data enables analysis such as:
+The retained ``ml_api_trace_*_counter_collection.csv.gz`` files hold the
+per-pass performance counters, the same counters a non-torch profile
+collects. Analyze joins each file to the matching marker CSV. This data
+enables analysis such as:
 
 * Identifying which PyTorch operators executed which GPU kernels
 * Aggregating performance counter values by operator
