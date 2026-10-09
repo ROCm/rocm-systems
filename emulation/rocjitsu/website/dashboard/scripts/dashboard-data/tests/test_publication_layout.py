@@ -20,7 +20,7 @@ def load_module(name, path):
 
 
 publisher = load_module('publisher', HERE.parent / 'publish-dashboard-run.py')
-fixtures = load_module('producer_tests', HERE / 'test-prepare-dashboard-data.py')
+fixtures = load_module('producer_tests', HERE / 'test_prepare_dashboard_data.py')
 
 
 @pytest.fixture

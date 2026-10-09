@@ -127,7 +127,7 @@ jobs:
         shell: bash
         run: |
           "${RUNNER_TEMP}/.venv/bin/python" -m pip install pytest
-          "${RUNNER_TEMP}/.venv/bin/python" -m pytest scripts/dashboard-data/tests/test-*.py -v
+          "${RUNNER_TEMP}/.venv/bin/python" -m pytest scripts/dashboard-data/tests -v
 
       - name: Build rocjitsu handbook
         if: steps.changes.outputs.handbook == 'true'

@@ -66,7 +66,7 @@ jobs:
         run: |
           python -m venv "${RUNNER_TEMP}/dashboard-tests-venv"
           "${RUNNER_TEMP}/dashboard-tests-venv/bin/python" -m pip install pytest
-          "${RUNNER_TEMP}/dashboard-tests-venv/bin/python" -m pytest scripts/dashboard-data/tests/test-*.py -v
+          "${RUNNER_TEMP}/dashboard-tests-venv/bin/python" -m pytest scripts/dashboard-data/tests -v
 
       - name: Validate prepared dashboard data
         if: ${{ !cancelled() && steps.prepare-data.outcome == 'success' }}

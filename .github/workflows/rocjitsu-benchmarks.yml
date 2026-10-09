@@ -216,7 +216,7 @@ jobs:
           python -m venv "${RUNNER_TEMP}/dashboard-tests-venv"
           "${RUNNER_TEMP}/dashboard-tests-venv/bin/python" -m pip install pytest
           "${RUNNER_TEMP}/dashboard-tests-venv/bin/python" -m pytest \
-            dashboard/emulation/rocjitsu/website/dashboard/scripts/dashboard-data/tests/test-prepare-dashboard-data.py \
+            dashboard/emulation/rocjitsu/website/dashboard/scripts/dashboard-data/tests \
             -v
 
       - name: Publish dashboard-ready result
