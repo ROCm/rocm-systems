@@ -293,8 +293,6 @@ public:
   using ScalarMemPipeline::ScalarMemPipeline;
 };
 
-// Execute real wait encodings so plugin tests exercise the same operands and
-// target policy as the core checker instead of fabricating a mnemonic/target.
 void execute_wait(ExecutionPluginGroup &plugins, Wavefront &wave, uint32_t word) {
   auto decoder = Decoder::create(wave.cu().arch());
   ASSERT_NE(decoder, nullptr);
@@ -8554,7 +8552,7 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeLoadcntOrderingSlot) {
   TestMemoryInstruction ignored_inst(std::move(ignored));
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, ignored_inst, *wf);
 
-  execute_wait(*f.plugin_group_, *wf, 0xbfc00001u); // gfx1250 s_wait_loadcnt 1.
+  execute_wait(*f.plugin_group_, *wf, 0xbfc00001u); // s_wait_loadcnt 1.
 
   f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + kDestinationVgpr,
                                          /*lane_mask=*/0x1u, /*byte_mask=*/0xFu);

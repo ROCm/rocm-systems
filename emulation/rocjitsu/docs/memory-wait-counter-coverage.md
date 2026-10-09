@@ -5,20 +5,6 @@ functional memory pipelines. Generated instruction metadata selects producers, t
 shared waitcheck target model determines their counter families. Register values and
 memory effects are still computed eagerly.
 
-Architectural wait decoding lives in
-`isa/arch/amdgpu/shared/wait_counter_policy.h`. The core scoreboard, static
-waitcheck analysis, and race detector plugin share its counter encodings,
-no-wait sentinels, and explicit wait fields. The policy maps canonical diagnostic
-counters to the memory pipelines' counter families without treating unsupported
-domains, such as XCNT, as ordinary completion waits.
-
-The detectors keep their pending state separate. The core scoreboard checks
-register readiness before instruction execution and discards completed register
-dependencies. The race plugin observes register accesses during execution and
-also retains LDS address histories across waves, including completed memory
-events that still need a barrier. Sharing wait decoding does not extend either
-detector's memory-race or instruction coverage.
-
 ## Architectures and queues
 
 | Architecture | Completion queues |
@@ -175,10 +161,3 @@ with real instruction execution for scalar/vector loads, inline DS results, coun
 producers, zero EXEC, message return units, and FLAT's lane-specific dependencies and
 both counter positions. Real-kernel checks supplement these tests; they do not prove
 complete recall across all kernel families.
-
-`tests/wait_hazard_test.cpp` runs the same wait/readiness scenarios against the
-core scoreboard and the race plugin. It covers explicit encodings, full drains,
-partial waits with counter-only operations, no-wait sentinels, unordered results,
-and independent register lanes and bytes. Core-only counter domains remain
-explicit in the cases. Detector-specific tests retain diagnostic details,
-producer classification, and LDS/barrier coverage.

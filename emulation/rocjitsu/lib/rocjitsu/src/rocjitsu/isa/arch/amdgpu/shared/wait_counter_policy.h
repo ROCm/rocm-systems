@@ -19,7 +19,7 @@
 namespace rocjitsu {
 class Instruction;
 
-/// @brief Canonical counters shared by static and runtime wait diagnostics.
+/// @brief Architectural wait-counter domains.
 ///
 /// @details GFX12 targets use the split counter names directly. Legacy gfx9
 /// style targets reuse Load for vmcnt, Ds for lgkmcnt, and Exp for expcnt.
@@ -200,9 +200,7 @@ wait_expression(WaitCounterKind counter, uint32_t required_count, rj_code_arch_t
   return WaitCounterKind::Count;
 }
 
-/// Map a decoded wait to the counter families represented by memory pipelines.
-/// Unsupported domains (for example XCNT and ALU dependencies) remain absent;
-/// applying their waits must not imply completion of another counter.
+/// Returns nullopt for domains without a corresponding memory-pipeline counter.
 [[nodiscard]] constexpr std::optional<amdgpu::WaitCounterType>
 memory_wait_counter_type(WaitCounterKind counter, WaitcntModel model) {
   using amdgpu::WaitCounterType;
@@ -234,8 +232,7 @@ memory_wait_counter_type(WaitCounterKind counter, WaitcntModel model) {
   }
 }
 
-/// Architectural wait policy, independent of CFG analysis, simulator state,
-/// and race-event lifetime. Absent fields leave counters unchanged.
+/// Architectural wait encodings and counter limits.
 struct WaitCounterPolicy {
   [[nodiscard]] static size_t counter_index(WaitCounterKind counter);
 
@@ -276,7 +273,8 @@ struct WaitCounterPolicy {
   [[nodiscard]] static util::FailureOr<std::optional<uint32_t>>
   counter_no_wait_value(rj_code_arch_t arch, WaitCounterKind counter);
 
-  // An engaged result with no active fields represents an explicit no-wait sentinel.
+  // Absent fields leave their counters unchanged. An engaged result with no
+  // active fields represents an explicit no-wait sentinel.
   [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
   explicit_wait_fields(const Instruction &inst, rj_code_arch_t arch);
 
