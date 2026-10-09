@@ -242,7 +242,7 @@ def test_apply_operator_filter_intersects_existing_kernel_ids(monkeypatch):
         "rocprof_compute_analyze.analysis_cli.console_warning",
         lambda *argv: warnings.append(argv),
     )
-    args = argparse.Namespace(torch_operator=["*relu*"], kernel=[0])
+    args = argparse.Namespace(torch_operator=["*relu*"], gpu_kernel=[0])
     cli = cli_analysis(args, {})
     workload = workload_with_operator_forest()
     workload.filter_kernel_ids = [0]
@@ -251,7 +251,45 @@ def test_apply_operator_filter_intersects_existing_kernel_ids(monkeypatch):
         "No PyTorch operators matched the -k filter: [0]" in str(item)
         for item in warnings
     )
+    assert workload.ml_api_call_trees == {}
     assert workload.filter_kernel_ids == [0]
+
+
+def test_apply_operator_filter_missed_glob_clears_forest(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.console_warning",
+        lambda *argv: warnings.append(argv),
+    )
+    args = argparse.Namespace(torch_operator=["nomatch"])
+    cli = cli_analysis(args, {})
+    workload = workload_with_operator_forest()
+    cli.apply_operator_filter(args, workload, "/workload", ["torch"])
+    assert any(
+        "No PyTorch operators matched the pattern(s): nomatch" in str(item)
+        for item in warnings
+    )
+    assert workload.ml_api_call_trees == {}
+
+
+def test_apply_operator_filter_unmapped_kernels_clears_forest(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.console_warning",
+        lambda *argv: warnings.append(argv),
+    )
+    args = argparse.Namespace(torch_operator=["*relu*"])
+    cli = cli_analysis(args, {})
+    workload = workload_with_operator_forest()
+    workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = pd.DataFrame({
+        "Kernel_Name": ["unrelated_kernel"]
+    })
+    cli.apply_operator_filter(args, workload, "/workload", ["torch"])
+    assert any(
+        "No PyTorch kernels mapped to kernel-top IDs" in str(item)
+        for item in warnings
+    )
+    assert workload.ml_api_call_trees == {}
 
 
 def test_apply_operator_filter_keeps_intersection():
