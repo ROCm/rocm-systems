@@ -831,12 +831,7 @@ jobs:
         shell: bash
         run: |
           uv pip install --system pytest pytest-xdist filelock
-          cmake -S corpus/runtime-cts -B build/runtime-cts -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCTS_SUITES=aql \
-            '-DCTS_ARCHS=gfx1250;gfx950;gfx942;gfx1201;gfx1100' \
-            -DAMDGPU_LLVM_BIN="$(rocm-sdk path --root)/lib/llvm/bin"
-          cmake --build build/runtime-cts --parallel "$(nproc)"
+          bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-runtime-cts.sh" build
 
       - name: Run runtime CTS AQL suite
         if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.build_runtime_cts.outcome == 'success' }}
@@ -844,26 +839,7 @@ jobs:
         working-directory: ${{ env.ROCJITSU_RUNTIME_CTS_CORPUS_DIR }}
         shell: bash
         run: |
-          targets=(
-            'gfx1250 gfx1250_mi455x.json'
-            'gfx950 gfx950_mi355x_kmd.json'
-            'gfx942 gfx942_cdna3_kmd.json'
-            'gfx1201 gfx1201_r9700.json'
-            'gfx1100 gfx1100_w7900.json'
-          )
-          mkdir -p .pytest-artifacts/runtime-cts/junit
-          status=0
-          for entry in "${targets[@]}"; do
-            read -r target config <<< "${entry}"
-            python3 -m pytest tests/test_corpus.py \
-              --suite aql --target "${target}" \
-              --binary-dir build/runtime-cts \
-              --run-wrapper "${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu --config ${ROCJITSU_SOURCE_DIR}/configs/${config} --" \
-              --artifact-directory .pytest-artifacts/runtime-cts \
-              --junitxml ".pytest-artifacts/runtime-cts/junit/${target}.xml" \
-              -v -ra || status=1
-          done
-          exit "${status}"
+          bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-runtime-cts.sh" run
 
       - name: Upload runtime CTS AQL diagnostics
         if: ${{ always() && matrix.name == 'release' }}
