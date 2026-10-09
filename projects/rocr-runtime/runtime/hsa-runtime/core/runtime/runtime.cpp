@@ -2227,7 +2227,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
         } else if (polling && !finish && !g_use_interrupt_wait) {
           // No interrupt-backed event is available for at least one pending
           // signal (PrepareInterrupt forced polling) -- on the WSL/dxg thunk
-          // that is every signal, since it implements no KFD events at all. 
+          // that is every signal, since it implements no KFD events at all.
           // Without a sleep this loop monopolizes a CPU core re-scanning the
           // signal values for the whole lifetime of the async-events thread,
           // idle or not; the two async-events threads cost ~2 cores in every
