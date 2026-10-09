@@ -1522,7 +1522,7 @@ impl KfdQueue {
             }
         } else if request.aql.is_some() && lifetime == DriverContextLifetime::Process {
             BufferKind::OwnedUserptr {
-                cache: crate::memory::HostCachePolicy::Uncached,
+                cache: crate::memory::HostMappingPolicy::Uncached,
             }
         } else {
             // KFD USERPTR cannot be allocated in a secondary INSTANCE VM.

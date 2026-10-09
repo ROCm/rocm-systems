@@ -33,7 +33,7 @@ use crate::platform::memory::{
 use rocddi::device::Device;
 use rocddi::gpu::{CopyRect, GpuCopySequence, GpuCopyTimestamps};
 use rocddi::memory::{
-    Allocation, DeviceAccess, HostCachePolicy, MemoryKind, VirtualAddress, VirtualDeviceMapping,
+    Allocation, DeviceAccess, HostMappingPolicy, MemoryKind, VirtualAddress, VirtualDeviceMapping,
     VirtualHostMapping, VirtualMemory,
 };
 use rocddi::session::{DriverContextLifetime, Session};
@@ -460,20 +460,20 @@ fn cpu_pool_memory_kind(
         MemoryKind::System
     } else {
         MemoryKind::OwnedHost {
-            cache: cpu_pool_cache_policy(pool, flags),
+            policy: cpu_pool_mapping_policy(pool, flags),
         }
     }
 }
 
-fn cpu_pool_cache_policy(pool: HsaMemoryPool, flags: u32) -> HostCachePolicy {
+fn cpu_pool_mapping_policy(pool: HsaMemoryPool, flags: u32) -> HostMappingPolicy {
     if pool.handle == CPU_POOL_KERNARG || flags & ALLOC_UNCACHED != 0 {
-        HostCachePolicy::Uncached
+        HostMappingPolicy::Uncached
     } else if pool.handle == CPU_POOL_EXTENDED {
-        HostCachePolicy::Extended
+        HostMappingPolicy::Extended
     } else if pool.handle == CPU_POOL_FINE || flags & ALLOC_PCIE != 0 {
-        HostCachePolicy::Fine
+        HostMappingPolicy::Fine
     } else {
-        HostCachePolicy::Coarse
+        HostMappingPolicy::Coarse
     }
 }
 
@@ -2066,7 +2066,7 @@ unsafe fn memory_lock_to_pool(
                 first.register_host_with_peers(
                     &peers,
                     host_base,
-                    cpu_pool_cache_policy(pool, flags & ALLOC_UNCACHED),
+                    cpu_pool_mapping_policy(pool, flags & ALLOC_UNCACHED),
                     native_size as u64,
                     runtime.host_page_size as u64,
                     DeviceAccess::READ | DeviceAccess::WRITE,
@@ -5299,13 +5299,13 @@ fn write_loaded_copy_destination(address: usize, bytes: &[u8]) -> Status {
 fn execute_gpu_entries(
     device: &Device,
     entries: impl IntoIterator<Item = GpuCopyEntry>,
-    sdma_ring: Option<u32>,
+    sdma_engine: Option<u32>,
     timed: bool,
     stop: &AtomicBool,
 ) -> Result<Option<GpuCopyTimestamps>, CopyRouteFailure> {
     let gpu = copy_gpu(device)?;
-    let mut sequence = match sdma_ring {
-        Some(ring) => GpuCopySequence::begin_on_sdma_ring(gpu, stop, ring),
+    let mut sequence = match sdma_engine {
+        Some(engine) => GpuCopySequence::begin_on_sdma_engine(gpu, stop, engine),
         None => GpuCopySequence::begin(gpu, stop),
     }
     .map_err(CopyRouteFailure::from)?;
@@ -5390,7 +5390,7 @@ fn gpu_copy_profile(index: usize, ticks: Option<GpuCopyTimestamps>) -> Option<As
 
 fn execute_copy_route(
     route: AsyncCopyRoute,
-    sdma_ring: Option<u32>,
+    sdma_engine: Option<u32>,
     profile_enabled: bool,
     host_clock: Option<&Device>,
     stop: &AtomicBool,
@@ -5472,7 +5472,7 @@ fn execute_copy_route(
         } => execute_gpu_entries(
             &device,
             std::iter::once(entry),
-            sdma_ring,
+            sdma_engine,
             profile_enabled,
             stop,
         )
@@ -5488,7 +5488,7 @@ fn execute_copy_route(
 
 struct AsyncCopyTask {
     route: AsyncCopyRoute,
-    sdma_ring: Option<u32>,
+    sdma_engine: Option<u32>,
     borrowed_memory: Vec<Option<usize>>,
     completion: HsaSignal,
 }
@@ -5549,7 +5549,7 @@ fn enqueue_copy_job(
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         execute_copy_route(
                             task.route,
-                            task.sdma_ring,
+                            task.sdma_engine,
                             profile_enabled,
                             host_clock.as_ref(),
                             &stop,
@@ -5599,13 +5599,13 @@ fn enqueue_async_copy(
     resolved: ResolvedAsyncCopy,
     dependency_slice: &[HsaSignal],
     completion: HsaSignal,
-    sdma_ring: Option<u32>,
+    sdma_engine: Option<u32>,
 ) -> Status {
     enqueue_copy_job(
         runtime,
         vec![AsyncCopyTask {
             route: resolved.route,
-            sdma_ring,
+            sdma_engine,
             borrowed_memory: resolved.borrowed_memory.to_vec(),
             completion,
         }],
@@ -5686,7 +5686,7 @@ unsafe fn submit_async_copy(
             Ok(resolved) => resolved,
             Err(status) => return status,
         };
-        let sdma_ring = match (engine, &resolved.route) {
+        let sdma_engine = match (engine, &resolved.route) {
             (Some(mask), AsyncCopyRoute::Gpu { index, .. }) => {
                 let available = match copy_engine_mask_for_gpu(runtime, *index) {
                     Ok(available) => available,
@@ -5700,7 +5700,7 @@ unsafe fn submit_async_copy(
             (Some(_), _) => return NOT_SUPPORTED,
             (None, _) => None,
         };
-        enqueue_async_copy(runtime, resolved, dependency_slice, completion, sdma_ring)
+        enqueue_async_copy(runtime, resolved, dependency_slice, completion, sdma_engine)
     })
 }
 
@@ -5976,7 +5976,7 @@ unsafe fn prepare_batch_copy(
         let (route, bases) = resolve_batch_copy_entries(runtime, &entries)?;
         tasks.push(AsyncCopyTask {
             route,
-            sdma_ring: None,
+            sdma_engine: None,
             borrowed_memory: bases,
             completion: op.completion_signal,
         });
@@ -6201,7 +6201,7 @@ fn copy_engine_mask_for_gpu(runtime: &Runtime, index: usize) -> Result<u32, Stat
     }
     let count = gpu.info().queues.sdma_engine_count.min(16);
     let valid_ids = (1_u32 << count) - 1;
-    Ok(gpu.available_sdma_rings().map_err(map_error)? & valid_ids)
+    Ok(gpu.available_sdma_engines().map_err(map_error)? & valid_ids)
 }
 
 fn copy_engine_mask(runtime: &Runtime, dst: HsaAgent, src: HsaAgent) -> Result<u32, Status> {
@@ -6963,9 +6963,9 @@ mod tests {
     #[test]
     fn cpu_pool_allocations_preserve_their_cache_policy() {
         for (pool, cache) in [
-            (CPU_POOL_FINE, HostCachePolicy::Fine),
-            (CPU_POOL_EXTENDED, HostCachePolicy::Extended),
-            (CPU_POOL_COARSE, HostCachePolicy::Coarse),
+            (CPU_POOL_FINE, HostMappingPolicy::Fine),
+            (CPU_POOL_EXTENDED, HostMappingPolicy::Extended),
+            (CPU_POOL_COARSE, HostMappingPolicy::Coarse),
         ] {
             assert_eq!(
                 cpu_pool_memory_kind(
@@ -6973,7 +6973,7 @@ mod tests {
                     DriverContextLifetime::Process,
                     0
                 ),
-                MemoryKind::OwnedHost { cache }
+                MemoryKind::OwnedHost { policy: cache }
             );
         }
         assert_eq!(

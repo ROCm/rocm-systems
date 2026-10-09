@@ -327,9 +327,9 @@ impl DeviceDriverState {
         }
     }
 
-    pub(crate) fn available_sdma_rings(&self) -> Result<u32, Error> {
+    pub(crate) fn available_sdma_engines(&self) -> Result<u32, Error> {
         match self {
-            Self::LinuxKfd { driver, state } => driver.available_sdma_rings(state),
+            Self::LinuxKfd { driver, state } => driver.available_sdma_engines(state),
             #[cfg(test)]
             Self::Test { .. } => unsupported(),
         }

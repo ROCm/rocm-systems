@@ -481,7 +481,7 @@ pub(crate) struct CopyResourcePool {
 #[derive(Default)]
 struct CopyResourceSlots {
     default: Option<CopyResources>,
-    rings: [Option<CopyResources>; u32::BITS as usize],
+    engines: [Option<CopyResources>; u32::BITS as usize],
 }
 
 impl CopyResourceSlots {
@@ -491,10 +491,10 @@ impl CopyResourceSlots {
     ) -> Result<&mut Option<CopyResources>, CopyFailure> {
         match format {
             KernelQueueFormat::Sdma => Ok(&mut self.default),
-            KernelQueueFormat::SdmaOnRing(ring) => self
-                .rings
-                .get_mut(ring as usize)
-                .ok_or_else(|| invalid("SDMA ring index is out of range")),
+            KernelQueueFormat::SdmaOnEngine(engine) => self
+                .engines
+                .get_mut(engine as usize)
+                .ok_or_else(|| invalid("SDMA engine index is out of range")),
             KernelQueueFormat::Pm4 => Err(invalid("PM4 is not an SDMA copy format")),
         }
     }
@@ -657,16 +657,16 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
         Self::begin_with_format(gpu, cancel, KernelQueueFormat::Sdma)
     }
 
-    /// Acquires an ordered copy sequence on one selected DRM DMA ring.
+    /// Acquires an ordered copy sequence on one qualified logical SDMA engine.
     ///
     /// # Errors
-    /// Returns a target-capability, unavailable-ring, or native failure.
-    pub fn begin_on_sdma_ring(
+    /// Returns a target-capability, unavailable-engine, or native failure.
+    pub fn begin_on_sdma_engine(
         gpu: GpuDevice<'device>,
         cancel: &'cancel AtomicBool,
-        ring: u32,
+        engine: u32,
     ) -> Result<Self, CopyFailure> {
-        Self::begin_with_format(gpu, cancel, KernelQueueFormat::SdmaOnRing(ring))
+        Self::begin_with_format(gpu, cancel, KernelQueueFormat::SdmaOnEngine(engine))
     }
 
     fn begin_with_format(
@@ -963,7 +963,7 @@ impl<'device> GpuDevice<'device> {
         self.copy_resource_pool()?.take(self, format)
     }
 
-    /// Prepares default and advertised-ring SDMA queues and command allocations
+    /// Prepares default and advertised-engine SDMA queues and command allocations
     /// for later copies or fills on this activated GPU. Subsequent calls leave
     /// healthy idle resources in place; concurrent copies acquire independent
     /// contexts.
@@ -979,11 +979,13 @@ impl<'device> GpuDevice<'device> {
         }
         let pool = self.copy_resource_pool()?;
         pool.preload(self, KernelQueueFormat::Sdma)?;
-        let mut rings = self.available_sdma_rings().map_err(CopyFailure::retired)?;
-        while rings != 0 {
-            let ring = rings.trailing_zeros();
-            pool.preload(self, KernelQueueFormat::SdmaOnRing(ring))?;
-            rings &= rings - 1;
+        let mut engines = self
+            .available_sdma_engines()
+            .map_err(CopyFailure::retired)?;
+        while engines != 0 {
+            let engine = engines.trailing_zeros();
+            pool.preload(self, KernelQueueFormat::SdmaOnEngine(engine))?;
+            engines &= engines - 1;
         }
         Ok(())
     }

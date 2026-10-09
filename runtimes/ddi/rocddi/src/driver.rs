@@ -15,6 +15,7 @@ mod instance;
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 mod linux_kfd;
+mod resources;
 #[cfg(test)]
 pub(crate) mod test_driver;
 #[cfg(test)]
@@ -30,6 +31,10 @@ pub(crate) use linux_kfd::KfdEventSubscription;
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 pub(crate) use linux_kfd::{KfdKernelQueue, KfdQueue, KfdSignalEvent, LinuxKfdDriver as KfdDriver};
+pub(crate) use resources::{
+    AllocationState, KernelQueueState, QueueState, VirtualAddressState, VirtualDeviceMappingState,
+    VirtualHostMappingState, VirtualMemoryState,
+};
 
 use crate::host_storage::{Allocator, Owned};
 use crate::kernel_queue::{KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait};
@@ -258,7 +263,7 @@ pub(crate) trait GpuDriver: Driver + AllocationOperations + VirtualMemoryOperati
     /// Kernel-mediated submission queue created by this same driver.
     type KernelQueue: KernelQueueResource;
     fn supports_expert_scheduling(&self, device: &Self::DeviceState) -> Result<bool, Error>;
-    fn available_sdma_rings(&self, device: &Self::DeviceState) -> Result<u32, Error>;
+    fn available_sdma_engines(&self, device: &Self::DeviceState) -> Result<u32, Error>;
     /// # Safety
     /// The caller retains all raw signal and scratch addresses that the GPU
     /// may reach, including after an ambiguous driver creation result.

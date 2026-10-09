@@ -10,7 +10,7 @@
 use super::*;
 use crate::driver::AllocationOperations;
 use crate::host_storage::Allocator;
-use crate::memory::{HostCachePolicy, MemoryKind};
+use crate::memory::{HostMappingPolicy, MemoryKind};
 use std::os::fd::{AsRawFd, IntoRawFd};
 use std::os::unix::fs::FileExt;
 use std::sync::Arc;
@@ -439,11 +439,11 @@ impl Fixture {
     ) -> Result<Owned<KfdAllocation>, Error> {
         let kind = match kind {
             MemoryKind::System => BufferKind::Gtt,
-            MemoryKind::OwnedHost { cache } => BufferKind::OwnedUserptr { cache },
-            MemoryKind::RegisteredHost { address, cache } => {
+            MemoryKind::OwnedHost { policy } => BufferKind::OwnedUserptr { cache: policy },
+            MemoryKind::RegisteredHost { address, policy } => {
                 // SAFETY: Scripted KFD replies cannot access this synthetic
                 // address; the fixture tests metadata and rollback only.
-                BufferKind::Userptr(unsafe { BorrowedHostPages::new(address, cache) })
+                BufferKind::Userptr(unsafe { BorrowedHostPages::new(address, policy) })
             }
             MemoryKind::DeviceLocal {
                 host_visible,
@@ -673,7 +673,7 @@ fn secondary_context_rejects_owned_userptr_before_native_allocation() {
             .allocate_with_lifetime(
                 crate::session::DriverContextLifetime::Session,
                 MemoryKind::OwnedHost {
-                    cache: HostCachePolicy::Fine,
+                    policy: HostMappingPolicy::Fine,
                 },
                 DeviceAccess::READ | DeviceAccess::WRITE,
             )
@@ -706,7 +706,7 @@ fn secondary_extended_registration_reaches_drm_only_for_gfx1201() {
     let other = make_device(110_000);
     let request = crate::memory::HostRegistration {
         address: 0x10000,
-        cache: HostCachePolicy::Extended,
+        policy: HostMappingPolicy::Extended,
         size: desc().size,
         alignment: desc().alignment,
         permissions: DeviceAccess::READ | DeviceAccess::WRITE,
@@ -1442,25 +1442,25 @@ fn allocation_permissions_reach_kfd_without_widening_access() {
             ),
             (
                 MemoryKind::OwnedHost {
-                    cache: HostCachePolicy::Coarse,
+                    policy: HostMappingPolicy::Coarse,
                 },
                 uapi::USERPTR | uapi::NO_SUBSTITUTE,
             ),
             (
                 MemoryKind::OwnedHost {
-                    cache: HostCachePolicy::Fine,
+                    policy: HostMappingPolicy::Fine,
                 },
                 uapi::USERPTR | uapi::COHERENT | uapi::NO_SUBSTITUTE,
             ),
             (
                 MemoryKind::OwnedHost {
-                    cache: HostCachePolicy::Extended,
+                    policy: HostMappingPolicy::Extended,
                 },
                 uapi::USERPTR | uapi::COHERENT | uapi::EXT_COHERENT | uapi::NO_SUBSTITUTE,
             ),
             (
                 MemoryKind::OwnedHost {
-                    cache: HostCachePolicy::Uncached,
+                    policy: HostMappingPolicy::Uncached,
                 },
                 uapi::USERPTR | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE,
             ),
@@ -1748,7 +1748,7 @@ fn registered_host_pages_keep_the_caller_address_and_an_independent_gpu_va() {
         .allocate(
             MemoryKind::RegisteredHost {
                 address: 0x12345,
-                cache: HostCachePolicy::Fine,
+                policy: HostMappingPolicy::Fine,
             },
             DeviceAccess::READ | DeviceAccess::WRITE,
         )
@@ -1781,13 +1781,13 @@ fn registered_host_pages_keep_the_caller_address_and_an_independent_gpu_va() {
 #[test]
 fn registered_host_cache_policies_reach_kfd() {
     for (cache, flags) in [
-        (HostCachePolicy::Coarse, 0),
-        (HostCachePolicy::Fine, uapi::COHERENT),
+        (HostMappingPolicy::Coarse, 0),
+        (HostMappingPolicy::Fine, uapi::COHERENT),
         (
-            HostCachePolicy::Extended,
+            HostMappingPolicy::Extended,
             uapi::COHERENT | uapi::EXT_COHERENT,
         ),
-        (HostCachePolicy::Uncached, uapi::COHERENT | uapi::UNCACHED),
+        (HostMappingPolicy::Uncached, uapi::COHERENT | uapi::UNCACHED),
     ] {
         let fixture = Fixture::with_flags(
             [
@@ -1802,7 +1802,7 @@ fn registered_host_cache_policies_reach_kfd() {
             .allocate(
                 MemoryKind::RegisteredHost {
                     address: 0x12345,
-                    cache,
+                    policy: cache,
                 },
                 DeviceAccess::READ | DeviceAccess::WRITE,
             )
@@ -1827,7 +1827,7 @@ fn owned_system_pages_use_one_cpu_and_gpu_address() {
     let mut allocation = fixture
         .allocate(
             MemoryKind::OwnedHost {
-                cache: HostCachePolicy::Fine,
+                policy: HostMappingPolicy::Fine,
             },
             DeviceAccess::READ | DeviceAccess::WRITE,
         )
@@ -1854,7 +1854,7 @@ fn invalid_registered_host_address_fails_before_native_observation() {
             .allocate(
                 MemoryKind::RegisteredHost {
                     address: 0,
-                    cache: HostCachePolicy::Fine,
+                    policy: HostMappingPolicy::Fine,
                 },
                 DeviceAccess::READ | DeviceAccess::WRITE,
             )
@@ -2131,7 +2131,7 @@ fn memory_fault_reaches_each_subscriber_without_inventing_device_loss() {
         read_only: true,
         no_execute: false,
         imprecise: false,
-        error_type: 0,
+        cause: GpuMemoryFaultCause::None,
     });
     assert_eq!(first.poll().unwrap(), Some(expected));
     assert_eq!(second.poll().unwrap(), Some(expected));
@@ -2245,9 +2245,9 @@ fn later_hardware_loss_is_reported_after_a_nonterminal_exception() {
         subscriber.poll().unwrap(),
         Some(DeviceEvent::GpuHardwareException(GpuHardwareException {
             endpoint_id: Some([42; 16]),
-            reset_type: 1,
+            scope: GpuResetScope::Other,
             memory_lost: false,
-            reset_cause: 1,
+            cause: GpuResetCause::Ecc,
         }))
     );
     assert_eq!(subscriber.poll().unwrap(), None);
@@ -2261,9 +2261,9 @@ fn later_hardware_loss_is_reported_after_a_nonterminal_exception() {
         subscriber.poll().unwrap(),
         Some(DeviceEvent::GpuHardwareException(GpuHardwareException {
             endpoint_id: Some([42; 16]),
-            reset_type: 1,
+            scope: GpuResetScope::Other,
             memory_lost: true,
-            reset_cause: 1,
+            cause: GpuResetCause::Ecc,
         }))
     );
     assert_eq!(subscriber.poll().unwrap(), None);
@@ -2275,7 +2275,7 @@ fn failed_native_rearm_retries_without_replaying_the_record() {
     let mut subscriber = fixture.vm.subscribe_events().unwrap();
     fixture
         .hardware_reset_errno
-        .store(5, Ordering::Release);
+        .store(errno::EIO as u32, Ordering::Release);
     fixture.hardware.store(1, Ordering::Release);
     assert!(matches!(
         subscriber.poll().unwrap(),

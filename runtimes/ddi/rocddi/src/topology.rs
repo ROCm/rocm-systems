@@ -196,14 +196,14 @@ pub struct GpuQueueCapabilities {
     pub aql_system_cache_control: bool,
     /// Direct native PM4 transport is implemented for this endpoint.
     pub pm4: bool,
-    /// Bounded DRM-mediated PM4 submission is qualified for this endpoint.
+    /// Bounded driver-mediated PM4 submission is qualified for this endpoint.
     pub kernel_pm4: bool,
     /// System-memory release/acquire through PM4 cache controls is qualified
     /// for this endpoint and host architecture.
     pub pm4_system_cache_control: bool,
     /// Direct monotonic-64-bit SDMA transport is implemented.
     pub sdma: bool,
-    /// Bounded DRM-mediated SDMA submission is qualified for this endpoint.
+    /// Bounded driver-mediated SDMA submission is qualified for this endpoint.
     pub kernel_sdma: bool,
     /// System-memory release/acquire through the selected SDMA protocol is
     /// qualified for this endpoint and host architecture.

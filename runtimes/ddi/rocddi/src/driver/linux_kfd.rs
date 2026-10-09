@@ -33,8 +33,8 @@ use crate::memory::interop::linux::{
     KfdSvmLocation,
 };
 use crate::memory::{
-    AllocationDesc, AllocationLimits, DeviceAccess, HostCachePolicy, HostRegistration, MemoryKind,
-    OwnedMemoryKind, VirtualAddressInfo, VirtualMemoryInfo,
+    AllocationDesc, AllocationLimits, DeviceAccess, HostMappingPolicy, HostRegistration,
+    MemoryKind, OwnedMemoryKind, VirtualAddressInfo, VirtualMemoryInfo,
 };
 use crate::os::native_error;
 use crate::profiling::ClockCounters;

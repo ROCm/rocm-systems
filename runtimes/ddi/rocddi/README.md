@@ -120,7 +120,8 @@ The core source is organized by ownership domain:
 - `device.rs` owns explicitly activated endpoint state, core lifecycle checks,
   kind-neutral introspection, and device-event subscriptions. `gpu/` is the
   checked GPU capability view and exposes GPU queues and profiling.
-  Linux-specific signal events remain below `gpu::event::linux`;
+  Linux-specific signal events live in `event/linux.rs` and are exposed below
+  `gpu::event::linux`;
 - `memory.rs` and `memory/` own driver-generic allocation,
   address-reservation, and mapping owners. A virtual-address reservation
   verifies that every device uses the selected driver, intersects their
@@ -129,8 +130,10 @@ The core source is organized by ownership domain:
   KFD IPC, KFD SVM, and AIS file-transfer contracts used with Linux APIs and
   other processes;
 - `driver.rs` defines the private driver and resource interfaces;
-  `driver/instance.rs` owns installed-driver and activated-device routing. The
-  Linux KFD and DRM implementation lives in `driver/linux_kfd.rs` and
+  `driver/instance.rs` owns installed-driver and activated-device routing, while
+  `driver/resources.rs` pairs concrete drivers with allocation, virtual-memory,
+  and queue owners. Validation and retryable cleanup stay in the generic owner
+  modules. The Linux KFD and DRM implementation lives in `driver/linux_kfd.rs` and
   `driver/linux_kfd/`. Its `operations.rs` implements the shared driver
   contracts; `interop.rs` provides KFD and DRM sharing operations. KFD and DRM
   owners remain with that driver;
@@ -171,7 +174,7 @@ invokes a frontend callback while holding the native observation lock.
 
 The [safety boundary and resource state guide](docs/safety.md) records the
 native reachability rules shared by the core and both adapters.
-Owned and caller-owned host pages use `HostCachePolicy` to select the GPU
+Owned and caller-owned host pages use `HostMappingPolicy` to select the GPU
 mapping. In the primary KFD context, coarse USERPTR omits the coherent flag;
 fine adds it, extended also adds extended coherency, and uncached adds the
 uncached flag while retaining coherent access. The caller keeps registered
@@ -222,8 +225,9 @@ of device-to-device, host-to-device, and device-to-host linear copies. It stages
 each host operand when that entry runs and retires each packet before starting
 the next entry. Any operation failure makes the sequence terminal. rocddi
 queries the DRM DMA IP ring mask for an activated GFX1201 device.
-`GpuCopySequence::begin_on_sdma_ring` binds its command context to one
-advertised DRM ring; submission and completion waits use that same ring.
+`GpuCopySequence::begin_on_sdma_engine` binds its command context to one
+advertised logical SDMA engine; submission and completion waits use that same
+engine. The platform driver maps the logical index to its submission target.
 The default copy path uses ring zero. The same native owner encodes OSS5 linear
 and constant-fill packets with system cache control, splits large transfers
 into bounded packets, and reuses command backing only

@@ -96,7 +96,7 @@ impl KfdKernelQueue {
         let (ip_type, ring) = match format {
             KernelQueueFormat::Pm4 => (drm::HW_IP_COMPUTE, 0),
             KernelQueueFormat::Sdma => (drm::HW_IP_DMA, 0),
-            KernelQueueFormat::SdmaOnRing(ring) => {
+            KernelQueueFormat::SdmaOnEngine(ring) => {
                 if ring >= u32::BITS
                     || drm::sdma_available_rings(vm.render()?)
                         .map_err(|source| native_error("DRM SDMA ring query", source))?
@@ -522,7 +522,7 @@ mod tests {
             ],
             || {
                 let mut queue =
-                    KfdKernelQueue::create(vm.clone(), KernelQueueFormat::SdmaOnRing(1)).unwrap();
+                    KfdKernelQueue::create(vm.clone(), KernelQueueFormat::SdmaOnEngine(1)).unwrap();
                 let submission = queue
                     .submit(KernelCommand {
                         device_address: 0x1000,
@@ -537,7 +537,7 @@ mod tests {
             },
         );
         drm::with_script([drm::TestCall::QuerySdmaRings(Ok(0b01))], || {
-            let error = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::SdmaOnRing(1))
+            let error = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::SdmaOnEngine(1))
                 .err()
                 .unwrap();
             assert_eq!(error.kind(), ErrorKind::InvalidArgument);

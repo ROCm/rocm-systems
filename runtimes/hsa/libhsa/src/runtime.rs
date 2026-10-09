@@ -26,7 +26,8 @@ use std::time::Duration;
 use crate::platform::event::{SignalEvent, SignalEventPage};
 use rocddi::device::Device;
 use rocddi::device::event::{
-    DeviceEvent, DeviceEventSubscription, GpuHardwareException, GpuMemoryFault, subscribe,
+    DeviceEvent, DeviceEventSubscription, GpuHardwareException, GpuMemoryFault,
+    GpuMemoryFaultCause, GpuResetCause, subscribe,
 };
 use rocddi::memory::Allocation;
 use rocddi::session::{DriverContextLifetime, Session};
@@ -264,11 +265,11 @@ fn memory_fault_event(agent: HsaAgent, fault: GpuMemoryFault) -> HsaAmdEvent {
     if fault.imprecise {
         reason |= AMD_MEMORY_FAULT_IMPRECISE;
     }
-    reason |= match fault.error_type {
-        1 => AMD_MEMORY_FAULT_SRAM_ECC,
-        2 => AMD_MEMORY_FAULT_DRAM_ECC,
-        3 => AMD_MEMORY_FAULT_HANG,
-        _ => 0,
+    reason |= match fault.cause {
+        GpuMemoryFaultCause::SramEcc => AMD_MEMORY_FAULT_SRAM_ECC,
+        GpuMemoryFaultCause::DramEcc => AMD_MEMORY_FAULT_DRAM_ECC,
+        GpuMemoryFaultCause::Hang => AMD_MEMORY_FAULT_HANG,
+        GpuMemoryFaultCause::None | GpuMemoryFaultCause::Other => 0,
     };
     HsaAmdEvent {
         event_type: AMD_GPU_MEMORY_FAULT_EVENT,
@@ -277,10 +278,9 @@ fn memory_fault_event(agent: HsaAgent, fault: GpuMemoryFault) -> HsaAmdEvent {
 }
 
 fn hardware_exception_event(agent: HsaAgent, exception: GpuHardwareException) -> HsaAmdEvent {
-    let cause = if exception.reset_cause == 1 {
-        AMD_HW_EXCEPTION_CAUSE_ECC
-    } else {
-        AMD_HW_EXCEPTION_CAUSE_GPU_HANG
+    let cause = match exception.cause {
+        GpuResetCause::Ecc => AMD_HW_EXCEPTION_CAUSE_ECC,
+        GpuResetCause::Hang | GpuResetCause::Other => AMD_HW_EXCEPTION_CAUSE_GPU_HANG,
     };
     HsaAmdEvent {
         event_type: AMD_GPU_HW_EXCEPTION_EVENT,
@@ -1576,11 +1576,11 @@ mod tests {
     #[test]
     fn memory_fault_events_match_the_amd_extension_layout() {
         let agent = HsaAgent { handle: 0x1234 };
-        for (error_type, extra_reason) in [
-            (0, 0),
-            (1, AMD_MEMORY_FAULT_SRAM_ECC),
-            (2, AMD_MEMORY_FAULT_DRAM_ECC),
-            (3, AMD_MEMORY_FAULT_HANG),
+        for (cause, extra_reason) in [
+            (GpuMemoryFaultCause::None, 0),
+            (GpuMemoryFaultCause::SramEcc, AMD_MEMORY_FAULT_SRAM_ECC),
+            (GpuMemoryFaultCause::DramEcc, AMD_MEMORY_FAULT_DRAM_ECC),
+            (GpuMemoryFaultCause::Hang, AMD_MEMORY_FAULT_HANG),
         ] {
             let event = memory_fault_event(
                 agent,
@@ -1591,7 +1591,7 @@ mod tests {
                     read_only: true,
                     no_execute: true,
                     imprecise: true,
-                    error_type,
+                    cause,
                 },
             );
             assert_eq!(event.event_type, AMD_GPU_MEMORY_FAULT_EVENT);
@@ -1613,17 +1613,17 @@ mod tests {
     #[test]
     fn hardware_exception_events_match_the_amd_extension_layout() {
         let agent = HsaAgent { handle: 0x1234 };
-        for (native_cause, expected_cause) in [
-            (0, AMD_HW_EXCEPTION_CAUSE_GPU_HANG),
-            (1, AMD_HW_EXCEPTION_CAUSE_ECC),
+        for (cause, expected_cause) in [
+            (GpuResetCause::Hang, AMD_HW_EXCEPTION_CAUSE_GPU_HANG),
+            (GpuResetCause::Ecc, AMD_HW_EXCEPTION_CAUSE_ECC),
         ] {
             let event = hardware_exception_event(
                 agent,
                 GpuHardwareException {
                     endpoint_id: Some([42; 16]),
-                    reset_type: 0,
+                    scope: rocddi::device::event::GpuResetScope::WholeGpu,
                     memory_lost: false,
-                    reset_cause: native_cause,
+                    cause,
                 },
             );
             assert_eq!(event.event_type, AMD_GPU_HW_EXCEPTION_EVENT);

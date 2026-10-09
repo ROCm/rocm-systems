@@ -259,7 +259,7 @@ fn export_owns_the_returned_descriptor_on_success_and_failure() {
                 panic!("unexpected DMA-BUF export call")
             };
             assert_eq!(args.handle, 17);
-            assert_eq!(args.flags, O_CLOEXEC);
+            assert_eq!(args.flags, libc::O_CLOEXEC as u32);
             args.descriptor = u32::try_from(returned).unwrap();
             errno.map_or(Ok(()), |code| Err(io::Error::from_raw_os_error(code)))
         }));

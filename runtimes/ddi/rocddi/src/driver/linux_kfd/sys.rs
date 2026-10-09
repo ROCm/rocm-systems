@@ -46,8 +46,6 @@ unsafe extern "C" {
     fn syscall(number: c_long, ...) -> c_long;
 }
 
-const O_CLOEXEC: u32 = 0x0008_0000;
-
 /// The typed call also keeps indirect buffers borrowed during fault injection.
 /// Test doubles can inspect and modify outputs without following raw pointers.
 /// Production dispatch goes straight from this match to the kernel ioctl.
@@ -633,7 +631,7 @@ impl Kfd {
     pub(super) fn export_dma_buf(&self, handle: u64) -> io::Result<File> {
         let mut args = uapi::ExportDmaBuf {
             handle,
-            flags: O_CLOEXEC,
+            flags: libc::O_CLOEXEC as u32,
             ..uapi::ExportDmaBuf::default()
         };
         let result = self.call(Call::ExportDmaBuf(&mut args));

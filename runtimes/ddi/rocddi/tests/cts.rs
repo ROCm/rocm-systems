@@ -23,7 +23,7 @@ use rocddi::gpu::queue::{
 };
 use rocddi::gpu::{CopyRect, GpuCopySequence};
 use rocddi::memory::interop::linux::{AisFileOperation, ais_transfer};
-use rocddi::memory::{DeviceAccess, HostCachePolicy, MemoryKind};
+use rocddi::memory::{DeviceAccess, HostMappingPolicy, MemoryKind};
 use rocddi::session::{DriverContextLifetime, Session};
 
 #[test]
@@ -279,19 +279,19 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     }
     assert_eq!(&destination_bytes[..64], &source_bytes[..64]);
 
-    let ring_mask = gpu.available_sdma_rings()?;
-    assert_ne!(ring_mask & 1, 0);
-    for ring in 0..u32::BITS {
-        if ring_mask & (1_u32 << ring) == 0 {
+    let engine_mask = gpu.available_sdma_engines()?;
+    assert_ne!(engine_mask & 1, 0);
+    for engine in 0..u32::BITS {
+        if engine_mask & (1_u32 << engine) == 0 {
             continue;
         }
         destination_bytes[..64].fill(0xa5);
-        let mut sequence = match GpuCopySequence::begin_on_sdma_ring(gpu, &cancel, ring) {
+        let mut sequence = match GpuCopySequence::begin_on_sdma_engine(gpu, &cancel, engine) {
             Ok(sequence) => sequence,
             Err(failure) => return Err(Box::new(failure.error)),
         };
         // SAFETY: Both system allocations remain GPU-mapped until this
-        // selected-ring submission retires or its owners are retained.
+        // selected-engine submission retires or its owners are retained.
         if let Err(failure) = unsafe {
             sequence.copy_linear(
                 destination_info.device_address,
@@ -724,7 +724,7 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
 
     let mut uncached_host = device.allocate(
         MemoryKind::OwnedHost {
-            cache: HostCachePolicy::Uncached,
+            policy: HostMappingPolicy::Uncached,
         },
         4096,
         4096,
@@ -771,11 +771,12 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     drop(uncached_host);
 
     for cache in [
-        HostCachePolicy::Coarse,
-        HostCachePolicy::Fine,
-        HostCachePolicy::Extended,
+        HostMappingPolicy::Coarse,
+        HostMappingPolicy::Fine,
+        HostMappingPolicy::Extended,
     ] {
-        let mut host = device.allocate(MemoryKind::OwnedHost { cache }, 4096, 4096, access)?;
+        let mut host =
+            device.allocate(MemoryKind::OwnedHost { policy: cache }, 4096, 4096, access)?;
         let info = host.info();
         assert_eq!(info.host_address, Some(info.device_address as usize));
         host.free()?;
@@ -789,7 +790,13 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     // SAFETY: The aligned 4096-byte page lies inside the boxed 8192-byte
     // extent. The box stays mapped until native deregistration succeeds.
     let mut registered = match unsafe {
-        device.register_host(host_address, HostCachePolicy::Uncached, 4096, 4096, access)
+        device.register_host(
+            host_address,
+            HostMappingPolicy::Uncached,
+            4096,
+            4096,
+            access,
+        )
     } {
         Ok(registered) => registered,
         Err(error) => {
@@ -848,9 +855,9 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     drop(registered);
 
     for cache in [
-        HostCachePolicy::Coarse,
-        HostCachePolicy::Fine,
-        HostCachePolicy::Extended,
+        HostMappingPolicy::Coarse,
+        HostMappingPolicy::Fine,
+        HostMappingPolicy::Extended,
     ] {
         // SAFETY: The boxed page cover remains live through successful
         // deregistration or is retained on uncertain native cleanup.
@@ -938,7 +945,7 @@ fn gfx1201_secondary_extended_host_contract() -> Result<(), Box<dyn Error>> {
     let mut registered = match unsafe {
         device.register_host(
             host_address,
-            HostCachePolicy::Extended,
+            HostMappingPolicy::Extended,
             BYTES as u64,
             BYTES as u64,
             access,
