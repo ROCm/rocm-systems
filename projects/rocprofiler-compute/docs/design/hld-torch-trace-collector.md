@@ -90,28 +90,23 @@ between those formats.
 ## Analysis path
 
 Profile copies marker CSVs unchanged. `--list-*-operators` / `--*-operator`
-rename on-disk `Correlation_Id` to `Correlation_ID`, then full-outer-join
-each pass on `Correlation_ID` (plus `GUID` when both files have that column),
-consolidate matching operator calls, parse Function, then nest marker
-intervals per `Thread_Id`.
+rename on-disk `Correlation_Id` to `Correlation_ID` and join each pass on
+that column, parse Function, then nest marker intervals per `Thread_Id`.
+`Correlation_ID` is the in-memory per-pass join key after that rename.
 
-The across-pass stitch key keeps `seqNr`, `tid`, and `ftid` and omits `ltid`,
-plus `function_ordinal`. `Correlation_ID` is the in-memory per-pass join key
-after that rename.
-
-Those flags record `UnaccountedKernelError` when a kernel's `Correlation_ID`
-is not in the marker CSV, and report it after the call tree. Plain analyze
-without those flags does not join and does not report that error.
+Those flags print warnings after the call tree. Plain analyze without
+those flags does not join and does not report those warnings.
 
 Collapsed GPU time and kernel lists come from pass 0 (collapse, not fold).
 Printed identical sibling fold is display-only and does not mutate the forest.
-Both `--list-*-operators` and `--*-operator` call `filter_forest_by_backends`
-before kernel ids. Operator filter then globs on that confined view.
+Operator flags confine the forest by backend, then glob on that view.
 
-Two markers on the same `Thread_Id` whose intervals overlap (neither nested
-nor adjacent) record `OverlappingMarkerRangeError`. Adjacent ranges
-(`A.end == B.start`) are siblings. Analysis also uses the launcher id and
-interval containment to attach worker ranges to the launcher's call.
+Adjacent ranges (`A.end == B.start`) are siblings. Analysis also uses the
+launcher id and interval containment to attach worker ranges to the
+launcher's call.
+
+Join steps and recorded error types are in the
+[low-level design](lld-torch-trace-collector.md).
 
 ## Build and runtime compatibility
 
