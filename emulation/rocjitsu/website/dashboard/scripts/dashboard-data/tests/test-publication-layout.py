@@ -1,4 +1,5 @@
 """Publication layout, legacy-history and containment contracts."""
+
 import copy
 import importlib.util
 from pathlib import Path
@@ -23,16 +24,24 @@ fixtures = load_module('producer_tests', HERE / 'test-prepare-dashboard-data.py'
 @pytest.fixture
 def built(tmp_path):
     run, catalog = publisher.prepare.normalize_runs(
-        [fixtures.raw()], run_id='new', branch='develop', commit_message='Fictional',
-        machine_id='worker', trigger='auto')
+        [fixtures.raw()],
+        run_id='new',
+        branch='develop',
+        commit_message='Fictional',
+        machine_id='worker',
+        trigger='auto',
+    )
     root = tmp_path / 'built'
     publisher.prepare.write_built_run(root, run, catalog)
     return root, run, catalog
 
 
 def snapshot(root):
-    return {p.relative_to(root).as_posix(): p.read_bytes()
-            for p in root.rglob('*') if p.is_file()}
+    return {
+        p.relative_to(root).as_posix(): p.read_bytes()
+        for p in root.rglob('*')
+        if p.is_file()
+    }
 
 
 @pytest.mark.parametrize('version', [1, None])
@@ -43,13 +52,17 @@ def test_flat_legacy_history_remains_byte_preserved(built, tmp_path, version):
     if version is not None:
         legacy['schemaVersion'] = version
     publisher.prepare.write_json(root / 'runs/legacy.json', legacy)
-    publisher.prepare.write_json(root / 'index.json', {
-        'generatedAt': '2026-01-01T02:00:00Z', 'runFiles': ['runs/legacy.json']})
+    publisher.prepare.write_json(
+        root / 'index.json',
+        {'generatedAt': '2026-01-01T02:00:00Z', 'runFiles': ['runs/legacy.json']},
+    )
     original = (root / 'runs/legacy.json').read_bytes()
     publisher.write_dataset(root, run, catalog)
     assert (root / 'runs/legacy.json').read_bytes() == original
     assert publisher.prepare.read_json(root / 'index.json')['runFiles'] == [
-        'runs/legacy.json', 'runs/default-branch/new.json']
+        'runs/legacy.json',
+        'runs/default-branch/new.json',
+    ]
     before = snapshot(root)
     publisher.write_dataset(root, run, catalog)
     assert snapshot(root) == before
@@ -61,14 +74,18 @@ def test_flat_legacy_history_remains_byte_preserved(built, tmp_path, version):
     assert snapshot(root) == before
 
 
-@pytest.mark.parametrize('name,version', [
-    ('runs/old.json', 2),
-    ('runs/old.json', None),
-    ('runs/default-branch/old.json', None),
-    ('runs/side-branches/old.json', 2),
-])
+@pytest.mark.parametrize(
+    'name,version',
+    [
+        ('runs/old.json', 2),
+        ('runs/old.json', None),
+        ('runs/default-branch/old.json', None),
+        ('runs/side-branches/old.json', 2),
+    ],
+)
 def test_invalid_historical_layout_or_unversioned_configurations_require_migration(
-        built, tmp_path, name, version):
+    built, tmp_path, name, version
+):
     _, run, catalog = built
     root = tmp_path / 'published'
     historical = copy.deepcopy(run)
@@ -76,18 +93,24 @@ def test_invalid_historical_layout_or_unversioned_configurations_require_migrati
     if version is None:
         historical.pop('schemaVersion')
     publisher.prepare.write_json(root / name, historical)
-    publisher.prepare.write_json(root / 'index.json', {
-        'generatedAt': '2026-01-01T02:00:00Z', 'runFiles': [name]})
+    publisher.prepare.write_json(
+        root / 'index.json', {'generatedAt': '2026-01-01T02:00:00Z', 'runFiles': [name]}
+    )
     before = snapshot(root)
     with pytest.raises(ValueError, match='migration|directory|schema'):
         publisher.write_dataset(root, run, catalog)
     assert snapshot(root) == before
 
 
-@pytest.mark.parametrize('name', [
-    'runs/new.json', 'runs/side-branches/new.json',
-    'runs/side-branches/feature/new.json', 'runs/default-branch/wrong.json',
-])
+@pytest.mark.parametrize(
+    'name',
+    [
+        'runs/new.json',
+        'runs/side-branches/new.json',
+        'runs/side-branches/feature/new.json',
+        'runs/default-branch/wrong.json',
+    ],
+)
 def test_built_layout_matches_source_branch_and_id(built, name):
     root, _, _ = built
     destination = root / name
@@ -117,10 +140,18 @@ def test_built_directory_requires_exactly_one_run_across_groups(built):
 
 
 @pytest.mark.parametrize('target', ['run', 'directory', 'catalog'])
-def test_built_symlinks_rejected_without_touching_external_files(built, tmp_path, target):
+def test_built_symlinks_rejected_without_touching_external_files(
+    built, tmp_path, target
+):
     root, run, _ = built
-    path = root / {'run': 'runs/default-branch/new.json',
-                   'directory': 'runs/default-branch', 'catalog': run['testCatalog']}[target]
+    path = (
+        root
+        / {
+            'run': 'runs/default-branch/new.json',
+            'directory': 'runs/default-branch',
+            'catalog': run['testCatalog'],
+        }[target]
+    )
     outside = tmp_path / 'outside'
     path.rename(outside)
     path.symlink_to(outside, target_is_directory=target == 'directory')

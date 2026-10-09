@@ -15,4 +15,3 @@ export function createFeedbackPublication() {
   publication.index.runFiles.push(fixtureRunPath(run));
   return publication;
 }
-

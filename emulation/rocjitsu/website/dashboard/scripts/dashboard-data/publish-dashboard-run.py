@@ -7,6 +7,7 @@ run path is absent, append it and set generatedAt. An indexed run whose file
 already matches is left unchanged, including generatedAt. Publication metadata
 is never read or written: website configuration is bundled with the frontend.
 """
+
 import argparse
 from datetime import datetime, timezone
 import importlib.util
@@ -32,32 +33,50 @@ def load_index(root, source):
         return None
     index = prepare.read_json(root / 'index.json')
     names = index['runFiles']
-    prepare.require(isinstance(names, list) and all(isinstance(name, str) and
-                    re.fullmatch(r'runs/(?:default-branch/|side-branches/)?[A-Za-z0-9._-]+\.json', name) for name in names),
-                    'Invalid indexed run filename')
+    prepare.require(
+        isinstance(names, list)
+        and all(
+            isinstance(name, str)
+            and re.fullmatch(
+                r'runs/(?:default-branch/|side-branches/)?[A-Za-z0-9._-]+\.json', name
+            )
+            for name in names
+        ),
+        'Invalid indexed run filename',
+    )
     prepare.require(len(names) == len(set(names)), 'Duplicate indexed run filename')
     prepare.instant(index['generatedAt'])
     for name in names:
         previous_run = prepare.read_json(root / name)
         version = previous_run.get('schemaVersion', 1)
-        prepare.require(type(version) is int and version in (1, 2),
-                        f'Unsupported run schema; explicit migration required: {name}')
+        prepare.require(
+            type(version) is int and version in (1, 2),
+            f'Unsupported run schema; explicit migration required: {name}',
+        )
         if version == 1:
-            prepare.require(isinstance(previous_run.get('targets'), list)
-                            and 'configurations' not in previous_run,
-                            f'Legacy run schema requires target groups; explicit migration required: {name}')
+            prepare.require(
+                isinstance(previous_run.get('targets'), list)
+                and 'configurations' not in previous_run,
+                f'Legacy run schema requires target groups; explicit migration required: {name}',
+            )
         flat = re.fullmatch(r'runs/[A-Za-z0-9._-]+\.json', name)
         if flat:
-            prepare.require(version == 1,
-                            f'Flat run paths require legacy schema 1; explicit migration required: {name}')
+            prepare.require(
+                version == 1,
+                f'Flat run paths require legacy schema 1; explicit migration required: {name}',
+            )
         else:
-            prepare.require(name == prepare.run_filename(previous_run),
-                            f'Indexed run directory does not match source.branch or id: {name}')
+            prepare.require(
+                name == prepare.run_filename(previous_run),
+                f'Indexed run directory does not match source.branch or id: {name}',
+            )
         previous_source = previous_run['source']
         if previous_source['commit'] == source['commit']:
             prepare.require(
-                prepare.instant(previous_source['committedAt']) == prepare.instant(source['committedAt']),
-                'Commit has conflicting committedAt values')
+                prepare.instant(previous_source['committedAt'])
+                == prepare.instant(source['committedAt']),
+                'Commit has conflicting committedAt values',
+            )
     return index
 
 
@@ -75,14 +94,19 @@ def write_dataset(root, run, catalog):
     # even when the old file is an orphan or a historical flat legacy record.
     for directory in ('runs', 'runs/default-branch', 'runs/side-branches'):
         previous_path = f"{directory}/{run['id']}.json"
-        prepare.require(previous_path == run_path or not (root / previous_path).exists(),
-                        f'Immutable resource conflict: {previous_path}')
+        prepare.require(
+            previous_path == run_path or not (root / previous_path).exists(),
+            f'Immutable resource conflict: {previous_path}',
+        )
     resources = {run['testCatalog']: catalog, run_path: run}
     # Check all conflicts before writing anything, including unindexed resources.
     for name, value in resources.items():
         if (root / name).exists():
-            prepare.require(prepare.canonical(prepare.read_json(root / name)) == prepare.canonical(value),
-                            f'Immutable resource conflict: {name}')
+            prepare.require(
+                prepare.canonical(prepare.read_json(root / name))
+                == prepare.canonical(value),
+                f'Immutable resource conflict: {name}',
+            )
     run_files = index['runFiles'] if index else []
     if run_path not in run_files:
         index = {
@@ -100,35 +124,52 @@ def load_built(source):
     prepare.validate_output_path(source)
     prepare.require(source.is_dir(), 'Built data directory is missing')
     run_dir = source / 'runs'
-    prepare.require(run_dir.is_dir() and not run_dir.is_symlink(),
-                    'Built data must contain a runs directory')
+    prepare.require(
+        run_dir.is_dir() and not run_dir.is_symlink(),
+        'Built data must contain a runs directory',
+    )
     runs = sorted(path for path in run_dir.rglob('*') if path.is_file())
     prepare.require(len(runs) == 1, 'Built data must contain exactly one run file')
     run_path = runs[0]
-    prepare.require(re.fullmatch(
-        r'runs/(?:default-branch|side-branches)/[A-Za-z0-9._-]+\.json',
-        run_path.relative_to(source).as_posix()),
-                    'Invalid built run filename')
+    prepare.require(
+        re.fullmatch(
+            r'runs/(?:default-branch|side-branches)/[A-Za-z0-9._-]+\.json',
+            run_path.relative_to(source).as_posix(),
+        ),
+        'Invalid built run filename',
+    )
     run = prepare.read_json(run_path)
-    prepare.require(isinstance(run.get('id'), str) and run_path.name == f"{run['id']}.json",
-                    'Built run filename must match its id')
-    prepare.require(type(run.get('schemaVersion')) is int and run['schemaVersion'] == 2,
-                    'Built run requires numeric schemaVersion 2; migrate older runs explicitly')
-    prepare.require(run_path.relative_to(source).as_posix() == prepare.run_filename(run),
-                    'Built run directory does not match source.branch')
+    prepare.require(
+        isinstance(run.get('id'), str) and run_path.name == f"{run['id']}.json",
+        'Built run filename must match its id',
+    )
+    prepare.require(
+        type(run.get('schemaVersion')) is int and run['schemaVersion'] == 2,
+        'Built run requires numeric schemaVersion 2; migrate older runs explicitly',
+    )
+    prepare.require(
+        run_path.relative_to(source).as_posix() == prepare.run_filename(run),
+        'Built run directory does not match source.branch',
+    )
     catalog_name = run.get('testCatalog')
-    prepare.require(isinstance(catalog_name, str) and re.fullmatch(
-        r'test-catalogs/[A-Za-z0-9._-]+\.json', catalog_name),
-        'Built run references an invalid catalog')
+    prepare.require(
+        isinstance(catalog_name, str)
+        and re.fullmatch(r'test-catalogs/[A-Za-z0-9._-]+\.json', catalog_name),
+        'Built run references an invalid catalog',
+    )
     catalog = prepare.read_json(source / catalog_name)
     return run, catalog
 
 
 def validate_compatibility_arguments(repository, is_beta):
     url = prepare.urlsplit(repository)
-    prepare.require(url.scheme in ('http', 'https') and url.hostname
-                    and url.username is None and url.password is None,
-                    'repository must be a safe HTTP URL')
+    prepare.require(
+        url.scheme in ('http', 'https')
+        and url.hostname
+        and url.username is None
+        and url.password is None,
+        'repository must be a safe HTTP URL',
+    )
     prepare.require(type(is_beta) is bool, 'is-beta must be boolean')
 
 
@@ -141,15 +182,28 @@ def publish(source, data_dir, repository, is_beta=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--from', dest='source', required=True,
-                        help='Directory written by prepare-dashboard-data.py')
-    parser.add_argument('--data-dir', required=True,
-                        help='Publication data directory whose index.json is updated')
-    parser.add_argument('--repository', required=True,
-                        help='Compatibility argument: validated HTTP URL, otherwise ignored; '
-                             'repository settings are bundled with the website')
-    parser.add_argument('--is-beta', action='store_true',
-                        help='Compatibility flag, ignored; beta settings are bundled with the website')
+    parser.add_argument(
+        '--from',
+        dest='source',
+        required=True,
+        help='Directory written by prepare-dashboard-data.py',
+    )
+    parser.add_argument(
+        '--data-dir',
+        required=True,
+        help='Publication data directory whose index.json is updated',
+    )
+    parser.add_argument(
+        '--repository',
+        required=True,
+        help='Compatibility argument: validated HTTP URL, otherwise ignored; '
+        'repository settings are bundled with the website',
+    )
+    parser.add_argument(
+        '--is-beta',
+        action='store_true',
+        help='Compatibility flag, ignored; beta settings are bundled with the website',
+    )
     args = parser.parse_args()
     try:
         run = publish(args.source, args.data_dir, args.repository, args.is_beta)
