@@ -119,7 +119,7 @@ TeamFcollectTester<T1>::TeamFcollectTester(TesterArguments args)
   else if constexpr (std::is_same<T1, __half>::value ||
                      std::is_same<T1, __hip_bfloat16>::value) {
     for (int i = 0; i < total_elems; ++i) {
-      source_buf[i] = static_cast<T1>(3.14f + my_pe);
+      source_buf[i] = static_cast<T1>(3.5f + my_pe);
     }
   }
   else if constexpr (std::is_floating_point<T1>::value) {
@@ -216,7 +216,7 @@ void TeamFcollectTester<T1>::verifyResults(size_t size) {
         }
         else if constexpr (std::is_same<T1, __half>::value ||
                            std::is_same<T1, __hip_bfloat16>::value) {
-          expected = static_cast<T1>(3.14f + pe);
+          expected = static_cast<T1>(3.5f + pe);
         }
         else if constexpr (std::is_floating_point<T1>::value) {
           expected = static_cast<T1>(3.14 + pe);

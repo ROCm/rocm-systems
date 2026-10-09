@@ -220,7 +220,7 @@ void TeamAlltoallvTester<T1>::resetBuffers(size_t size) {
       }
       else if constexpr (std::is_same<T1, __half>::value ||
                          std::is_same<T1, __hip_bfloat16>::value) {
-        source_buf[idx] = static_cast<T1>(3.14f + my_pe + pe);
+        source_buf[idx] = static_cast<T1>(3.5f + my_pe + pe);
       }
       else if constexpr (std::is_floating_point<T1>::value) {
         source_buf[idx] = static_cast<T1>(3.14 + my_pe + pe);
