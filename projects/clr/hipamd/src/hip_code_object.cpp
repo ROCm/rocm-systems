@@ -24,21 +24,24 @@ hipError_t ihipFree(void* ptr);
 // forward declaration of methods required for managed variables
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 
-hipError_t DynCO::loadCodeObject(const char* fname, const void* image) {
+hipError_t DynCO::loadCodeObject(const char* fname, const void* image, bool init_global_vars,
+                                 std::vector<char>* image_storage) {
   std::scoped_lock lock(dclock_);
 
   // Number of devices = 1 in dynamic code object
   fb_info_ = new FatBinaryInfo(fname, image);
-  std::vector<hip::Device*> devices = {g_devices[ihipGetDevice()]};
-  IHIP_RETURN_ONFAIL(fb_info_->ExtractFatBinaryUsingCOMGR(devices));
+  std::vector<hip::Device*> devices = {g_devices[device_id_]};
+  IHIP_RETURN_ONFAIL(fb_info_->ExtractFatBinaryUsingCOMGR(devices, image_storage));
 
   // No Lazy loading for DynCO
-  IHIP_RETURN_ONFAIL(fb_info_->BuildProgram(ihipGetDevice()));
+  IHIP_RETURN_ONFAIL(fb_info_->BuildProgram(device_id_));
 
   module_ = fb_info_->Module(device_id_);
 
-  // Define Global variables
-  IHIP_RETURN_ONFAIL(populateDynGlobalVars());
+  if (init_global_vars) {
+    // Primary library/module loads own global and managed-variable state.
+    IHIP_RETURN_ONFAIL(populateDynGlobalVars());
+  }
 
   // Define Global functions
   IHIP_RETURN_ONFAIL(populateDynGlobalFuncs());
@@ -144,7 +147,7 @@ hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, const std::string& func_name)
   }
 
   /* See if this could be solved */
-  return it->second->GetDynFunc(hfunc, module_);
+  return it->second->GetDynFunc(hfunc, module_, device_id_);
 }
 
 hipError_t DynCO::getFuncCount(unsigned int* count) {
@@ -166,7 +169,7 @@ hipError_t DynCO::enumerateFunctions(hipFunction_t* functions, unsigned int numF
       break;
     }
     hipFunction_t hfunc = nullptr;
-    auto ret = kv.second->GetDynFunc(&hfunc, module_);
+    auto ret = kv.second->GetDynFunc(&hfunc, module_, device_id_);
     if (ret != hipSuccess) {
       return ret;
     }
@@ -234,8 +237,8 @@ hipError_t DynCO::populateDynGlobalVars() {
   std::vector<std::string> var_names;
   std::string managedVarExt = ".managed";
   // For Dynamic Modules there is only one hipFatBinaryDevInfo_
-  device::Program* dev_program = fb_info_->GetProgram(ihipGetDevice())
-                                     ->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
+  device::Program* dev_program =
+      fb_info_->GetProgram(device_id_)->getDeviceProgram(*g_devices[device_id_]->devices()[0]);
 
   if (!dev_program->getGlobalVarFromCodeObj(&var_names)) {
     LogPrintfError("Could not get Global vars from Code Obj for Module: 0x%x", module_);
@@ -261,8 +264,8 @@ hipError_t DynCO::populateDynGlobalFuncs() {
   std::scoped_lock lock(dclock_);
 
   std::vector<std::string> func_names;
-  device::Program* dev_program = fb_info_->GetProgram(ihipGetDevice())
-                                     ->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
+  device::Program* dev_program =
+      fb_info_->GetProgram(device_id_)->getDeviceProgram(*g_devices[device_id_]->devices()[0]);
 
   // Get all the global func names from COMGR
   if (!dev_program->getGlobalFuncFromCodeObj(&func_names)) {
