@@ -52,6 +52,22 @@ std::string Win32ErrorString(DWORD error) {
     return result + " (error " + std::to_string(error) + ")";
 }
 
+// Returns an owned copy of an environment variable, or an empty string if it
+// is not set. GetEnvironmentVariableW reads the live process environment (the
+// one the Windows loader uses), so changes made with SetEnvironmentVariableW
+// after CRT startup are seen, unlike _wgetenv's CRT copy.
+std::wstring GetEnvVar(const wchar_t *name) {
+    std::wstring value;
+    DWORD size = GetEnvironmentVariableW(name, nullptr, 0);
+    // The variable can change between calls; retry while the buffer is too small.
+    while (size > value.size()) {
+        value.resize(size);
+        size = GetEnvironmentVariableW(name, value.data(), static_cast<DWORD>(value.size()));
+    }
+    value.resize(size);
+    return value;
+}
+
 } // namespace
 #endif // _WIN32
 
@@ -95,10 +111,11 @@ std::filesystem::path VaapiLoader::FindVaDisplayLibPath() {
         }
     }
 
-    // Strategy 2: fall back to %ROCM_PATH%.
-    const wchar_t *rocm_path = _wgetenv(L"ROCM_PATH");
-    if (rocm_path) {
-        fs::path full = fs::path(rocm_path) / "lib" / "rocm_sysdeps" / "bin" / candidate;
+    // Strategy 2: fall back to %ROCM_PATH%. A relative value is ignored so the
+    // lookup never depends on the current directory.
+    fs::path rocm_path(GetEnvVar(L"ROCM_PATH"));
+    if (rocm_path.is_absolute()) {
+        fs::path full = rocm_path / "lib" / "rocm_sysdeps" / "bin" / candidate;
         if (fs::exists(full)) {
             return full;
         }
@@ -110,25 +127,23 @@ std::filesystem::path VaapiLoader::FindVaDisplayLibPath() {
     // rather than with SearchPathW, which also searches the current directory
     // and would let a DLL planted there be loaded. Relative entries (e.g. ".")
     // are skipped for the same reason.
-    const wchar_t *path_env = _wgetenv(L"PATH");
-    if (path_env) {
-        std::wstring_view entries(path_env);
-        while (!entries.empty()) {
-            size_t sep = entries.find(L';');
-            std::wstring_view entry = entries.substr(0, sep);
-            entries = (sep == std::wstring_view::npos) ? std::wstring_view() : entries.substr(sep + 1);
-            if (entry.size() >= 2 && entry.front() == L'"' && entry.back() == L'"') {
-                entry = entry.substr(1, entry.size() - 2);
-            }
-            fs::path dir(entry);
-            if (!dir.is_absolute()) {
-                continue;
-            }
-            std::error_code ec;
-            fs::path full = dir / candidate;
-            if (fs::is_regular_file(full, ec)) {
-                return full;
-            }
+    const std::wstring path_env = GetEnvVar(L"PATH");
+    std::wstring_view entries(path_env);
+    while (!entries.empty()) {
+        size_t sep = entries.find(L';');
+        std::wstring_view entry = entries.substr(0, sep);
+        entries = (sep == std::wstring_view::npos) ? std::wstring_view() : entries.substr(sep + 1);
+        if (entry.size() >= 2 && entry.front() == L'"' && entry.back() == L'"') {
+            entry = entry.substr(1, entry.size() - 2);
+        }
+        fs::path dir(entry);
+        if (!dir.is_absolute()) {
+            continue;
+        }
+        std::error_code ec;
+        fs::path full = dir / candidate;
+        if (fs::is_regular_file(full, ec)) {
+            return full;
         }
     }
 
