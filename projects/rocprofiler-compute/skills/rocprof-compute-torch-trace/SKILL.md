@@ -66,9 +66,10 @@ When counters are being spread thin across many short operator kernels,
 Profile preserves each pass's raw marker and counter CSVs with the
 `ml_api_trace` prefix. Marker `Function` cells describe one call, with
 available arguments and thread correlation fields including `ltid`; they
-contain no repeated ancestor path. Use an analysis version that understands
-this flat marker format. An older analyzer expecting stacked `:#` labels
-cannot interpret these captures correctly.
+contain no repeated ancestor path. A Function whose first token is the
+legacy stacked shape (`:#` or `#n@file:line`) makes analyze exit during
+parse, before the tree. Re-profile with current `--torch-trace` or
+`--triton-trace`.
 
 ## 3. List the captured operators
 
@@ -81,8 +82,9 @@ rocprof-compute analyze \
     --experimental --list-torch-operators
 ```
 
-This prints the operators as a call tree grouped by source location, with
-kernel launch statistics, so it also shows which operators are worth opening.
+This prints the operators as a call tree sorted by GPU duration, with
+`file:line` on each node that recorded a source location, plus kernel
+launch statistics, so it also shows which operators are worth opening.
 
 The Triton equivalent is `--list-triton-operators`.
 
