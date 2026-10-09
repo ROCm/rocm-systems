@@ -120,6 +120,7 @@ class StaticCommands:
         clock=None,
         profile=None,
         mem_carveout=None,
+        ampp=None,
     ):
         """Get Static information for target gpu
 
@@ -176,6 +177,8 @@ class StaticCommands:
             args.clock = clock
         if mem_carveout:
             args.mem_carveout = mem_carveout
+        if ampp:
+            args.ampp = ampp
 
         # args.clock defaults to False so if it was overwritten to empty list, that indicates that it was given as an arguments but with an empty list
         if args.clock == []:
@@ -194,6 +197,7 @@ class StaticCommands:
             "process_isolation",
             "clock",
             "mem_carveout",
+            "ampp",
         ]
         current_platform_values = [
             args.asic,
@@ -207,6 +211,7 @@ class StaticCommands:
             args.process_isolation,
             args.clock,
             args.mem_carveout,
+            getattr(args, "ampp", None),
         ]
 
         # amd-smi static default arguments:
@@ -1210,6 +1215,112 @@ class StaticCommands:
                     "Failed to get mem carveout info for gpu %s | %s", gpu_id, e.get_error_info()
                 )
 
+        if getattr(args, "ampp", None):
+            try:
+                ampp_version, ampp_profiles = amdsmi_interface.amdsmi_get_ampp_profiles(args.gpu)
+                logging.debug(f"AMPP version: {ampp_version}, profiles: {ampp_profiles}")
+
+                ampp_profile_list = []
+                for ampp_profile in ampp_profiles:
+                    profile_entry = dict(ampp_profile)
+                    if ampp_profile["is_configured"]:
+                        try:
+                            profile_entry["fields"] = amdsmi_interface.amdsmi_get_ampp_fields(
+                                args.gpu, ampp_profile["name"]
+                            )
+                        except amdsmi_exception.AmdSmiLibraryException as e:
+                            no_data = (
+                                e.get_error_code()
+                                == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DATA
+                            )
+                            profile_entry["fields"] = [] if no_data else "N/A"
+                            logging.debug(
+                                "Failed to get AMPP fields for profile %s on gpu %s | %s",
+                                ampp_profile["name"],
+                                gpu_id,
+                                e.get_error_info(),
+                            )
+                    else:
+                        # Unconfigured writable slot - no fields to report
+                        profile_entry["fields"] = []
+                    ampp_profile_list.append(profile_entry)
+
+                if self.logger.is_json_format():
+                    # JSON: version sits alongside profiles, per spec's
+                    # "ampp": {"version": ..., "profiles": [...]} shape.
+                    static_dict["ampp"] = {"version": ampp_version, "profiles": ampp_profile_list}
+                elif self.logger.is_csv_format():
+                    # CSV: flatten completely to avoid an unparsable
+                    # repr() dump, following this file's established
+                    # flatten-before-CSV convention (see soc_pstate,
+                    # xgmi_plpd, mem_carveout above). Compact string form
+                    # matches the spec's CSV Output example.
+                    profiles_str = (
+                        ", ".join(
+                            f"{p['name']}(active={p['is_active']},"
+                            f"configured={p['is_configured']},"
+                            f"writable={p['is_writable']})"
+                            for p in ampp_profile_list
+                        )
+                        or "N/A"
+                    )
+                    static_dict["ampp_version"] = ampp_version
+                    static_dict["ampp"] = profiles_str
+                else:
+                    # Human readable: PROFILE header with ACTIVE/WRITABLE/
+                    # CONFIGURED/FIELDS nested beneath it, per the AMPP design
+                    # doc. custom_dump has no "header + nested children" shape
+                    # for list items, so each profile is keyed by index
+                    # (ampp_profile_N) with its opaque name stashed in a NAME
+                    # field; amdsmi_logger folds that back into a "PROFILE:
+                    # <name>" line. Profile names are opaque sysfs folder
+                    # names (not assumed to be "profile_N"), so they can't be
+                    # recovered from the index alone.
+                    ampp_dict = {"version": ampp_version}
+                    for index, profile_entry in enumerate(ampp_profile_list):
+                        profile_dict = {
+                            "name": profile_entry["name"],
+                            "active": str(profile_entry["is_active"]).lower(),
+                            "writable": str(profile_entry["is_writable"]).lower(),
+                            "configured": str(profile_entry["is_configured"]).lower(),
+                        }
+                        fields = profile_entry["fields"]
+                        if not isinstance(fields, list):
+                            # Per-profile field fetch failed; "fields" holds the
+                            # "N/A" sentinel rather than a list.
+                            profile_dict["fields"] = "N/A"
+                        elif fields:
+                            fields_dict = {}
+                            for field in fields:
+                                field_value = f"{field['value']} {field['unit']}"
+                                if field["has_limits"]:
+                                    field_value += (
+                                        f" (min={field['limit_min']}, max={field['limit_max']})"
+                                    )
+                                fields_dict[field["name"]] = field_value
+                            profile_dict["fields"] = fields_dict
+                        # else: unconfigured slot - omit FIELDS entirely, per design.
+                        ampp_dict[f"ampp_profile_{index}"] = profile_dict
+
+                    if ampp_profile_list:
+                        static_dict["ampp"] = ampp_dict
+                    else:
+                        static_dict["ampp"] = "N/A"
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                not_supported = (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                )
+                if not_supported and not (
+                    self.logger.is_json_format() or self.logger.is_csv_format()
+                ):
+                    static_dict["ampp"] = "N/A (AMPP is not supported on this ASIC/VBIOS)"
+                else:
+                    static_dict["ampp"] = "N/A"
+                logging.debug(
+                    "Failed to get AMPP profiles for gpu %s | %s", gpu_id, e.get_error_info()
+                )
+
         # default to printing all clocks, if in current_platform_args; otherwise print specific clocks
         if "clock" in current_platform_args and (
             args.clock == True or isinstance(args.clock, list)
@@ -1615,6 +1726,7 @@ class StaticCommands:
         clock=None,
         profile=None,
         mem_carveout=None,
+        ampp=None,
     ):
         """Get Static information for target gpu and cpu
 
@@ -1694,6 +1806,7 @@ class StaticCommands:
             "clock",
             "profile",
             "mem_carveout",
+            "ampp",
         ]
         for attr in gpu_attributes:
             if hasattr(args, attr):
@@ -1745,6 +1858,7 @@ class StaticCommands:
                     clock,
                     profile,
                     mem_carveout,
+                    ampp,
                 )
         elif self.helpers.is_amd_hsmp_initialized():  # Only CPU is initialized
             if args.cpu == None:
@@ -1780,6 +1894,7 @@ class StaticCommands:
                 clock,
                 profile,
                 mem_carveout,
+                ampp,
             )
 
         if hasattr(args, "nic") and args.nic:
