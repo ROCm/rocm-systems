@@ -1854,6 +1854,11 @@ and simulated host execution:</p>
 <td>Shared MMA helpers per VM. Omitted/-1 selects the table; 0 disables; explicit values are 0–128.</td>
 </tr>
 <tr>
+<td><code>wait_checking</code></td>
+<td>string</td>
+<td>Override wait diagnostics on every CU: <code>on</code>, <code>off</code>, or <code>all</code>. Omission preserves per-CU settings and defaults.</td>
+</tr>
+<tr>
 <td><code>thread_allocations</code></td>
 <td>array</td>
 <td>Preferred <code>num_threads</code> / <code>cpu_dispatch_threads</code> / <code>async_helper_threads</code> triples, selected by total execution-thread cost.</td>
@@ -2160,14 +2165,54 @@ by shader engine, array, and WGP. Within an engine, array <code>a</code> and WGP
 CU child <code>a * num_cu_per_sh + w</code>, which reports <code>WGP_ID = w</code>. The KFD mask loop
 does not select direct-CU groups; their WGP IDs still follow CU child order.</p>
 <h3 id="memory-wait-diagnostics">Memory wait diagnostics<a class="headerlink" href="#memory-wait-diagnostics" title="Permanent link">&para;</a></h3>
-<p>With memory wait diagnostics enabled, compute units warn when an instruction reads
-or overwrites a pending memory result without a sufficient wait. Results still
-execute eagerly. See
-<a href="../memory-wait-diagnostics/">memory wait diagnostics</a> for coverage and the
-<code>memory_wait_diagnostics</code> setting (<code>off</code>, the default, or <code>warn</code>).
-On gfx1250, XCNT replay-source warnings are independently opt-in through
-<code>xcnt_diagnostics=warn</code> (default: <code>off</code>). Both settings belong in each
-<code>compute_unit</code> node's <code>config</code> array.</p>
+<p>Ordinary memory wait diagnostics are enabled by default; gfx1250 XCNT replay-source
+checks are off. Compute units warn when an instruction reads or overwrites a pending
+memory result without a sufficient wait. Execution continues with eagerly computed values.</p>
+<p>If warnings appear incorrect or checking slows a workload, disable both checks:</p>
+<div class="highlight"><pre><span></span><code>rocjitsu<span class="w"> </span>--config<span class="w"> </span>/path/to/config.json<span class="w"> </span>--wait-checking<span class="o">=</span>off<span class="w"> </span>--<span class="w"> </span>&lt;command&gt;
+</code></pre></div>
+<p><code>--wait-checking MODE</code> and <code>--wait-checking=MODE</code> accept:</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Ordinary checks</th>
+<th>gfx1250 XCNT checks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>on</code></td>
+<td>Enabled</td>
+<td>Disabled</td>
+</tr>
+<tr>
+<td><code>off</code></td>
+<td>Disabled</td>
+<td>Disabled</td>
+</tr>
+<tr>
+<td><code>all</code></td>
+<td>Enabled</td>
+<td>Enabled</td>
+</tr>
+</tbody>
+</table>
+<p>The flag overrides both settings on every CU and GPU for this launch. It uses the
+same config-copy mechanism as <code>--cpu-thread-budget</code>, leaving the source file unchanged.
+Omitting it preserves the JSON settings and defaults. No rebuild is needed.
+Both flags also work with <code>mirage run</code>, for profiles and explicit <code>--config</code>
+files, in daemon and in-process modes. They compose in either order.
+The native <code>rocjitsu</code> CLI refuses them with <code>--attach</code>, which joins an existing
+daemon. Both CLIs refuse these overrides when an enabled DBT guest names an
+external <code>dbt_guest.simulator_config</code>; configure the daemon or host simulator instead.</p>
+<p>For a persistent override, set top-level <code>"wait_checking": "off"</code> (or <code>"on"</code> / <code>"all"</code>).
+Without a global override, each <code>compute_unit</code> node's <code>config</code> array accepts
+<code>memory_wait_diagnostics</code> (<code>warn</code> by default) and <code>xcnt_diagnostics</code> (<code>off</code> by default),
+each with values <code>warn</code> or <code>off</code>. Invalid per-CU values are rejected even with a
+global override. Checkpoints preserve each CU's effective diagnostic settings;
+older checkpoints without these fields use the defaults. See
+<a href="../memory-wait-diagnostics/">memory wait diagnostics</a> for coverage and limitations.</p>
 <h3 id="kfd-device-sections">KFD device sections<a class="headerlink" href="#kfd-device-sections" title="Permanent link">&para;</a></h3>
 <p>KFD device identity can be defined by <code>vm.gpu.device</code> for a simulated GPU and
 by <code>dbt_guest.guest_device</code> for a DBT guest. These sections define properties
