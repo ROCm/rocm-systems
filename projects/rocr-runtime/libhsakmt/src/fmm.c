@@ -4694,6 +4694,9 @@ static void print_device_id_array(uint32_t *device_id_array, uint32_t device_id_
 #endif
 }
 
+/* A supplied obj requires the caller to hold aperture->fmm_mutex.
+ * With obj == NULL, this helper acquires and releases the mutex.
+ */
 static int _fmm_unmap_from_gpu(HsaKFDContext *ctx,
 		manageable_aperture_t *aperture, void *address,
 		uint32_t *device_ids_array, uint32_t device_ids_array_size,
