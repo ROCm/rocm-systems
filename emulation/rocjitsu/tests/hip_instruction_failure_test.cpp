@@ -1,10 +1,21 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+/// @file hip_instruction_failure_test.cpp
+/// @brief Fatal simulated instructions terminate the native HIP process.
+///
+/// Requires the simulator interposer via LD_PRELOAD=librocjitsu.so.
+
 #include <cstdlib>
 #include <hip/hip_runtime.h>
 
 #include <gtest/gtest.h>
+
+namespace {
+constexpr int kInitializationFailure = 10;
+constexpr int kLaunchFailure = 11;
+constexpr int kSynchronizationReturned = 12;
+} // namespace
 
 __global__ void unsupported_instruction() {
   // s_cbranch_i_fork is decoded but has no execution implementation on CDNA3/4.
@@ -13,12 +24,13 @@ __global__ void unsupported_instruction() {
 
 [[noreturn]] void wait_for_unsupported_instruction() {
   if (hipInit(0) != hipSuccess)
-    std::_Exit(10);
+    std::_Exit(kInitializationFailure);
   unsupported_instruction<<<4, 64>>>();
   if (hipGetLastError() != hipSuccess)
-    std::_Exit(11);
+    std::_Exit(kLaunchFailure);
+  // Any return is unexpected, regardless of synchronization's status.
   (void)hipDeviceSynchronize();
-  std::_Exit(12);
+  std::_Exit(kSynchronizationReturned);
 }
 
 TEST(HipInstructionFailureTest, UnsupportedInstructionExitsWithFailure) {
