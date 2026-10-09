@@ -789,13 +789,19 @@ void DataHazardPlugin::onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32
   if (state == nullptr || state->current.instruction_id == 0 || state->is_memory_op)
     return;
 
+  const uint32_t logical_reg = logical_vgpr_base(*wf, physical_reg);
+  const uint64_t new_lanes =
+      state->vgpr_reads.take_new_lanes(logical_reg, state->current.instruction_id, lane_mask);
+  if (new_lanes == 0)
+    return;
+
   RegisterAccessView access;
   access.instruction = state->current;
   access.register_class = RegisterClass::Vector;
-  access.physical_reg = logical_vgpr_base(*wf, physical_reg);
+  access.physical_reg = logical_reg;
   access.size_bytes = kBytesPerDword;
   access.is_read = true;
-  access.lane_mask = lane_mask;
+  access.lane_mask = new_lanes;
   adapter_.on_register_access(access);
 }
 

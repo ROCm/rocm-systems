@@ -384,6 +384,94 @@ TEST(DataHazardAdapterTest, LoadDestinationLanesAreIssueExecNotBoundsMask) {
   EXPECT_EQ(warnings[0].finding.instruction.instruction_id, 3u);
 }
 
+// A scalar-path MFMA reads each operand element with its own one-lane read.
+// The plugin passes on only the first read of each lane of each register per
+// instruction; a repeat read would check the same pending state again.
+TEST(VgprReadFilterTest, PassesEachLaneOfARegisterOncePerInstruction) {
+  dh::VgprReadFilter filter;
+
+  EXPECT_EQ(filter.take_new_lanes(4, 10, 0x01), 0x01u);
+  EXPECT_EQ(filter.take_new_lanes(4, 10, 0x01), 0u);
+  // Only the lanes not yet read come through.
+  EXPECT_EQ(filter.take_new_lanes(4, 10, 0x0F), 0x0Eu);
+  EXPECT_EQ(filter.take_new_lanes(4, 10, 0x0F), 0u);
+}
+
+TEST(VgprReadFilterTest, RegistersAreFilteredIndependently) {
+  dh::VgprReadFilter filter;
+
+  EXPECT_EQ(filter.take_new_lanes(4, 10, 0x01), 0x01u);
+  EXPECT_EQ(filter.take_new_lanes(5, 10, 0x01), 0x01u);
+  // A register past every one seen so far grows the filter.
+  EXPECT_EQ(filter.take_new_lanes(511, 10, ~uint64_t{0}), ~uint64_t{0});
+  EXPECT_EQ(filter.take_new_lanes(4, 10, 0x01), 0u);
+}
+
+TEST(VgprReadFilterTest, ANewInstructionStartsClean) {
+  dh::VgprReadFilter filter;
+
+  EXPECT_EQ(filter.take_new_lanes(4, 10, 0xFF), 0xFFu);
+  EXPECT_EQ(filter.take_new_lanes(4, 11, 0x01), 0x01u);
+  // The earlier instruction's lanes no longer count for the new one.
+  EXPECT_EQ(filter.take_new_lanes(4, 11, 0xFF), 0xFEu);
+}
+
+TEST(VgprReadFilterTest, ClearForgetsEveryRegister) {
+  dh::VgprReadFilter filter;
+
+  EXPECT_EQ(filter.take_new_lanes(4, 10, 0x01), 0x01u);
+  filter.clear();
+  EXPECT_EQ(filter.take_new_lanes(4, 10, 0x01), 0x01u);
+}
+
+// The reads the filter passes on still find the hazard the unfiltered stream
+// did: an instruction re-reading lanes 4-7 of a register with a load pending on
+// lanes 0-3 reports nothing, and its first read of lane 0 reports the RAW.
+TEST(VgprReadFilterTest, FilteredReadsReportTheSameRaw) {
+  AdapterHarness h;
+  dh::VgprReadFilter filter;
+
+  h.adapter.on_instruction(h.instruction(1, 0x100));
+  dh::MemoryRouteView load;
+  load.instruction = h.instruction(1, 0x100);
+  load.resource_kind = ResourceKind::GlobalMemory;
+  load.register_class = dh::RegisterClass::Vector;
+  load.register_base = 4;
+  load.address = 0x2000;
+  load.size_bytes = 4;
+  load.is_load = true;
+  load.exec_mask = 0x0F;
+  load.register_lane_mask = 0x0F;
+  h.adapter.on_memory_route(load);
+
+  h.adapter.on_instruction(h.instruction(2, 0x104));
+  const auto read = [&](uint64_t lanes) {
+    const uint64_t new_lanes = filter.take_new_lanes(4, 2, lanes);
+    if (new_lanes == 0)
+      return;
+    dh::RegisterAccessView access;
+    access.instruction = h.instruction(2, 0x104);
+    access.register_class = dh::RegisterClass::Vector;
+    access.physical_reg = 4;
+    access.size_bytes = 4;
+    access.is_read = true;
+    access.lane_mask = new_lanes;
+    h.adapter.on_register_access(access);
+  };
+
+  for (int element = 0; element < 32; ++element)
+    read(uint64_t{0x10} << (element % 4));
+  EXPECT_TRUE(h.engine.warning_snapshot().empty());
+
+  for (int element = 0; element < 32; ++element)
+    read(0x01);
+  const auto warnings = h.engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::RAW);
+  EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, 1u);
+  EXPECT_EQ(warnings[0].finding.instruction.instruction_id, 2u);
+}
+
 // The divergent if/else shape: a load on the "if" lanes and a write to the same
 // VGPR on the "else" lanes do not conflict; a write on an "if" lane does.
 TEST(DataHazardAdapterTest, RegisterWriteLanesReachTheEngine) {

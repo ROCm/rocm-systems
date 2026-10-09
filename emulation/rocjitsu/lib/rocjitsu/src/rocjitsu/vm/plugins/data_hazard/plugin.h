@@ -134,6 +134,42 @@ private:
 ///
 /// Register-read and memory-route callbacks carry no instruction identity, so
 /// they are attributed to whatever this wave most recently began executing.
+/// The lanes of each VGPR an instruction has not yet reported reading.
+///
+/// An instruction can read one register many times: a scalar-path MFMA reads
+/// each operand element through its own one-lane read, tens of thousands per
+/// instruction. A repeat read of a lane checks the same pending state as the
+/// first and can find nothing it did not, so only the first read of each lane
+/// is passed on. Entries are stamped with the instruction that set them, so a
+/// new instruction starts clean without clearing anything.
+class VgprReadFilter {
+public:
+  /// The lanes of @p lane_mask that @p instruction_id has not yet read from
+  /// VGPR @p reg, which are recorded as read.
+  uint64_t take_new_lanes(uint32_t reg, hazard_core::EntityId instruction_id, uint64_t lane_mask) {
+    if (reg >= lanes_.size()) {
+      lanes_.resize(reg + 1, 0);
+      instructions_.resize(reg + 1, 0);
+    }
+    if (instructions_[reg] != instruction_id) {
+      instructions_[reg] = instruction_id;
+      lanes_[reg] = 0;
+    }
+    const uint64_t new_lanes = lane_mask & ~lanes_[reg];
+    lanes_[reg] |= new_lanes;
+    return new_lanes;
+  }
+
+  void clear() {
+    lanes_.clear();
+    instructions_.clear();
+  }
+
+private:
+  std::vector<uint64_t> lanes_;
+  std::vector<hazard_core::EntityId> instructions_;
+};
+
 struct DataHazardWavefrontState : WavefrontState {
   InstructionView current;
   bool is_memory_op = false;
@@ -155,6 +191,10 @@ struct DataHazardWavefrontState : WavefrontState {
   /// delivered by pointer rather than looked up by key.
   hazard_core::DataHazardEngine::WaveHandle engine_wave;
 
+  /// Read hooks are const, so the filter of VGPR reads already reported is
+  /// mutable.
+  mutable VgprReadFilter vgpr_reads;
+
   void reset() {
     current = InstructionView{};
     is_memory_op = false;
@@ -164,6 +204,7 @@ struct DataHazardWavefrontState : WavefrontState {
     disassembly_dispatch = 0;
     recorded_pcs.clear();
     engine_wave.reset();
+    vgpr_reads.clear();
   }
 };
 
