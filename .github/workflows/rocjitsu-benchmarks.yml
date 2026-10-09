@@ -239,7 +239,6 @@ jobs:
               --raw-run "${RESULTS_DOWNLOAD_DIR}/${MULTI_THREAD_MODE}/run.json" \
               --data-dir "${BUILD_DIR}" \
               --run-id "${RUN_ID}" \
-              --repository "https://github.com/${GITHUB_REPOSITORY}" \
               --expected-sha "${BENCHMARK_SHA}" \
               --expected-corpus-sha "${CORPUS_SHA}" \
               --machine-id "${BENCHMARK_MACHINE}" \
@@ -273,9 +272,7 @@ jobs:
 
             python "${GITHUB_WORKSPACE}/dashboard/emulation/rocjitsu/website/dashboard/scripts/dashboard-data/publish-dashboard-run.py" \
                 --from "${BUILD_DIR}" \
-                --data-dir "${GITHUB_WORKSPACE}/publication/rocjitsu-dashboard/data" \
-                --repository "https://github.com/${GITHUB_REPOSITORY}" \
-                --is-beta
+                --data-dir "${GITHUB_WORKSPACE}/publication/rocjitsu-dashboard/data"
 
             node "${GITHUB_WORKSPACE}/dashboard/emulation/rocjitsu/website/dashboard/scripts/validate-dashboard-data.mjs" \
               "${GITHUB_WORKSPACE}/publication/rocjitsu-dashboard/data"

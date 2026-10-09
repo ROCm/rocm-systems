@@ -92,8 +92,6 @@ class PrepareTests(unittest.TestCase):
             str(staging),
             '--run-id',
             run_id,
-            '--repository',
-            'https://github.com/ROCm/rocm-systems',
             '--expected-sha',
             SHA,
             '--expected-corpus-sha',
@@ -124,9 +122,6 @@ class PrepareTests(unittest.TestCase):
                 str(staging),
                 '--data-dir',
                 str(publication),
-                '--repository',
-                'https://github.com/ROCm/rocm-systems',
-                '--is-beta',
             ],
             text=True,
             capture_output=True,
@@ -146,15 +141,14 @@ class PrepareTests(unittest.TestCase):
             if p.is_file()
         }
 
-    def test_cli_help_explains_ignored_metadata_compatibility_flags(self):
+    def test_cli_omits_unused_website_metadata_arguments(self):
         for script in (SCRIPT, PUBLISH):
             result = subprocess.run(
                 [sys.executable, str(script), '--help'], text=True, capture_output=True
             )
             self.assert_ok(result)
-            self.assertIn('compatibility', result.stdout.lower())
-            self.assertIn('ignored', result.stdout.lower())
-            self.assertIn('bundled', result.stdout.lower())
+            self.assertNotIn('--repository', result.stdout)
+            self.assertNotIn('--is-beta', result.stdout)
 
     def test_cli_requires_raw_runs_not_a_prepared_dataset(self):
         prepared = self.root / 'prepared'
@@ -194,8 +188,6 @@ class PrepareTests(unittest.TestCase):
                 str(staging),
                 '--run-id',
                 'attempt-1',
-                '--repository',
-                'https://github.com/ROCm/rocm-systems',
                 '--expected-sha',
                 SHA,
                 '--expected-corpus-sha',
@@ -568,7 +560,6 @@ class PrepareTests(unittest.TestCase):
         for extra in (
             ('--trigger', 'invalid'),
             ('--expected-sha', 'short'),
-            ('--repository', 'file:///not-a-repository'),
             ('--branch', ''),
         ):
             with self.subTest(extra=extra):
@@ -796,8 +787,6 @@ def test_export_prepared_data_for_workflow(tmp_path):
                 str(build),
                 '--run-id',
                 run_id,
-                '--repository',
-                'https://github.com/ROCm/rocm-systems',
                 '--expected-sha',
                 SHA,
                 '--expected-corpus-sha',
@@ -825,9 +814,6 @@ def test_export_prepared_data_for_workflow(tmp_path):
                 str(build),
                 '--data-dir',
                 str(destination),
-                '--repository',
-                'https://github.com/ROCm/rocm-systems',
-                '--is-beta',
             ],
             capture_output=True,
             text=True,

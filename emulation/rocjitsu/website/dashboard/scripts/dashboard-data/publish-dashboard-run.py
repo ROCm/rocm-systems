@@ -161,21 +161,8 @@ def load_built(source):
     return run, catalog
 
 
-def validate_compatibility_arguments(repository, is_beta):
-    url = prepare.urlsplit(repository)
-    prepare.require(
-        url.scheme in ('http', 'https')
-        and url.hostname
-        and url.username is None
-        and url.password is None,
-        'repository must be a safe HTTP URL',
-    )
-    prepare.require(type(is_beta) is bool, 'is-beta must be boolean')
-
-
-def publish(source, data_dir, repository, is_beta=False):
+def publish(source, data_dir):
     run, catalog = load_built(source)
-    validate_compatibility_arguments(repository, is_beta)
     write_dataset(Path(os.path.abspath(data_dir)), run, catalog)
     return run
 
@@ -193,20 +180,9 @@ def main():
         required=True,
         help='Publication data directory whose index.json is updated',
     )
-    parser.add_argument(
-        '--repository',
-        required=True,
-        help='Compatibility argument: validated HTTP URL, otherwise ignored; '
-        'repository settings are bundled with the website',
-    )
-    parser.add_argument(
-        '--is-beta',
-        action='store_true',
-        help='Compatibility flag, ignored; beta settings are bundled with the website',
-    )
     args = parser.parse_args()
     try:
-        run = publish(args.source, args.data_dir, args.repository, args.is_beta)
+        run = publish(args.source, args.data_dir)
         print(f"Published schema-2 run {run['id']}")
     except (ValueError, KeyError, TypeError, OSError) as error:
         parser.exit(1, f'error: {error}\n')

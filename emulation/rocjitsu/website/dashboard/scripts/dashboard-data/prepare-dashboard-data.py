@@ -22,7 +22,6 @@ from pathlib import Path
 import re
 import statistics
 import tempfile
-from urllib.parse import urlsplit
 
 
 def canonical(value):
@@ -406,7 +405,6 @@ def prepare(
     *,
     data_dir,
     run_id,
-    repository,
     expected_sha,
     expected_corpus_sha,
     machine_id,
@@ -425,14 +423,6 @@ def prepare(
         ('machine_id', machine_id),
     ):
         require(text(value), f'{name} must be nonempty text')
-    url = urlsplit(repository)
-    require(
-        url.scheme in ('http', 'https')
-        and url.hostname
-        and url.username is None
-        and url.password is None,
-        'repository must be a safe HTTP URL',
-    )
     raw_runs = [read_json(Path(path)) for path in raw_run]
     require(raw_runs, 'Supply at least one raw run')
     for raw in raw_runs:
@@ -459,12 +449,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--raw-run', action='append', required=True)
     parser.add_argument('--data-dir', required=True)
-    parser.add_argument(
-        '--repository',
-        required=True,
-        help='Compatibility argument: validated HTTP URL, otherwise ignored; '
-        'repository settings are bundled with the website',
-    )
     for name in (
         'run-id',
         'expected-sha',
