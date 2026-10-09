@@ -94,7 +94,7 @@ MAXTEXT_BASELINE_DOCKERFILE = "Dockerfile.maxtext-baseline"
 MADENGINE_REPO = "https://github.com/mkuznet1/madengine.git"
 MADENGINE_REF = "10a0414b644d204e45437ab01d9e795176e0ee4f"  # madengine#213
 MAD_REPO = "https://github.com/ROCm/MAD.git"
-MAD_REF = "7acfac7c0cfb227a80e6405db8a0d2c3330145fe"  # mad-rccl, MAD#279
+MAD_REF = "7a9a25e742ef60e8deffb6e5fd9b559857d2018d"  # mad-rccl, MAD#280
 MAD_BRANCH = "mad-rccl"
 
 # Primus is not vendored in MAD; tools/fetch_primus.sh checks it out into
@@ -104,8 +104,9 @@ MAD_BRANCH = "mad-rccl"
 #
 # v26.7.0 and not jax-maxtext-v26.8: both ship primus-cli and the MI355X 405B
 # config, but AMD-AGI/Primus#999 retired examples/run_pretrain.sh and v26.8 no
-# longer carries it.  We gate on primus-cli, which is in both, so this pin is
-# the only thing tying us to v26.7.0.
+# longer carries it.  We gate on primus-cli, which is in both (and ROCm/MAD#280
+# moved MAD's own overlay to the same check), so this pin is the only thing
+# tying us to v26.7.0.
 PRIMUS_URL = "https://github.com/AMD-AGI/Primus"
 PRIMUS_REF = "v26.7.0"
 
@@ -202,7 +203,17 @@ WORKLOAD_CONFIGS = {
     "llama-3.1-405b-maxtext": {
         "type": "training",
         "family": "maxtext",
-        "model_repo": "jax-maxtext/maxtext_MI355X_llama3.1_405B-fp8-pretrain",
+        # MAD's models.json calls this "jax-maxtext/maxtext_MI355X_...", but the
+        # directory prefix must NOT travel into the manifest: madengine builds
+        # its sbatch script path as
+        #   <output_dir>/madengine_{model_info[name]}.sh
+        # (deployment/slurm.py), so a slash in the name points the write at a
+        # subdirectory that was never created and the whole deployment dies
+        # with "Failed to generate script: No such file or directory" before
+        # anything is submitted. Verified against the pinned madengine and
+        # v2.2.1 -- both carry that line. The name is only an identifier here;
+        # `scripts` is what actually locates run.sh.
+        "model_repo": "maxtext_MI355X_llama3.1_405B-fp8-pretrain",
         "base_image": "rocm/jax-training:maxtext-v26.6",
         "gpu_target": "gfx950",
         "metric_key": "tokens_per_second_per_gpu",
