@@ -511,6 +511,14 @@ in the following table.
         | ``6``: rocSHMEM GDA (required for that backend to initialize)
         | ``7``: Anvil SDMA (also accepts unset)
 
+    * - | ``NCCL_GIN_PROXY_POLL_BATCH``
+        | Maximum GIN operations the proxy thread issues per peer in each
+          progress iteration. Larger values cut polling overhead when queues
+          are deep.
+      - | Integer value (default: ``32``)
+        | Values below ``1`` are treated as ``1``, which issues one operation
+          per iteration and never sends the RMA aggregation hint
+
     * - | ``NCCL_RMA_PLUGIN``
         | Selects external one-sided RMA plugins, which are also the backend
           the built-in GIN proxy forwards to.

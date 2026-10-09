@@ -47,6 +47,12 @@ Version 15 added an ``optFlags`` argument to ``iput``, ``iputSignal`` and
   backend to aggregate compatible requests. This is a hint; it must not change
   the operation's data or ordering semantics.
 
+The GIN proxy sets the hint when that peer's next operation is already queued
+and will be issued in the same progress iteration (see
+``NCCL_GIN_PROXY_POLL_BATCH``). Each run ends with a data operation without the
+hint or with an ``iflush``, so a backend that holds hinted requests, for example
+by delaying a doorbell, should submit them on either.
+
 Compatibility with older plugins
 =================================
 
