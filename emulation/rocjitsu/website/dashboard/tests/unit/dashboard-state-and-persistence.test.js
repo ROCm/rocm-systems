@@ -1,3 +1,4 @@
+import { createReactRootSurface } from '../helpers/react-root-surface.js';
 import { act, createElement, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -20,14 +21,7 @@ afterEach(() => {
 // Probe renders no host elements; only React's root event/selection surface is
 // needed. State updates and StrictMode run in real React, without a DOM package.
 function mountState({ href = 'https://example.test/app/?campaign=keep#anchor', saved = null, dataset = data, blockedStorage = false } = {}) {
-  const browser = new EventTarget();
-  const document = new EventTarget();
-  const container = new EventTarget();
-  Object.assign(container, { nodeType: 1, tagName: 'DIV', namespaceURI: 'http://www.w3.org/1999/xhtml', ownerDocument: document });
-  Object.assign(document, { nodeType: 9, body: container, activeElement: null, defaultView: browser });
-  browser.HTMLElement = class {};
-  browser.HTMLIFrameElement = class extends browser.HTMLElement {};
-  browser.document = document;
+  const { browser, container } = createReactRootSurface();
   browser.location = { href };
   let stored = saved === null ? null : JSON.stringify(saved);
   if (blockedStorage) Object.defineProperty(browser, 'localStorage', { get() { throw new Error('Storage denied'); } });
@@ -47,9 +41,7 @@ function mountState({ href = 'https://example.test/app/?campaign=keep#anchor', s
       browser.location.href = nextHref;
     }),
   };
-  vi.stubGlobal('window', browser);
-  vi.stubGlobal('document', document);
-  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+
   let state;
   let currentData = dataset;
   const renders = [];

@@ -1,7 +1,8 @@
 import { targetColor } from '../utils/chartColors.js';
+import { historyRanges } from '../config/historyRanges.js';
 import { commitShaFor, commitTimestampFor, compareCommitPosition, compareRunsByCommit, compareRunExecution, sortRunsByCommit } from './runOrdering.js';
 
-const HISTORY_RANGE_DAYS = { '1W': 7, '1M': 30, '3M': 90, '6M': 180 };
+const HISTORY_RANGE_DAYS = { ...Object.fromEntries(historyRanges.filter(({ days }) => days !== null).map(({ id, days }) => [id, days])), '6M': 180 };
 const modesFor = (filters) => filters.modes ?? ['ST', 'MT'];
 const completed = (test) => test?.status === 'completed' && Number.isFinite(test.durationSeconds);
 const sum = (tests) => tests.reduce((total, test) => total + test.durationSeconds, 0);

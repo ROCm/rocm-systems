@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { historyRanges } from '../config/historyRanges.js';
 
 const FILTER_STORAGE_KEY = 'rocjitsu-dashboard-filters';
 const BENCHMARK_STORAGE_KEY = 'rocjitsu-dashboard-benchmarks';
 const pages = new Set(['overview', 'branch', 'benchmarks', 'compare']);
-const ranges = new Set(['1W', '1M', '3M', 'ALL']);
+const ranges = new Set(historyRanges.map(({ id }) => id));
 const emptyBranchSelection = { branch: null, candidateId: null, referenceId: null, manual: false, target: null, mode: null, detail: false };
 
 export function readDashboardRoute(href = globalThis.window?.location?.href ?? 'http://localhost/') {

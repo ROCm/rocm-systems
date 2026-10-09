@@ -5,6 +5,7 @@ import FactCheckRoundedIcon from '@mui/icons-material/FactCheckRounded';
 import HealthAndSafetyRoundedIcon from '@mui/icons-material/HealthAndSafetyRounded';
 import { alpha } from '@mui/material/styles';
 import { monoFont } from '../../theme/tokens';
+import { historyRangeById } from '../../config/historyRanges';
 import { formatDuration, formatPercent } from '../../utils/formatters';
 import { changeTone, classifyDurationChange } from '../../utils/performance';
 
@@ -22,7 +23,7 @@ function Metric({ label, value, caption, icon: Icon, tone = 'neutral', badgeTone
 export default function MetricsGrid({ metrics, range = 'ALL' }) {
   const hasResults = metrics.total > 0;
   const healthy = hasResults && metrics.completed === metrics.total && metrics.failed === 0;
-  const period = { '1W': 'past week', '1M': 'past month', '3M': 'past 3 months', ALL: 'all available history' }[range] ?? 'selected range';
+  const period = historyRangeById.get(range)?.period ?? 'selected range';
   return (
     <Paper variant="outlined" data-testid="metric-strip" sx={{ borderRadius: '8px', display: 'grid', gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: 'repeat(4, minmax(0, 1fr))' }, overflow: 'hidden', boxShadow: 'none', '& > div': { borderRight: 1, borderColor: 'divider' }, '& > div:nth-of-type(2)': { borderRightWidth: { xs: 0, md: 1 } }, '& > div:nth-of-type(n+3)': { borderTopStyle: 'solid', borderTopWidth: { xs: 1, md: 0 }, borderColor: 'divider' }, '& > div:last-child': { borderRight: 0 } }}>
       <Metric icon={TimerRoundedIcon} badgeTone={hasResults ? 'primary' : 'neutral'} label="Total duration" value={formatDuration(metrics.duration)} caption="Sum of selected benchmark runtimes" />

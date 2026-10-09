@@ -7,14 +7,14 @@ import FactCheckRoundedIcon from '@mui/icons-material/FactCheckRounded';
 import FilterAltOffRoundedIcon from '@mui/icons-material/FilterAltOffRounded';
 import ArrowDownwardRoundedIcon from '@mui/icons-material/ArrowDownwardRounded';
 import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded';
-import { monoFont } from '../../theme/tokens';
+import { colorTokens, monoFont } from '../../theme/tokens';
 import { formatDuration, formatPercent } from '../../utils/formatters';
 import { changeTone, classifyDurationChange } from '../../utils/performance';
 import CommitComparison from '../shared/CommitComparison';
 
 function Stat({ label, value, icon: Icon, tone = 'neutral', caption, children }) {
   const theme = useTheme();
-  const color = tone === 'purple' ? (theme.palette.mode === 'dark' ? '#be95ff' : '#6929c4') : tone === 'neutral' ? theme.palette.text.secondary : theme.palette[tone].main;
+  const color = tone === 'purple' ? colorTokens[theme.palette.mode === 'dark' ? 'dark' : 'light'].purpleText : tone === 'neutral' ? theme.palette.text.secondary : theme.palette[tone].main;
   return <Box data-testid={`comparison-metric-${label.toLowerCase().replaceAll(' ', '-')}`} data-tone={tone} sx={{ position: 'relative', minWidth: 0, p: 2, borderRight: 1, borderBottom: 1, borderColor: 'divider' }}>
     <Typography variant="overline" sx={{ display: 'block', color: 'text.secondary', fontSize: 11, lineHeight: '18px', pr: 4.5 }}>{label}</Typography>
     <Box aria-hidden="true" sx={{ position: 'absolute', top: 16, right: 16, width: 32, height: 32, borderRadius: '7px', display: 'grid', placeItems: 'center', color, bgcolor: alpha(color, 0.1) }}><Icon sx={{ fontSize: 20 }} /></Box>

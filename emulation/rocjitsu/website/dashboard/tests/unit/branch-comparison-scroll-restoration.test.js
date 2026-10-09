@@ -1,3 +1,4 @@
+import { createReactRootSurface } from '../helpers/react-root-surface.js';
 import { act, Children, createElement, isValidElement, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -51,14 +52,7 @@ function nodes(tree) {
 }
 
 it('v11 full branch comparison preserves the atomic pair and scrolls to the top after rendering', async () => {
-  const browser = new EventTarget();
-  const document = new EventTarget();
-  const container = new EventTarget();
-  Object.assign(container, { nodeType: 1, tagName: 'DIV', namespaceURI: 'http://www.w3.org/1999/xhtml', ownerDocument: document });
-  Object.assign(document, { nodeType: 9, body: container, activeElement: null, defaultView: browser });
-  browser.HTMLElement = class {};
-  browser.HTMLIFrameElement = class extends browser.HTMLElement {};
-  browser.document = document;
+  const { browser, container } = createReactRootSurface();
   browser.location = { href: 'https://example.test/?view=branch&campaign=keep' };
   browser.localStorage = { getItem: () => null, setItem: vi.fn() };
   browser.matchMedia = () => ({ matches: false });
@@ -66,9 +60,7 @@ it('v11 full branch comparison preserves the atomic pair and scrolls to the top 
   const frames = [];
   browser.requestAnimationFrame = vi.fn((callback) => frames.push(callback));
   browser.scrollTo = vi.fn();
-  vi.stubGlobal('window', browser);
-  vi.stubGlobal('document', document);
-  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+
   let appTree;
   let dashboardTree;
   function CaptureDashboard({ element }) { dashboardTree = element.type(element.props); return null; }

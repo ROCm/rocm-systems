@@ -1,6 +1,7 @@
 import { formatDuration, formatFullDate, shortSha } from '../../utils/formatters';
 import { commitTimestampFor } from '../../data/runOrdering';
 import { selectBenchmarkCatalog } from '../../data/selectors';
+import { historyRangeById } from '../../config/historyRanges';
 
 export function benchmarkResultChoices(viewModel) {
   return viewModel.runs.flatMap((run, index) => viewModel.series.map((series) => {
@@ -32,7 +33,7 @@ export function explorerCatalog(data, filters) {
 // canonical history, not the viewer's clock or a branch execution.
 export function benchmarkRangeData(data, range = 'ALL') {
   if (range === 'ALL' || !data.runs.length) return data;
-  const days = { '1W': 7, '1M': 30, '3M': 90 }[range];
+  const days = historyRangeById.get(range)?.days;
   if (!days) return data;
   const latest = Math.max(...data.runs.map((run) => Date.parse(commitTimestampFor(run))));
   const anchor = new Date(latest);

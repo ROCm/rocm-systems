@@ -73,7 +73,10 @@ export function createSchema2Publication() {
 }
 
 export async function writeSchema2FixtureDirectory(directory) {
-  const publication = createSchema2Publication();
+  return writeFixturePublication(directory, createSchema2Publication());
+}
+
+export async function writeFixturePublication(directory, publication) {
   await mkdir(directory, { recursive: true });
   // This function deliberately targets test data only; never point it at published data.
   for (const entry of await readdir(directory)) await rm(path.join(directory, entry), { recursive: true, force: true });

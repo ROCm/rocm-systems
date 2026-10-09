@@ -6,6 +6,24 @@ import DurationHistory from '../../src/components/overview/DurationHistory.jsx';
 import * as trend from '../../src/components/overview/overviewPresentation.js';
 import LargestChanges from '../../src/components/overview/LargestChanges.jsx';
 import OverviewView from '../../src/components/overview/OverviewView.jsx';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { colorTokens } from '../../src/theme/tokens.js';
+
+test.each(['light', 'dark'])('%s trend reads its interactive color from the shared palette', (mode) => {
+  const original = colorTokens[mode].interactive;
+  const theme = createTheme({ palette: { mode } });
+  const draw = () => renderToStaticMarkup(createElement(ThemeProvider, { theme }, createElement(DurationHistory, { history, range: 'ALL', onRangeChange() {} })));
+  draw();
+  expect(chartCapture.props.option.series[0].lineStyle.color).toBe(original);
+  try {
+    colorTokens[mode].interactive = '#123456';
+    draw();
+    expect(chartCapture.props.option.series[0].lineStyle.color).toBe('#123456');
+    expect(chartCapture.props.option.series[0].itemStyle.color).toBe('#123456');
+  } finally {
+    colorTokens[mode].interactive = original;
+  }
+});
 
 test('overview passes its selected period into the metric strip', () => {
   const html = render(OverviewView, { data: { runs: [] }, viewModel: { metrics: { total: 0 }, history, changes: [] }, state: { filters: { targets: [], suites: [], modes: [] }, historyRange: '1W', setHistoryRange() {} } });

@@ -6,7 +6,8 @@ import { escapeHtml, formatDuration, formatFullDate, formatPercent, formatShortD
 import { changeTone, classifyDurationChange } from '../../utils/performance';
 import { chartAreaGradient, chartPointStyle } from '../../utils/chartStyles';
 import { commitTimestampFor } from '../../data/runOrdering';
-import { monoFont } from '../../theme/tokens';
+import { historyRanges, historyRangeById } from '../../config/historyRanges';
+import { colorTokens, monoFont } from '../../theme/tokens';
 import { visuallyHiddenStyles } from '../../theme/styles';
 import { trendKeyIndex, nearestTrendIndex, shouldHideTrendPointer } from './overviewPresentation';
 
@@ -56,11 +57,11 @@ export default function DurationHistory({ history, filters, coverage, range, onR
   const inspectedAnchors = anchorsFor(inspectedSlot?.run);
   const firstValue = eligible.length ? series.data[eligible[0]] : null;
   const baseline = Number.isFinite(series?.baseline) ? series.baseline : firstValue;
-  const blue = theme.palette.mode === 'dark' ? '#78a9ff' : '#0f62fe';
+  const blue = colorTokens[theme.palette.mode === 'dark' ? 'dark' : 'light'].interactive;
   const scale = Math.max(...(series?.data.filter(Number.isFinite) ?? [0]), 0) > 60 ? 1 / 60 : 1;
   const rangeState = classifyDurationChange(history.durationDelta);
   const rangeTone = changeTone(rangeState);
-  const period = { '1W': 'past week', '1M': 'past month', '3M': 'past 3 months', ALL: 'all available history' }[range] ?? 'Selected period';
+  const period = historyRangeById.get(range)?.period ?? 'Selected period';
   const option = useMemo(() => ({
     textStyle: { fontFamily: theme.typography.fontFamily, color: theme.palette.text.secondary },
     tooltip: {
@@ -140,7 +141,7 @@ export default function DurationHistory({ history, filters, coverage, range, onR
   return (
     <SectionCard data-testid="performance-trend" title="Performance Trend" subtitle="Sum of selected benchmark runtimes · develop only" sx={{ height: '100%', minWidth: 0 }} contentSx={{ p: 2, '&:last-child': { pb: 2 }, height: '100%', display: 'flex', flexDirection: 'column' }} action={(
       <Box sx={{ maxWidth: '100%', overflowX: 'auto' }}><ToggleButtonGroup exclusive size="small" value={range} onChange={(_, next) => next && onRangeChange(next)} aria-label="History timeframe">
-        {[['1W', 'Trailing 7 days'], ['1M', 'Trailing 30 days'], ['3M', 'Trailing 90 days'], ['ALL', 'All available history']].map(([value, label]) => <ToggleButton key={value} value={value} aria-label={label} sx={{ minWidth: 38, minHeight: { xs: 44, sm: 32 }, px: 1, fontSize: 11 }}>{value}</ToggleButton>)}
+        {historyRanges.map(({ id: value, label }) => <ToggleButton key={value} value={value} aria-label={label} sx={{ minWidth: 38, minHeight: { xs: 44, sm: 32 }, px: 1, fontSize: 11 }}>{value}</ToggleButton>)}
       </ToggleButtonGroup></Box>
     )}>
       <Stack direction="row" sx={{ flexWrap: 'wrap', alignItems: 'baseline', gap: 1, mb: 0.5 }}>

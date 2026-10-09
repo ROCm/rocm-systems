@@ -1,3 +1,4 @@
+import { createReactRootSurface } from '../helpers/react-root-surface.js';
 import { act, Children, createElement, isValidElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, test, vi } from 'vitest';
@@ -59,13 +60,8 @@ function nodes(tree) {
 // Mount the real view and picker callbacks/hooks; inspect the resulting Autocomplete
 // props without mounting MUI's host DOM or ECharts (the browser gate owns those).
 function mountPicker() {
-  const browser = new EventTarget(), document = new EventTarget(), container = new EventTarget();
-  Object.assign(container, { nodeType: 1, tagName: 'DIV', namespaceURI: 'http://www.w3.org/1999/xhtml', ownerDocument: document });
-  Object.assign(document, { nodeType: 9, body: container, activeElement: null, defaultView: browser });
-  browser.HTMLElement = class {};
-  browser.HTMLIFrameElement = class extends browser.HTMLElement {};
-  browser.document = document;
-  vi.stubGlobal('window', browser); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  const { container } = createReactRootSurface();
+
   let tree, picker;
   function CapturePicker({ element }) { picker = BenchmarkGridPicker(element.props); return null; }
   function Probe({ scope }) {

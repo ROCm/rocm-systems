@@ -1,3 +1,4 @@
+import { createReactRootSurface } from '../helpers/react-root-surface.js';
 import { fixtureRunPath } from '../fixtures/runPath.js';
 import { act, Children, createElement, isValidElement, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -38,22 +39,13 @@ afterEach(() => {
 // Real App, Dashboard and Benchmarks hooks/callbacks; capture their React trees
 // instead of mounting MUI/ECharts host DOM. Loader is the only data boundary mock.
 function mountApp(storage = new Map(), blockedStorage = false) {
-  const browser = new EventTarget();
-  const document = new EventTarget();
-  const container = new EventTarget();
-  Object.assign(container, { nodeType: 1, tagName: 'DIV', namespaceURI: 'http://www.w3.org/1999/xhtml', ownerDocument: document });
-  Object.assign(document, { nodeType: 9, body: container, activeElement: null, defaultView: browser });
-  browser.HTMLElement = class {};
-  browser.HTMLIFrameElement = class extends browser.HTMLElement {};
-  browser.document = document;
+  const { browser, container } = createReactRootSurface();
   browser.location = { href: 'https://example.test/app/?view=benchmarks&campaign=keep#anchor' };
   if (blockedStorage) Object.defineProperty(browser, 'localStorage', { get() { throw new Error('Storage denied'); } });
   else browser.localStorage = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
   browser.matchMedia = () => ({ matches: false });
   browser.history = { state: { external: 'retained' }, pushState: vi.fn((state, title, href) => { browser.location.href = href; }), replaceState: vi.fn((state, title, href) => { browser.location.href = href; }) };
-  vi.stubGlobal('window', browser);
-  vi.stubGlobal('document', document);
-  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+
   let appTree;
   let benchmarkTree;
   function CaptureBenchmarks({ element }) { benchmarkTree = BenchmarksView(element.props); return null; }

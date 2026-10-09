@@ -1,3 +1,4 @@
+import { createReactRootSurface } from '../helpers/react-root-surface.js';
 import { act, Children, createElement, isValidElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, test, vi } from 'vitest';
@@ -16,13 +17,8 @@ function nodes(tree) {
   return result;
 }
 function mountTrend(overrides = {}) {
-  const browser = new EventTarget(), document = new EventTarget(), container = new EventTarget();
-  Object.assign(container, { nodeType: 1, tagName: 'DIV', namespaceURI: 'http://www.w3.org/1999/xhtml', ownerDocument: document });
-  Object.assign(document, { nodeType: 9, body: container, activeElement: null, defaultView: browser });
-  browser.HTMLElement = class {};
-  browser.HTMLIFrameElement = class extends browser.HTMLElement {};
-  browser.document = document;
-  vi.stubGlobal('window', browser); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  const { container } = createReactRootSurface();
+
   const history = {
     series: [{ data: [120, 100], baseline: 120 }],
     slots: [0, 1].map((x) => ({ x, run: { runId: `fictional-${x}`, timestamp: '2026-10-01T12:00:00Z', commitTimestamp: '2026-10-01T11:00:00Z' } })),

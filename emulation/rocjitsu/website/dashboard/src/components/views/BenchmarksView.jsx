@@ -10,6 +10,7 @@ import SectionCard from '../shared/SectionCard';
 import CategoryTag from '../shared/CategoryTag';
 import { benchmarkRangeData, benchmarkResultChoices, boundedGridSelection, explorerCatalog } from '../benchmarks/benchmarkExplorer';
 import { selectBenchmarkSeries } from '../../data/selectors';
+import { historyRanges } from '../../config/historyRanges';
 import { formatFullDate } from '../../utils/formatters';
 
 export default function BenchmarksView({ data, filters, historyRange: controlledRange, onRangeChange, initialBenchmarkIds, selectedBenchmarks, onBenchmarksChange, selectedRunIds = [], onSelectRun, onClearSelectedRuns }) {
@@ -56,7 +57,7 @@ export default function BenchmarksView({ data, filters, historyRange: controlled
           <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
             <Typography role="status" variant="caption" color="text.secondary">{selected.length} of 8 charts{selected.length === 8 ? ' · Remove a workload to free a slot' : ''}</Typography>
             <ToggleButtonGroup exclusive size="small" value={range} onChange={(_, next) => next && changeRange(next)} aria-label="Benchmark history timeframe">
-              {[['1W', 'Trailing 7 days'], ['1M', 'Trailing 30 days'], ['3M', 'Trailing 90 days'], ['ALL', 'All available history']].map(([value, label]) => <ToggleButton key={value} value={value} aria-label={label} sx={{ minHeight: { xs: 44, sm: 32 }, fontSize: 11, px: 1 }}>{value}</ToggleButton>)}
+              {historyRanges.map(({ id: value, label }) => <ToggleButton key={value} value={value} aria-label={label} sx={{ minHeight: { xs: 44, sm: 32 }, fontSize: 11, px: 1 }}>{value}</ToggleButton>)}
             </ToggleButtonGroup>
           </Stack>
         </Stack>

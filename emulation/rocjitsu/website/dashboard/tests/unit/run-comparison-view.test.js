@@ -4,6 +4,23 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, test, vi } from 'vitest';
 import CompareRunsView from '../../src/components/views/CompareRunsView.jsx';
 import RunMetadataDiff from '../../src/components/compare/RunMetadataDiff.jsx';
+import ComparisonMetrics from '../../src/components/compare/ComparisonMetrics.jsx';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { colorTokens } from '../../src/theme/tokens.js';
+
+test.each(['light', 'dark'])('%s baseline metric reads purple from the shared palette', (mode) => {
+  const original = colorTokens[mode].purpleText;
+  const theme = createTheme({ palette: { mode } });
+  const model = { comparable: [{}], notComparable: [], candidateDuration: 8, baselineDuration: 10, aggregateDelta: -20 };
+  const draw = () => renderToStaticMarkup(createElement(ThemeProvider, { theme }, createElement(ComparisonMetrics, { model })));
+  expect(draw()).toContain(`color:${original}`);
+  try {
+    colorTokens[mode].purpleText = '#123456';
+    expect(draw()).toContain('color:#123456');
+  } finally {
+    colorTokens[mode].purpleText = original;
+  }
+});
 import { validatePublishedDashboardData } from '../../src/data/dashboardValidation.js';
 import { createSchema2Publication } from '../fixtures/schema2Dataset.js';
 const captured = vi.hoisted(() => ({ chart: null, selectors: [], swap: null, pair: null }));
