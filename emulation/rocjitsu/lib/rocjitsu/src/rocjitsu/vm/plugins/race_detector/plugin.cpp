@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
@@ -527,42 +528,22 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
 
 void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,
                                                          amdgpu::Wavefront &wf) {
+  if (!inst.is_waitcnt())
+    return;
+  const auto fields = WaitCounterPolicy::explicit_wait_fields(inst, wf.cu().arch());
+  if (fields.failed() || !fields.value())
+    return;
+
   auto *s = get_state(wf);
   assert(s && s->race_state);
-
-  const std::string_view mnemonic = inst.mnemonic();
-  const auto &target = wf.wait_target();
+  const auto model = waitcnt_model(wf.cu().arch()).value();
   PendingWaitCount wait;
-  if (mnemonic == "s_waitcnt") {
-    wait.add(amdgpu::WaitCounterType::VMCNT, target.vmcnt);
-    wait.add(amdgpu::WaitCounterType::LGKMCNT, target.lgkmcnt);
-    wait.add(amdgpu::WaitCounterType::EXPCNT, target.expcnt);
-  } else if (mnemonic == "s_waitcnt_vmcnt") {
-    wait.add(amdgpu::WaitCounterType::VMCNT, target.vmcnt);
-  } else if (mnemonic == "s_waitcnt_vscnt") {
-    wait.add(amdgpu::WaitCounterType::VSCNT, target.vscnt);
-  } else if (mnemonic == "s_waitcnt_lgkmcnt") {
-    wait.add(amdgpu::WaitCounterType::LGKMCNT, target.lgkmcnt);
-  } else if (mnemonic == "s_waitcnt_expcnt" || mnemonic == "s_wait_expcnt") {
-    wait.add(amdgpu::WaitCounterType::EXPCNT, target.expcnt);
-  } else if (mnemonic == "s_wait_loadcnt") {
-    wait.add(amdgpu::WaitCounterType::LOADCNT, target.vmcnt);
-  } else if (mnemonic == "s_wait_storecnt") {
-    wait.add(amdgpu::WaitCounterType::STORECNT, target.vscnt);
-  } else if (mnemonic == "s_wait_dscnt") {
-    wait.add(amdgpu::WaitCounterType::DSCNT, target.dscnt);
-  } else if (mnemonic == "s_wait_kmcnt") {
-    wait.add(amdgpu::WaitCounterType::KMCNT, target.kmcnt);
-  } else if (mnemonic == "s_wait_loadcnt_dscnt") {
-    wait.add(amdgpu::WaitCounterType::LOADCNT, target.vmcnt);
-    wait.add(amdgpu::WaitCounterType::DSCNT, target.dscnt);
-  } else if (mnemonic == "s_wait_storecnt_dscnt") {
-    wait.add(amdgpu::WaitCounterType::STORECNT, target.vscnt);
-    wait.add(amdgpu::WaitCounterType::DSCNT, target.dscnt);
-  } else if (mnemonic == "s_wait_asynccnt") {
-    wait.add(amdgpu::WaitCounterType::ASYNCCNT, target.asynccnt);
-  } else if (mnemonic == "s_wait_tensorcnt") {
-    wait.add(amdgpu::WaitCounterType::TENSORCNT, target.tensorcnt);
+  for (size_t i = 0; i < fields.value()->size(); ++i) {
+    const auto threshold = (*fields.value())[i];
+    if (!threshold)
+      continue;
+    if (const auto counter = memory_wait_counter_type(static_cast<WaitCounterKind>(i), model))
+      wait.add(*counter, static_cast<int>(*threshold));
   }
   if (!wait.empty())
     s->race_state->dispatch(wait);

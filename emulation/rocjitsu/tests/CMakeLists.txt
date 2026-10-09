@@ -670,6 +670,7 @@ add_executable(
     sysfs_test.cpp
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
+    wait_hazard_test.cpp
     memory_wait_scoreboard_test.cpp
     register_access_test.cpp
     register_file_test.cpp

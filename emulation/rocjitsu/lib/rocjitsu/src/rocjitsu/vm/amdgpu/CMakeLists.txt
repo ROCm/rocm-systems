@@ -40,7 +40,9 @@ rj_add_object_library(rocjitsu_vm_amdgpu
 # propagates usage requirements without including those object files.
 target_link_libraries(
     rocjitsu_vm_amdgpu
-    INTERFACE $<TARGET_OBJECTS:rocjitsu_waitcheck_target>
+    INTERFACE
+        $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
+        $<TARGET_OBJECTS:rocjitsu_waitcheck_target>
 )
 
 add_subdirectory(pci)

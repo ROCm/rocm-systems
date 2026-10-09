@@ -3,6 +3,10 @@
 
 # Waitcheck's target policies can be tested independently of the checker driver.
 rj_add_object_library(rocjitsu_waitcheck_target waitcheck/target.cpp)
+target_link_libraries(
+    rocjitsu_waitcheck_target
+    INTERFACE $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
+)
 
 # State transfer depends on target policy, independently of the checker driver.
 rj_add_object_library(rocjitsu_waitcheck_state waitcheck/state.cpp)
