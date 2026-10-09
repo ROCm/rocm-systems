@@ -299,7 +299,6 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm*) { return ncclSuccess; }
 ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*) {
   return ncclSuccess;
 }
-ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
 #ifdef ENABLE_ROCSHMEM_GIN
 // Only referenced from ncclDevrCommCreateInternal's SDMA signal-binding block,
 // which is itself behind ENABLE_ROCSHMEM_GIN. Copied from develop's
@@ -474,16 +473,23 @@ ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct nc
 // ---------------------------------------------------------------------------
 // Barrier requirement builders (host variants).
 // ---------------------------------------------------------------------------
+// The real builders fully populate the out-requirement; the create path's
+// resource-sizing loop then reads its fields (and writes through
+// outBufferHandle). Zero it so stack-garbage pointers do not cause wild writes
+// once a test drives the create path past the GIN gate.
 extern "C" ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t, int, ncclLsaBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* out) {
+  if (out) *out = {};
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, int, ncclGinBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* out) {
+  if (out) *out = {};
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCftBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* out) {
+  if (out) *out = {};
   return ncclSuccess;
 }
 
@@ -491,11 +497,27 @@ extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCft
 // this binary, so a fake would be a duplicate. Tests drive its terms instead of
 // its answer.
 
-// Reached only once GIN is activated, which the GIN gate rejects for every
-// comm this binary builds.
-ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
-                                 uint32_t) {
+// The real ncclGinDevCommSetup records a non-zero ginContextCount and a valid
+// ginHandles[0] on success; both gate ncclGinDevCommFree in ncclDevCommDestroy
+// and on the create-failure path. The default mirrors that contract so a test
+// driving the create path past the GIN gate can observe the leak-release.
+static ncclResult_t DefaultGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*,
+                                           struct ncclDevComm* devComm, uint32_t) {
+  devComm->ginContextCount = 1;
+  devComm->ginHandles[0] = reinterpret_cast<void*>(0xACE);
   return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*, uint32_t)>
+    g_devrGinDevCommSetup = DefaultGinDevCommSetup;
+ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
+                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion) {
+  return g_devrGinDevCommSetup(comm, reqs, devComm, deviceCodeVersion);
+}
+
+static ncclResult_t DefaultGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*, struct ncclDevComm const*)> g_devrGinDevCommFree = DefaultGinDevCommFree;
+ncclResult_t ncclGinDevCommFree(struct ncclComm* comm, struct ncclDevComm const* devComm) {
+  return g_devrGinDevCommFree(comm, devComm);
 }
 
 // The enqueue-rearch job path: collective_stubs.cc pins
@@ -529,6 +551,8 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapAllGather                      = DefaultAllGather;
   g_devrGinRegister                             = DefaultGinRegister;
   g_devrGinDeregister                           = DefaultGinDeregister;
+  g_devrGinDevCommSetup                         = DefaultGinDevCommSetup;
+  g_devrGinDevCommFree                          = DefaultGinDevCommFree;
   g_devrRmaProxyConnectOnce                     = DefaultRmaProxyConnectOnce;
   g_devrRmaProxyRegister                        = DefaultRmaProxyRegister;
   g_devrSpaceAlloc                              = DefaultSpaceAlloc;
