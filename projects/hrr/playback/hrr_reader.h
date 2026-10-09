@@ -166,14 +166,18 @@ struct Archive {
   std::vector<Event> events;
 
   // Crash-resilience status, set by load_archive:
-  //   complete  — the clean-shutdown trailer (hrr_eof_record) was found, so the
-  //               capturing process exited normally and the archive is whole.
+  //   complete  — the clean-shutdown trailer (hrr_eof_record) was found and
+  //               counts the records before it, so the capturing process
+  //               exited normally and the archive is whole.
   //   truncated — a torn trailing record was detected and discarded; all
   //               complete records before it were recovered. Replay still works.
   // A capture interrupted by a crash typically has complete=false; it may also
   // have truncated=true if the final record was only partially written.
   bool complete  = false;
   bool truncated = false;
+  // Whole records found after the trailer. They are not replayed, and the
+  // trailer's event count must match the records before it for complete=true.
+  size_t skipped_after_trailer = 0;
 
   // Content-addressed blobs: hash_hex -> file path
   std::unordered_map<std::string, std::string> blobs;

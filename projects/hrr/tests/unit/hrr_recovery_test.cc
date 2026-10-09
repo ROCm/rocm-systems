@@ -270,6 +270,54 @@ HRR_TEST_CASE(Unit_HRR_Recovery_NoTrailer) {
 /**
  * Test Description
  * ----------------
+ *   - N records, a clean trailer that counts them, then two more records, as a
+ *     runtime that kept writing after the trailer at shutdown could leave. The
+ *     reader stops at the trailer: the archive is complete with exactly the N
+ *     records, and the two after it are counted and not replayed.
+ */
+HRR_TEST_CASE(Unit_HRR_Recovery_RecordAfterTrailer) {
+  TmpArchive arc("after_trailer");
+  arc.write_records(5);
+  arc.write_trailer(5);
+  for (uint64_t seq : {100u, 101u}) {
+    hrr_event_header h = make_min_record(seq);
+    arc.write_bytes(&h, sizeof(h));
+  }
+  arc.finish();
+
+  hrr::Archive a;
+  REQUIRE(hrr::load_archive(arc.path(), a));
+  CHECK(a.events.size() == 5);
+  CHECK(a.complete);
+  CHECK_FALSE(a.truncated);
+  CHECK(a.skipped_after_trailer == 2);
+  for (const auto& ev : a.events) CHECK(ev.header().sequence_id < 100);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - N records followed by a trailer that claims a different count. The
+ *     trailer still ends the stream, but the archive is not treated as a clean
+ *     complete capture, so --repair rewrites it rather than trusting it.
+ */
+HRR_TEST_CASE(Unit_HRR_Recovery_TrailerCountMismatch) {
+  TmpArchive arc("count_mismatch");
+  arc.write_records(5);
+  arc.write_trailer(4);
+  arc.finish();
+
+  hrr::Archive a;
+  REQUIRE(hrr::load_archive(arc.path(), a));
+  CHECK(a.events.size() == 5);
+  CHECK_FALSE(a.complete);
+  CHECK_FALSE(a.truncated);
+  CHECK(a.skipped_after_trailer == 0);
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - A crash-style per-process archive has no clean trailer and an old
  *     root-shaped manifest that lacks pid/parent_pid.
  *   - hrr-playback --repair appends a clean trailer and rewrites manifest.json

@@ -324,9 +324,12 @@ bool load_archive(const std::string& path, Archive& archive) {
   // Read events sequentially. read_raw_record handles the framing and the
   // torn-tail recovery; a torn record means the capture was interrupted, and
   // everything parsed before it is kept. The clean-shutdown trailer
-  // (hrr_eof_record) explicitly marks a whole archive.
+  // (hrr_eof_record) explicitly marks a whole archive, and it ends the event
+  // stream.
   bool truncated = false;
   bool complete  = false;
+  bool trailer   = false;
+  uint64_t trailer_count = 0;
   const uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
   while (true) {
     Event ev;
@@ -349,8 +352,9 @@ bool load_archive(const std::string& path, Archive& archive) {
         total == static_cast<uint32_t>(sizeof(hrr_eof_record))) {
       const auto* er = reinterpret_cast<const hrr_eof_record*>(ev.raw_payload.data());
       if (er->eof_magic == HRR_EOF_MAGIC) {
-        complete = true;
-        continue;  // do not append trailer as a replay event
+        trailer = true;
+        trailer_count = er->total_events;
+        break;  // the trailer is not a replay event, and nothing after it is
       }
     }
 
@@ -598,11 +602,33 @@ bool load_archive(const std::string& path, Archive& archive) {
     archive.events.push_back(std::move(ev));
   }
 
+  // A runtime older than the writer fix for it could append a few records
+  // after the trailer, from calls still in flight at shutdown. They are not in
+  // the trailer's count, so they are counted and left out of the replay.
+  if (trailer) {
+    std::vector<uint8_t> rest;
+    while (read_raw_record(f, rest) == RecordStatus::Ok)
+      ++archive.skipped_after_trailer;
+    if (archive.skipped_after_trailer)
+      fprintf(stderr,
+              "[HRR] Ignored %zu records after the clean-shutdown trailer\n",
+              archive.skipped_after_trailer);
+  }
+
   fclose(f);
+
+  if (trailer) {
+    complete = trailer_count == archive.events.size();
+    if (!complete)
+      fprintf(stderr,
+              "[HRR] Clean-shutdown trailer counts %llu events but %zu precede it; "
+              "the archive is not treated as complete\n",
+              static_cast<unsigned long long>(trailer_count), archive.events.size());
+  }
 
   archive.complete  = complete;
   archive.truncated = truncated;
-  if (!complete) {
+  if (!trailer) {
     fprintf(stderr,
             "[HRR] Archive has no clean-shutdown trailer (capture likely crashed); "
             "recovered %zu events%s\n",

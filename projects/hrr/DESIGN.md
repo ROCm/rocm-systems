@@ -90,8 +90,12 @@ atomically renamed), so a crash never leaves a partial final blob.
 On the read side, `load_archive` is append-only-aware: a torn record can only be
 the last one, so a partial header/payload at the tail is a recovery point — all
 complete records are kept and `Archive::truncated` is set, rather than failing
-the whole load. `Archive::complete` reflects whether the trailer was found.
-`hrr-playback --info` reports both; `hrr-playback --repair` rewrites a truncated
+the whole load. The trailer ends the event stream. Records after it, which a
+runtime older than the writer fix could leave from calls still in flight at
+shutdown, are counted in `Archive::skipped_after_trailer`, reported once and
+not replayed. `Archive::complete` is set when the trailer was found and its
+`total_events` equals the number of records before it; a mismatch is reported
+and leaves the archive incomplete. `hrr-playback --info` reports both; `hrr-playback --repair` rewrites a truncated
 archive (trimmed to the last complete record, trailer + manifest added) into a
 clean one.
 
