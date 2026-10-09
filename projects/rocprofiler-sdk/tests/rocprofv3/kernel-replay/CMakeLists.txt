@@ -180,6 +180,8 @@ set_tests_properties(
                "${rocprofv3-generate-env}"
                RESOURCE_LOCK
                rocprofiler_kernel_replay
+               RUN_SERIAL
+               ON
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_SETUP
