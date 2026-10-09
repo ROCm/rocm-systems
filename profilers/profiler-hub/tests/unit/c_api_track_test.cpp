@@ -167,37 +167,12 @@ TEST_F(c_api_track_test, an_unknown_track_clears_the_event_list_and_reports_the_
     EXPECT_EQ(events.events, nullptr);
 }
 
-TEST_F(c_api_track_test, the_nesting_depth_of_a_flat_track_is_one)
+TEST_F(c_api_track_test, the_track_list_reports_the_nesting_depth_of_a_flat_track)
 {
-    uint32_t depth = 99;
+    ph_track_list_t tracks{};
+    ASSERT_EQ(ph_get_track_list(m_ctx, &tracks), PH_RESULT_SUCCESS);
 
-    ASSERT_EQ(ph_get_track_nesting_depth(m_ctx, m_track_id, &depth), PH_RESULT_SUCCESS);
-
-    EXPECT_EQ(depth, 1U);
-}
-
-TEST_F(c_api_track_test, an_unknown_track_has_no_nesting_depth)
-{
-    uint32_t depth = 99;
-
-    EXPECT_EQ(ph_get_track_nesting_depth(m_ctx, 999999, &depth),
-              PH_RESULT_INVALID_ARGUMENT);
-
-    EXPECT_EQ(depth, 0U);
-}
-
-TEST_F(c_api_track_test, a_null_nesting_depth_is_an_invalid_argument)
-{
-    EXPECT_EQ(ph_get_track_nesting_depth(m_ctx, m_track_id, nullptr),
-              PH_RESULT_INVALID_ARGUMENT);
-}
-
-TEST_F(c_api_track_test, a_null_context_has_no_nesting_depth)
-{
-    uint32_t depth = 0;
-
-    EXPECT_EQ(ph_get_track_nesting_depth(nullptr, m_track_id, &depth),
-              PH_RESULT_INVALID_CONTEXT);
+    EXPECT_EQ(tracks.tracks[0].nesting_depth, 1U);
 }
 
 TEST_F(c_api_track_test, a_null_event_list_is_an_invalid_argument)

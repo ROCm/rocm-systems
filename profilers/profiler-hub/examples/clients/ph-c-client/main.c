@@ -161,7 +161,8 @@ static void
 print_tracks(const ph_track_list_t* tracks, uint32_t limit)
 {
     printf("\n=== Tracks (%d) ===\n", tracks->list_size);
-    printf("%-4s %-12s %-8s %-8s %-8s %-8s %-20s %-8s %-8s %-20s %-20s %-16s %-16s %s\n",
+    printf("%-4s %-12s %-8s %-8s %-8s %-8s %-20s %-8s %-8s %-20s %-20s %-16s %-16s %-8s "
+           "%s\n",
            "id",
            "nid",
            "pid",
@@ -175,6 +176,7 @@ print_tracks(const ph_track_list_t* tracks, uint32_t limit)
            "end",
            "min_value",
            "max_value",
+           "depth",
            "name");
     for(uint32_t i = 0; i < tracks->list_size && i < limit; ++i)
     {
@@ -187,7 +189,7 @@ print_tracks(const ph_track_list_t* tracks, uint32_t limit)
             snprintf(max_text, sizeof(max_text), "%.6g", track->value_range.max);
         }
         printf("%-4d %-12d %-8d %-8d %-8d %-8d %-20s %-8d %-8d %-20llu %-20llu %-16s "
-               "%-16s %s\n",
+               "%-16s %-8u %s\n",
                track->id,
                track->nid,
                track->pid,
@@ -201,6 +203,7 @@ print_tracks(const ph_track_list_t* tracks, uint32_t limit)
                (unsigned long long) track->end_ts,
                min_text,
                max_text,
+               (unsigned) track->nesting_depth,
                track->track_name);
     }
     if(tracks->list_size > limit)
@@ -270,53 +273,6 @@ print_samples(const ph_sample_list_t* samples, uint32_t limit)
 }
 
 static void
-demo_nesting_depths(ph_ctx_t ctx, const ph_track_list_t* tracks, uint32_t limit)
-{
-    printf("\n=== Nesting depth per track (%u tracks, first %u shown) ===\n",
-           tracks->list_size,
-           limit);
-    printf("%-4s %-20s %-10s %-8s %s\n", "id", "category", "events", "depth", "ms");
-
-    uint32_t deepest_track = 0;
-    uint32_t deepest       = 0;
-    uint32_t slowest_track = 0;
-    double   slowest_ms    = 0.0;
-    for(uint32_t i = 0; i < tracks->list_size; ++i)
-    {
-        const ph_track_t* track = &tracks->tracks[i];
-        uint32_t          depth = 0;
-        const double      t0    = monotonic_ms();
-        ph_get_track_nesting_depth(ctx, track->id, &depth);
-        const double ms = monotonic_ms() - t0;
-
-        if(depth > deepest)
-        {
-            deepest       = depth;
-            deepest_track = track->id;
-        }
-        if(ms > slowest_ms)
-        {
-            slowest_ms    = ms;
-            slowest_track = track->id;
-        }
-        if(i < limit)
-        {
-            printf("%-4u %-20s %-10u %-8u %.3f\n",
-                   (unsigned) track->id,
-                   track_category_name(track->category),
-                   (unsigned) track->event_count,
-                   (unsigned) depth,
-                   ms);
-        }
-    }
-    printf("deepest: track %u (depth %u), slowest: track %u (%.3f ms)\n",
-           (unsigned) deepest_track,
-           (unsigned) deepest,
-           (unsigned) slowest_track,
-           slowest_ms);
-}
-
-static void
 demo_track_events(ph_ctx_t ctx, uint32_t track_id)
 {
     ph_event_list_t events;
@@ -328,11 +284,6 @@ demo_track_events(ph_ctx_t ctx, uint32_t track_id)
            events.list_size,
            PRINT_LIMIT);
     print_events(&events, PRINT_LIMIT);
-
-    uint32_t nesting_depth = 0;
-    TIME_CALL("ph_get_track_nesting_depth",
-              ph_get_track_nesting_depth(ctx, track_id, &nesting_depth));
-    printf("nesting depth: %u\n", (unsigned) nesting_depth);
 
     if(events.list_size == 0) return;
 
@@ -545,8 +496,6 @@ main(int argc, char** argv)
     uint32_t duration_track_id = 0;
     uint32_t counter_track_id  = 0;
     find_sample_tracks(&node.track_list, &duration_track_id, &counter_track_id);
-
-    demo_nesting_depths(ctx, &node.track_list, PRINT_LIMIT);
 
     if(duration_track_id != 0)
     {

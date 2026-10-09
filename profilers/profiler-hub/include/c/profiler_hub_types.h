@@ -98,6 +98,8 @@ extern "C"
         ph_value_range_t value_range; /**< Sample value range. Only valid for
                                             PH_TRACK_CATEGORY_PMC_AGENT tracks with
                                             at least one sample value. */
+        uint32_t nesting_depth;       /**< Largest ph_event_t::depth of the track's
+                                            events; 0 for PMC tracks. */
     } ph_track_t;
 
     /**

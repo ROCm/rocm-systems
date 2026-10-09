@@ -57,9 +57,12 @@ downstream consumer of the library.
   included, that are active when the event starts, relative to the whole track. A
   `ph_get_track_events()` request with a time window is now served from the
   whole-track events, so its events keep that depth and come ordered by start.
-- New `ph_get_track_nesting_depth()` returns the largest `ph_event_t::depth` of a
-  track. It reads the whole track on the first call, as `ph_get_track_events()`
-  does.
+- `ph_track_t::nesting_depth` is the largest `ph_event_t::depth` of the track (0 for
+  PMC tracks).
+- `ph_ctx_create()` now reads the events of every track and the samples of every PMC
+  track and keeps them in memory until `ph_ctx_free()`. Opening a trace takes longer
+  and uses memory proportional to its event count; `ph_get_track_events()` and
+  `ph_get_track_samples()` then never read the database.
 - New `PH_TRACK_CATEGORY_THREAD_SAMPLE`/`track_kind_t::thread_sample`
   category: duration events explicitly tagged with a named track (via
   `writer_t::register_track_info()` + `trace_environment_t::track_name`)

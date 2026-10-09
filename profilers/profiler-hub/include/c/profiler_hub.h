@@ -126,26 +126,6 @@ extern "C"
                                     ph_event_list_t* events);
 
     /**
-     * @brief Reads the largest ph_event_t::depth of a track.
-     * @param ctx Context to query.
-     * @param track_id Id of a track, as returned by
-     *        ph_get_track_list()/ph_get_node().
-     * @param depth Out parameter receiving the maximum nesting depth; it is
-     *        set to 0 before any other work, so it is valid on failure. It
-     *        stays 0 for a PMC track and for a track without events.
-     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
-     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p depth is null
-     *         or @p track_id does not identify a known track,
-     *         PH_RESULT_INTERNAL_ERROR on failure.
-     * @note The whole track is read and kept on the first call, exactly as
-     *       for ph_get_track_events() without a time window; later calls for
-     *       the track are answered from memory.
-     */
-    ph_result_t ph_get_track_nesting_depth(ph_ctx_t  ctx,
-                                           uint32_t  track_id,
-                                           uint32_t* depth);
-
-    /**
      * @brief Retrieves PMC/counter samples for a track within an optional
      *        time window.
      * @param ctx Context to query.

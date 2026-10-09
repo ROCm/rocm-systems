@@ -174,32 +174,6 @@ ph_get_track_events(ph_ctx_t         ctx,
 }
 
 ph_result_t
-ph_get_track_nesting_depth(ph_ctx_t ctx, uint32_t track_id, uint32_t* depth)
-{
-    if(ctx == nullptr)
-    {
-        return PH_RESULT_INVALID_CONTEXT;
-    }
-
-    if(depth == nullptr)
-    {
-        return PH_RESULT_INVALID_ARGUMENT;
-    }
-
-    *depth = 0;
-    return guard_call([ctx, track_id, depth]() {
-        if(!ctx->has_track(track_id))
-        {
-            return PH_RESULT_INVALID_ARGUMENT;
-        }
-
-        *depth = ctx->get_track_nesting_depth(track_id);
-
-        return PH_RESULT_SUCCESS;
-    });
-}
-
-ph_result_t
 ph_get_track_samples(ph_ctx_t          ctx,
                      uint32_t          track_id,
                      uint64_t          start_ts,

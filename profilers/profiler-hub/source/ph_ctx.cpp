@@ -75,6 +75,7 @@ ph_ctx::ph_ctx(std::string_view trace_path)
     populate_reader_catalog(m_thread_pool, m_connection_pool, *m_catalog);
 
     initialize_track_list();
+    load_all_tracks();
     initialize_node_agents();
     initialize_node_processes();
     initialize_node_info();
@@ -159,19 +160,6 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
     return m_track_reader.events(track_it->second, start_ts, end_ts);
 }
 
-uint32_t
-ph_ctx::get_track_nesting_depth(uint32_t track_id)
-{
-    LOG_DEBUG("[Profiler-Hub] Get track nesting depth. Track id {}", track_id);
-    const auto track_it = m_track_by_id.find(track_id);
-    if(track_it == m_track_by_id.end())
-    {
-        return 0;
-    }
-
-    return m_track_reader.nesting_depth(track_it->second);
-}
-
 ph_sample_list_t
 ph_ctx::get_track_samples(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
 {
@@ -229,6 +217,23 @@ ph_ctx::initialize_track_list()
                                                                   1 }
                                               : ph_value_range_t{},
         });
+    }
+}
+
+void
+ph_ctx::load_all_tracks()
+{
+    for(auto& c_track : m_c_tracks)
+    {
+        const auto& track = m_track_by_id.at(c_track.id);
+        if(track->category == profiler_hub::reader_types::track_kind_t::pmc_agent)
+        {
+            std::ignore = m_track_reader.samples(track, 0, 0);
+            continue;
+        }
+
+        std::ignore           = m_track_reader.events(track, 0, 0);
+        c_track.nesting_depth = m_track_reader.nesting_depth(track);
     }
 }
 

@@ -195,6 +195,24 @@ TEST_F(c_api_pmc_ctx_test, ph_get_track_list_pmc_track_exposes_valid_value_range
     ph_ctx_free(ctx);
 }
 
+TEST_F(c_api_pmc_ctx_test, ph_get_track_list_pmc_track_has_nesting_depth_zero)
+{
+    ph_ctx_t ctx = nullptr;
+    ASSERT_EQ(ph_ctx_create(&ctx, m_db_path.c_str()), PH_RESULT_SUCCESS);
+
+    ph_track_list_t tracks{};
+    ASSERT_EQ(ph_get_track_list(ctx, &tracks), PH_RESULT_SUCCESS);
+
+    const auto* pmc_track = std::find_if(
+        tracks.tracks, tracks.tracks + tracks.list_size, [](const ph_track_t& track) {
+            return track.category == PH_TRACK_CATEGORY_PMC_AGENT;
+        });
+    ASSERT_NE(pmc_track, tracks.tracks + tracks.list_size);
+    EXPECT_EQ(pmc_track->nesting_depth, 0U);
+
+    ph_ctx_free(ctx);
+}
+
 TEST_F(c_api_thread_ctx_test, ph_get_track_list_thread_track_value_range_is_not_valid)
 {
     ph_ctx_t ctx = nullptr;
