@@ -65,6 +65,11 @@ struct local_context_control_t
     // for these; toggling any other context is rejected, so a local start cannot promote a
     // globally-stopped context.
     std::unordered_set<rocprofiler_context_id_t> pre_active{};
+
+    // The agent being replayed. The map is thread-scoped, but a tool callback on the replaying
+    // thread can dispatch to another agent; overrides apply only to dispatches on this one. Unset
+    // means "every agent" (unit tests that model no particular agent).
+    std::optional<rocprofiler_agent_id_t> replay_agent{};
 };
 
 // RAII: owns this replay loop's override map and installs it as the thread's active routing for the
@@ -79,6 +84,10 @@ public:
     // context::get_active_contexts()). These become the pre-active mask: a local start/stop is only
     // honored for one of these (see local_context_control_t::pre_active).
     explicit scoped_local_context_control(const context::context_array_t& active_contexts);
+    // As above, for the replay loop of `replay_agent`: overrides apply only to dispatches on that
+    // agent, and replaying_agent() reports it for the loop's lifetime.
+    scoped_local_context_control(const context::context_array_t& active_contexts,
+                                 rocprofiler_agent_id_t          replay_agent);
     ~scoped_local_context_control();
 
     scoped_local_context_control(const scoped_local_context_control&) = delete;
@@ -126,5 +135,16 @@ local_context_override(rocprofiler_context_id_t context_id);
 // own enabled state.
 bool
 is_locally_enabled(rocprofiler_context_id_t context_id);
+
+// As above, for a dispatch on `dispatch_agent`: a loop's overrides only apply to dispatches on the
+// agent it is replaying, so a dispatch a tool callback sends to another agent is unaffected.
+bool
+is_locally_enabled(rocprofiler_context_id_t context_id, rocprofiler_agent_id_t dispatch_agent);
+
+// The agent whose replay loop this thread is running, or std::nullopt outside a loop (or in a loop
+// that names no agent). WriteInterceptor uses it to refuse nested replays and to stop a replay
+// callback from dispatching to the agent being replayed, whose replay lock this thread holds.
+std::optional<rocprofiler_agent_id_t>
+replaying_agent();
 }  // namespace kernel_replay
 }  // namespace rocprofiler

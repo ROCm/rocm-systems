@@ -62,6 +62,14 @@ scoped_local_context_control::scoped_local_context_control(
     tl_control = &m_control;
 }
 
+scoped_local_context_control::scoped_local_context_control(
+    const context::context_array_t& active_contexts,
+    rocprofiler_agent_id_t          replay_agent)
+: scoped_local_context_control{active_contexts}
+{
+    m_control.replay_agent = replay_agent;
+}
+
 scoped_local_context_control::~scoped_local_context_control() { tl_control = nullptr; }
 
 void
@@ -100,8 +108,25 @@ local_context_override(rocprofiler_context_id_t context_id)
 bool
 is_locally_enabled(rocprofiler_context_id_t context_id)
 {
-    auto ov = local_context_override(context_id);
-    return !ov || *ov;
+    if(tl_control == nullptr) return true;
+    auto itr = tl_control->overrides.find(context_id);
+    return itr == tl_control->overrides.end() || itr->second;
+}
+
+bool
+is_locally_enabled(rocprofiler_context_id_t context_id, rocprofiler_agent_id_t dispatch_agent)
+{
+    if(tl_control == nullptr) return true;
+    if(tl_control->replay_agent && *tl_control->replay_agent != dispatch_agent) return true;
+    auto itr = tl_control->overrides.find(context_id);
+    return itr == tl_control->overrides.end() || itr->second;
+}
+
+std::optional<rocprofiler_agent_id_t>
+replaying_agent()
+{
+    if(tl_control == nullptr) return std::nullopt;
+    return tl_control->replay_agent;
 }
 }  // namespace kernel_replay
 }  // namespace rocprofiler
