@@ -256,9 +256,6 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 
   template <int WordPerThread>
   __device__ __forceinline__ void loadRegsBegin(uint64_t (&regs)[WordPerThread], T const* src, int eltN) {
-#if TDM_LL128_ON
-    if (tdmLoadBegin<WordPerThread>(src, eltN)) return;
-#endif
     constexpr int EltPer16B = 16 / sizeof(T);
     // Parametrize the warp-local addressing on the LL128 line geometry.
     // The literals "16" and "4" originally hard-coded 2*LINEELEMS and
@@ -318,9 +315,6 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 
   template <int WordPerThread>
   __device__ __forceinline__ void loadRegsFinish(uint64_t (&regs)[WordPerThread]) {
-#if TDM_LL128_ON
-    tdmLoadFinish<WordPerThread>(regs);
-#endif
     // Move data out of flag registers into the vacant registers.
 #pragma unroll
     for (int g = 1; g < WordPerThread / 2; g += 2) {
@@ -496,9 +490,6 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     barrier();
 
     sqtt_marker_enter("PRIM_LL128_DATA_PROCESS");
-#if TDM_LL128_ON
-    tdmLoadAllowed = RECV;  // async source load only pays when there is a spin to hide
-#endif
     nelem -= DataEltPerSlice * warp;
     srcPtr += DataEltPerSlice * warp;
     dstPtr += DataEltPerSlice * warp;
@@ -511,14 +502,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       if (DST) {
         if (accPtr != nullptr) {
           uint64_t accRegs[NCCL_LL128_SHMEM_ELEMS_PER_THREAD];
-#if TDM_LL128_ON
-          tdmLoadAllowed = false;  // accumulator load has no spin to overlap with
-#endif
           loadRegsBegin(accRegs, accPtr, eltInSlice);
           loadRegsFinish(accRegs);
-#if TDM_LL128_ON
-          tdmLoadAllowed = RECV;
-#endif
           accPtr += DataEltPerSlice * nwarps;
 #pragma unroll
           for (int u = 0; u < NCCL_LL128_SHMEM_ELEMS_PER_THREAD; u++) {
