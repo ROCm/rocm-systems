@@ -112,6 +112,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     before validation. Its raw-byte fixture reproduces the enum UBSan failure;
     enable it after the production fix. The defined `RAS_DIAG_CHECK_COUNT`
     sentinel remains covered by enabled dispatch and peer-payload tests.
+  - `ras/diagnostics_env.cc` (`RAS_DIAGNOSTICS_ENV_CC_PATH`, from
+    `ras-diagnostics-env-test.cc`); suite `RasDiagnosticsEnvMicrotest.*`.
+    Covers NCCL environment collection, filtering, truncation, aggregation,
+    mismatch reporting, and reporter errors.
   - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
     `RasClientMicrotest.*`. With
     `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this
@@ -777,3 +781,26 @@ cmake --build build -j"$(nproc)"
 
 Disable coverage instrumentation for the standalone host-only test binaries
 with `-DHOST_TEST_COVERAGE=OFF`.
+
+### Shared RAS diagnostic fixtures
+
+`fakes/ras_registry_test_support.h` owns test installation/reset of the
+`ras.cc` communicator registry. Both operations hold `ncclCommsMutex` and
+clear `ncclCommsSorted`; installation validates allocation before replacing
+the old registry and preserves explicit vacant slots. The RAS and diagnostics
+suites use the same helper. `fakes/ras_diagnostics_test_support.h` shares the
+owned communicator and recording reporter used by the diagnostic suites.
+
+`SetMicroEnviron` in `fakes/env_fakes.{h,cc}` replaces the scripted environment
+for enumeration tests, preserving input order and malformed entries while
+making valid entries visible through `micro_getenv` and `getenv`. While that
+override is active, `SetMicroEnv` and `SetMicroEnvAbsent` also update `environ`.
+`ClearMicroEnv`/`ResetEnvFakes` restore the original process environment and
+clear the lookup map. Map-only tests retain the existing fallback behavior
+unless they opt into the enumeration override.
+
+`DISABLED_Summarize_HashCollisionsReportFullCommIdentity` tracks AICOMRCCL-2743.
+The environment reporters currently omit host and process hashes, so distinct
+communicators can appear identical. The disabled regression specifies the full
+identity for consistent, mismatch, and mismatch-summary reports. Enable it
+with the separate production fix; enabled tests still pin correct grouping.

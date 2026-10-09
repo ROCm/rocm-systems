@@ -24,6 +24,13 @@
  * Thread-safety: write_event_raw() and write_blob() acquire the file mutex.
  * open() publishes a new archive under it. A forked child's first record opens
  * its archive under g_reopen_mu, which flush() and close() also take.
+ *
+ * Access: on POSIX the archive holds the process's host buffers, kernel
+ * arguments and code objects, so every archive directory this writer creates is
+ * 0700, every file is 0600, no file is opened through a symbolic link in its last
+ * path component, and when the archive is opened the per-process directory must
+ * be a real directory owned by the effective user. The directories above each
+ * file are resolved again on every open.
  */
 
 #include "hip_capture_writer.h"
@@ -36,6 +43,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cerrno>
 #include <filesystem>
@@ -92,17 +100,10 @@ static inline uint64_t current_parent_process_id() {
 #  include <sys/statvfs.h>
 #  include <sys/syscall.h>
 #  include <pthread.h>
-#  define HRR_OPEN(p)        ::open((p), O_WRONLY | O_CREAT | O_TRUNC, 0644)
-#  define HRR_OPEN_APPEND(p) ::open((p), O_RDWR | O_CREAT, 0644)
+#  define HRR_OPEN(p)        open_private_fd((p))
 #  define HRR_WRITE(fd,b,n)  ::write((fd), (b), (n))
 #  define HRR_CLOSE(fd)      ::close((fd))
 #  define HRR_FSYNC(fd)      ::fsync((fd))
-
-using hrr_stat_t = struct stat;
-static int hrr_stat_file(const char* path, hrr_stat_t* st) { return stat(path, st); }
-static std::int64_t hrr_stat_size(const hrr_stat_t& st) {
-  return static_cast<std::int64_t>(st.st_size);
-}
 
 static int hrr_ftruncate_fd(int fd, std::int64_t len) {
   return ftruncate(fd, static_cast<off_t>(len));
@@ -247,6 +248,11 @@ static std::mutex        g_reopen_mu;
 // "co:" prefix for code objects matches the playback-side load_code_object key convention.
 static std::mutex                      g_blob_mu;
 static std::unordered_set<std::string> g_written_blobs;
+#ifndef _WIN32
+// blobs/<xx> prefixes already checked with claim_private_dir (xx is two hex chars).
+// Atomic because write_blob runs on many threads without a lock held.
+static std::atomic<bool> g_blob_prefix_claimed[256];
+#endif
 
 // APIs recorded in this archive that replay cannot reproduce (note_unreplayable).
 // Listed in manifest.json so the gap is a property of the archive rather than
@@ -308,9 +314,180 @@ static void buffer_append_locked(const void* data, size_t len) {
 // Directory helpers
 // ---------------------------------------------------------------------------
 
-static void ensure_dir(const std::string& path) {
-  if (path.empty()) return;
-  fs::create_directories(path);
+// Create `path` and any missing parents: 0700 from the base directory down, and
+// 0777 minus the umask above it. `path` must lie under g_base_dir.
+// Never throws: this runs inside hip::init, the API shims and atexit, where an
+// exception ends the process.
+static bool ensure_dir(const std::string& path) {
+  if (path.empty()) {
+    errno = ENOENT;
+    return false;
+  }
+#ifdef _WIN32
+  std::error_code ec;
+  fs::create_directories(path, ec);
+  if (ec) {
+    const std::error_condition cond = ec.default_error_condition();
+    errno = cond.category() == std::generic_category() ? cond.value() : EIO;
+    return false;
+  }
+  return true;
+#else
+  if (::mkdir(path.c_str(), 0700) == 0 || errno == EEXIST) return true;
+  const size_t base_last = g_base_dir.find_last_not_of('/');
+  const size_t base_len = base_last == std::string::npos ? 0 : base_last + 1;
+  std::string cur;
+  size_t pos = 0;
+  do {
+    pos = path.find('/', pos + 1);
+    cur.assign(path, 0, pos);
+    if (::mkdir(cur.c_str(), cur.size() < base_len ? 0777 : 0700) != 0 && errno != EEXIST) {
+      const int err = errno;
+      struct stat st{};
+      if (::stat(cur.c_str(), &st) != 0) {
+        errno = err;
+        return false;
+      }
+      if (!S_ISDIR(st.st_mode)) {
+        errno = ENOTDIR;
+        return false;
+      }
+    }
+  } while (pos != std::string::npos);
+  return true;
+#endif
+}
+
+#ifndef _WIN32
+static bool owned_by_euid(const struct stat& st) { return st.st_uid == geteuid(); }
+#endif
+
+// pid-<pid>, blobs/, code_objects/ and each blobs/<xx> must be a real directory
+// owned by the effective user; anything else planted there (a symbolic link,
+// another user's directory) is refused. An existing one is tightened to 0700.
+static bool claim_private_dir(const std::string& path) {
+#ifdef _WIN32
+  (void)path;
+  return true;
+#else
+  const int fd = ::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  if (fd < 0) return false;
+  struct stat st{};
+  int err = 0;
+  if (::fstat(fd, &st) != 0) {
+    err = errno;
+  } else if (!owned_by_euid(st)) {
+    err = EPERM;
+  } else if ((st.st_mode & 07777) != 0700 && ::fchmod(fd, 0700) != 0) {
+    err = errno;
+  }
+  ::close(fd);
+  errno = err;
+  return err == 0;
+#endif
+}
+
+// Open this process's events.bin and report how many bytes it already holds.
+// On POSIX an existing file is reused only if it is a regular file with a single
+// link owned by the effective user, and a new one is created exclusively, so
+// nothing planted at that path is ever truncated or appended to. O_NONBLOCK keeps
+// a planted FIFO or device from blocking the open; it changes nothing for the
+// regular file that is kept.
+static int open_events_file(const std::string& path, std::int64_t* existing_size) {
+  *existing_size = 0;
+#ifdef _WIN32
+  hrr_stat_t st{};
+  if (hrr_stat_file(path.c_str(), &st) == 0 && hrr_stat_size(st) > 0) {
+    *existing_size = hrr_stat_size(st);
+    return HRR_OPEN_APPEND(path.c_str());
+  }
+  return HRR_OPEN(path.c_str());
+#else
+  int fd = ::open(path.c_str(), O_RDWR | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+  if (fd < 0 && errno == ENOENT)
+    fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600);
+  if (fd < 0) return -1;
+  struct stat st{};
+  int err = 0;
+  if (::fstat(fd, &st) != 0) {
+    err = errno;
+  } else if (!S_ISREG(st.st_mode) || st.st_nlink != 1 || !owned_by_euid(st)) {
+    err = EPERM;
+  } else if ((st.st_mode & 07777) != 0600 && ::fchmod(fd, 0600) != 0) {
+    err = errno;
+  }
+  if (err != 0) {
+    ::close(fd);
+    errno = err;
+    return -1;
+  }
+  *existing_size = static_cast<std::int64_t>(st.st_size);
+  return fd;
+#endif
+}
+
+#ifndef _WIN32
+// Open a file inside the archive for writing and truncate it: 0600, never
+// through a symbolic link or a hard link. Truncation happens only after the
+// opened inode has been checked, so a planted hard link cannot empty a file
+// outside the archive, and O_NONBLOCK keeps a planted FIFO from blocking the
+// open. A refused inode fails with EPERM, so the caller's message names the
+// reason. Async-signal-safe: emergency_finalize reaches it through HRR_OPEN.
+static int open_private_fd(const char* path) {
+  const int fd = ::open(path, O_WRONLY | O_CREAT | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600);
+  if (fd < 0) return -1;
+  struct stat st{};
+  int err = 0;
+  if (::fstat(fd, &st) != 0) {
+    err = errno;
+  } else if (!S_ISREG(st.st_mode) || st.st_nlink != 1 || !owned_by_euid(st)) {
+    err = EPERM;
+  } else if (((st.st_mode & 07777) != 0600 && ::fchmod(fd, 0600) != 0) || ::ftruncate(fd, 0) != 0) {
+    err = errno;
+  }
+  if (err != 0) {
+    ::close(fd);
+    errno = err;
+    return -1;
+  }
+  return fd;
+}
+#endif
+
+// fopen(path, "w") for a file inside the archive, opened by open_private_fd on POSIX.
+static FILE* fopen_private(const std::string& path) {
+#ifdef _WIN32
+  return fopen(path.c_str(), "w");
+#else
+  const int fd = open_private_fd(path.c_str());
+  if (fd < 0) return nullptr;
+  FILE* f = ::fdopen(fd, "w");
+  if (!f) ::close(fd);
+  return f;
+#endif
+}
+
+// fopen(path, "r") for a file inside the archive. On POSIX only a regular file
+// is read, never through a symbolic link, and a planted FIFO is refused rather
+// than blocking the open. What is trusted on the way in passes the same checks
+// as what is written: ours and a single link, or another user's counters and
+// manifests would be taken for this archive's.
+static FILE* fopen_read_regular(const std::string& path) {
+#ifdef _WIN32
+  return fopen(path.c_str(), "r");
+#else
+  const int fd = ::open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+  if (fd < 0) return nullptr;
+  struct stat st{};
+  if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_nlink != 1 ||
+      !owned_by_euid(st)) {
+    ::close(fd);
+    return nullptr;
+  }
+  FILE* f = ::fdopen(fd, "r");
+  if (!f) ::close(fd);
+  return f;
+#endif
 }
 
 static bool atomic_write_file(const std::string& path, const void* data, size_t len);
@@ -417,7 +594,7 @@ static ScanResult scan_events_for_resume(FILE* f, std::int64_t file_size) {
 static bool try_load_writer_state(const std::string& path, std::int64_t file_size,
                                   uint64_t* next_seq, uint64_t* ev_count,
                                   uint64_t* bl_count) {
-  FILE* f = fopen(path.c_str(), "r");
+  FILE* f = fopen_read_regular(path);
   if (!f) return false;
 
   uint64_t ns = 0, ec = 0, bc = 0;
@@ -446,8 +623,7 @@ static void save_writer_state_locked() {
   std::int64_t sz = hrr_seek_end(g_events_fd);
   if (sz < 0) return;
 
-  std::string path = g_output_dir + "/writer_state.json";
-  FILE* f = fopen(path.c_str(), "w");
+  FILE* f = fopen_private(g_output_dir + "/writer_state.json");
   if (!f) return;
   fprintf(f,
           "{\n"
@@ -463,24 +639,59 @@ static void save_writer_state_locked() {
   fclose(f);
 }
 
+// A blob or code object found on resume counts as already written only if this
+// user wrote it: a regular file with a single link owned by the effective user.
+// The directories were claimed first, so nobody else can add one now, but a
+// file another user planted before the claim, or a hard link to a file
+// elsewhere, would otherwise be trusted and never rewritten. Left unindexed,
+// it is replaced by the next atomic write of that hash, which renames over it.
+static bool resumed_file_is_ours(const fs::path& p) {
+#ifdef _WIN32
+  std::error_code ec;
+  return fs::symlink_status(p, ec).type() == fs::file_type::regular;
+#else
+  struct stat st{};
+  return ::lstat(p.c_str(), &st) == 0 && S_ISREG(st.st_mode) && st.st_nlink == 1 &&
+         owned_by_euid(st);
+#endif
+}
+
 static void index_existing_blobs_locked(const std::string& output_dir) {
   std::lock_guard<std::mutex> lk(g_blob_mu);
   g_written_blobs.clear();
 
-  fs::path blobs_root = output_dir + "/blobs";
-  if (fs::exists(blobs_root)) {
-    for (const auto& ent : fs::recursive_directory_iterator(blobs_root)) {
-      if (ent.is_regular_file() && ent.path().extension() == ".blob")
-        g_written_blobs.insert(ent.path().stem().string());
+  // error_code overloads throughout: a missing or unreadable directory only
+  // means fewer blobs are known to exist, and a blob written twice is harmless.
+  // Only a file resumed_file_is_ours() accepts counts; anything else is replaced.
+  // A blobs/<xx> prefix is claimed before its files are trusted: one that fails
+  // claim_private_dir contributes nothing, and write_blob refuses it later.
+  std::error_code ec;
+  const fs::path blobs_root = output_dir + "/blobs";
+  for (fs::directory_iterator dit(blobs_root, ec), dend; !ec && dit != dend; dit.increment(ec)) {
+    std::error_code entry_ec;
+    if (dit->symlink_status(entry_ec).type() != fs::file_type::directory) continue;
+#ifndef _WIN32
+    const std::string name = dit->path().filename().string();
+    const auto nibble = [](char c) -> int {
+      return (c >= '0' && c <= '9') ? c - '0' : (c >= 'a' && c <= 'f') ? c - 'a' + 10 : -1;
+    };
+    if (name.size() != 2 || nibble(name[0]) < 0 || nibble(name[1]) < 0) continue;
+    if (!claim_private_dir(dit->path().string())) continue;
+    g_blob_prefix_claimed[(nibble(name[0]) << 4) | nibble(name[1])].store(
+        true, std::memory_order_release);
+#endif
+    for (fs::directory_iterator it(dit->path(), entry_ec), end; !entry_ec && it != end;
+         it.increment(entry_ec)) {
+      if (it->path().extension() == ".blob" && resumed_file_is_ours(it->path()))
+        g_written_blobs.insert(it->path().stem().string());
     }
   }
 
-  fs::path co_root = output_dir + "/code_objects";
-  if (fs::exists(co_root)) {
-    for (const auto& ent : fs::directory_iterator(co_root)) {
-      if (ent.is_regular_file() && ent.path().extension() == ".hsaco")
-        g_written_blobs.insert(std::string("co:") + ent.path().stem().string());
-    }
+  ec.clear();
+  const fs::path co_root = output_dir + "/code_objects";
+  for (fs::directory_iterator it(co_root, ec), end; !ec && it != end; it.increment(ec)) {
+    if (it->path().extension() == ".hsaco" && resumed_file_is_ours(it->path()))
+      g_written_blobs.insert(std::string("co:") + it->path().stem().string());
   }
 }
 
@@ -491,7 +702,8 @@ static void reopen_after_fork() {
   // From the *base* dir, so the child selects its own pid-<pid> sub-archive.
   // open() assigns g_base_dir, so pass it a copy.
   const std::string base = g_base_dir;
-  (void)open(base.c_str());
+  // A child whose archive is refused runs on uncaptured, without the shims.
+  if (!open(base.c_str())) hip_capture_uninstall();
   g_reopen_after_fork.store(false, std::memory_order_release);
 }
 
@@ -562,8 +774,7 @@ static void install_atfork_handlers_once() {
 #endif
 
 static void write_manifest_stdio(const char* output_dir, bool complete) {
-  std::string manifest_path = std::string(output_dir) + "/manifest.json";
-  FILE* mf = fopen(manifest_path.c_str(), "w");
+  FILE* mf = fopen_private(std::string(output_dir) + "/manifest.json");
   if (!mf) return;
   fprintf(mf,
           "{\n"
@@ -616,7 +827,7 @@ struct ProcessManifestEntry {
 };
 
 static bool read_process_manifest(const std::string& path, ProcessManifestEntry* out) {
-  FILE* f = fopen(path.c_str(), "r");
+  FILE* f = fopen_read_regular(path);
   if (!f) return false;
 
   ProcessManifestEntry e{};
@@ -668,15 +879,20 @@ static void update_root_manifest() {
   if (g_base_dir.empty()) return;
 
   std::vector<ProcessManifestEntry> entries;
-  for (const auto& ent : fs::directory_iterator(g_base_dir)) {
-    if (!ent.is_directory()) continue;
-    const std::string name = ent.path().filename().string();
+  std::error_code ec;
+  for (fs::directory_iterator it(g_base_dir, ec), end; !ec && it != end; it.increment(ec)) {
+    std::error_code entry_ec;
+    if (it->symlink_status(entry_ec).type() != fs::file_type::directory) continue;
+    const std::string name = it->path().filename().string();
     if (name.rfind("pid-", 0) != 0) continue;
     ProcessManifestEntry entry{};
-    const std::string manifest_path = (ent.path() / "manifest.json").string();
+    const std::string manifest_path = (it->path() / "manifest.json").string();
     if (read_process_manifest(manifest_path, &entry))
       entries.push_back(entry);
   }
+  // A scan that stopped on an error would replace the root manifest with one
+  // that leaves out the archives it did not reach.
+  if (ec) return;
 
   std::sort(entries.begin(), entries.end(),
             [](const auto& a, const auto& b) { return a.pid < b.pid; });
@@ -762,6 +978,17 @@ static bool fs_space(const std::string& dir, uint64_t* avail, uint64_t* total,
   return true;
 }
 
+// pid-<pid>/active tells producers outside the runtime that this process's
+// capture is on. open() removes a stale one before any step that can fail and
+// creates it as its last step. flush() removes it at shutdown, and
+// stop_for_space() when the capture stops early. events.bin cannot carry that
+// signal: a resume that fails after opening it leaves the earlier run's file in
+// place. The marker holds one line naming the process instance (see
+// process_instance()). A killed process cannot remove its marker, and a producer
+// in a later process with the same pid checks before HIP starts, so it must find
+// its own instance in the marker.
+static constexpr const char* kActiveMarker = "/active";
+
 // Flush what is buffered, close events.bin and mark the archive incomplete.
 // Every write path already treats a closed events fd as "capture off". Both flags
 // are raised under g_file_mu, so a writer that sees the stop flag and then takes
@@ -781,6 +1008,9 @@ static void stop_for_space(uint64_t keep_free) {
     HRR_CLOSE(g_events_fd);
     g_events_fd = -1;
   }
+  // The application runs on, and producers would keep writing sidecars to an
+  // archive that records nothing, on a file system already short of space.
+  (void)remove((g_output_dir + kActiveMarker).c_str());
   mark_incomplete(reason);
   // Not gated on AMD_LOG_LEVEL, like the refusal in open().
   fprintf(stderr,
@@ -864,7 +1094,7 @@ struct SpaceReservation {
   ~SpaceReservation() { release_space(len); }
 };
 
-// For open() refusing for lack of space. A forked child inherits these paths and
+// For open() refusing an archive. A forked child inherits these paths and
 // atexit(hip_capture_shutdown), so without this its flush() would finalize the
 // parent's archive, or one the child never opened. An empty g_base_dir also keeps
 // reopen_after_fork() from trying again.
@@ -878,6 +1108,86 @@ static void clear_archive_paths() {
 // open / close / flush / checkpoint
 // ---------------------------------------------------------------------------
 
+// A failed open() keeps no archive path, so reopen_after_fork() does not open one
+// in a forked child. When this attempt created pid-<pid>, its empty directories go
+// too, so a refused capture leaves nothing behind. Only empty directories are
+// removed, and a link in their place is not followed.
+static bool open_failed(const std::string& out_dir, bool created_pid_dir) {
+  if (created_pid_dir) {
+    for (const char* sub : {"/blobs", "/code_objects", ""}) {
+      const std::string dir = out_dir + sub;
+#ifdef _WIN32
+      std::error_code ec;
+      if (fs::is_directory(fs::symlink_status(dir, ec)) && fs::is_empty(dir, ec))
+        fs::remove(dir, ec);
+#else
+      (void)::rmdir(dir.c_str());
+#endif
+    }
+  }
+  clear_archive_paths();
+  return false;
+}
+
+// Names this process instance, so a producer can tell the marker its own writer
+// created from one that a killed process with the same pid left behind. On Linux
+// it is the boot id and the start time from /proc/self/stat, in clock ticks since
+// boot; on Windows the creation time as a FILETIME. Empty when it cannot be read.
+static std::string process_instance() {
+#if defined(_WIN32)
+  FILETIME created{}, exited{}, kernel{}, user{};
+  if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) return {};
+  return std::to_string((static_cast<uint64_t>(created.dwHighDateTime) << 32) |
+                        created.dwLowDateTime);
+#elif defined(__linux__)
+  auto first_line = [](const char* path) {
+    std::string line;
+    if (FILE* f = fopen(path, "r")) {
+      char buf[1024];
+      if (fgets(buf, sizeof(buf), f) != nullptr) line = buf;
+      fclose(f);
+    }
+    return line;
+  };
+  std::string boot = first_line("/proc/sys/kernel/random/boot_id");
+  while (!boot.empty() && boot.back() == '\n') boot.pop_back();
+  const std::string stat_line = first_line("/proc/self/stat");
+  // Field 2, the command name, may hold spaces and parentheses. Every field
+  // after the last ')' is one word with one space before it.
+  const size_t name_end = stat_line.rfind(')');
+  if (boot.empty() || name_end == std::string::npos) return {};
+  const char* p = stat_line.c_str() + name_end;
+  for (int field = 3; field <= 22; ++field) {
+    p = strchr(p, ' ');
+    if (p == nullptr) return {};
+    ++p;
+  }
+  const size_t digits = strspn(p, "0123456789");
+  if (digits == 0) return {};
+  return boot + " " + std::string(p, digits);
+#else
+  return {};
+#endif
+}
+
+static bool publish_active_marker(const std::string& out_dir) {
+  const std::string marker = out_dir + kActiveMarker;
+  const std::string instance = process_instance();
+  if (instance.empty())
+    LogPrintfWarning("[HRR capture] Cannot name this process in %s, so producers will not "
+                     "take the capture for active", marker.c_str());
+  const int fd = HRR_OPEN(marker.c_str());
+  if (fd < 0) return false;
+  const std::string line = instance + "\n";
+  const bool written = write_all_fd(fd, line.data(), line.size());
+  const int err = errno;
+  HRR_CLOSE(fd);
+  if (written) return true;
+  (void)remove(marker.c_str());
+  errno = err;
+  return false;
+}
+
 bool open(const char* output_dir) {
   if (is_open()) return true;  // already open — guard against double-invocation
   if (g_out_of_space.load(std::memory_order_relaxed)) {  // e.g. a child after fork
@@ -890,18 +1200,38 @@ bool open(const char* output_dir) {
   // The archive is prepared in locals and published below under the writer
   // mutex and g_buf_busy. A forked child opens its archive while other threads
   // may checkpoint, crash or finalize, and none of them may see the events fd
-  // before the buffer holds the file header.
-  const std::string base_dir = output_dir;
-  ensure_dir(base_dir);
+  // before the buffer holds the file header. g_base_dir is set first because
+  // ensure_dir() reads it; open() runs at init or under g_reopen_mu, as flush()
+  // does.
+  g_base_dir = output_dir;
   const uint64_t pid = current_process_id();
   const uint64_t parent_pid = current_parent_process_id();
   char sub[64];
   snprintf(sub, sizeof(sub), "/pid-%llu", static_cast<unsigned long long>(pid));
-  const std::string out_dir = base_dir + sub;
+  const std::string out_dir = g_base_dir + sub;
 
-  ensure_dir(out_dir);
-  ensure_dir(out_dir + "/blobs");
-  ensure_dir(out_dir + "/code_objects");
+  std::error_code exists_ec;
+  const bool created_pid_dir =
+      !fs::exists(fs::symlink_status(out_dir, exists_ec));
+  bool dirs_ok = ensure_dir(out_dir) && claim_private_dir(out_dir);
+  // A marker left by an earlier process with this pid goes first, once the
+  // directory it sits in is known to be ours.
+  if (dirs_ok) (void)remove((out_dir + kActiveMarker).c_str());
+  dirs_ok = dirs_ok && ensure_dir(out_dir + "/blobs") &&
+            claim_private_dir(out_dir + "/blobs") &&
+            ensure_dir(out_dir + "/code_objects") &&
+            claim_private_dir(out_dir + "/code_objects");
+  if (!dirs_ok) {
+    const int err = errno;
+    LogPrintfError("[HRR capture] Cannot use %s as a private archive directory: %s",
+                   out_dir.c_str(), strerror(err));
+    fprintf(stderr, "[HRR capture] Capture disabled: cannot use %s as a private archive "
+            "directory (%s).\n", out_dir.c_str(), strerror(err));
+    return open_failed(out_dir, created_pid_dir);
+  }
+#ifndef _WIN32
+  for (auto& claimed : g_blob_prefix_claimed) claimed.store(false, std::memory_order_relaxed);
+#endif
 
   if (!init_space_reserve(out_dir)) {
     LogPrintfError("[HRR capture] Less than %llu MiB free on the file system holding %s",
@@ -909,84 +1239,111 @@ bool open(const char* output_dir) {
     fprintf(stderr, "[HRR capture] Capture disabled: less than %llu MiB free on the file "
             "system holding %s.\n", static_cast<unsigned long long>(g_keep_free >> 20),
             out_dir.c_str());
-    // Only removes directories that are still empty.
-    std::error_code ec;
-    for (const char* dir : {"/blobs", "/code_objects", ""}) fs::remove(out_dir + dir, ec);
-    clear_archive_paths();
-    return false;
+    return open_failed(out_dir, created_pid_dir);
   }
 
   std::string events_path = out_dir + "/events.bin";
   std::string manifest_path = out_dir + "/manifest.json";
 
-  hrr_stat_t st{};
-  bool exists = false;
-  exists = (hrr_stat_file(events_path.c_str(), &st) == 0 && hrr_stat_size(st) > 0);
+  std::int64_t existing_size = 0;
+  const int fd = open_events_file(events_path, &existing_size);
+  if (fd < 0) {
+    const int err = errno;
+    LogPrintfError("[HRR capture] Failed to open %s: %s", events_path.c_str(), strerror(err));
+    fprintf(stderr, "[HRR capture] Capture disabled: cannot open %s (%s).\n",
+            events_path.c_str(), strerror(err));
+    return open_failed(out_dir, created_pid_dir);
+  }
 
-  int fd = -1;
+  const bool exists = existing_size > 0;
   uint64_t next_seq = 0, ev_count = 0, bl_count = 0;
   bool fast = false;
   ScanResult scan{};
   if (exists) {
-    fd = HRR_OPEN_APPEND(events_path.c_str());
-    if (fd < 0) {
-      LogPrintfError("[HRR capture] Failed to open %s for append", events_path.c_str());
-      return false;
-    }
-
     const std::string state_path = out_dir + "/writer_state.json";
-    fast = try_load_writer_state(state_path, hrr_stat_size(st),
-                                 &next_seq, &ev_count, &bl_count);
+    fast = try_load_writer_state(state_path, existing_size, &next_seq, &ev_count, &bl_count);
 
+    // Without the scan a trailer is not stripped and the counters can restart,
+    // so an archive that cannot be scanned is not resumed.
+    bool scanned = false;
+    int scan_err = 0;
+#ifdef _WIN32
+    if (FILE* rf = fopen(events_path.c_str(), "rb")) {
+      scan = scan_events_for_resume(rf, existing_size);
+      fclose(rf);
+      scanned = true;
+    } else {
+      scan_err = errno;
+    }
+#else
+    // Reuse the already-validated events descriptor so a pathname swap cannot
+    // make the scan follow a different file than open_events_file accepted.
+    const int scan_fd = ::fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    if (scan_fd < 0) {
+      scan_err = errno;
+    } else if (FILE* rf = ::fdopen(scan_fd, "rb")) {
+      scan = scan_events_for_resume(rf, existing_size);
+      fclose(rf);
+      scanned = true;
+    } else {
+      scan_err = errno;
+      ::close(scan_fd);
+    }
+#endif
+    if (!scanned) {
+      LogPrintfError("[HRR capture] Cannot read %s to resume it: %s", events_path.c_str(),
+                     strerror(scan_err));
+      fprintf(stderr, "[HRR capture] Capture disabled: cannot read %s to resume it (%s).\n",
+              events_path.c_str(), strerror(scan_err));
+      HRR_CLOSE(fd);
+      return open_failed(out_dir, created_pid_dir);
+    }
     if (!fast) {
-      FILE* rf = fopen(events_path.c_str(), "rb");
-      if (rf) {
-        scan = scan_events_for_resume(rf, hrr_stat_size(st));
-        fclose(rf);
-      }
       next_seq = (scan.count > 0) ? (scan.max_seq + 1) : 0;
       ev_count = scan.count;
-    } else if (hrr_stat_file(events_path.c_str(), &st) == 0) {
-      FILE* rf = fopen(events_path.c_str(), "rb");
-      if (rf) {
-        scan = scan_events_for_resume(rf, hrr_stat_size(st));
-        fclose(rf);
-      }
     }
 
-    if (scan.append_at > 0 && (scan.had_trailer || scan.torn_tail)) {
-      if (hrr_ftruncate_fd(fd, scan.append_at) != 0) {
-        LogPrintfWarning("[HRR capture] ftruncate resume at %lld failed", (long long)scan.append_at);
-      }
+    // The reader stops at a trailer or a torn tail, so records appended after
+    // one that cannot be cut off would be lost: such an archive is not resumed.
+    if (scan.append_at > 0 && (scan.had_trailer || scan.torn_tail) &&
+        hrr_ftruncate_fd(fd, scan.append_at) != 0) {
+      const int err = errno;
+      LogPrintfError("[HRR capture] ftruncate resume of %s at %lld failed: %s", events_path.c_str(),
+                     (long long)scan.append_at, strerror(err));
+      fprintf(stderr, "[HRR capture] Capture disabled: cannot trim %s to resume it (%s).\n",
+              events_path.c_str(), strerror(err));
+      HRR_CLOSE(fd);
+      return open_failed(out_dir, created_pid_dir);
     }
     if (hrr_seek_end(fd) < 0) {
+      const int err = errno;
       LogPrintfError("[HRR capture] seek end of %s failed", events_path.c_str());
+      fprintf(stderr, "[HRR capture] Capture disabled: cannot seek to the end of %s (%s).\n",
+              events_path.c_str(), strerror(err));
       HRR_CLOSE(fd);
-      return false;
+      return open_failed(out_dir, created_pid_dir);
     }
 
-    // g_blob_mu before g_file_mu, as the lock order requires.
     index_existing_blobs_locked(out_dir);
   } else {
     // Fresh per-process archive.
-    {
-      std::lock_guard<std::mutex> lk(g_blob_mu);
-      g_written_blobs.clear();
-    }
-#ifndef _WIN32
-    fd = ::open(events_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
-#else
-    fd = HRR_OPEN(events_path.c_str());
-#endif
-    if (fd < 0) {
-      LogPrintfError("[HRR capture] Failed to open %s for writing", events_path.c_str());
-      return false;
-    }
+    std::lock_guard<std::mutex> lk(g_blob_mu);
+    g_written_blobs.clear();
+  }
+
+  // The last step before the archive is published, on resume and on a fresh one.
+  if (!publish_active_marker(out_dir)) {
+    const int err = errno;
+    LogPrintfError("[HRR capture] Cannot create %s%s: %s", out_dir.c_str(), kActiveMarker,
+                   strerror(err));
+    fprintf(stderr, "[HRR capture] Capture disabled: cannot create %s%s (%s).\n",
+            out_dir.c_str(), kActiveMarker, strerror(err));
+    HRR_CLOSE(fd);
+    return open_failed(out_dir, created_pid_dir);
   }
 
   {
     BufWriteGuard lk;
-    g_base_dir   = base_dir;
     g_output_dir = out_dir;
     g_pid        = pid;
     g_parent_pid = parent_pid;
@@ -1109,6 +1466,7 @@ void flush(const char* /*output_dir*/) {
   write_manifest_stdio(out_dir.c_str(), /*complete=*/!incomplete);
   update_root_manifest();
   remove((out_dir + "/writer_state.json").c_str());
+  remove((out_dir + kActiveMarker).c_str());
 }
 
 void close() {
@@ -1290,24 +1648,35 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_le
 //
 // g_written_blobs ensures only one thread ever reaches here for a given path,
 // so there is no concurrent write to the same temp file. The rename makes the
-// blob visible to readers only when fully written — a process crash mid-fwrite
+// blob visible to readers only when fully written: a process crash mid-write
 // leaves only the temp file, not a partial final blob.
 //
 // On Windows, rename() fails when the destination already exists (unlike POSIX
 // where it is atomic). Use MoveFileExA(MOVEFILE_REPLACE_EXISTING) instead.
+//
+// On POSIX the temp file comes from mkostemps: an unpredictable name, created
+// exclusively with mode 0600. This matters for the root manifest, whose
+// directory is whatever HIP_HRR_CAPTURE_OUTPUT names and may be shared.
 // ---------------------------------------------------------------------------
 
 static bool atomic_write_file(const std::string& path,
                               const void* data, size_t len) {
+#ifdef _WIN32
   std::string tmp = path + "." + std::to_string(current_process_id()) + ".tmp";
   FILE* f = fopen(tmp.c_str(), "wb");
   if (!f) return false;
   bool ok = (fwrite(data, 1, len, f) == len);
   fclose(f);
   if (!ok) { remove(tmp.c_str()); return false; }
-#ifdef _WIN32
   ok = MoveFileExA(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
 #else
+  std::string tmp = path + ".XXXXXX.tmp";
+  const int fd = ::mkostemps(&tmp[0], 4, O_CLOEXEC);
+  if (fd < 0) return false;
+  // mkostemps creates the file 0600 minus the umask.
+  bool ok = ::fchmod(fd, 0600) == 0 && write_all_fd(fd, data, len);
+  if (::close(fd) != 0) ok = false;
+  if (!ok) { remove(tmp.c_str()); return false; }
   ok = (rename(tmp.c_str(), path.c_str()) == 0);
 #endif
   if (!ok) remove(tmp.c_str());
@@ -1346,7 +1715,29 @@ Hash128 write_blob(const void* data, size_t len) {
 
   // blobs/<2-char-prefix>/<fullhash>.blob
   std::string subdir = g_output_dir + "/blobs/" + std::string(hex, 2);
+#ifndef _WIN32
+  {
+    // hash_hex writes lowercase hex digits; two chars index 0..255.
+    const auto nibble = [](char c) -> unsigned {
+      return (c >= '0' && c <= '9') ? static_cast<unsigned>(c - '0')
+                                    : static_cast<unsigned>(c - 'a' + 10);
+    };
+    const unsigned pref = (nibble(hex[0]) << 4) | nibble(hex[1]);
+    if (!g_blob_prefix_claimed[pref].load(std::memory_order_acquire)) {
+      if (!ensure_dir(subdir) || !claim_private_dir(subdir)) {
+        LogPrintfWarning("[HRR capture] Failed to claim blob prefix %s",
+                         std::string(hex, 2).c_str());
+        mark_incomplete("a blob directory could not be used, so a blob is missing");
+        std::lock_guard<std::mutex> lk(g_blob_mu);
+        g_written_blobs.erase(key);
+        return h;
+      }
+      g_blob_prefix_claimed[pref].store(true, std::memory_order_release);
+    }
+  }
+#else
   ensure_dir(subdir);
+#endif
   std::string path = subdir + "/" + key + ".blob";
 
   if (atomic_write_file(path, data, len)) {
@@ -1354,6 +1745,7 @@ Hash128 write_blob(const void* data, size_t len) {
   } else {
     // Write failed — remove from set so a later call can retry.
     LogPrintfWarning("[HRR capture] Failed to write blob %s", hex);
+    mark_incomplete("a blob could not be written");
     std::lock_guard<std::mutex> lk(g_blob_mu);
     g_written_blobs.erase(key);
   }
@@ -1393,6 +1785,7 @@ Hash128 write_code_object(const void* image, size_t image_size) {
     g_blob_count.fetch_add(1, std::memory_order_relaxed);
   } else {
     LogPrintfWarning("[HRR capture] Failed to write code object %s", hex);
+    mark_incomplete("a code object could not be written");
     std::lock_guard<std::mutex> lk(g_blob_mu);
     g_written_blobs.erase(key);
   }

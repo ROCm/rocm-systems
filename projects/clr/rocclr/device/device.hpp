@@ -24,11 +24,9 @@
 #include "devsignal.hpp"
 #include "utils/nontemporal.hpp"
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 #include "devurilocator.hpp"
-#endif
-#endif
+#endif  // DEVICE_ADDRESS_SANITIZER
 
 #include <array>
 #include <cassert>
@@ -118,6 +116,14 @@ enum MemRangeAttribute : uint32_t {
 // DMA-BUF mapping-type flags for GetHandleForAddressRange
 enum MemRangeDmaBufMappingType : uint64_t {
   MemRangeDmaBufMappingTypePcie = 0x1,  ///< Maps dmabuf via pcie, requires large bar support
+};
+
+// DMA-BUF mapping results for GetHandleForAddressRange.
+// kNotSupported is returned on unsupported devices.
+enum HandleExportResult : uint32_t {
+  kSuccess = 0,   ///< Handle was exported.
+  kNotSupported,  ///< Request is valid but unsupported on this device.
+  kError,         ///< Export failed.
 };
 
 //! Maps hipFuncCache_t to group memory carveout percentage.
@@ -995,9 +1001,9 @@ class Memory {
   MemAccess GetAccess() const { return memAccess_; }
 
   //! Retrieves shareable handle for hipMalloc'ed address range.
-  virtual bool GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle,
-                                 unsigned long long flags) {
-    return false;
+  virtual HandleExportResult GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle,
+                                               unsigned long long flags) {
+    return HandleExportResult::kError;
   }
 
  protected:
@@ -2435,24 +2441,18 @@ class Device : public RuntimeObject {
   //! Sets the group memory carveout percentage hint for the device
   void UpdateGroupMemCarveout(uint8_t percent) { group_mem_carveout_hint_ = percent; }
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const = 0;
-#endif
-#endif
 
-#if defined(__linux__) && defined(__clang__)
-#if __has_feature(address_sanitizer)
   void reportDeviceMemoryLeaks();
   static void reportAllDeviceMemoryLeaks();
-#endif
 #endif
 
   static bool IsGPUInError() { return (gpu_error_.load(std::memory_order_relaxed) != CL_SUCCESS); }
   static cl_int GetGPUError() { return gpu_error_.load(std::memory_order_relaxed); }
 
-  bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
-                                unsigned long long flags);
+  HandleExportResult GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
+                                              unsigned long long flags);
 
   // Registers a memory object allocated via hostcall for later cleanup.
   void TrackHostcallMemory(amd::Memory* memory);
