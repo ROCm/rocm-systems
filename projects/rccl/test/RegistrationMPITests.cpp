@@ -51,8 +51,6 @@ using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;
 
-extern int ncclCuMemRuntimeSupported();
-
 // Test Configuration
 namespace RegTestConfig {
     constexpr size_t SMALL_COUNT  = 1024;           // 4KB for float
@@ -467,12 +465,15 @@ TEST_F(GdrFlush_CuMem, AllGatherUnregistered_MultiNode)
     // getenv can be 1 after SetUp while ncclParamCuMemEnable is still 0 from an
     // earlier communicator in this process. Skip that case; do not skip when the
     // runtime itself cannot enable cuMem (e.g. kernel < 6.8), where the flush is
-    // a no-op and AllGather should still complete.
-    if (!ncclCuMemEnable() && ncclCuMemRuntimeSupported()) {
-        GTEST_SKIP() << "NCCL_CUMEM_ENABLE was already cached as 0 by an earlier "
-                        "communicator in this process; run with "
-                        "--gtest_filter=GdrFlush_CuMem.* or launch with "
-                        "NCCL_CUMEM_ENABLE=1";
+    // a no-op and AllGather should still complete. Coordinate so one rank skipping
+    // cannot leave the others blocked in ncclAllGather.
+    if (auto reason = mpiCoordinatedSkipReason(
+            !ncclCuMemEnable() && ncclCuMemRuntimeSupported(),
+            "NCCL_CUMEM_ENABLE was already cached as 0 by an earlier "
+            "communicator in this process; run with --gtest_filter=GdrFlush_CuMem.* "
+            "or launch with NCCL_CUMEM_ENABLE=1");
+        !reason.empty()) {
+        GTEST_SKIP() << reason;
     }
 
     using T = RegTestConfig::DefaultType;
