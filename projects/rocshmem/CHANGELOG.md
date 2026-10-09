@@ -30,6 +30,10 @@
              * `rocshmem_{ctx_}<TYPE>_{broadcast,fcollect,alltoall}{_wave}{_wg}`
              * `rocshmem_{ctx_}<TYPE>_alltoallv_wg`
              * `rocshmem_{ctx_}<TYPE>_{and,or,xor,min,max,sum,prod}_reduce{_scatter}{_wave}{_wg}`
+* Add `-tc` argument to functional test, to specify type coverage. Allows `full` `minimal` 
+  or custom list `<type_1>:<type_2>:...`
+    * `full` exercises all types that an API support
+    * `minimal` tests a minimal set of types, made for quick rocshmem functionality testing
 
 ### Deprecated
 * Deprecated `rocshmem_signal_fetch_wg` and `rocshmem_signal_fetch_wave`.
