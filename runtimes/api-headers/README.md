@@ -51,3 +51,11 @@ The provider currently reports signal hints unsupported because it does not
 probe the CP firmware's queue capability bit.
 
 `abce` is not a mirror: `include/abce` is its primary location.
+
+## Standalone public AMDF package
+
+`cmake -S runtimes/api-headers -B build/runtime-api-headers` configures a header-only installation without runtime binaries, Rust or a native compiler. Install it with `cmake --install build/runtime-api-headers --prefix <absolute-prefix>`.
+
+Native consumers use `find_package(ROCmRuntimeAPI CONFIG REQUIRED COMPONENTS AMDF)` and `ROCmRuntimeAPI::AMDF`. This target exposes only the installed AMDF headers and stays valid after relocation. The package includes this source-provenance document. HSA and private/UAPI targets are not published by this initial package; the existing `rocm_runtime::runtime_headers` source-tree umbrella is retained for implementation consumers.
+
+The KFD test snapshot is independently owned under [`testing/drivers/kfd/uapi`](../testing/drivers/kfd/uapi/README.md). Updating these runtime mirrors never changes that test contract automatically.

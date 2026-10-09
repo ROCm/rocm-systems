@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Native registration metadata; paths are relative to the completed prefix.
+set(suite_family "@suite_family@")
+set(suite_executable "bin/@suite_family@/@suite_executable@")
+set(suite_test "@suite_test@")
+set(suite_requires_runtime @suite_requires_runtime@)
