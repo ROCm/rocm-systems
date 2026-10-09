@@ -330,6 +330,7 @@ enum P2pCollChildExit {
     CHILD_OK   = 0,  // ran the full sequence, result correct
     CHILD_FAIL = 1,  // a HIP/NCCL error or a wrong AllReduce result
     CHILD_SKIP = 2,  // preconditions not met (too few GPUs / no direct P2P)
+    CHILD_SKIP_NO_IPC = 3,  // segReuseRunRank only: the buffer was not IPC-registered
 };
 
 // Runs entirely inside a forked child process — first HIP/NCCL call is here.
@@ -626,7 +627,7 @@ static int segReuseRunRank(int rank, int numSegments, P2pCollShared* shared)
                driver, os.release);
     }
     CHILD_NC(ncclCommDestroy(comm));
-    return ipcReg ? CHILD_OK : CHILD_SKIP;
+    return ipcReg ? CHILD_OK : CHILD_SKIP_NO_IPC;
 }
 
 static void testP2pIpcSegmentReuse(int numSegments)
@@ -642,7 +643,7 @@ static void testP2pIpcSegmentReuse(int numSegments)
         ASSERT_GE(pids[r], 0) << "fork() failed for rank " << r;
         if (pids[r] == 0) _exit(segReuseRunRank(r, numSegments, shared));
     }
-    bool skip = false;
+    bool noGpus = false, noIpc = false;
     for (int n = 0; n < 2; n++) {
         int status = 0;
         const pid_t pid = waitpid(-1, &status, 0);
@@ -652,14 +653,18 @@ static void testP2pIpcSegmentReuse(int numSegments)
         }
         const int r = pid == pids[0] ? 0 : 1;
         const int code = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
-        skip |= code == CHILD_SKIP;
-        if (code == CHILD_OK || code == CHILD_SKIP) continue;
+        noGpus |= code == CHILD_SKIP;
+        noIpc |= code == CHILD_SKIP_NO_IPC;
+        if (code == CHILD_OK || code == CHILD_SKIP || code == CHILD_SKIP_NO_IPC) continue;
         ADD_FAILURE() << "Rank " << r << " failed with exit code " << code << " (128 + signal if killed)";
         if (n == 0) kill(pids[1 - r], SIGKILL); // the peer of a faulted rank blocks in the transfer
     }
     munmap(shared, sizeof(P2pCollShared));
-    if (skip && !::testing::Test::HasFailure())
-        GTEST_SKIP() << "Needs 2 GPUs with cuMem P2P IPC registration; each rank printed why it skipped.";
+    if (::testing::Test::HasFailure()) return;
+    if (noGpus) GTEST_SKIP() << "Needs 2 GPUs with cuMem VMM (gfx942, gfx950 or gfx1250).";
+    if (noIpc)
+        GTEST_SKIP() << "Buffer not IPC-registered: cuMem is off, or the transfer took no P2P read/write path. "
+                        "Each rank printed its VMM attribute, HIP driver version and kernel release.";
 }
 
 /**
