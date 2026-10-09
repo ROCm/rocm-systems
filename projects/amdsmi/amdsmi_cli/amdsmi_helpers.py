@@ -3437,6 +3437,90 @@ class AMDSMIHelpers:
                 }
             return error_msg
 
+    # CLI-facing full names for the library's internal "PB"/"FB" strings
+    # (amdsmi_interface.py's own string contract stays unchanged).
+    NPM_BALANCING_MODE_TO_CLI = {"PB": "POWER_BALANCING", "FB": "FREQUENCY_BALANCING"}
+    NPM_BALANCING_MODE_FROM_CLI = {"POWER_BALANCING": "PB", "FREQUENCY_BALANCING": "FB"}
+
+    def validate_and_set_node_balancing_mode(self, node_handle, requested_mode, logger):
+        """Validate and set the NPM balancing mode for a node.
+
+        Args:
+            node_handle: Node handle (system-wide, not per-GPU)
+            requested_mode (str): "POWER_BALANCING" or "FREQUENCY_BALANCING"
+            logger: AMDSMILogger instance for format-aware output
+
+        Returns:
+            dict or str: Structured data for JSON/CSV or formatted string for human-readable output
+        """
+        if node_handle is None:
+            message = "No node handle available; cannot set balancing mode"
+            self.error_collector.record(int(amdsmi_cli_exceptions.AmdSmiExitCode.DEVICE_NOT_FOUND))
+            if logger.is_json_format() or logger.is_csv_format():
+                return {"status": "error", "message": message}
+            return message
+
+        # Pre-check NPM enablement, mirroring validate_and_set_node_power_limit():
+        # amdsmi_set_npm_balancing_mode() reports both "NPM disabled" and
+        # "board/mode sysfs file missing/unreadable while NPM is enabled" as
+        # the same AMDSMI_STATUS_NOT_SUPPORTED. Checking status up front lets
+        # the former be reported unambiguously.
+        try:
+            npm_info = amdsmi_interface.amdsmi_get_npm_info(node_handle)
+            if npm_info["status"] == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_DISABLED:
+                message = "[AMDSMI_STATUS_NOT_SUPPORTED] NPM is disabled on this node; cannot set balancing mode"
+                self.error_collector.record_library_error(
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                )
+                if logger.is_json_format() or logger.is_csv_format():
+                    return {
+                        "status": "error",
+                        "requested_mode": requested_mode,
+                        "error": "AMDSMI_STATUS_NOT_SUPPORTED",
+                        "message": message,
+                    }
+                return message
+        except amdsmi_exception.AmdSmiLibraryException:
+            # NPM enablement couldn't be determined (e.g. npm_status sysfs file
+            # unreadable); fall through and let the set call below report its
+            # own error rather than masking it with a pre-check failure.
+            pass
+
+        try:
+            amdsmi_interface.amdsmi_set_npm_balancing_mode(
+                node_handle, self.NPM_BALANCING_MODE_FROM_CLI[requested_mode]
+            )
+            message = f"Successfully set NPM balancing mode to {requested_mode}"
+            if logger.is_json_format() or logger.is_csv_format():
+                return {"status": "success", "balancing_mode": requested_mode, "message": message}
+            return message
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                raise PermissionError("Command requires elevation") from e
+            if (
+                e.get_error_code()
+                == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_SETTING_UNAVAILABLE
+            ):
+                message = (
+                    f"BALANCING_MODE: [{e.get_error_info(detailed=False)}] "
+                    f"{requested_mode} is not supported on this platform"
+                )
+            elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+                message = (
+                    "NPM balancing mode is not supported on this node; cannot set balancing mode"
+                )
+            else:
+                message = f"[{e.get_error_info(detailed=False)}] Unable to set NPM balancing mode to {requested_mode}"
+            self.error_collector.record_library_error(e.get_error_code())
+            if logger.is_json_format() or logger.is_csv_format():
+                return {
+                    "status": "error",
+                    "requested_mode": requested_mode,
+                    "error": e.get_error_info(detailed=False),
+                    "message": message,
+                }
+            return message
+
     def validate_and_set_node_power_limit(self, node_handle, requested_limit, logger):
         """Validate and set the NPM (Node Power Management) power limit for a node.
 

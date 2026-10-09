@@ -84,7 +84,10 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
     auto records     = std::vector<std::unique_ptr<rocprofiler_spm_counter_record_t>>{};
     auto buf_records = std::vector<rocprofiler_spm_counter_record_t>{};
 
-    if(spm_packet->cb.buffer) buf = buffer::get_buffer(spm_packet->cb.buffer->handle);
+    if(spm_packet->cb.buffer)
+    {
+        buf = buffer::get_buffer(spm_packet->cb.buffer->handle);
+    }
 
     auto agent_id =
         CHECK_NOTNULL(rocprofiler::agent::get_rocprofiler_agent(spm_packet->GetAgent()))->id;
@@ -132,9 +135,12 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
     {
         auto _lk = std::unique_lock{get_buffer_mut()};
 
-        buf->emplace(ROCPROFILER_BUFFER_CATEGORY_COUNTERS,
-                     ROCPROFILER_COUNTER_RECORD_PROFILE_COUNTING_DISPATCH_HEADER,
-                     spm_packet->cb.dispatch_data);
+        if(dispatch_id != 0)
+        {
+            buf->emplace(ROCPROFILER_BUFFER_CATEGORY_COUNTERS,
+                         ROCPROFILER_COUNTER_RECORD_PROFILE_COUNTING_DISPATCH_HEADER,
+                         spm_packet->cb.dispatch_data);
+        }
         for(const auto& itr : buf_records)
         {
             buf->emplace(

@@ -3445,6 +3445,14 @@ const _: () = {
 };
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNpmBalancingModeT {
+    AmdsmiNpmBalancingModeInvalid = 0,
+    AmdsmiNpmBalancingModePowerBalancing = 1,
+    AmdsmiNpmBalancingModeFrequencyBalancing = 2,
+    AmdsmiNpmBalancingModeMax = 3,
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum AmdsmiComputeTrayTypeT {
     AmdsmiComputeTrayTypeUnknown = 0,
     AmdsmiComputeTrayTypeHeliosP = 1,
@@ -5156,6 +5164,24 @@ extern "C" {
     pub fn amdsmi_get_npm_info(
         node_handle: AmdsmiNodeHandle,
         info: *mut AmdsmiNpmInfoT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_npm_balancing_mode(
+        node_handle: AmdsmiNodeHandle,
+        mode: *mut AmdsmiNpmBalancingModeT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_set_npm_balancing_mode(
+        node_handle: AmdsmiNodeHandle,
+        mode: AmdsmiNpmBalancingModeT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_npm_supported_balancing_modes(
+        node_handle: AmdsmiNodeHandle,
+        supported_modes: *mut AmdsmiBitFieldT,
     ) -> AmdsmiStatusT;
 }
 extern "C" {

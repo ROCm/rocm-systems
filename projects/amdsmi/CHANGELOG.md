@@ -21,6 +21,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed a one-byte overrun when reading the memory partition into a small buffer**.  
+  - A buffer too small for the partition name had the byte after its end overwritten. The name is now truncated inside the buffer, and the call still reports that the buffer is too small.
+
+- **Fixed crashes when several threads start or stop AMD SMI at the same time**.  
+  - Programs that initialize and shut down the library from more than one thread could crash, find no GPUs, or leave the library initialized after every thread had shut it down.
+
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  
   - `amd-smi ras --cper` showed an empty `list afids` column for fatal records, `amd-smi ras --afid --cper-file` printed `-`, and `amdsmi_get_afids_from_cper()` returned no AFIDs. amdgpu writes fatal crashdump sections 32 bytes shorter than `sizeof(cper_sec_crashdump)`, and the section bounds check required the full struct, so every such section was skipped. The check now requires only the dump member the record type uses.
 
@@ -58,6 +64,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added `AMDSMI_VRAM_TYPE_HBM4` to `amdsmi_vram_type_t`**.  
   - Identifies HBM Generation 4 VRAM, reported by `amdsmi_get_gpu_vram_info()`.
   - Also added the pre-existing `HBM3E` value to the Python `AmdSmiVramType` enum, which had been missing it.
+
+- **Added NPM (Node Power Management) balancing mode get/set**.  
+  - New `amdsmi_npm_balancing_mode_t` enum: `AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING` (PB, the default) or `AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING` (FB).
+  - New APIs: `amdsmi_get_npm_balancing_mode()` and `amdsmi_set_npm_balancing_mode()`. Getting always reflects the last-selected mode regardless of NPM enablement, returning `AMDSMI_STATUS_NOT_SUPPORTED` only when the underlying value is missing or unreadable.
+  - Setting is AMD-SMI-only (not exposed via BMC Redfish/APML) and requires elevated privileges; it returns `AMDSMI_STATUS_NOT_SUPPORTED` without touching sysfs when NPM is disabled on the node.
+  - CLI: `amd-smi node -p` now shows `BALANCING_MODE`; new `amd-smi set --node-balancing-mode {POWER_BALANCING,FREQUENCY_BALANCING}` (node-wide, not per-GPU, requires sudo).
+  - New `AMDSMI_NPM_BALANCING_MODE_MAX` enum value marks the end of the defined range, and new `amdsmi_get_npm_supported_balancing_modes()` reports the balancing modes supported by a node's platform/ASIC as a bitmask (bit N for enum value N), independent of NPM enablement. `amdsmi_set_npm_balancing_mode()` now returns `AMDSMI_STATUS_SETTING_UNAVAILABLE` when the requested mode is absent from this bitmask, distinct from the `AMDSMI_STATUS_NOT_SUPPORTED` NPM-disabled case. CLI: `amd-smi node -p` now also shows `SUPPORTED_BALANCING_MODES`, and `amd-smi set --node-balancing-mode` reports a distinct "not supported on this platform" message for a mode absent from the bitmask vs. the generic "NPM is disabled" message.
 
 ### Changed
 
