@@ -61,6 +61,7 @@ env:
   ROCM_SDK_DEVICE_GFX_GROUP: "gfx1100 gfx1201 gfx1250 gfx942 gfx950"
   CMAKE_VERSION: 3.31.10
   ROCJITSU_CPU_THREAD_BUDGET: 4
+  MIRAGE_TEST_THREADS: 4
   UV_VERSION: 0.9.26
   UV_HTTP_RETRIES: 10
 
@@ -68,6 +69,8 @@ jobs:
   test:
     runs-on: aws-linux-scale-rocm-prod
     name: test (${{ matrix.name }})
+    env:
+      ROCJITSU_HOST_CPU_BASELINE: ${{ matrix.host_cpu_baseline }}
     # Kubernetes container hooks ignore Docker create options, including --user
     # and --init. Use the image user with sudo, a Python venv, and tini below.
     container:
@@ -80,6 +83,7 @@ jobs:
       matrix:
         include:
           - name: release
+            host_cpu_baseline: x86-64-v4
             allow_failure: false
             # 20,131 verified objects completed in 146.47s locally; 20 minutes
             # leaves substantial runner headroom while this release-only gate lands.
@@ -100,6 +104,7 @@ jobs:
             corpus_rerun_timeout: 600
             corpus_sanitizer: none
           - name: asan-ubsan
+            host_cpu_baseline: x86-64-v4
             allow_failure: true
             # Sanitized simulator cases need extra interpreter headroom. Long
             # gfx1100 FPSAN cases can cross four minutes under shared-runner
@@ -122,6 +127,9 @@ jobs:
             corpus_rerun_timeout: 1200
             corpus_sanitizer: clang-asan
           - name: tsan
+            # Keep required F64 SIMD coverage: Clang/libstdc++ uses the scalar
+            # workaround for native 64-bit masks at v4.
+            host_cpu_baseline: x86-64-v3
             allow_failure: false
             verify_dbt_idempotence: 0
             dbt_timeout: 30
@@ -141,6 +149,7 @@ jobs:
             corpus_rerun_timeout: 0
             corpus_sanitizer: none
           - name: ubsan-gcc
+            host_cpu_baseline: x86-64-v4
             allow_failure: true
             verify_dbt_idempotence: 0
             # Keep additional headroom for the largest packaged code objects.
@@ -228,17 +237,20 @@ jobs:
             echo "DBT_WORKERS=${DBT_WORKERS}"
           } >> "${GITHUB_ENV}"
           echo "CPUs: ${CPUS}; corpus workers: ${CORPUS_WORKERS}; simulator execution threads: ${ROCJITSU_CPU_THREAD_BUDGET}; DBT workers: ${DBT_WORKERS}"
-          # Probe the runtime CPU before enabling AVX-512. These binaries are
-          # built and tested on this runner; keep the project's portable default.
+          # Verify the pinned lane baseline without silently changing coverage
+          # when a different CPU is assigned from the pool.
           gcc -x c -o "${RUNNER_TEMP}/rocjitsu-host-cpu" - <<'C'
           #include <stdio.h>
           int main(void) {
             puts(__builtin_cpu_supports("x86-64-v4") ? "x86-64-v4" : "x86-64-v3");
           }
           C
-          HOST_CPU_BASELINE="$("${RUNNER_TEMP}/rocjitsu-host-cpu")"
-          echo "ROCJITSU_HOST_CPU_BASELINE=${HOST_CPU_BASELINE}" >> "${GITHUB_ENV}"
-          echo "Host CPU baseline: ${HOST_CPU_BASELINE} (v4 enables AVX-512)"
+          DETECTED_HOST_CPU_BASELINE="$("${RUNNER_TEMP}/rocjitsu-host-cpu")"
+          if [[ "${ROCJITSU_HOST_CPU_BASELINE}" == x86-64-v4 && "${DETECTED_HOST_CPU_BASELINE}" != x86-64-v4 ]]; then
+            echo "::error::This lane requires an x86-64-v4 runner for AVX-512 coverage"
+            exit 1
+          fi
+          echo "Host CPU baseline: ${ROCJITSU_HOST_CPU_BASELINE} (runner supports ${DETECTED_HOST_CPU_BASELINE})"
 
       - name: Test DBT SHA-pair tooling
         if: matrix.name == 'release'
@@ -456,7 +468,7 @@ jobs:
           unset MIRAGE_E2E_ALLOW_SKIP
           # AWS Kubernetes runners do not support Docker's --init option.
           # Reap orphaned descendants so teardown tests can observe them gone.
-          tini -s -- cargo test --locked --workspace --no-fail-fast -- --test-threads="${ROCJITSU_CORPUS_WORKERS}" --nocapture
+          tini -s -- cargo test --locked --workspace --no-fail-fast -- --test-threads="${MIRAGE_TEST_THREADS}" --nocapture
 
       - name: Test static ASan launcher preload
         if: matrix.run_static_asan_launch
