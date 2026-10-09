@@ -41,6 +41,7 @@ members = [
     "loader/rocelf",
     "image/rocaddr3",
     "loader/rocloader",
+    "testing/ddi/rocddi",
 ]
 resolver = "3"
 
