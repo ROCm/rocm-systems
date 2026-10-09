@@ -127,6 +127,9 @@ class _FakeWrapper:
     AMDSMI_STATUS_UNEXPECTED_DATA = 28
     AMDSMI_STATUS_NOT_INIT = 29
     AMDSMI_STATUS_DRIVER_NOT_LOADED = 30
+    AMDSMI_STATUS_MORE_DATA = 42
+    AMDSMI_STATUS_OUT_OF_RESOURCES = 11
+    AMDSMI_STATUS_INSUFFICIENT_SIZE = 12
     amdsmi_processor_handle = _FakeHandle
 
 
@@ -395,6 +398,36 @@ class TestCliRasCperJson(unittest.TestCase):
         parsed = json.loads(captured)
         self.assertIsInstance(parsed, list)
         self.assertEqual(len(parsed), 2, f"expected 2 fabric entries (1 per GPU), got: {parsed!r}")
+
+        for row in parsed:
+            self.assertEqual(row["severity"], "FABRIC-FATAL")
+
+    def test_fabric_cper_final_batch_with_cursor_zero(self):
+        """
+        Test that the final batch is emitted when cursor returns 0 (no more data).
+        This ensures the last page isn't dropped due to premature break.
+        """
+        counts_fabric = {}
+
+        def _fabric_entries(handle, _mask, _size, cursor):
+            seen = counts_fabric.get(handle.value, 0)
+            counts_fabric[handle.value] = seen + 1
+            if seen == 0:
+                entry = _fabric_entry("2026/10/08 10:00:00", "fatal")
+                return ({0: entry}, 0, [b""], 0)
+            return ({}, 0, [], 0)
+
+        self.interface.amdsmi_get_gpu_cper_entries = lambda *a: ({}, 0, [], 0)
+        self.interface.amdsmi_get_fabric_cper_entries = _fabric_entries
+
+        commands = self._make_commands()
+        captured = self._run_ras(commands, _build_ras_args(self._handles))
+
+        parsed = json.loads(captured)
+        self.assertIsInstance(parsed, list)
+        self.assertEqual(
+            len(parsed), 2, f"expected 2 fabric entries with cursor 0, got: {parsed!r}"
+        )
 
         for row in parsed:
             self.assertEqual(row["severity"], "FABRIC-FATAL")

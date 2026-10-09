@@ -25,6 +25,7 @@ extern "C" {
 #include <algorithm>
 #include <limits>
 #include <unordered_map>
+#include <vector>
 
 /**
  * @brief Complete telemetry ID to string mapping using unordered_map for O(1) lookup
@@ -878,18 +879,22 @@ amdsmi_status_t amdsmi_get_tray_info(amdsmi_node_handle node_handle, amdsmi_tray
 
 // Convert POSIX timespec to the BCD-encoded timestamp UEFI CPER records use.
 static void timespec_to_cper_timestamp(const struct timespec* ts, amdsmi_cper_timestamp_t* out) {
+  static constexpr auto to_bcd = [](int v) -> uint8_t {
+    return static_cast<uint8_t>(((v / 10) << 4) | (v % 10));
+  };
+
   struct tm utc;
   gmtime_r(&ts->tv_sec, &utc);
 
-  out->seconds = static_cast<uint8_t>((utc.tm_sec % 10) | ((utc.tm_sec / 10) << 4));
-  out->minutes = static_cast<uint8_t>((utc.tm_min % 10) | ((utc.tm_min / 10) << 4));
-  out->hours = static_cast<uint8_t>((utc.tm_hour % 10) | ((utc.tm_hour / 10) << 4));
-  out->day = static_cast<uint8_t>((utc.tm_mday % 10) | ((utc.tm_mday / 10) << 4));
-  out->month = static_cast<uint8_t>(((utc.tm_mon + 1) % 10) | (((utc.tm_mon + 1) / 10) << 4));
+  out->seconds = to_bcd(utc.tm_sec);
+  out->minutes = to_bcd(utc.tm_min);
+  out->hours = to_bcd(utc.tm_hour);
+  out->day = to_bcd(utc.tm_mday);
+  out->month = to_bcd(utc.tm_mon + 1);
 
   int year = utc.tm_year + 1900;
-  out->year = static_cast<uint8_t>((year % 100 % 10) | (((year % 100) / 10) << 4));
-  out->century = static_cast<uint8_t>((year / 100 % 10) | (((year / 100) / 10) << 4));
+  out->year = to_bcd(year % 100);
+  out->century = to_bcd(year / 100);
   out->flag = 0;
 }
 
@@ -927,6 +932,11 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
     return AMDSMI_STATUS_INVAL;
   }
 
+  constexpr uint64_t kMaxUaloeEntries = 4096;
+  if (*entry_count == 0 || *entry_count > kMaxUaloeEntries) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
   amd::smi::AMDSmiGPUDevice* device = nullptr;
   amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &device);
   if (status != AMDSMI_STATUS_SUCCESS || device == nullptr) {
@@ -940,44 +950,25 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
-  const size_t ualoe_buf_size = 1048576;  // 1 MB
-  char* ualoe_buf = static_cast<char*>(malloc(ualoe_buf_size));
-  if (ualoe_buf == nullptr) {
-    return AMDSMI_STATUS_OUT_OF_RESOURCES;
-  }
-
-  // Allocate array for UALoE header pointers. *entry_count is caller-supplied,
-  // so clamp it before sizing the allocation.
-  constexpr uint64_t kMaxUaloeEntries = 4096;
-  if (*entry_count == 0 || *entry_count > kMaxUaloeEntries) {
-    free(ualoe_buf);
-    return AMDSMI_STATUS_INVAL;
-  }
   const size_t max_ualoe_entries = static_cast<size_t>(*entry_count);
-  ualoe_cper_hdr_t** ualoe_hdrs =
-      static_cast<ualoe_cper_hdr_t**>(malloc(max_ualoe_entries * sizeof(ualoe_cper_hdr_t*)));
-  if (ualoe_hdrs == nullptr) {
-    free(ualoe_buf);
-    return AMDSMI_STATUS_OUT_OF_RESOURCES;
-  }
+  const size_t ualoe_buf_size = 1048576;  // 1 MB
+  std::vector<char> ualoe_buf(ualoe_buf_size);
+  std::vector<ualoe_cper_hdr_t*> ualoe_hdrs(max_ualoe_entries);
 
   uint64_t ualoe_buf_size_var = ualoe_buf_size;
   uint64_t ualoe_entry_count = max_ualoe_entries;
 
-  // Convert "all severities" sentinel to UALoE's actual mask.
-  // That mask is passed through raw, but UALoE only defines bits 0-2.
+  // UALoE defines only severity bits 0-2; map the "all" guard onto them.
   uint32_t ualoe_severity_mask = severity_mask;
   if (severity_mask == (1U << AMDSMI_CPER_SEV_NUM)) {
     ualoe_severity_mask = (1U << AMDSMI_CPER_SEV_NUM) - 1U;
   }
 
-  int ret =
-      ualoe_get_ifoe_cper_entries(ualoe_handle, ualoe_severity_mask, ualoe_buf, &ualoe_buf_size_var,
-                                  ualoe_hdrs, &ualoe_entry_count, cursor);
+  int ret = ualoe_get_ifoe_cper_entries(ualoe_handle, ualoe_severity_mask, ualoe_buf.data(),
+                                        &ualoe_buf_size_var, ualoe_hdrs.data(), &ualoe_entry_count,
+                                        cursor);
 
   if (ret != 0 && ret != ENOBUFS) {
-    free(ualoe_buf);
-    free(ualoe_hdrs);
     if (ret == ENOSPC) {
       return AMDSMI_STATUS_OUT_OF_RESOURCES;
     }
@@ -995,16 +986,28 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
 
   for (uint64_t i = 0; i < ualoe_entry_count; i++) {
     const ualoe_cper_hdr_t* ualoe_hdr = ualoe_hdrs[i];
-    if (ualoe_hdr == nullptr || ualoe_hdr->record_length < sizeof(ualoe_cper_hdr_t)) {
+    if (ualoe_hdr == nullptr) {
+      entries_dropped = true;
       break;
     }
+
+    // Validate pointer lies within ualoe_buf before dereferencing record_length
+    const size_t ualoe_offset = reinterpret_cast<const char*>(ualoe_hdr) - ualoe_buf.data();
+    if (ualoe_offset + sizeof(ualoe_cper_hdr_t) > ualoe_buf_size_var) {
+      entries_dropped = true;
+      break;
+    }
+
+    if (ualoe_hdr->record_length < sizeof(ualoe_cper_hdr_t)) {
+      entries_dropped = true;
+      break;
+    }
+
     const uint32_t ualoe_payload_size =
         static_cast<uint32_t>(ualoe_hdr->record_length - sizeof(ualoe_cper_hdr_t));
     const uint32_t amdsmi_record_length =
         static_cast<uint32_t>(sizeof(amdsmi_cper_hdr_t) + ualoe_payload_size);
 
-    // The record must not claim to extend past the end of what UALoE filled in.
-    const size_t ualoe_offset = reinterpret_cast<const char*>(ualoe_hdr) - ualoe_buf;
     if (ualoe_offset + ualoe_hdr->record_length > ualoe_buf_size_var) {
       entries_dropped = true;
       break;
@@ -1032,9 +1035,6 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
     amdsmi_offset += amdsmi_record_length;
   }
 
-  free(ualoe_buf);
-  free(ualoe_hdrs);
-
   *buf_size = amdsmi_offset;
   *entry_count = transformed_entries;
 
@@ -1043,6 +1043,9 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
   }
 
   if (entries_dropped) {
+    if (transformed_entries > 0) {
+      return AMDSMI_STATUS_MORE_DATA;
+    }
     return AMDSMI_STATUS_OUT_OF_RESOURCES;
   }
 
