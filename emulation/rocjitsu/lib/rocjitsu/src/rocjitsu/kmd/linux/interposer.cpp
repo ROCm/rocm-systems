@@ -2946,17 +2946,22 @@ public:
   /// @p fd is not an export. Prevents a closed-without-PRIME export fd from leaving a
   /// stale flag that a later PRIME on the recycled fd number would apply, and ends
   /// the export's hold on the BO record that duplicate_gem_export extends to a
-  /// duplicate.
-  void drop_gem_export(int fd) {
+  /// duplicate. Call it, and the kernel close or replacement it pairs with, inside one
+  /// lock_drm_fd_lifecycle() scope, as duplicate_gem_export is.
+  /// @returns Whether @p fd was a dma-buf export.
+  bool drop_gem_export(int fd) {
     std::lock_guard lock(fd_mutex_);
-    pending_gem_flags_.erase(fd);
-    exported_gem_objects_.erase(fd);
+    const bool flags = pending_gem_flags_.erase(fd) != 0;
+    const bool state = exported_gem_objects_.erase(fd) != 0;
+    return flags || state;
   }
 
   /// @brief Keep the BO state a PRIME export retained for @p source on its duplicate @p target.
   /// @details The state must outlive the export fd's last close, and a duplicate is
   /// that same open file under another number. Called after a successful dup,
-  /// dup2, dup3 or fcntl(F_DUPFD*); a no-op when @p source is not a PRIME export.
+  /// dup2, dup3 or fcntl(F_DUPFD*), in the lock_drm_fd_lifecycle() scope of that call so
+  /// a racing close of @p source cannot drop the record between the kernel dup and
+  /// this copy; a no-op when @p source is not a PRIME export.
   void duplicate_gem_export(int source, int target) {
     std::lock_guard lock(fd_mutex_);
     const auto it = exported_gem_objects_.find(source);
@@ -4379,7 +4384,13 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   // later PRIME on the recycled fd number could misapply as the wrong PTE MTYPE.
   // A PRIME export fd also releases the BO state it retained. No-op for
   // non-dmabuf fds.
-  InterposerContext::ctx.drop_gem_export(fd);
+  {
+    // The record goes with the kernel close, inside the scope a dup of this fd holds
+    // from its syscall to duplicate_gem_export, so that dup sees both or neither.
+    auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
+    if (InterposerContext::ctx.drop_gem_export(fd))
+      return static_cast<int>(InterposerContext::real().close(fd));
+  }
   // NOTE: a GEM/dmabuf mapping is NOT torn down when a transient dmabuf EXPORT fd
   // closes. ROCr closes that fd immediately after VMemorySetAccessPerHandle()
   // returns, while the GPU mapping must stay live for the caller. GEM state is keyed
@@ -5068,6 +5079,7 @@ RJ_INTERPOSER_EXPORT int dup(int oldfd) {
     rc = InterposerContext::real().dup(oldfd);
     if (rc >= 0) {
       InterposerContext::ctx.duplicate_sync_file(oldfd, rc);
+      InterposerContext::ctx.duplicate_gem_export(oldfd, rc);
       drm_release = InterposerContext::ctx.commit_drm_dup(rc, drm_file);
     }
   }
@@ -5084,7 +5096,6 @@ RJ_INTERPOSER_EXPORT int dup(int oldfd) {
   else
     InterposerContext::ctx.untrack_dup(rc);
   InterposerContext::ctx.complete_drm_release(std::move(drm_release));
-  InterposerContext::ctx.duplicate_gem_export(oldfd, rc);
   return rc;
 }
 
@@ -5107,12 +5118,11 @@ void reconcile_dup_target(int newfd, std::optional<InterposerContext::DupBackend
                           InterposerContext::DrmFinalRelease displaced_release) {
   InterposerContext::ctx.untrack_sysfs(newfd);
   // dup2/dup3 atomically close whatever newfd was, bypassing the close() hook, so
-  // every per-fd cleanup close() performs must be mirrored here. Drop any transient
-  // EXPORT_DMABUF flags for newfd: a dmabuf export fd overwritten before a
-  // PRIME_FD_TO_HANDLE would otherwise leave a stale fd→flags record that a later
-  // PRIME on the recycled fd number could misapply as the wrong PTE MTYPE. No-op for
-  // non-dmabuf fds.
-  InterposerContext::ctx.drop_gem_export(newfd);
+  // every per-fd cleanup close() performs must be mirrored here. The export record
+  // for newfd was dropped with the kernel replacement, in the lifecycle scope: a
+  // dmabuf export fd overwritten before a PRIME_FD_TO_HANDLE would otherwise leave a
+  // stale fd→flags record that a later PRIME on the recycled fd number could
+  // misapply as the wrong PTE MTYPE.
   InterposerContext::ctx.complete_drm_release(std::move(overwritten_release));
   InterposerContext::ctx.complete_drm_release(std::move(displaced_release));
   InterposerContext::ctx.invalidate_overwritten_kfd_fd(newfd);
@@ -5151,6 +5161,9 @@ RJ_INTERPOSER_EXPORT int dup2(int oldfd, int newfd) {
         newfd, [&] { return InterposerContext::real().dup2(oldfd, newfd); });
     if (rc >= 0) {
       InterposerContext::ctx.duplicate_sync_file(oldfd, rc);
+      // The replaced target's export record goes with its descriptor.
+      InterposerContext::ctx.drop_gem_export(rc);
+      InterposerContext::ctx.duplicate_gem_export(oldfd, rc);
       auto drm_close = InterposerContext::ctx.untrack_drm(rc);
       overwritten_release = std::move(drm_close.release);
       displaced_release = InterposerContext::ctx.commit_drm_dup(rc, drm_file);
@@ -5165,7 +5178,6 @@ RJ_INTERPOSER_EXPORT int dup2(int oldfd, int newfd) {
     return rc;
   }
   reconcile_dup_target(rc, reserved, std::move(overwritten_release), std::move(displaced_release));
-  InterposerContext::ctx.duplicate_gem_export(oldfd, rc);
   return rc;
 }
 
@@ -5198,6 +5210,9 @@ RJ_INTERPOSER_EXPORT int dup3(int oldfd, int newfd, int flags) {
         newfd, [&] { return InterposerContext::real().dup3(oldfd, newfd, flags); });
     if (rc >= 0) {
       InterposerContext::ctx.duplicate_sync_file(oldfd, rc);
+      // The replaced target's export record goes with its descriptor.
+      InterposerContext::ctx.drop_gem_export(rc);
+      InterposerContext::ctx.duplicate_gem_export(oldfd, rc);
       auto drm_close = InterposerContext::ctx.untrack_drm(rc);
       overwritten_release = std::move(drm_close.release);
       displaced_release = InterposerContext::ctx.commit_drm_dup(rc, drm_file);
@@ -5212,7 +5227,6 @@ RJ_INTERPOSER_EXPORT int dup3(int oldfd, int newfd, int flags) {
     return rc;
   }
   reconcile_dup_target(rc, reserved, std::move(overwritten_release), std::move(displaced_release));
-  InterposerContext::ctx.duplicate_gem_export(oldfd, rc);
   return rc;
 }
 #endif
@@ -5334,6 +5348,7 @@ int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
     rc = invoke();
     if (rc >= 0) {
       InterposerContext::ctx.duplicate_sync_file(fd, static_cast<int>(rc));
+      InterposerContext::ctx.duplicate_gem_export(fd, static_cast<int>(rc));
       drm_release = InterposerContext::ctx.commit_drm_dup(static_cast<int>(rc), drm_file);
     }
   } else {
@@ -5353,7 +5368,6 @@ int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
       else
         InterposerContext::ctx.untrack_dup(static_cast<int>(rc));
       InterposerContext::ctx.complete_drm_release(std::move(drm_release));
-      InterposerContext::ctx.duplicate_gem_export(fd, static_cast<int>(rc));
     }
   }
   return static_cast<int>(rc);

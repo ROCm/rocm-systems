@@ -1082,6 +1082,68 @@ TEST(InterposerDrmTest, PrimeImportKeepsTheBoStateAfterTheHandleCloses) {
   }
 }
 
+// A dup racing the close of the export fd either fails or returns a descriptor that
+// still carries the BO state: the record follows the kernel descriptor, so neither
+// operation may slip between the other's table update and its syscall.
+TEST(InterposerDrmTest, DupRacingTheCloseOfAPrimeExportKeepsTheBoState) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  int exporter = open_drm_render();
+  ASSERT_GE(exporter, 0);
+  int importer = open_drm_render();
+  ASSERT_GE(importer, 0);
+  constexpr int kAttempts = 3000;
+  int duplicated = 0;
+  int lost = 0;
+  for (int attempt = 0; attempt < kAttempts; ++attempt) {
+    drm_amdgpu_gem_create create{};
+    create.in.bo_size = 4096;
+    create.in.alignment = 65536;
+    create.in.domains = AMDGPU_GEM_DOMAIN_CPU;
+    ASSERT_EQ(ioctl(exporter, DRM_IOCTL_AMDGPU_GEM_CREATE, &create), 0);
+    drm_amdgpu_gem_metadata store{};
+    store.handle = create.out.handle;
+    store.op = AMDGPU_GEM_METADATA_OP_SET_METADATA;
+    store.data.tiling_info = 0x11;
+    store.data.data_size_bytes = sizeof(uint32_t);
+    store.data.data[0] = 0xA1B2C3D4u;
+    ASSERT_EQ(ioctl(exporter, DRM_IOCTL_AMDGPU_GEM_METADATA, &store), 0);
+    drm_prime_handle prime{};
+    prime.handle = create.out.handle;
+    prime.flags = DRM_CLOEXEC;
+    ASSERT_EQ(ioctl(exporter, DRM_IOCTL_PRIME_HANDLE_TO_FD, &prime), 0);
+    ASSERT_EQ(gem_close(exporter, create.out.handle), 0);
+
+    std::barrier start(2);
+    int copy = -1;
+    std::thread closer([&] {
+      start.arrive_and_wait();
+      close(prime.fd);
+    });
+    start.arrive_and_wait();
+    copy = dup(prime.fd);
+    closer.join();
+    if (copy < 0)
+      continue;
+    ++duplicated;
+    uint32_t imported = 0;
+    ASSERT_TRUE(prime_import(importer, copy, &imported));
+    drm_amdgpu_gem_metadata query{};
+    query.handle = imported;
+    query.op = AMDGPU_GEM_METADATA_OP_GET_METADATA;
+    ASSERT_EQ(ioctl(importer, DRM_IOCTL_AMDGPU_GEM_METADATA, &query), 0);
+    if (query.data.data_size_bytes != sizeof(uint32_t) || query.data.tiling_info != 0x11u)
+      ++lost;
+    EXPECT_EQ(gem_close(importer, imported), 0);
+    EXPECT_EQ(close(copy), 0);
+  }
+  EXPECT_GT(duplicated, 0);
+  EXPECT_EQ(lost, 0) << lost << " of " << duplicated << " duplicates lost the BO state";
+  EXPECT_EQ(close(importer), 0);
+  EXPECT_EQ(close(exporter), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
 namespace {
 
 // hipMalloc in local mode allocates at a caller VA. Exporting it must keep the
