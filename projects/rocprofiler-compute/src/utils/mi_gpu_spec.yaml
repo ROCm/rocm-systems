@@ -538,7 +538,7 @@ mi_gpu_spec:
             design:
               memory_levels: ["LDS", "L0", "L1", "L2"]
             chip_ids:
-              physical: 30033
+              physical: 30032
 
 
   #########################################################

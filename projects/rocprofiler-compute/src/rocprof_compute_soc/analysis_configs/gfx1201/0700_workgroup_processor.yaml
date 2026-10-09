@@ -328,8 +328,10 @@ Panel Config:
         metric: Metric
         value: Value
       metric:
-        SQ_WMMA_VALU_INSTS: ROUND(SUM(SQ_WMMA_VALU_INSTS), 0)
-        SQ_INST_CYCLES_VALU_WMMA: ROUND(SUM(SQ_INST_CYCLES_VALU_WMMA), 0)
+        SQ_WMMA_VALU_INSTS:
+          value: ROUND(SUM(SQ_WMMA_VALU_INSTS), 0)
+        SQ_INST_CYCLES_VALU_WMMA:
+          value: ROUND(SUM(SQ_INST_CYCLES_VALU_WMMA), 0)
 
   - metric_table:
       id: 713
@@ -338,8 +340,10 @@ Panel Config:
         metric: Metric
         value: Value
       metric:
-        SQ_INSTS_VALU: ROUND(SUM(SQ_INSTS_VALU), 0)
-        SQ_INST_CYCLES_VALU: ROUND(SUM(SQ_INST_CYCLES_VALU), 0)
+        SQ_INSTS_VALU:
+          value: ROUND(SUM(SQ_INSTS_VALU), 0)
+        SQ_INST_CYCLES_VALU:
+          value: ROUND(SUM(SQ_INST_CYCLES_VALU), 0)
 
   metrics_description:
     WGP Utilization: >-

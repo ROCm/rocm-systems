@@ -6237,6 +6237,7 @@ rocprofiler-sdk:
             - gfx1151
             - gfx1152
             - gfx1153
+            - gfx1201
           expression: reduce(SQ_WAVE_CYCLES,sum)/reduce(SQ_BUSY_CYCLES,sum)
         - architectures:
             - gfx90a
@@ -6244,7 +6245,6 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
-            - gfx1201
           expression: reduce(accumulate(SQ_LEVEL_WAVES, LOW_RES),sum)/reduce(SQ_BUSY_CU_CYCLES,sum)
     - name: MeanOccupancyPerCU
       description: Mean occupancy per compute unit.
@@ -17149,6 +17149,7 @@ rocprofiler-sdk:
       definitions:
         - architectures:
             - gfx1250
+            - gfx1201
           block: GL2C
           event: 191
     - name: GL2C_EA_WR_UNCACHED_32B
@@ -23427,6 +23428,7 @@ rocprofiler-sdk:
       definitions:
         - architectures:
             - gfx1250
+            - gfx1201
           expression: reduce(GL2C_WRITE_SECTORS,sum)
     - name: GL2C_EA_WR_UNCACHED_32B_sum
       description: sum of GL2C EA WR UNCACHED 32B.

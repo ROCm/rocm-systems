@@ -66,10 +66,10 @@ class gfx1201_soc(OmniSoC_Base):
 
         collected: set[str] = set()
         try:
-            for result_file in csv_compression.find_csvs(
-                workload_dir, "results_*.csv"
+            for result_file in workload_dir.glob(
+                f"results_*.csv{csv_compression.GZIP_SUFFIX}"
             ):
-                with csv_compression.open_csv_read(result_file) as stream:
+                with csv_compression.open_gzip_csv_read(result_file) as stream:
                     collected.update(
                         row["Counter_Name"]
                         for row in csv.DictReader(stream)
@@ -77,13 +77,14 @@ class gfx1201_soc(OmniSoC_Base):
                     )
         except (OSError, UnicodeError, csv.Error, KeyError) as error:
             console_error(
-                "Unable to validate SQ_WMMA_VALU_INSTS profiling output: "
-                f"{error}"
+                f"Unable to validate SQ_WMMA_VALU_INSTS profiling output: {error}",
+                exit=False,
             )
 
         if not wmma_counters.intersection(collected):
             console_error(
                 "SQ_WMMA_VALU_INSTS was requested but is absent from the "
                 "profiling output. The installed aqlprofile may reject gfx1201 "
-                "SQ event 233 because SqcCounterBlockMaxEvent is below 511."
+                "SQ event 233 because SqcCounterBlockMaxEvent is below 511.",
+                exit=False,
             )
