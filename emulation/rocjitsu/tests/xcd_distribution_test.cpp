@@ -12,8 +12,11 @@
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gws_device.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
+#include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/soc.h"
@@ -1798,4 +1801,28 @@ TEST(XcdDistributionTest, ScratchRequiresTheCompleteWaveSlice) {
   const auto counts = fx.soc->dispatched_workgroups_per_xcd();
   EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), 0u)
       << "a one-byte scratch mapping was accepted for a complete wave";
+}
+
+// Production construction (config loader): the loader wires every CU of an XCD
+// to that XCD's single device-global GWS store, and each XCD gets its own store.
+// This is what makes cross-CU GWS rendezvous work for a real dispatch, which
+// the command processor scatters across an XCD's CUs. Regression for CUs falling
+// back to their private default store when assembled from a config file.
+TEST(XcdDistributionTest, ConfigLoaderWiresSharedGwsStorePerXcd) {
+  XcdDistributionFixture fx;
+  ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
+
+  std::set<const amdgpu::GwsDevice *> per_xcd_stores;
+  for (uint32_t xi = 0; xi < fx.soc->num_xcds(); ++xi) {
+    auto *xcd = fx.soc->xcd(xi);
+    const amdgpu::GwsDevice *store = xcd->gws_device().get();
+    ASSERT_NE(store, nullptr) << "xcd " << xi << " has no GWS store";
+    per_xcd_stores.insert(store);
+    const auto &cus = xcd->command_processor()->compute_units();
+    EXPECT_FALSE(cus.empty());
+    for (auto *cu : cus)
+      EXPECT_EQ(&cu->gws_device(), store) << "xcd " << xi << " CU does not share the XCD GWS store";
+  }
+  // Each XCD is an independent dispatch/cross-CU boundary, so stores are distinct.
+  EXPECT_EQ(per_xcd_stores.size(), fx.soc->num_xcds());
 }

@@ -8,6 +8,7 @@
 
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gws_device.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/shader_engine.h"
 
@@ -54,6 +55,21 @@ public:
   void set_l2_cache(L2Cache *l2);
   void set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence);
   void add_shader_engine(ShaderEngine *se) { shader_engines_.push_back(se); }
+
+  /// @brief Share this XCD's device-global GWS store with all of its CUs.
+  ///
+  /// @details GWS resources are device-global and a dispatch's workgroups scatter
+  /// across this XCD's CUs (its command processor is the dispatch/cross-CU
+  /// boundary), so every CU must share one store for cross-CU wakeups and the
+  /// process-wide quiescence backstop (see GwsDevice). Each CU holds a shared_ptr
+  /// to the store, so it outlives every registered CU regardless of teardown
+  /// order. Must be called after the shader engines and their CUs are attached;
+  /// the full constructor calls it, and the config loader calls it after it
+  /// assembles the XCD's children.
+  void wire_gws_to_cus();
+
+  /// @brief Return this XCD's shared device-global GWS store.
+  const std::shared_ptr<GwsDevice> &gws_device() const { return gws_device_; }
 
   /// @brief Set flat-address-space aperture boundaries on all CUs via their SPIs.
   void set_apertures(uint64_t shared_base, uint64_t shared_limit, uint64_t private_base,
@@ -111,6 +127,8 @@ public:
 private:
   simdojo::ExecMode exec_mode_;
   std::shared_ptr<DeviceCacheCoherence> coherence_ = std::make_shared<DeviceCacheCoherence>();
+  /// Device-global GWS store shared by every CU of this XCD (see wire_gws_to_cus).
+  std::shared_ptr<GwsDevice> gws_device_ = std::make_shared<GwsDevice>();
   CommandProcessor *cp_ = nullptr;
   L2Cache *l2_cache_ = nullptr;
   std::vector<ShaderEngine *> shader_engines_;
