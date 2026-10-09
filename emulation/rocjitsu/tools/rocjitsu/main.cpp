@@ -391,6 +391,12 @@ void print_usage() {
          "                    Replace cpu_thread_budget for this launch only; the\n"
          "                    config file is left unchanged. Zero selects automatic\n"
          "                    sizing. Not available with --attach.\n"
+         "  --wait-checking <mode>, --wait-checking=<mode>\n"
+         "                    Override every CU and GPU for this launch:\n"
+         "                    on = ordinary checks, off = no wait checks,\n"
+         "                    all = ordinary plus gfx1250 XCNT.\n"
+         "                    Omission keeps JSON settings and defaults. The source\n"
+         "                    config is unchanged. Not available with --attach.\n"
          "  --vfio-socket <path>\n"
          "                    Serve the configured GPU as a PCI function to a VMM over\n"
          "                    the vfio-user protocol on this AF_UNIX socket, instead of\n"
@@ -416,7 +422,7 @@ int main(int argc, char *argv[]) {
   const char *config_path = nullptr;
   const char *vfio_socket = nullptr;
   bool thread_budget_table = false;
-  std::optional<uint32_t> cpu_thread_budget;
+  config::LaunchOverrides overrides;
   int vfio_ready_fd = -1;
   bool daemon_mode = false;
   bool attach_mode = false;
@@ -443,9 +449,21 @@ int main(int argc, char *argv[]) {
         std::cerr << "rocjitsu: --cpu-thread-budget requires a value\n";
         return 1;
       }
-      cpu_thread_budget = config::parse_uint32(value);
-      if (!cpu_thread_budget) {
+      overrides.cpu_thread_budget = config::parse_uint32(value);
+      if (!overrides.cpu_thread_budget) {
         std::cerr << "rocjitsu: --cpu-thread-budget requires an unsigned integer\n";
+        return 1;
+      }
+    } else if (arg == "--wait-checking" || arg.starts_with("--wait-checking=")) {
+      const size_t equals = arg.find('=');
+      std::string_view value;
+      if (equals != std::string_view::npos)
+        value = arg.substr(equals + 1);
+      else if (i + 1 < argc)
+        value = argv[++i];
+      overrides.wait_checking = config::parse_wait_checking(value);
+      if (!overrides.wait_checking) {
+        std::cerr << "rocjitsu: --wait-checking requires on, off, or all\n";
         return 1;
       }
     } else if (arg == "--vfio-socket" && i + 1 < argc) {
@@ -498,22 +516,26 @@ int main(int argc, char *argv[]) {
   }
 
   // Attaching joins a daemon that already built its machine from its own config,
-  // so there is nothing left here for a budget to apply to.
-  if (cpu_thread_budget && attach_mode) {
+  // so these overrides cannot change it.
+  if (overrides.cpu_thread_budget && attach_mode) {
     std::cerr << "rocjitsu: --cpu-thread-budget cannot be combined with --attach\n";
     return 1;
   }
+  if (overrides.wait_checking && attach_mode) {
+    std::cerr << "rocjitsu: --wait-checking cannot be combined with --attach\n";
+    return 1;
+  }
 
-  // Applying the budget to a copy keeps the override inside this launch: the
+  // Applying overrides to a copy keeps them inside this launch: the
   // config the user named is never rewritten, and simulations built from other
-  // configs in the same process tree keep the budgets their own configs ask for.
+  // configs in the same process tree keep their own settings.
   util::StringDiagnostic launch_config_diagnostic;
   auto config_json_for_this_launch = [&]() -> rocjitsu::FailureOr<std::string> {
     std::string json = rocjitsu::config::read_config_file(abs_config);
-    if (!cpu_thread_budget)
+    if (overrides.empty())
       return json;
-    return rocjitsu::config::json_with_cpu_thread_budget(json, *cpu_thread_budget,
-                                                         launch_config_diagnostic.emitter());
+    return rocjitsu::config::json_with_launch_overrides(json, overrides,
+                                                        launch_config_diagnostic.emitter());
   };
 
   if (thread_budget_table) {
@@ -568,11 +590,11 @@ int main(int argc, char *argv[]) {
   // The copy lives in this invocation's runtime directory, beside the config-path
   // handoff an exec'd workload already reads, so the same cleanup reclaims it.
   auto write_config_for_this_launch = [&]() {
-    if (!cpu_thread_budget)
+    if (overrides.empty())
       return true;
     util::StringDiagnostic diagnostic;
     rocjitsu::FailureOr<std::string> written = rocjitsu::config::write_effective_config(
-        abs_config, *cpu_thread_budget, my_pid, diagnostic.emitter());
+        abs_config, overrides, my_pid, diagnostic.emitter());
     if (written.failed()) {
       std::cerr << std::format("rocjitsu: {}\n", diagnostic.message());
       cleanup_runtime_files(my_pid);
@@ -622,11 +644,19 @@ int main(int argc, char *argv[]) {
     return 1;
   }
   // A dbt_guest simulator_config is resolved relative to the config naming it, and
-  // it, not this config, is what the host VM is built from. Moving the budget onto
-  // a copy would therefore both break that path and miss the config it must reach.
-  if (dbt_guest_mode && cpu_thread_budget && !dbt_guest_config.host.simulator_config_path.empty()) {
+  // it, not this config, is what the host VM is built from. Moving overrides onto
+  // a copy would therefore both break that path and miss the config they must reach.
+  if (dbt_guest_mode && overrides.cpu_thread_budget &&
+      !dbt_guest_config.host.simulator_config_path.empty()) {
     std::cerr << std::format("rocjitsu: --cpu-thread-budget cannot be combined with a dbt_guest "
                              "simulator_config; set cpu_thread_budget in {} instead\n",
+                             dbt_guest_config.host.simulator_config_path);
+    return 1;
+  }
+  if (dbt_guest_mode && overrides.wait_checking &&
+      !dbt_guest_config.host.simulator_config_path.empty()) {
+    std::cerr << std::format("rocjitsu: --wait-checking cannot be combined with a dbt_guest "
+                             "simulator_config; set wait_checking in {} instead\n",
                              dbt_guest_config.host.simulator_config_path);
     return 1;
   }
