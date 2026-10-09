@@ -1541,9 +1541,9 @@ def _build_ml_api_call_trees(workload: schema.Workload) -> None:
         )
     skipped_keys: set[tuple[str, str]] = set()
     workload.ml_api_trace_df = _apply_parsed_function_columns(
-        _collapse_matching_markers_across_passes(
-            [pair.joined_df for pair in workload.ml_api_trace_pairs]
-        )
+        _collapse_matching_markers_across_passes([
+            pair.joined_df for pair in workload.ml_api_trace_pairs
+        ])
     )
     workload.ml_api_call_trees = nest_marker_intervals(
         workload.ml_api_trace_df, skipped_keys=skipped_keys

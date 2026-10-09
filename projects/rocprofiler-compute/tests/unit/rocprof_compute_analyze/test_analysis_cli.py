@@ -77,4 +77,3 @@ def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypat
     inst.pre_processing()
 
     assert len(membw_calls) == (1 if expect_called else 0)
-
