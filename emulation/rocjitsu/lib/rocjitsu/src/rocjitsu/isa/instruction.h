@@ -121,9 +121,10 @@ public:
   virtual ~Instruction() = default;
 
   /// @brief Pool allocator hooks, set by the decoder's enable_pool().
-  /// @details Pool users must allocate and free on the bound thread, with the
-  /// decoder outliving its pooled instructions. CU execution instead forces
-  /// heap allocation so instructions can survive quanta and worker migration.
+  /// @details Pool users must allocate and free on the bound thread while their
+  /// pool is active, with the decoder outliving its pooled instructions.
+  /// CU execution instead forces heap allocation so instructions can survive
+  /// quanta and worker migration.
   using AllocFn = void *(*)(void *pool, size_t size);
   using DeallocFn = void (*)(void *pool, void *ptr);
   static thread_local inline AllocFn alloc_fn_;
