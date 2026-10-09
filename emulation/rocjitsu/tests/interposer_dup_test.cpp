@@ -997,7 +997,12 @@ TEST(InterposerDrmTest, PrimeImportSharesTheBufferAndItsMetadata) {
   EXPECT_EQ(close(kfd), 0);
 }
 
-TEST(InterposerDrmTest, PrimeImportKeepsTheBoStateAfterTheHandleCloses) {
+namespace {
+
+// Exports a GEM_CREATE buffer, closes its handle, and imports it through the fd
+// @p duplicate returns for the export fd. The BO state must survive the close of
+// every other reference to the buffer, including the original export fd.
+template <typename Duplicate> void check_prime_import_keeps_the_bo_state(Duplicate duplicate) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
   int exporter = open_drm_render();
@@ -1023,10 +1028,15 @@ TEST(InterposerDrmTest, PrimeImportKeepsTheBoStateAfterTheHandleCloses) {
   prime.handle = create.out.handle;
   prime.flags = DRM_CLOEXEC;
   ASSERT_EQ(ioctl(exporter, DRM_IOCTL_PRIME_HANDLE_TO_FD, &prime), 0);
+  const int import_fd = duplicate(prime.fd);
+  ASSERT_GE(import_fd, 0);
+  if (import_fd != prime.fd) {
+    EXPECT_EQ(close(prime.fd), 0);
+  }
   ASSERT_EQ(gem_close(exporter, create.out.handle), 0);
   uint32_t imported = 0;
-  ASSERT_TRUE(prime_import(importer, prime.fd, &imported));
-  EXPECT_EQ(close(prime.fd), 0);
+  ASSERT_TRUE(prime_import(importer, import_fd, &imported));
+  EXPECT_EQ(close(import_fd), 0);
 
   drm_amdgpu_gem_metadata query{};
   query.handle = imported;
@@ -1050,6 +1060,26 @@ TEST(InterposerDrmTest, PrimeImportKeepsTheBoStateAfterTheHandleCloses) {
   EXPECT_EQ(close(importer), 0);
   EXPECT_EQ(close(exporter), 0);
   EXPECT_EQ(close(kfd), 0);
+}
+
+} // namespace
+
+TEST(InterposerDrmTest, PrimeImportKeepsTheBoStateAfterTheHandleCloses) {
+  const struct {
+    const char *name;
+    int (*duplicate)(int);
+  } cases[] = {
+      {"original fd", [](int fd) { return fd; }},
+      {"dup", [](int fd) { return dup(fd); }},
+      {"dup2", [](int fd) { return dup2(fd, 900); }},
+      {"dup3", [](int fd) { return dup3(fd, 901, O_CLOEXEC); }},
+      {"F_DUPFD", [](int fd) { return fcntl(fd, F_DUPFD, 902); }},
+      {"F_DUPFD_CLOEXEC", [](int fd) { return fcntl(fd, F_DUPFD_CLOEXEC, 903); }},
+  };
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    check_prime_import_keeps_the_bo_state(test_case.duplicate);
+  }
 }
 
 namespace {

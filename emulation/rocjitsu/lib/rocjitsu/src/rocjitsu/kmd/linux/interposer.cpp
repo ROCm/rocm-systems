@@ -2950,6 +2950,19 @@ public:
     exported_gem_objects_.erase(fd);
   }
 
+  /// @brief Keep the BO state a PRIME export retained for @p source on its duplicate @p target.
+  /// @details The state must outlive the export fd's last close, and a duplicate is
+  /// that same open file under another number. Called after a successful dup,
+  /// dup2, dup3 or fcntl(F_DUPFD*); a no-op when @p source is not a PRIME export.
+  void duplicate_gem_export(int source, int target) {
+    std::lock_guard lock(fd_mutex_);
+    const auto it = exported_gem_objects_.find(source);
+    if (it == exported_gem_objects_.end())
+      return;
+    std::shared_ptr<GemObject> object = it->second;
+    exported_gem_objects_[target] = std::move(object);
+  }
+
   /// @brief Mint a stable GEM handle for a prime-imported dmabuf (PRIME_FD_TO_HANDLE).
   /// @details Allocates a fresh monotonically-increasing handle (never fd-derived),
   /// consumes the transient EXPORT_DMABUF flags for @p dmabuf_fd (defaulting to 0 if
@@ -5064,6 +5077,7 @@ RJ_INTERPOSER_EXPORT int dup(int oldfd) {
   else
     InterposerContext::ctx.untrack_dup(rc);
   InterposerContext::ctx.complete_drm_release(std::move(drm_release));
+  InterposerContext::ctx.duplicate_gem_export(oldfd, rc);
   return rc;
 }
 
@@ -5144,6 +5158,7 @@ RJ_INTERPOSER_EXPORT int dup2(int oldfd, int newfd) {
     return rc;
   }
   reconcile_dup_target(rc, reserved, std::move(overwritten_release), std::move(displaced_release));
+  InterposerContext::ctx.duplicate_gem_export(oldfd, rc);
   return rc;
 }
 
@@ -5190,6 +5205,7 @@ RJ_INTERPOSER_EXPORT int dup3(int oldfd, int newfd, int flags) {
     return rc;
   }
   reconcile_dup_target(rc, reserved, std::move(overwritten_release), std::move(displaced_release));
+  InterposerContext::ctx.duplicate_gem_export(oldfd, rc);
   return rc;
 }
 #endif
@@ -5330,6 +5346,7 @@ int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
       else
         InterposerContext::ctx.untrack_dup(static_cast<int>(rc));
       InterposerContext::ctx.complete_drm_release(std::move(drm_release));
+      InterposerContext::ctx.duplicate_gem_export(fd, static_cast<int>(rc));
     }
   }
   return static_cast<int>(rc);
