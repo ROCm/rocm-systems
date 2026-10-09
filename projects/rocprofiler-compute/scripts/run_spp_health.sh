@@ -26,11 +26,11 @@
 #   ARCH=gfx90a  THEROCK=/opt/rocm-7.2.0 bash scripts/run_spp_health.sh
 #   ARCH=gfx950  THEROCK=/opt/rocm-7.1.0 bash scripts/run_spp_health.sh
 #
-# 500-iter medians are ITERS=500, including gfx942. Median CSV is
-# tools/compare_spp_legacy_medians.py, not a separate worker.
+# 500-iter medians are ITERS=500, including gfx942. The report uses the
+# default single-pass packable path only. The legacy allocator mode is gone.
 #
 # Produces under $ROOT/workloads/:
-#   {vcopy,nbody,mega_kernel}_${TAG}_{spp,legacy}/
+#   {vcopy,nbody,mega_kernel}_${TAG}_spp/
 #   logs_${ARCH}_${TAG}/*.log
 #   logs_${ARCH}_${TAG}/run_meta.env
 # Ends with ALL_DONE in $LOG.
@@ -499,11 +499,6 @@ run_one() {
   t0=$(date +%s)
 
   echo "--- PROFILE mode=$mode name=$name iters=$ITERS cmd=$* ---"
-  unset ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC || true
-  unset ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE || true
-  if [[ "$mode" == "legacy" ]]; then
-    export ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1
-  fi
 
   set +e
   "${PROFILE[@]}" -n "$wl_name" -- "$@"
@@ -565,7 +560,7 @@ write_run_meta
 
 PROFILE=(python3 src/rocprof-compute profile --overwrite "${PROFILE_EXTRA[@]}")
 
-for mode in spp legacy; do
+for mode in spp; do
   run_one "$mode" vcopy ./sample/vc -n 81920 -b 256 -i "$ITERS"
   run_one "$mode" nbody ./sample/mini-nbody-block 131072 "$ITERS"
   if [[ "$SKIP_MEGA" != "1" ]]; then

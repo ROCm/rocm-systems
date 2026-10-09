@@ -7,7 +7,6 @@ metric's PMC set is co-collected. Analyze must evaluate those metrics using
 values from one qualifying pass, not a name-keyed mega-table last-write.
 """
 
-import os
 import re
 from collections import Counter
 from dataclasses import dataclass
@@ -56,12 +55,6 @@ _SYSTEM_LIKE_VARS = frozenset({
     "pipes_per_gpu",
     "se_per_gpu",
 })
-
-
-def legacy_pass_merge_enabled() -> bool:
-    """Escape hatch: restore pre-provenance name-keyed merge/eval."""
-    raw = os.environ.get("ROCPROF_COMPUTE_ANALYZE_LEGACY_PASS_MERGE", "0")
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def natural_pass_sort_key(key: str) -> Tuple[Union[int, str], ...]:
@@ -432,11 +425,7 @@ def bind_expression_dataframe(
 
     Returns the set of pass keys selected for at least one metric.
     """
-    if (
-        expression_df.empty
-        or not pass_layout.has_duplicates
-        or legacy_pass_merge_enabled()
-    ):
+    if expression_df.empty or not pass_layout.has_duplicates:
         return set()
     if "metric_id" not in expression_df.columns or "value" not in expression_df.columns:
         return set()

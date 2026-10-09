@@ -25,20 +25,18 @@ Usage (from the `rocprofiler-compute` project root):
     ./tools/counter_grouping_inspector.py --arch gfx942 --block 2 3 4
     ./tools/counter_grouping_inspector.py --arch gfx942 --output plan.txt
     ./tools/counter_grouping_inspector.py --arch gfx942 --output plan.svg
-    ./tools/counter_grouping_inspector.py --arch gfx942 --compare-spp -o spp.txt
 """
 
 import argparse
 import importlib
 import logging
-import os
 import sys
 import tempfile
 from collections.abc import Iterator
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from rich.console import Console
 
@@ -48,10 +46,12 @@ if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
 # Import from existing modules to maintain single source of truth
+from rocprof_compute_soc.counter_file import (  # noqa: E402
+    flat_counters_in_perfmon_file,
+)
 from rocprof_compute_soc.soc_base import (  # noqa: E402
     CounterFile,
     OmniSoC_Base,
-    flat_counters_in_perfmon_file,
     is_tcc_channel_counter,
 )
 from utils.logger import console_error  # noqa: E402
@@ -62,10 +62,6 @@ from utils.utils_counter_defs import (  # noqa: E402
     extract_counters_and_variables,
 )
 from vendored import yaml  # noqa: E402
-
-_LEGACY_HEURISTIC_ENV = "ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC"
-_SINGLE_PASS_PACKABLE_ENV = "ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE"
-_COMPARE_ENV_KEYS = (_LEGACY_HEURISTIC_ENV, _SINGLE_PASS_PACKABLE_ENV)
 
 
 def _counter_display_ip_prefix(counter: str) -> str:
@@ -640,16 +636,6 @@ Examples:
             "  .svg - SVG image output (requires rich library)"
         ),
     )
-    parser.add_argument(
-        "--compare-spp",
-        action="store_true",
-        help=(
-            "Emit before (legacy heuristic, no refill) and after (default SPP) "
-            "bucket layouts, multi-bucket counts, and per-section HW packing "
-            "limits / display-column notes (.txt only)."
-        ),
-    )
-
     args = parser.parse_args()
 
     config_dir = args.config_dir or get_default_config_dir()
@@ -669,19 +655,6 @@ Examples:
         console_error(
             f"Error: Architecture config directory not found: {config_arch_path}"
         )
-
-    if args.compare_spp:
-        if args.output and args.output.suffix.lower() == ".svg":
-            console_error("--compare-spp requires .txt output (or stdout).")
-        with tempfile.TemporaryDirectory(prefix="rocprof_counter_inspector_") as tmp:
-            _run_compare_spp(
-                args,
-                arch,
-                config_dir,
-                perfmon_config,
-                Path(tmp),
-            )
-        return
 
     with tempfile.TemporaryDirectory(prefix="rocprof_counter_inspector_") as tmpdir:
         workload_root = Path(tmpdir)
@@ -710,229 +683,6 @@ Examples:
                 print()
 
         _emit_inspector_output(args, output_files, config_dir, arch)
-
-
-def _backup_compare_env() -> Dict[str, Optional[str]]:
-    return {key: os.environ.get(key) for key in _COMPARE_ENV_KEYS}
-
-
-def _restore_compare_env(backup: Dict[str, Optional[str]]) -> None:
-    for key, value in backup.items():
-        if value is None:
-            os.environ.pop(key, None)
-        else:
-            os.environ[key] = value
-
-
-def _prepare_inspector_soc_for_allocate(
-    arch: str,
-    config_dir: Path,
-    block_filter: Optional[List[str]],
-    perfmon_config: dict[str, int],
-    workload_root: Path,
-) -> tuple[OmniSoC_Base, set[str]]:
-    soc = _build_inspector_soc(
-        arch,
-        config_dir,
-        block_filter,
-        perfmon_config,
-        workload_root,
-    )
-    counters, _fb = soc.detect_counters()
-    counters = counters - {"SQ_ACCUM_PREV_HIRES"}
-    if not counters:
-        console_error("No counters found!")
-    soc.get_rocprof_supported_counters = (  # type: ignore[method-assign]
-        lambda c=counters: _rocprof_supported_superset(c)
-    )
-    return soc, counters
-
-
-def _allocate_under_env(
-    arch: str,
-    config_dir: Path,
-    block_filter: Optional[List[str]],
-    perfmon_config: dict[str, int],
-    workload_root: Path,
-    *,
-    env_updates: Dict[str, Optional[str]],
-) -> tuple[OmniSoC_Base, set[str], list[CounterFile]]:
-    """Allocate under temporary env, restoring prior values afterward."""
-    backup = _backup_compare_env()
-    try:
-        for key, value in env_updates.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-        soc, counters = _prepare_inspector_soc_for_allocate(
-            arch,
-            config_dir,
-            block_filter,
-            perfmon_config,
-            workload_root,
-        )
-        files, _fc, _acc = soc._allocate_perfmon_counter_files(counters)
-        return soc, counters, files
-    finally:
-        _restore_compare_env(backup)
-
-
-def _run_compare_spp(
-    args: argparse.Namespace,
-    arch: str,
-    config_dir: Path,
-    perfmon_config: dict[str, int],
-    workload_root: Path,
-) -> None:
-    from rocprof_compute_soc.counter_grouping_buckets import (
-        count_multi_bucket_metrics,
-    )
-    from rocprof_compute_soc.counter_grouping_single_pass import (
-        _count_packable_multi,
-        collect_unique_packable_unions,
-    )
-
-    # Before = legacy heuristic (priority coalesce + first-fit).
-    soc_legacy, counters, files_legacy = _allocate_under_env(
-        arch,
-        config_dir,
-        args.block,
-        perfmon_config,
-        workload_root / "legacy",
-        env_updates={
-            _LEGACY_HEURISTIC_ENV: "1",
-            _SINGLE_PASS_PACKABLE_ENV: None,
-        },
-    )
-    # After = default SPP (on unless LEGACY_HEURISTIC / SINGLE_PASS_PACKABLE=0).
-    soc_spp, _c2, files_spp = _allocate_under_env(
-        arch,
-        config_dir,
-        args.block,
-        perfmon_config,
-        workload_root / "spp",
-        env_updates={
-            _LEGACY_HEURISTIC_ENV: None,
-            _SINGLE_PASS_PACKABLE_ENV: None,
-        },
-    )
-    # Union-based packable multi: fair under SPP PMC duplication.
-    unions, _packable_n = collect_unique_packable_unions(
-        soc_spp,
-        counters,
-        perfmon_config,
-    )
-    packable_legacy = _count_packable_multi(files_legacy, unions)
-    packable_spp = _count_packable_multi(files_spp, unions)
-    # Counter→bucket multi still useful for legacy; under SPP it overcounts
-    # because packable PMCs may be duplicated into other passes.
-    multi_legacy = count_multi_bucket_metrics(files_legacy, soc_legacy, counters)
-    multi_spp = count_multi_bucket_metrics(files_spp, soc_spp, counters)
-    _emit_compare_spp_output(
-        args,
-        files_legacy,
-        files_spp,
-        config_dir,
-        arch,
-        multi_legacy,
-        multi_spp,
-        packable_legacy,
-        packable_spp,
-    )
-
-
-def generate_compare_spp_report(
-    files_legacy: list[CounterFile],
-    files_spp: list[CounterFile],
-    config_dir: Path,
-    arch: str,
-    *,
-    multi_bucket_legacy: int,
-    multi_bucket_spp: int,
-    packable_multi_legacy: int,
-    packable_multi_spp: int,
-) -> str:
-    """Before (legacy) / after (default SPP) bucket layout comparison."""
-    buf = StringIO()
-    buf.write("Legacy vs single-pass-packable (SPP) comparison\n")
-    buf.write(f"Architecture: {arch}\n\n")
-    buf.write("Summary\n")
-    buf.write(f"  Perfmon buckets (legacy / LEGACY_HEURISTIC=1): {len(files_legacy)}\n")
-    buf.write(f"  Perfmon buckets (default SPP):               {len(files_spp)}\n")
-    buf.write(
-        f"  Packable unions still multi-bucket (legacy): {packable_multi_legacy}\n"
-    )
-    buf.write(f"  Packable unions still multi-bucket (SPP):    {packable_multi_spp}\n")
-    buf.write(
-        f"  All multi-bucket metrics (legacy, counter map): {multi_bucket_legacy}\n"
-    )
-    buf.write(
-        "  All multi-bucket metrics (SPP, counter map; "
-        f"inflated by PMC dup): {multi_bucket_spp}\n"
-    )
-    buf.write("\n")
-    buf.write(
-        generate_bucket_plan(
-            files_legacy,
-            arch,
-            heading=(f"BEFORE (legacy heuristic) — {len(files_legacy)} bucket(s)"),
-        )
-    )
-    buf.write(
-        generate_bucket_metrics(
-            files_legacy,
-            config_dir,
-            arch,
-            section_heading="BEFORE (legacy) — multi-bucket metrics",
-        )
-    )
-    buf.write(
-        generate_bucket_plan(
-            files_spp,
-            arch,
-            heading=f"AFTER (default SPP) — {len(files_spp)} bucket(s)",
-        )
-    )
-    buf.write(
-        generate_bucket_metrics(
-            files_spp,
-            config_dir,
-            arch,
-            section_heading="AFTER (SPP) — multi-bucket metrics",
-        )
-    )
-    return buf.getvalue()
-
-
-def _emit_compare_spp_output(
-    args: argparse.Namespace,
-    files_legacy: list[CounterFile],
-    files_spp: list[CounterFile],
-    config_dir: Path,
-    arch: str,
-    multi_bucket_legacy: int,
-    multi_bucket_spp: int,
-    packable_multi_legacy: int,
-    packable_multi_spp: int,
-) -> None:
-    report = generate_compare_spp_report(
-        files_legacy,
-        files_spp,
-        config_dir,
-        arch,
-        multi_bucket_legacy=multi_bucket_legacy,
-        multi_bucket_spp=multi_bucket_spp,
-        packable_multi_legacy=packable_multi_legacy,
-        packable_multi_spp=packable_multi_spp,
-    )
-    weighted_section = _weighted_avg_section(config_dir, arch)
-    full = report + weighted_section
-    if args.output:
-        args.output.write_text(full, encoding="utf-8")
-        print(f"Compare-SPP report written to {args.output}")
-    else:
-        print(full, end="")
 
 
 def _weighted_avg_section(config_dir: Path, arch: str) -> str:

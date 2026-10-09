@@ -18,12 +18,8 @@
 #     ./scripts/run_spp_health_local_driver.sh --fetch --report
 #
 # 500-iter medians are the default ITERS=500, including gfx942. There is no
-# separate 500med script. A legacy --compare flag is ignored; median CSV and
-# markdown come from tools/compare_spp_legacy_medians.py:
-#
-#   python3 tools/compare_spp_legacy_medians.py \
-#     --artifacts validation-artifacts/spp-health-261001-gfx942-500med \
-#     --tag 261001-gfx942-500med
+# separate 500med script. The health run uses the default single-pass packable
+# path only. The legacy allocator mode is gone.
 #
 # --report calls tools/generate_metric_health_report.py.
 
@@ -35,7 +31,6 @@ Usage: ARCH=<gfx942|gfx950|gfx90a|gfx908|gfx1151> $(basename "$0") [--wait] [--f
        $(basename "$0") <arch> [--wait] [--fetch] [--report]
 
 Env: TAG ITERS NO_ROOF THEROCK ARTIFACTS HOST NODE PARTITION GRES
-     --compare is ignored; use tools/compare_spp_legacy_medians.py
 EOF
 }
 
@@ -49,9 +44,6 @@ while [[ $# -gt 0 ]]; do
     --wait) DO_WAIT=true ;;
     --fetch) DO_FETCH=true ;;
     --report) DO_REPORT=true ;;
-    --compare)
-      echo "NOTE: --compare deprecated here; use tools/compare_spp_legacy_medians.py" >&2
-      ;;
     -h|--help) usage; exit 0 ;;
     gfx*)
       if [[ -n "$ARCH_ARG" ]]; then
@@ -528,7 +520,7 @@ generate_report() {
   local logs="${ARTIFACTS}/logs/${ARCH}"
   local reports="${ARTIFACTS}/reports"
   mkdir -p "$reports"
-  local spp_args=() base_args=() wl_dir_args=() name mode wl_root sys
+  local spp_args=() wl_dir_args=() name mode wl_root sys
   for name in vcopy nbody mega_kernel; do
     if [[ ! -f "${logs}/${name}_spp.log" ]]; then
       if [[ "$REPORT_MISSING" == "warn" ]]; then
@@ -539,10 +531,7 @@ generate_report() {
       exit 1
     fi
     spp_args+=("${name}:${logs}/${name}_spp.log")
-    if [[ -f "${logs}/${name}_legacy.log" ]]; then
-      base_args+=("${name}:${logs}/${name}_legacy.log")
-    fi
-    for mode in spp legacy; do
+    for mode in spp; do
       wl_root="${ARTIFACTS}/${ARCH}/${name}_${TAG}_${mode}"
       if [[ -d "$wl_root" ]]; then
         sys=$(find "$wl_root" -maxdepth 3 -type f -name sysinfo.csv 2>/dev/null | head -1 || true)
@@ -565,14 +554,10 @@ generate_report() {
     --arch "$ARCH"
     --out "${reports}/${ARCH}_health_spp.html"
     --host "${REPORT_HOST}"
-    --baseline-label "legacy heuristic"
     --iterations "${iters}"
     --stat Median
     "${spp_args[@]}"
   )
-  if ((${#base_args[@]})); then
-    cmd+=(--baseline "${base_args[@]}")
-  fi
   if ((${#wl_dir_args[@]})); then
     cmd+=(--workload-dir "${wl_dir_args[@]}")
   fi

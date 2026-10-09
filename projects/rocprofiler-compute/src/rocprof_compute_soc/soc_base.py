@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import functools
 import os
 import shutil
 from abc import abstractmethod
@@ -13,16 +12,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 import config
-from rocprof_compute_soc.counter_file import (
-    CounterFile,
-    flat_counters_in_perfmon_file,
-)
+from rocprof_compute_soc.counter_file import CounterFile
 from rocprof_compute_soc.counter_file import (
     LimitedSet as LimitedSet,
 )
-from rocprof_compute_soc.counter_grouping_buckets import iter_metric_groups
 from rocprof_compute_soc.counter_grouping_single_pass import (
-    single_pass_packable_enabled_from_env,
     try_allocate_single_pass_packable,
 )
 from rocprof_compute_soc.counter_grouping_tcc import (
@@ -56,82 +50,6 @@ from utils.utils_common import (
 )
 from utils.utils_counter_defs import extract_counters_and_variables
 from vendored import yaml
-
-
-def _same_bucket_priority_ids_from_policy_value(
-    arch_name: str,
-    ids: object,
-) -> tuple[str, ...] | None:
-    """
-    Normalize ``same_bucket_priority_metric_ids`` from YAML: list of ids, or
-    mapping id -> { name: ... } (id is the key; order preserved).
-    Returns None if invalid (caller should warn).
-    """
-    if ids is None:
-        return ()
-    if isinstance(ids, list):
-        return tuple(str(x) for x in ids)
-    if isinstance(ids, dict):
-        ordered: list[str] = []
-        for key, meta in ids.items():
-            token = str(key).strip()
-            if not token:
-                continue
-            if meta is not None and not isinstance(meta, dict):
-                console_warning(
-                    "profiling",
-                    (
-                        "Ignoring same_bucket_priority_metric_ids["
-                        f"{arch_name!r}][{token!r}]: "
-                        "expected a mapping or null."
-                    ),
-                )
-                continue
-            ordered.append(token)
-        return tuple(ordered)
-    return None
-
-
-@functools.lru_cache(maxsize=1)
-def _load_same_bucket_priority_policy_map() -> dict[str, tuple[str, ...]]:
-    """Load counter grouping policy YAML into arch -> metric id tuple."""
-    path = (
-        config.rocprof_compute_home
-        / "rocprof_compute_soc"
-        / "analysis_configs"
-        / "profiling_counter_grouping_policy.yaml"
-    )
-    if not path.is_file():
-        console_warning(
-            "profiling",
-            f"Profiling counter grouping policy missing ({path}); "
-            "same-bucket priority metrics disabled.",
-        )
-        return {}
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if raw is None:
-        return {}
-    archs = raw.get("architectures")
-    if not isinstance(archs, dict):
-        return {}
-    out: dict[str, tuple[str, ...]] = {}
-    for arch_name, cfg in archs.items():
-        if not isinstance(cfg, dict):
-            continue
-        key = str(arch_name)
-        parsed = _same_bucket_priority_ids_from_policy_value(
-            key,
-            cfg.get("same_bucket_priority_metric_ids"),
-        )
-        if parsed is None:
-            console_warning(
-                "profiling",
-                f"Ignoring same_bucket_priority_metric_ids for {key!r}: "
-                "expected a list of ids or a mapping id -> metadata.",
-            )
-            continue
-        out[key] = parsed
-    return out
 
 
 class OmniSoC_Base:
@@ -361,20 +279,6 @@ class OmniSoC_Base:
             return
         texts.append(yaml.dump(metric_dict[metric_id], sort_keys=False))
 
-    def _same_bucket_priority_metric_ids(self) -> tuple[str, ...]:
-        """Metric ids whose PMCs get tier-0 priority in the greedy coalescing pass.
-
-        Loaded from profiling_counter_grouping_policy.yaml for the current arch.
-        gfx115x parts share one policy block, so look the arch up by its
-        canonical config name. Returns an empty tuple when the arch has no
-        grouping policy.
-        """
-        arch = self.__arch
-        if not arch:
-            return ()
-        policy_arch = canonical_config_arch(arch)
-        return _load_same_bucket_priority_policy_map().get(policy_arch, ())
-
     def parse_counters(self, config_text: str) -> set[str]:
         """Hardware PMC names in YAML metric config text."""
         counters, _variables = extract_counters_and_variables(
@@ -382,63 +286,6 @@ class OmniSoC_Base:
             self._mspec.gpu_series,
         )
         return counters
-
-    def _metric_aware_coalesce_pass(
-        self,
-        work_set: set[str],
-        output_files: list[CounterFile],
-        file_count: int,
-    ) -> tuple[set[str], list[CounterFile], int]:
-        """Greedy heuristic: place each metric's counters into the first feasible
-        pmc_perf bucket, else open a new one. Overflow stays for first-fit.
-
-        Accepts:
-            work_set        counters still to be placed (not modified)
-            output_files    existing CounterFile buckets (not modified)
-            file_count      current bucket sequence number
-        Returns:
-            (remaining_counters, updated_files, file_count)
-        """
-        if not work_set:
-            return work_set, list(output_files), file_count
-
-        # Work on copies so the caller's originals are untouched.
-        remaining = set(work_set)
-        files = list(output_files)
-
-        # Same groups as single-pass packing, including WEIGHTED_AVG weights.
-        rows = iter_metric_groups(self, remaining)
-
-        # -- Place each metric group into an existing or new bucket --
-        cfg = self.__perfmon_config
-        for _sort_key, group, label in rows:
-            # Re-filter: remaining shrinks as earlier groups are placed.
-            need_sorted = sorted(c for c in group if c in remaining)
-            if not need_sorted:
-                continue
-            placed = False
-            for bucket_idx, bucket in enumerate(files):
-                trial = _trial_counter_file_with_extra(bucket, cfg, need_sorted)
-                if trial is not None:
-                    files[bucket_idx] = trial
-                    remaining -= set(need_sorted)
-                    placed = True
-                    break
-            if placed:
-                continue
-            new_bucket = CounterFile(str(file_count), cfg)
-            trial = _trial_counter_file_with_extra(new_bucket, cfg, need_sorted)
-            if trial is not None and flat_counters_in_perfmon_file(trial):
-                files.append(trial)
-                file_count += 1
-                remaining -= set(need_sorted)
-            else:
-                console_debug(
-                    "profiling",
-                    f"Metric-aware pack: cannot fit all PMCs for "
-                    f"{label!r} in one bucket; deferring to first-fit.",
-                )
-        return remaining, files, file_count
 
     @demarcate
     def detect_counters(self) -> tuple[set[str], list[str]]:
@@ -548,61 +395,31 @@ class OmniSoC_Base:
         after its *_ACCUM charges 0. Legacy SQ_ACCUM_PREV_HIRES pairing and
         dedicated accum buckets are not used.
 
-        The default path is single-pass-packable: every metric whose PMC set
+        Single-pass packable is the only allocator: every metric whose PMC set
         fits one CounterFile gets a full-bucket collection (counters may be
         duplicated across passes), then SPU PMCs are filled into existing
-        buckets. Set ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1 for the legacy
-        heuristic (priority coalesce, then first-fit).
+        buckets.
 
         Returns:
             output_files, file_count, and accu_file_count.
         """
-        output_files: list[CounterFile] = []
         # Kept for call-site compatibility; dedicated accum files are gone.
         accu_file_count = 0
-        work_set = set(counters)
-        file_count = 0
-        tcc_channel_counter_file_map: dict[str, CounterFile] = {}
+        if not counters:
+            return [], 0, accu_file_count
 
-        if single_pass_packable_enabled_from_env():
-            single_pass = try_allocate_single_pass_packable(
-                self,
-                work_set,
-                self.__perfmon_config,
-                file_count_start=file_count,
+        single_pass = try_allocate_single_pass_packable(
+            self,
+            set(counters),
+            self.__perfmon_config,
+        )
+        if single_pass is None:
+            console_error(
+                "profiling",
+                "single-pass packing could not place every packable metric set",
             )
-            if single_pass is not None:
-                output_files, file_count, _stats = single_pass
-                return output_files, file_count, accu_file_count
-
-        # Legacy path: priority coalesce, then first-fit.
-        if self._same_bucket_priority_metric_ids():
-            work_set, output_files, file_count = self._metric_aware_coalesce_pass(
-                work_set, output_files, file_count
-            )
-        work = sorted(work_set)
-        tcc_channel_counter_file_map = _rebuild_tcc_channel_file_map(output_files)
-
-        for ctr in work:
-            if is_tcc_channel_counter(ctr):
-                output_file = tcc_channel_counter_file_map.get(ctr.split("[")[0])
-                if output_file:
-                    output_file.add(ctr)
-                    continue
-
-            added = False
-            for output_file in output_files:
-                if output_file.add(ctr):
-                    added = True
-                    if is_tcc_channel_counter(ctr):
-                        tcc_channel_counter_file_map[ctr.split("[")[0]] = output_file
-                    break
-
-            if not added:
-                output_files.append(CounterFile(str(file_count), self.__perfmon_config))
-                file_count += 1
-                output_files[-1].add(ctr)
-
+            raise AssertionError("single-pass packing failed")
+        output_files, file_count, _stats = single_pass
         return output_files, file_count, accu_file_count
 
     def _iter_arch_analysis_yaml_metrics(
@@ -841,37 +658,3 @@ class OmniSoC_Base:
                 f"{self.get_args().output_directory}' "
                 "for charts",
             )
-
-
-def _trial_counter_file_with_extra(
-    basis: CounterFile,
-    perfmon_config: dict[str, int],
-    extra_counters_sorted: list[str],
-) -> CounterFile | None:
-    """Clone basis, try appending extras; None if any won't fit."""
-    trial = CounterFile(basis.name, perfmon_config)
-    for ctr in flat_counters_in_perfmon_file(basis):
-        if not trial.add(ctr):
-            msg = f"clone replay failed for {ctr!r} in bucket {basis.name!r}"
-            raise RuntimeError(msg)
-    for block, basis_set in basis.blocks.items():
-        reservation = trial.blocks[block].avail - basis_set.avail
-        if reservation < 0 or not trial.blocks[block].reserve(reservation):
-            msg = f"clone reservation failed for block {block!r} in {basis.name!r}"
-            raise RuntimeError(msg)
-    for ctr in extra_counters_sorted:
-        if not trial.add(ctr):
-            return None
-    return trial
-
-
-def _rebuild_tcc_channel_file_map(
-    output_files: list[CounterFile],
-) -> dict[str, CounterFile]:
-    """Map TCC counter base name to the bucket that holds its channel instances."""
-    result: dict[str, CounterFile] = {}
-    for bucket in output_files:
-        for ctr in flat_counters_in_perfmon_file(bucket):
-            if is_tcc_channel_counter(ctr):
-                result[ctr.split("[")[0]] = bucket
-    return result

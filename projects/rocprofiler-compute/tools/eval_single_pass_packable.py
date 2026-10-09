@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
-"""Compare default single-pass-packable allocate vs legacy heuristic.
+"""Report single-pass-packable allocate gates for one architecture.
 
 Example::
 
@@ -9,12 +9,11 @@ Example::
 """
 
 import argparse
-import os
 import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Dict, Optional, Set, Tuple, Union
+from typing import Dict, Set, Tuple, Union
 
 _ROOT = Path(__file__).resolve().parent.parent
 for _p in (_ROOT / "src", _ROOT / "tools"):
@@ -27,9 +26,6 @@ from counter_grouping_inspector import (  # noqa: E402
     get_default_config_dir,
 )
 
-from rocprof_compute_soc.counter_grouping_buckets import (  # noqa: E402
-    count_multi_bucket_metrics,
-)
 from rocprof_compute_soc.counter_grouping_single_pass import (  # noqa: E402
     _count_packable_multi,
     collect_unique_packable_unions,
@@ -38,23 +34,6 @@ from rocprof_compute_soc.counter_grouping_single_pass import (  # noqa: E402
 )
 from rocprof_compute_soc.soc_base import OmniSoC_Base  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
-
-_ENV_KEYS = (
-    "ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE",
-    "ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC",
-)
-
-
-def _backup_env() -> Dict[str, Optional[str]]:
-    return {k: os.environ.get(k) for k in _ENV_KEYS}
-
-
-def _restore_env(backup: Dict[str, Optional[str]]) -> None:
-    for key, val in backup.items():
-        if val is None:
-            os.environ.pop(key, None)
-        else:
-            os.environ[key] = val
 
 
 def _build_soc(arch: str, tmp: Path) -> Tuple[OmniSoC_Base, Set[str], Dict[str, int]]:
@@ -69,58 +48,22 @@ def _build_soc(arch: str, tmp: Path) -> Tuple[OmniSoC_Base, Set[str], Dict[str, 
     return soc, counters, perfmon_config
 
 
-def _run_legacy(arch: str) -> Dict[str, Union[int, float]]:
-    backup = _backup_env()
-    try:
-        os.environ["ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC"] = "1"
-        with tempfile.TemporaryDirectory(prefix="eval_spp_") as tmp:
-            soc, counters, perfmon_config = _build_soc(arch, Path(tmp))
-            t0 = time.perf_counter()
-            files, _fc, _acc = soc._allocate_perfmon_counter_files(set(counters))
-            elapsed = time.perf_counter() - t0
-            unions, packable_n = collect_unique_packable_unions(
-                soc, counters, perfmon_config
-            )
-            multi = count_multi_bucket_metrics(files, soc, counters)
-            packable_multi = _count_packable_multi(files, unions)
-    finally:
-        _restore_env(backup)
-    return {
-        "passes": len(files),
-        "pmc_total": len(counters),
-        "multi_metrics": multi,
-        "packable_multi": packable_multi,
-        "packable_metrics": packable_n,
-        "unique_packable_unions": len(unions),
-        "seconds": round(elapsed, 3),
-    }
-
-
 def _run_spp_default(arch: str) -> Dict[str, Union[int, float]]:
-    backup = _backup_env()
-    try:
-        os.environ.pop("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", None)
-        os.environ.pop("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", None)
-        with tempfile.TemporaryDirectory(prefix="eval_spp_") as tmp:
-            soc, counters, perfmon_config = _build_soc(arch, Path(tmp))
-            t0 = time.perf_counter()
-            result = try_allocate_single_pass_packable(
-                soc, set(counters), perfmon_config
-            )
-            elapsed = time.perf_counter() - t0
-            assert result is not None, "SPP allocate returned None (unexpected)"
-            files, _fc, stats = result
-            unions, packable_n = collect_unique_packable_unions(
-                soc, counters, perfmon_config
-            )
-            _slot_unions, slot_n = collect_unique_slot_limit_unions(
-                soc, counters, perfmon_config
-            )
-            packable_multi = _count_packable_multi(files, unions)
-            # Product narrative: with_pmc minus SPU parents (inspector taxonomy).
-            product_single_pass = packable_n  # allocator packable count
-    finally:
-        _restore_env(backup)
+    with tempfile.TemporaryDirectory(prefix="eval_spp_") as tmp:
+        soc, counters, perfmon_config = _build_soc(arch, Path(tmp))
+        t0 = time.perf_counter()
+        result = try_allocate_single_pass_packable(soc, set(counters), perfmon_config)
+        elapsed = time.perf_counter() - t0
+        assert result is not None, "SPP allocate returned None (unexpected)"
+        files, _fc, stats = result
+        unions, packable_n = collect_unique_packable_unions(
+            soc, counters, perfmon_config
+        )
+        _slot_unions, slot_n = collect_unique_slot_limit_unions(
+            soc, counters, perfmon_config
+        )
+        packable_multi = _count_packable_multi(files, unions)
+        product_single_pass = packable_n
 
     return {
         "passes": stats.bucket_count,
@@ -143,27 +86,15 @@ def main() -> int:
     parser.add_argument("--arch", default="gfx942")
     args = parser.parse_args()
 
-    baseline = _run_legacy(args.arch)
     spp = _run_spp_default(args.arch)
 
     print(f"arch={args.arch}")
-    print()
-    print("Legacy (LEGACY_HEURISTIC=1 + priority coalesce + first-fit)")
-    for key, val in baseline.items():
-        print(f"  {key}: {val}")
     print()
     print("Default single-pass-packable (+ SPU residual fill)")
     for key, val in spp.items():
         print(f"  {key}: {val}")
     print()
-    print(
-        "vs legacy: "
-        f"{spp['passes'] - baseline['passes']:+d} "
-        f"({baseline['passes']} → {spp['passes']})"
-    )
     if args.arch == "gfx942":
-        # Phase 1 SPP: 14 passes, packable_multi==0, SLOT fill +0.
-        # Phase 2: SPU parents are analyze composites (0 HW PMC parents).
         ok = (
             spp["packable_multi"] == 0
             and spp["passes"] == 14

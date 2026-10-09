@@ -82,7 +82,6 @@ from utils.metrics.pass_provenance import (
     PassLayout,
     bind_expression_dataframe,
     extract_row_refs,
-    legacy_pass_merge_enabled,
     ordered_scoped_builtin_bindings,
     pass_scoped_builtins,
 )
@@ -1193,12 +1192,7 @@ class db_analysis(OmniAnalyze_Base):
             sys_info,
             db_analysis._expressions_without_pass_suffixes(expressions),
         )
-        if (
-            pass_layout is not None
-            and used_passes
-            and pass_layout.has_duplicates
-            and not legacy_pass_merge_enabled()
-        ):
+        if pass_layout is not None and used_passes and pass_layout.has_duplicates:
             sys_info.update(
                 db_analysis.calc_pass_scoped_builtin_sys_info(
                     pmc_df,
@@ -1297,11 +1291,7 @@ class db_analysis(OmniAnalyze_Base):
             if ceilings:
                 peaks_df = pd.DataFrame([ceilings])
             used_passes: set[str] = set()
-            if (
-                pass_layout is not None
-                and pass_layout.has_duplicates
-                and not legacy_pass_merge_enabled()
-            ):
+            if pass_layout is not None and pass_layout.has_duplicates:
                 gpu_series = mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
                 used_passes = bind_expression_dataframe(
                     expression_template,

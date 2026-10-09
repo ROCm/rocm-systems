@@ -12,8 +12,8 @@ metrics and yields incomplete coverage.
 Primary statistic is **Median** (not Avg):
 
 * Prefer the Median column when present in `--view table` output.
-* Else recompute Median from per-dispatch data via `--workload-dir` (same
-  `MEDIAN(<min-inner>)` path as `tools/compare_spp_legacy_medians.py`).
+* Else recompute Median from per-dispatch data via `--workload-dir`
+  (`MEDIAN` of the Min formula inner).
 * Else, if Min==Max, treat that value as the Median.
 * Value-only panels (no Avg/Min/Max/Median) use the single Value column.
 
@@ -29,7 +29,7 @@ Arch → analysis_configs mapping (`--arch`):
 
 import argparse
 import html
-import importlib.util
+import math
 import re
 import sys
 from dataclasses import dataclass, field
@@ -380,18 +380,194 @@ def parse_log(path: Path) -> ParsedLog:
     return result
 
 
-def _load_median_helpers():  # noqa: ANN202
-    """Lazy-load median recompute helpers from compare_spp_legacy_medians."""
-    helper_path = ROOT / "tools" / "compare_spp_legacy_medians.py"
-    spec = importlib.util.spec_from_file_location(
-        "compare_spp_legacy_medians", helper_path
+def min_formula_to_median_expr(min_formula: str) -> Optional[str]:
+    """Rewrite a Min formula into a Median expression.
+
+    Handles `MIN(x)` and `c * MIN(x)` / `MIN(x) * c` patterns that
+    appear in analysis_configs.
+    """
+    formula = min_formula.strip()
+    if not formula or formula == "None":
+        return None
+
+    if formula.startswith("MIN("):
+        depth = 0
+        for index, ch in enumerate(formula):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    if index != len(formula) - 1:
+                        break
+                    return f"MEDIAN{formula[3 : index + 1]}"
+        return None
+
+    factored = re.fullmatch(r"(.+?)\s*\*\s*(MIN\(.+\))", formula)
+    if factored:
+        left, min_call = factored.group(1).strip(), factored.group(2)
+        median_call = min_formula_to_median_expr(min_call)
+        if median_call:
+            return f"{left} * {median_call}"
+    factored = re.fullmatch(r"(MIN\(.+\))\s*\*\s*(.+)", formula)
+    if factored:
+        min_call, right = factored.group(1), factored.group(2).strip()
+        median_call = min_formula_to_median_expr(min_call)
+        if median_call:
+            return f"{median_call} * {right}"
+    return None
+
+
+def compute_medians_for_workload(
+    wl_dir: Path,
+    metric_keys: List[str],
+) -> Dict[str, Optional[float]]:
+    """Recompute Median for metrics that have a Min formula, via analyze path."""
+    del metric_keys  # compute all Min-backed rows; keys unused
+    if str(SRC) not in sys.path:
+        sys.path.insert(0, str(SRC))
+
+    import pandas as pd
+
+    import config
+    from utils import file_io, parser, schema
+    from utils.metrics.evaluation_pipeline import eval_metric
+    from utils.metrics.expression import build_metric_value_string
+    from utils.utils_common import canonical_config_arch
+
+    sys_info = pd.read_csv(wl_dir / "sysinfo.csv")
+    arch = str(sys_info.iloc[0]["gpu_arch"])
+    config_arch = canonical_config_arch(arch) or arch
+    config_dir = (
+        config.rocprof_compute_home
+        / "rocprof_compute_soc"
+        / "analysis_configs"
+        / config_arch
     )
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load {helper_path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+
+    arch_config = schema.ArchConfig()
+    arch_config.panel_configs = file_io.load_panel_configs([str(config_dir)])
+    profiling_config = file_io.load_profiling_config(str(wl_dir))
+
+    parser.build_dfs(
+        arch_configs=arch_config,
+        filter_metrics=None,
+        sys_info=sys_info.iloc[0],
+        profiling_config=profiling_config,
+        arch=arch,
+    )
+
+    for df_id, frame in arch_config.dfs.items():
+        if arch_config.dfs_type.get(df_id) != "metric_table":
+            continue
+        if "Min" not in frame.columns or "Median" in frame.columns:
+            continue
+        medians: List[Optional[str]] = []
+        for _, row in frame.iterrows():
+            min_expr = row.get("Min")
+            if not isinstance(min_expr, str) or not min_expr or min_expr == "None":
+                medians.append(None)
+                continue
+            medians.append(min_formula_to_median_expr(min_expr))
+        frame["Median"] = medians
+
+    build_metric_value_string(arch_config.dfs, arch_config.dfs_type, "per_kernel")
+
+    for df_id, frame in arch_config.dfs.items():
+        if arch_config.dfs_type.get(df_id) != "metric_table":
+            continue
+        if "Median" not in frame.columns or "Min" not in frame.columns:
+            continue
+        for row_id, row in frame.iterrows():
+            median_expr = row.get("Median")
+            min_expr = row.get("Min")
+            if (not isinstance(median_expr, str) or not median_expr) and isinstance(
+                min_expr, str
+            ):
+                if "to_min(" in min_expr:
+                    frame.at[row_id, "Median"] = min_expr.replace(
+                        "to_min(", "to_median(", 1
+                    )
+
+    workload = schema.Workload()
+    workload.sys_info = sys_info
+    workload.roofline_peaks = pd.DataFrame()
+    workload.filter_gpu_ids = None
+    workload.filter_kernel_ids = None
+    workload.filter_dispatch_ids = None
+    workload.raw_pmc = file_io.create_df_pmc(str(wl_dir), verbose=0)
+
+    filtered = parser.apply_filters(
+        workload,
+        str(wl_dir),
+        debug=False,
+    )
+
+    for df_id, frame in arch_config.dfs.items():
+        if arch_config.dfs_type.get(df_id) != "metric_table":
+            continue
+        if "Median" not in frame.columns:
+            continue
+        exprs = arch_config.dfs_expressions.setdefault(df_id, [])
+        for _, row in frame.iterrows():
+            median_expr = row.get("Median")
+            if (
+                isinstance(median_expr, str)
+                and median_expr
+                and median_expr not in exprs
+            ):
+                exprs.append(median_expr)
+
+    eval_metric(
+        arch_config.dfs,
+        arch_config.dfs_type,
+        arch_config.dfs_expressions,
+        sys_info.iloc[0],
+        workload.roofline_peaks,
+        filtered,
+        debug=False,
+    )
+
+    skip_cols = {
+        "Avg",
+        "Min",
+        "Max",
+        "Median",
+        "Unit",
+        "Peak",
+        "Percent of Peak",
+        "Description",
+        "Value",
+    }
+    out: Dict[str, Optional[float]] = {}
+    for df_id, frame in arch_config.dfs.items():
+        if arch_config.dfs_type.get(df_id) != "metric_table":
+            continue
+        if "Median" not in frame.columns:
+            continue
+        name_col = "Metric" if "Metric" in frame.columns else None
+        if name_col is None:
+            for col in frame.columns:
+                if col not in skip_cols:
+                    name_col = col
+                    break
+        if name_col is None:
+            continue
+        for row_id, row in frame.iterrows():
+            key = f"{row_id}|{row[name_col]}"
+            median_value = row.get("Median")
+            if median_value is None or (
+                isinstance(median_value, float) and math.isnan(median_value)
+            ):
+                out[key] = None
+            elif isinstance(median_value, str):
+                out[key] = to_float(median_value)
+            else:
+                try:
+                    out[key] = float(median_value)
+                except (TypeError, ValueError):
+                    out[key] = None
+    return out
 
 
 def apply_recomputed_medians(
@@ -405,8 +581,6 @@ def apply_recomputed_medians(
     """
     if not workload_dirs:
         return
-    helpers = _load_median_helpers()
-    compute = helpers.compute_medians_for_workload
 
     for dir_key, wl_dir in workload_dirs.items():
         if dir_key.endswith("_legacy"):
@@ -432,7 +606,7 @@ def apply_recomputed_medians(
             # that had no Median column (source empty after Value-only skip).
             keys = list(log.metrics)
         try:
-            medians = compute(wl_dir, keys)
+            medians = compute_medians_for_workload(wl_dir, keys)
         except Exception as exc:  # noqa: BLE001 — report soft-fail in HTML
             print(f"WARN: median recompute failed for {dir_key}: {exc}")
             continue
@@ -458,15 +632,13 @@ def apply_recomputed_medians_for_map(
     """Recompute medians into a flat wl→metrics map (for baseline)."""
     if not workload_dirs:
         return
-    helpers = _load_median_helpers()
-    compute = helpers.compute_medians_for_workload
     for wl_name, metrics in metrics_by_wl.items():
         dir_key = f"{wl_name}{mode_suffix}"
         wl_dir = workload_dirs.get(dir_key) or workload_dirs.get(wl_name)
         if wl_dir is None:
             continue
         try:
-            medians = compute(wl_dir, list(metrics))
+            medians = compute_medians_for_workload(wl_dir, list(metrics))
         except Exception as exc:  # noqa: BLE001
             print(f"WARN: median recompute failed for {dir_key}: {exc}")
             continue

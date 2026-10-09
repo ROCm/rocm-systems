@@ -181,7 +181,7 @@ REQ is measured in pass 1 (low-traffic phase, REQ = 1000) and MISS in pass 2
 | Mechanism | What it does | Why it is insufficient |
 |---|---|---|
 | `same_bucket_priority_metric_ids` | Greedy bin-packing that tries to keep priority metrics' counters in one pass | Falls through silently when counters don't fit; only 4 metrics configured (gfx115x only) |
-| `_metric_aware_coalesce_pass` | Best-effort: sorts metrics by counter count, tries to pack each metric's counters into one bucket | No guarantee; logs a debug message and defers to first-fit when it fails |
+| `_metric_aware_coalesce_pass` | Removed with the pre-SPP allocator. It sorted metrics by counter count and tried to pack each metric into one bucket | No guarantee; it deferred leftovers when a set did not fit |
 | `coll_level` | Marks accumulator counters that need dedicated pass files | Only for ACCUM counters, not for general ratio metrics |
 | `NOISE_CLAMP` | Display-time clamp that suppresses results with high noise indicators | Mitigation, not prevention -- the wrong value is still computed |
 

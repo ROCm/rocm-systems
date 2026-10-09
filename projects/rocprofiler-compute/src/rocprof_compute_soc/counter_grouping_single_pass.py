@@ -6,22 +6,15 @@
 Every metric whose PMC set fits one CounterFile (single-pass packable, not
 SPU) has some perfmon bucket containing its full PMC set. The allocator
 minimizes the number of passes under that hard constraint. Counters not
-required by any packable union use ordinary first-fit. Remaining SPU PMCs
+required by any packable set use ordinary first-fit. Remaining SPU PMCs
 are placed into existing buckets when possible, and new passes are opened
 only if needed. Short-term TCC channel rules live in counter_grouping_tcc:
 affinity pairs, the multi-column request row, and which extra copies to keep.
 
 Overlapping packable sets that cannot share one bucket are handled by
-duplicating counters into an additional bucket (additive passes). That
-differs from the legacy heuristic, which places each counter in at most one
-bucket.
-
-Disable with ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1 (or
-ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=0) to restore the priority
-coalesce + first-fit path.
+duplicating counters into an additional bucket (additive passes).
 """
 
-import os
 from dataclasses import dataclass
 from itertools import combinations
 from typing import (
@@ -61,13 +54,11 @@ def try_allocate_single_pass_packable(
 ) -> Optional[Tuple[List[CounterFile], int, "SinglePassPackableStats"]]:
     """Allocate work_set with packable metrics forced into one bucket.
 
-    On success, clears work_set. The caller checks
-    single_pass_packable_enabled_from_env and skips this function when the
-    legacy heuristic is selected.
+    On success, clears work_set.
 
     Returns:
-        (files, file_count, stats) when every packable union has a full bucket.
-        None when work_set is empty, when packable unions still lack a full
+        (files, file_count, stats) when every packable set has a full bucket.
+        None when work_set is empty, when packable sets still lack a full
         bucket after allocate, or when residual SPU fill drops that coverage.
     """
     if not work_set:
@@ -92,8 +83,8 @@ def try_allocate_single_pass_packable(
         console_warning(
             "profiling",
             "single-pass-packable: "
-            f"{packable_multi} packable union(s) still lack a full bucket "
-            "after allocate; falling back to legacy heuristic.",
+            f"{packable_multi} packable metric set(s) still lack a full bucket "
+            "after allocate.",
         )
         return None
 
@@ -113,8 +104,8 @@ def try_allocate_single_pass_packable(
         console_warning(
             "profiling",
             "single-pass-packable: "
-            f"{packable_multi} packable union(s) lost coverage after residual "
-            "fill; falling back to legacy heuristic.",
+            f"{packable_multi} packable metric set(s) lost coverage after "
+            "residual fill.",
         )
         return None
     file_count = _next_bucket_number(files, file_count_start)
@@ -143,30 +134,6 @@ def try_allocate_single_pass_packable(
 
     work_set.clear()
     return files, file_count, stats
-
-
-def single_pass_packable_enabled_from_env() -> bool:
-    """Return True when single-pass-packable is the active allocate path.
-
-    Default is on. Set ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1 to use the
-    legacy heuristic. ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=0 also
-    disables SPP for explicit A/B during migration.
-    """
-    if legacy_heuristic_enabled_from_env():
-        return False
-    raw = (
-        os.environ
-        .get("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", "1")
-        .strip()
-        .lower()
-    )
-    return raw not in {"0", "false", "no", "off"}
-
-
-def legacy_heuristic_enabled_from_env() -> bool:
-    """Return True when the legacy coalesce / first-fit path is forced."""
-    raw = os.environ.get("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
 
 
 def collect_unique_packable_unions(
