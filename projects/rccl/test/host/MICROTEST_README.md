@@ -198,6 +198,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     by its follow-ups.
   - `include/param/parser_{default,enum,bitset,list}.h` (header-only, from
     `param-parsers-test.cc`); suite `ParamParsersMicrotest.*`.
+  - `param/param_registry.cc` (`PARAM_REGISTRY_CC_PATH`, from
+    `param-registry-test.cc`); suite `ParamRegistryMicrotest.*`.
   - `misc/gdr_probe.cc` (`GDR_PROBE_CC_PATH`, from `gdr-probe-test.cc`); suite
     `GdrProbeTest.*`. Covers `ncclIbProbeGdrSupport`, the runtime GPU
     memory-registration fallback behind the sysfs peer-memory scan: the result
