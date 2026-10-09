@@ -693,6 +693,13 @@ class AmdSmiLinkType(IntEnum):
     AMDSMI_LINK_TYPE_UNKNOWN = amdsmi_wrapper.AMDSMI_LINK_TYPE_UNKNOWN
 
 
+class AmdSmiLinkStatus(IntEnum):
+    AMDSMI_LINK_STATUS_ENABLED = amdsmi_wrapper.AMDSMI_LINK_STATUS_ENABLED
+    AMDSMI_LINK_STATUS_DISABLED = amdsmi_wrapper.AMDSMI_LINK_STATUS_DISABLED
+    AMDSMI_LINK_STATUS_INACTIVE = amdsmi_wrapper.AMDSMI_LINK_STATUS_INACTIVE
+    AMDSMI_LINK_STATUS_ERROR = amdsmi_wrapper.AMDSMI_LINK_STATUS_ERROR
+
+
 class AmdSmiUtilizationCounterType(IntEnum):
     COARSE_GRAIN_GFX_ACTIVITY = amdsmi_wrapper.AMDSMI_COARSE_GRAIN_GFX_ACTIVITY
     COARSE_GRAIN_MEM_ACTIVITY = amdsmi_wrapper.AMDSMI_COARSE_GRAIN_MEM_ACTIVITY
@@ -4354,6 +4361,49 @@ def amdsmi_topo_get_link_type(
     )
 
     return {"hops": hops_64.value, "type": type_32.value}
+
+
+def amdsmi_get_link_topology(
+    processor_handle_src: processor_handle_t, processor_handle_dst: processor_handle_t
+):
+    """Return GPU link topology using the host API's fields.
+
+    Returns:
+        dict: ``{"weight": int, "link_status": int, "link_type": int,
+        "num_hops": int, "fb_sharing": int}``.
+        Interpret status/type with :class:`AmdSmiLinkStatus`/:class:`AmdSmiLinkType`.
+
+    Note:
+        Baremetal behavior:
+
+        - Self pair: INTERNAL/ENABLED, zero weight and hops, ``fb_sharing=1``.
+        - Current successful calls report ENABLED; UNKNOWN-to-DISABLED is defensive.
+        - Status is not link health or the topology CLI's P2P access check.
+        - ``num_hops`` counts abstracted steps, capped at 255, not physical links.
+        - ``fb_sharing=0`` means no P2P access or a failed P2P query.
+        - Fields are queried sequentially, not atomically.
+    """
+    if not isinstance(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle)
+
+    if not isinstance(processor_handle_dst, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle_dst, amdsmi_wrapper.amdsmi_processor_handle)
+
+    topology_info = amdsmi_wrapper.amdsmi_link_topology_t()
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_link_topology(
+            processor_handle_src, processor_handle_dst, ctypes.byref(topology_info)
+        )
+    )
+
+    return {
+        "weight": topology_info.weight,
+        "link_status": topology_info.link_status,
+        "link_type": topology_info.link_type,
+        "num_hops": topology_info.num_hops,
+        "fb_sharing": topology_info.fb_sharing,
+    }
 
 
 def amdsmi_topo_get_p2p_status(
