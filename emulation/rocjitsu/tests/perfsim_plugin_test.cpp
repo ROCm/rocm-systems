@@ -415,6 +415,50 @@ TEST_F(PerfsimPluginTest, GpuCompilerSimV13StagesUntilDispatchIsAccepted) {
   EXPECT_NE(line_with_prefix(trace, "end 43 "), trace.size());
 }
 
+TEST_F(PerfsimPluginTest, CancellationRetainsFailureReasonAndReleasesWaveIdentity) {
+  WaveFixture fixture(1);
+  testing::internal::CaptureStderr();
+  {
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::make_unique<PerfsimPlugin>(plugin_config().c_str())));
+    fixture.cu->set_plugin_group(group);
+    group->onInit();
+
+    constexpr uint32_t kFailedDispatch = 46;
+    group->onAmdgpuDispatchPacketProcessed(dispatch_info(kFailedDispatch));
+    group->onAmdgpuDispatchExecutionBegin(kFailedDispatch);
+    Wavefront &failed = fixture.wave(kFailedDispatch, 0, {0, 0, 0}, 0);
+    group->onAmdgpuWavefrontDispatched(failed);
+    const std::array<uint32_t, 1> words{0x7E000200};
+    SyntheticInstruction instruction("v_add_f32", words);
+    group->onAmdgpuBeforeExecuteInstruction(0x4000, instruction, failed);
+    failed.report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
+    fixture.cu->abort_dispatch(kFailedDispatch);
+    EXPECT_TRUE(failed.is_halted());
+
+    constexpr uint32_t kNextDispatch = 47;
+    group->onAmdgpuDispatchPacketProcessed(dispatch_info(kNextDispatch));
+    group->onAmdgpuDispatchExecutionBegin(kNextDispatch);
+    Wavefront &next = fixture.wave(kNextDispatch, 1, {1, 0, 0}, 0);
+    group->onAmdgpuWavefrontDispatched(next);
+    const std::array<uint32_t, 1> end_words{0xBF810000};
+    SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+    group->onAmdgpuBeforeExecuteInstruction(0x5000, end, next);
+    next.halt();
+    group->onAmdgpuDispatchExecutionEnd(kNextDispatch);
+    group->onShutdown();
+  }
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  EXPECT_NE(diagnostic.find("wavefront cancelled after an instruction failure"), std::string::npos);
+  EXPECT_EQ(diagnostic.find("wavefront slot was reset"), std::string::npos);
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_EQ(line_with_prefix(trace, "begin 46 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "instruction 46 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "end 46 "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "begin 47 "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "end 47 "), trace.size());
+}
+
 TEST_F(PerfsimPluginTest, ReclaimsFaultAbortedWaveStateBeforePhysicalSlotReuse) {
   WaveFixture fixture(1);
   testing::internal::CaptureStderr();
