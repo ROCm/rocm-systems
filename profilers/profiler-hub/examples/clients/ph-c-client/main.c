@@ -380,6 +380,81 @@ demo_track_samples(ph_ctx_t ctx, uint32_t track_id)
 }
 
 static void
+read_all_tracks_async(ph_ctx_t               ctx,
+                      const ph_track_list_t* tracks,
+                      const char*            run_name,
+                      const char*            bench_label)
+{
+    const uint32_t    n            = tracks->list_size;
+    ph_future_t*      futures      = calloc(n, sizeof(ph_future_t));
+    ph_event_list_t*  event_lists  = calloc(n, sizeof(ph_event_list_t));
+    ph_sample_list_t* sample_lists = calloc(n, sizeof(ph_sample_list_t));
+
+    const double t0 = monotonic_ms();
+
+    for(uint32_t i = 0; i < n; ++i)
+    {
+        const ph_track_t* track = &tracks->tracks[i];
+        ph_future_create(NULL, NULL, &futures[i]);
+        if(track->category == PH_TRACK_CATEGORY_PMC_AGENT)
+        {
+            ph_get_track_samples(ctx, track->id, 0, 0, &sample_lists[i], futures[i]);
+        }
+        else
+        {
+            ph_get_track_events(ctx, track->id, 0, 0, &event_lists[i], futures[i]);
+        }
+    }
+
+    unsigned long total_rows      = 0;
+    unsigned long duration_tracks = 0;
+    unsigned long counter_tracks  = 0;
+    unsigned long failed_tracks   = 0;
+    for(uint32_t i = 0; i < n; ++i)
+    {
+        ph_future_wait(futures[i]);
+
+        ph_result_t result = PH_RESULT_INTERNAL_ERROR;
+        ph_future_result(futures[i], &result);
+        ph_future_free(futures[i]);
+
+        if(result != PH_RESULT_SUCCESS)
+        {
+            failed_tracks++;
+        }
+        else if(tracks->tracks[i].category == PH_TRACK_CATEGORY_PMC_AGENT)
+        {
+            total_rows += sample_lists[i].list_size;
+            counter_tracks++;
+        }
+        else
+        {
+            total_rows += event_lists[i].list_size;
+            duration_tracks++;
+        }
+    }
+    const double read_ms = monotonic_ms() - t0;
+    record_bench(bench_label, read_ms);
+
+    printf("\n=== Read all tracks with futures: %s ===\n", run_name);
+    printf("tracks:          %u (%lu duration, %lu counter, %lu failed)\n",
+           n,
+           duration_tracks,
+           counter_tracks,
+           failed_tracks);
+    printf("total rows read: %lu\n", total_rows);
+    printf("total time:      %.3f ms\n", read_ms);
+    if(total_rows > 0)
+    {
+        printf("avg per row:     %.6f ns\n", read_ms * 1e6 / (double) total_rows);
+    }
+
+    free(futures);
+    free(event_lists);
+    free(sample_lists);
+}
+
+static void
 on_load_progress(ph_future_t future, double value)
 {
     (void) future;
@@ -431,6 +506,9 @@ main(int argc, char** argv)
     {
         demo_track_samples(ctx, counter_track_id);
     }
+
+    read_all_tracks_async(ctx, &node.track_list, "1st run", "read all tracks 1st");
+    read_all_tracks_async(ctx, &node.track_list, "2nd run", "read all tracks 2nd run");
 
     TIME_CALL("ph_ctx_free", ph_ctx_free(ctx));
 
