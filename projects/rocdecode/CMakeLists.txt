@@ -165,9 +165,11 @@ if(_deps_met)
   # RTLD_LOCAL | RTLD_DEEPBIND (see vaapi_loader.cpp) to prevent symbol
   # collision with any system libva.so.2 in the same process; no direct
   # link-time dependency is needed in that case.
+  # On Windows TheRock builds, rocm_sysdeps_va_win32.dll and rocm_sysdeps_va.dll
+  # are likewise loaded at runtime via LoadLibraryExW (see vaapi_loader.cpp).
   #On non-TheRock builds, link directly as before.
   include_directories(${LIBVA_INCLUDE_DIR})
-  if(NOT (USING_THE_ROCK AND UNIX))
+  if(NOT USING_THE_ROCK)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
     if(NOT WIN32)
       # FindLibva only looks for va-drm on Linux. Referencing the variable on
@@ -188,7 +190,10 @@ if(_deps_met)
     # the include. Normally both resolve to the same directory and this is a
     # no-op. Windows-only, for the same stale-cache reason as va-drm above.
     include_directories(${LIBVA_WIN32_INCLUDE_DIR})
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_WIN32_LIBRARY} d3d12 dxgi)
+    if(NOT USING_THE_ROCK)
+      set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_WIN32_LIBRARY})
+    endif()
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} d3d12 dxgi)
   endif()
 
   # rocprofiler
@@ -261,10 +266,14 @@ if(_deps_met)
     set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/rocm_sysdeps/lib" BUILD_WITH_INSTALL_RPATH TRUE)
     if(UNIX)
       # Enable dlopen-based VA isolation and link against libdl for dlopen/dlsym/dlclose.
-      # dlopen is Linux-only.
       target_compile_definitions(${PROJECT_NAME} PRIVATE ROCDECODE_USE_DLOPEN_VA)
       target_link_libraries(${PROJECT_NAME} dl)
     endif()
+  endif()
+  if(USING_THE_ROCK AND WIN32)
+    # Load rocm_sysdeps_va_win32.dll / rocm_sysdeps_va.dll at runtime via
+    # LoadLibraryExW/GetProcAddress (kernel32, linked by default).
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ROCDECODE_USE_DLOPEN_VA)
   endif()
 
   # rocprofiler
