@@ -26,6 +26,7 @@
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys::trace_cache
@@ -239,6 +240,29 @@ struct gpu_perf_counter_name_entry
 
 }  // namespace info
 
+namespace detail
+{
+/// Shared-lock membership check first; the write lock is taken only for a new key, and
+/// @p make (-> element) runs only then.
+template <typename Synchronized, typename Key, typename MakeFn>
+void
+insert_if_absent(Synchronized& data, const Key& key, MakeFn&& make)
+{
+    data.ulock([&key](const auto& _data) { return _data.find(key) != _data.end(); },
+               [&make](auto& _data) {
+                   _data.emplace(make());
+                   return true;
+               });
+}
+
+template <typename Synchronized, typename Key>
+void
+insert_if_absent(Synchronized& data, const Key& key)
+{
+    insert_if_absent(data, key, [&key]() -> const Key& { return key; });
+}
+}  // namespace detail
+
 struct metadata_registry
 {
     metadata_registry()                                    = default;
@@ -256,29 +280,12 @@ struct metadata_registry
         requires std::is_invocable_r_v<info::thread, MakeFn>
     void ensure_thread(std::uint64_t thread_id, MakeFn&& make)
     {
-        m_threads.ulock(
-            [thread_id](const auto& _data) {
-                return _data.find(thread_id) != _data.end();
-            },
-            [&make](auto& _data) {
-                _data.emplace(make());
-                return true;
-            });
+        detail::insert_if_absent(m_threads, thread_id, std::forward<MakeFn>(make));
     }
 
-    /// Registers the track only if @p name is unknown; @p make (-> info::track)
-    /// is invoked under the write lock, so the known path builds nothing.
-    template <typename MakeFn>
-        requires std::is_invocable_r_v<info::track, MakeFn>
-    void ensure_track(std::string_view name, MakeFn&& make)
-    {
-        m_tracks.ulock(
-            [name](const auto& _data) { return _data.find(name) != _data.end(); },
-            [&make](auto& _data) {
-                _data.emplace(make());
-                return true;
-            });
-    }
+    /// Registers the track only if @p name is unknown; the track is built on insert only.
+    void ensure_track(std::string_view name, std::optional<size_t> thread_id,
+                      std::string_view extdata = "{}");
 
     void add_queue(const std::uint64_t& queue_handle);
     void add_stream(const std::uint64_t& stream_handle);

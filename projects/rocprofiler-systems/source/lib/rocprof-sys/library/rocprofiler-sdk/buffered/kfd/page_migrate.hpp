@@ -174,8 +174,7 @@ on_kfd_page_migrate(typename SdkBackend::kfd_page_migrate_record* record,
 
     auto const track_name = fmt::format("KFD Page Migrate [{}->{}]",
                                         agent_label(src_agent), agent_label(dst_agent));
-    metadata_registry.ensure_track(
-        track_name, [&] { return typename Externals::track_t{ track_name, tid, "{}" }; });
+    metadata_registry.ensure_track(track_name, tid);
 
     auto const agent_node_id = [](const auto* agent_ptr) {
         return agent_ptr ? std::to_string(agent_ptr->node_id) : std::string{ "null" };

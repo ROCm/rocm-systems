@@ -111,8 +111,7 @@ on_kfd_event_unmap_from_gpu(typename SdkBackend::kfd_event_unmap_record* record,
     };
 
     auto const track_name = fmt::format("KFD Unmap from GPU [{}]", agent_label(agent));
-    metadata_registry.ensure_track(
-        track_name, [&] { return typename Externals::track_t{ track_name, tid, "{}" }; });
+    metadata_registry.ensure_track(track_name, tid);
 
     constexpr auto k_empty_event_metadata = "{}";
     const auto     pmc_value =

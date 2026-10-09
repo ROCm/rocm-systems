@@ -80,11 +80,7 @@ void
 metadata_initialize_track()
 {
     auto _init_track = [&](const char* label) {
-        trace_cache::get_metadata_registry().ensure_track(label, [&] {
-            return rocprofsys::trace_cache::info::track{ .track_name = label,
-                                                         .thread_id  = std::nullopt,
-                                                         .extdata    = "{}" };
-        });
+        trace_cache::get_metadata_registry().ensure_track(label, std::nullopt);
     };
 
     static std::once_flag _once{};

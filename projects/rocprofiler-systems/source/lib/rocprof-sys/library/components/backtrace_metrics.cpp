@@ -223,11 +223,7 @@ metadata_init_tracks(std::int64_t _tid)
     });
 
     apply_for_all_thread_names<Category>(_tid, [&](const std::string& _track_name) {
-        trace_cache::get_metadata_registry().ensure_track(_track_name, [&] {
-            return trace_cache::info::track{ .track_name = _track_name,
-                                             .thread_id  = thread_id,
-                                             .extdata    = "{}" };
-        });
+        trace_cache::get_metadata_registry().ensure_track(_track_name, thread_id);
     });
 }
 

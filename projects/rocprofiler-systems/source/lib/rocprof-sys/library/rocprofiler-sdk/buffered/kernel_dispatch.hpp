@@ -81,10 +81,7 @@ on_kernel_dispatch(typename SdkBackend::kernel_dispatch_record_t* record,
 
         auto const track_name = fmt::format("GPU Kernel Dispatch [{}] Queue {}",
                                             agent->device_id, queue_id.handle);
-        metadata_registry.ensure_track(track_name, [&] {
-            return typename Externals::track_t{ track_name, record->thread_id,
-                                                k_empty_json };
-        });
+        metadata_registry.ensure_track(track_name, record->thread_id);
 
         metadata_registry.add_queue(queue_id.handle);
         metadata_registry.add_stream(stream_id);

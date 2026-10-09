@@ -1461,13 +1461,13 @@ struct externals
                 g_metadata_registry_mock->ensure_thread(make());
             }
         }
-        template <typename MakeFn>
-            requires std::is_invocable_r_v<track_t, MakeFn>
-        void ensure_track(std::string_view, MakeFn&& make)
+        void ensure_track(std::string_view name, std::optional<std::uint64_t> thread_id,
+                          std::string_view extdata = "{}")
         {
             if(g_metadata_registry_mock)
             {
-                g_metadata_registry_mock->ensure_track(make());
+                g_metadata_registry_mock->ensure_track(
+                    track_t{ std::string{ name }, thread_id, std::string{ extdata } });
             }
         }
         void add_pmc_info(const pmc_info_t& info)

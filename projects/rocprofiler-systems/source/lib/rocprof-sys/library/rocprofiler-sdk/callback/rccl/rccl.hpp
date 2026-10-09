@@ -81,25 +81,12 @@ template <policies::domain_service::backend   SdkBackend,
 inline void
 on_rccl_configure()
 {
-    constexpr auto k_empty_json   = "{}";
     constexpr auto k_no_thread_id = std::nullopt;
 
     auto& metadata_registry = Externals::get_metadata_registry();
     metadata_registry.add_string(Externals::comm_data_name);
-    metadata_registry.ensure_track(Externals::rccl_send_track_name, [&] {
-        return typename Externals::track_t{
-            .track_name = std::string{ Externals::rccl_send_track_name },
-            .thread_id  = k_no_thread_id,
-            .extdata    = k_empty_json
-        };
-    });
-    metadata_registry.ensure_track(Externals::rccl_recv_track_name, [&] {
-        return typename Externals::track_t{
-            .track_name = std::string{ Externals::rccl_recv_track_name },
-            .thread_id  = k_no_thread_id,
-            .extdata    = k_empty_json
-        };
-    });
+    metadata_registry.ensure_track(Externals::rccl_send_track_name, k_no_thread_id);
+    metadata_registry.ensure_track(Externals::rccl_recv_track_name, k_no_thread_id);
 
     rccl::device_resolver<SdkBackend>::template configure_comm_cu_device_function<
         Externals>();

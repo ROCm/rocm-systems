@@ -89,8 +89,7 @@ on_kfd_event_dropped_events(typename SdkBackend::kfd_event_dropped_record* recor
     });
 
     auto const track_name = std::string{ "KFD Dropped Events" };
-    metadata_registry.ensure_track(
-        track_name, [&] { return typename Externals::track_t{ track_name, tid, "{}" }; });
+    metadata_registry.ensure_track(track_name, tid);
 
     constexpr auto k_empty_args           = "";
     constexpr auto k_empty_event_metadata = "{}";

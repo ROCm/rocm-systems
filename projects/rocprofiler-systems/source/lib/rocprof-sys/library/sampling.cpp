@@ -253,16 +253,8 @@ metadata_initialize_track(std::int64_t tid)
         get_track_name<category::overflow_sampling>(*_thread_info);
 
     auto& registry = trace_cache::get_metadata_registry();
-    registry.ensure_track(_timer_track_name, [&] {
-        return trace_cache::info::track{ .track_name = _timer_track_name,
-                                         .thread_id  = thread_id,
-                                         .extdata    = "{}" };
-    });
-    registry.ensure_track(_overflow_track_name, [&] {
-        return trace_cache::info::track{ .track_name = _overflow_track_name,
-                                         .thread_id  = thread_id,
-                                         .extdata    = "{}" };
-    });
+    registry.ensure_track(_timer_track_name, thread_id);
+    registry.ensure_track(_overflow_track_name, thread_id);
 }
 
 // Added
