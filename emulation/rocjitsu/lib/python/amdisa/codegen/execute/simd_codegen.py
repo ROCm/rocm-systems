@@ -2595,7 +2595,8 @@ def simd_probe_line(
 def _guard_mode_arithmetic_probe(template_name: str, probe: str | None) -> str | None:
     """Retain native arithmetic only when it implements the guest FP policy."""
     if template_name in SIMD_VOP3_BINARY_MODE_FP16:
-        # The helper checks host/guest rounding and handles denormal MODE itself.
+        # The helper requires guest RNE and handles denormal MODE explicitly.
+        # Its evaluator establishes host RNE and restores the caller's FP state.
         return probe
     if template_name == 'v_fma_mix_f32_vop3p':
         # The fused MIX helper establishes MODE and applies denormal controls.

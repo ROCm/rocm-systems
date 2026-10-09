@@ -2775,12 +2775,15 @@ std::vector<ArithmeticCase> f16_binary_modifier_cases() {
   add_cdna4("Gfx950AddHighSourcesHighDestination", false, 0x34003c00, 0x34003c00, 0x3800a5a5u, 11);
   add_cdna4("Gfx950MulHighSourcesLowDestination", true, 0x40003c00, 0x38003c00, 0x00003c00u, 3);
   add_cdna4("Gfx950MulHighSourcesHighDestination", true, 0x40003c00, 0x38003c00, 0x3c00a5a5u, 11);
-  // Unsupported guest or host rounding retains the scalar fallback.
+  // Unsupported guest rounding retains the scalar fallback; host rounding is
+  // established and restored by the SIMD evaluator.
   add("AddGuestRoundUpFallback", false, 0x3c00, 0x1000, 0xa5a53c01u, 0xc4, 0, 0, 0, 0, 0,
       FE_TONEAREST, 0, expect_simd_fallback());
-  add("AddHostRoundUpFallback", false, 0x3c00, 0x1000, 0xa5a53c00u, 0xc0, 0, 0, 0, 0, 0, FE_UPWARD,
-      0, expect_simd_fallback());
+  add("AddHostRoundUpStillUsesSimd", false, 0x3c00, 0x1000, 0xa5a53c00u, 0xc0, 0, 0, 0, 0, 0,
+      FE_UPWARD);
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+  // Enable the full-MXCSR preservation assertion without overriding rounding.
+  cases.back().mxcsr_mask = _MM_EXCEPT_MASK;
   // Widened F16 ADD/MUL operands and results cannot be F32 subnormals, so host
   // DAZ/FTZ does not require a fallback.
   add("AddHostFlushStillUsesSimd", false, 1, 0, 0xa5a50001u, 0xc0, 0, 0, 0, 0, 0, FE_TONEAREST,
@@ -3020,7 +3023,7 @@ INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuRoundedResultModifierTest,
 class ValuLegacyRoundedResultModifierTest : public testing::TestWithParam<ArithmeticCase> {};
 
 // The MODE-aware F16 ADD/MUL SIMD path supports these output modifiers and
-// denormal settings. Unsupported host rounding still selects scalar fallback.
+// denormal settings, independently of the caller's host rounding mode.
 TEST_P(ValuLegacyRoundedResultModifierTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   ForceScalarGuard guard;
   for (const bool scalar : {true, false}) {
@@ -3054,7 +3057,7 @@ INSTANTIATE_TEST_SUITE_P(F16BinaryModifiers, ValuF16BinaryModifierTest,
                          });
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
-void expect_f16_binary_host_environment(uint32_t host_mxcsr) {
+void expect_f16_binary_host_environment(uint32_t host_mxcsr, int host_rounding = FE_TONEAREST) {
   ForceScalarGuard guard;
   for (const bool multiply : {false, true}) {
     const auto words = rdna4::build_vop3(multiply ? rdna4::kVMulF16Vop3 : rdna4::kVAddF16Vop3,
@@ -3066,7 +3069,7 @@ void expect_f16_binary_host_environment(uint32_t host_mxcsr) {
         {{0, multiply ? 0x7c00u : 0x7bffu}, {1, multiply ? 0u : 1u}, {6, 0xa5a5a5a5u}},
         {{6, multiply ? 0xa5a5fe00u : 0xa5a57bffu}},
         0x40u,
-        FE_TONEAREST,
+        host_rounding,
         0xffffu,
         host_mxcsr,
         expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)};
@@ -3084,6 +3087,20 @@ TEST(ValuFpModeHelpers, F16BinaryPreservesHostExceptionFlagsAndMasks) {
   for (const uint32_t mxcsr : {0x1f80u, 0x1fa0u, 0x9fe4u}) {
     SCOPED_TRACE(mxcsr);
     expect_f16_binary_host_environment(mxcsr);
+  }
+}
+
+TEST(ValuFpModeHelpers, F16BinaryPreservesNonNearestHostRounding) {
+  for (const int rounding : {FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    SCOPED_TRACE(rounding);
+    // Exercise independent x87/MXCSR rounding, with clean flags or sticky
+    // flags plus DAZ/FTZ. With SIMD enabled, ADD and MUL must take the named route.
+    for (const uint32_t mxcsr_rounding : {_MM_ROUND_UP, _MM_ROUND_DOWN, _MM_ROUND_TOWARD_ZERO}) {
+      for (const uint32_t mxcsr : {0x1f80u, 0x9fe4u}) {
+        SCOPED_TRACE(mxcsr | mxcsr_rounding);
+        expect_f16_binary_host_environment(mxcsr | mxcsr_rounding, rounding);
+      }
+    }
   }
 }
 
@@ -3410,9 +3427,10 @@ TEST(ValuFpModeHelpers, FusedResultAndOutputFlush) {
             0x80000000u);
 }
 
-TEST(ValuFpModeHelpers, OutputScalePrecedesF16Rounding) {
-  // Explicit omod exercises SDWA's pre-round helper contract. Migrated VOP3
-  // callers leave it zero and apply output_modifier to the rounded result.
+TEST(ValuFpModeHelpers, LegacySdwaOutputScalePrecedesF16Rounding) {
+  // Explicit omod pins SDWA's legacy pre-round scaling, without SDWA hardware
+  // validation. Migrated VOP3 callers leave it zero and apply output_modifier
+  // to the rounded result; their captures do not establish SDWA ordering.
   EXPECT_EQ(amdgpu::fp_mode::finish_arithmetic_f16(65504.0 * 2.0, 0, 1, false, 3), 0x7bffu);
   EXPECT_EQ(amdgpu::fp_mode::finish_arithmetic_f16(1.0 + 0x1p-24, 1, 1, false, 1), 0x4001u);
   EXPECT_EQ(amdgpu::fp_mode::finish_arithmetic_f16(-0.0, 0, 1, false, 1), 0u);

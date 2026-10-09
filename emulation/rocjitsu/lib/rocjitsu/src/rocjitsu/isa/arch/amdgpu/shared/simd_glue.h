@@ -2334,17 +2334,16 @@ template <bool True16, typename T, typename Inst, typename BinOp>
 }
 
 /// @brief Execute VOP3 F16 ADD/MUL with MODE and source/output modifiers.
-/// @details RNE only; denormal controls are applied explicitly on half encodings.
-/// WithModifiers applies raw ABS/NEG before the operation and OMOD/CLAMP afterward.
+/// @details Guest RNE only; denormal controls are applied explicitly on half encodings.
+/// The wrapper applies raw ABS/NEG before the operation and OMOD/CLAMP afterward.
 /// Signed input flushing commutes with ABS/NEG. True16 selection and stores use
-/// the existing F16 register glue; unsupported host or guest rounding falls back.
+/// the existing F16 register glue; other guest rounding modes fall back.
 template <fp_mode::Arithmetic operation, bool True16, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop3_f16_arithmetic_simd(Inst &inst, Wavefront &wf) {
-  // Every finite F16 value and every sum or product of two widened F16 values
-  // is normal (or zero) in F32. Host flush controls therefore cannot affect
-  // this operation; only host and guest rounding must be nearest-even.
-  if (!fp_mode::native_rounding_matches(wf.fp_round_mode_f16_f64()))
+  // binary_f16_simd establishes nearest-even host rounding and restores the
+  // caller's environment. Only the guest rounding mode restricts this route.
+  if (wf.fp_round_mode_f16_f64() != 0)
     return false;
   const auto raw_operation = [denorm = wf.fp_denorm_mode_f16_f64(), ovfl = wf.fp16_ovfl()](auto a,
                                                                                            auto b) {
