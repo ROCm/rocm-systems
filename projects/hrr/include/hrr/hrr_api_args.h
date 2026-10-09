@@ -73,17 +73,30 @@
  * v6: pointer arguments whose pointee used to be dropped now carry it inline
  * (DEREF_FIELDS). Event payloads grew for ~50 APIs, so an archive written
  * before v6 cannot be read by a v6 reader: re-capture rather than replay an
- * old recording. */
-#define HRR_VERSION ((uint16_t)6u)
+ * old recording.
+ * v7: the host blobs of the pitched copies are packed, and the writer sets
+ * HRR_FILE_FLAG_PACKED_HOST_RECTS. A v6 reader ignored the flag and replayed
+ * a packed blob with the recorded pitch, reading past its end. */
+#define HRR_VERSION ((uint16_t)7u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
 typedef struct {
     uint32_t magic;    /* HRR_MAGIC                */
     uint16_t version;  /* HRR_VERSION              */
-    uint16_t reserved; /* zero                     */
+    uint16_t reserved; /* HRR_FILE_FLAG_* bits      */
 } hrr_file_header;
 #pragma pack(pop)
+
+/* Bits of hrr_file_header.reserved in events.bin. A reader before v7 ignores
+ * them, which is why the packed layout came with the v7 bump.
+ * HRR_FILE_FLAG_PACKED_HOST_RECTS: the host blobs of the pitched copies
+ * (hipMemcpy2D, the hipMemcpy3D family and the driver 2D/3D copies) hold only
+ * the copied rows, packed end to end: width*height*depth bytes, whatever the
+ * pitch. Without it, a blob spans the host rect from its base pointer through
+ * the last copied byte, or holds the flat width*height*depth bytes from the
+ * base pointer (3D and driver D2H, hipMemcpy3D H2D). */
+#define HRR_FILE_FLAG_PACKED_HOST_RECTS ((uint16_t)0x0001u)
 
 #ifdef __cplusplus
 static_assert(sizeof(hrr_file_header) == 8, "hrr_file_header must be 8 bytes");
@@ -5820,6 +5833,22 @@ typedef struct {
     uint64_t module;
 } hrr_args_hipModuleEnumerateFunctions;
 
+/* hipError_t hipDeviceFlushGPUDirectRDMAWrites(enum hipFlushGPUDirectRDMAWritesTarget target, enum hipFlushGPUDirectRDMAWritesScope scope) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t /* enum hipFlushGPUDirectRDMAWritesTarget */ target;
+    uint64_t /* enum hipFlushGPUDirectRDMAWritesScope */ scope;
+} hrr_args_hipDeviceFlushGPUDirectRDMAWrites;
+
+/* hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t pMod;
+    uint64_t library;
+} hrr_args_hipLibraryGetModule;
+
 /* ---- API id enumeration ---- */
 typedef enum hrr_api_id {
     HRR_API_HIPAPINAME = 0,
@@ -6367,16 +6396,18 @@ typedef enum hrr_api_id {
     HRR_API_HIPDEVICEGETLUID = 542,
     HRR_API_HIPINITDEVICE = 543,
     HRR_API_HIPMODULEENUMERATEFUNCTIONS = 544,
-    HRR_API_HIPPOPCALLCONFIGURATION = 545,
-    HRR_API_HIPPUSHCALLCONFIGURATION = 546,
-    HRR_API_HIPREGISTERFATBINARY = 547,
-    HRR_API_HIPREGISTERFUNCTION = 548,
-    HRR_API_HIPREGISTERMANAGEDVAR = 549,
-    HRR_API_HIPREGISTERSURFACE = 550,
-    HRR_API_HIPREGISTERTEXTURE = 551,
-    HRR_API_HIPREGISTERVAR = 552,
-    HRR_API_HIPUNREGISTERFATBINARY = 553,
-    HRR_API_COUNT = 554
+    HRR_API_HIPDEVICEFLUSHGPUDIRECTRDMAWRITES = 545,
+    HRR_API_HIPLIBRARYGETMODULE = 546,
+    HRR_API_HIPPOPCALLCONFIGURATION = 547,
+    HRR_API_HIPPUSHCALLCONFIGURATION = 548,
+    HRR_API_HIPREGISTERFATBINARY = 549,
+    HRR_API_HIPREGISTERFUNCTION = 550,
+    HRR_API_HIPREGISTERMANAGEDVAR = 551,
+    HRR_API_HIPREGISTERSURFACE = 552,
+    HRR_API_HIPREGISTERTEXTURE = 553,
+    HRR_API_HIPREGISTERVAR = 554,
+    HRR_API_HIPUNREGISTERFATBINARY = 555,
+    HRR_API_COUNT = 556
 } hrr_api_id_t;
 
 /* Array of API names indexed by hrr_api_id_t */
@@ -6927,6 +6958,8 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipDeviceGetLuid",
     "hipInitDevice",
     "hipModuleEnumerateFunctions",
+    "hipDeviceFlushGPUDirectRDMAWrites",
+    "hipLibraryGetModule",
     "__hipPopCallConfiguration",
     "__hipPushCallConfiguration",
     "__hipRegisterFatBinary",

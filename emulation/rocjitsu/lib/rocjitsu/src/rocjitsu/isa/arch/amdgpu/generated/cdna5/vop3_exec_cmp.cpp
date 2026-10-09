@@ -73,10 +73,10 @@ RJ_NOINLINE void VCmpLtF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -160,10 +160,10 @@ RJ_NOINLINE void VCmpEqF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -247,10 +247,10 @@ RJ_NOINLINE void VCmpLeF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -334,10 +334,10 @@ RJ_NOINLINE void VCmpGtF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -421,10 +421,10 @@ RJ_NOINLINE void VCmpLgF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -508,10 +508,10 @@ RJ_NOINLINE void VCmpGeF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -595,10 +595,10 @@ RJ_NOINLINE void VCmpOF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -682,10 +682,10 @@ RJ_NOINLINE void VCmpUF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -769,10 +769,10 @@ RJ_NOINLINE void VCmpNgeF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -856,10 +856,10 @@ RJ_NOINLINE void VCmpNlgF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -943,10 +943,10 @@ RJ_NOINLINE void VCmpNgtF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -1030,10 +1030,10 @@ RJ_NOINLINE void VCmpNleF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -1117,10 +1117,10 @@ RJ_NOINLINE void VCmpNeqF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -1204,10 +1204,10 @@ RJ_NOINLINE void VCmpNltF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -1945,10 +1945,10 @@ RJ_NOINLINE void VCmpLtI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -2024,10 +2024,10 @@ RJ_NOINLINE void VCmpEqI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -2103,10 +2103,10 @@ RJ_NOINLINE void VCmpLeI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -2182,10 +2182,10 @@ RJ_NOINLINE void VCmpGtI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -2261,10 +2261,10 @@ RJ_NOINLINE void VCmpNeI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -2340,10 +2340,10 @@ RJ_NOINLINE void VCmpGeI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -2414,10 +2414,10 @@ RJ_NOINLINE void VCmpLtU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -2484,10 +2484,10 @@ RJ_NOINLINE void VCmpEqU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -2555,10 +2555,10 @@ RJ_NOINLINE void VCmpLeU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -2625,10 +2625,10 @@ RJ_NOINLINE void VCmpGtU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -2695,10 +2695,10 @@ RJ_NOINLINE void VCmpNeU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -2766,10 +2766,10 @@ RJ_NOINLINE void VCmpGeU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -3457,10 +3457,10 @@ RJ_NOINLINE void VCmpClassF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) 
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -3635,10 +3635,10 @@ RJ_NOINLINE void VCmpxLtF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -3716,10 +3716,10 @@ RJ_NOINLINE void VCmpxEqF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -3797,10 +3797,10 @@ RJ_NOINLINE void VCmpxLeF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -3878,10 +3878,10 @@ RJ_NOINLINE void VCmpxGtF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -3959,10 +3959,10 @@ RJ_NOINLINE void VCmpxLgF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -4040,10 +4040,10 @@ RJ_NOINLINE void VCmpxGeF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -4121,10 +4121,10 @@ RJ_NOINLINE void VCmpxOF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -4202,10 +4202,10 @@ RJ_NOINLINE void VCmpxUF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -4283,10 +4283,10 @@ RJ_NOINLINE void VCmpxNgeF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -4364,10 +4364,10 @@ RJ_NOINLINE void VCmpxNlgF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -4445,10 +4445,10 @@ RJ_NOINLINE void VCmpxNgtF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -4526,10 +4526,10 @@ RJ_NOINLINE void VCmpxNleF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -4607,10 +4607,10 @@ RJ_NOINLINE void VCmpxNeqF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -4688,10 +4688,10 @@ RJ_NOINLINE void VCmpxNltF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -6244,10 +6244,10 @@ RJ_NOINLINE void VCmpxLtI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -6335,10 +6335,10 @@ RJ_NOINLINE void VCmpxEqI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -6426,10 +6426,10 @@ RJ_NOINLINE void VCmpxLeI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -6517,10 +6517,10 @@ RJ_NOINLINE void VCmpxGtI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -6608,10 +6608,10 @@ RJ_NOINLINE void VCmpxNeI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -6699,10 +6699,10 @@ RJ_NOINLINE void VCmpxGeI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -6786,10 +6786,10 @@ RJ_NOINLINE void VCmpxLtU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -6869,10 +6869,10 @@ RJ_NOINLINE void VCmpxEqU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -6952,10 +6952,10 @@ RJ_NOINLINE void VCmpxLeU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -7035,10 +7035,10 @@ RJ_NOINLINE void VCmpxGtU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -7118,10 +7118,10 @@ RJ_NOINLINE void VCmpxNeU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -7201,10 +7201,10 @@ RJ_NOINLINE void VCmpxGeU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -8343,10 +8343,10 @@ RJ_NOINLINE void VCmpxClassF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
   }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
