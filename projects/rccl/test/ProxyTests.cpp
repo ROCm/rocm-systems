@@ -1056,9 +1056,13 @@ TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
             ASSERT_EQ(clock_gettime(serviceClock, &cpuBefore), 0);
 
             // Simulate an unrelated external TCP client. It completes the TCP
-            // connection and sends a wrong NCCL magic, but no NCCL type.
-            const uint64_t badMagic = kProxyMagic ^ 1ULL;
-            const ssize_t sent = send(externalFd, &badMagic, sizeof(badMagic), MSG_NOSIGNAL);
+            // connection and sends a complete hello with the wrong NCCL magic.
+            char badMagic[NCCL_SOCKET_PLAIN_HELLO_BYTES] = {};
+            const uint64_t badMagicValue = kProxyMagic ^ 1ULL;
+            const enum ncclSocketType proxyType = ncclSocketTypeProxy;
+            memcpy(badMagic, &badMagicValue, sizeof(badMagicValue));
+            memcpy(badMagic + sizeof(badMagicValue), &proxyType, sizeof(proxyType));
+            const ssize_t sent = send(externalFd, badMagic, sizeof(badMagic), MSG_NOSIGNAL);
             close(externalFd);
 
             // The fixed service returns to poll(). The pre-fix service keeps
