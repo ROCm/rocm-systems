@@ -24,11 +24,9 @@
 #include "devsignal.hpp"
 #include "utils/nontemporal.hpp"
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 #include "devurilocator.hpp"
-#endif
-#endif
+#endif  // DEVICE_ADDRESS_SANITIZER
 
 #include <array>
 #include <cassert>
@@ -764,6 +762,8 @@ class Settings {
   void enableExtension(uint name) { extensions_ |= static_cast<uint64_t>(1) << name; }
 
   size_t stagedXferSize_ = 0;     //!< Staged buffer size
+  size_t sdma_swap_alignment_ = 0;  //!< SDMA swap address alignment
+  size_t sdma_indirect_max_size_ = 0;  //!< Max SDMA indirect copy size
 
  private:
   //! Disable copy constructor
@@ -2433,17 +2433,11 @@ class Device : public RuntimeObject {
   //! Sets the group memory carveout percentage hint for the device
   void UpdateGroupMemCarveout(uint8_t percent) { group_mem_carveout_hint_ = percent; }
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const = 0;
-#endif
-#endif
 
-#if defined(__linux__) && defined(__clang__)
-#if __has_feature(address_sanitizer)
   void reportDeviceMemoryLeaks();
   static void reportAllDeviceMemoryLeaks();
-#endif
 #endif
 
   static bool IsGPUInError() { return (gpu_error_.load(std::memory_order_relaxed) != CL_SUCCESS); }

@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! HSA code-object readers, ELF validation, relocation, and executable state.
@@ -44,17 +45,33 @@ const SYMBOL_TYPE_AMDGPU_HSA_INDIRECT_FUNCTION: u8 = 11;
 const SYMBOL_BINDING_GLOBAL: u8 = 1;
 const SYMBOL_UNDEFINED: u16 = 0;
 const SYMBOL_ABSOLUTE: u16 = 0xfff1;
+const SYMBOL_COMMON: u16 = 0xfff2;
+const RELOCATION_ABSOLUTE_32_LO: u32 = 1;
+const RELOCATION_ABSOLUTE_32_HI: u32 = 2;
 const RELOCATION_ABSOLUTE_64: u32 = 3;
+const RELOCATION_ABSOLUTE_32: u32 = 6;
 const RELOCATION_RELATIVE_64: u32 = 13;
 const AMDGPU_MACHINE_MASK: u32 = 0xff;
 const AMDGPU_MACHINE_GFX1201: u32 = 0x4e;
 const AMDGPU_MACHINE_GFX12_GENERIC: u32 = 0x59;
+const AMDGPU_XNACK_MASK: u32 = 0x300;
+const AMDGPU_XNACK_ANY: u32 = 0x100;
+const AMDGPU_SRAMECC_MASK: u32 = 0xc00;
+const AMDGPU_SRAMECC_ANY: u32 = 0x400;
+const AMDGPU_GENERIC_VERSION_SHIFT: u32 = 24;
 
 /// Origin retained for loader queries after bytes have been snapshotted.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum ReaderStorage {
     Memory,
-    File { descriptor: i32, offset: usize },
+    File { uri: Vec<u8> },
+}
+
+impl ReaderStorage {
+    fn from_file(descriptor: i32, offset: usize, size: usize) -> Self {
+        crate::platform::code_object_file_uri(descriptor, offset, size)
+            .map_or(Self::Memory, |uri| Self::File { uri })
+    }
 }
 
 /// Immutable code-object byte snapshot associated with one reader handle.
@@ -157,6 +174,37 @@ pub(crate) struct Executable {
     pub(crate) loaded: Vec<LoadedObject>,
     pub(crate) names: HashMap<(String, u64), u64>,
     pub(crate) symbol_handles: Vec<u64>,
+}
+
+/// Resolves a complete range in a loaded executable to its CPU mapping.
+/// An address inside an object with an excessive extent is an error, so a
+/// caller cannot accidentally fall back to dereferencing its GPU address.
+pub(crate) fn loaded_host_range(
+    runtime: &Runtime,
+    address: usize,
+    size: usize,
+) -> Result<Option<usize>, Status> {
+    for executable in runtime.executables.values() {
+        for object in &executable.loaded {
+            let Some(offset) = (address as u64).checked_sub(object.device_base) else {
+                continue;
+            };
+            if offset >= object.size {
+                continue;
+            }
+            let offset = usize::try_from(offset).map_err(|_| INVALID_ALLOCATION)?;
+            let end = offset.checked_add(size).ok_or(INVALID_ALLOCATION)?;
+            if end > object.size as usize {
+                return Err(INVALID_ALLOCATION);
+            }
+            return object
+                .host_base
+                .checked_add(offset)
+                .map(Some)
+                .ok_or(INVALID_ALLOCATION);
+        }
+    }
+    Ok(None)
 }
 
 /// HSA-visible executable symbol with its resolved runtime address.
@@ -315,6 +363,26 @@ fn code_object_target(machine: u32) -> Option<(&'static str, u64)> {
     }
 }
 
+fn validate_load_target(layout: ElfLayout, gfx: (u32, u32, u32)) -> Result<(), Status> {
+    let version = code_object_version(layout)?;
+    let Some((_, variant)) = code_object_target(layout.flags) else {
+        return Err(INVALID_ISA_NAME);
+    };
+    let features_supported = if version == 3 {
+        layout.flags & (AMDGPU_XNACK_MASK | AMDGPU_SRAMECC_MASK) == 0
+    } else {
+        matches!(layout.flags & AMDGPU_XNACK_MASK, 0 | AMDGPU_XNACK_ANY)
+            && matches!(layout.flags & AMDGPU_SRAMECC_MASK, 0 | AMDGPU_SRAMECC_ANY)
+    };
+    if !features_supported
+        || (variant == 1 && (version < 6 || layout.flags >> AMDGPU_GENERIC_VERSION_SHIFT == 0))
+        || gfx != (12, 0, 1)
+    {
+        return Err(INCOMPATIBLE_ARGUMENTS);
+    }
+    Ok(())
+}
+
 fn split_symbol_name(full_name: &str) -> (&str, &str) {
     full_name.rfind("::").map_or(("", full_name), |separator| {
         (&full_name[..separator], &full_name[separator + 2..])
@@ -328,6 +396,72 @@ fn variable_metadata(section_flags: u64) -> (u32, bool) {
         VARIABLE_SEGMENT_GLOBAL
     };
     (segment, section_flags & SECTION_FLAG_WRITE != 0)
+}
+
+struct ElfSymbolTable<'a> {
+    bytes: &'a [u8],
+    offset: u64,
+    entry_size: usize,
+    count: usize,
+    strings: &'a [u8],
+}
+
+impl<'a> ElfSymbolTable<'a> {
+    fn entry(&self, index: usize) -> Result<&'a [u8], Status> {
+        table_entry(self.bytes, self.offset, index, self.entry_size).ok_or(INVALID_CODE_OBJECT)
+    }
+
+    fn name(&self, symbol: &[u8]) -> Result<&'a str, Status> {
+        let offset = usize::try_from(read_u32(symbol, 0).ok_or(INVALID_CODE_OBJECT)?)
+            .map_err(|_| INVALID_CODE_OBJECT)?;
+        c_string(self.strings, offset).ok_or(INVALID_CODE_OBJECT)
+    }
+}
+
+fn symbol_table<'a>(
+    bytes: &'a [u8],
+    layout: ElfLayout,
+    section: &[u8],
+) -> Result<ElfSymbolTable<'a>, Status> {
+    let offset = read_u64(section, 24).ok_or(INVALID_CODE_OBJECT)?;
+    let size = read_u64(section, 32).ok_or(INVALID_CODE_OBJECT)?;
+    let strings_index = usize::try_from(read_u32(section, 40).ok_or(INVALID_CODE_OBJECT)?)
+        .map_err(|_| INVALID_CODE_OBJECT)?;
+    if strings_index >= layout.section_count {
+        return Err(INVALID_CODE_OBJECT);
+    }
+    let entry_size = usize::try_from(read_u64(section, 56).ok_or(INVALID_CODE_OBJECT)?)
+        .map_err(|_| INVALID_CODE_OBJECT)?;
+    if entry_size < 24 || size % entry_size as u64 != 0 {
+        return Err(INVALID_CODE_OBJECT);
+    }
+    let strings_section = table_entry(
+        bytes,
+        layout.section_offset,
+        strings_index,
+        layout.section_entry_size,
+    )
+    .filter(|section| read_u32(section, 4) == Some(SECTION_STRTAB))
+    .ok_or(INVALID_CODE_OBJECT)?;
+    let strings_offset = usize::try_from(read_u64(strings_section, 24).ok_or(INVALID_CODE_OBJECT)?)
+        .map_err(|_| INVALID_CODE_OBJECT)?;
+    let strings_size = usize::try_from(read_u64(strings_section, 32).ok_or(INVALID_CODE_OBJECT)?)
+        .map_err(|_| INVALID_CODE_OBJECT)?;
+    let strings = bytes
+        .get(
+            strings_offset
+                ..strings_offset
+                    .checked_add(strings_size)
+                    .ok_or(INVALID_CODE_OBJECT)?,
+        )
+        .ok_or(INVALID_CODE_OBJECT)?;
+    Ok(ElfSymbolTable {
+        bytes,
+        offset,
+        entry_size,
+        count: usize::try_from(size).map_err(|_| INVALID_CODE_OBJECT)? / entry_size,
+        strings,
+    })
 }
 
 fn parse_symbols(
@@ -349,36 +483,7 @@ fn parse_symbols(
     let Some(symbol_section) = symbol_section else {
         return Ok(Vec::new());
     };
-    let symbol_offset = read_u64(symbol_section, 24).ok_or(INVALID_CODE_OBJECT)?;
-    let symbol_size = read_u64(symbol_section, 32).ok_or(INVALID_CODE_OBJECT)?;
-    let strings_index = usize::try_from(read_u32(symbol_section, 40).ok_or(INVALID_CODE_OBJECT)?)
-        .map_err(|_| INVALID_CODE_OBJECT)?;
-    let entry_size = usize::try_from(read_u64(symbol_section, 56).ok_or(INVALID_CODE_OBJECT)?)
-        .map_err(|_| INVALID_CODE_OBJECT)?;
-    if entry_size < 24 || symbol_size % entry_size as u64 != 0 {
-        return Err(INVALID_CODE_OBJECT);
-    }
-    let strings = table_entry(
-        bytes,
-        layout.section_offset,
-        strings_index,
-        layout.section_entry_size,
-    )
-    .filter(|section| read_u32(section, 4) == Some(SECTION_STRTAB))
-    .ok_or(INVALID_CODE_OBJECT)?;
-    let strings_offset = usize::try_from(read_u64(strings, 24).ok_or(INVALID_CODE_OBJECT)?)
-        .map_err(|_| INVALID_CODE_OBJECT)?;
-    let strings_size = usize::try_from(read_u64(strings, 32).ok_or(INVALID_CODE_OBJECT)?)
-        .map_err(|_| INVALID_CODE_OBJECT)?;
-    let string_table = bytes
-        .get(
-            strings_offset
-                ..strings_offset
-                    .checked_add(strings_size)
-                    .ok_or(INVALID_CODE_OBJECT)?,
-        )
-        .ok_or(INVALID_CODE_OBJECT)?;
-    let count = usize::try_from(symbol_size).map_err(|_| INVALID_CODE_OBJECT)? / entry_size;
+    let table = symbol_table(bytes, layout, symbol_section)?;
     let wavefront_size = if matches!(
         layout.flags & AMDGPU_MACHINE_MASK,
         AMDGPU_MACHINE_GFX1201 | AMDGPU_MACHINE_GFX12_GENERIC
@@ -388,17 +493,14 @@ fn parse_symbols(
         64
     };
     let mut symbols = Vec::new();
-    for symbol_index in 0..count {
-        let symbol = table_entry(bytes, symbol_offset, symbol_index, entry_size)
-            .ok_or(INVALID_CODE_OBJECT)?;
+    for symbol_index in 0..table.count {
+        let symbol = table.entry(symbol_index)?;
         let name_offset = usize::try_from(read_u32(symbol, 0).ok_or(INVALID_CODE_OBJECT)?)
             .map_err(|_| INVALID_CODE_OBJECT)?;
         if name_offset == 0 {
             continue;
         }
-        let full_name = c_string(string_table, name_offset)
-            .ok_or(INVALID_CODE_OBJECT)?
-            .to_owned();
+        let full_name = table.name(symbol)?.to_owned();
         let symbol_info = *symbol.get(4).ok_or(INVALID_CODE_OBJECT)?;
         let symbol_type = symbol_info & 0xf;
         let kind = if symbol_type == SYMBOL_TYPE_AMDGPU_HSA_KERNEL
@@ -418,7 +520,9 @@ fn parse_symbols(
         let value = read_u64(symbol, 8).ok_or(INVALID_CODE_OBJECT)?;
         let size =
             u32::try_from(read_u64(symbol, 16).ok_or(INVALID_CODE_OBJECT)?).unwrap_or(u32::MAX);
-        let is_definition = section_index != SYMBOL_UNDEFINED && symbol_type != SYMBOL_TYPE_COMMON;
+        let is_definition = section_index != SYMBOL_UNDEFINED
+            && section_index != SYMBOL_COMMON
+            && symbol_type != SYMBOL_TYPE_COMMON;
         let section = (usize::from(section_index) < layout.section_count)
             .then(|| {
                 table_entry(
@@ -522,20 +626,34 @@ fn add_relocation_base(base: u64, value: u64, addend: i64) -> Option<u64> {
 
 fn apply_relocations(
     bytes: &[u8],
-    section_offset: u64,
-    section_entry_size: usize,
-    section_count: usize,
+    layout: ElfLayout,
     virtual_base: u64,
     device_base: u64,
     image: &mut [u8],
+    resolve_external: impl Fn(&str) -> Option<u64>,
 ) -> Result<(), Status> {
     let load_bias = device_base
         .checked_sub(virtual_base)
         .ok_or(INVALID_CODE_OBJECT)?;
-    for section_index in 0..section_count {
-        let section = table_entry(bytes, section_offset, section_index, section_entry_size)
-            .ok_or(INVALID_CODE_OBJECT)?;
+    for section_index in 0..layout.section_count {
+        let section = table_entry(
+            bytes,
+            layout.section_offset,
+            section_index,
+            layout.section_entry_size,
+        )
+        .ok_or(INVALID_CODE_OBJECT)?;
         if read_u32(section, 4) != Some(SECTION_RELA) {
+            continue;
+        }
+        let target_section = usize::try_from(read_u32(section, 44).ok_or(INVALID_CODE_OBJECT)?)
+            .map_err(|_| INVALID_CODE_OBJECT)?;
+        if target_section != 0 {
+            if target_section >= layout.section_count {
+                return Err(INVALID_CODE_OBJECT);
+            }
+            // Section-targeted relocations were applied by the linker. Only
+            // dynamic relocations without a target section modify the image.
             continue;
         }
         let relocation_offset = read_u64(section, 24).ok_or(INVALID_CODE_OBJECT)?;
@@ -543,6 +661,9 @@ fn apply_relocations(
         let symbol_section_index =
             usize::try_from(read_u32(section, 40).ok_or(INVALID_CODE_OBJECT)?)
                 .map_err(|_| INVALID_CODE_OBJECT)?;
+        if symbol_section_index >= layout.section_count {
+            return Err(INVALID_CODE_OBJECT);
+        }
         let relocation_entry_size =
             usize::try_from(read_u64(section, 56).ok_or(INVALID_CODE_OBJECT)?)
                 .map_err(|_| INVALID_CODE_OBJECT)?;
@@ -552,9 +673,9 @@ fn apply_relocations(
 
         let symbol_section = table_entry(
             bytes,
-            section_offset,
+            layout.section_offset,
             symbol_section_index,
-            section_entry_size,
+            layout.section_entry_size,
         )
         .ok_or(INVALID_CODE_OBJECT)?;
         if !matches!(
@@ -563,16 +684,7 @@ fn apply_relocations(
         ) {
             return Err(INVALID_CODE_OBJECT);
         }
-        let symbol_offset = read_u64(symbol_section, 24).ok_or(INVALID_CODE_OBJECT)?;
-        let symbol_size = read_u64(symbol_section, 32).ok_or(INVALID_CODE_OBJECT)?;
-        let symbol_entry_size =
-            usize::try_from(read_u64(symbol_section, 56).ok_or(INVALID_CODE_OBJECT)?)
-                .map_err(|_| INVALID_CODE_OBJECT)?;
-        if symbol_entry_size < 24 || symbol_size % symbol_entry_size as u64 != 0 {
-            return Err(INVALID_CODE_OBJECT);
-        }
-        let symbol_count =
-            usize::try_from(symbol_size).map_err(|_| INVALID_CODE_OBJECT)? / symbol_entry_size;
+        let symbols = symbol_table(bytes, layout, symbol_section)?;
         let relocation_count = usize::try_from(relocation_size).map_err(|_| INVALID_CODE_OBJECT)?
             / relocation_entry_size;
 
@@ -591,26 +703,31 @@ fn apply_relocations(
             let symbol_index = usize::try_from(info >> 32).map_err(|_| INVALID_CODE_OBJECT)?;
             let value = match relocation_type {
                 RELOCATION_RELATIVE_64 => add_relocation_base(load_bias, 0, addend),
-                RELOCATION_ABSOLUTE_64 => {
-                    if symbol_index >= symbol_count {
+                RELOCATION_ABSOLUTE_32_LO
+                | RELOCATION_ABSOLUTE_32_HI
+                | RELOCATION_ABSOLUTE_64
+                | RELOCATION_ABSOLUTE_32 => {
+                    if symbol_index >= symbols.count {
                         return Err(INVALID_CODE_OBJECT);
                     }
-                    let symbol = table_entry(bytes, symbol_offset, symbol_index, symbol_entry_size)
-                        .ok_or(INVALID_CODE_OBJECT)?;
+                    let symbol = symbols.entry(symbol_index)?;
                     let section_index = read_u16(symbol, 6).ok_or(INVALID_CODE_OBJECT)?;
                     let symbol_value = read_u64(symbol, 8).ok_or(INVALID_CODE_OBJECT)?;
-                    if section_index == SYMBOL_UNDEFINED {
+                    let symbol_type = *symbol.get(4).ok_or(INVALID_CODE_OBJECT)? & 0xf;
+                    let (base, value) = if section_index == SYMBOL_UNDEFINED
+                        || section_index == SYMBOL_COMMON
+                        || symbol_type == SYMBOL_TYPE_COMMON
+                    {
+                        let name = symbols.name(symbol)?;
+                        (0, resolve_external(name).ok_or(VARIABLE_UNDEFINED)?)
+                    } else if section_index == SYMBOL_ABSOLUTE {
+                        (0, symbol_value)
+                    } else if usize::from(section_index) < layout.section_count {
+                        (load_bias, symbol_value)
+                    } else {
                         return Err(INVALID_CODE_OBJECT);
-                    }
-                    add_relocation_base(
-                        if section_index == SYMBOL_ABSOLUTE {
-                            0
-                        } else {
-                            load_bias
-                        },
-                        symbol_value,
-                        addend,
-                    )
+                    };
+                    add_relocation_base(base, value, addend)
                 }
                 _ => return Err(INVALID_CODE_OBJECT),
             }
@@ -621,29 +738,75 @@ fn apply_relocations(
                     .ok_or(INVALID_CODE_OBJECT)?,
             )
             .map_err(|_| INVALID_CODE_OBJECT)?;
+            let width = if relocation_type == RELOCATION_ABSOLUTE_64
+                || relocation_type == RELOCATION_RELATIVE_64
+            {
+                8
+            } else {
+                4
+            };
             let destination = image
-                .get_mut(target_offset..target_offset.checked_add(8).ok_or(INVALID_CODE_OBJECT)?)
+                .get_mut(
+                    target_offset
+                        ..target_offset
+                            .checked_add(width)
+                            .ok_or(INVALID_CODE_OBJECT)?,
+                )
                 .ok_or(INVALID_CODE_OBJECT)?;
-            destination.copy_from_slice(&value.to_le_bytes());
+            if width == 8 {
+                destination.copy_from_slice(&value.to_le_bytes());
+            } else {
+                let word = if relocation_type == RELOCATION_ABSOLUTE_32_HI {
+                    value >> 32
+                } else {
+                    value & u64::from(u32::MAX)
+                };
+                let word = u32::try_from(word).map_err(|_| INVALID_CODE_OBJECT)?;
+                destination.copy_from_slice(&word.to_le_bytes());
+            }
         }
     }
     Ok(())
 }
 
+fn resolve_executable_symbol(
+    runtime: &Runtime,
+    executable: HsaExecutable,
+    agent: HsaAgent,
+    name: &str,
+) -> Option<u64> {
+    let executable = runtime.executables.get(&executable.handle)?;
+    let name = name.to_owned();
+    let handle = executable
+        .names
+        .get(&(name.clone(), 0))
+        .or_else(|| executable.names.get(&(name, agent.handle)))?;
+    runtime
+        .symbols
+        .get(handle)
+        .filter(|symbol| symbol.is_definition)
+        .map(|symbol| symbol.address)
+}
+
 fn parse_and_load(
     runtime: &Runtime,
+    executable: HsaExecutable,
     agent: HsaAgent,
     code_object: Arc<[u8]>,
     storage: ReaderStorage,
 ) -> Result<(LoadedObject, Vec<PendingSymbol>), Status> {
     let bytes = code_object.as_ref();
     let layout = parse_elf_layout(bytes)?;
-    let _version = code_object_version(layout)?;
     let (gpu_index, memory_kind, object_kind) = if agent.handle == 0 {
-        if runtime.gpus.is_empty() {
-            return Err(OUT_OF_RESOURCES);
-        }
-        (0, MemoryKind::System, LOADER_OBJECT_KIND_PROGRAM)
+        let gpu_index = runtime
+            .gpus
+            .iter()
+            .position(|gpu| {
+                let info = gpu.info;
+                (info.gfx_major, info.gfx_minor, info.gfx_stepping) == (12, 0, 1)
+            })
+            .ok_or(OUT_OF_RESOURCES)?;
+        (gpu_index, MemoryKind::System, LOADER_OBJECT_KIND_PROGRAM)
     } else {
         let Some(gpu_index) = runtime.gpu_index(agent) else {
             return Err(INVALID_AGENT);
@@ -659,6 +822,8 @@ fn parse_and_load(
             LOADER_OBJECT_KIND_AGENT,
         )
     };
+    let info = runtime.gpus[gpu_index].info;
+    validate_load_target(layout, (info.gfx_major, info.gfx_minor, info.gfx_stepping))?;
     let page = runtime.host_page_size as u64;
     let mut loads = Vec::new();
     let mut virtual_base = u64::MAX;
@@ -696,6 +861,14 @@ fn parse_and_load(
     }
     if loads.is_empty() || virtual_end <= virtual_base {
         return Err(INVALID_CODE_OBJECT);
+    }
+    let mut pending = parse_symbols(bytes, layout, &[SECTION_DYNSYM, SECTION_SYMTAB])?;
+    if pending.iter().any(|symbol| {
+        !symbol.is_definition
+            && symbol.linkage == SYMBOL_LINKAGE_PROGRAM
+            && resolve_executable_symbol(runtime, executable, agent, &symbol.full_name).is_none()
+    }) {
+        return Err(VARIABLE_UNDEFINED);
     }
     let allocation_end = align_up(virtual_end, page).ok_or(INVALID_CODE_OBJECT)?;
     let allocation_size = allocation_end - virtual_base;
@@ -737,19 +910,17 @@ fn parse_and_load(
         unsafe { std::slice::from_raw_parts_mut(host_base as *mut u8, allocation_size_usize) };
     apply_relocations(
         bytes,
-        layout.section_offset,
-        layout.section_entry_size,
-        layout.section_count,
+        layout,
         virtual_base,
         info.device_address,
         image,
+        |name| resolve_executable_symbol(runtime, executable, agent, name),
     )?;
     // The executable is written through a potentially write-combined CPU
     // mapping. Make both segment data and relocations visible before loading
     // can be observed complete by a submitting thread.
     fence(Ordering::SeqCst);
 
-    let mut pending = parse_symbols(bytes, layout, &[SECTION_DYNSYM, SECTION_SYMTAB])?;
     pending.retain_mut(|symbol| {
         if !symbol.is_definition || symbol.value < virtual_base || symbol.value >= virtual_end {
             return false;
@@ -780,9 +951,7 @@ fn parse_and_load(
                     code_object.len()
                 )
                 .into_bytes(),
-                ReaderStorage::File { descriptor, offset } => {
-                    crate::platform::code_object_file_uri(descriptor, offset, code_object.len())
-                }
+                ReaderStorage::File { uri } => uri,
             },
             segments,
             code_object,
@@ -1280,10 +1449,7 @@ pub unsafe extern "C" fn hsa_code_object_reader_create_from_file(
             handle,
             Reader {
                 bytes: bytes.into(),
-                storage: ReaderStorage::File {
-                    descriptor: file,
-                    offset: 0,
-                },
+                storage: ReaderStorage::from_file(file, 0, size),
             },
         );
         // SAFETY: The caller supplied writable output storage.
@@ -1474,7 +1640,7 @@ unsafe fn load_executable_code_object(
     if program && executable_record.program_loaded {
         return INCOMPATIBLE_ARGUMENTS;
     }
-    let (mut object, symbols) = match parse_and_load(runtime, agent, bytes, storage) {
+    let (mut object, symbols) = match parse_and_load(runtime, executable, agent, bytes, storage) {
         Ok(result) => result,
         Err(status) => return status,
     };
@@ -1582,7 +1748,7 @@ pub unsafe extern "C" fn hsa_executable_load_agent_code_object(
         let Some((bytes, storage)) = runtime
             .readers
             .get(&reader.handle)
-            .map(|reader| (reader.bytes.clone(), reader.storage))
+            .map(|reader| (reader.bytes.clone(), reader.storage.clone()))
         else {
             return INVALID_CODE_OBJECT_READER;
         };
@@ -1618,7 +1784,7 @@ pub unsafe extern "C" fn hsa_executable_load_program_code_object(
         let Some((bytes, storage)) = runtime
             .readers
             .get(&reader.handle)
-            .map(|reader| (reader.bytes.clone(), reader.storage))
+            .map(|reader| (reader.bytes.clone(), reader.storage.clone()))
         else {
             return INVALID_CODE_OBJECT_READER;
         };
@@ -2307,23 +2473,14 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_host_address(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        let address = device_address as u64;
-        for executable in runtime.executables.values() {
-            for object in &executable.loaded {
-                if address >= object.device_base && address - object.device_base < object.size {
-                    let Ok(offset) = usize::try_from(address - object.device_base) else {
-                        return INVALID_ARGUMENT;
-                    };
-                    let Some(host) = object.host_base.checked_add(offset) else {
-                        return INVALID_ARGUMENT;
-                    };
-                    // SAFETY: The caller supplied writable output storage.
-                    unsafe { host_address.write(host as *const c_void) };
-                    return SUCCESS;
-                }
+        match loaded_host_range(runtime, device_address as usize, 1) {
+            Ok(Some(host)) => {
+                // SAFETY: The caller supplied writable output storage.
+                unsafe { host_address.write(host as *const c_void) };
+                SUCCESS
             }
+            Ok(None) | Err(_) => INVALID_ARGUMENT,
         }
-        INVALID_ARGUMENT
     })
 }
 
@@ -2577,10 +2734,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_code_object_reader_create_from_file_
             handle,
             Reader {
                 bytes: bytes.into(),
-                storage: ReaderStorage::File {
-                    descriptor: file,
-                    offset,
-                },
+                storage: ReaderStorage::from_file(file, offset, size),
             },
         );
         // SAFETY: The caller supplied writable output storage.
@@ -2981,15 +3135,7 @@ mod tests {
                 let _ = code_object_version(layout);
                 let _ = parse_symbols(bytes, layout, &[SECTION_SYMTAB, SECTION_DYNSYM]);
                 let mut image = [0_u8; 256];
-                let _ = apply_relocations(
-                    bytes,
-                    layout.section_offset,
-                    layout.section_entry_size,
-                    layout.section_count,
-                    0x100,
-                    0x1000,
-                    &mut image,
-                );
+                let _ = apply_relocations(bytes, layout, 0x100, 0x1000, &mut image, |_| None);
             }
         }
     }
@@ -2997,18 +3143,25 @@ mod tests {
     #[test]
     fn applies_relative_and_defined_absolute_relocations() {
         const SECTION_ENTRY_SIZE: usize = 64;
-        const SECTION_COUNT: usize = 3;
+        const SECTION_COUNT: usize = 4;
         const SYMBOL_OFFSET: usize = SECTION_ENTRY_SIZE * SECTION_COUNT;
         const RELOCATION_OFFSET: usize = SYMBOL_OFFSET + 48;
-        let mut bytes = vec![0_u8; RELOCATION_OFFSET + 48];
+        const STRING_OFFSET: usize = RELOCATION_OFFSET + 48;
+        let mut bytes = vec![0_u8; STRING_OFFSET + 1];
 
         let symbol_section = SECTION_ENTRY_SIZE;
         write_u32(&mut bytes, symbol_section + 4, SECTION_DYNSYM);
         write_u64(&mut bytes, symbol_section + 24, SYMBOL_OFFSET as u64);
         write_u64(&mut bytes, symbol_section + 32, 48);
+        write_u32(&mut bytes, symbol_section + 40, 3);
         write_u64(&mut bytes, symbol_section + 56, 24);
         write_u16(&mut bytes, SYMBOL_OFFSET + 24 + 6, 1);
         write_u64(&mut bytes, SYMBOL_OFFSET + 24 + 8, 0x140);
+
+        let string_section = SECTION_ENTRY_SIZE * 3;
+        write_u32(&mut bytes, string_section + 4, SECTION_STRTAB);
+        write_u64(&mut bytes, string_section + 24, STRING_OFFSET as u64);
+        write_u64(&mut bytes, string_section + 32, 1);
 
         let relocation_section = SECTION_ENTRY_SIZE * 2;
         write_u32(&mut bytes, relocation_section + 4, SECTION_RELA);
@@ -3037,16 +3190,18 @@ mod tests {
         write_i64(&mut bytes, RELOCATION_OFFSET + 40, 8);
 
         let mut image = [0_u8; 256];
+        let layout = ElfLayout {
+            abi_version: 0,
+            flags: 0,
+            program_offset: 0,
+            program_entry_size: 0,
+            program_count: 0,
+            section_offset: 0,
+            section_entry_size: SECTION_ENTRY_SIZE,
+            section_count: SECTION_COUNT,
+        };
         assert_eq!(
-            apply_relocations(
-                &bytes,
-                0,
-                SECTION_ENTRY_SIZE,
-                SECTION_COUNT,
-                0x100,
-                0x1000,
-                &mut image,
-            ),
+            apply_relocations(&bytes, layout, 0x100, 0x1000, &mut image, |_| None,),
             Ok(())
         );
         assert_eq!(read_u64(&image, 0x20), Some(0x1080));
