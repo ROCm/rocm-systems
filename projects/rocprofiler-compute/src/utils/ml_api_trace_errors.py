@@ -163,7 +163,7 @@ class MarkerNotNestedError(MlApiTraceError):
         self,
         operator_name: str,
         thread_id: str,
-        start_timestamp: object,
+        start_timestamp: float,
     ) -> None:
         self.operator_name = operator_name
         self.thread_id = thread_id
