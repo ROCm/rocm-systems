@@ -407,7 +407,7 @@ compute_queue_t::update_waves ()
 
     wave->set_mark (wave_mark);
     wave->workgroup ().set_mark (wave_mark);
-    wave->workgroup ().cluster ().set_mark (wave_mark);
+    wave->cluster ().set_mark (wave_mark);
   };
 
   process_t &process = this->process ();
