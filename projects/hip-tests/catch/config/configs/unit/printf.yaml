@@ -2,12 +2,11 @@
 printf:
   Unit_Printf_flags_Sanity_Positive:
     <<: *level_default
-    # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/274
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - needs to be further investigated. Fails in external CI for hip-tests PR 274. gfx1201 (amd_windows) FAIL: proc.getOutput() == reference -> '00000042 -0000042 00000042 0123.456 +0000042 -42 +0000042 xyzzy -42 42 00000042 00000042 052 0x2a 0X2A 42.000000 4.200000e+01."
   Unit_Printf_length_Sanity_Positive:
     <<: *level_default
-    # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/274
-    disabled: [amd_windows, amd_wsl]
   Unit_Printf_specifier_Sanity_Positive: *level_default
   Unit_Printf_Negative_Parameters_RTC: *level_default
   Unit_Buffered_Printf_Flags: *level_default

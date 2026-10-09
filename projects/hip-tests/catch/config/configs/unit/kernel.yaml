@@ -11,8 +11,6 @@ kernel:
     tags: [attributes, P1]
   Unit_hipDynamicShared:
     <<: *level_default
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
     tags: [memory, P0]
   Unit_hipDynamicShared2:
     <<: *level_default
@@ -85,7 +83,9 @@ kernel:
     tags: [launch, P1]
   Unit_hipGridLaunch_ExceedMaxGridDim_Negative:
     <<: *level_default
-    disabled: [amd_windows, amd_linux, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_linux, amd_wsl]
+      reason: "AIRUNTIME-2892 - needs to be further investigated; see also AIRUNTIME-2862. gfx1030 (amd_linux) FAIL 3/3: hipErrorInvalidConfiguration not returned for an oversize grid. gfx1201 (amd_windows) FAIL: err == hipErrorInvalidConfiguration -> 0 == 9. gfx1201 (amd_wsl) FAIL: err == hipErrorInvalidConfiguration -> 0 == 9."
     tags: [launch]
   Unit_hipExtDynDataPrefetch_NegativeTests:
     <<: *level_default
@@ -101,8 +101,13 @@ kernel:
     tags: [launch, P1]
   Unit_KernelStackSize:
     <<: *level_default
+    unsupported:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2744 - unit/kernel/CMakeLists.txt adds hipKernelStackSize.cc only if(UNIX), so it is never built or run on native Windows."
+    disabled:
+      targets: [amd_linux, amd_wsl]
+      reason: "AIRUNTIME-2892 - needs to be further investigated. Source hipKernelStackSize.cc is arch-gated to gfx1250/gfx1251 (unit/kernel/CMakeLists.txt); it compiles into the fat multi-arch build (arch list includes gfx1250) and runs/passes on gfx1030, but is intended for gfx1250/gfx1251. gfx1201 (amd_wsl) FAIL: false -> false. Needs re-triage on amd_linux and on gfx1250/gfx1251."
     tags: [P0]
-    disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_Validate_User_Sgpr_Count:
     <<: *level_default
   Unit_hipGridLaunch_MaxGridDim_DeviceProperties:

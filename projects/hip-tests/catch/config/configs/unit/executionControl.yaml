@@ -2,8 +2,9 @@
 executionControl:
   Unit_hipFuncGetAttributes_Positive_Basic:
     <<: *level_default
-    # NOTE: The following test is disabled due to defect - EXSWHTEC-242
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_linux, amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2892 - needs to be further investigated; relates to defect EXSWHTEC-242. gfx1030 (amd_linux) FAIL 3/3: attr.constSizeBytes != kConstSizeBytes. gfx1201 (amd_windows) FAIL: attr.constSizeBytes == kConstSizeBytes -> 18446744073709551615 (0xffffffffffffffff) == 128. gfx1201 (amd_wsl) FAIL: attr.constSizeBytes == kConstSizeBytes -> 18446744073709551615 (0xffffffffffffffff) == 128."
     tags: [attributes, kernel]
   Unit_hipFuncGetAttributes_Negative_Parameters:
     <<: *level_default
@@ -16,8 +17,6 @@ executionControl:
     tags: [kernel, launch]
   Unit_hipLaunchKernel_Negative_Parameters:
     <<: *level_default
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
     tags: [kernel, launch]
   Unit_hipLaunchKernel_Verify_Capture: *level_default
   Unit_hipLaunchCooperativeKernel_Positive_Basic:
@@ -56,9 +55,10 @@ executionControl:
     tags: [kernel, launch]
   Unit_hipExtLaunchMultiKernelMultiDevice_Negative_Parameters:
     <<: *level_default
+    disabled:
+      targets: [amd_linux, amd_wsl]
+      reason: "AIRUNTIME-2892 - needs to be further investigated; disabled due to defect EXSWHTEC-244. gfx1201 (amd_wsl) FAIL: localError == hipErrorInvalidValue -> 101 == 1. Needs re-triage on amd_linux."
     tags: [kernel, launch]
-    # NOTE: The following test is disabled due to defect - EXSWHTEC-244
-    disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_hipExtLaunchMultiKernelMultiDevice_Negative_MultiKernelSameDevice:
     <<: *level_default
     tags: [kernel, launch]
@@ -74,7 +74,6 @@ executionControl:
   Unit_hipLaunchByPtr_Verify_Capture: *level_default
   Unit_hipGetProcAddress_KernelLaunchApis:
     <<: *level_default
-    disabled: [amd_wsl]
     tags: [kernel]
   Unit_hipGetProcAddress_CallbackActivityAPIs:
     <<: *level_default
@@ -84,21 +83,21 @@ executionControl:
     tags: [kernel]
   Unit_hipFuncSetCacheConfig_Positive_Basic:
     <<: *level_default
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
     tags: [attributes, kernel]
   Unit_hipFuncSetCacheConfig_Negative_Parameters:
     <<: *level_default
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
     tags: [attributes, kernel]
   Unit_hipFuncSetCacheConfig_Positive_VerifyCarveoutMapping:
     <<: *level_default
     tags: [attributes, kernel, P1]
   Unit_hipFuncSetSharedMemConfig_Positive_Basic:
     <<: *level_default
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    unsupported:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2744 - not built on amd_wsl: hipFuncSetSharedMemConfig tests are compiled only on non-AMD (NVIDIA) platforms per the HIP_PLATFORM gate in unit/executionControl/CMakeLists.txt."
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2744 - intermittent segfault failure. Needs re-triage on amd_windows."
     tags: [attributes, kernel]
   Unit_hipFuncSetSharedMemConfig_Negative_Parameters:
     <<: *level_default
@@ -111,8 +110,12 @@ executionControl:
     tags: [attributes, kernel]
   Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout:
     <<: *level_default
-    # Note: intermittent Seg fault failure
-    disabled: [amd_windows, amd_wsl]
+    unsupported:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-2744 - not built on amd_wsl: hipFuncSetAttribute tests are compiled only on non-AMD (NVIDIA) platforms per the HIP_PLATFORM gate in unit/executionControl/CMakeLists.txt."
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2744 - intermittent segfault failure. Needs re-triage on amd_windows."
     tags: [attributes, kernel]
   Unit_hipFuncSetAttribute_Positive_Parameters:
     <<: *level_default
