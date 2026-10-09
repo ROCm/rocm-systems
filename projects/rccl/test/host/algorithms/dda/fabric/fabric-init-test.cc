@@ -53,8 +53,12 @@ static ncclResult_t InitCalloc(T** ptr, size_t nelem, const char* file, int line
   if (ret == ncclSuccess && *ptr != nullptr) g_initHostLive[*ptr] = nelem * sizeof(T);
   return ret;
 }
+static int g_initBadFrees = 0;
 static void InitFree(void* ptr) {
-  g_initHostLive.erase(ptr);
+  if (ptr != nullptr && g_initHostLive.erase(ptr) == 0) {
+    ++g_initBadFrees;
+    return;
+  }
   std::free(ptr);
 }
 
@@ -154,6 +158,7 @@ class DdaFabricCommTest : public FabricLedgerTest {
     if (HasFatalFailure()) return;
     SetMicroEnvAbsent("RCCL_DDA_FABRIC_MAXBLOCKS");
     g_initHostLive.clear();
+    g_initBadFrees = 0;
     // Host-to-host copies must land inside a tracked host block.
     auto ledgerCopy = g_hipMemcpy;
     g_hipMemcpy = [this, ledgerCopy](void* dst, const void* src, size_t n, hipMemcpyKind kind) {
@@ -201,9 +206,11 @@ class DdaFabricCommTest : public FabricLedgerTest {
   }
 
   ::testing::AssertionResult HostClean() const {
-    if (g_initHostLive.empty() && hostCopiesRefused_ == 0) return ::testing::AssertionSuccess();
+    if (g_initHostLive.empty() && hostCopiesRefused_ == 0 && g_initBadFrees == 0) {
+      return ::testing::AssertionSuccess();
+    }
     return ::testing::AssertionFailure() << g_initHostLive.size() << " host allocations live; " << hostCopiesRefused_
-                                         << " host copies refused";
+                                         << " host copies refused; " << g_initBadFrees << " bad frees";
   }
 
   ::testing::AssertionResult AllReleased() const {
@@ -362,12 +369,12 @@ TEST_F(DdaFabricCommInitTest, CommInit_AllSucceed_PeersMapTheWholeScratch) {
   bufferSize_ = kUnalignedScratch;
   ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
   auto* const* dev = static_cast<void* const*>(comm_->ddaPeerPtrsDev);  // host stand-in
-  const size_t ownSize = ledger_.reserved.at(comm_->ddaScratch);
+  const size_t ownSize = ledger_.mappedSize.at(comm_->ddaScratch);
 
   for (int i = 0; i < kNRanks; ++i) {
     if (i == kRank) continue;
-    ASSERT_EQ(ledger_.reserved.count(dev[i]), 1u) << "peer " << i;
-    EXPECT_EQ(ledger_.reserved.at(dev[i]), ownSize) << "peer " << i;
+    ASSERT_EQ(ledger_.mappedSize.count(dev[i]), 1u) << "peer " << i;
+    EXPECT_EQ(ledger_.mappedSize.at(dev[i]), ownSize) << "peer " << i;
   }
 }
 
@@ -427,9 +434,12 @@ TEST_F(DdaFabricCommInitTest, CommInit_WithManager_TracksScratchAndUntracksPeerM
   comm_->memManager = manager;
   std::vector<std::pair<ncclMemManager*, void*>> tracked;
   std::vector<std::pair<ncclMemManager*, void*>> untracked;
-  ScopedHook track(g_memTrack, [&tracked](ncclMemManager* m, void* ptr, size_t, hipMemGenericAllocationHandle_t,
-                                          hipMemAllocationHandleType, ncclMemType_t) {
+  std::vector<hipMemAllocationHandleType> types;
+  ScopedHook track(g_memTrack, [&tracked, &types](ncclMemManager* m, void* ptr, size_t,
+                                                  hipMemGenericAllocationHandle_t, hipMemAllocationHandleType type,
+                                                  ncclMemType_t) {
     tracked.push_back({m, ptr});
+    types.push_back(type);
     return ncclSuccess;
   });
   auto untrackLive = g_memUntrackDynamic;
@@ -451,7 +461,9 @@ TEST_F(DdaFabricCommInitTest, CommInit_WithManager_TracksScratchAndUntracksPeerM
   auto has = [](const std::vector<std::pair<ncclMemManager*, void*>>& v, ncclMemManager* m, void* p) {
     return std::find(v.begin(), v.end(), std::make_pair(m, p)) != v.end();
   };
-  EXPECT_TRUE(has(tracked, manager, scratch)) << "scratch not tracked in the comm's manager";
+  auto it = std::find(tracked.begin(), tracked.end(), std::make_pair(manager, scratch));
+  ASSERT_NE(it, tracked.end()) << "scratch not tracked in the comm's manager";
+  EXPECT_EQ(types[it - tracked.begin()], ncclCuMemHandleType);
   EXPECT_TRUE(has(untracked, manager, scratch)) << "scratch not untracked from the comm's manager";
   for (void* peer : peers) {
     EXPECT_TRUE(has(untracked, manager, peer)) << "peer mapping " << peer << " not untracked";

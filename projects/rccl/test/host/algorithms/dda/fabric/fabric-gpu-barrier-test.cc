@@ -219,13 +219,13 @@ TEST_F(FabricGpuBarrierTest, MallocAndInit_AllSucceed_PeersMapTheWholeFlagBuffer
   InitResult& r = Init(kNRanks, kRank, kManyBlocks);
   ASSERT_NE(r.first, nullptr);
   auto* const* table = static_cast<FlagType* const*>(r.first->peerFlagsDev->get());
-  const size_t ownSize = ledger_.reserved.at(r.first->selfFlagBuf->get());
+  const size_t ownSize = ledger_.mappedSize.at(r.first->selfFlagBuf->get());
   ASSERT_GE(ownSize, FlagBytes(kNRanks, kManyBlocks));
 
   for (int i = 0; i < kNRanks; ++i) {
     if (i == kRank) continue;
-    ASSERT_EQ(ledger_.reserved.count(table[i]), 1u) << "peer " << i;
-    EXPECT_EQ(ledger_.reserved.at(table[i]), ownSize) << "peer " << i;
+    ASSERT_EQ(ledger_.mappedSize.count(table[i]), 1u) << "peer " << i;
+    EXPECT_EQ(ledger_.mappedSize.at(table[i]), ownSize) << "peer " << i;
   }
 }
 
@@ -274,9 +274,12 @@ TEST_F(FabricGpuBarrierTest, MallocAndInit_WithManager_TracksFlagBufferAndUntrac
   auto manager = std::make_unique<ncclMemManager>();
   std::vector<std::pair<ncclMemManager*, void*>> tracked;
   std::vector<std::pair<ncclMemManager*, void*>> untracked;
-  ScopedHook track(g_memTrack, [&tracked](ncclMemManager* m, void* ptr, size_t, hipMemGenericAllocationHandle_t,
-                                          hipMemAllocationHandleType, ncclMemType_t) {
+  std::vector<hipMemAllocationHandleType> types;
+  ScopedHook track(g_memTrack, [&tracked, &types](ncclMemManager* m, void* ptr, size_t,
+                                                  hipMemGenericAllocationHandle_t, hipMemAllocationHandleType type,
+                                                  ncclMemType_t) {
     tracked.push_back({m, ptr});
+    types.push_back(type);
     return ncclSuccess;
   });
   auto untrackLive = g_memUntrackDynamic;
@@ -296,12 +299,22 @@ TEST_F(FabricGpuBarrierTest, MallocAndInit_WithManager_TracksFlagBufferAndUntrac
 
   result_.first.reset();
 
-  EXPECT_NE(std::find(tracked.begin(), tracked.end(), std::make_pair(manager.get(), flags)), tracked.end())
-      << "flag buffer not tracked in the given manager";
+  auto it = std::find(tracked.begin(), tracked.end(), std::make_pair(manager.get(), flags));
+  ASSERT_NE(it, tracked.end()) << "flag buffer not tracked in the given manager";
+  EXPECT_EQ(types[it - tracked.begin()], ncclCuMemHandleType);
   for (void* peer : peers) {
     EXPECT_NE(std::find(untracked.begin(), untracked.end(), std::make_pair(manager.get(), peer)), untracked.end())
         << "peer mapping " << peer << " not untracked from the given manager";
   }
+}
+
+TEST_F(FabricGpuBarrierTest, HipVmmLedger_FreeOfUntrackedBuffer_IsRefused) {
+  int notAllocated = 0;
+
+  EXPECT_NE(hipFree(&notAllocated), hipSuccess);
+
+  EXPECT_EQ(ledger_.rejected.size(), 1u);
+  ledger_.rejected.clear();
 }
 
 // ---------------------------------------------------------------------------

@@ -224,8 +224,17 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `transport/p2p.cc` shareable-buffer entry points that `rccl-UnitTestsMicro`
   compiles for real. See `test_categories_micro_diagnostics.yaml`.
 
-- **`rccl-UnitTestsMicroDda`**: `src/algorithms/dda/`. Tests mirror the source
-  tree under `test/host/algorithms/`. See `test_categories_micro_dda.yaml`.
+- **`rccl-UnitTestsMicroDda`** — `src/algorithms/dda/`, one binary because the
+  units share the cuMem VMM and bootstrap seams; tests mirror the source tree
+  under `test/host/algorithms/`. See `test_categories_micro_dda.yaml`.
+  - `fabric/fabric_mem_handler.cc` (`FABRIC_MEM_HANDLER_CC_PATH`, from
+    `fabric-mem-handler-test.cc`); suite `FabricMemHandlerTest.*`.
+  - `fabric/fabric_gpu_barrier.cu` (`FABRIC_GPU_BARRIER_CC_PATH`, from
+    `fabric-gpu-barrier-test.cc`); suites `FabricGpuBarrierTest.*`,
+    `Geometry/FabricGpuBarrier*GeometryTest.*`.
+  - `fabric/fabric_init.cu` (`FABRIC_INIT_CC_PATH`, from `fabric-init-test.cc`);
+    suites `DdaUseFabricPathTest.*`, `DdaFabricComm*Test.*` and their `Arch/`,
+    `Skip/`, `Step/` instantiations.
 
 Everything below (seams, fakes, coverage) applies to all of them; the concrete examples
 use `p2p.cc`.
@@ -344,7 +353,7 @@ symbol.
 
 | Production TU | Fakes file |
 |---|---|
-| `src/algorithms/dda/*.cc` | `fakes/dda_fakes.cc` |
+| `src/algorithms/dda/*.cc` (targets that do not compile the real file) | `fakes/dda_fakes.cc` |
 | `src/allocator.cc` | `fakes/allocator_fakes.cc` |
 | `src/bootstrap.cc` | `fakes/bootstrap_stubs.cc` |
 | `src/ce_coll.cc` | `fakes/ce_fakes.cc` |

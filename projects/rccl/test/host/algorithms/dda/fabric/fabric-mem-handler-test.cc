@@ -236,9 +236,9 @@ TEST_F(FabricMemHandlerTest, ExchangeMemPtrs_MapsEachPeerToItsImportedHandleAtIt
     if (r == kRank) continue;
     void* p = PeerPtr(r);
     ASSERT_EQ(ledger_.mappedHandle.count(p), 1u) << "peer " << r;
-    ASSERT_EQ(ledger_.reserved.count(p), 1u) << "peer " << r;
+    ASSERT_EQ(ledger_.mappedSize.count(p), 1u) << "peer " << r;
     EXPECT_EQ(ledger_.mappedHandle.at(p), HandleForDesc(PeerDesc(r))) << "peer " << r;
-    EXPECT_EQ(ledger_.reserved.at(p), PeerSize(r)) << "peer " << r;
+    EXPECT_EQ(ledger_.mappedSize.at(p), PeerSize(r)) << "peer " << r;
   }
 }
 

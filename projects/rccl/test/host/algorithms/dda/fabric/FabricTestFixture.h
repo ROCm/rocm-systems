@@ -44,9 +44,7 @@ class FabricLedgerTest : public ::testing::Test {
 
   ::testing::AssertionResult LedgerClean() const {
     if (ledger_.Clean()) return ::testing::AssertionSuccess();
-    return ::testing::AssertionFailure() << ledger_.reserved.size() << " reservations, " << ledger_.liveHandles.size()
-                                         << " handles, " << ledger_.liveBuffers.size() << " buffers live; "
-                                         << ledger_.rejected.size() << " calls refused";
+    return ::testing::AssertionFailure() << ledger_.Summary();
   }
 
   HipVmmLedger ledger_;
