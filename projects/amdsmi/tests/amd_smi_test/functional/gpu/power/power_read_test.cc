@@ -55,6 +55,13 @@ void TestPowerRead::Run(void) {
     for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
       PrintDeviceHeader(processor_handles_[i]);
 
+      DISPLAY_AMDSMI_API("amdsmi_get_power_info(nullptr)", "gpu=" + std::to_string(i),
+                         VERB(STANDARD));
+      err = amdsmi_get_power_info(processor_handles_[i], nullptr);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+      // The WSL backend reports NOT_SUPPORTED before checking for a null pointer.
+      ASSERT_TRUE(err == AMDSMI_STATUS_INVAL || err == AMDSMI_STATUS_NOT_SUPPORTED);
+
       amdsmi_power_cap_info_t info;
       DISPLAY_AMDSMI_API("amdsmi_get_power_cap_info", "gpu=" + std::to_string(i), VERB(STANDARD));
       err = amdsmi_get_power_cap_info(processor_handles_[i], 0, &info);

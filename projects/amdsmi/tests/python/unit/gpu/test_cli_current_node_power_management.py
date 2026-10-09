@@ -2,35 +2,13 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Mock-based unit tests for the ``CURRENT_NODE_POWER`` field in ``amd-smi node -p``.
+"""Mock-based unit tests for ``CURRENT_NODE_POWER`` in ``amd-smi node -p``.
 
-current_node_power moved from amdsmi_power_info_t (per-GPU, amd-smi metric
---power) to amdsmi_npm_info_t (per-node, amd-smi node -p /
-amdsmi_get_npm_info()) -- see the "Set npm power limit" design doc. This file
-replaces the previous test_metric_power_node_power.py, which exercised the
-now-removed amd-smi metric --power NODE_POWER surface.
-
-``NodeCommands.node()`` in ``amdsmi_cli/subcommands/node.py`` now seeds
-``npm_dict["current_node_power"] = "N/A"`` and, on a successful
-``amdsmi_get_npm_info()`` call, overwrites it with
-``npm_info.get("current_node_power", "N/A")`` -- directly mirroring the
-pre-existing ``threshold``/``limit`` fields it sits next to. These tests
-drive the real ``NodeCommands.node()`` dispatch (stubbing only the
-underlying ``amdsmi`` package, per the
-``test_vcn_busy_navi.py``/``test_cli_set_clk_limit.py`` stub-and-importlib
-pattern) and assert ``current_node_power`` is present with the correct
-format/value across all output modes:
-
-* human-readable: unit-suffixed string printed as ``CURRENT_NODE_POWER: 5800 W``.
-* JSON/file output: ``{"value": 5800, "unit": "W"}`` (unit_format's json
-  branch), nested under ``power_management``.
-* CSV: the raw value (unit_format is not applied on the CSV path).
-
-Also covers the "N/A" sentinel pass-through (key absent from the library's
-dict, or explicitly UINT32_MAX-turned-"N/A" upstream in
-``amdsmi_get_npm_info()``'s Python wrapper) and the
-``AmdSmiLibraryException`` fallback path (whole npm_dict stays at its "N/A"
-defaults, current_node_power included).
+Drives the real ``NodeCommands.node()`` with the ``amdsmi`` package stubbed and
+checks the new ``current_node_power`` field from ``amdsmi_get_npm_info()``:
+human-readable, JSON, and CSV output, "N/A" pass-through, the
+``AmdSmiLibraryException`` fallback, and that the CSV ``node`` column is emitted
+only with ``-p``.
 """
 
 import argparse
@@ -68,6 +46,7 @@ def _build_fake_modules():
         "amdsmi.amdsmi_interface",
         amdsmi_wrapper=wrapper,
         amdsmi_get_npm_info=lambda _h: dict(_DEFAULT_NPM_INFO),
+        amdsmi_get_tray_info=lambda: {"max_acc_per_tray": 4, "tray_type": "OAM"},
     )
     exception = fake_module("amdsmi.amdsmi_exception", AmdSmiLibraryException=_FakeLibraryException)
     amdsmi_pkg = fake_module(
@@ -138,7 +117,7 @@ def _build_node_args(**overrides):
     return argparse.Namespace(**defaults)
 
 
-def _run_node(node_module, output_format="human", destination="stdout"):
+def _run_node(node_module, output_format="human", destination="stdout", **arg_overrides):
     helpers = _FakeHelpers()
     logger = _FakeLogger(output_format=output_format, destination=destination)
     commands = object.__new__(node_module.NodeCommands)
@@ -147,7 +126,7 @@ def _run_node(node_module, output_format="human", destination="stdout"):
     commands.group_check_printed = True
     commands.node_handle = object()
 
-    commands.node(_build_node_args())
+    commands.node(_build_node_args(**arg_overrides))
     return logger, commands
 
 
@@ -187,8 +166,19 @@ class TestNodePowerManagementCurrentNodePower(unittest.TestCase):
         _, commands = _run_node(self.node_module, output_format="csv", destination="file")
         # CSV path stores raw values, no unit_format applied.
         self.assertEqual(commands.logger.output["current_node_power"], 5800)
-        # CSV rows always lead with a device identifier, mirroring gpu/cpu/nic.
         self.assertEqual(commands.logger.output["node"], 0)
+        self.assertEqual(next(iter(commands.logger.output)), "node")
+
+    def test_csv_omits_node_column_without_power_management(self):
+        _, commands = _run_node(
+            self.node_module,
+            output_format="csv",
+            destination="file",
+            power_management=False,
+            tray=True,
+        )
+        self.assertNotIn("node", commands.logger.output)
+        self.assertEqual(commands.logger.output["tray_type"], "OAM")
 
     def test_current_node_power_na_key_absent_from_library_dict(self):
         # If current_node_power is missing from the dict entirely (e.g. an

@@ -2120,7 +2120,7 @@ class SetValueCommands:
             process_isolation (int, optional): Value override for args.process_isolation. Defaults to None.
         Raises:
             AmdSmiRequiredCommandException: If no device target or argument is provided
-            AmdSmiInvalidParameterException: If GPU/CPU/CORE arguments are combined or --gtt is misused
+            AmdSmiInvalidParameterException: If GPU/CPU/CORE arguments are combined or --gtt/--node-power-limit is misused
             PermissionError: If a set operation requires elevation (AMDSMI_STATUS_NO_PERM)
 
         Return:
@@ -2172,17 +2172,21 @@ class SetValueCommands:
         # Special node power limit handling (node-wide, not per-GPU) — handle before device dispatch
         if hasattr(args, "node_power_limit") and args.node_power_limit is not None:
             if hasattr(args, "gpu") and args.gpu is not None:
-                print(
+                msg = (
                     "amd-smi set: error: argument --node-power-limit/-n: not allowed with "
-                    "argument --gpu/-g (--node-power-limit is a node-wide setting, not per-GPU)",
-                    file=sys.stderr,
+                    "argument --gpu/-g (--node-power-limit is a node-wide setting, not per-GPU)"
                 )
-                sys.exit(2)
+                raise AmdSmiInvalidParameterException(
+                    "set", "--node-power-limit", self.helpers.get_output_format(), msg
+                )
             requested_limit = args.node_power_limit
             if self.node_handle is None:
                 self.logger.output["set_node_power_limit"] = (
                     "[AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported] "
                     "Unable to set node power limit: no NPM-capable node found"
+                )
+                self.helpers.error_collector.record_library_error(
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
                 )
                 self.logger.print_output()
                 return
