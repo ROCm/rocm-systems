@@ -1,29 +1,36 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { historyRanges } from '../config/historyRanges.js';
+import { dashboardPages } from '../config/dashboardPages.js';
 
 const FILTER_STORAGE_KEY = 'rocjitsu-dashboard-filters';
 const BENCHMARK_STORAGE_KEY = 'rocjitsu-dashboard-benchmarks';
-const pages = new Set(['overview', 'branch', 'benchmarks', 'compare']);
+const pages = new Set(dashboardPages.map(({ id }) => id));
 const ranges = new Set(historyRanges.map(({ id }) => id));
+const filterKeys = ['targets', 'suites', 'modes'];
+const comparisonUrlKeys = { targets: 'compareTargets', suites: 'compareSuites', modes: 'compareModes' };
 const emptyBranchSelection = { branch: null, candidateId: null, referenceId: null, manual: false, target: null, mode: null, detail: false };
 
 export function readDashboardRoute(href = globalThis.window?.location?.href ?? 'http://localhost/') {
-  const preferences = {};
   const errors = [];
   let params;
   try { params = new URL(href).searchParams; } catch {
     params = new URLSearchParams();
     errors.push('Invalid dashboard URL.');
   }
-  for (const key of ['targets', 'suites', 'modes']) {
-    const values = params.getAll(key);
-    if (!values.length) preferences[key] = null;
-    else if (values.length === 1 && values[0] === '') preferences[key] = [];
+  const readScope = (names) => Object.fromEntries(filterKeys.map((key) => {
+    const name = names[key];
+    const values = params.getAll(name);
+    let selection;
+    if (!values.length) selection = null;
+    else if (values.length === 1 && values[0] === '') selection = [];
     else if (values.some((value) => !value || (key === 'modes' && !['ST', 'MT'].includes(value))) || new Set(values).size !== values.length) {
-      preferences[key] = [];
-      errors.push(`Invalid ${key} selection in this URL.`);
-    } else preferences[key] = values;
-  }
+      selection = [];
+      errors.push(`Invalid ${name} selection in this URL.`);
+    } else selection = values;
+    return [key, selection];
+  }));
+  const preferences = readScope(Object.fromEntries(filterKeys.map((key) => [key, key])));
+  const comparisonPreferences = Object.values(comparisonUrlKeys).some((key) => params.has(key)) ? readScope(comparisonUrlKeys) : null;
   const field = (key, fallback, allowed) => {
     const values = params.getAll(key);
     if (!values.length) return fallback;
@@ -40,6 +47,7 @@ export function readDashboardRoute(href = globalThis.window?.location?.href ?? '
     tab: field('view', 'overview', pages),
     historyRange: field('range', 'ALL', ranges),
     preferences,
+    comparisonPreferences,
     branchSelection: {
       ...emptyBranchSelection,
       branch: field('branch', null),
@@ -76,12 +84,14 @@ export function buildDashboardUrl(href, snapshot) {
     if (value == null) params.delete(key);
     else params.set(key, value);
   }
-  for (const key of ['targets', 'suites', 'modes']) {
-    params.delete(key);
-    const values = snapshot.preferences[key];
-    if (values !== null) {
-      if (!values.length) params.set(key, '');
-      else values.forEach((value) => params.append(key, value));
+  for (const key of filterKeys) {
+    for (const [name, scope] of [[key, snapshot.preferences], [comparisonUrlKeys[key], snapshot.comparisonPreferences]]) {
+      params.delete(name);
+      const values = scope?.[key];
+      if (values != null) {
+        if (!values.length) params.set(name, '');
+        else values.forEach((value) => params.append(name, value));
+      }
     }
   }
   return url.href;
@@ -115,10 +125,19 @@ function readBenchmarkSelection() {
 function readInitialState() {
   const route = readDashboardRoute(globalThis.window?.location?.href ?? 'http://localhost/');
   const saved = readFilters();
+  const preferences = Object.fromEntries(Object.keys(saved).map((key) => [key, route.preferences[key] ?? saved[key]]));
   return {
     ...route,
-    preferences: Object.fromEntries(Object.keys(saved).map((key) => [key, route.preferences[key] ?? saved[key]])),
+    preferences,
+    comparisonPreferences: route.comparisonPreferences ?? (route.tab === 'compare' ? { ...preferences } : null),
   };
+}
+
+// Copy defaults only once options arrive; never freeze empty bootstrap data.
+function snapshotScope(data, preferences) {
+  return Object.fromEntries(filterKeys.map((key) => [key,
+    preferences[key] ?? (data[key]?.length ? [...data[key]] : null),
+  ]));
 }
 
 function selectFilters(data, preferences) {
@@ -142,10 +161,16 @@ const resolveNext = (next, current) => typeof next === 'function' ? next(current
 export function useDashboardState(data) {
   // One route snapshot makes branch/pair/scope transitions atomic. Null filters
   // stay uninitialized through bootstrap; [] always means an intentional empty.
-  const [snapshot, setSnapshot] = useState(readInitialState);
+  const [snapshot, setSnapshot] = useState(() => {
+    const initial = readInitialState();
+    return { ...initial, comparisonPreferences: initial.comparisonPreferences && snapshotScope(data, initial.comparisonPreferences) };
+  });
   const snapshotRef = useRef(snapshot);
-  const { preferences, branchSelection, historyRange, tab, comparisonBaselineId, comparisonCandidateId, routeError } = snapshot;
-  const filters = useMemo(() => selectFilters(data, preferences), [data, preferences]);
+  const { preferences, comparisonPreferences, branchSelection, historyRange, tab, comparisonBaselineId, comparisonCandidateId, routeError } = snapshot;
+  // The shell and active page share these filters; only canonical preferences
+  // are stored. Comparison scope remains an independent part of the URL snapshot.
+  const activePreferences = tab === 'compare' ? comparisonPreferences ?? preferences : preferences;
+  const filters = useMemo(() => selectFilters(data, activePreferences), [data, activePreferences]);
 
   // Resolve updates against the last event, not a stale render. History writes
   // are never inside React's functional state updater (StrictMode replays it).
@@ -165,24 +190,28 @@ export function useDashboardState(data) {
     tab: 'compare',
     comparisonCandidateId: candidateId,
     comparisonBaselineId: baselineId,
-    preferences: {
-      ...current.preferences,
+    comparisonPreferences: {
+      ...snapshotScope(data, current.comparisonPreferences ?? current.preferences),
       targets: [target],
       modes: [mode],
-      suites: suites === undefined ? current.preferences.suites : suites,
+      ...(suites === undefined ? {} : { suites }),
     },
-  })), [updateRoute]);
+  })), [data, updateRoute]);
 
   const clearRouteError = useCallback(() => updateRoute((current) => ({ ...current, routeError: '' }), 'replaceState'), [updateRoute]);
-  const setFilter = useCallback((key, next) => updateRoute((current) => ({
-    ...current,
-    preferences: { ...current.preferences, [key]: resolveNext(next, selectFilters(data, current.preferences)[key]) },
-  }), 'replaceState'), [data, updateRoute]);
+  const setFilter = useCallback((key, next) => updateRoute((current) => {
+    const field = current.tab === 'compare' ? 'comparisonPreferences' : 'preferences';
+    const scope = current[field] ?? snapshotScope(data, current.preferences);
+    return { ...current, [field]: { ...scope, [key]: resolveNext(next, selectFilters(data, scope)[key]) } };
+  }, 'replaceState'), [data, updateRoute]);
   const setTargets = useCallback((next) => setFilter('targets', next), [setFilter]);
   const setSuites = useCallback((next) => setFilter('suites', next), [setFilter]);
   const setModes = useCallback((next) => setFilter('modes', next), [setFilter]);
   const setHistoryRange = useCallback((next) => updateRoute((current) => ({ ...current, historyRange: resolveNext(next, current.historyRange) }), 'replaceState'), [updateRoute]);
-  const setTab = useCallback((next) => updateRoute((current) => ({ ...current, tab: resolveNext(next, current.tab) })), [updateRoute]);
+  const setTab = useCallback((next) => updateRoute((current) => {
+    const tab = resolveNext(next, current.tab);
+    return { ...current, tab, comparisonPreferences: current.comparisonPreferences ?? (tab === 'compare' ? snapshotScope(data, current.preferences) : null) };
+  }), [data, updateRoute]);
   const setComparisonBaselineId = useCallback((next) => updateRoute((current) => ({ ...current, comparisonBaselineId: resolveNext(next, current.comparisonBaselineId) })), [updateRoute]);
   const setComparisonCandidateId = useCallback((next) => updateRoute((current) => ({ ...current, comparisonCandidateId: resolveNext(next, current.comparisonCandidateId) })), [updateRoute]);
   const setComparisonPair = useCallback((next) => updateRoute((current) => {
@@ -194,6 +223,7 @@ export function useDashboardState(data) {
     const browser = globalThis.window;
     const restore = () => {
       const next = readDashboardRoute(browser.location.href);
+      if (next.tab === 'compare' && !next.comparisonPreferences) next.comparisonPreferences = { ...next.preferences };
       snapshotRef.current = next;
       setSnapshot(next);
     };
@@ -204,11 +234,13 @@ export function useDashboardState(data) {
     return () => browser?.removeEventListener?.('popstate', restore);
   }, []);
   useEffect(() => {
+    if (routeError || !comparisonPreferences || !filterKeys.some((key) => comparisonPreferences[key] === null && data[key]?.length)) return;
+    updateRoute((current) => ({ ...current, comparisonPreferences: snapshotScope(data, current.comparisonPreferences) }), 'replaceState');
+  }, [data, comparisonPreferences, routeError, updateRoute]);
+  useEffect(() => {
     try { globalThis.window?.localStorage?.setItem(FILTER_STORAGE_KEY, JSON.stringify(preferences)); } catch { /* Storage is optional. */ }
   }, [preferences]);
 
-  const [benchmarkMode, setBenchmarkMode] = useState('single');
-  const [search, setSearch] = useState('');
   const [explorerRunIds, setExplorerRunIds] = useState([]);
   // Null is not yet chosen; [] is an explicitly empty grid. Keep full workload
   // definitions here so page/data unmounts cannot discard unavailable identity.
@@ -227,8 +259,6 @@ export function useDashboardState(data) {
     branchSelection,
     routeError,
     clearRouteError,
-    benchmarkMode,
-    search,
     comparisonBaselineId,
     comparisonCandidateId,
     explorerRunIds,
@@ -241,8 +271,6 @@ export function useDashboardState(data) {
     setTab,
     setBranchSelection,
     openComparison,
-    setBenchmarkMode,
-    setSearch,
     setComparisonBaselineId,
     setComparisonCandidateId,
     setExplorerRunIds,

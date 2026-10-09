@@ -9,7 +9,7 @@ import { commitTimestampFor } from '../../data/runOrdering';
 import { historyRanges, historyRangeById } from '../../config/historyRanges';
 import { colorTokens, monoFont } from '../../theme/tokens';
 import { visuallyHiddenStyles } from '../../theme/styles';
-import { trendKeyIndex, nearestTrendIndex, shouldHideTrendPointer } from './overviewPresentation';
+import { trendGapEndpoints, trendKeyIndex, nearestTrendIndex, shouldHideTrendPointer } from './overviewPresentation';
 
 // Inspection text can rerender without replacing ECharts' model or restarting guides.
 const StableTrendChart = memo(Chart);
@@ -71,7 +71,7 @@ export default function DurationHistory({ history, filters, coverage, range, onR
       extraCssText: 'max-width:240px;white-space:normal;overflow-wrap:anywhere;pointer-events:none;',
       axisPointer: { type: 'line', snap: false, animation: false, lineStyle: { color: theme.palette.text.secondary, type: 'dotted', width: 1 } },
       formatter: (parameters) => {
-        const point = (Array.isArray(parameters) ? parameters : [parameters]).find((item) => Number.isFinite(item.value?.[1]));
+        const point = (Array.isArray(parameters) ? parameters : [parameters]).find((item) => (item.seriesIndex == null || item.seriesIndex === 0) && Number.isFinite(item.value?.[1]));
         const run = point && history.slots[point.dataIndex]?.run;
         if (!run) return '';
         return `<strong>${escapeHtml(shortSha(run))}</strong> · ${escapeHtml(formatFullDate(commitTimestampFor(run)))}<br/>Runtime · <strong>${compactDuration(point.value[1] / scale)}</strong>${anchorsFor(run).length ? '<br/>Normalized estimate' : ''}`;
@@ -102,7 +102,7 @@ export default function DurationHistory({ history, filters, coverage, range, onR
     series: series ? [{
       name: 'Selected runtime', type: 'line', encode: { x: 0, y: 1 },
       data: series.data.map((value, index) => [history.slots[index].x, Number.isFinite(value) ? value * scale : null]),
-      smooth: false, connectNulls: true, showSymbol: true, symbol: 'circle', symbolSize: 4,
+      smooth: false, connectNulls: false, showSymbol: true, symbol: 'circle', symbolSize: 4,
       lineStyle: { color: blue, width: 2.5, shadowBlur: 7, shadowOffsetY: 3, shadowColor: `${blue}30` },
       itemStyle: chartPointStyle(blue, theme.palette.background.paper),
       areaStyle: { color: chartAreaGradient(blue, 0.15) },
@@ -116,6 +116,15 @@ export default function DurationHistory({ history, filters, coverage, range, onR
         ],
       },
 
+    }, {
+      type: 'line', encode: { x: 0, y: 1 },
+      data: trendGapEndpoints(series.data).flatMap((endpoints, gapIndex) => [
+        ...(gapIndex ? [[null, null]] : []),
+        ...endpoints.map((index) => [history.slots[index].x, series.data[index] * scale]),
+      ]),
+      smooth: false, connectNulls: false, silent: true, showSymbol: false, symbol: 'none',
+      lineStyle: { color: blue, width: 2.5, type: 'dashed' },
+      tooltip: { show: false }, emphasis: { disabled: true },
     }] : [],
   }), [history, series, theme, scale, blue, baseline, anchorsFor]);
   const events = useMemo(() => ({
@@ -130,7 +139,7 @@ export default function DurationHistory({ history, filters, coverage, range, onR
       }
     },
     click: (event) => {
-      if (event.componentType === 'series') {
+      if (event.componentType === 'series' && event.seriesIndex === 0) {
         const index = nearestTrendIndex(history, history.slots[event.dataIndex]?.x);
         if (index == null) hidePointer();
         else inspect(index);

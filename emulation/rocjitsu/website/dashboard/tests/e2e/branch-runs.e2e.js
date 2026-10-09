@@ -84,9 +84,10 @@ test('branch matrix, diagnostics, manual reference and full comparison share one
   await expect(page.getByTestId('candidate-run-selected-identity')).toContainText('fictional-branch-01');
   await expect(page.getByTestId('baseline-run-selected-identity')).toContainText('fictional-develop-20');
   const params = new URL(page.url()).searchParams;
-  expect(params.getAll('targets')).toEqual(['gfx950']);
-  expect(params.getAll('modes')).toEqual(['MT']);
-  expect(params.getAll('suites')).toEqual(['Triton']);
+  expect(params.getAll('compareTargets')).toEqual(['gfx950']);
+  expect(params.getAll('compareModes')).toEqual(['MT']);
+  expect(params.getAll('compareSuites')).toEqual(['Triton']);
+  for (const key of ['targets', 'modes', 'suites']) expect(params.getAll(key)).toEqual(['']);
   await expect(page.getByTestId('comparison-metric-comparable').getByText('2', { exact: true })).toBeVisible();
   await expect(page.getByTestId('metadata-row-sdk')).toHaveAttribute('data-different', 'true');
   await expect(page.getByTestId('metadata-row-sdk')).not.toContainText('Changed');

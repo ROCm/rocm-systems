@@ -1,6 +1,6 @@
 import { Box, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from '@mui/material';
 import { runEnvironmentDetails } from '../../data/provenance';
-import { shortSha } from '../../utils/formatters';
+import { formatMetadataValue, shortSha } from '../../utils/formatters';
 import { monoFont } from '../../theme/tokens';
 
 function coverage(run, filters) {
@@ -9,11 +9,6 @@ function coverage(run, filters) {
   if (!tests.length) return 'No tests in selected scope';
   const completed = tests.filter((test) => test.status === 'completed' && Number.isFinite(test.durationSeconds)).length;
   return `${completed}/${tests.length} completed`;
-}
-
-function display(value) {
-  if (value == null) return 'Not provided';
-  return typeof value === 'object' ? JSON.stringify(value) : String(value);
 }
 
 export default function RunMetadataDiff({ baseline, candidate, filters }) {
@@ -33,7 +28,7 @@ export default function RunMetadataDiff({ baseline, candidate, filters }) {
       <TableCell component="th" scope="row" sx={{ width: '26%', fontFamily: 'inherit', fontWeight: 500 }}>
         {row.label ?? row.key}
       </TableCell>
-      {['baseline', 'candidate'].map((side) => <TableCell key={side} sx={{ width: '37%', fontFamily: monoFont, borderLeft: 1, borderColor: 'divider', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{display(row[side])}</TableCell>)}
+      {['baseline', 'candidate'].map((side) => <TableCell key={side} sx={{ width: '37%', fontFamily: monoFont, borderLeft: 1, borderColor: 'divider', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{formatMetadataValue(row[side])}</TableCell>)}
     </TableRow>;
   });
   return <>

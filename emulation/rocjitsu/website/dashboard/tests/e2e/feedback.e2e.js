@@ -103,7 +103,7 @@ test('feedback: cursor sweeps keep native guides visible without replacing the t
   }
 });
 
-test('feedback: static trend explanation, connected missing slots, blue commit links and fresh ST+MT defaults', async ({ page }) => {
+test('feedback: static trend explanation, interrupted solid line, blue commit links and fresh ST+MT defaults', async ({ page }) => {
   const errors = errorsFor(page);
   await openDashboard(page);
   await expect(page.getByRole('checkbox', { name: 'ST', exact: true })).toBeChecked();
@@ -113,7 +113,7 @@ test('feedback: static trend explanation, connected missing slots, blue commit l
     const series = instance.getOption().series[0];
     return { connectNulls: series.connectNulls, nulls: series.data.filter((point) => point[1] == null).length, left: instance.getOption().grid[0].left };
   });
-  expect(chart.connectNulls).toBe(true);
+  expect(chart.connectNulls).toBe(false);
   expect(chart.left).toBe(40);
   expect((await trend.getByRole('img').boundingBox()).height).toBe(320);
   expect(await trend.getByRole('group', { name: 'Inspect performance trend' }).evaluate((element) => getComputedStyle(element).marginTop)).toBe('16px');

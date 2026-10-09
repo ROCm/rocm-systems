@@ -5,11 +5,9 @@ import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded';
 import GridViewRoundedIcon from '@mui/icons-material/GridViewRounded';
 import CompareArrowsRoundedIcon from '@mui/icons-material/CompareArrowsRounded';
 import FiltersBar from './FiltersBar';
+import { dashboardPages } from '../../config/dashboardPages';
 
-const pages = [
-  ['overview', 'Overview', ShowChartRoundedIcon], ['branch', 'Branch Runs', AccountTreeRoundedIcon],
-  ['benchmarks', 'Benchmarks', GridViewRoundedIcon], ['compare', 'Run Comparison', CompareArrowsRoundedIcon],
-];
+const pageIcons = { overview: ShowChartRoundedIcon, branch: AccountTreeRoundedIcon, benchmarks: GridViewRoundedIcon, compare: CompareArrowsRoundedIcon };
 
 export default function DashboardShell({ data, state, loading = false, header, children }) {
   const theme = useTheme();
@@ -46,7 +44,10 @@ export default function DashboardShell({ data, state, loading = false, header, c
               '& .MuiTab-icon': { m: 0, fontSize: 18, opacity: 0.85 },
               '& .MuiTab-root.Mui-selected::after': { content: '""', display: { xs: 'none', md: 'block' }, ml: 'auto', width: 5, height: 5, flexShrink: 0, borderRadius: '50%', bgcolor: 'primary.main' },
             }}>
-            {pages.map(([value, label, Icon]) => <Tab key={value} value={value} icon={<Icon />} iconPosition="start" label={label} id={`dashboard-tab-${value}`} aria-controls={`dashboard-panel-${value}`} />)}
+            {dashboardPages.map(({ id, label }) => {
+              const Icon = pageIcons[id];
+              return <Tab key={id} value={id} icon={Icon ? <Icon /> : undefined} iconPosition="start" label={label} id={`dashboard-tab-${id}`} aria-controls={`dashboard-panel-${id}`} />;
+            })}
           </Tabs>
         </Box>
         {state.tab === 'branch' ? (

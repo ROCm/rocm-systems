@@ -78,8 +78,8 @@ const render = (Component, props) => renderToStaticMarkup(createElement(Componen
 test('trend connects measured points visually without replacing null or measured-zero slots', () => {
   const before = structuredClone(history);
   render(DurationHistory, { history, range: 'ALL', onRangeChange() {} });
-  expect(capture.props.option.series).toHaveLength(1);
-  expect(capture.props.option.series[0].connectNulls).toBe(true);
+  expect(capture.props.option.series).toHaveLength(2);
+  expect(capture.props.option.series[0].connectNulls).toBe(false);
   expect(capture.props.option.series[0].data).toEqual([[0, 2], [1, null], [2, 0], [3, 100 / 60]]);
   expect(capture.props.option.tooltip.formatter([{ dataIndex: 1, value: [1, null] }])).toBe('');
   expect(history).toEqual(before);

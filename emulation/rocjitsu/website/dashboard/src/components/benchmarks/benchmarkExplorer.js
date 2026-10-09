@@ -1,7 +1,7 @@
 import { formatDuration, formatFullDate, shortSha } from '../../utils/formatters';
 import { commitTimestampFor } from '../../data/runOrdering';
 import { selectBenchmarkCatalog } from '../../data/selectors';
-import { historyRangeById } from '../../config/historyRanges';
+import { resolveHistoryRange } from '../../config/historyRanges';
 
 export function benchmarkResultChoices(viewModel) {
   return viewModel.runs.flatMap((run, index) => viewModel.series.map((series) => {
@@ -32,9 +32,8 @@ export function explorerCatalog(data, filters) {
 // Like canonical Overview, the range is commit-time based and anchored to published
 // canonical history, not the viewer's clock or a branch execution.
 export function benchmarkRangeData(data, range = 'ALL') {
-  if (range === 'ALL' || !data.runs.length) return data;
-  const days = historyRangeById.get(range)?.days;
-  if (!days) return data;
+  const { days } = resolveHistoryRange(range);
+  if (!days || !data.runs.length) return data;
   const latest = Math.max(...data.runs.map((run) => Date.parse(commitTimestampFor(run))));
   const anchor = new Date(latest);
   anchor.setUTCHours(0, 0, 0, 0);

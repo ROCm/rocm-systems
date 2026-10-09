@@ -5,8 +5,8 @@ import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded';
 import CloudSyncRoundedIcon from '@mui/icons-material/CloudSyncRounded';
 import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded';
 import { formatFullDate } from '../../utils/formatters';
+import { dashboardPageLabels } from '../../config/dashboardPages';
 
-const titles = { overview: 'Overview', branch: 'Branch Runs', benchmarks: 'Benchmarks', compare: 'Run Comparison' };
 const dateFormatter = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 const timeFormatter = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' });
 const actionStyles = { width: { xs: 44, sm: 32 }, height: { xs: 44, sm: 32 }, border: 1, borderColor: 'divider', borderRadius: '6px', '& svg': { fontSize: 17 } };
@@ -29,8 +29,8 @@ export default function DashboardHeader({ data, dataError = null, downloadData, 
     <Box component="header" sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: { xs: 2, md: 3 }, py: { xs: 2, md: 2.5 } }}>
       <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1.5 }}>
         <Box sx={{ minWidth: 0 }}>
-          <Typography sx={{ fontSize: 11, lineHeight: '16px', color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Rocjitsu / {titles[tab]}</Typography>
-          <Typography component="h1" variant="h1" sx={{ mt: 0.25 }}>{titles[tab]}</Typography>
+          <Typography sx={{ fontSize: 11, lineHeight: '16px', color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Rocjitsu / {dashboardPageLabels[tab]}</Typography>
+          <Typography component="h1" variant="h1" sx={{ mt: 0.25 }}>{dashboardPageLabels[tab]}</Typography>
           <Tooltip title={publicationAvailable ? formatFullDate(data.generatedAt) : ''}>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
               {loading ? 'Loading run data…' : dataError ? 'Data unavailable' : publicationLabel ? <>Data as of <Box component="strong" sx={{ fontWeight: 600, color: 'text.primary' }}><time dateTime={data.generatedAt}>{publicationLabel}</time></Box></> : 'Data unavailable'}

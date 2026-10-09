@@ -1,8 +1,8 @@
 import { targetColor } from '../utils/chartColors.js';
-import { historyRanges } from '../config/historyRanges.js';
+import { resolveHistoryRange } from '../config/historyRanges.js';
 import { commitShaFor, commitTimestampFor, compareCommitPosition, compareRunsByCommit, compareRunExecution, sortRunsByCommit } from './runOrdering.js';
 
-const HISTORY_RANGE_DAYS = { ...Object.fromEntries(historyRanges.filter(({ days }) => days !== null).map(({ id, days }) => [id, days])), '6M': 180 };
+
 const modesFor = (filters) => filters.modes ?? ['ST', 'MT'];
 const completed = (test) => test?.status === 'completed' && Number.isFinite(test.durationSeconds);
 const sum = (tests) => tests.reduce((total, test) => total + test.durationSeconds, 0);
@@ -78,7 +78,7 @@ function historySlots(runs, anchorDay, range) {
     return { slots, keys: null, axisMax: Math.max(0, slots.length - 1) };
   }
   const start = range === 'ALL' ? periodKey(commitTimestampFor(ordered[0]), 'daily')
-    : range === 'YTD' ? `${anchorDay.slice(0, 4)}-01-01` : shiftDay(anchorDay, -((HISTORY_RANGE_DAYS[range] ?? 90) - 1));
+    : range === 'YTD' ? `${anchorDay.slice(0, 4)}-01-01` : shiftDay(anchorDay, -(resolveHistoryRange(range, { compatibility: true }).days - 1));
   const keys = dayKeys(start, anchorDay);
   if (range === '1W') {
     const slots = keys.flatMap((key, index) => {
@@ -120,7 +120,9 @@ function currentWorkload(data, filters) {
           durationSeconds: test.durationSeconds, runId: run.runId, catalogId: run.catalogId, timestamp: run.timestamp });
       }
     }
-    return { ...pair, catalogId: reference?.catalogId, ids, anchors };
+    // One eligible set is shared by every point, including the current endpoint.
+    // A workload cannot contribute until its configuration has a valid anchor.
+    return { ...pair, catalogId: reference?.catalogId, ids: ids.filter((id) => anchors.has(id)), anchors };
   }).filter(({ ids }) => ids.length > 0);
 }
 
@@ -154,6 +156,7 @@ function runSummary(run, filters) {
 }
 
 export function selectOverview(data, filters, range = 'ALL') {
+  range = resolveHistoryRange(range, { compatibility: true }).id;
   const reference = data.latestCommitRun ?? sortRunsByCommit(data.runs).at(-1) ?? null;
   const anchorDay = periodKey(commitTimestampFor(reference) ?? data.generatedAt, 'daily');
   const { slots, keys, axisMax } = historySlots(data.runs, anchorDay, range);

@@ -40,8 +40,8 @@ describe('v10 bundled fonts', () => {
 });
 
 describe('v10 Carbon theme', () => {
-  it('exports footer-ready neutral styles for the parent-owned three-line attribution', () => {
-    expect(sharedStyles.dashboardFooterStyles).toMatchObject({ borderTop: 1, borderColor: 'divider', bgcolor: 'background.default', color: 'text.secondary', px: { xs: 2, md: 3 }, py: 2.5, fontFamily: sansFont, fontSize: 12, lineHeight: '20px' });
+  it('does not export the unused footer style', () => {
+    expect(sharedStyles).not.toHaveProperty('dashboardFooterStyles');
   });
   it.each([
     ['light', '#f4f4f4', '#ffffff', '#161616', '#525252', '#e0e0e0', '#0f62fe', '#edf5ff', '#0043ce', '#198038', '#da1e28'],

@@ -159,7 +159,6 @@ function Dashboard({ data, state, dataError = null, onRetry = null }) {
   };
   const openBenchmarks = () => {
     state.setExplorerRunIds([]);
-    state.setBenchmarkMode('single');
     state.setTab('benchmarks');
     window.requestAnimationFrame(() => window.scrollTo({ top: 0 }));
   };

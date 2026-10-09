@@ -17,6 +17,11 @@ const fullDateFormatter = new Intl.DateTimeFormat(undefined, {
 export const formatShortDate = (timestamp) => shortDateFormatter.format(new Date(timestamp));
 export const formatFullDate = (timestamp) => fullDateFormatter.format(new Date(timestamp));
 
+export function formatMetadataValue(value) {
+  if (value == null) return 'Not provided';
+  return typeof value === 'object' ? JSON.stringify(value) : String(value);
+}
+
 export function formatDuration(value) {
   if (!Number.isFinite(value)) return '—';
   if (value >= 60) return `${Math.floor(value / 60)}m ${(value % 60).toFixed(1)}s`;

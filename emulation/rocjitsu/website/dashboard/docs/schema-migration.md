@@ -2,6 +2,17 @@
 
 Implementation: [runSchema.js](../src/data/runSchema.js), called by [dashboardValidation.js](../src/data/dashboardValidation.js).
 
+## Accepted exclusion policy
+
+Non-Vanilla instrumented runs are excluded from dashboard history and comparisons.
+Original records are retained unchanged in raw exports; their measurements and
+plugin identities are never relabelled as Vanilla. This is an accepted exclusion
+policy, not a migration that converts instrumented measurements into ordinary
+benchmark results.
+
+This policy documents existing behavior. It does not restore reserved plugin support or retired UI,
+and does not introduce a plugin selector or instrumented-run comparison surface.
+
 ## Dispatch
 
 ```js

@@ -1,11 +1,7 @@
 import { Box, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from '@mui/material';
 import { safeExternalUrl } from './branchPresentation';
 import { monoFont } from '../../theme/tokens';
-
-function display(value) {
-  if (value == null) return 'Not provided';
-  return typeof value === 'object' ? JSON.stringify(value) : String(value);
-}
+import { formatMetadataValue } from '../../utils/formatters';
 
 export default function BranchEnvironment({ candidate, reference, selection, repository }) {
   const baselineFacts = new Map((reference?.provenance?.details ?? []).map((fact) => [fact.key, fact]));
@@ -33,8 +29,8 @@ export default function BranchEnvironment({ candidate, reference, selection, rep
         {prefix === 'environment' && <Typography component="div" variant="caption" color="text.secondary" sx={{ fontFamily: monoFont }}>{fact.key}</Typography>}
         {fact.baselineLabel && fact.candidateLabel && fact.baselineLabel !== fact.candidateLabel && <Typography variant="caption">Reference label: {fact.baselineLabel}</Typography>}
       </TableCell>
-      <TableCell sx={{ fontFamily: monoFont }}>{display(fact.baseline)}</TableCell>
-      <TableCell sx={{ fontFamily: monoFont }}>{display(fact.candidate)}</TableCell>
+      <TableCell sx={{ fontFamily: monoFont }}>{formatMetadataValue(fact.baseline)}</TableCell>
+      <TableCell sx={{ fontFamily: monoFont }}>{formatMetadataValue(fact.candidate)}</TableCell>
     </TableRow>;
   });
   return <Box component="details" data-testid="branch-environment" sx={{ borderTop: 1, borderColor: 'divider', mt: 1 }}>

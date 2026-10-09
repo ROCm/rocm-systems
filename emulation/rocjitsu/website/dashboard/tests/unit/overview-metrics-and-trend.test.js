@@ -56,11 +56,13 @@ const history = {
   currentDuration: 100, durationDelta: -16.67, summary: '1 target · 1 suite · ST',
 };
 
-test('summed trend has a derived dotted baseline and connects visual gaps without changing null data', () => {
+test('summed trend has a dotted baseline and a separate dashed bridge without changing null data', () => {
   const html = render(DurationHistory, { history, range: '1M', onRangeChange() {} });
   const option = chartCapture.props.option;
-  expect(option.series).toHaveLength(1);
-  expect(option.series[0].connectNulls).toBe(true);
+  expect(option.series).toHaveLength(2);
+  expect(option.series[0].connectNulls).toBe(false);
+  expect(option.series[1]).toMatchObject({ data: [[0, 2], [2, 100 / 60]], silent: true, symbol: 'none', showSymbol: false, lineStyle: { type: 'dashed' }, tooltip: { show: false } });
+  expect(option.series[1].areaStyle).toBeUndefined();
   expect(option.series[0].markLine.label.formatter).toBe('Baseline · 2m0s');
   expect(option.series[0].markLine.lineStyle.type).toBe('dotted');
   expect(option.series[0].data[1][1]).toBeNull();
@@ -71,6 +73,22 @@ test('summed trend has a derived dotted baseline and connects visual gaps withou
   expect(chartCapture.props.onEvents).toHaveProperty('updateAxisPointer');
   expect(chartCapture.props.onEvents).toHaveProperty('click');
   expect(chartCapture.props.onEvents).toHaveProperty('finished');
+});
+
+test.each(['light', 'dark'])('%s bridges only nearest finite endpoints across interior gaps', (mode) => {
+  const values = [null, 12, null, null, 0, 10, null, 20, null];
+  const gapped = { ...history, axisMax: 8, series: [{ ...history.series[0], data: values }], slots: values.map((_, x) => ({ ...history.slots[0], x })) };
+  renderToStaticMarkup(createElement(ThemeProvider, { theme: createTheme({ palette: { mode } }) }, createElement(DurationHistory, { history: gapped, range: 'ALL', onRangeChange() {} })));
+  const option = chartCapture.props.option;
+  expect(option.series[0].connectNulls).toBe(false);
+  expect(option.series).toHaveLength(2);
+  expect(option.series[1].connectNulls).toBe(false);
+  expect(option.series[1].data).toEqual([[1, 12], [4, 0], [null, null], [5, 10], [7, 20]]);
+  for (const bridge of option.series.slice(1)) {
+    expect(bridge).toMatchObject({ silent: true, showSymbol: false, symbol: 'none', lineStyle: { type: 'dashed', color: colorTokens[mode].interactive }, tooltip: { show: false } });
+    expect(bridge.areaStyle).toBeUndefined();
+  }
+  expect(option.tooltip.formatter([{ seriesIndex: 1, dataIndex: 0, value: [1, 12] }])).toBe('');
 });
 
 test('normalized trend tooltip is compact and leaves anchor provenance to inspection details', () => {

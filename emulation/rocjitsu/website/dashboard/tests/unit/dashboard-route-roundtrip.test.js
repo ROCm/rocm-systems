@@ -56,6 +56,22 @@ it.each(['targets', 'suites'])('round-trips validated long %s through URL serial
 });
 
 describe('static-hosted dashboard routes', () => {
+  it('round-trips independent comparison scope, exact URL-special suites and intentional empties', () => {
+    const route = dashboardState.readDashboardRoute('https://example.test/?view=compare&targets=gfx950&modes=ST&suites=global&compareTargets=gfx1250&compareModes=&compareSuites=A%26B+%2F+C');
+    expect(route.comparisonPreferences).toEqual({ targets: ['gfx1250'], modes: [], suites: ['A&B / C'] });
+    expect(route.preferences).toEqual({ targets: ['gfx950'], modes: ['ST'], suites: ['global'] });
+    expect(dashboardState.readDashboardRoute(dashboardState.buildDashboardUrl('https://example.test/', route))).toEqual(route);
+  });
+  it.each([
+    ['compareTargets=gfx950&compareTargets=gfx950', 'targets'],
+    ['compareSuites=&compareSuites=gemm', 'suites'],
+    ['compareModes=invalid', 'modes'],
+  ])('fails closed for malformed comparison scope without changing globals: %s', (query, key) => {
+    const route = dashboardState.readDashboardRoute(`https://example.test/?targets=gfx950&suites=gemm&modes=ST&${query}`);
+    expect(route.comparisonPreferences[key]).toEqual([]);
+    expect(route.preferences).toEqual({ targets: ['gfx950'], suites: ['gemm'], modes: ['ST'] });
+    expect(route.routeError).toContain('Invalid compare');
+  });
   it('writes an atomic selection while preserving unrelated query parameters and hash', () => {
     expect(typeof dashboardState.buildDashboardUrl).toBe('function');
     const snapshot = dashboardState.readDashboardRoute('https://example.test/app/?view=branch&branch=feat%2Fx&run=run-2&reference=run-1&manual=1&detail=1&target=gfx950&mode=MT&modes=');

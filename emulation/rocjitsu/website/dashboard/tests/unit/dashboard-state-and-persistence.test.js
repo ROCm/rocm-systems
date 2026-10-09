@@ -63,6 +63,69 @@ function mountState({ href = 'https://example.test/app/?campaign=keep#anchor', s
   };
 }
 
+it('snapshots global scope on first ordinary comparison visit and then keeps both scopes independent', () => {
+  const global = { targets: ['gfx950'], suites: ['memory'], modes: ['ST'] };
+  const probe = mountState({ saved: global });
+  probe.update((state) => state.setTab('compare'));
+  expect(probe.state.filters).toEqual(global);
+  probe.update((state) => { state.setTargets(['gfx1250']); state.setModes(['MT']); state.setSuites([]); });
+  const comparison = { targets: ['gfx1250'], suites: [], modes: ['MT'] };
+  expect(probe.state.filters).toEqual(comparison);
+  expect(JSON.parse(probe.browser.localStorage.getItem('rocjitsu-dashboard-filters'))).toEqual(global);
+  probe.update((state) => state.setTab('overview'));
+  expect(probe.state.filters).toEqual(global);
+  probe.update((state) => state.setSuites(['gemm']));
+  probe.update((state) => state.setTab('compare'));
+  expect(probe.state.filters).toEqual(comparison);
+  const href = probe.browser.location.href;
+  const reloaded = mountState({ href });
+  expect(reloaded.state.filters).toEqual(comparison);
+  reloaded.update((state) => state.setTab('benchmarks'));
+  expect(reloaded.state.filters).toEqual({ ...global, suites: ['gemm'] });
+});
+
+it('scoped comparison opening never edits global filters or their storage', () => {
+  const global = { targets: ['gfx950'], suites: ['memory'], modes: ['ST'] };
+  const probe = mountState({ saved: global });
+  probe.update((state) => state.openComparison({ candidateId: 'c', baselineId: 'b', target: 'gfx1250', mode: 'MT', suites: ['gemm'] }));
+  expect(probe.state.filters).toEqual({ targets: ['gfx1250'], suites: ['gemm'], modes: ['MT'] });
+  expect(JSON.parse(probe.browser.localStorage.getItem('rocjitsu-dashboard-filters'))).toEqual(global);
+  probe.update((state) => state.setTab('benchmarks'));
+  expect(probe.state.filters).toEqual(global);
+});
+
+it('separate comparison URL scope preserves intentional empties and survives Back/Forward', () => {
+  const probe = mountState({ href: 'https://example.test/?view=compare&targets=gfx950&modes=ST&suites=memory&compareTargets=&compareModes=&compareSuites=' });
+  expect(probe.state.filters).toEqual({ targets: [], modes: [], suites: [] });
+  probe.update((state) => state.setTab('overview'));
+  expect(probe.state.filters).toEqual({ targets: ['gfx950'], modes: ['ST'], suites: ['memory'] });
+  probe.go(-1);
+  expect(probe.state.filters).toEqual({ targets: [], modes: [], suites: [] });
+  probe.go(1);
+  expect(probe.state.filters.targets).toEqual(['gfx950']);
+});
+
+it('resolves comparison defaults after bootstrap and retains its first snapshot across later global changes', () => {
+  const probe = mountState({ dataset: { targets: [], suites: [], modes: [] }, href: 'https://example.test/?view=compare' });
+  expect(probe.state.filters).toEqual({ targets: [], suites: [], modes: [] });
+  probe.rerender(data);
+  expect(probe.state.filters).toEqual(data);
+  probe.update((state) => state.setTab('overview'));
+  probe.update((state) => { state.setTargets([]); state.setModes([]); });
+  probe.update((state) => state.setTab('compare'));
+  expect(probe.state.filters).toEqual(data);
+  probe.rerender({ targets: [], suites: [], modes: [] });
+  probe.rerender(data);
+  expect(probe.state.filters).toEqual(data);
+});
+
+it('does not expose retired benchmark mode or global search state', () => {
+  const state = readState();
+  for (const key of ['benchmarkMode', 'setBenchmarkMode', 'search', 'setSearch']) {
+    expect(state).not.toHaveProperty(key);
+  }
+});
+
 it('pushes one coherent branch selection even under StrictMode', () => {
   const probe = mountState();
   const selection = { branch: 'feat/a', candidateId: 'missing-attempt', referenceId: 'missing-reference', manual: true, target: 'gfx950', mode: 'MT', detail: true };
@@ -98,9 +161,11 @@ it('opens comparison with one atomic pair and scope while preserving deliberate 
   const url = new URL(probe.browser.location.href);
   expect(url.searchParams.get('compareCandidate')).toBe('missing-candidate');
   expect(url.searchParams.get('compareBaseline')).toBe('missing-baseline');
-  expect(url.searchParams.getAll('targets')).toEqual(['gfx950']);
-  expect(url.searchParams.getAll('modes')).toEqual(['MT']);
-  expect(url.searchParams.getAll('suites')).toEqual(['']);
+  expect(url.searchParams.getAll('compareTargets')).toEqual(['gfx950']);
+  expect(url.searchParams.getAll('compareModes')).toEqual(['MT']);
+  expect(url.searchParams.getAll('compareSuites')).toEqual(['']);
+  expect(url.searchParams.getAll('targets')).toEqual([]);
+  expect(url.searchParams.getAll('modes')).toEqual(['']);
   probe.update((state) => state.openComparison({ candidateId: 'attempt-2', baselineId: 'attempt-1', target: 'gfx1250', mode: 'ST', suites: ['memory'] }));
   expect(probe.state.filters.suites).toEqual(['memory']);
 });
@@ -115,8 +180,6 @@ it('restores the entire route on Back/Forward without pushing or losing local pa
     state.setTargets([]);
     state.setSuites([]);
     state.setHistoryRange('1M');
-    state.setSearch('keep search');
-    state.setBenchmarkMode('grid');
     state.setExplorerRunIds(['unpublished-id']);
   });
   expect(probe.browser.history.pushState).toHaveBeenCalledTimes(3);
@@ -131,7 +194,7 @@ it('restores the entire route on Back/Forward without pushing or losing local pa
   expect(probe.state.tab).toBe('overview');
   expect(probe.state.filters).toEqual({ targets: ['gfx950'], suites: [], modes: ['ST'] });
   probe.go(3);
-  expect(probe.state).toMatchObject({ tab: 'compare', branchSelection: branch, comparisonCandidateId: 'compare-c', comparisonBaselineId: 'compare-b', historyRange: '1M', search: 'keep search', benchmarkMode: 'grid', explorerRunIds: ['unpublished-id'] });
+  expect(probe.state).toMatchObject({ tab: 'compare', branchSelection: branch, comparisonCandidateId: 'compare-c', comparisonBaselineId: 'compare-b', historyRange: '1M', explorerRunIds: ['unpublished-id'] });
   expect(probe.state.filters).toEqual({ targets: [], suites: [], modes: ['MT'] });
   expect(probe.browser.history.pushState).toHaveBeenCalledTimes(pushes);
   expect(probe.browser.history.replaceState).toHaveBeenCalledTimes(replacements);

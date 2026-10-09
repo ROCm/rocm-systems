@@ -1,4 +1,15 @@
 // Pure presentation navigation; gaps are not eligible inspection points.
+export function trendGapEndpoints(values) {
+  const bridges = [];
+  let previous = null;
+  values.forEach((value, index) => {
+    if (!Number.isFinite(value)) return;
+    if (previous != null && index > previous + 1) bridges.push([previous, index]);
+    previous = index;
+  });
+  return bridges;
+}
+
 export function trendKeyIndex(indexes, current, key) {
   if (key === 'Escape' || !indexes.length) return null;
   if (key === 'Home') return indexes[0];
