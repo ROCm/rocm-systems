@@ -56,7 +56,8 @@ class Wavefront;
 ///
 /// Per-operation policy:
 ///  * Barrier: hardware/LLVM program the resource with (participants - 1); the
-///    CDNA/RDNA barrier pseudocode queues an arrival while the counter is
+///    modeled barrier pseudocode (CDNA/LLVM; the RDNA3/3.5 variant differs -- see
+///    the per-ISA modeling notes below) queues an arrival while the counter is
 ///    positive and, on the arrival that observes zero, releases every queued
 ///    arrival and reloads the counter from that arrival's own value (so
 ///    consecutive phases may differ in size). A blocking arrival is gated on the
@@ -81,6 +82,26 @@ class Wavefront;
 ///    race-free: each CU publishes a snapshot of its own signalable-wave count,
 ///    and escape requires every currently-active CU to have published in the
 ///    current park epoch, so a runnable producer on another CU is never missed.
+///    Recovery policy: abandoning a wait is not a silent state change. The
+///    backstop *invalidates* each resource it abandons (counter/credits cleared,
+///    disarmed, generation bumped) via @ref invalidate_resource, so a later
+///    dispatch reusing that rid begins a fresh phase instead of inheriting the
+///    unfinished one.
+///
+/// Per-ISA modeling notes (no GFX11 hardware was available to validate this
+/// review; where ISA manuals disagree the model follows one interpretation and
+/// records the discrepancy):
+///  * Barrier release ordering: CDNA1-3 and RDNA1/2 test the counter before
+///    decrementing; RDNA3/3.5 (Table 63) decrement first, and their
+///    "participants - 1" wording would make @c init(1) followed by the first
+///    @c barrier(1) release immediately. The model implements the CDNA/LLVM
+///    test-then-decrement reading uniformly; the RDNA3/3.5 decrement-first
+///    variant is not modeled.
+///  * @c release_all credit accounting: CDNA1-3 and RDNA1/2 assign the queued-
+///    wave count to the counter (so with no queued waiter it clears to zero),
+///    whereas RDNA3/3.5 (Table 63) add the queued-wave count (leaving prior
+///    banked credits intact). The model implements the assignment reading
+///    (credits cleared); the RDNA3/3.5 additive variant is not modeled.
 class GwsDevice {
 public:
   /// @brief Number of GWS resources (6-bit resource id space).
@@ -152,6 +173,9 @@ private:
   /// @brief Whether process @p process is provably quiescent (genuine deadlock).
   /// Requires @ref mutex_ and an up-to-date snapshot from every active CU.
   bool escape_ready(uint32_t process) const;
+  /// @brief Invalidate a resource abandoned by the deadlock backstop so a later
+  /// dispatch cannot inherit its unfinished phase. Requires @ref mutex_.
+  void invalidate_resource(uint32_t process, uint32_t rid);
 
   mutable std::mutex mutex_;
   std::unordered_map<uint32_t, std::array<Resource, kResourceCount>> resources_;
