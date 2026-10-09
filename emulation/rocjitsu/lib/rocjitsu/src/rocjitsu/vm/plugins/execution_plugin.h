@@ -235,7 +235,8 @@ public:
                                            uint32_t /*physical_sgpr_count*/,
                                            std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
 
-  /// Called when the last wavefront of a workgroup has halted.
+  /// Called when the last wavefront of a workgroup has completed normally.
+  /// Cancelled workgroups do not receive this callback.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWorkgroupCompleted(uint32_t /*dispatch_id*/, uint32_t /*wg_id*/) {}
 
@@ -243,9 +244,18 @@ public:
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWavefrontDispatched(amdgpu::Wavefront & /*wf*/) {}
 
-  /// Called when a wavefront halts, before its resources are freed.
+  /// Called when a wavefront terminates normally, before its resources are freed.
+  /// Dispatch cancellation uses onAmdgpuWavefrontCancelled instead.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWavefrontHalted(amdgpu::Wavefront & /*wf*/) {}
+
+  /// Called when an active wavefront is cancelled with its dispatch, before its
+  /// registers and plugin state are freed. The wave's instruction-execution
+  /// error, if present, is still available. May precede its first instruction.
+  /// This is a terminal notification, not successful workgroup or dispatch
+  /// completion; it does not also call onAmdgpuWavefrontHalted.
+  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
+  virtual void onAmdgpuWavefrontCancelled(amdgpu::Wavefront & /*wf*/) {}
 
   /// Called when a VGPR is read during instruction execution.
   /// @param wf Owning wavefront, or nullptr if the register is unallocated.
