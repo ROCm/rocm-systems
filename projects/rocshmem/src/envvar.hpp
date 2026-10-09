@@ -130,6 +130,7 @@ namespace envvar {
       REVERSE_OFFLOAD,
       GDA,
       SDMA,
+      TDM,
     };
 
     // env var string prefixes
@@ -141,6 +142,7 @@ namespace envvar {
     template <> inline constexpr const char* prefix<tag::REVERSE_OFFLOAD> = "ROCSHMEM_RO";
     template <> inline constexpr const char* prefix<tag::GDA> = "ROCSHMEM_GDA";
     template <> inline constexpr const char* prefix<tag::SDMA> = "ROCSHMEM_SDMA";
+    template <> inline constexpr const char* prefix<tag::TDM> = "ROCSHMEM_TDM";
   }  // namespace category
 
   namespace parser {
@@ -579,6 +581,11 @@ namespace envvar {
     extern const var<int32_t> num_channels;
     extern const var<bool> spread_channels;
   }  // namespace sdma
+
+  namespace tdm {
+    template <typename T> using var = var<T, category::tag::TDM>;
+    extern const var<uint32_t> tile_bytes;
+  }  // namespace tdm
 
   /**
    * @brief Print mode for environment variables
