@@ -12,7 +12,7 @@
         {
             "expected_behavior": [
                 "recommends the profile-only preset",
-                "explains it is a flat profile with sampling and tracing disabled"
+                "explains it is a flat profile with Perfetto trace output, rocPD output and call-stack sampling disabled"
             ],
             "id": "lowest-overhead-production-profile",
             "prompt": "I want to profile my production service with rocprof-sys-run but need the lowest possible overhead. What preset fits?",
