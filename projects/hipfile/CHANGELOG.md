@@ -12,6 +12,7 @@
 ### Fixed
 
 * `hipFileRead()`, `hipFileWrite()`, and the asynchronous and batch I/O APIs now fall back to the compatibility path when the amdgpu kernel driver doesn't support AIS (for example, the inbox Linux driver). Previously, they failed with `ENOTTY` ("Inappropriate ioctl for device") or, with ROCr versions that don't include the matching libhsakmt fix, with an unrelated error code.
+* `hipFileRead()` and `hipFileWrite()` now return `-hipFileHipDriverError` when a HIP runtime call fails. Previously, they returned the negated `hipError_t` (for example, `-999` for `hipErrorUnknown`), which is neither `-1` nor a negated `hipFileOpError_t` as documented.
 * `ais-check` no longer reports an LVM parity RAID logical volume (`raid4`, `raid5`, `raid6`) as fastpath capable.
 * Per-GPU I/O statistics are now attributed to the GPU that owns the I/O buffer instead of the caller's active HIP device. Previously, `hipFileGetStatsL3()` and `ais-stats` could report counters against the wrong GPU when the active device differed from the buffer's device.
 * `hipfile.h` now includes `<time.h>`, which declares the `struct timespec` used by `hipFileBatchIOGetStatus()`. Previously, C code that included `<time.h>` after `hipfile.h` got an incompatible pointer type error or warning when passing a `struct timespec *` to `hipFileBatchIOGetStatus()`.
