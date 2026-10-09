@@ -120,6 +120,11 @@ struct GemObject {
   uint64_t tiling_info = 0;
   uint32_t metadata_size = 0;
   uint32_t metadata[64] = {};
+  // The KFD allocation flags the GPU PTE type derives from, recorded at the first
+  // export or import of the buffer. A duplicate of the export fd, or a repeated
+  // import, has no EXPORT_DMABUF record of its own and takes them from here.
+  uint32_t alloc_flags = 0;
+  bool has_alloc_flags = false;
 };
 
 } // namespace rocjitsu
@@ -2985,8 +2990,10 @@ public:
     if (gem_entries_.size() == std::numeric_limits<uint32_t>::max())
       return 0;
     uint32_t alloc_flags = 0;
+    bool flags_exported = false;
     if (auto it = pending_gem_flags_.find(dmabuf_fd); it != pending_gem_flags_.end()) {
       alloc_flags = it->second;
+      flags_exported = true;
       pending_gem_flags_.erase(it);
     }
     // Pin the backing to the HANDLE's lifetime by dup'ing the dmabuf fd now, rather
@@ -3012,7 +3019,6 @@ public:
     // Only fresh GEM allocations qualify for disjoint parallel RAM accesses.
     gem.drm_file_id = drm_file->id;
     gem.size = size;
-    gem.alloc_flags = alloc_flags;
     struct stat st {};
     const bool identified = real().fstat_fn(dmabuf_fd, &st) == 0;
     if (identified)
@@ -3039,6 +3045,15 @@ public:
     // state a PRIME export retains, and the allocation may be freed while the fd lives.
     if (identified)
       exported_gem_objects_[dmabuf_fd] = gem.object;
+    // The first export or import fixes the buffer's flags; later imports of any
+    // descriptor to it map with the same cache policy.
+    if (flags_exported) {
+      gem.object->alloc_flags = alloc_flags;
+      gem.object->has_alloc_flags = true;
+    } else if (gem.object->has_alloc_flags) {
+      alloc_flags = gem.object->alloc_flags;
+    }
+    gem.alloc_flags = alloc_flags;
     // hsaKmtMemoryGetCpuAddr follows a prime import with GEM_MMAP. A zero offset
     // is "no mapping" and that call fails the VMM handle create.
     const uint64_t map_bytes = (size + 4095) & ~uint64_t{4095};
@@ -3098,6 +3113,10 @@ public:
     track_gem_flags(exported, alloc_flags);
     {
       std::lock_guard lock(fd_mutex_);
+      if (!object->has_alloc_flags) {
+        object->alloc_flags = alloc_flags;
+        object->has_alloc_flags = true;
+      }
       exported_gem_objects_[exported] = std::move(object);
     }
     return exported;
