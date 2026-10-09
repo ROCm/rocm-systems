@@ -1446,7 +1446,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
   // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
   const bool ceAr2ShotEligible = rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr);
-  const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed && twoShotWindow &&
+  const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
                                   ceAr2ShotEligible && (force || symReg);
   if (!query)
     INFO(NCCL_TUNING,
@@ -1469,11 +1469,11 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // Gated on the raw symk signal, not symEligible: symmetric-window operands copy
     // through the user windows via CE-registered, so they must not be diverted into
     // the staging buffer just because symMaxR2 withdrew symk.
-    if (!symkRequested && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
+    if (!cs.bestPreferredFound && !symkRequested && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
       rcclCollDecision cand = *decision;
       cand.algo = RCCL_CE_2SHOT;
       cand.nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
-      rcclCandSearchRecord(cs, RCCL_BACKEND_CE, cand);
+      rcclCandSearchRecord(cs, RCCL_BACKEND_CE, cand, twoShotWindow);
     }
 
     // (4) DDA fast paths. Shared gate: !symkRequested on every arch, and either
@@ -1503,36 +1503,35 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
         const size_t arDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncAllReduce);
         const size_t arDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncAllReduce);
         // Small-message fast lane: LL protocol (no GPU barrier).
-        if (
-            ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+        if (ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
           rcclCollDecision cand = *decision;
           cand.algo = RCCL_DDA_FABRIC_LL; cand.protocol = NCCL_PROTO_LL;
           cand.nMaxChannels = ncclAllReduceDdaFabricLLBlocks(comm, count, datatype);
           rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand, msgBytes <= arDdaLLMax);
         }
         // Mid-size fast lane: LL128 protocol (128B lines, no GPU barrier).
-        if (!cs.bestPreferredFound && arDdaLL128Max > 0 && msgBytes <= arDdaLL128Max &&
+        if (!cs.bestPreferredFound && arDdaLL128Max > 0 &&
             ncclAllReduceDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype, op)) {
           rcclCollDecision cand = *decision;
           cand.algo = RCCL_DDA_FABRIC_LL128; cand.protocol = NCCL_PROTO_LL128;
           cand.nMaxChannels = ncclAllReduceDdaFabricLL128Blocks(comm, count, datatype);
-          rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand);
+          rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand, msgBytes <= arDdaLL128Max);
         }
         // The entry gate now admits the widest tier, so VMM re-checks its own cap.
-        if (!cs.bestPreferredFound && arDdaVmmMax != 0 && msgBytes <= arDdaVmmMax &&
+        if (!cs.bestPreferredFound && arDdaVmmMax != 0 &&
             ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
           rcclCollDecision cand = *decision;
           cand.algo = RCCL_DDA_FABRIC_VMM;
           cand.nMaxChannels = ncclAllReduceDdaFabricBlocks(comm, count, datatype);
-          rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand);
+          rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand, msgBytes <= arDdaVmmMax);
         }
       } else {
-        if (arDdaVmmMax != 0 && msgBytes <= arDdaVmmMax &&
+        if (arDdaVmmMax != 0 &&
             ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
           rcclCollDecision cand = *decision;
           cand.algo = RCCL_DDA_IPC;
           cand.nMaxChannels = ncclAllReduceDdaIpcBlocks(comm, count, datatype);
-          rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand);
+          rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand, msgBytes <= arDdaVmmMax);
         }
       }
     }
@@ -1567,20 +1566,21 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
        (int)ceCountDivisible, (int)ceEnabledByArch,
        (int)ceRegInWindow, (int)hasSysmemSegment, (int)comm->config.CTAPolicy, (int)force);
 
-  if (!cs.bestPreferredFound && symEligible) {
+  if (!cs.bestPreferredFound && symkRequested) {
+    const bool symInWindow = !symSuppressedByMin && !symSuppressedByMax;
     // Reporting only: fill the symk protocol/channels that will actually run.
     // Live path: collTaskAppend tags the task (symkExtract=1) so
     // ncclMakeSymmetricTaskList honors this choice instead of re-deriving it.
     if (!query) {
       rcclCollDecision cand = *decision;
       cand.algo = RCCL_SYMMETRIC;
-      rcclCandSearchRecord(cs, RCCL_BACKEND_SYMMETRIC, cand);
+      rcclCandSearchRecord(cs, RCCL_BACKEND_SYMMETRIC, cand, symInWindow);
     } else {
       int a, p, ch;
       if (rcclSymkQuery(comm, ncclFuncAllReduce, count, datatype, op, &a, &p, &ch)) {
         rcclCollDecision cand = *decision;
         cand.algo = RCCL_SYMMETRIC; cand.protocol = p; cand.nMaxChannels = ch;
-        rcclCandSearchRecord(cs, RCCL_BACKEND_SYMMETRIC, cand);
+        rcclCandSearchRecord(cs, RCCL_BACKEND_SYMMETRIC, cand, symInWindow);
       }
       // symk query failed — fall through to next candidate
     }
