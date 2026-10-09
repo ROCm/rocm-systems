@@ -2098,6 +2098,7 @@ rj_add_interposer_test_suite(
     GemMetadataRoundTripsOnABuffer
     GemOpReportsTheCreateSize
     GemOpSetPlacementChangesTheReportedDomain
+    KfdBufferKeepsItsMetadataAfterEveryHandleCloses
     OpensWithinCurrentDescriptorLimit
     PrimeHandleToFdReturnsTheBuffer
     PrimeImportKeepsTheBoStateAfterTheHandleCloses

@@ -112,6 +112,9 @@ public:
     // from the thunk) that the driver must never unmap, since unmapping them
     // races with the owning process still accessing the memory.
     bool host_ptr_owned = false;
+    // DRM BO state (create info, placement, UMD metadata) for this backing. The
+    // kernel BO keeps it after every GEM handle and dmabuf fd closes.
+    std::shared_ptr<void> bo_state;
   };
 
   /// @brief Memory policy descriptor.

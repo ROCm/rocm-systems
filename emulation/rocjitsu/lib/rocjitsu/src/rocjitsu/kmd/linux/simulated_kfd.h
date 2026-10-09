@@ -27,6 +27,7 @@ RJ_DIAGNOSTIC_POP
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <sys/stat.h>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -456,6 +457,14 @@ public:
   /// @retval true the range was unmapped.
   /// @retval false the local process is gone, so nothing was unmapped.
   [[nodiscard]] bool gem_va_unmap(uint64_t gpu_va, size_t size);
+
+  /// @brief Keep DRM BO state with the local allocations backed by the file @p st describes.
+  /// @details A KFD allocation's BO, with its UMD metadata, outlives every GEM handle
+  /// and dmabuf fd to it. The first state offered is shared by every allocation of
+  /// that file and freed with the last of them.
+  /// @returns The state those allocations keep, or @p state when no allocation uses the file.
+  [[nodiscard]] std::shared_ptr<void> retain_bo_state(const struct stat &st,
+                                                      std::shared_ptr<void> state);
 
   /// @brief Look up a KfdProcess by ID. Returns nullptr if not found.
   std::shared_ptr<KfdProcess> find_process(uint32_t process_id) const;

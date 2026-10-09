@@ -720,6 +720,28 @@ std::shared_ptr<KfdProcess> SimulatedKfd::find_process(uint32_t process_id) cons
   return (it != processes_.end()) ? it->second : nullptr;
 }
 
+std::shared_ptr<void> SimulatedKfd::retain_bo_state(const struct stat &st,
+                                                    std::shared_ptr<void> state) {
+  auto proc = find_process(local_process_id_);
+  if (!proc)
+    return state;
+  std::lock_guard<std::mutex> lock(proc->alloc_mutex_);
+  std::vector<KfdProcess::GpuAllocation *> backed;
+  for (auto &[handle, alloc] : proc->allocations_) {
+    const int backing = alloc.memfd >= 0 ? alloc.memfd : alloc.dmabuf_fd;
+    struct stat backing_st {};
+    if (backing >= 0 && safe_fstat(backing, &backing_st) == 0 && backing_st.st_dev == st.st_dev &&
+        backing_st.st_ino == st.st_ino) {
+      backed.push_back(&alloc);
+      if (alloc.bo_state)
+        state = alloc.bo_state;
+    }
+  }
+  for (auto *alloc : backed)
+    alloc->bo_state = state;
+  return state;
+}
+
 std::shared_ptr<KfdProcess> SimulatedKfd::find_local_process() const {
   return find_process(local_process_id_);
 }
