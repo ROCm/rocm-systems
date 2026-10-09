@@ -3074,3 +3074,167 @@ void VirtMemoryTestBasic::TestImportedHandlePointerInfo(void) {
     std::cout << kSubTestSeparator << std::endl;
   }
 }
+
+namespace {
+struct PoolOwnerQuery {
+  hsa_amd_memory_pool_t target;
+  hsa_device_type_t owner_type;
+  bool found;
+};
+
+hsa_status_t MatchPoolOnAgent(hsa_amd_memory_pool_t pool, void* data) {
+  auto* query = static_cast<PoolOwnerQuery*>(data);
+  if (pool.handle == query->target.handle) query->found = true;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t FindPoolOwnerAgent(hsa_agent_t agent, void* data) {
+  auto* query = static_cast<PoolOwnerQuery*>(data);
+  if (query->found) return HSA_STATUS_SUCCESS;
+
+  if (hsa_amd_agent_iterate_memory_pools(agent, MatchPoolOnAgent, query) != HSA_STATUS_SUCCESS) {
+    return HSA_STATUS_SUCCESS;
+  }
+  if (query->found) {
+    hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &query->owner_type);
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+// Resolves which agent owns a pool. The recovered placement is checked by owner
+// device type rather than by exact pool handle: a dmabuf carries no NUMA node, so
+// the runtime may legitimately name a different host pool than the source one.
+bool PoolOwnerDeviceType(hsa_amd_memory_pool_t pool, hsa_device_type_t* owner_type) {
+  PoolOwnerQuery query = {pool, HSA_DEVICE_TYPE_CPU, false};
+  if (hsa_iterate_agents(FindPoolOwnerAgent, &query) != HSA_STATUS_SUCCESS) return false;
+  if (!query.found) return false;
+  *owner_type = query.owner_type;
+  return true;
+}
+}  // namespace
+
+void VirtMemoryTestBasic::ImportedAllocInfoForPool(hsa_amd_memory_pool_t pool,
+                                                   hsa_device_type_t expected_owner,
+                                                   const char* label) {
+  rocrtst::pool_info_t pool_i;
+  ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
+  if (!pool_i.alloc_allowed || pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return;
+
+  const size_t alloc_size = pool_i.alloc_granule;
+  hsa_amd_vmem_alloc_handle_t exported_handle;
+  ASSERT_SUCCESS(
+      hsa_amd_vmem_handle_create(pool, alloc_size, MEMORY_TYPE_PINNED, 0, &exported_handle));
+
+  int dmabuf_fd = -1;
+  if (hsa_amd_vmem_export_shareable_handle(&dmabuf_fd, exported_handle, 0) != HSA_STATUS_SUCCESS) {
+    /* Exporting host memory needs a GPU DRM context; skip where unavailable. */
+    if (verbosity() > 0) {
+      std::cout << "    " << label << ": export unavailable - Skipping." << std::endl;
+    }
+    EXPECT_SUCCESS(hsa_amd_vmem_handle_release(exported_handle));
+    return;
+  }
+  ASSERT_GE(dmabuf_fd, 0);
+
+  hsa_amd_vmem_alloc_handle_t imported_handle;
+  ASSERT_SUCCESS(hsa_amd_vmem_import_shareable_handle(dmabuf_fd, &imported_handle));
+  ASSERT_EQ(close(dmabuf_fd), 0);
+
+  hsa_amd_memory_pool_t got_pool = {};
+  hsa_amd_memory_type_t got_type = MEMORY_TYPE_NONE;
+  ASSERT_SUCCESS(
+      hsa_amd_vmem_get_alloc_properties_from_handle(imported_handle, &got_pool, &got_type));
+
+  /* Recovery is best-effort: a kernel without GET_DMABUF_INFO, or a thunk without
+   * hsaKmtQueryDmaBufInfo, leaves the handle unresolved and the runtime reports
+   * that rather than inventing a placement. That is documented behaviour, so skip
+   * the feature check instead of failing. */
+  hsa_amd_vmem_handle_info_t info = {};
+  info.size = sizeof(info);
+  const hsa_status_t info_status = hsa_amd_vmem_get_vmem_info(imported_handle, &info);
+
+  if (info_status == HSA_STATUS_ERROR_INVALID_ALLOCATION && got_pool.handle == 0) {
+    if (verbosity() > 0) {
+      std::cout << "    " << label << ": driver cannot describe imported handle - Skipping."
+                << std::endl;
+    }
+    EXPECT_SUCCESS(hsa_amd_vmem_handle_release(imported_handle));
+    EXPECT_SUCCESS(hsa_amd_vmem_handle_release(exported_handle));
+    return;
+  }
+
+  /* Imported handles previously reported no region at all, which left callers with
+   * nothing to consult and forced HIP to assume device memory. */
+  EXPECT_NE(got_pool.handle, 0u) << label << ": imported handle reported no owning pool";
+
+  if (got_pool.handle != 0) {
+    hsa_device_type_t owner_type = HSA_DEVICE_TYPE_CPU;
+    EXPECT_TRUE(PoolOwnerDeviceType(got_pool, &owner_type))
+        << label << ": recovered pool belongs to no known agent";
+    EXPECT_EQ(owner_type, expected_owner)
+        << label << ": recovered placement names the wrong agent type";
+  }
+
+  EXPECT_SUCCESS(info_status);
+  EXPECT_EQ(info.alloc_size, alloc_size) << label << ": imported handle reported wrong size";
+
+  if (verbosity() > 0) {
+    std::cout << "    " << label << ": pool 0x" << std::hex << got_pool.handle << std::dec
+              << " size " << info.alloc_size << std::endl;
+  }
+
+  EXPECT_SUCCESS(hsa_amd_vmem_handle_release(imported_handle));
+  EXPECT_SUCCESS(hsa_amd_vmem_handle_release(exported_handle));
+}
+
+void VirtMemoryTestBasic::TestHostBackedAllocImportInfo(void) {
+  if (verbosity() > 0) {
+    PrintMemorySubtestHeader("Host Backed Alloc Import Info Test");
+  }
+
+  bool vmem_supported = false;
+  ASSERT_SUCCESS(
+      hsa_system_get_info(HSA_AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED, &vmem_supported));
+  if (!vmem_supported) {
+    if (verbosity() > 0) {
+      std::cout << "    Virtual Memory API not supported on this system - Skipping." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
+  std::vector<hsa_agent_t> cpus;
+  std::vector<hsa_agent_t> gpus;
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateCPUAgents, &cpus));
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
+  if (cpus.empty() || gpus.empty()) {
+    if (verbosity() > 0) {
+      std::cout << "    Need both a CPU and a GPU agent - Skipping." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
+  /* The case that regressed: a host-backed allocation exported and re-imported
+   * must still be reported as host memory, with its original size. */
+  hsa_amd_memory_pool_t cpu_pool = {};
+  ASSERT_SUCCESS(
+      hsa_amd_agent_iterate_memory_pools(cpus[0], rocrtst::GetGlobalMemoryPool, &cpu_pool));
+  if (cpu_pool.handle != 0) {
+    ImportedAllocInfoForPool(cpu_pool, HSA_DEVICE_TYPE_CPU, "host pool");
+  }
+
+  /* Control case. Without it, a regression that reported every import as host
+   * memory would still pass the check above. */
+  hsa_amd_memory_pool_t gpu_pool = {};
+  ASSERT_SUCCESS(
+      hsa_amd_agent_iterate_memory_pools(gpus[0], rocrtst::GetGlobalMemoryPool, &gpu_pool));
+  if (gpu_pool.handle != 0) {
+    ImportedAllocInfoForPool(gpu_pool, HSA_DEVICE_TYPE_GPU, "device pool");
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Subtest finished" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}

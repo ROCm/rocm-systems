@@ -20,6 +20,7 @@
 # function and links against nothing.
 
 import os
+import stat
 import struct
 import sys
 import threading
@@ -69,15 +70,156 @@ def _archive_dir():
     """The capture directory for this process, or None if capture is not active.
 
     This is the whole "is HRR recording?" check: the capture writer creates
-    pid-<pid>/ when it opens, so the directory existing is the signal. Re-checked
-    on every poll because capture starts at HIP init, which is normally after
-    this module loads.
+    pid-<pid>/active as the last step of a successful open and removes it at
+    shutdown, so that file is the signal. Neither pid-<pid> nor its events.bin
+    is: both stay when the writer refuses an archive or fails to resume one, and
+    capture is then off. Re-checked on every poll because capture starts at HIP
+    init, which is normally after this module loads.
+
+    The marker must name this process. A process killed with SIGKILL leaves its
+    marker behind, and a later process with the same pid finds it before HIP
+    starts.
     """
     root = os.environ.get("HIP_HRR_CAPTURE_OUTPUT")
     if not root:
         return None
     d = os.path.join(root, "pid-%d" % os.getpid())
-    return d if os.path.isdir(d) else None
+    marker = os.path.join(d, "active")
+    if not _private_dir(d) or not _private_file(marker):
+        return None
+    instance = _process_instance()
+    if instance is None or _read_marker(marker) != instance:
+        return None
+    return d
+
+
+def _process_instance():
+    """This process as the capture writer names it in the active marker, or None.
+
+    On Linux the boot id and the start time from /proc/self/stat, in clock ticks
+    since boot. On Windows the creation time as a FILETIME.
+    """
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32")
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.GetProcessTimes.argtypes = ([wintypes.HANDLE]
+                                        + [ctypes.POINTER(wintypes.FILETIME)] * 4)
+        k32.GetProcessTimes.restype = wintypes.BOOL
+        times = [wintypes.FILETIME() for _ in range(4)]
+        if not k32.GetProcessTimes(k32.GetCurrentProcess(), *map(ctypes.byref, times)):
+            return None
+        return str(times[0].dwHighDateTime << 32 | times[0].dwLowDateTime)
+    try:
+        with open("/proc/sys/kernel/random/boot_id") as f:
+            boot = f.readline().strip()
+        with open("/proc/self/stat") as f:
+            line = f.readline()
+    except OSError:
+        return None
+    # Field 2, the command name, may hold spaces and parentheses. The fields
+    # after the last ')' start at field 3, so field 22 is the 20th of them.
+    fields = line[line.rfind(")") + 1:].split()
+    if not boot or len(fields) < 20 or not fields[19].isdigit():
+        return None
+    return "%s %s" % (boot, fields[19])
+
+
+def _read_marker(path):
+    """The marker's first line, or None if it cannot be read."""
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0))
+    except OSError:
+        return None
+    try:
+        data = os.read(fd, 256)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    return data.decode("ascii", "replace").split("\n", 1)[0]
+
+
+def _private_dir(path):
+    """True if path is a real directory owned by us, not a link to one.
+
+    The capture writer refuses a planted pid-<pid> link, and a producer that
+    followed it would write region data wherever it points.
+    """
+    if os.name == "nt":
+        return os.path.isdir(path)
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    return stat.S_ISDIR(st.st_mode) and st.st_uid == os.geteuid()
+
+
+def _private_file(path):
+    """True if path is a regular single-linked file owned by us, as the writer
+    creates the active marker."""
+    if os.name == "nt":
+        return os.path.isfile(path)
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    return (stat.S_ISREG(st.st_mode) and st.st_uid == os.geteuid()
+            and st.st_nlink == 1)
+
+
+def _open_private_dir(path):
+    """Create path if needed and return a descriptor on it, set to mode 0700.
+
+    None if it is a link or not a directory of ours. The mode is set through the
+    descriptor because mkdir's is filtered by the umask, and a umask such as 0277
+    would leave a directory this process cannot create its file in.
+    """
+    try:
+        os.mkdir(path, 0o700)
+    except OSError:
+        pass  # already there, or the open below says why not
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid():
+            raise OSError("not a directory of this user")
+        if stat.S_IMODE(st.st_mode) != 0o700:
+            os.fchmod(fd, 0o700)
+    except OSError:
+        os.close(fd)
+        return None
+    return fd
+
+
+def _open_private(path, dir_fd=None):
+    """Open path for append with mode 0600, refusing a link or a file not ours.
+
+    O_NONBLOCK so that a FIFO planted at path cannot block the open before the
+    type check refuses it; it changes nothing for a regular file.
+    """
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags, 0o600, dir_fd=dir_fd)
+    if os.name != "nt":
+        try:
+            st = os.fstat(fd)
+            if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
+                    or st.st_nlink != 1):
+                raise OSError("%s is not a private file of this user" % path)
+            if stat.S_IMODE(st.st_mode) != 0o600:
+                os.fchmod(fd, 0o600)  # the umask filters a new file's mode too
+        except OSError:
+            os.close(fd)
+            raise
+    return os.fdopen(fd, "ab", buffering=0)
 
 
 class _Stream:
@@ -102,8 +244,30 @@ class _Stream:
         if self._fh is None or self._pid != os.getpid():
             self.close()
             regions = os.path.join(d, "regions")
-            os.makedirs(regions, exist_ok=True)
-            self._fh = open(os.path.join(regions, "pytorch.hrrr"), "ab", buffering=0)
+            # Private as the README asks, and never through a planted link. The
+            # file is opened relative to the directory checked, so the
+            # directory cannot be swapped for a link in between.
+            if os.name == "nt":
+                try:
+                    os.mkdir(regions, 0o700)
+                except FileExistsError:
+                    pass
+                dfd, name = None, os.path.join(regions, "pytorch.hrrr")
+                ok = _private_dir(regions)
+            else:
+                dfd, name = _open_private_dir(regions), "pytorch.hrrr"
+                ok = dfd is not None
+            if not ok:
+                _log("%s is not a private directory; not writing" % regions)
+                return False
+            try:
+                self._fh = _open_private(name, dir_fd=dfd)
+            except OSError as e:
+                _log("cannot open the region file: %s" % e)
+                return False
+            finally:
+                if dfd is not None:
+                    os.close(dfd)
             self._pid = os.getpid()
             # Only on a fresh file. The stream is opened for append, and DESIGN.md
             # explicitly supports a process re-opening its own writer on resume, so

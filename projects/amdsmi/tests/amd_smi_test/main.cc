@@ -27,6 +27,7 @@
 #include "functional/gpu/metrics/process_list_read.h"
 #include "functional/gpu/partition/computepartition_memallocmode_read_write.h"
 #include "functional/gpu/partition/computepartition_read_write.h"
+#include "functional/gpu/partition/memorypartition_read.h"
 #include "functional/gpu/partition/memorypartition_read_write.h"
 #include "functional/gpu/pci/pci_read_write.h"
 #include "functional/gpu/perf/overdrive_read.h"
@@ -256,6 +257,10 @@ TEST(GpuFunctionalReadOnly, TestGpuPartitionMetricsRead) {
   TestGpuPartitionMetricsRead tst;
   RunGenericTest(&tst);
 }
+TEST(GpuFunctionalReadOnly, TestMemoryPartitionRead) {
+  TestMemoryPartitionRead tst;
+  RunGenericTest(&tst);
+}
 TEST(GpuFunctionalReadOnly, TestMetricsCounterRead) {
   TestMetricsCounterRead tst;
   RunGenericTest(&tst);
@@ -365,7 +370,6 @@ TEST(SystemFunctionalReadOnly, TestCrossProcessSerialization) {
   tst.Run();
   RunCustomTestEpilog(&tst);
 }
-/*
 TEST(SystemFunctionalReadOnly, TestConcurrentInit) {
   TestConcurrentInit tst;
   SetFlags(&tst);
@@ -375,7 +379,6 @@ TEST(SystemFunctionalReadOnly, TestConcurrentInit) {
   // RunCustomTestEpilog(&tst);  // Avoid extra amdsmi_shut_down
   tst.DisplayResults();
 }
-*/
 
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);

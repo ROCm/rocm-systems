@@ -333,7 +333,7 @@ usage: amd-smi metric [-h] [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE 
                       [--cpu-dimm-pow-consumption DIMM_ADDR]
                       [--cpu-dimm-thermal-sensor DIMM_ADDR] [--core-boost-limit]
                       [--core-curr-active-freq-core-limit] [--core-energy]
-                      [--json | --csv] [--file FILE] [--loglevel LEVEL]
+                      [--json | --csv] [--file FILE] [--loglevel LEVEL] [--show-unsupported]
 
 If no GPU is specified, returns metric information for all GPUs on the system.
 If no metric argument is provided, all metric information will be displayed.
@@ -435,7 +435,45 @@ Command Modifiers:
   --file FILE                               Saves output into a file on the provided path (stdout by default).
   --loglevel LEVEL                          Set the logging level from the possible choices:
                                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
+  --show-unsupported                        Print every field, including the ones the GPU's gpu_metrics
+                                                table version cannot carry and which are omitted by default;
+                                                affects human-readable output only, since --json and --csv
+                                                always print every field
 ```
+
+The `gpu_metrics` table the driver exposes has a version, and each version
+carries a different set of fields. Fields the detected version cannot carry are
+omitted from human-readable output. Pass `--show-unsupported` to print them as
+`N/A` instead, which restores the output of earlier releases.
+
+`--json` and `--csv` are never filtered. They are consumed by scripts, so they
+keep emitting every field, the `N/A` ones included, and their key and column
+sets are unchanged from earlier releases. `--show-unsupported` is accepted
+alongside them and has no effect.
+
+This is scoped to the metrics table version, not to what the ASIC supports. Only
+fields whose sole sources are the metrics blobs are eligible, such as the
+`hbm_stacks`, `mid`, `aid` and `xcd` temperature arrays and the `uclk_aid` and
+`socclks_mid` clock arrays. Anything the CLI can also read from hwmon or sysfs is
+always printed: the `edge`, `hotspot` and `mem` temperature sensors, the fan
+section, the voltages, and the `gfx_N`, `vclk_N`, `dclk_N`, `mem_N` and
+`socclk_N` clock slots. A field the version *does* carry but the ASIC or driver
+leaves unpopulated also still prints `N/A`.
+
+Filtering never removes a field that reports a value, and it suppresses nothing
+at all when the metrics version is unrecognized or its header cannot be read.
+
+A section named on the command line is never emptied by filtering. Plain
+`amd-smi metric` prints every section, so a section the version can populate
+nothing of is dropped entirely; on a metrics v1.3 GPU that removes the whole
+`throttle` section. Asking for that section by name instead, as in `amd-smi
+metric --throttle`, prints it in full rather than answering with silence. A named
+section that is only partly suppressed is still filtered, so `amd-smi metric
+--usage` on a v1.9 GPU still omits `jpeg_activity`.
+
+`--partition` scopes the data rather than naming a section, so it protects
+nothing and `amd-smi metric --partition` filters exactly like plain `amd-smi
+metric`.
 
 (cmd-process)=
 ### amd-smi process
@@ -683,6 +721,9 @@ Set Arguments:
                                                 Alternatively, pass @<path> to restore every writable profile found
                                                 in a JSON file (as produced by `amd-smi static --ampp --json`).
                                                 Example: --ampp-configure @profiles.json
+  --node-balancing-mode {POWER_BALANCING,FREQUENCY_BALANCING}
+                                                Set NPM balancing mode: POWER_BALANCING or FREQUENCY_BALANCING.
+                                                This is a system-wide setting, not per-GPU.
   -n, --node-power-limit WATTS                Set the node-level (NPM) power limit in watts.
                                                 This is a node-wide setting, not per-GPU.
                                                 Max node power limit: 6000 W
@@ -1087,6 +1128,20 @@ On systems without UALoE hardware/session, `amdsmi_get_tray_info()` returns
 `AMDSMI_STATUS_NOT_SUPPORTED` and the `TRAY:` block (and the `tray`/
 `max_acc_per_tray`/`tray_type` keys in `--json`/`--csv`) is omitted entirely.
 
+`amd-smi node --power-management` includes `BALANCING_MODE`, the NPM
+balancing mode (`POWER_BALANCING`, the default, or `FREQUENCY_BALANCING`).
+This field reads `N/A` when the underlying value is missing or unreadable,
+not when NPM is disabled (see `STATUS` for enablement). Use
+`amd-smi set --node-balancing-mode {POWER_BALANCING,FREQUENCY_BALANCING}` to
+change it (AMD-SMI-only; not exposed via BMC Redfish/APML).
+
+It also includes `SUPPORTED_BALANCING_MODES`, the balancing modes supported by
+this node's platform/ASIC (e.g. `POWER_BALANCING, FREQUENCY_BALANCING`),
+independent of current NPM enablement. `amd-smi set --node-balancing-mode`
+returns `AMDSMI_STATUS_SETTING_UNAVAILABLE` with a message naming the
+requested mode if it is absent from this set, distinct from
+`AMDSMI_STATUS_NOT_SUPPORTED`'s "NPM is disabled on this node" message.
+
 ## Interpreting the output
 
 When you run an `amd-smi` command, the tool presents detailed information
@@ -1104,7 +1159,7 @@ information, GPU status, and running processes.
 ~$ amd-smi
 +------------------------------------------------------------------------------+
 | AMD-SMI            27.0.0                                                    |
-| amdgpu Version:    6.19.4                                                    |
+| amdgpu Version:    6.19.14.31400000-2370381                                  |
 | ROCm Version:      7.14.0                                                    |
 | Platform:          Linux Baremetal                                           |
 |-------------------------------------+----------------------------------------|
@@ -1279,7 +1334,7 @@ GPU: 0
         PTL_FORMAT: N/A
     DRIVER:
         NAME: amdgpu
-        VERSION: 6.19.4
+        VERSION: 6.19.14.31400000-2370381
         OS_KERNEL_VERSION: 5.15.0-generic
     BOARD:
         MODEL_NUMBER: N/A

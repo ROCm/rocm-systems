@@ -336,13 +336,11 @@ class NullDevice : public amd::Device {
   void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const override {};
   void ReleaseGlobalSignal(void* signal) const override {}
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const {
     ShouldNotReachHere();
     return nullptr;
   }
-#endif
 #endif
 
  private:
@@ -479,6 +477,14 @@ class Device : public NullDevice {
   //! Allocate a host-resident VMM handle on a CPU NUMA pool. numaNode < 0 resolves
   //! to the calling thread's current node (HostNumaCurrent). Returns 0 on failure.
   uint64_t hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const;
+
+  //! Recovers the location, owning device and size of a VMM allocation from its
+  //! ROCr handle. Returns false when ROCr cannot report them - an imported handle
+  //! whose placement the kernel could not describe, or (under ROCR_DLL_LOAD) a
+  //! ROCr too old to export hsa_amd_vmem_get_vmem_info - leaving the caller on
+  //! its default.
+  bool getVmmAllocInfo(amd::Memory& amd_mem_obj, amd::Device::VmmLocationType* location_type,
+                       int* device_id, size_t* size) const override;
 
   void* deviceLocalAlloc(size_t size,
                         const AllocationFlags& flags = AllocationFlags{}, bool allowAllAgentsAccess = true) const override;
@@ -867,10 +873,8 @@ class Device : public NullDevice {
     return (engine_type == HwQueueEngine::SdmaD2H) ? maxSdmaReadMask_ : maxSdmaWriteMask_;
   }
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const;
-#endif
 #endif
 };  // class roc::Device
 

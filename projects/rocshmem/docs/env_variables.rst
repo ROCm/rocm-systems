@@ -222,15 +222,17 @@ control the behavior of rocSHMEM.
       -
 
     * - | ``ROCSHMEM_SDMA_ENABLED``
-        | Enable or disable the SDMA transport at runtime (requires ``USE_SDMA`` build option).
-      - ``1``
-      - | ``0``: Disabled. All transfers use GPU load/store (IPC path).
+        | Enable or disable the SDMA transport at runtime. (build option ``USE_SDMA=OFF`` disables this feature).
+      - ``0``
+      - | ``0``: Disabled. All transfers use load/store (IPC path).
         | ``1``: Enabled. Transfers at or above ``ROCSHMEM_SDMA_THRESHOLD`` use the SDMA engine.
 
     * - | ``ROCSHMEM_SDMA_THRESHOLD``
-        | Minimum transfer size in bytes to route through the SDMA engine.
-        | Transfers smaller than this threshold use GPU load/store instead.
-      - ``256``
+        | Minimum transfer size in bytes to route through the SDMA engine for
+        | per-lane operations. Wave and workgroup operations automatically scale
+        | the threshold by the wavefront size (e.g., 1024 × 64 = 64KB on gfx9).
+        | Transfers smaller than the effective threshold use load/store (IPC path) instead.
+      - ``1024``
       - Size in bytes.
 
     * - | ``ROCSHMEM_SDMA_NUM_CHANNELS``

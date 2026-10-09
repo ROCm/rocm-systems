@@ -97,7 +97,7 @@ def test_relative_vgpr_ops_use_unsigned_packed_m0_fields():
     assert 'rel_dst_offset > 255u' not in swap
     assert 'rel_src_valid ? rel_src_index : 0u' in move
     assert 'if (!rel_dst_valid) return;' in move
-    assert 'wf.m0() <= 1023u' in full_width
+    assert 'amdgpu::relative_vgpr_index(rel_src_base, wf.m0(),' in full_width
     assert 'static_cast<int32_t>(wf.m0())' not in full_width
 
 
@@ -212,9 +212,10 @@ def test_permlanex16_fetches_from_other_half_row():
         cross=True,
     )
 
-    assert 'uint32_t row_base = lane & ~0x1Fu;' in cpp
-    assert 'uint32_t half = (lane ^ 0x10u) & 0x10u;' in cpp
-    assert 'uint32_t src_lane = row_base | half | sel;' in cpp
+    assert (
+        'valu_permutation_source(amdgpu::ValuPermutation::X16, lane, sel, 16, wf.wf_size())'
+        in cpp
+    )
     assert 'sel ^ 0x10' not in cpp
 
 

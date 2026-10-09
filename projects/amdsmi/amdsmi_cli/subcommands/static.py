@@ -685,7 +685,7 @@ class StaticCommands:
             try:
                 driver_info = amdsmi_interface.amdsmi_get_gpu_driver_info(args.gpu)
                 driver_info_dict["name"] = driver_info["driver_name"]
-                driver_info_dict["version"] = driver_info["driver_version"]
+                driver_info_dict["version"] = driver_info["driver_full_version"]
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug(
                     "Failed to get driver info for gpu %s | %s", gpu_id, e.get_error_info()
@@ -1369,7 +1369,7 @@ class StaticCommands:
                         clk_type_conversion = "N/A"
                         output_format = self.helpers.get_output_format()
                         raise AmdSmiInvalidParameterException(
-                            "static", clk_type, output_format
+                            "static", clk, output_format
                         )  # clk type given is bad
 
                     try:

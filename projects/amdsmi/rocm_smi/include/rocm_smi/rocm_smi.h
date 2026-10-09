@@ -665,6 +665,17 @@ typedef struct {
 } rsmi_ampp_profile_t;
 
 /**
+ * @brief NPM balancing mode
+ *
+ */
+typedef enum {
+  RSMI_NPM_BALANCING_MODE_INVALID = 0,
+  RSMI_NPM_BALANCING_MODE_POWER_BALANCING = 1,
+  RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING = 2,
+  RSMI_NPM_BALANCING_MODE_MAX = 3
+} rsmi_npm_balancing_mode_t;
+
+/**
  * @brief Activity (Utilization) Metrics.  This enum is used to identify
  * various activity metrics.
  *
@@ -3205,7 +3216,16 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind, u
 rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
                                     rsmi_npm_info_t* npm_info);
 
+rsmi_status_t rsmi_dev_npm_balancing_mode_get(uint32_t dv_ind, uintptr_t node_handle,
+                                              rsmi_npm_balancing_mode_t* mode);
+
+rsmi_status_t rsmi_dev_npm_balancing_mode_set(uint32_t dv_ind, uintptr_t node_handle,
+                                              rsmi_npm_balancing_mode_t mode);
+
 rsmi_status_t rsmi_dev_npm_limit_set(uint32_t dv_ind, uintptr_t node_handle, uint64_t limit);
+
+rsmi_status_t rsmi_dev_npm_supported_balancing_modes_get(uint32_t dv_ind, uintptr_t node_handle,
+                                                         uint64_t* bitmask);
 
 rsmi_status_t rsmi_dev_baseboard_power_get(uint32_t dv_ind, uint64_t* power);
 

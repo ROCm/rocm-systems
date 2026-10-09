@@ -24,11 +24,9 @@
 #include "devsignal.hpp"
 #include "utils/nontemporal.hpp"
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 #include "devurilocator.hpp"
-#endif
-#endif
+#endif  // DEVICE_ADDRESS_SANITIZER
 
 #include <array>
 #include <cassert>
@@ -118,6 +116,14 @@ enum MemRangeAttribute : uint32_t {
 // DMA-BUF mapping-type flags for GetHandleForAddressRange
 enum MemRangeDmaBufMappingType : uint64_t {
   MemRangeDmaBufMappingTypePcie = 0x1,  ///< Maps dmabuf via pcie, requires large bar support
+};
+
+// DMA-BUF mapping results for GetHandleForAddressRange.
+// kNotSupported is returned on unsupported devices.
+enum HandleExportResult : uint32_t {
+  kSuccess = 0,   ///< Handle was exported.
+  kNotSupported,  ///< Request is valid but unsupported on this device.
+  kError,         ///< Export failed.
 };
 
 //! Maps hipFuncCache_t to group memory carveout percentage.
@@ -764,6 +770,8 @@ class Settings {
   void enableExtension(uint name) { extensions_ |= static_cast<uint64_t>(1) << name; }
 
   size_t stagedXferSize_ = 0;     //!< Staged buffer size
+  size_t sdma_swap_alignment_ = 0;  //!< SDMA swap address alignment
+  size_t sdma_indirect_max_size_ = 0;  //!< Max SDMA indirect copy size
 
  private:
   //! Disable copy constructor
@@ -993,9 +1001,9 @@ class Memory {
   MemAccess GetAccess() const { return memAccess_; }
 
   //! Retrieves shareable handle for hipMalloc'ed address range.
-  virtual bool GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle,
-                                 unsigned long long flags) {
-    return false;
+  virtual HandleExportResult GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle,
+                                               unsigned long long flags) {
+    return HandleExportResult::kError;
   }
 
  protected:
@@ -2188,6 +2196,20 @@ class Device : public RuntimeObject {
   }
 
   /**
+   * Recovers the location and size of a VMM allocation.
+   *
+   * @param amd_mem_obj physical memory object of the allocation
+   * @param location_type [out] where the allocation resides
+   * @param device_id [out] owning device for device memory, InvalidDeviceId otherwise
+   * @param size [out] allocation size in bytes
+   * @return True when the backend reported them; false leaves the caller on its default.
+   */
+  virtual bool getVmmAllocInfo(amd::Memory& amd_mem_obj, VmmLocationType* location_type,
+                               int* device_id, size_t* size) const {
+    return false;
+  }
+
+  /**
    * @return True if the device successfully applied the SVM attributes in HMM for device memory
    */
   virtual bool SetSvmAttributes(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
@@ -2433,24 +2455,18 @@ class Device : public RuntimeObject {
   //! Sets the group memory carveout percentage hint for the device
   void UpdateGroupMemCarveout(uint8_t percent) { group_mem_carveout_hint_ = percent; }
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const = 0;
-#endif
-#endif
 
-#if defined(__linux__) && defined(__clang__)
-#if __has_feature(address_sanitizer)
   void reportDeviceMemoryLeaks();
   static void reportAllDeviceMemoryLeaks();
-#endif
 #endif
 
   static bool IsGPUInError() { return (gpu_error_.load(std::memory_order_relaxed) != CL_SUCCESS); }
   static cl_int GetGPUError() { return gpu_error_.load(std::memory_order_relaxed); }
 
-  bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
-                                unsigned long long flags);
+  HandleExportResult GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
+                                              unsigned long long flags);
 
   // Registers a memory object allocated via hostcall for later cleanup.
   void TrackHostcallMemory(amd::Memory* memory);

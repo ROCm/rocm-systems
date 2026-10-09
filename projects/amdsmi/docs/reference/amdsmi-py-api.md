@@ -568,9 +568,13 @@ Output: Dictionary with fields
 
 Field | Content
 ---|---
-`driver_name` |  driver name
-`driver_version` |  driver_version
-`driver_date` |  driver_date
+``driver_name`` |  driver name
+``driver_kernel_version`` | amdgpu kernel source version, such as ``6.19.14``
+``amdgpu_driver_version`` | amdgpu module version, such as ``31400000``
+``driver_version`` | driver version, such as ``6.19.14.31400000``
+``driver_build_version`` | active DKMS build version, such as ``2370381``
+``driver_full_version`` | composed version, such as ``6.19.14.31400000-2370381``
+``driver_date`` |  driver_date
 
 Exceptions that can be thrown by `amdsmi_get_gpu_driver_info` function:
 
@@ -3162,6 +3166,122 @@ try:
     else:
         node_handle = amdsmi.amdsmi_get_node_handle(devices[0])
         amdsmi.amdsmi_set_npm_limit(node_handle, 6000)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_npm_balancing_mode
+
+Description: Returns the NPM balancing mode for a node: Power Balancing (`"PB"`,
+the default) or Frequency Balancing (`"FB"`). This is not gated on NPM
+enablement; it raises `AmdSmiLibraryException` (`AMDSMI_STATUS_NOT_SUPPORTED`)
+if the underlying value is missing or unreadable.
+
+Input parameters:
+
+* `node_handle` node handle obtained from `amdsmi_get_node_handle`
+
+Output: `str` — `"PB"` or `"FB"`
+
+Exceptions that can be thrown by `amdsmi_get_npm_balancing_mode` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        node_handle = amdsmi.amdsmi_get_node_handle(devices[0])
+        mode = amdsmi.amdsmi_get_npm_balancing_mode(node_handle)
+        print(mode)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_npm_balancing_mode
+
+Description: Sets the NPM balancing mode for a node to Power Balancing (`"PB"`)
+or Frequency Balancing (`"FB"`). This setting is AMD-SMI-only; it is not
+exposed via BMC Redfish/APML. Requires elevated (root) privileges.
+
+Input parameters:
+
+* `node_handle` node handle obtained from `amdsmi_get_node_handle`
+* `mode` `"PB"` or `"FB"`
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_npm_balancing_mode` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - NPM is disabled on this node
+- `AMDSMI_STATUS_SETTING_UNAVAILABLE` - requested mode absent from this platform's supported balancing modes
+- `AMDSMI_STATUS_NO_PERM` - Caller lacks elevated privileges
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        node_handle = amdsmi.amdsmi_get_node_handle(devices[0])
+        amdsmi.amdsmi_set_npm_balancing_mode(node_handle, "FB")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_npm_supported_balancing_modes
+
+Description: Returns the set of NPM balancing modes supported by this node's
+platform/ASIC, independent of current NPM enablement.
+
+Input parameters:
+
+* `node_handle` node handle obtained from `amdsmi_get_node_handle`
+
+Output: `List[str]` — subset of `["PB", "FB"]` (e.g. `["PB", "FB"]` on
+platforms that support both)
+
+Exceptions that can be thrown by `amdsmi_get_npm_supported_balancing_modes` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        node_handle = amdsmi.amdsmi_get_node_handle(devices[0])
+        supported_modes = amdsmi.amdsmi_get_npm_supported_balancing_modes(node_handle)
+        print(supported_modes)
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:
