@@ -142,15 +142,6 @@ class cli_analysis(OmniAnalyze_Base):
             if getattr(args, framework_flags["list_attr"], False)
         ]
 
-        if active_operator_filters and active_operator_lists:
-            console_warning(
-                "ml api trace",
-                "Both operator listing and filter flags are set. "
-                "Defaulting to listing. "
-                "Use the filter flag to filter the operators instead.",
-            )
-            active_operator_filters = []
-
         for path_info in args.path:
             workload = self._runs[path_info[0]]
 
