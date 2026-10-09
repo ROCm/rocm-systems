@@ -101,13 +101,14 @@ RUN wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.g
 
 ## fetching RCCL, RCCL-Tests and rocSHMEM sources (shallow, blobless, sparse checkout of the monorepo)
 ENV ROCM_SYSTEMS_DIR=${WORKDIR}/rocm-systems
+## check out a named branch (the ref, or a fixed name if it is not a valid branch name) so the version banner is not "HEAD:<sha>"
 RUN git init "${ROCM_SYSTEMS_DIR}" \
     && cd "${ROCM_SYSTEMS_DIR}" \
     && git remote add origin "${ROCM_SYSTEMS_REPO}" \
     && git sparse-checkout init --cone \
     && git sparse-checkout set projects/rccl projects/rccl-tests projects/rocshmem \
     && git fetch --depth 1 --filter=blob:none origin "${ROCM_SYSTEMS_REF}" \
-    && git checkout FETCH_HEAD
+    && git checkout -B "$(git check-ref-format --branch "${ROCM_SYSTEMS_REF}" 2>/dev/null || echo rocm-systems-ref)" FETCH_HEAD
 
 ## building RCCL
 ENV RCCL_INSTALL_PREFIX=${WORKDIR}/rccl/install
