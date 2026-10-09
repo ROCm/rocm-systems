@@ -730,8 +730,10 @@ void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
 void ComputeUnitCore::abort_dispatch(uint32_t dispatch_id) {
   std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
   for (const auto &wavefront : wfs_) {
-    if (wavefront && !wavefront->is_halted() && wavefront->dispatch_id() == dispatch_id)
+    if (wavefront && !wavefront->is_halted() && wavefront->dispatch_id() == dispatch_id) {
+      plugin_group().onAmdgpuWavefrontCancelled(*wavefront);
       free_wavefront_resources(*wavefront);
+    }
   }
 
   std::erase_if(active_wgs_, [dispatch_id](const auto &entry) {
