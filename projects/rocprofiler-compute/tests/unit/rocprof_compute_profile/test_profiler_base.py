@@ -1240,9 +1240,17 @@ def test_compute_selected_frameworks_unions_torch_and_triton_flags():
     assert ml_api == both_flags
 
 
-def test_sanitize_rejects_torch_trace_with_attach_pid(tmp_path):
+@pytest.mark.parametrize(
+    "trace_flag",
+    [
+        pytest.param("torch_trace", id="torch"),
+        pytest.param("triton_trace", id="triton"),
+        pytest.param("ml_api_trace", id="ml_api"),
+    ],
+)
+def test_sanitize_rejects_ml_api_trace_with_attach_pid(tmp_path, trace_flag):
     remaining = _setup_test_files(tmp_path, [sys.executable, "{script}"], "script")
-    args = _make_sanitize_args(remaining, torch_trace=True, attach_pid=12345)
+    args = _make_sanitize_args(remaining, attach_pid=12345, **{trace_flag: True})
     profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
     with pytest.raises(SystemExit):
         profiler.sanitize()
