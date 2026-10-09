@@ -32,7 +32,7 @@ FlatLoadUbyteFlat::FlatLoadUbyteFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -79,7 +79,7 @@ FlatLoadSbyteFlat::FlatLoadSbyteFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -126,7 +126,7 @@ FlatLoadUshortFlat::FlatLoadUshortFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -173,7 +173,7 @@ FlatLoadSshortFlat::FlatLoadSshortFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -220,7 +220,7 @@ FlatLoadDwordFlat::FlatLoadDwordFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -267,7 +267,7 @@ FlatLoadDwordx2Flat::FlatLoadDwordx2Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -314,7 +314,7 @@ FlatLoadDwordx4Flat::FlatLoadDwordx4Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -361,7 +361,7 @@ FlatLoadDwordx3Flat::FlatLoadDwordx3Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -408,13 +408,14 @@ FlatStoreByteFlat::FlatStoreByteFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
+  data.set_register_byte_mask(0x1);
   set_memory_issue_info(
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VSCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED},
@@ -457,13 +458,14 @@ FlatStoreByteD16HiFlat::FlatStoreByteD16HiFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
+  data.set_register_byte_mask(0x4);
   set_memory_issue_info(
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VSCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED},
@@ -506,13 +508,14 @@ FlatStoreShortFlat::FlatStoreShortFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
+  data.set_register_byte_mask(0x3);
   set_memory_issue_info(
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VSCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED},
@@ -555,13 +558,14 @@ FlatStoreShortD16HiFlat::FlatStoreShortD16HiFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
   }
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
+  data.set_register_byte_mask(0xc);
   set_memory_issue_info(
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VSCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED},
@@ -604,7 +608,7 @@ FlatStoreDwordFlat::FlatStoreDwordFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -653,7 +657,7 @@ FlatStoreDwordx2Flat::FlatStoreDwordx2Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -702,7 +706,7 @@ FlatStoreDwordx4Flat::FlatStoreDwordx4Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -751,7 +755,7 @@ FlatStoreDwordx3Flat::FlatStoreDwordx3Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -800,7 +804,7 @@ FlatLoadUbyteD16Flat::FlatLoadUbyteD16Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -854,7 +858,7 @@ FlatLoadUbyteD16HiFlat::FlatLoadUbyteD16HiFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -908,7 +912,7 @@ FlatLoadSbyteD16Flat::FlatLoadSbyteD16Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -962,7 +966,7 @@ FlatLoadSbyteD16HiFlat::FlatLoadSbyteD16HiFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -1016,7 +1020,7 @@ FlatLoadShortD16Flat::FlatLoadShortD16Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -1070,7 +1074,7 @@ FlatLoadShortD16HiFlat::FlatLoadShortD16HiFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -1128,7 +1132,7 @@ FlatAtomicSwapFlat::FlatAtomicSwapFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -1184,7 +1188,7 @@ FlatAtomicCmpswapFlat::FlatAtomicCmpswapFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -1240,7 +1244,7 @@ FlatAtomicAddFlat::FlatAtomicAddFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -1296,7 +1300,7 @@ FlatAtomicSubFlat::FlatAtomicSubFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -1352,7 +1356,7 @@ FlatAtomicSminFlat::FlatAtomicSminFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -1408,7 +1412,7 @@ FlatAtomicUminFlat::FlatAtomicUminFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -1464,7 +1468,7 @@ FlatAtomicSmaxFlat::FlatAtomicSmaxFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -1520,7 +1524,7 @@ FlatAtomicUmaxFlat::FlatAtomicUmaxFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -1576,7 +1580,7 @@ FlatAtomicAndFlat::FlatAtomicAndFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -1632,7 +1636,7 @@ FlatAtomicOrFlat::FlatAtomicOrFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -1688,7 +1692,7 @@ FlatAtomicXorFlat::FlatAtomicXorFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -1744,7 +1748,7 @@ FlatAtomicIncFlat::FlatAtomicIncFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -1800,7 +1804,7 @@ FlatAtomicDecFlat::FlatAtomicDecFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -1856,7 +1860,7 @@ FlatAtomicFcmpswapFlat::FlatAtomicFcmpswapFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -1912,7 +1916,7 @@ FlatAtomicFminFlat::FlatAtomicFminFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -1968,7 +1972,7 @@ FlatAtomicFmaxFlat::FlatAtomicFmaxFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -2024,7 +2028,7 @@ FlatAtomicSwapX2Flat::FlatAtomicSwapX2Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -2080,7 +2084,7 @@ FlatAtomicCmpswapX2Flat::FlatAtomicCmpswapX2Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -2136,7 +2140,7 @@ FlatAtomicAddX2Flat::FlatAtomicAddX2Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -2192,7 +2196,7 @@ FlatAtomicSubX2Flat::FlatAtomicSubX2Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -2248,7 +2252,7 @@ FlatAtomicSminX2Flat::FlatAtomicSminX2Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -2304,7 +2308,7 @@ FlatAtomicUminX2Flat::FlatAtomicUminX2Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -2360,7 +2364,7 @@ FlatAtomicSmaxX2Flat::FlatAtomicSmaxX2Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -2416,7 +2420,7 @@ FlatAtomicUmaxX2Flat::FlatAtomicUmaxX2Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -2472,7 +2476,7 @@ FlatAtomicAndX2Flat::FlatAtomicAndX2Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -2528,7 +2532,7 @@ FlatAtomicOrX2Flat::FlatAtomicOrX2Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -2584,7 +2588,7 @@ FlatAtomicXorX2Flat::FlatAtomicXorX2Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -2640,7 +2644,7 @@ FlatAtomicIncX2Flat::FlatAtomicIncX2Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -2696,7 +2700,7 @@ FlatAtomicDecX2Flat::FlatAtomicDecX2Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -2752,7 +2756,7 @@ FlatAtomicFcmpswapX2Flat::FlatAtomicFcmpswapX2Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -2808,7 +2812,7 @@ FlatAtomicFminX2Flat::FlatAtomicFminX2Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -2864,7 +2868,7 @@ FlatAtomicFmaxX2Flat::FlatAtomicFmaxX2Flat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
@@ -2908,6 +2912,8 @@ GlobalLoadDwordAddtidFlat::GlobalLoadDwordAddtidFlat(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  if (!inst_.lds)
+    flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2984,7 +2990,7 @@ GlobalAtomicCsubFlat::GlobalAtomicCsubFlat(const MachineInst *inst)
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
     }
-  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+  } else if ((inst_.seg == 0 || inst_.seg == 2) && inst_.saddr != 0x7F) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
     src_operands_[num_src_++] = &saddr;
