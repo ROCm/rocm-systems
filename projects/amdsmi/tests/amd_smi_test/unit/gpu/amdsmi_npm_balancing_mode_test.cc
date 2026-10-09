@@ -42,7 +42,33 @@
 #include "amd_smi/impl/amd_smi_test_internal.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
+#if defined(ENABLE_WSL_BACKEND)
+#include "amd_smi/impl/amd_smi_wsl_device.h"
+#endif  // ENABLE_WSL_BACKEND
+
 namespace fs = std::filesystem;
+
+// On a real WSL2 CI runner, WSLGPUBackend::IsActive() makes every NPM call
+// short-circuit to AMDSMI_STATUS_NOT_SUPPORTED before ever consulting this
+// test's fabricated board_path content (see the ENABLE_WSL_BACKEND guard at
+// the top of each amdsmi_*npm* function in amd_smi.cc). A plain helper
+// function would not work here: GTEST_SKIP_() expands to a `return`, which
+// would only exit the helper, not the TEST() body -- hence a macro.
+#if defined(ENABLE_WSL_BACKEND)
+#define SKIP_IF_WSL_BACKEND_ACTIVE()                                   \
+  do {                                                                 \
+    if (amd::smi::WSLGPUBackend::IsActive()) {                         \
+      GTEST_SKIP_(                                                     \
+          "WSLGPUBackend is active: this NPM call short-circuits to "  \
+          "AMDSMI_STATUS_NOT_SUPPORTED before this test's fabricated " \
+          "board content is ever consulted");                          \
+    }                                                                  \
+  } while (0)
+#else
+#define SKIP_IF_WSL_BACKEND_ACTIVE() \
+  do {                               \
+  } while (0)
+#endif  // ENABLE_WSL_BACKEND
 
 namespace {
 
@@ -136,6 +162,7 @@ TEST(GpuUnit, GetNpmBalancingModeDisabledStillReportsLastSelectedMode) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   TempBoardDir board;
   board.WriteFile("npm_status", "disabled");
@@ -157,6 +184,7 @@ TEST(GpuUnit, GetNpmBalancingModeEnabledDefaultsToPowerBalancing) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   TempBoardDir board;
   board.WriteFile("npm_status", "enabled");
@@ -180,6 +208,7 @@ TEST(GpuUnit, GetNpmBalancingModeEnabledMissingModeFileIsNotSupported) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   TempBoardDir board;
   board.WriteFile("npm_status", "enabled");
@@ -200,6 +229,7 @@ TEST(GpuUnit, GetNpmBalancingModeGarbageValueIsUnexpectedData) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   TempBoardDir board;
   board.WriteFile("npm_status", "enabled");
@@ -220,6 +250,7 @@ TEST(GpuUnit, GetNpmBalancingModeEnabledReadsFrequencyBalancing) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   TempBoardDir board;
   board.WriteFile("npm_status", "enabled");
@@ -270,6 +301,7 @@ TEST(GpuUnit, SetNpmBalancingModeNonRootIsNoPerm) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (amd::smi::is_sudo_user()) {
     GTEST_SKIP_(
@@ -294,6 +326,7 @@ TEST(GpuUnit, SetNpmBalancingModeRootRejectsWhenNpmDisabled) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (!amd::smi::is_sudo_user()) {
     GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -321,6 +354,7 @@ TEST(GpuUnit, SetNpmBalancingModeRootRoundTrip) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (!amd::smi::is_sudo_user()) {
     GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -356,6 +390,7 @@ TEST(GpuUnit, SetNpmBalancingModeRootMissingModeFileIsNotSupported) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (!amd::smi::is_sudo_user()) {
     GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -380,6 +415,7 @@ TEST(GpuUnit, SetNpmBalancingModeRootMissingBoardDirIsNotSupported) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (!amd::smi::is_sudo_user()) {
     GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -408,6 +444,7 @@ TEST(GpuUnit, SetNpmBalancingModeRootRejectsModeAbsentFromSupportedBitmask) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (!amd::smi::is_sudo_user()) {
     GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -434,6 +471,7 @@ TEST(GpuUnit, SetNpmBalancingModeRootAllowsModePresentInSupportedBitmask) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (!amd::smi::is_sudo_user()) {
     GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -462,6 +500,7 @@ TEST(GpuUnit, SetNpmBalancingModeRootRejectsCorruptSupportedModesFile) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (!amd::smi::is_sudo_user()) {
     GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -489,6 +528,7 @@ TEST(GpuUnit, SetNpmBalancingModeRootToleratesMissingSupportedModesFile) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (!amd::smi::is_sudo_user()) {
     GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -543,6 +583,7 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesMissingFileIsNotSupported) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   TempBoardDir board;
   // Deliberately do not create board/supported_mode: not yet implemented
@@ -562,6 +603,7 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesNotGatedOnNpmEnablement) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   TempBoardDir board;
   board.WriteFile("npm_status", "disabled");
@@ -582,6 +624,7 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesDecodesHexBitmask) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   TempBoardDir board;
   board.WriteFile("supported_mode", "0x2");
@@ -601,6 +644,7 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesGarbageValueIsUnexpectedData) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   TempBoardDir board;
   board.WriteFile("supported_mode", "not-a-hex-number");
@@ -682,6 +726,7 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesNegativeValueIsUnexpectedData) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   TempBoardDir board;
   // std::stoull("-1", ..., 16) would otherwise silently parse as UINT64_MAX;
