@@ -3716,9 +3716,10 @@ def generated_f16_sdwa_consumers(request, tmp_path_factory):
     ]
     + [('V_ADD_F16', 'finish_arithmetic_f16')],
 )
-def test_generated_f16_sdwa_preserves_producer_rounding_contract(
+def test_generated_f16_sdwa_preserves_unvalidated_legacy_ordering(
     generated_f16_sdwa_consumers, instruction, helper
 ):
+    """Pin current helper selection; no SDWA captures establish its ordering."""
     route, output = generated_f16_sdwa_consumers
     encoding = 'vop2' if instruction == 'V_ADD_F16' else 'vop1'
     if route == 'shared':

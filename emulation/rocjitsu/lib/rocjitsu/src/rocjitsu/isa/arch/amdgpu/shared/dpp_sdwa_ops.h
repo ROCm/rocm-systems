@@ -808,6 +808,7 @@ inline uint32_t output_modifier(const Inst &inst, const Wavefront &wf) {
 }
 
 /// @brief Apply SDWA scaling before narrowing a semantic F16 result.
+/// @details Retained legacy ordering, without SDWA hardware validation.
 template <typename Inst>
 inline uint16_t round_f16_result(const Inst &inst, const Wavefront &wf, float value,
                                  bool fp16_ovfl) {
@@ -821,6 +822,7 @@ inline uint16_t round_f16_result(const Inst &inst, const Wavefront &wf, float va
 }
 
 /// @brief Apply SDWA scaling to an already rounded half transcendental result.
+/// @details Retained legacy ordering, without SDWA hardware validation.
 template <typename Inst>
 inline uint16_t finish_rounded_f16(const Inst &inst, const Wavefront &wf, float value,
                                    bool fp16_ovfl) {
@@ -829,6 +831,8 @@ inline uint16_t finish_rounded_f16(const Inst &inst, const Wavefront &wf, float 
 }
 
 /// @brief Apply SDWA scaling before guest-mode rounding of a wide F16 arithmetic result.
+/// @details Retained legacy ordering, without SDWA hardware validation; migrated
+/// VOP3 arithmetic instead modifies the rounded half. See output_modifier.h.
 template <typename Inst>
 inline uint16_t finish_arithmetic_f16(const Inst &inst, const Wavefront &wf, double value,
                                       uint32_t round_mode, uint32_t denorm_mode, bool fp16_ovfl) {
