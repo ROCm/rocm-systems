@@ -1168,8 +1168,21 @@ TEST_F(TopoTest, RemoveNode_RefusedWhilePathsComputed) {
   ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
   ASSERT_EQ(built->nodes[NET].count, 1);
 
+  auto linkTargets = [&]() {
+    std::vector<std::vector<struct ncclTopoNode*>> targets;
+    for (int t = 0; t < NCCL_TOPO_NODE_TYPES; t++) {
+      for (int n = 0; n < built->nodes[t].count; n++) {
+        struct ncclTopoNode* node = built->nodes[t].nodes + n;
+        targets.emplace_back();
+        for (int l = 0; l < node->nlinks; l++) targets.back().push_back(node->links[l].remNode);
+      }
+    }
+    return targets;
+  };
+  const auto linksBefore = linkTargets();
   ASSERT_EQ(ncclTopoRemoveNode(built, NET, 0), ncclInternalError);
   EXPECT_EQ(built->nodes[NET].count, 1);
+  EXPECT_EQ(linkTargets(), linksBefore) << "a refused removal must not touch any link";
 
   ncclTopoRemovePaths(built);
   for (int t1 = 0; t1 < NCCL_TOPO_NODE_TYPES; t1++) {
@@ -1181,6 +1194,17 @@ TEST_F(TopoTest, RemoveNode_RefusedWhilePathsComputed) {
   }
   EXPECT_EQ(ncclTopoRemoveNode(built, NET, 0), ncclSuccess);
   EXPECT_EQ(built->nodes[NET].count, 0);
+  for (int t = 0; t < NCCL_TOPO_NODE_TYPES; t++) {
+    for (int n = 0; n < built->nodes[t].count; n++) {
+      struct ncclTopoNode* node = built->nodes[t].nodes + n;
+      for (int l = 0; l < node->nlinks; l++) {
+        const struct ncclTopoNode* remNode = node->links[l].remNode;
+        const struct ncclTopoNodeSet* remSet = built->nodes + remNode->type;
+        EXPECT_LT(remNode - remSet->nodes, remSet->count)
+            << "node " << t << "/" << n << " still links past the live nodes of type " << remNode->type;
+      }
+    }
+  }
   EXPECT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
 
   ncclTopoFree(built);
