@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Shared Linux host utilities used by the KFD backend.
 //!
 //! These wrappers centralize process-identity checks, descriptor duplication and
@@ -11,9 +14,8 @@
 use std::ffi::c_int;
 use std::fs::File;
 use std::io;
-use std::mem::ManuallyDrop;
 use std::os::fd::{FromRawFd, IntoRawFd};
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{FileExt, MetadataExt};
 
 unsafe extern "C" {
     fn close(fd: c_int) -> c_int;
@@ -63,6 +65,22 @@ pub(super) fn duplicate_file(descriptor: i32) -> io::Result<File> {
     Ok(unsafe { File::from_raw_fd(duplicate) })
 }
 
+/// Gets the file length from an owned duplicate of a borrowed descriptor.
+pub(super) fn descriptor_length(descriptor: i32) -> io::Result<u64> {
+    duplicate_file(descriptor)?
+        .metadata()
+        .map(|metadata| metadata.len())
+}
+
+/// Reads an exact range without closing or moving the caller's descriptor.
+pub(super) fn read_descriptor_exact_at(
+    descriptor: i32,
+    buffer: &mut [u8],
+    offset: u64,
+) -> io::Result<()> {
+    duplicate_file(descriptor)?.read_exact_at(buffer, offset)
+}
+
 /// Consumes one owned descriptor even when the underlying close reports an error.
 pub(super) fn close_descriptor(descriptor: i32) -> io::Result<()> {
     // SAFETY: The caller transfers ownership of this descriptor for one close.
@@ -73,13 +91,30 @@ pub(super) fn close_descriptor(descriptor: i32) -> io::Result<()> {
     }
 }
 
-pub(super) fn descriptor_length(descriptor: i32) -> io::Result<u64> {
+/// Reads at a fixed file offset without changing the shared file position.
+pub(super) fn read_descriptor_at(
+    descriptor: i32,
+    buffer: &mut [u8],
+    offset: i64,
+) -> io::Result<usize> {
     if descriptor < 0 {
-        return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        return Err(io::Error::from_raw_os_error(9));
     }
-    // SAFETY: The temporary File borrows the descriptor for metadata only.
-    let file = ManuallyDrop::new(unsafe { File::from_raw_fd(descriptor) });
-    file.metadata().map(|metadata| metadata.len())
+    let offset = u64::try_from(offset).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+    duplicate_file(descriptor)?.read_at(buffer, offset)
+}
+
+/// Writes at a fixed file offset without changing the shared file position.
+pub(super) fn write_descriptor_at(
+    descriptor: i32,
+    buffer: &[u8],
+    offset: i64,
+) -> io::Result<usize> {
+    if descriptor < 0 {
+        return Err(io::Error::from_raw_os_error(9));
+    }
+    let offset = u64::try_from(offset).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+    duplicate_file(descriptor)?.write_at(buffer, offset)
 }
 
 pub(super) fn dma_buf_file_info(file: &File) -> io::Result<DmaBufFileInfo> {
@@ -170,4 +205,51 @@ pub(super) fn close_file(file: &mut Option<File>) -> io::Result<()> {
         return Ok(());
     };
     close_descriptor(file.into_raw_fd())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Seek, SeekFrom, Write};
+    use std::os::fd::AsRawFd;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NEXT_FILE: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn descriptor_snapshot_preserves_caller_ownership_and_file_position() {
+        let path = std::env::temp_dir().join(format!(
+            "rocddi-descriptor-test-{}-{}",
+            std::process::id(),
+            NEXT_FILE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        std::fs::remove_file(path).unwrap();
+        file.write_all(b"abcdef").unwrap();
+        file.seek(SeekFrom::Start(2)).unwrap();
+        let descriptor = file.as_raw_fd();
+
+        assert_eq!(descriptor_length(descriptor).unwrap(), 6);
+        let mut bytes = [0; 3];
+        read_descriptor_exact_at(descriptor, &mut bytes, 1).unwrap();
+        assert_eq!(&bytes, b"bcd");
+        assert_eq!(file.stream_position().unwrap(), 2);
+        file.read_exact(&mut bytes[..1]).unwrap();
+        assert_eq!(bytes[0], b'c');
+
+        assert_eq!(
+            read_descriptor_exact_at(descriptor, &mut bytes, 5)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+        assert!(descriptor_length(-1).is_err());
+        assert!(read_descriptor_exact_at(-1, &mut bytes, 0).is_err());
+    }
 }

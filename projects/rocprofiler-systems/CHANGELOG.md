@@ -12,6 +12,22 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   the profiler output. Enable collection with `ROCPROFSYS_USE_HIPFILE` and select metrics with
   `ROCPROFSYS_HIPFILE_METRICS`. See
   [hipFile Infinity Storage I/O telemetry](./docs/how-to/hipfile-telemetry.rst).
+- `rocprof-sys-attach` finds the tool library in the target's own ROCm installation when the
+  target cannot see this installation's library (for example, inside a container), so
+  `ROCPROF_ATTACH_TOOL_LIBRARY` is no longer needed there.
+
+### Resolved issues
+
+- Fixed a crash (`SIGSEGV`) in `rocprof-sys-instrument` when instrumenting Fortran+HIP
+  programs compiled with `gfortran -g` or `-g -O0`. gfortran encodes assumed-shape and
+  allocatable array bounds as DWARF location expression blocks rather than integer
+  constants at debug optimization levels; DynInst was treating these block-form
+  attributes as errors and dereferencing a null pointer in `parseSubrange()`.
+  Fixed in [ROCm/dyninst#33](https://github.com/ROCm/dyninst/pull/33).
+- Fixed `rocprof-sys-attach` aborting the target process when attaching to a process
+  running in a different mount namespace (for example, a container). The tool library
+  path is now validated against the target's mount namespace before attaching, failing
+  cleanly with a diagnostic instead.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
 

@@ -61,6 +61,7 @@
 #include "suites/functional/virtual_memory.h"
 #include "suites/functional/svm_memory.h"
 #include "suites/functional/time_stamp.h"
+#include "suites/functional/heap_reservation.h"
 #include "suites/performance/dispatch_time.h"
 #include "suites/performance/memory_async_copy.h"
 #if ENABLE_COPY_NUMA
@@ -373,6 +374,15 @@ TEST(rocrtstFunc, Time_Stamp) {
   if (!RunCustomTestProlog(&ts)) return;
   ts.TimeStampTest();
   RunCustomTestEpilog(&ts);
+}
+
+TEST(rocrtstFunc, Heap_Reservation) {
+    if (rocrtst::SkipIfNotWsl("heap VA pools are reserved only by the WSL/DXG thunk")) return;
+    HeapReservationTest hr;
+
+    if (!RunCustomTestProlog(&hr)) return;
+    hr.HeapReservationSurvivesConstrainedAddressSpace();
+    RunCustomTestEpilog(&hr);
 }
 
 TEST(rocrtstFunc, BarrierPkt_TimeStamp) {

@@ -281,10 +281,8 @@ bool Program::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
     return false;
   }
 
-#if defined(__linux__) && defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   UriLocator::recordCodeObjects(hsaExecutable_);
-#endif
 #endif
 
   for (auto& kit : kernels()) {
