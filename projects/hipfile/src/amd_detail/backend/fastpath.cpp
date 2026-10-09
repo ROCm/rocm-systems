@@ -33,7 +33,8 @@ using namespace std;
 static bool
 fastpathFallbackEligibleErrno(int err)
 {
-    return err == ENODEV || err == EREMOTEIO;
+    // ENOTTY: the KFD does not implement the AIS ioctl.
+    return err == ENODEV || err == EREMOTEIO || err == ENOTTY;
 }
 
 /* The fastpath backend is used when:
