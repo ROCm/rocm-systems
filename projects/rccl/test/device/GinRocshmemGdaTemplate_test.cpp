@@ -49,7 +49,15 @@ __device__ unsigned long long g_gdaInlinePutsAtFence = 0;
 namespace RcclUnitTesting
 {
 
-class GinRocshmemGdaTemplateTest : public DeviceTestBase {};
+class GinRocshmemGdaTemplateTest : public DeviceTestBase {
+protected:
+  // A test that leaves the mock queue busy would stall the tests after it.
+  void TearDown() override {
+    size_t zero = 0;
+    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::try_quiet_busy), &zero, sizeof(zero)));
+    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::pending_wqes), &zero, sizeof(zero)));
+  }
+};
 
 struct GdaHarness {
   ncclGinRocshmemGdaGPUContext ctx;
@@ -61,7 +69,7 @@ struct GdaHarness {
 // them into a single uploaded GdaHarness. Peer 1 is the (self-mapped) target:
 // its remote_vas entry points back at the local dst buffer and its signal
 // remote-address points back at the local signals array, so a self put/signal
-// is observable from the host.
+// is observable from the host. Each peer gets its own mock QP.
 class GdaEnv {
 public:
   static constexpr int kNRanks = 2;
@@ -69,7 +77,7 @@ public:
   static constexpr uint32_t kNSignals = 4;
   static constexpr uint32_t kNCounters = 2;
 
-  DeviceBuffer<rocshmem::QueuePair> qp{1};
+  DeviceBuffer<rocshmem::QueuePair> qp{kNRanks};
   DeviceBuffer<rocshmem::QueuePair*> qps{kNRanks};
   DeviceBuffer<uint64_t> signals{kNSignals};
   DeviceBuffer<uint64_t> counters{kNCounters};
@@ -85,7 +93,9 @@ public:
   explicit GdaEnv(size_t bytes) : dst(bytes ? bytes : 1), src(bytes ? bytes : 1) {}
 
   void build() {
-    std::vector<rocshmem::QueuePair*> qpRow(kNRanks, qp.ptr);
+    qp.zero();
+    std::vector<rocshmem::QueuePair*> qpRow(kNRanks);
+    for (int i = 0; i < kNRanks; ++i) qpRow[i] = qp.ptr + i;
     qps.copyFrom(qpRow.data(), kNRanks);
 
     signals.zero();
@@ -565,21 +575,31 @@ static void setTryQuietBusy(size_t polls) {
   HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::try_quiet_busy), &polls, sizeof(polls)));
 }
 
+static void setPendingWqes(size_t wqes) {
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::pending_wqes), &wqes, sizeof(wqes)));
+}
+
+static size_t readPolls(const GdaEnv& env, int peer) {
+  size_t polls = 0;
+  HIP_EXPECT(hipMemcpy(&polls, &env.qp.ptr[peer].polls, sizeof(polls), hipMemcpyDeviceToHost));
+  return polls;
+}
+
 static ncclGinRequest_t makeRequest(int peer) {
-  ncclGinRocshmemGdaRequest req{peer};
+  ncclGinRocshmemGdaRequest req{/*target=*/0, peer};
   ncclGinRequest_t raw{};
   std::memcpy(&raw, &req, sizeof(req));
   return raw;
 }
 
-static int readRequestPeer(DeviceBuffer<ncclGinRequest_t>& d_req) {
+static ncclGinRocshmemGdaRequest readRequest(DeviceBuffer<ncclGinRequest_t>& d_req) {
   ncclGinRequest_t raw = d_req.download();
   ncclGinRocshmemGdaRequest req;
   std::memcpy(&req, &raw, sizeof(req));
-  return req.peer;
+  return req;
 }
 
-// G13: FlushAsync records the peer and posts no quiet.
+// G13: FlushAsync records the peer and its queue target and posts no quiet.
 __global__ void kernelFlushAsync(GdaHarness* h, ncclGinRequest_t* req, int peer) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
@@ -587,19 +607,25 @@ __global__ void kernelFlushAsync(GdaHarness* h, ncclGinRequest_t* req, int peer)
   ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, peer, req, false, nullptr, 0);
 }
 
-TEST_F(GinRocshmemGdaTemplateTest, FlushAsync_RecordsPeerWithoutQuiet) {
+TEST_F(GinRocshmemGdaTemplateTest, FlushAsync_RecordsQueueTargetWithoutQuiet) {
   GdaEnv env(1);
   env.build();
   DeviceBuffer<ncclGinRequest_t> d_req(1);
   d_req.zero();
+  resetPutNbiCount();
+  resetSignalCount();
+  kernelPutData<<<1, 1>>>(env.dHarness.ptr, 1);
+  syncAndCheck();
   resetQuietCount();
   kernelFlushAsync<<<1, 1>>>(env.dHarness.ptr, d_req.ptr, GdaEnv::kPeer);
   syncAndCheck();
-  EXPECT_EQ(readRequestPeer(d_req), GdaEnv::kPeer);
+  ncclGinRocshmemGdaRequest req = readRequest(d_req);
+  EXPECT_EQ(req.peer, GdaEnv::kPeer);
+  EXPECT_EQ(req.target, 1ULL);
   EXPECT_EQ(readQuietCount(), 0ULL);
 }
 
-// G14: Wait quiets only the QP of the recorded peer.
+// G14: Wait polls only the QP of the recorded peer.
 __global__ void kernelWait(GdaHarness* h, ncclGinRequest_t* req) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
@@ -608,18 +634,18 @@ __global__ void kernelWait(GdaHarness* h, ncclGinRequest_t* req) {
                                                           nullptr);
 }
 
-TEST_F(GinRocshmemGdaTemplateTest, Wait_QuietsRecordedPeer) {
+TEST_F(GinRocshmemGdaTemplateTest, Wait_PollsRecordedPeer) {
   GdaEnv env(1);
   env.build();
   DeviceBuffer<ncclGinRequest_t> d_req(1);
   d_req.upload(makeRequest(GdaEnv::kPeer));
-  resetQuietCount();
   kernelWait<<<1, 1>>>(env.dHarness.ptr, d_req.ptr);
   syncAndCheck();
-  EXPECT_EQ(readQuietCount(), 1ULL);
+  EXPECT_EQ(readPolls(env, GdaEnv::kPeer), 1u);
+  EXPECT_EQ(readPolls(env, 0), 0u);
 }
 
-// G15-G19: timed Flush and Wait poll try_quiet until it drains, the budget runs out, or abort is set.
+// G15-G19: timed Flush and Wait poll the queue until it reaches the target, the budget runs out, or abort is set.
 __global__ void kernelFlushTimeout(GdaHarness* h, uint32_t* abortFlag, uint64_t timeoutCycles, ncclResult_t* result) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
@@ -642,7 +668,6 @@ TEST_F(GinRocshmemGdaTemplateTest, FlushTimeout_DrainedQueueNeedsNoBudget) {
   env.build();
   DeviceBuffer<ncclResult_t> d_result(1);
   d_result.upload(ncclInternalError);
-  setTryQuietBusy(0);
   resetQuietCount();
   kernelFlushTimeout<<<1, 1>>>(env.dHarness.ptr, nullptr, /*timeoutCycles=*/0, d_result.ptr);
   syncAndCheck();
@@ -658,7 +683,6 @@ TEST_F(GinRocshmemGdaTemplateTest, FlushTimeout_BusyQueueTimesOut) {
   setTryQuietBusy(kNeverDrains);
   kernelFlushTimeout<<<1, 1>>>(env.dHarness.ptr, nullptr, kShortBudget, d_result.ptr);
   syncAndCheck();
-  setTryQuietBusy(0);
   EXPECT_EQ(d_result.download(), ncclTimeout);
 }
 
@@ -687,7 +711,6 @@ TEST_F(GinRocshmemGdaTemplateTest, WaitTimeout_BusyQueueTimesOut) {
   setTryQuietBusy(kNeverDrains);
   kernelWaitTimeout<<<1, 1>>>(env.dHarness.ptr, d_req.ptr, nullptr, kShortBudget, d_result.ptr);
   syncAndCheck();
-  setTryQuietBusy(0);
   EXPECT_EQ(d_result.download(), ncclTimeout);
 }
 
@@ -704,8 +727,73 @@ TEST_F(GinRocshmemGdaTemplateTest, WaitTimeout_AbortReturnsSuccess) {
   setTryQuietBusy(kNeverDrains);
   kernelWaitTimeout<<<1, 1>>>(env.dHarness.ptr, d_req.ptr, d_abort.ptr, kLongBudget, d_result.ptr);
   syncAndCheck();
-  setTryQuietBusy(0);
   EXPECT_EQ(d_result.download(), ncclSuccess);
+}
+
+// G20: Wait covers the WQEs posted before FlushAsync, not the ones posted after it.
+__device__ void putOneByte(ncclGinCtx ginCtx, GdaHarness* h) {
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_NONE;
+  ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, ncclCoopThread{}, GdaEnv::kPeer, true, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
+      reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, 1, sig, ncclGinSignalInc, 0, false, 0, false, nullptr,
+      cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+__global__ void kernelPutFlushAsyncPutWait(GdaHarness* h, uint64_t timeoutCycles, ncclResult_t* result) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinRequest_t req;
+  putOneByte(ginCtx, h);
+  ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, GdaEnv::kPeer, &req, false, nullptr, 0);
+  putOneByte(ginCtx, h);
+  *result = ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, req, false, nullptr, cuda::memory_order_acq_rel, nullptr, timeoutCycles);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, WaitTimeout_CoversOnlyWqesBeforeFlushAsync) {
+  GdaEnv env(1);
+  env.build();
+  DeviceBuffer<ncclResult_t> d_result(1);
+
+  d_result.upload(ncclInternalError);
+  setPendingWqes(1);
+  kernelPutFlushAsyncPutWait<<<1, 1>>>(env.dHarness.ptr, kShortBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclSuccess);
+
+  d_result.upload(ncclInternalError);
+  setPendingWqes(2);
+  kernelPutFlushAsyncPutWait<<<1, 1>>>(env.dHarness.ptr, kShortBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclTimeout);
+}
+
+// G21: blocking Flush and Wait return once abort is set, even if the queue never drains.
+__global__ void kernelBlockingFlushWait(GdaHarness* h, ncclGinRequest_t* req, uint32_t* abortFlag) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, ncclCoopThread{}, false, nullptr,
+                                                           cuda::memory_order_seq_cst, abortFlag);
+  ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, *req, false, nullptr, cuda::memory_order_acq_rel,
+                                                          abortFlag);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, Blocking_ReturnsOnAbort) {
+  GdaEnv env(1);
+  env.build();
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  d_req.upload(makeRequest(GdaEnv::kPeer));
+  DeviceBuffer<uint32_t> d_abort(1);
+  uint32_t aborted = 1;
+  d_abort.copyFrom(&aborted, 1);
+  setTryQuietBusy(kNeverDrains);
+  kernelBlockingFlushWait<<<1, 1>>>(env.dHarness.ptr, d_req.ptr, d_abort.ptr);
+  syncAndCheck();
+  EXPECT_GT(readPolls(env, 0), 0u);
+  EXPECT_GT(readPolls(env, GdaEnv::kPeer), readPolls(env, 0));
 }
 
 }  // namespace RcclUnitTesting

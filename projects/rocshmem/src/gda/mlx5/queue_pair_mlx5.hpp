@@ -102,7 +102,9 @@ public:
 
   __device__ __noinline__ void quiet_single();
 
-  __device__ __noinline__ bool try_quiet_single();
+  __device__ __forceinline__ uint64_t quiet_target_single();
+
+  __device__ __noinline__ bool try_quiet_until_single(uint64_t target);
 
 private:
 #if GDA_MLX5_LOCK_USE_S_WAKEUP
@@ -337,12 +339,13 @@ __device__ inline __noinline__ void QueuePairMLX5::quiet_single() {
   poll_cq_until(sq.depth);
 }
 
-// precondition: called with all active lanes using different QPs
-__device__ inline __noinline__ bool QueuePairMLX5::try_quiet_single() {
-  uint16_t sq_depth = sq.depth;
+__device__ __forceinline__ uint64_t QueuePairMLX5::quiet_target_single() {
+  return __scoped_atomic_load_n(&sq.post, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE);
+}
 
-  uint64_t sq_post = __scoped_atomic_load_n(&sq.post, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE);
-  if (sq_post == 0) {
+// precondition: called with all active lanes using different QPs
+__device__ inline __noinline__ bool QueuePairMLX5::try_quiet_until_single(uint64_t target) {
+  if (target == 0) {
     return true;
   }
 
@@ -354,15 +357,13 @@ __device__ inline __noinline__ bool QueuePairMLX5::try_quiet_single() {
   }
 
   __be16 be_wqe_counter = static_cast<__be16>(wqecnt_sig_op_own);
-  uint16_t sq_head = endian::from_be(be_wqe_counter);
+  uint16_t completed = endian::from_be(be_wqe_counter) + 1;
 
-  uint16_t posted          = static_cast<uint16_t>(sq_post);
-  uint16_t completed       = sq_head + 1;
-  uint16_t consumed_slots  = posted   - completed;
-  uint16_t available_slots = sq_depth - consumed_slots;
+  // Read after the CQE so completed never runs ahead of sq_post
+  uint64_t sq_post = __scoped_atomic_load_n(&sq.post, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE);
+  uint16_t in_flight = static_cast<uint16_t>(sq_post) - completed;
 
-  return available_slots >= sq_depth &&
-         __scoped_atomic_load_n(&sq.post, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE) == sq_post;
+  return in_flight <= sq_post - target;
 }
 
 // precondition: called with all active lanes using different QPs

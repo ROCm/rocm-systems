@@ -53,8 +53,12 @@ public:
   static __device__ inline size_t rma_inline_count{0};
   static __device__ inline size_t amo_count{0};
   static __device__ inline size_t quiet_count{0};
-  // Polls that try_quiet_single() reports busy before the queue drains.
+  // Polls that try_quiet_until_single() reports busy before it checks the target.
   static __device__ inline size_t try_quiet_busy{0};
+  // Most recently posted WQEs that stay in flight.
+  static __device__ inline size_t pending_wqes{0};
+
+  size_t polls{0};
 
 public:
   __host__ QueuePairMock()                                      = default;
@@ -91,7 +95,9 @@ public:
 
   __device__ __forceinline__ void quiet_single();
 
-  __device__ __forceinline__ bool try_quiet_single();
+  __device__ __forceinline__ uint64_t quiet_target_single();
+
+  __device__ __forceinline__ bool try_quiet_until_single(uint64_t target);
 
 
   /**
@@ -289,11 +295,19 @@ __device__ __forceinline__ void QueuePairMock::quiet_single() {
   __scoped_atomic_fetch_add(&quiet_count, 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
 }
 
-__device__ __forceinline__ bool QueuePairMock::try_quiet_single() {
+__device__ __forceinline__ uint64_t QueuePairMock::quiet_target_single() {
+  return __scoped_atomic_load_n(&rma_count, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE) +
+         __scoped_atomic_load_n(&amo_count, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+}
+
+__device__ __forceinline__ bool QueuePairMock::try_quiet_until_single(uint64_t target) {
   quiet_single();
-  if (try_quiet_busy == 0) return true;
-  --try_quiet_busy;
-  return false;
+  ++polls;
+  if (try_quiet_busy != 0) {
+    --try_quiet_busy;
+    return false;
+  }
+  return target + pending_wqes <= quiet_target_single();
 }
 
 }  // namespace rocshmem

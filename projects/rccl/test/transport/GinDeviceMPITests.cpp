@@ -7645,58 +7645,56 @@ void GinMPIDeviceTests::runDeviceTimeout(DeviceTimeoutCase timeoutCase) {
   std::vector<int> expected;
   MPI_Barrier(MPI_COMM_WORLD);
   switch (timeoutCase) {
-    case DeviceTimeoutCase::WaitSignal:
-      // Before any signal, then met with a long and a zero budget, then unmet with a zero budget.
-      expected = {ncclTimeout, ncclSuccess, ncclSuccess, ncclTimeout};
-      timeoutWaitSignalBeforeKernel<<<kGinKernelBlocks, n, 0, stream>>>(budgets.shortCycles, dResults, devComm);
+  case DeviceTimeoutCase::WaitSignal:
+    // Before any signal, then met with a long and a zero budget, then unmet with a zero budget.
+    expected = {ncclTimeout, ncclSuccess, ncclSuccess, ncclTimeout};
+    timeoutWaitSignalBeforeKernel<<<kGinKernelBlocks, n, 0, stream>>>(budgets.shortCycles, dResults, devComm);
+    ASSERT_MPI_EQ(hipSuccess, drainTimeoutStream(stream));
+    MPI_Barrier(MPI_COMM_WORLD);
+    timeoutWaitSignalAfterKernel<<<kGinKernelBlocks, n, 0, stream>>>(peer, budgets.longCycles, dResults, devComm);
+    break;
+  case DeviceTimeoutCase::WaitSignalVA:
+    // Unmet with a short and a zero budget. Only proxy sends VA signals, so only it checks the met cases.
+    expected = {ncclTimeout, ncclTimeout};
+    timeoutWaitSignalVaBeforeKernel<<<kGinKernelBlocks, n, 0, stream>>>(sigWin, budgets.shortCycles, dResults, devComm);
+    if (vaSignalTestSkipReason().empty()) {
+      expected.insert(expected.end(), {ncclSuccess, ncclSuccess, ncclTimeout});
       ASSERT_MPI_EQ(hipSuccess, drainTimeoutStream(stream));
       MPI_Barrier(MPI_COMM_WORLD);
-      timeoutWaitSignalAfterKernel<<<kGinKernelBlocks, n, 0, stream>>>(peer, budgets.longCycles, dResults, devComm);
-      break;
-    case DeviceTimeoutCase::WaitSignalVA:
-      // Unmet with a short and a zero budget. Only proxy sends VA signals, so only it checks the met cases.
-      expected = {ncclTimeout, ncclTimeout};
-      timeoutWaitSignalVaBeforeKernel<<<kGinKernelBlocks, n, 0, stream>>>(sigWin, budgets.shortCycles, dResults,
-                                                                         devComm);
-      if (vaSignalTestSkipReason().empty()) {
-        expected.insert(expected.end(), {ncclSuccess, ncclSuccess, ncclTimeout});
-        ASSERT_MPI_EQ(hipSuccess, drainTimeoutStream(stream));
-        MPI_Barrier(MPI_COMM_WORLD);
-        timeoutWaitSignalVaAfterKernel<<<kGinKernelBlocks, n, 0, stream>>>(sigWin, peer, budgets.longCycles,
-                                                                          dResults, devComm);
-      }
-      break;
-    case DeviceTimeoutCase::WaitCounter:
-      // Before any put, then met with a long and a zero budget, then more completions than were issued.
-      expected = {ncclTimeout, ncclSuccess, ncclSuccess, ncclTimeout};
-      timeoutWaitCounterKernel<<<kGinKernelBlocks, n, 0, stream>>>(srcWin, dstWin, peer, budgets.shortCycles,
-                                                                  budgets.longCycles, dResults, devComm);
-      break;
-    case DeviceTimeoutCase::Flush:
-      // Per thread: idle, bulk in flight twice, then a long budget. The last slot is the peer handshake.
-      expected.assign(4 * n + 1, ncclSuccess);
-      expected[n + peer] = ncclTimeout;
-      expected[2 * n + peer] = ncclTimeout;
-      timeoutFlushKernel<<<kGinKernelBlocks, n, 0, stream>>>(srcWin, dstWin, peer, budgets.longCycles, dResults,
-                                                            devComm);
-      break;
-    case DeviceTimeoutCase::FlushAsyncWait:
-      // Per lane: bulk in flight, a long budget, then a zero budget once complete. The last slot is the handshake.
-      expected.assign(3 * n + 1, ncclSuccess);
-      std::fill_n(expected.begin(), n, ncclTimeout);
-      timeoutFlushAsyncWaitKernel<<<kGinKernelBlocks, n, 0, stream>>>(srcWin, dstWin, peer, budgets.longCycles,
-                                                                     dResults, devComm);
-      break;
-    case DeviceTimeoutCase::CApi:
-      // waitSignal, waitSignal VA, waitCounter, flush and wait unmet, then wait, flush, waitCounter, waitSignal met.
-      expected = {ncclTimeout, ncclTimeout, ncclTimeout, ncclTimeout, ncclTimeout,
-                  ncclSuccess, ncclSuccess, ncclSuccess, ncclSuccess};
-      timeoutCApiBeforeKernel<<<kGinKernelBlocks, n, 0, stream>>>(srcWin, dstWin, sigWin, peer, budgets.shortCycles,
-                                                                 budgets.longCycles, dResults, devComm);
-      ASSERT_MPI_EQ(hipSuccess, drainTimeoutStream(stream));
-      MPI_Barrier(MPI_COMM_WORLD);
-      timeoutCApiAfterKernel<<<kGinKernelBlocks, n, 0, stream>>>(peer, budgets.longCycles, dResults, devComm);
-      break;
+      timeoutWaitSignalVaAfterKernel<<<kGinKernelBlocks, n, 0, stream>>>(sigWin, peer, budgets.longCycles, dResults,
+                                                                        devComm);
+    }
+    break;
+  case DeviceTimeoutCase::WaitCounter:
+    // Before any put, then met with a long and a zero budget, then more completions than were issued.
+    expected = {ncclTimeout, ncclSuccess, ncclSuccess, ncclTimeout};
+    timeoutWaitCounterKernel<<<kGinKernelBlocks, n, 0, stream>>>(srcWin, dstWin, peer, budgets.shortCycles,
+                                                                budgets.longCycles, dResults, devComm);
+    break;
+  case DeviceTimeoutCase::Flush:
+    // Per thread: idle, bulk in flight twice, then a long budget. The last slot is the peer handshake.
+    expected.assign(4 * n + 1, ncclSuccess);
+    expected[n + peer] = ncclTimeout;
+    expected[2 * n + peer] = ncclTimeout;
+    timeoutFlushKernel<<<kGinKernelBlocks, n, 0, stream>>>(srcWin, dstWin, peer, budgets.longCycles, dResults, devComm);
+    break;
+  case DeviceTimeoutCase::FlushAsyncWait:
+    // Per lane: bulk in flight, a long budget, then a zero budget once complete. The last slot is the handshake.
+    expected.assign(3 * n + 1, ncclSuccess);
+    std::fill_n(expected.begin(), n, ncclTimeout);
+    timeoutFlushAsyncWaitKernel<<<kGinKernelBlocks, n, 0, stream>>>(srcWin, dstWin, peer, budgets.longCycles, dResults,
+                                                                   devComm);
+    break;
+  case DeviceTimeoutCase::CApi:
+    // waitSignal, waitSignal VA, waitCounter, flush and wait unmet, then wait, flush, waitCounter, waitSignal met.
+    expected = {ncclTimeout, ncclTimeout, ncclTimeout, ncclTimeout, ncclTimeout,
+                ncclSuccess, ncclSuccess, ncclSuccess, ncclSuccess};
+    timeoutCApiBeforeKernel<<<kGinKernelBlocks, n, 0, stream>>>(srcWin, dstWin, sigWin, peer, budgets.shortCycles,
+                                                               budgets.longCycles, dResults, devComm);
+    ASSERT_MPI_EQ(hipSuccess, drainTimeoutStream(stream));
+    MPI_Barrier(MPI_COMM_WORLD);
+    timeoutCApiAfterKernel<<<kGinKernelBlocks, n, 0, stream>>>(peer, budgets.longCycles, dResults, devComm);
+    break;
   }
   ASSERT_MPI_EQ(hipSuccess, drainTimeoutStream(stream));
 

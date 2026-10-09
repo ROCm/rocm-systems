@@ -90,7 +90,9 @@ public:
 
   __device__ __noinline__ void quiet_single();
 
-  __device__ __noinline__ bool try_quiet_single();
+  __device__ __forceinline__ uint64_t quiet_target_single();
+
+  __device__ __noinline__ bool try_quiet_until_single(uint64_t target);
 
 private:
   __device__ void ring_doorbell(uint32_t slot_idx);
@@ -407,8 +409,14 @@ __device__ inline __noinline__ void QueuePairBNXT::quiet_single() {
   poll_cq_until(sq.depth);
 }
 
+__device__ __forceinline__ uint64_t QueuePairBNXT::quiet_target_single() {
+  return __scoped_atomic_load_n(&sq.tail, __ATOMIC_SEQ_CST, __MEMORY_SCOPE_DEVICE);
+}
+
 // precondition: called with all active lanes using different QPs
-__device__ inline __noinline__ bool QueuePairBNXT::try_quiet_single() {
+// The tail wraps at the queue depth. If more than a full queue is posted after target, this can report
+// pending until the queue drains.
+__device__ inline __noinline__ bool QueuePairBNXT::try_quiet_until_single(uint64_t target) {
   struct bnxt_re_req_cqe *cqe = (struct bnxt_re_req_cqe *) cq.buf;
   uint32_t sq_depth = sq.depth;
 
@@ -417,8 +425,9 @@ __device__ inline __noinline__ bool QueuePairBNXT::try_quiet_single() {
 
   uint32_t sq_tail = __scoped_atomic_load_n(&sq.tail, __ATOMIC_SEQ_CST, __MEMORY_SCOPE_DEVICE);
 
-  uint32_t consumed_slots = (sq_tail - sq_head + sq_depth) % sq_depth;
-  return consumed_slots == 0;
+  uint32_t in_flight    = (sq_tail - sq_head + sq_depth) % sq_depth;
+  uint32_t since_target = (sq_tail - static_cast<uint32_t>(target) + sq_depth) % sq_depth;
+  return in_flight <= since_target;
 }
 
 // precondition: called with all active lanes using different QPs

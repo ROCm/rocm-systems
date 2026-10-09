@@ -92,7 +92,9 @@ public:
 
   __device__ __noinline__ void quiet_single();
 
-  __device__ __noinline__ bool try_quiet_single();
+  __device__ __forceinline__ uint64_t quiet_target_single();
+
+  __device__ __noinline__ bool try_quiet_until_single(uint64_t target);
 
 private:
   /**
@@ -411,18 +413,33 @@ __device__ inline __noinline__ void QueuePairIONIC::quiet_single() {
   quiet_internal_ccqe_single(sq.pos);
 }
 
+__device__ __forceinline__ uint64_t QueuePairIONIC::quiet_target_single() {
+  return __scoped_atomic_load_n(&sq.pos, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+}
+
 // precondition: called with all active lanes using different QPs
-__device__ inline __noinline__ bool QueuePairIONIC::try_quiet_single() {
+__device__ inline __noinline__ bool QueuePairIONIC::try_quiet_until_single(uint64_t target) {
   volatile struct ionic_v1_cqe *cqe = &cq.buf[0];
   uint32_t qtf_be = cqe->qid_type_flags;
   uint32_t msn = endian::from_be(cqe->send.msg_msn);
 
   if (!!(qtf_be & IONIC_V1_CQE_ERROR_BE)) {
+#if defined(BUILD_DEBUG_DEVICE)
+    uint32_t qtf = endian::from_be(qtf_be);
+    uint32_t qid = qtf >> IONIC_V1_CQE_QID_SHIFT;
+    uint32_t type = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
+    uint32_t flag = qtf & 0xf;
+    uint32_t status = endian::from_be(cqe->status_length);
+    uint64_t npg = cqe->send.npg_wqe_idx_timestamp & IONIC_V1_CQE_WQE_IDX_MASK;
+
+    LOGD_ERROR("QUIET ERROR (CCQE): qid %u type %u flag %#x status %u msn %u npg %lu",
+               qid, type, flag, status, msn, npg);
+#endif
     /* No other way to signal an error, so just crash. */
     abort();
   }
 
-  return !((msn - sq.pos) & 0x800000);
+  return !((msn - static_cast<uint32_t>(target)) & 0x800000);
 }
 
 __device__ __forceinline__ uint32_t QueuePairIONIC::reserve_sq(

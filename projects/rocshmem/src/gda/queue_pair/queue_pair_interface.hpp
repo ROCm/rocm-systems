@@ -361,15 +361,16 @@ public:
    * @brief Poll the completion queue once without blocking.
    *
    * @param[in] wf_info Wavefront information.
+   * @param[in] target  Position returned by quiet_target_single().
    *
-   * @return True for every lane of the PE group once all posted WQEs have completed.
+   * @return True for every lane of the PE group once all WQEs posted before target have completed.
    */
-  __device__ bool try_quiet(const ActiveWFInfo& wf_info) {
-    int drained = 1;
+  __device__ bool try_quiet_until(const ActiveWFInfo& wf_info, uint64_t target) {
+    int done = 1;
     if (wf_info.is_pe_group_first) {
-      drained = provider().try_quiet_single();
+      done = provider().try_quiet_until_single(target);
     }
-    return __shfl(drained, wf_info.pe_group_first_phys_lane_id) != 0;
+    return __shfl(done, wf_info.pe_group_first_phys_lane_id) != 0;
   }
 /**@}*/
 };

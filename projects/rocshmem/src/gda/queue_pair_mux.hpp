@@ -147,7 +147,9 @@ public:
 
   __device__ __forceinline__ void quiet_single();
 
-  __device__ __forceinline__ bool try_quiet_single();
+  __device__ __forceinline__ uint64_t quiet_target_single();
+
+  __device__ __forceinline__ bool try_quiet_until_single(uint64_t target);
 
 
   /**
@@ -363,19 +365,38 @@ __device__ __forceinline__ void QueuePairMux::quiet_single() {
   }
 }
 
-__device__ __forceinline__ bool QueuePairMux::try_quiet_single() {
+__device__ __forceinline__ uint64_t QueuePairMux::quiet_target_single() {
   switch (get_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    return qp.ionic.try_quiet_single();
+    return qp.ionic.quiet_target_single();
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    return qp.bnxt.try_quiet_single();
+    return qp.bnxt.quiet_target_single();
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    return qp.mlx5.try_quiet_single();
+    return qp.mlx5.quiet_target_single();
+#endif
+  default:
+    invalid_provider();
+  }
+}
+
+__device__ __forceinline__ bool QueuePairMux::try_quiet_until_single(uint64_t target) {
+  switch (get_provider()) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    return qp.ionic.try_quiet_until_single(target);
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    return qp.bnxt.try_quiet_until_single(target);
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    return qp.mlx5.try_quiet_until_single(target);
 #endif
   default:
     invalid_provider();
