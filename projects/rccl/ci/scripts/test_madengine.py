@@ -121,29 +121,6 @@ WORKLOAD_CONFIGS = {
             "--device=/dev/infiniband --cap-add IPC_LOCK "
             "--ulimit memlock=-1 -v /sys:/sys:ro -v /run/udev:/run/udev:ro",
     },
-    "llama-4-scout-training": {
-        "type": "training",
-        "model_repo": "primus_pyt_megatron_lm_train_llama-4-scout-17b-16e",
-        "model_repo_aliases": [
-            "primus_pyt_megatron_lm_train_llama-4-scout-17b-16e_overlay",
-            "primus_pyt_megatron_lm_train_llama-4-scout-17b-16e_scaleout",
-        ],
-        "base_image": "rocm/primus:v26.4",
-        "gpu_target": "gfx950",
-        "metric_key": "tokens_per_second_per_gpu",
-        "multiple_results": "perf_primus-megatron-Llama-4-Scout-17B-16E.csv",
-        "reference_values": {
-            "2N": 2734,
-            "4N": 2337,
-        },
-        "slurm_partition": "meta64",
-        "gpus_per_node": 8,
-        "time_limit": "03:00:00",  # one allocation, two runs, plus image staging
-        "docker_mounts": {"/dev/infiniband": "/dev/infiniband"},
-        "docker_run_options": "--privileged --group-add render --shm-size 64G "
-            "--device=/dev/infiniband --cap-add IPC_LOCK "
-            "--ulimit memlock=-1 -v /sys:/sys:ro -v /run/udev:/run/udev:ro",
-    },
     "gpt-oss-120b-training": {
         "type": "training",
         "model_repo": "primus_pyt_megatron_lm_train_gpt-oss-120b",

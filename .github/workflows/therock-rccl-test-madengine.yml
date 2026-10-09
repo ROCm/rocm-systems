@@ -43,7 +43,6 @@ on:
         type: choice
         options:
           - llama-3.1-70b-training
-          - llama-4-scout-training
           - gpt-oss-120b-training
         default: 'llama-3.1-70b-training'
       nodes:
