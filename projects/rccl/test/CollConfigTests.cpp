@@ -162,9 +162,15 @@ TEST(CollConfigTests, AcceptedConfigs_ReturnSuccess) {
 // isolate the call from aggregation (its channel range differs from its neighbours').
 TEST(CollConfigTests, SingleCtaBound_KeptAndIsolatedFromAggregation) {
   RUN_ISOLATED_TEST("SingleCtaBound_KeptAndIsolatedFromAggregation", []() {
+    // Control: a user config with neither bound set does not isolate, so the
+    // checks below are down to the CTA bound rather than to any config being passed.
+    ncclCollConfig_t neither = NCCL_COLLCONFIG_INITIALIZER;
+    ncclCollConfig_t internal = NCCL_COLLCONFIG_INITIALIZER;
+    ASSERT_EQ(ncclParseCollConfig(&neither, &internal), ncclSuccess);
+    EXPECT_FALSE(ncclCollConfigNeedAggIsolate(&internal));
+
     ncclCollConfig_t onlyMin = NCCL_COLLCONFIG_INITIALIZER;
     onlyMin.minCTAs = 4;
-    ncclCollConfig_t internal = NCCL_COLLCONFIG_INITIALIZER;
     ASSERT_EQ(ncclParseCollConfig(&onlyMin, &internal), ncclSuccess);
     EXPECT_EQ(internal.minCTAs, 4);
     EXPECT_EQ(internal.maxCTAs, NCCL_CONFIG_UNDEF_INT);

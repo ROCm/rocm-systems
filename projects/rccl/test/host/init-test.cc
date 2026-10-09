@@ -4659,7 +4659,7 @@ TEST_F(InitMicrotest, ParseCommConfig_OnlyMinCTAs_IsAcceptedAndMaxDefaultsToMaxC
     s.config().minCTAs = minCTAs;
     EXPECT_EQ(ncclSuccess, s.Run()) << "minCTAs=" << minCTAs;
     EXPECT_EQ(minCTAs, s.result_config().minCTAs);
-    EXPECT_EQ(MAXCHANNELS, s.result_config().maxCTAs);
+    EXPECT_EQ(MAXCHANNELS, s.result_config().maxCTAs) << "minCTAs=" << minCTAs;
   }
 }
 TEST_F(InitMicrotest, ParseCommConfig_OnlyMaxCTAs_IsAcceptedAndMinDefaultsToOne) {
@@ -4667,7 +4667,7 @@ TEST_F(InitMicrotest, ParseCommConfig_OnlyMaxCTAs_IsAcceptedAndMinDefaultsToOne)
     ParseCfg_Scene s;
     s.config().maxCTAs = maxCTAs;
     EXPECT_EQ(ncclSuccess, s.Run()) << "maxCTAs=" << maxCTAs;
-    EXPECT_EQ(1, s.result_config().minCTAs);
+    EXPECT_EQ(1, s.result_config().minCTAs) << "maxCTAs=" << maxCTAs;
     EXPECT_EQ(maxCTAs, s.result_config().maxCTAs);
   }
 }
