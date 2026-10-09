@@ -1687,6 +1687,20 @@ int SimulatedKfd::ioctl(uint32_t process_id, unsigned long request, void *arg, i
 
 int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg,
                                  int *target_mem_fd, int target_proc_fd) {
+  // kfd_ioctl() accepts older CREATE_QUEUE payloads by zero-extending them to
+  // the current kernel structure. In particular, older 88-byte payloads omit
+  // the sdma_engine_id tail. Copy back only bytes supplied by the caller.
+  // https://github.com/torvalds/linux/blob/d24e8ac715de2e16a53c144005b1863660a5fbea/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c
+  if (ioctl_without_size(request) == ioctl_without_size(AMDKFD_IOC_CREATE_QUEUE) &&
+      request != AMDKFD_IOC_CREATE_QUEUE) {
+    kfd_ioctl_create_queue_args args{};
+    const size_t bytes = std::min(ioctl_arg_size(request), sizeof(args));
+    std::memcpy(&args, arg, bytes);
+    const int result =
+        dispatch_ioctl(proc, AMDKFD_IOC_CREATE_QUEUE, &args, target_mem_fd, target_proc_fd);
+    std::memcpy(arg, &args, bytes);
+    return result;
+  }
   util::Logger::driver("IOCTL pid=", proc.process_id(), " ", LinuxKfd::ioctl_name(request));
 
   unsigned long dispatch_request = canonical_ioctl_request(request);
@@ -2193,6 +2207,7 @@ int SimulatedKfd::munmap(uint32_t process_id, void *addr, size_t length) {
 }
 
 int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
+  std::lock_guard<std::mutex> op_lock(proc.op_mutex_);
   {
     uint32_t doorbell_ord = 0;
     uint64_t doorbell_gpu_va = 0;
@@ -2215,14 +2230,19 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
             gs.doorbell_views, [addr](const auto &candidate) { return candidate.page == addr; });
         if (view == gs.doorbell_views.end())
           continue;
-        if (!proc.event_state_.is_closing()) {
-          errno = EPERM;
+        if (length != gs.doorbell_page_size) {
+          errno = EINVAL;
           return -1;
         }
         doorbell_gpu_va = view->gpu_va;
         doorbell_page_size = gs.doorbell_page_size;
         gs.doorbell_views.erase(view);
-        last_doorbell_view = gs.doorbell_views.empty();
+        // KFD doorbell mappings are ordinary userspace VMAs; unmapping one
+        // does not release the process's device doorbell allocation. Retain
+        // our private CP monitor and backing until process teardown so queues
+        // and subsequent client mappings still see the same doorbell slots.
+        // Linux: drivers/gpu/drm/amd/amdkfd/kfd_doorbell.c:kfd_doorbell_mmap.
+        last_doorbell_view = gs.doorbell_views.empty() && proc.event_state_.is_closing();
         if (last_doorbell_view) {
           doorbell_memfd = gs.doorbell_memfd;
           doorbell_monitor_page = gs.doorbell_monitor_page;
