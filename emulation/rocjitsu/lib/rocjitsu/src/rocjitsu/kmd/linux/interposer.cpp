@@ -3004,6 +3004,10 @@ public:
                                             ? AMDGPU_GEM_DOMAIN_VRAM
                                             : AMDGPU_GEM_DOMAIN_GTT;
     }
+    // ROCr's IPC export sets metadata through a handle it closes at once, with
+    // its dmabuf fd, and the importer checks that metadata later.
+    if (auto *drv = identified ? drm_file_simulated(drm_file) : nullptr)
+      gem.object = std::static_pointer_cast<GemObject>(drv->retain_bo_state(st, gem.object));
     // hsaKmtMemoryGetCpuAddr follows a prime import with GEM_MMAP. A zero offset
     // is "no mapping" and that call fails the VMM handle create.
     const uint64_t map_bytes = (size + 4095) & ~uint64_t{4095};
