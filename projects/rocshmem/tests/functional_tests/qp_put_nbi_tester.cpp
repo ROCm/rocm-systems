@@ -36,14 +36,15 @@ using namespace rocshmem;
  *
  * One-way non-blocking put using QP internals directly.  Pipelines multiple
  * put_nbi_single calls and quiets only at batch boundaries.  With poll set,
- * each quiet spins on the non-blocking try_quiet_single() instead.
+ * each quiet spins on the non-blocking try_quiet_until_single() instead.
  *****************************************************************************/
 static __device__ void QpPutNbiQuiet(QueuePair &qp, bool poll) {
   if (!poll) {
     qp.quiet_single();
     return;
   }
-  while (!qp.try_quiet_single()) {
+  uint64_t target = qp.quiet_target_single();
+  while (!qp.try_quiet_until_single(target)) {
   }
 }
 
