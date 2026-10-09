@@ -46,13 +46,27 @@ cases:
   Unit_HRR_ApiMatrix_T5_Roundtrip: {}
   Unit_HRR_ApiMatrix_UC1Dense_Direct: {}
   Unit_HRR_BlankCaptureOutputCapturesNothing: {}
+  Unit_HRR_CaptureAbort_Direct: {}
+  Unit_HRR_CaptureActiveMarker: {}
+  Unit_HRR_CaptureActiveMarker_Direct: {}
+  Unit_HRR_CaptureArchiveIsPrivate: {}
   Unit_HRR_CaptureCrashDuringFork: {}
   Unit_HRR_CaptureCrashDuringFork_Direct: {}
   Unit_HRR_CaptureCrashOnSmallStack: {}
   Unit_HRR_CaptureCrashSmallStack_Direct: {}
+  Unit_HRR_CaptureDisabledInForkedChild: {}
+  Unit_HRR_CaptureDoesNotBlockOnPlantedFifo: {}
   Unit_HRR_CaptureExitSummary: {}
+  Unit_HRR_CaptureForkWithoutFds_Direct: {}
+  Unit_HRR_CaptureKeepsRootManifestWhenBaseIsUnreadable: {}
+  Unit_HRR_CaptureMarkerRefused_Direct: {}
+  Unit_HRR_CaptureMarksUnwrittenFilesIncomplete: {}
+  Unit_HRR_CaptureRefusesPlantedLinks: {}
   Unit_HRR_CaptureReplayRoundtrip: {}
+  Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles: {}
   Unit_HRR_CaptureStartNotice: {}
+  Unit_HRR_CaptureSurvivesUnusableOutputPath: {}
+  Unit_HRR_CaptureTrimFails_Direct: {}
   Unit_HRR_ChevronLaunchRoundtrip: {}
   Unit_HRR_ChevronLaunch_Direct: {}
   Unit_HRR_ConfigureCallRoundtrip: {}
