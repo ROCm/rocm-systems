@@ -1085,12 +1085,19 @@ def test_split_operator_args_empty_blob():
     assert split_operator_args("  (  )  ") == []
 
 
-def test_format_operator_args_caps_item_count_and_length():
+def test_format_operator_args_caps_item_count():
     args_blob = "(" + ", ".join(f"a{i}={i}" for i in range(12)) + ")"
-    formatted_args = format_operator_args(args_blob, max_items=3, max_chars=40)
-    assert formatted_args.startswith("(a0=0, a1=1, a2=2, ...")
-    assert len(formatted_args) <= 40
-    assert formatted_args.endswith(")")
+    formatted_args = format_operator_args(args_blob, max_items=3, max_chars=200)
+    assert formatted_args == "(a0=0, a1=1, a2=2, ...)"
+
+
+def test_format_operator_args_caps_length():
+    long_token = "x" * 80
+    formatted_args = format_operator_args(
+        f"({long_token})", max_items=8, max_chars=20
+    )
+    assert len(formatted_args) <= 20
+    assert formatted_args.endswith("...)")
 
 
 def test_format_operator_args_empty_blob():
