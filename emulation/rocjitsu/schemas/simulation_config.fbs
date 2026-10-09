@@ -315,6 +315,9 @@ table SimulationConfig {
   // Shared async helpers across this VM. -1 selects the table; zero disables.
   // Append after thread_allocations to preserve existing checkpoint field IDs.
   async_helper_threads: int32 = -1;
+  // Optional override for all CUs: "off", "on" (ordinary only), or "all" (with XCNT).
+  // Omission preserves the per-CU diagnostic settings and defaults.
+  wait_checking: string;
 }
 
 root_type SimulationConfig;

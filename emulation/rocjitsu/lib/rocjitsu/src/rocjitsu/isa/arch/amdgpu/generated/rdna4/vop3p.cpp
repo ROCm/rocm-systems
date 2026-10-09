@@ -1094,6 +1094,12 @@ VFmaMixF32Vop3p::VFmaMixF32Vop3p(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_register_byte_mask(
+      src0.decoded_vgpr() && (inst_.opsel_hi & 1) ? ((inst_.opsel & 1) ? 0xc : 0x3) : 0xf);
+  src1.set_register_byte_mask(
+      src1.decoded_vgpr() && (inst_.opsel_hi & 2) ? ((inst_.opsel & 2) ? 0xc : 0x3) : 0xf);
+  src2.set_register_byte_mask(
+      src2.decoded_vgpr() && (inst_.opsel_hi_2) ? ((inst_.opsel & 4) ? 0xc : 0x3) : 0xf);
 }
 
 namespace detail {
@@ -1156,6 +1162,13 @@ VFmaMixloF16Vop3p::VFmaMixloF16Vop3p(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_register_byte_mask(
+      src0.decoded_vgpr() && (inst_.opsel_hi & 1) ? ((inst_.opsel & 1) ? 0xc : 0x3) : 0xf);
+  src1.set_register_byte_mask(
+      src1.decoded_vgpr() && (inst_.opsel_hi & 2) ? ((inst_.opsel & 2) ? 0xc : 0x3) : 0xf);
+  src2.set_register_byte_mask(
+      src2.decoded_vgpr() && (inst_.opsel_hi_2) ? ((inst_.opsel & 4) ? 0xc : 0x3) : 0xf);
+  vdst.set_register_byte_mask(0x3);
 }
 
 namespace detail {
@@ -1224,6 +1237,13 @@ VFmaMixhiF16Vop3p::VFmaMixhiF16Vop3p(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_register_byte_mask(
+      src0.decoded_vgpr() && (inst_.opsel_hi & 1) ? ((inst_.opsel & 1) ? 0xc : 0x3) : 0xf);
+  src1.set_register_byte_mask(
+      src1.decoded_vgpr() && (inst_.opsel_hi & 2) ? ((inst_.opsel & 2) ? 0xc : 0x3) : 0xf);
+  src2.set_register_byte_mask(
+      src2.decoded_vgpr() && (inst_.opsel_hi_2) ? ((inst_.opsel & 4) ? 0xc : 0x3) : 0xf);
+  vdst.set_register_byte_mask(0xc);
 }
 
 namespace detail {
@@ -1435,6 +1455,8 @@ VWmmaF3216x16x16F16Vop3p::VWmmaF3216x16x16F16Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1467,6 +1489,8 @@ VWmmaF3216x16x16Bf16Vop3p::VWmmaF3216x16x16Bf16Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1499,6 +1523,8 @@ VWmmaF1616x16x16F16Vop3p::VWmmaF1616x16x16F16Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1531,6 +1557,8 @@ VWmmaBf1616x16x16Bf16Vop3p::VWmmaBf1616x16x16Bf16Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1563,6 +1591,8 @@ VWmmaI3216x16x16Iu8Vop3p::VWmmaI3216x16x16Iu8Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1595,6 +1625,8 @@ VWmmaI3216x16x16Iu4Vop3p::VWmmaI3216x16x16Iu4Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1627,6 +1659,8 @@ VWmmaF3216x16x16Fp8Fp8Vop3p::VWmmaF3216x16x16Fp8Fp8Vop3p(const MachineInst *inst
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1660,6 +1694,8 @@ VWmmaF3216x16x16Fp8Bf8Vop3p::VWmmaF3216x16x16Fp8Bf8Vop3p(const MachineInst *inst
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1693,6 +1729,8 @@ VWmmaF3216x16x16Bf8Fp8Vop3p::VWmmaF3216x16x16Bf8Fp8Vop3p(const MachineInst *inst
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1726,6 +1764,8 @@ VWmmaF3216x16x16Bf8Bf8Vop3p::VWmmaF3216x16x16Bf8Bf8Vop3p(const MachineInst *inst
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1759,6 +1799,8 @@ VWmmaI3216x16x32Iu4Vop3p::VWmmaI3216x16x32Iu4Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1790,6 +1832,8 @@ VSwmmacF3216x16x32F16Vop3p::VSwmmacF3216x16x32F16Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1821,6 +1865,8 @@ VSwmmacF3216x16x32Bf16Vop3p::VSwmmacF3216x16x32Bf16Vop3p(const MachineInst *inst
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1853,6 +1899,8 @@ VSwmmacF1616x16x32F16Vop3p::VSwmmacF1616x16x32F16Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1884,6 +1932,8 @@ VSwmmacBf1616x16x32Bf16Vop3p::VSwmmacBf1616x16x32Bf16Vop3p(const MachineInst *in
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1916,6 +1966,8 @@ VSwmmacI3216x16x32Iu8Vop3p::VSwmmacI3216x16x32Iu8Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1947,6 +1999,8 @@ VSwmmacI3216x16x32Iu4Vop3p::VSwmmacI3216x16x32Iu4Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1978,6 +2032,8 @@ VSwmmacI3216x16x64Iu4Vop3p::VSwmmacI3216x16x64Iu4Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2009,6 +2065,8 @@ VSwmmacF3216x16x32Fp8Fp8Vop3p::VSwmmacF3216x16x32Fp8Fp8Vop3p(const MachineInst *
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2041,6 +2099,8 @@ VSwmmacF3216x16x32Fp8Bf8Vop3p::VSwmmacF3216x16x32Fp8Bf8Vop3p(const MachineInst *
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2073,6 +2133,8 @@ VSwmmacF3216x16x32Bf8Fp8Vop3p::VSwmmacF3216x16x32Bf8Fp8Vop3p(const MachineInst *
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2105,6 +2167,8 @@ VSwmmacF3216x16x32Bf8Bf8Vop3p::VSwmmacF3216x16x32Bf8Bf8Vop3p(const MachineInst *
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MATRIX_REGISTER_ACCESSES;
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {

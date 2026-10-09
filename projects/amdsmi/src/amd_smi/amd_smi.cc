@@ -22,6 +22,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <queue>
 #include <set>
 #include <sstream>
@@ -283,7 +284,12 @@ amdsmi_status_t rsmi_switch_wrapper(F&& f, amdsmi_processor_handle processor_han
 }
 #endif  // BRCM_NIC
 
+// Serializes init and shut_down so one thread at a time sets up or tears down the
+// system, and the reference count matches the calls.
+static std::mutex g_init_shut_down_mutex;
+
 amdsmi_status_t amdsmi_init(uint64_t flags) {
+  std::lock_guard<std::mutex> lock(g_init_shut_down_mutex);
   if (amd::smi::amdsmi_library_initialized()) {
     amd::smi::amdsmi_library_init_ref_acquire();
     return AMDSMI_STATUS_SUCCESS;
@@ -296,6 +302,7 @@ amdsmi_status_t amdsmi_init(uint64_t flags) {
 }
 
 amdsmi_status_t amdsmi_shut_down() {
+  std::lock_guard<std::mutex> lock(g_init_shut_down_mutex);
   if (!amd::smi::amdsmi_library_init_ref_release()) {
     return AMDSMI_STATUS_SUCCESS;
   }
