@@ -86,6 +86,34 @@ def test_missing_breakpoint_is_incomplete(request, launcher, hip_app, tmp_path):
     assert not list(tmp_path.rglob("*.att"))
 
 
+def test_same_source_line_captures_one_loop_round_trip(
+    request, launcher, hip_app, tmp_path
+):
+    output = tmp_path / "output"
+    location = "application.cpp:45"
+    result = subprocess.run(
+        command(request, launcher, output)
+        + ["--batch", "--start", location, "--stop", location, "--", hip_app, "repeat"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=45,
+    )
+    (tmp_path / "debugger.log").write_text(result.stdout)
+    assert result.returncode == 0, result.stdout
+    assert result.stdout.count("[att] ACTIVE") == 1
+    assert result.stdout.count("[att] DONE") == 1
+    assert "RESULT=14" in result.stdout
+    traces = list(output.rglob("*.att"))
+    assert len(traces) == 2 and all(path.stat().st_size > 0 for path in traces)
+    stats = list(output.glob("stats_*.csv"))
+    assert len(stats) == 1
+    # From capture_begin in iteration 1 to capture_begin in iteration 2:
+    # inside -> after -> next iteration's before kernel.
+    for kernel in ("inside_kernel", "after_kernel", "before_kernel"):
+        assert kernel + "(int*)" in stats[0].read_text()
+
+
 @pytest.mark.parametrize("skip", [100, 101])
 def test_skip_warmup_hits(request, launcher, hip_app, tmp_path, skip):
     output = tmp_path / "output"
@@ -167,7 +195,7 @@ def test_interactive_skip(request, launcher, hip_app, tmp_path):
     check_trace(output)
 
 
-def test_short_timeout_recovery_captures_next_iteration(
+def test_short_timeout_can_rearm_and_capture_next_iteration(
     request, launcher, hip_app, tmp_path
 ):
     output = tmp_path / "output"
@@ -178,11 +206,10 @@ def test_short_timeout_recovery_captures_next_iteration(
     ) as console:
         console.expect("(gdb)")
         console.send("att arm --start capture_begin --timeout 0.001us\nrun")
-        console.expect("timeout expired before application continuation")
-        console.send("att cancel")
-        console.expect("CANCELLED; failed capture is stopped")
-        console.send("continue")
-        console.expect("hit Breakpoint 1")
+        console.expect("DONE capture=1 reason=timeout")
+        # The user breakpoint may arrive before or after the timer reply.
+        if b"hit Breakpoint 1" not in console.output:
+            console.expect("hit Breakpoint 1")
         console.send("att arm --start capture_begin --stop capture_end")
         console.expect("ARMED capture=2")
         console.send("disable 1\ncontinue")
@@ -190,11 +217,11 @@ def test_short_timeout_recovery_captures_next_iteration(
         console.expect("exited normally")
     assert console.process.returncode == 0
     assert b"RESULT=14" in console.output
-    # Capture 1 expired before any new waves. Capture 2 must contain useful data.
+    # Capture 1 may stop before new waves launch. Capture 2 must contain useful data.
     traces = list(output.rglob("*_2.att"))
     assert len(traces) == 2 and all(path.stat().st_size > 0 for path in traces)
-    stats = [path.read_text() for path in output.glob("stats_*.csv")]
-    assert sum("inside_kernel(int*)" in text for text in stats) == 1
+    stats = [path.read_text() for path in output.glob("stats_*_dispatch_2.csv")]
+    assert len(stats) == 1 and "inside_kernel(int*)" in stats[0]
     assert all(
         "before_kernel(int*)" not in text and "after_kernel(int*)" not in text
         for text in stats

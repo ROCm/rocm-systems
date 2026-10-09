@@ -101,10 +101,12 @@ serve(void*)
         close_in_child();
         return nullptr;
     }
-    send_message("HELLO 1 " + std::to_string(getpid()) + " " + std::to_string(syscall(SYS_gettid)) +
+    send_message("HELLO 2 " + std::to_string(getpid()) + " " + std::to_string(syscall(SYS_gettid)) +
                  "\n");
-    bool        active  = false;
-    uint64_t    capture = 0;
+    bool        active   = false;
+    uint64_t    capture  = 0;
+    uint64_t    timeout  = 0;
+    uint64_t    deadline = 0;
     std::string last_stop;
     auto        stop = [&](const char* reason) {
         itimerspec off{};
@@ -162,7 +164,9 @@ serve(void*)
                                      " invalid START or SDK not initialized\n");
                         continue;
                     }
-                    capture = id;
+                    capture  = id;
+                    timeout  = duration;
+                    deadline = 0;
                     last_stop.clear();
                     if(resume(0) != 0)
                     {
@@ -171,9 +175,17 @@ serve(void*)
                     }
                     active       = true;
                     auto started = now();
-                    if(duration)
+                    connected    = send_message("STARTED " + std::to_string(id) + " " +
+                                             std::to_string(started) + "\n");
+                }
+                else if(sscanf(line.c_str(), "CONTINUED %" SCNu64 " %c", &id, &extra) == 1 &&
+                        id == capture && active && timeout)
+                {
+                    // Exclude both profiler setup and debugger continuation from the interval.
+                    // A repeated acknowledgement must not extend an already armed deadline.
+                    if(!deadline)
                     {
-                        auto       deadline = started + duration;
+                        deadline = now() + timeout;
                         itimerspec spec{};
                         spec.it_value.tv_sec  = deadline / 1000000000;
                         spec.it_value.tv_nsec = deadline % 1000000000;
@@ -184,8 +196,8 @@ serve(void*)
                             continue;
                         }
                     }
-                    connected = send_message("STARTED " + std::to_string(id) + " " +
-                                             std::to_string(started) + "\n");
+                    connected = send_message("TIMED " + std::to_string(id) + " " +
+                                             std::to_string(deadline) + "\n");
                 }
                 else if(sscanf(line.c_str(), "STOP %" SCNu64 " %c", &id, &extra) == 1 &&
                         id == capture && id)

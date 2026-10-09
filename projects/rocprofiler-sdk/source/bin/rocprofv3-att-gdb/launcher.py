@@ -44,7 +44,9 @@ def main(argv=None):
     )
     parser.add_argument("--stop", help="CPU function or file:line that stops capture")
     parser.add_argument(
-        "--timeout", type=parse_duration, help="one-shot capture duration, e.g. 10ms"
+        "--timeout",
+        type=parse_duration,
+        help="one-shot interval after debugger continuation, excluding setup, e.g. 10ms",
     )
     parser.add_argument(
         "--batch",

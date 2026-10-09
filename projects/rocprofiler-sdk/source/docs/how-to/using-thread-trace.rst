@@ -353,19 +353,47 @@ For a timed stop:
     rocprofv3-att-gdb --start begin_iteration --timeout 50ms \
         -d traces -- ./application
 
+To capture one loop round trip, use the same source line or function for both
+triggers:
+
+.. code-block:: bash
+
+    rocprofv3-att-gdb --start application.cpp:120 --stop application.cpp:120 \
+        --skip 100 -d traces -- ./application
+
+The start fires on hit 101. The stop fires on the next visit to that location,
+after GDB resumes past the current breakpoint instruction. Hits count across
+threads, so the next visit can come from another thread.
+
+The source line after ``hipDeviceSynchronize()`` does not guarantee a stop after
+synchronization. Optimization can split, move, or merge instructions, and GDB
+has no general source-line-exit breakpoint. For a specific compiled call, inspect
+``disassemble /s FUNCTION`` and prepare an instruction breakpoint at its
+normal-return continuation before capture starts. Verify that the selected
+execution path reaches it after the intended call. Use a source-line breakpoint
+only when its resolved locations have been verified in that binary; recheck
+after recompilation. The prototype does not resolve stop-after-call locations
+automatically. Entering the synchronize function and then using ``finish`` would
+introduce an additional stop during the trace.
+
 Durations accept ``us``, ``ms``, and ``s``. You can supply both ``--stop`` and
 ``--timeout``; the first stop wins. A sleeping application-side worker handles
 the one-shot timeout without interrupting an arbitrary application thread to
-inject a profiler call. The interval begins when the start call returns, before
-the triggering thread is continued. CPU scheduling and GPU command submission
-add boundary latency, so a timeout is not an exact GPU-duration guarantee.
+inject a profiler call. The interval begins after ``roctxProfilerResume(0)``
+returns and the debugger finishes continuing the triggering thread. The debugger
+then tells the helper to arm the timer for the full duration. Profiler setup,
+debugger continuation, and notification delivery can extend the trace; they do
+not consume the requested interval. When a shared user breakpoint holds the
+triggering thread, the timer waits for manual continuation. Later user stops
+do not pause or restart the timer.
+
+CPU scheduling and GPU command submission can delay the stop, so a timeout is
+not an exact GPU-duration guarantee. A short interval can still end before a
+kernel launches. An end breakpoint or explicit cancellation can stop earlier.
 
 A one-shot watchdog in the debugger reports an error if stopping has not
 completed within 10 seconds after the deadline. It adds no periodic checks in
-the application. If the interval expires before the triggering thread can
-continue, that thread stays stopped and the capture is reported as failed.
-Once Pause is acknowledged, use ``att cancel`` to clear the failure, then
-``att arm`` with a longer interval and continue the application when ready.
+the application.
 
 To choose locations interactively, omit ``--start``:
 

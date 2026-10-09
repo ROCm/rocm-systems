@@ -60,7 +60,9 @@ class Capture:
         self.watchdog = None
         self.reason = ""
         self.started = 0
-        self.expired_before_resume = False
+        self.trigger_thread = None
+        self.continued = False
+        self.timer_requested = False
         self.capture_stopped = False
         gdb.events.stop.connect(self.on_stop)
         gdb.events.cont.connect(self.on_continue)
@@ -103,7 +105,9 @@ class Capture:
         self.held.clear()
         self.stops.clear()
         self.reason = ""
-        self.expired_before_resume = False
+        self.trigger_thread = None
+        self.continued = False
+        self.timer_requested = False
         self.capture_stopped = False
         self.started = 0
         self.state = "ARMED"
@@ -149,7 +153,7 @@ class Capture:
         self.cancel_watchdog()
         capture = self.capture
         delay = self.control_timeout
-        states = ("STARTING", "STOPPING")
+        states = ("STARTING", "ACTIVE", "STOPPING")
         message = f"control did not complete within {self.control_timeout:g}s"
         if deadline is not None:
             delay = max(0, (deadline - time.monotonic_ns()) / 1e9 + delay)
@@ -181,6 +185,17 @@ class Capture:
 
     def on_continue(self, event):
         thread = getattr(event, "inferior_thread", None)
+        if (
+            self.timeout
+            and not self.continued
+            and self.trigger_thread is not None
+            and thread in (None, self.trigger_thread)
+        ):
+            self.continued = True
+            capture = self.capture
+            # Continue events occur inside the resume command. Defer until that command
+            # returns, including when a shared user breakpoint needs manual continuation.
+            gdb.post_event(lambda: self.arm_timer(capture))
         if thread is None:
             self.stops.clear()
             self.held.clear()
@@ -188,6 +203,18 @@ class Capture:
             self.stops.pop(thread, None)
             self.held.pop(thread, None)
         self.connect_helper()
+
+    def arm_timer(self, capture):
+        if (
+            capture == self.capture
+            and self.state == "ACTIVE"
+            and self.timeout
+            and self.continued
+            and not self.timer_requested
+        ):
+            self.timer_requested = True
+            self.wait_for_control()
+            self.send(f"CONTINUED {capture}")
 
     def connect_helper(self):
         if self.inferior.pid and self.reader_pid != self.inferior.pid:
@@ -261,7 +288,7 @@ class Capture:
         if fields[0] == "HELLO":
             if (
                 len(fields) != 4
-                or fields[1] != "1"
+                or fields[1] != "2"
                 or int(fields[2]) != self.inferior.pid
             ):
                 self.fail("incompatible helper handshake")
@@ -283,25 +310,17 @@ class Capture:
             if self.state == "STOPPING":
                 return
             self.cancel_watchdog()
-            if self.timeout and time.monotonic_ns() >= self.started + self.timeout:
-                self.expired_before_resume = True
-                self.stop_capture("timeout before continuation")
-                return
             self.state = "ACTIVE"
-            if self.timeout:
-                self.wait_for_control(self.started + self.timeout)
-            log(f"ACTIVE capture={self.capture}; ROCTx start acknowledged")
             self.resume_owned()
+            self.arm_timer(self.capture)
+            log(f"ACTIVE capture={self.capture}; ROCTx start acknowledged")
+        elif fields[0] == "TIMED" and self.state == "ACTIVE" and self.timer_requested:
+            self.wait_for_control(int(fields[2]))
         elif fields[0] == "STOPPED" and self.state in ("STARTING", "ACTIVE", "STOPPING"):
             self.capture_stopped = True
             self.cancel_watchdog()
             self.remove("end")
             self.remove("start")
-            if self.expired_before_resume:
-                self.fail(
-                    "timeout expired before application continuation; use a longer interval"
-                )
-                return
             self.state = "DONE"
             self.reason = self.reason or fields[2]
             elapsed = (int(fields[3]) - self.started) / 1000000 if self.started else 0
@@ -358,6 +377,7 @@ class Capture:
         if exclusive:
             self.held[thread] = token
         if start_hit and self.state == "ARMED":
+            self.trigger_thread = thread
             log(f"start hit={self.start.hit_count}; activating capture={self.capture}")
             self.remove("start")  # Remove every owned location before trace activation.
             if self.end:
@@ -389,7 +409,6 @@ class Capture:
         self.remove("end")
         if self.state == "ERROR" and self.capture_stopped:
             self.state = "CANCELLED"
-            self.expired_before_resume = False
             self.held.clear()
             self.stops.clear()
             log(
@@ -409,6 +428,7 @@ class Capture:
         if event.inferior != self.inferior:
             return
         self.close()
+        self.trigger_thread = None
         self.held.clear()
         self.stops.clear()
         self.pending.clear()

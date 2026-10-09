@@ -22,6 +22,31 @@ breakpoint stays disabled during warmup, and the start breakpoint is removed
 before capture starts. Skipped hits can still incur debugger overhead during
 warmup, but do not call the profiler.
 
+The start and stop may use the same location to capture a loop round trip:
+
+```sh
+rocprofv3-att-gdb --start application.cpp:120 --stop application.cpp:120 \
+    --skip 100 -d traces -- ./application
+```
+
+Capture starts on hit 101 and stops on the next hit. GDB resumes past the
+current breakpoint instruction before the stop can fire at that location.
+Both triggers match across threads, so another thread can supply the next hit.
+
+Source-line order does not guarantee execution order. In particular, the line
+after `hipDeviceSynchronize()` is not a reliable stop-after-synchronization
+location: optimization can split, move, or merge the associated instructions.
+For a specific compiled call, inspect `disassemble /s FUNCTION` and prepare an
+instruction breakpoint at its normal-return continuation before capture starts.
+Verify that the selected execution path reaches it after the intended call.
+A source-line breakpoint is suitable only if its resolved locations have been
+verified in that particular binary; recompilation requires checking again.
+
+GDB has no general source-line-exit breakpoint. Its Python `FinishBreakpoint`
+targets the return of an existing stack frame; stopping at the synchronize
+function's entry to create one would add a stop during capture. The prototype
+does not automatically resolve a stop-after-call location.
+
 With no `--start`, the launcher opens ROCgdb: use
 `att arm --start LOCATION --skip 100 --stop LOCATION`, then `run`. `att status`
 reports the capture state and remaining skip count; `att cancel` cancels it.
@@ -49,12 +74,19 @@ iterations that already ran. This workflow uses an application launched with
 the helper; injecting the profiler into an independently started process needs
 the planned attach support.
 
-For timed captures, a one-shot debugger watchdog reports an error if stopping
-has not completed within 10 seconds after the capture deadline. The target
-worker still uses its one-shot timer, with no periodic checks during capture.
-If a short interval expires before application continuation, the triggering
-thread stays stopped. After Pause is acknowledged, use `att cancel` to clear the
-failed capture, then rearm with a longer interval and continue when ready.
+The timeout interval starts after both `roctxProfilerResume(0)` and the
+debugger's continuation of the triggering thread have completed. The debugger
+then tells the helper to arm a one-shot monotonic timer for the full requested
+duration. Setup, continuation, and delivery of this notification can extend the
+trace; they do not consume the interval. If a shared user breakpoint keeps the
+triggering thread stopped, the timer waits for manual continuation. Later user
+stops do not pause or restart the timer. A supplied end breakpoint or explicit
+cancellation can still stop earlier.
+
+A one-shot debugger watchdog reports an error if stopping has not completed
+within 10 seconds after the capture deadline. The target worker blocks on its
+socket and timer, with no periodic checks during capture. A very short interval
+can still finish before a kernel launches; it does not measure GPU execution time.
 An early stop in the loader (for example, `starti`) can delay helper setup;
 connection attempts resume on continuation or at the selected start hit.
 
@@ -101,11 +133,14 @@ ctest --test-dir build/att-gdb --output-on-failure
 coverage includes breakpoint/timeout capture, competing stop sources, literal
 application arguments, concurrent CPU trigger hits, repeated captures,
 cancellation, preservation of user breakpoints, missing triggers, duplicate/stale
-commands, disconnect cleanup, warmup skipping (including interactive use and an
+commands, disconnect cleanup, identical start/stop source lines for a loop round
+trip, warmup skipping (including interactive use and an
 unreached selected hit), and a HIP host-stub trigger with inlining disabled.
-Regression cases cover blocked timed stops, deadline completion grace, expired
-capture recovery, preservation of new user breakpoint/signal stops while a
-control call is pending, and connection retry after a loader stop.
+Regression cases cover blocked timed stops, deadline completion grace, exclusion
+of slow profiler setup and debugger continuation from the timeout, manual
+continuation of shared user breakpoints, short captures followed by rearming,
+preservation of new user breakpoint/signal stops while a control call is pending,
+and connection retry after a loader stop.
 GPU checks decode the traces and assert that only the inside kernel was traced.
 
 This is the single-process launch prototype. It uses a separate, preloaded
