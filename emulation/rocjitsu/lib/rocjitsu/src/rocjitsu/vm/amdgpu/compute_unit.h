@@ -1309,6 +1309,9 @@ protected:
   /// @brief Cancel local dispatch state and queue one terminal VM fault for CP delivery.
   void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome);
 
+  /// @brief Cancel an unhandled decode or execution failure without successful completion.
+  void handle_instruction_failure(Wavefront &wf, const std::string &failure);
+
   mutable std::recursive_mutex wave_state_mutex_;
   /// @brief Recursion depth of WaveStateGuard on the thread holding the mutex.
   /// @details Only ever touched under @ref wave_state_mutex_, so the value

@@ -3783,6 +3783,12 @@ if(RJ_ENABLE_HIP_TESTS)
                 CONFIG ${RJ_HIP_TEST_CONFIG}
                 TIMEOUT 20
             )
+            rj_add_hip_test_case(
+                hip_instruction_failure_test
+                "HipInstructionFailureTest.DecodeFailureExitsWithFailure"
+                CONFIG ${RJ_HIP_TEST_CONFIG}
+                TIMEOUT 20
+            )
         endif()
 
         # --- Daemon RPC tests (gtest-driven) ---
