@@ -43,7 +43,7 @@ constexpr size_t kMediumCount     = 65536;  // elements per rank for larger test
 // partial tail chunk whenever nRanks is not a power of two. Costs a transient
 // host buffer of the same size per rank in fill/verify.
 constexpr size_t kPipelinedTotalBytes = 512ull * 1024 * 1024;
-// Non-Sum AllReduce size that stays inside the gfx942/gfx950 CE AllReduce caps (256 MiB) while symk cannot take it.
+// Non-Sum AllReduce size inside the gfx942/gfx950 CE 2-shot cap (256 MiB), so the registered to 2-shot handoff can run.
 constexpr size_t kCeOnlyTotalBytes = 128ull * 1024 * 1024;
 constexpr size_t kCeOnlyRankStride = 517;   // per-rank offset so every rank wins some elements of Max/Min
 constexpr size_t kCeOnlyValueRange = 4096;  // keeps fill values exact in float32
@@ -276,26 +276,17 @@ protected:
         return algo == static_cast<int>(RCCL_CE_REGISTERED) || algo == static_cast<int>(RCCL_CE_2SHOT);
     }
 
-    // CE AR is expected only when RCCL itself predicts a CE variant, so a declined symk query (RING) never demands CE.
-    bool isCeAllReduceExpected(int predictedAlgo) const
+    bool isCeAllReduceExpected() const
     {
         // CE AllReduce is single-node only (ceAllReduceFits / nNodes>1 gate).
-        return isCeAllReduceDispatchConfigured() && !isMultiNodeTest() && isCeAllReduceAlgo(predictedAlgo);
+        return isCeAllReduceDispatchConfigured() && !isMultiNodeTest();
     }
 
-    void assertCEAllReducePathTaken(int predictedAlgo, const char* context)
+    void assertCEAllReducePathTaken(const char* context)
     {
         const std::string log = readAllLogs();
 
-        int rank = -1;
-        ncclCommUserRank(getActiveCommunicator(), &rank);
-        // Only rank 0 logs the selected AllReduce backend.
-        if(predictedAlgo == static_cast<int>(RCCL_SYMMETRIC) && rank == 0)
-        {
-            EXPECT_TRUE(logShowsAllReduceAlgo(log, "SYM"))
-                << context << ": symk was predicted but the live AllReduce did not log \"algo SYM\"";
-        }
-        if(isCeAllReduceExpected(predictedAlgo))
+        if(isCeAllReduceExpected())
         {
             EXPECT_TRUE(ceLogShowsAllReducePath(log))
                 << context
@@ -311,9 +302,7 @@ protected:
                 << ": CE AllReduce log marker found but CE AR was not expected";
             if(!ceLogShowsAllReducePath(log))
             {
-                const char* name = "?";
-                (void)rcclGetAlgoName(predictedAlgo, &name);
-                TEST_INFO("%s: assertion passed: non-CE-AR path, predicted algo %s", context, name);
+                TEST_INFO("%s: assertion passed: non-CE-AR path (CE AR prerequisites not met)", context);
             }
         }
     }
@@ -752,9 +741,9 @@ protected:
     // own INFO line. minChunksPerShard = 0 skips the check; >= 2 requires the
     // multi-chunk pipeline to have run rather than the single-shot path, which
     // logs the same CE marker and would otherwise pass unnoticed.
-    void assertCEAllReduceChunking(int predictedAlgo, size_t minChunksPerShard, const char* context)
+    void assertCEAllReduceChunking(size_t minChunksPerShard, const char* context)
     {
-        if(!isCeAllReduceExpected(predictedAlgo) || minChunksPerShard == 0)
+        if(!isCeAllReduceExpected() || minChunksPerShard == 0)
         {
             return;
         }
@@ -792,6 +781,12 @@ protected:
                   rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, alignedCount, ncclFloat32, op,
                                       sendSym.ptr, recvSym.ptr, /*graphCapturing=*/0, &predictedAlgo, &proto,
                                       &nChannels));
+        if(isCeAllReduceExpected())
+        {
+            // Under CTAPolicy=ZERO an available CE registered path beats symk, so the reporter must name a CE variant.
+            ASSERT_TRUE(isCeAllReduceAlgo(predictedAlgo)) << testId << ": predicted algo " << predictedAlgo
+                                                          << " is not a CE AllReduce variant";
+        }
 
         ASSERT_EQ(ncclSuccess,
                   ncclAllReduce(sendSym.ptr, recvSym.ptr, alignedCount, ncclFloat32, op,
@@ -806,11 +801,11 @@ protected:
                 << "Rank " << rank << ": CE AllReduce Sum verification failed";
         }
 
-        assertCEAllReducePathTaken(predictedAlgo, testId);
-        assertCEAllReduceChunking(predictedAlgo, minChunksPerShard, testId);
+        assertCEAllReducePathTaken(testId);
+        assertCEAllReduceChunking(minChunksPerShard, testId);
     }
 
-    // Max/Min on symmetric windows: symk only takes Sum and DDA IPC only Sum, so RCCL_CE_ALLREDUCE=1 must pick a CE variant.
+    // Max/Min on symmetric windows: symk does not request non-Sum, so after the first call CE 2-shot can take over from registered.
     void runCeOnlyAllReduce(ncclRedOp_t op, const char* testId)
     {
         if(!validateTestPrerequisites(kMinRanks2))
@@ -882,8 +877,8 @@ protected:
                 << ": expected " << want << ", got " << got;
         }
 
-        assertCEAllReducePathTaken(static_cast<int>(RCCL_CE_2SHOT), testId);
-        assertCEAllReduceChunking(static_cast<int>(RCCL_CE_2SHOT), kCeOnlyMinChunksPerShard, testId);
+        assertCEAllReducePathTaken(testId);
+        assertCEAllReduceChunking(kCeOnlyMinChunksPerShard, testId);
         if(rank == 0)
         {
             const std::string log = readAllLogs();
@@ -928,8 +923,7 @@ TEST_F(CeMPI_AllReduce, LargeMessage)
     runAllReduce(kMinRanks4, largeCount, ncclSum, "CeMPI_AllReduce/LargeMessage");
 }
 
-// CE-MPI-AR-06: Multi-chunk pipeline (chunksPerShard >= 2) when RCCL predicts CE for a 512 MiB Sum.
-// On gfx942/gfx950 symk wins every eligible Sum before CE registered is considered, so this expects SYM; AR-07/08 cover the pipeline there.
+// CE-MPI-AR-06: Multi-chunk pipeline (chunksPerShard >= 2); under CTAPolicy=ZERO registered CE takes a 512 MiB Sum at any size.
 TEST_F(CeMPI_AllReduce, PipelinedMultiChunk)
 {
     const size_t pipelinedCount = kPipelinedTotalBytes / sizeof(float);
@@ -937,7 +931,7 @@ TEST_F(CeMPI_AllReduce, PipelinedMultiChunk)
                  /*minChunksPerShard=*/2);
 }
 
-// CE-MPI-AR-07: Max on symmetric windows keeps CE AllReduce exercised where symk wins every Sum.
+// CE-MPI-AR-07: Max on symmetric windows covers CE registered then CE 2-shot on one comm.
 TEST_F(CeMPI_AllReduce, MaxOp128MiB)
 {
     runCeOnlyAllReduce(ncclMax, "CeMPI_AllReduce/MaxOp128MiB");
