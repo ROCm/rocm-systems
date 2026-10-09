@@ -59,6 +59,8 @@ env:
   ROCJITSU_DBT_SHA_MANIFEST: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/gfx1250-b0-a0-sha-pairs.json
   ROCM_SDK_VERSION: 10.1.0a20260812
   ROCM_SDK_DEVICE_GFX_GROUP: "gfx1100 gfx1201 gfx1250 gfx942 gfx950"
+  CMAKE_VERSION: 3.31.10
+  ROCJITSU_CPU_THREAD_BUDGET: 4
   UV_VERSION: 0.9.26
   UV_HTTP_RETRIES: 10
 
@@ -66,6 +68,8 @@ jobs:
   test:
     runs-on: aws-linux-scale-rocm-prod
     name: test (${{ matrix.name }})
+    # Kubernetes container hooks ignore Docker create options, including --user
+    # and --init. Use the image user with sudo, a Python venv, and tini below.
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       env:
@@ -91,9 +95,6 @@ jobs:
             enable_expensive_checks: 0
             sanitizer_runtime: STATIC
             run_simulator_corpus: true
-            # Each simulator process can use many host threads. Bound Release
-            # fanout so long FPSAN cases do not starve under runner load.
-            corpus_worker_limit: 4
             corpus_soft_timeout: 360
             corpus_hard_timeout: 600
             corpus_rerun_timeout: 600
@@ -116,7 +117,6 @@ jobs:
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
             run_simulator_corpus: true
-            corpus_worker_limit: 4
             corpus_soft_timeout: 360
             corpus_hard_timeout: 600
             corpus_rerun_timeout: 1200
@@ -136,7 +136,6 @@ jobs:
             enable_expensive_checks: 0
             sanitizer_runtime: SHARED
             run_simulator_corpus: false
-            corpus_worker_limit: 16
             corpus_soft_timeout: 0
             corpus_hard_timeout: 0
             corpus_rerun_timeout: 0
@@ -158,7 +157,6 @@ jobs:
             c_compiler: gcc
             cxx_compiler: g++
             run_simulator_corpus: true
-            corpus_worker_limit: 4
             corpus_soft_timeout: 240
             corpus_hard_timeout: 480
             corpus_rerun_timeout: 1200
@@ -171,7 +169,6 @@ jobs:
           sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential \
             ca-certificates \
-            cmake \
             curl \
             git \
             libclang-rt-dev \
@@ -203,13 +200,45 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Set up Python environment and uv
+      - name: Set up Python environment, uv, and CMake
         run: |
           python -m venv "${RUNNER_TEMP}/rocjitsu-python"
           "${RUNNER_TEMP}/rocjitsu-python/bin/python" -m pip install \
-            --disable-pip-version-check "uv==${UV_VERSION}"
+            --disable-pip-version-check "uv==${UV_VERSION}" "cmake==${CMAKE_VERSION}"
           echo "VIRTUAL_ENV=${RUNNER_TEMP}/rocjitsu-python" >> "${GITHUB_ENV}"
           echo "${RUNNER_TEMP}/rocjitsu-python/bin" >> "${GITHUB_PATH}"
+
+      - name: Configure runner concurrency and SIMD
+        shell: bash
+        run: |
+          lscpu
+          free -h
+          cmake --version
+          ctest --version
+          CPUS="$(nproc)"
+          CORPUS_WORKERS=$(( CPUS / ROCJITSU_CPU_THREAD_BUDGET ))
+          (( CORPUS_WORKERS > 0 )) || CORPUS_WORKERS=1
+          # The GCC DBT lane allows 8 GiB per translation; 64 workers leave
+          # memory headroom on the pool's 768 GiB runners.
+          DBT_WORKERS=$(( CPUS < 64 ? CPUS : 64 ))
+          {
+            echo "ROCJITSU_CORPUS_WORKERS=${CORPUS_WORKERS}"
+            echo "VULKAN_CTS_WORKERS=${CORPUS_WORKERS}"
+            echo "VULKAN_CTS_CPU_BUDGET=$(( CORPUS_WORKERS * ROCJITSU_CPU_THREAD_BUDGET ))"
+            echo "DBT_WORKERS=${DBT_WORKERS}"
+          } >> "${GITHUB_ENV}"
+          echo "CPUs: ${CPUS}; corpus workers: ${CORPUS_WORKERS}; simulator execution threads: ${ROCJITSU_CPU_THREAD_BUDGET}; DBT workers: ${DBT_WORKERS}"
+          # Probe the runtime CPU before enabling AVX-512. These binaries are
+          # built and tested on this runner; keep the project's portable default.
+          gcc -x c -o "${RUNNER_TEMP}/rocjitsu-host-cpu" - <<'C'
+          #include <stdio.h>
+          int main(void) {
+            puts(__builtin_cpu_supports("x86-64-v4") ? "x86-64-v4" : "x86-64-v3");
+          }
+          C
+          HOST_CPU_BASELINE="$("${RUNNER_TEMP}/rocjitsu-host-cpu")"
+          echo "ROCJITSU_HOST_CPU_BASELINE=${HOST_CPU_BASELINE}" >> "${GITHUB_ENV}"
+          echo "Host CPU baseline: ${HOST_CPU_BASELINE} (v4 enables AVX-512)"
 
       - name: Test DBT SHA-pair tooling
         if: matrix.name == 'release'
@@ -348,6 +377,7 @@ jobs:
           ROCM_PATH="${ROCM_PATH}" \
             cmake -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
             -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
+            -DROCJITSU_HOST_CPU_BASELINE="${ROCJITSU_HOST_CPU_BASELINE}" \
             -DCMAKE_C_FLAGS="${CFLAGS:-}" \
             -DCMAKE_CXX_FLAGS="${CXXFLAGS:-}" \
             "${CMAKE_CONFIG_FLAGS[@]}" \
@@ -358,10 +388,8 @@ jobs:
             -DROCJITSU_ENABLE_PERFSIM_PLUGIN=ON \
             -DRJ_SANITIZER_RUNTIME=${{ matrix.sanitizer_runtime }}
 
-          # Set a conservative number of workers to avoid OOM and excessive system load.
-          WORKERS="$(( ($(nproc) + 1) / 2 ))"
-          echo "Build and CTest workers: ${WORKERS} (available CPUs: $(nproc))"
-          cmake --build "${ROCJITSU_BUILD_DIR}" -j "${WORKERS}"
+          # Let Ninja and CTest choose their default CPU parallelism.
+          cmake --build "${ROCJITSU_BUILD_DIR}" -j
 
           CTEST_SELECTION=()
           if [[ -n "${TEST_REGEX}" ]]; then
@@ -371,7 +399,7 @@ jobs:
             "${CTEST_SELECTION[@]}" \
             -E "${EXCLUDED_TESTS}" \
             --output-on-failure \
-            -j "${WORKERS}"
+            -j
 
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
@@ -428,7 +456,7 @@ jobs:
           unset MIRAGE_E2E_ALLOW_SKIP
           # AWS Kubernetes runners do not support Docker's --init option.
           # Reap orphaned descendants so teardown tests can observe them gone.
-          tini -s -- cargo test --locked --workspace --no-fail-fast -- --test-threads=4 --nocapture
+          tini -s -- cargo test --locked --workspace --no-fail-fast -- --test-threads="${ROCJITSU_CORPUS_WORKERS}" --nocapture
 
       - name: Test static ASan launcher preload
         if: matrix.run_static_asan_launch
@@ -444,6 +472,7 @@ jobs:
             -DCMAKE_C_COMPILER="${ROCM_PATH}/lib/llvm/bin/amdclang" \
             -DCMAKE_CXX_COMPILER="${ROCM_PATH}/lib/llvm/bin/amdclang++" \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DROCJITSU_HOST_CPU_BASELINE="${ROCJITSU_HOST_CPU_BASELINE}" \
             -DCMAKE_CXX_FLAGS="${CXXFLAGS}" \
             -DRJ_ENABLE_ASAN=1 \
             -DRJ_ENABLE_UBSAN=0 \
@@ -503,13 +532,8 @@ jobs:
 
           corpus_test_status=0
 
-          WORKER_LIMIT=${{ matrix.corpus_worker_limit }}
-          WORKERS="$(nproc)"
-          if (( WORKERS > WORKER_LIMIT )); then
-            WORKERS="${WORKER_LIMIT}"
-          fi
           corpus_test_flags=(
-            --workers "${WORKERS}"
+            --workers "${ROCJITSU_CORPUS_WORKERS}"
             --soft-timeout ${{ matrix.corpus_soft_timeout }}
             --hard-timeout ${{ matrix.corpus_hard_timeout }}
             --rerun-timeout ${{ matrix.corpus_rerun_timeout }}
@@ -553,8 +577,8 @@ jobs:
           # The pinned SDK still uses the retired disable switch, while a
           # runtime built from this checkout uses the new enable switch.
           COMMON_HOTSWAP_ENV="HSA_HOTSWAP_DISABLE=1 HSA_HOTSWAP_ENABLE=0"
-          PLAIN_WRAPPER="env ${COMMON_UNSETS} -u HSA_TOOLS_LIB -u HSA_TOOLS_DISABLE_REGISTER -u HSA_HOTSWAP_VERBOSE ${COMMON_HOTSWAP_ENV} ${LAUNCHER} --config ${B0_CONFIG} --"
-          TRANSLATED_WRAPPER="env ${COMMON_UNSETS} ${COMMON_HOTSWAP_ENV} HSA_TOOLS_DISABLE_REGISTER=1 HSA_TOOLS_LIB=${HOTSWAP} HSA_HOTSWAP_VERBOSE=1 ${LAUNCHER} --config ${A0_CONFIG} --"
+          PLAIN_WRAPPER="env ${COMMON_UNSETS} -u HSA_TOOLS_LIB -u HSA_TOOLS_DISABLE_REGISTER -u HSA_HOTSWAP_VERBOSE ${COMMON_HOTSWAP_ENV} ${LAUNCHER} --config ${B0_CONFIG} --cpu-thread-budget ${ROCJITSU_CPU_THREAD_BUDGET} --"
+          TRANSLATED_WRAPPER="env ${COMMON_UNSETS} ${COMMON_HOTSWAP_ENV} HSA_TOOLS_DISABLE_REGISTER=1 HSA_TOOLS_LIB=${HOTSWAP} HSA_HOTSWAP_VERBOSE=1 ${LAUNCHER} --config ${A0_CONFIG} --cpu-thread-budget ${ROCJITSU_CPU_THREAD_BUDGET} --"
 
           python3 "${ROCJITSU_SOURCE_DIR}/tests/corpus/test-validate-gfx1250-semantic-translations.py"
 
@@ -632,10 +656,6 @@ jobs:
               > "${DBT_TRANSLATOR}"
             chmod +x "${DBT_TRANSLATOR}"
           fi
-          DBT_WORKERS="$(nproc)"
-          if (( DBT_WORKERS > 16 )); then
-            DBT_WORKERS=16
-          fi
           "${ROCJITSU_DBT_VENV}/bin/python" -m pytest tests/test_corpus.py \
             --target gfx1250 \
             --suite dbt \
@@ -670,10 +690,6 @@ jobs:
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         run: |
-          DBT_WORKERS="$(nproc)"
-          if (( DBT_WORKERS > 16 )); then
-            DBT_WORKERS=16
-          fi
           python3 \
             "${ROCJITSU_SOURCE_DIR}/tests/corpus/record-gfx1250-dbt-sha-pairs.py" \
             collect \
