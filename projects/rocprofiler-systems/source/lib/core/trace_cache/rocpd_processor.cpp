@@ -1068,6 +1068,7 @@ rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& m
 : sample_processor_interface()
 , m_metadata(md)
 , m_agent_manager(agent_mngr)
+, m_pid(pid)
 , m_db_output_path(generate_db_output_path(pid))
 {
     auto const n_info = node_info::get_instance();
@@ -1151,7 +1152,7 @@ rocpd_processor_t::finalize_processing()
         return;
     }
 
-    output::registry::instance().register_file(m_db_output_path);
+    output::registry::instance().register_file(m_db_output_path, m_pid);
 
     if(m_dropped_pmc_events_count > 0)
     {

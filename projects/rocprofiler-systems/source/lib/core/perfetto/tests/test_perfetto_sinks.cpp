@@ -124,7 +124,7 @@ TEST(locked_file_append, status_name_handles_known_and_unknown_values)
 // write_proto_to
 // ----------------------------------------------------------------------------
 
-TEST_F(PerfettoSinkTest, nested_directory_write_succeeds_and_registers_file)
+TEST(write_proto_to, nested_directory_write_succeeds)
 {
     const auto root =
         std::filesystem::path{ ::testing::TempDir() } / "rocprofsys-write-proto-to-test";
@@ -140,21 +140,16 @@ TEST_F(PerfettoSinkTest, nested_directory_write_succeeds_and_registers_file)
                                 std::istreambuf_iterator<char>{} };
     EXPECT_EQ(contents, data);
 
-    const auto out = rocprofsys::output::registry::instance().format_summary();
-    EXPECT_THAT(out, ::testing::HasSubstr(path.string()));
-
     std::filesystem::remove_all(root);
 }
 
-TEST_F(PerfettoSinkTest, empty_filename_fails_and_does_not_register)
+TEST(write_proto_to, empty_filename_fails)
 {
     const std::string data{ "x" };
     EXPECT_FALSE(rocprofsys::core::write_proto_to("", data.data(), data.size()));
-
-    EXPECT_TRUE(rocprofsys::output::registry::instance().format_summary().empty());
 }
 
-TEST_F(PerfettoSinkTest, unwritable_parent_directory_fails_and_does_not_register)
+TEST(write_proto_to, unwritable_parent_directory_fails)
 {
     if(geteuid() == 0)
     {
@@ -174,13 +169,11 @@ TEST_F(PerfettoSinkTest, unwritable_parent_directory_fails_and_does_not_register
     EXPECT_FALSE(
         rocprofsys::core::write_proto_to(path.string(), data.data(), data.size()));
 
-    EXPECT_TRUE(rocprofsys::output::registry::instance().format_summary().empty());
-
     std::filesystem::permissions(root, std::filesystem::perms::owner_all);
     std::filesystem::remove_all(root);
 }
 
-TEST_F(PerfettoSinkTest, write_failure_after_open_fails_and_does_not_register)
+TEST(write_proto_to, write_failure_after_open_fails)
 {
     // /dev/full is a real Linux device: opening it for writing always
     // succeeds, but every write() call fails with ENOSPC. Exercises the
@@ -188,8 +181,6 @@ TEST_F(PerfettoSinkTest, write_failure_after_open_fails_and_does_not_register)
     // scaffolding in production code.
     const std::string data{ "abc" };
     EXPECT_FALSE(rocprofsys::core::write_proto_to("/dev/full", data.data(), data.size()));
-
-    EXPECT_TRUE(rocprofsys::output::registry::instance().format_summary().empty());
 }
 
 // ----------------------------------------------------------------------------
@@ -484,7 +475,7 @@ TEST_F(PerfettoSinkTest, append_mode_zero_declared_sources_disables_output)
     EXPECT_TRUE(sink.buffer_for_testing().empty());
 }
 
-TEST_F(PerfettoSinkTest, finalize_creates_parent_directories)
+TEST_F(PerfettoSinkTest, finalize_creates_parent_directories_and_registers_file)
 {
     const auto root = std::filesystem::path{ ::testing::TempDir() } /
                       "rocprofsys-single-file-sink-test";
@@ -505,6 +496,9 @@ TEST_F(PerfettoSinkTest, finalize_creates_parent_directories)
     char          marker = 0;
     read_framed_packet(contents, 0, seq_id, marker);
     EXPECT_EQ(marker, 'A');
+
+    EXPECT_THAT(rocprofsys::output::registry::instance().format_summary(),
+                ::testing::HasSubstr(path.string()));
 
     std::filesystem::remove_all(root);
 }

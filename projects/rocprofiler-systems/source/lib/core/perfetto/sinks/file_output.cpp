@@ -4,7 +4,6 @@
 #include "core/perfetto/sinks/file_output.hpp"
 
 #include "common/path.hpp"
-#include "core/output/output_summary.hpp"
 #include "logger/debug.hpp"
 
 #include <cerrno>
@@ -63,8 +62,6 @@ write_proto_to(const std::string& filename, const char* data, std::size_t size)
         LOG_ERROR("write_proto_to: write or close failed for '{}'", filename);
         return false;
     }
-
-    output::registry::instance().register_file(filename);
     return true;
 }
 

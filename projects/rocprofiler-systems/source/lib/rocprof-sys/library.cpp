@@ -609,6 +609,9 @@ rocprofsys_init_library_hidden()
         return;
     }
 
+    // Runs again on re-attach, so each attach session gets its own run clock.
+    output::registry::instance().start_new_session();
+
     auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     if(_debug_init)
@@ -1395,8 +1398,10 @@ rocprofsys_finalize_hidden(void)
     {
         LOG_DEBUG("Registering causal output files...");
         auto _base = config::get_causal_output_filename();
-        output::registry::instance().register_file(fmt::format("{}.json", _base));
-        output::registry::instance().register_file(fmt::format("{}.txt", _base));
+        output::registry::instance().register_file(fmt::format("{}.json", _base),
+                                                   getpid());
+        output::registry::instance().register_file(fmt::format("{}.txt", _base),
+                                                   getpid());
     }
 
     if(get_use_process_sampling())
@@ -1506,9 +1511,10 @@ rocprofsys_finalize_hidden(void)
                 }
 
                 output::registry::instance().register_file(
-                    settings::compose_output_filename(_comp_name, "txt", _cfg));
+                    settings::compose_output_filename(_comp_name, "txt", _cfg), getpid());
                 output::registry::instance().register_file(
-                    settings::compose_output_filename(_comp_name, "json", _cfg));
+                    settings::compose_output_filename(_comp_name, "json", _cfg),
+                    getpid());
             }
         }
     }

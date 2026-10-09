@@ -71,6 +71,7 @@ private:
     std::shared_ptr<metadata_registry>      m_metadata;
     std::shared_ptr<agent_manager>          m_agent_manager;
     std::unique_ptr<profiler_hub::writer_t> m_writer;
+    pid_t                                   m_pid;
     std::string                             m_db_output_path;
 
     // PMC keys that have already been warned about
