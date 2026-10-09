@@ -199,11 +199,16 @@ protected:
 
     // Skip only when no rank took the per-segment path. A mixed result is a
     // failure: SyncSkip(ANY miss) would hide a unilateral-success bug.
+    // RCCL_TEST_RMA_MSEG_REQUIRE=1 (CI) turns the skip into a failure.
     bool MultiSegmentPathAvailable()
     {
         const bool local =
             readAllLogs().find(kMultiSegMarker) != std::string::npos;
-        if (!MPIHelpers::anyRankTrue(local)) return false;
+        if (!MPIHelpers::anyRankTrue(local)) {
+            if (MPIHelpers::getEnvParam<int>("RCCL_TEST_RMA_MSEG_REQUIRE", 0) != 0)
+                ADD_FAILURE() << "RCCL_TEST_RMA_MSEG_REQUIRE=1 but no rank took the multi-segment path";
+            return false;
+        }
         if (!AllTookMultiSegPath()) {
             ADD_FAILURE() << "multi-segment registration was asymmetric across ranks";
             return true;
@@ -1222,6 +1227,25 @@ TEST_F(RmaMultiSegmentMPITest, RegisterExceedsMaxSegmentsRejected)
         << "registration of a " << kOverCap << "-segment buffer should be rejected "
         << "with ncclInvalidUsage (cap=" << NCCL_RMA_MAX_SEGMENTS << "), got " << r;
     EXPECT_EQ(mh, nullptr) << "no MR handle should be produced on rejection";
+}
+
+// NCCL_MULTI_SEGMENT_REGISTER=0 keeps a multi-segment window on the upstream single-MR path,
+// whether or not that MR registers.
+TEST_F(RmaMultiSegmentMPITest, MultiSegmentRegisterOff_KeepsUpstreamPath)
+{
+    if (!SetUpFixture(2, 2)) return;
+    if (SyncSkip(MPIHelpers::getEnvParam<int>("NCCL_MULTI_SEGMENT_REGISTER", 1) != 0))
+        GTEST_SKIP() << "Requires NCCL_MULTI_SEGMENT_REGISTER=0";
+
+    MultiSegmentVmmBuffer* buf = AllocSym(kNumSegments, kSegRequestBytes);
+    if (SyncSkip(buf == nullptr))
+        GTEST_SKIP() << "Multi-segment VMM allocation not supported";
+
+    void* mh = nullptr;
+    (void)RegMr(buf->ptr, buf->totalSize, &mh);
+    const bool local = readAllLogs().find(kMultiSegMarker) != std::string::npos;
+    EXPECT_FALSE(MPIHelpers::anyRankTrue(local))
+        << "NCCL_MULTI_SEGMENT_REGISTER=0 still took the per-segment RMA path";
 }
 
 // REGRESSION: an ordinary single-allocation buffer must still register and
