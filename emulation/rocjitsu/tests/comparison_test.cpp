@@ -7,7 +7,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
 #include "util/simd.h"
 
 #include <gtest/gtest.h>
@@ -190,11 +189,6 @@ TEST(ComparisonTest, AppliesModifiersBeforeTheFlush) {
   // v_cmp_lt_f16 -a, |b| with a = 0x0001: NEG makes -tiny, the flush makes -0.
   EXPECT_FALSE((cmp::evaluate<fmt::F16, cmp::Lt>(0x0001u, 0x0000u, 0u, 1u, kFlush)));
   EXPECT_TRUE((cmp::evaluate<fmt::F16, cmp::Lt>(0x0001u, 0x0000u, 0u, 1u, kKeep)));
-  // ABS clears the sign before NEG sets it again.
-  EXPECT_EQ(rocjitsu::amdgpu::source_modifier::apply<fmt::F32>(0x80000002u, true, true),
-            0x80000002u);
-  EXPECT_EQ(rocjitsu::amdgpu::source_modifier::apply<fmt::F32>(0x80000002u, true, false),
-            0x00000002u);
   // The src1 modifiers come from bit 1 of each field.
   EXPECT_FALSE((cmp::evaluate<fmt::F32, cmp::Gt>(0x3f800000u, 0x3f800000u, 0u, 1u, kKeep)));
   EXPECT_TRUE((cmp::evaluate<fmt::F32, cmp::Gt>(0x3f800000u, 0x3f800000u, 0u, 2u, kKeep)));

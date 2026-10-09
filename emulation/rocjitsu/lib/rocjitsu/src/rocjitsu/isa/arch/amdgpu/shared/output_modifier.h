@@ -20,6 +20,11 @@
 /// CDNA4 and CDNA5, and VOP3 CEIL/FLOOR/TRUNC/RNDNE F32/F64 on every target
 /// (CDNA1-5, RDNA1-4).
 ///
+/// CDNA4 V_MINIMUM3_F32/V_MAXIMUM3_F32 retain the emulator's wave-IEEE-based
+/// OMOD policy. The ISA specifies forced IEEE=1 for these instructions and
+/// disables OMOD under IEEE=1; whether that override also suppresses their
+/// OMOD needs hardware verification and a separate instruction-policy follow-up.
+///
 /// Scalar and SIMD callers use the same implementation on unsigned encodings.
 /// F16 occupies the low half of a 32-bit lane; F32 and F64 use 32 and 64 bits.
 

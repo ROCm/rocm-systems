@@ -3,6 +3,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
 
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
+
 #include <gtest/gtest.h>
 
 #include <bit>
@@ -11,6 +13,13 @@
 namespace {
 
 namespace src = rocjitsu::amdgpu::source_modifier;
+namespace fmt = rocjitsu::amdgpu::fp_format;
+
+TEST(SourceModifierTest, RawBitsApplyAbsBeforeNeg) {
+  // ABS clears the sign before NEG sets it again.
+  EXPECT_EQ(src::apply<fmt::F32>(0x80000002u, true, true), 0x80000002u);
+  EXPECT_EQ(src::apply<fmt::F32>(0x80000002u, true, false), 0x00000002u);
+}
 
 TEST(SourceModifierTest, FloatAdaptersPreserveNanBitsAndSignedZero) {
   // ABS then NEG leaves this negative signaling NaN's encoding intact.

@@ -10,6 +10,8 @@ parameters rather than accessing transient instance state.
 
 from __future__ import annotations
 
+from amdisa.codegen.execute import input_policy
+
 
 def vop3_src_mod(
     varname: str, src_idx: int, has_abs: bool, indent: str = '    '
@@ -82,7 +84,7 @@ def output_policy_expr(dtype: str, fields: tuple[str, str] = OUTPUT_MODIFIERS) -
     ``fields`` holds the (OMOD, CLAMP) expressions from the instruction.
     """
     omod, clamp = fields
-    fmt = f'amdgpu::fp_format::{dtype.upper()}'
+    fmt = f'amdgpu::fp_format::{input_policy.FORMATS[dtype]}'
     return f'amdgpu::output_modifier_policy<{fmt}>(wf, {omod}, {clamp})'
 
 
@@ -95,5 +97,5 @@ def output_policy_decl(
 
 def apply_output(dtype: str, bits: str) -> str:
     """Apply OMOD then CLAMP to an already rounded destination encoding."""
-    fmt = f'amdgpu::fp_format::{dtype.upper()}'
+    fmt = f'amdgpu::fp_format::{input_policy.FORMATS[dtype]}'
     return f'amdgpu::output_modifier::apply<{fmt}>({bits}, {OUTPUT_POLICY})'

@@ -2184,10 +2184,10 @@ std::vector<ArithmeticCase> minmax_input_flush_cases() {
 }
 
 std::vector<ArithmeticCase> minmax_output_modifier_cases() {
-  // Expected bits come from gfx1201 captures with OMOD/CLAMP. The directed
+  // Sample-table expectations come from gfx1201 captures with OMOD/CLAMP. The directed
   // overflow cases were captured for all 30 min/max forms on 2026-10-02.
   // Equal inputs let every form reuse the same output-stage expectations.
-  // The final samples explicitly check the order of combined modifiers.
+  // The final table samples explicitly check the order of combined modifiers.
   struct Sample {
     const char *name;
     uint8_t omod;
@@ -2344,6 +2344,33 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
                        FE_TONEAREST});
     }
   }
+  // Emulator regression expectations, not additional hardware captures.
+  // Poison unused source halves with NaNs to check OP_SEL before modifiers.
+  // The harness initializes v6 to 0xdeadbeef and checks inactive lanes too.
+  const auto maximum = rdna4::build_vop3(
+      rdna4::kVMaximumF16Vop3, {.vdst = 6, .opsel = 3, .src0 = 256, .src1 = 257, .omod = 2});
+  cases.push_back({"MaximumF16HighSourcesMul4",
+                   ROCJITSU_CODE_ARCH_RDNA4,
+                   {maximum[0], maximum[1], 0u},
+                   {{0, 0x38007e00u}, {1, 0x34007e00u}},
+                   {{6, 0xdead4000u}},
+                   0xf0u,
+                   FE_TONEAREST});
+  const auto minimum3 = rdna4::build_vop3(rdna4::kVMinimum3F16Vop3, {.vdst = 6,
+                                                                     .abs = 1,
+                                                                     .opsel = 13,
+                                                                     .src0 = 256,
+                                                                     .src1 = 257,
+                                                                     .src2 = 258,
+                                                                     .omod = 3,
+                                                                     .neg = 1});
+  cases.push_back({"Minimum3F16MixedSourcesAbsNegDiv2HighDestination",
+                   ROCJITSU_CODE_ARCH_RDNA4,
+                   {minimum3[0], minimum3[1], 0u},
+                   {{0, 0x40007e00u}, {1, 0x7c013800u}, {2, 0x3c007e00u}},
+                   {{6, 0xbc00beefu}},
+                   0xf0u,
+                   FE_TONEAREST});
   return cases;
 }
 
