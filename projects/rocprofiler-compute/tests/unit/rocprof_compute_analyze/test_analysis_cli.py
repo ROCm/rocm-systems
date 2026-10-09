@@ -140,7 +140,6 @@ def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypat
     assert len(membw_calls) == (1 if expect_called else 0)
 
 
-
 # -- parse_operator_patterns (torch_operator) -------------------------------
 
 
@@ -301,8 +300,7 @@ def test_apply_operator_filter_unmapped_kernels_clears_forest(monkeypatch):
     })
     cli.apply_operator_filter(args, workload, "/workload", ["torch"])
     assert any(
-        "No PyTorch kernels mapped to kernel-top IDs" in str(item)
-        for item in warnings
+        "No PyTorch kernels mapped to kernel-top IDs" in str(item) for item in warnings
     )
     assert workload.ml_api_call_trees == {}
 
