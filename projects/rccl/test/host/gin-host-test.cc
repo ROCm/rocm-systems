@@ -339,8 +339,13 @@ struct FakeGin {
   static ncclResult_t QueryLastError(void*, bool* hasError) {
     FakeGin& self = current();
     ++self.queryCalls;
+    // A plugin that fails the query reports nothing, so the out-parameter is
+    // left as production set it -- otherwise the fake, not production, would be
+    // what clears it.
+    ncclResult_t ret = self.failQueryLastError.at(self.queryCalls);
+    if (ret != ncclSuccess) return ret;
     if (hasError) *hasError = (self.queryErrorOnCall != 0 && self.queryCalls == self.queryErrorOnCall);
-    return self.failQueryLastError.at(self.queryCalls);
+    return ncclSuccess;
   }
 
   ncclGin_t vtable() {
@@ -467,25 +472,22 @@ class GinHostTest : public ::testing::Test {
     return r;
   }
 
-  // Build a progress list without spawning worker threads.
+  // A one-devComm progress list, built by hand and without worker threads.
+  // Only the ncclGinProgress tests use this: they need a different
+  // needsProxyProgress per connection, which the real setup path -- where the
+  // plugin answers the same way for every context it creates -- cannot express.
+  // Every other suite builds its list through ncclGinDevCommSetup.
   void attachProgressList(int ginCommCount, int proxyNthreads, const std::vector<int>& needsProxy) {
     auto* gs = gin();
     gs->proxyNthreads = proxyNthreads;
     gs->backends[0].ginCommCount = ginCommCount;
     fake_.slots.clear();
-    gs->devComms = nullptr;
-    appendDevComm(ginCommCount, needsProxy);
-  }
 
-  // Append one more devComm to the list, reusing the slot vector so the caller
-  // can tell which context each ginProgress / queryLastError call landed on.
-  ncclGinStateDevComm* appendDevComm(int ginCommCount, const std::vector<int>& needsProxy) {
     auto* dc = static_cast<ncclGinStateDevComm*>(std::calloc(1, sizeof(ncclGinStateDevComm)));
-    if (dc == nullptr) {
-      ADD_FAILURE() << "calloc ncclGinStateDevComm";
-      return nullptr;
-    }
+    ASSERT_NE(nullptr, dc) << "calloc ncclGinStateDevComm";
     dc->backendIndex = 0;
+    // The slot vector is how a test tells which context each ginProgress call
+    // landed on.
     for (int i = 0; i < ginCommCount; i++) {
       auto slot = std::make_unique<FakeSlot>();
       slot->idx = i;
@@ -496,15 +498,7 @@ class GinHostTest : public ::testing::Test {
       dc->ginCtx[i] = slot.get();
       fake_.slots.push_back(std::move(slot));
     }
-    auto* gs = gin();
-    if (gs->devComms == nullptr) {
-      gs->devComms = dc;
-    } else {
-      auto* last = gs->devComms;
-      while (last->next) last = last->next;
-      last->next = dc;
-    }
-    return dc;
+    gs->devComms = dc;
   }
 
   void freeProgressList() {
@@ -964,11 +958,18 @@ TEST_F(GinHostConnectOnceMicrotest, ZeroDevicesReturnsInternalError) {
   EXPECT_FALSE(gin()->connected);
 }
 
-// A failing devices() surfaces the plugin's own status.
+// A failing devices() surfaces the plugin's own status, and stops the connect
+// before the backend is sized or anything is opened.
 TEST_F(GinHostConnectOnceMicrotest, DevicesFailurePropagates) {
+  gin()->backends[0].ginCommCount = 7;  // poison: only a connect that got past devices() rewrites this
   fake_.failDevices = {ncclSystemError, 1};
+
   EXPECT_EQ(ncclSystemError, connectOnce());
+
   EXPECT_FALSE(gin()->connected);
+  EXPECT_EQ(7, gin()->backends[0].ginCommCount);
+  EXPECT_EQ(0, fake_.listenCalls);
+  EXPECT_EQ(0, fake_.connectCalls);
 }
 
 // More local GIN devices than connections: the extra devices are dropped rather
@@ -1011,10 +1012,15 @@ TEST_F(GinHostConnectOnceMicrotest, ListenFailureSkipsCloseListen) {
 
 // A topology query that fails stops the connect before the plugin is touched.
 TEST_F(GinHostConnectOnceMicrotest, TopologyQueryFailurePropagates) {
+  gin()->backends[0].ginCommCount = 7;  // poison, as in DevicesFailurePropagates
   g_failTopoGetLocalGinDevs = {ncclSystemError, 1};
+
   EXPECT_EQ(ncclSystemError, connectOnce());
+
   EXPECT_EQ(0, fake_.devicesCalls);
   EXPECT_FALSE(gin()->connected);
+  EXPECT_EQ(7, gin()->backends[0].ginCommCount);
+  EXPECT_EQ(0, g_bootstrapAllGatherCalls);
 }
 
 // A failed property query releases the listen comm that was opened for the same
@@ -1030,9 +1036,17 @@ TEST_F(GinHostConnectOnceMicrotest, GetPropertiesFailureClosesListenComm) {
 // stops the connect.
 TEST_F(GinHostConnectOnceMicrotest, ConnectionCountExchangeFailurePropagates) {
   g_failBootstrapAllGather = {ncclSystemError, 1};
+
   EXPECT_EQ(ncclSystemError, connectOnce());
-  EXPECT_EQ(0, fake_.connectCalls);
+
   EXPECT_FALSE(gin()->connected);
+  // The exchange decides how many connections to open, so nothing was opened
+  // yet and the cleanup path has nothing to close.
+  EXPECT_EQ(0, fake_.listenCalls);
+  EXPECT_EQ(0, fake_.connectCalls);
+  EXPECT_EQ(0, fake_.closeListenCalls);
+  EXPECT_EQ(0, fake_.closeCollCalls);
+  EXPECT_EQ(nullptr, gin()->backends[0].ginComms[0]);
 }
 
 // Cleanup failures must not mask the failure that caused the cleanup: the
@@ -1229,16 +1243,22 @@ TEST_F(GinHostDevCommSetupMicrotest, ContextCountRoundsUpToWholeConnections) {
   EXPECT_EQ(4, devComm_.ginConnectionCount);
 }
 
-// Exclusive contexts are the conservative path: nothing is shared between
-// devComms today, so the request is configured exactly like a shared one.
-TEST_F(GinHostDevCommSetupMicrotest, ExclusiveContextsAreConfiguredLikeSharedOnes) {
+// Exclusive contexts are the point of the flag: a second request gets contexts
+// of its own from the plugin rather than being handed the first devComm's.
+TEST_F(GinHostDevCommSetupMicrotest, ExclusiveContextsAreNotSharedWithAnotherDevComm) {
   auto reqs = proxyReqs();
   reqs.ginContextCount = 1;
   reqs.ginExclusiveContexts = true;
 
+  ncclDevComm first{};
+  ASSERT_EQ(ncclSuccess, setupWithBackend(reqs, &first));
   ASSERT_EQ(ncclSuccess, setupWithBackend(reqs, &devComm_));
+
+  EXPECT_EQ(2, fake_.createContextCalls);
   EXPECT_EQ(1u, devComm_.ginContextCount);
-  EXPECT_EQ(1, lastConfig().nContexts);
+  EXPECT_NE(first.ginHandles[0], devComm_.ginHandles[0]);
+
+  EXPECT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &first));
 }
 
 // The traffic class comes from the requirements when set, and from the comm's
@@ -1435,35 +1455,57 @@ TEST_F(GinHostDevCommSetupMicrotest, LaterDevCommsReuseTheExistingProgressThread
 ////////////////////////////////////////////////////////////////////////////////
 // ncclGinDevCommFree -- lookup failures
 
-class GinHostDevCommFreeMicrotest : public GinHostTest {};
+// The devComms this suite frees are built by ncclGinDevCommSetup, so the list a
+// free walks is the one production linked rather than one the test modelled.
+class GinHostDevCommFreeMicrotest : public GinHostTest {
+ protected:
+  void SetUp() override {
+    GinHostTest::SetUp();
+    ASSERT_EQ(ncclSuccess, connectOnce());
+    gin()->proxyThreadStopSignal.store(true);  // any spawned worker exits immediately
+  }
+
+  ncclDevComm makeDevComm() {
+    ncclDevComm devComm{};
+    auto reqs = proxyReqs();
+    reqs.ginContextCount = gin()->backends[0].ginCommCount;
+    EXPECT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, &devComm, NCCL_VERSION_CODE));
+    return devComm;
+  }
+};
 
 // Freeing against an empty list is an internal error, not a crash on a NULL
 // list head.
 TEST_F(GinHostDevCommFreeMicrotest, EmptyListReportsInternalError) {
+  ASSERT_EQ(nullptr, gin()->devComms);
   ncclDevComm devComm{};
   EXPECT_EQ(ncclInternalError, ncclGinDevCommFree(comm(), &devComm));
 }
 
 // The devComm is looked up by its GIN handle; an unknown handle walks the whole
-// list and then fails.
+// list and then fails, leaving the devComms that are on it untouched.
 TEST_F(GinHostDevCommFreeMicrotest, UnknownHandleReportsInternalError) {
-  attachProgressList(1, 1, {1});
-  appendDevComm(1, {1});
+  ncclDevComm first = makeDevComm();
+  ncclDevComm second = makeDevComm();
 
   ncclDevComm devComm{};
   devComm.ginHandles[0] = reinterpret_cast<void*>(0x999);  // belongs to no devComm
   EXPECT_EQ(ncclInternalError, ncclGinDevCommFree(comm(), &devComm));
   EXPECT_EQ(0, fake_.destroyCalls.load());
-  freeProgressList();
+  int listLength = 0;
+  for (auto* dc = gin()->devComms; dc != nullptr; dc = dc->next) listLength++;
+  EXPECT_EQ(2, listLength) << "a failed lookup unlinked a devComm";
+
+  EXPECT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &first));
+  EXPECT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &second));
 }
 
-// A plugin that fails to destroy a context surfaces that status to the caller.
+// A plugin that fails to destroy a context surfaces that status to the caller,
+// and the devComm stays off the list: the free is not retryable.
 TEST_F(GinHostDevCommFreeMicrotest, DestroyContextFailurePropagates) {
-  attachProgressList(1, 1, {1});
+  ncclDevComm devComm = makeDevComm();
   fake_.failDestroyContext = {ncclSystemError, 1};
 
-  ncclDevComm devComm{};
-  devComm.ginHandles[0] = gin()->devComms->devHandles[0]->handle;
   EXPECT_EQ(ncclSystemError, ncclGinDevCommFree(comm(), &devComm));
   // The devComm was already unlinked, so the list -- not this test -- owns nothing.
   EXPECT_EQ(nullptr, gin()->devComms);
@@ -1519,11 +1561,20 @@ TEST_F(GinHostFinalizeMicrotest, SkipsConnectionSlotsThatAreAlreadyClosed) {
 }
 
 // A close that fails surfaces to the caller instead of being swallowed by the
-// teardown path.
+// teardown path, and finalize stops there rather than wiping the state behind
+// a connection it could not release.
 TEST_F(GinHostFinalizeMicrotest, CloseCollFailurePropagates) {
+  nthreadsParam_ = 2;  // a second connection, to show the walk stopped
   ASSERT_EQ(ncclSuccess, connectOnce());
+  ASSERT_EQ(2, gin()->backends[0].ginCommCount);
   fake_.failCloseColl = {ncclSystemError, 1};
+
   EXPECT_EQ(ncclSystemError, ncclGinHostFinalize(comm()));
+
+  EXPECT_EQ(1, fake_.closeCollCalls);
+  EXPECT_NE(nullptr, gin()->backends[0].ginComms[0]);  // the slot is not cleared
+  EXPECT_TRUE(gin()->connected);                       // ... and the state is not wiped
+  EXPECT_EQ(1, gin()->numActiveBackends);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1631,10 +1682,17 @@ TEST_F(GinHostRegisterMicrotest, NullWindowFromThePluginIsASystemError) {
   EXPECT_EQ(1u, fake_.regMrCalls.size());  // stops at the first bad connection
 }
 
-// A failing registration surfaces the plugin's status.
+// A failing registration surfaces the plugin's status and stops there: the
+// remaining connections are left unregistered rather than half-populated.
 TEST_F(GinHostRegisterMicrotest, RegistrationFailurePropagates) {
+  void* const poison = reinterpret_cast<void*>(0xDEAD);
+  for (auto& win : hostWins_) win = poison;
   fake_.failRegMrSym = {ncclInternalError, 1};
+
   EXPECT_EQ(ncclInternalError, registerWindow());
+
+  EXPECT_EQ(1u, fake_.regMrCalls.size());  // the second connection is never asked
+  EXPECT_EQ(poison, hostWins_[1]);         // ... so its slot is untouched
 }
 
 // Deregistration mirrors registration: one call per populated slot.
@@ -1663,26 +1721,51 @@ TEST_F(GinHostRegisterMicrotest, SkipsEmptySlots) {
   EXPECT_EQ(win1, fake_.deregMrCalls[0].second);
 }
 
-// A failing deregistration surfaces the plugin's status.
+// A failing deregistration surfaces the plugin's status and stops the walk
+// there, same as registration.
 TEST_F(GinHostRegisterMicrotest, DeregistrationFailurePropagates) {
   ASSERT_EQ(ncclSuccess, registerWindow());
   fake_.failDeregMrSym = {ncclSystemError, 1};
+
   EXPECT_EQ(ncclSystemError, ncclGinDeregister(comm(), hostWins_));
+
+  EXPECT_EQ(1u, fake_.deregMrCalls.size());  // the second slot is left registered
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // ncclGinQueryLastError
 
+// Like the free suite, the list walked here is built by ncclGinDevCommSetup --
+// two GIN connections per devComm, so "asked every context" and "stopped early"
+// are distinguishable.
 class GinHostQueryLastErrorMicrotest : public GinHostTest {
  protected:
+  std::vector<std::unique_ptr<ncclDevComm>> devComms_;
+
+  void SetUp() override {
+    GinHostTest::SetUp();
+    nthreadsParam_ = 2;
+    ASSERT_EQ(ncclSuccess, connectOnce());
+    ASSERT_EQ(2, gin()->backends[0].ginCommCount);
+    gin()->proxyThreadStopSignal.store(true);  // any spawned worker exits immediately
+  }
+
+  void addDevComm() {
+    devComms_.push_back(std::make_unique<ncclDevComm>());
+    auto reqs = proxyReqs();
+    reqs.ginContextCount = gin()->backends[0].ginCommCount;
+    ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, devComms_.back().get(), NCCL_VERSION_CODE));
+  }
+
   void TearDown() override {
-    freeProgressList();
+    for (auto& dc : devComms_) EXPECT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), dc.get()));
     GinHostTest::TearDown();
   }
 };
 
 // With nothing registered there is nothing to ask, and the answer is "no error".
 TEST_F(GinHostQueryLastErrorMicrotest, NoDevCommsReportsNoError) {
+  ASSERT_EQ(nullptr, gin()->devComms);
   bool hasError = true;
   EXPECT_EQ(ncclSuccess, ncclGinQueryLastError(gin(), &hasError));
   EXPECT_FALSE(hasError);
@@ -1692,36 +1775,40 @@ TEST_F(GinHostQueryLastErrorMicrotest, NoDevCommsReportsNoError) {
 // Every context of every devComm is asked, including the ones that do not need
 // proxy progress -- that is the only way a device-initiated backend reports.
 TEST_F(GinHostQueryLastErrorMicrotest, AsksEveryContextOfEveryDevComm) {
-  attachProgressList(2, 1, {1, 0});
-  appendDevComm(2, {0, 0});
+  addDevComm();
+  fake_.needsProxyProgress = false;  // a device-initiated devComm, never progressed
+  addDevComm();
 
   bool hasError = true;
   EXPECT_EQ(ncclSuccess, ncclGinQueryLastError(gin(), &hasError));
   EXPECT_FALSE(hasError);
-  EXPECT_EQ(4, fake_.queryCalls);
+  EXPECT_EQ(4, fake_.queryCalls);  // 2 devComms x 2 connections
 }
 
 // The first context reporting an error ends the walk: the caller only needs to
 // know that something failed.
 TEST_F(GinHostQueryLastErrorMicrotest, StopsAtTheFirstContextReportingAnError) {
-  attachProgressList(2, 1, {1, 1});
-  appendDevComm(2, {1, 1});
+  addDevComm();
+  addDevComm();
   fake_.queryErrorOnCall = 2;
 
   bool hasError = false;
   EXPECT_EQ(ncclSuccess, ncclGinQueryLastError(gin(), &hasError));
   EXPECT_TRUE(hasError);
-  EXPECT_EQ(2, fake_.queryCalls);
+  EXPECT_EQ(2, fake_.queryCalls);  // the remaining three contexts are never asked
 }
 
 // A query that fails outright is a different thing from a query that reports an
-// error, and surfaces the plugin's status.
+// error: the plugin's status surfaces, the walk stops, and the caller is not
+// told an error was found.
 TEST_F(GinHostQueryLastErrorMicrotest, QueryFailurePropagates) {
-  attachProgressList(1, 1, {1});
+  addDevComm();
   fake_.failQueryLastError = {ncclSystemError, 1};
 
-  bool hasError = false;
+  bool hasError = true;  // pre-poisoned, so "left false" is a real assertion
   EXPECT_EQ(ncclSystemError, ncclGinQueryLastError(gin(), &hasError));
+  EXPECT_FALSE(hasError);
+  EXPECT_EQ(1, fake_.queryCalls);  // the devComm's second connection is never asked
 }
 
 }  // namespace
