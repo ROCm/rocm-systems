@@ -2,6 +2,7 @@
 #include "ph_future.hpp"
 #include "profiler-hub/c/profiler_hub.h"
 
+#include <functional>
 #include <memory>
 #include <tuple>
 #include <utility>
@@ -19,6 +20,30 @@ guard_call(Fn&& fn)
     {
         return PH_RESULT_INTERNAL_ERROR;
     }
+}
+
+ph_result_t
+run_operation(ph_ctx_t ctx, ph_future_t future, std::function<ph_result_t()> operation)
+{
+    if(future == nullptr)
+    {
+        return guard_call(operation);
+    }
+
+    if(!future->try_attach())
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    try
+    {
+        ctx->run_async(future->shared_from_this(), std::move(operation));
+    } catch(...)
+    {
+        future->finish(PH_FUTURE_ERROR, PH_RESULT_FUTURE_ALLOCATION_FAILED);
+        return PH_RESULT_FUTURE_ALLOCATION_FAILED;
+    }
+    return PH_RESULT_SUCCESS;
 }
 }  // namespace
 
@@ -123,7 +148,7 @@ ph_get_schema_version(ph_ctx_t ctx, ph_schema_version_t* version)
 }
 
 ph_result_t
-ph_get_track_list(ph_ctx_t ctx, ph_track_list_t* track_list)
+ph_get_track_list(ph_ctx_t ctx, ph_track_list_t* track_list, ph_future_t future)
 {
     if(ctx == nullptr)
     {
@@ -135,7 +160,7 @@ ph_get_track_list(ph_ctx_t ctx, ph_track_list_t* track_list)
         return PH_RESULT_INVALID_ARGUMENT;
     }
 
-    return guard_call([ctx, track_list]() {
+    return run_operation(ctx, future, [ctx, track_list]() -> ph_result_t {
         if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
         {
             return ready;
@@ -146,7 +171,7 @@ ph_get_track_list(ph_ctx_t ctx, ph_track_list_t* track_list)
 }
 
 ph_result_t
-ph_get_node(ph_ctx_t ctx, ph_node_t* node)
+ph_get_node(ph_ctx_t ctx, ph_node_t* node, ph_future_t future)
 {
     if(ctx == nullptr)
     {
@@ -158,7 +183,7 @@ ph_get_node(ph_ctx_t ctx, ph_node_t* node)
         return PH_RESULT_INVALID_ARGUMENT;
     }
 
-    return guard_call([ctx, node]() {
+    return run_operation(ctx, future, [ctx, node]() -> ph_result_t {
         if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
         {
             return ready;
@@ -173,7 +198,8 @@ ph_get_track_events(ph_ctx_t         ctx,
                     uint32_t         track_id,
                     uint64_t         start_ts,
                     uint64_t         end_ts,
-                    ph_event_list_t* events)
+                    ph_event_list_t* events,
+                    ph_future_t      future)
 {
     if(ctx == nullptr)
     {
@@ -186,20 +212,21 @@ ph_get_track_events(ph_ctx_t         ctx,
     }
 
     *events = ph_event_list_t{ .list_size = 0, .events = nullptr };
-    return guard_call([ctx, track_id, start_ts, end_ts, events]() {
-        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
-        {
-            return ready;
-        }
-        if(!ctx->has_track(track_id))
-        {
-            return PH_RESULT_INVALID_ARGUMENT;
-        }
+    return run_operation(
+        ctx, future, [ctx, track_id, start_ts, end_ts, events]() -> ph_result_t {
+            if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+            {
+                return ready;
+            }
+            if(!ctx->has_track(track_id))
+            {
+                return PH_RESULT_INVALID_ARGUMENT;
+            }
 
-        *events = ctx->get_track_events(track_id, start_ts, end_ts);
+            *events = ctx->get_track_events(track_id, start_ts, end_ts);
 
-        return PH_RESULT_SUCCESS;
-    });
+            return PH_RESULT_SUCCESS;
+        });
 }
 
 ph_result_t
@@ -207,7 +234,8 @@ ph_get_track_samples(ph_ctx_t          ctx,
                      uint32_t          track_id,
                      uint64_t          start_ts,
                      uint64_t          end_ts,
-                     ph_sample_list_t* samples)
+                     ph_sample_list_t* samples,
+                     ph_future_t       future)
 {
     if(ctx == nullptr)
     {
@@ -220,20 +248,21 @@ ph_get_track_samples(ph_ctx_t          ctx,
     }
 
     *samples = ph_sample_list_t{ .list_size = 0, .samples = nullptr };
-    return guard_call([ctx, track_id, start_ts, end_ts, samples]() {
-        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
-        {
-            return ready;
-        }
-        if(!ctx->has_track(track_id))
-        {
-            return PH_RESULT_INVALID_ARGUMENT;
-        }
+    return run_operation(
+        ctx, future, [ctx, track_id, start_ts, end_ts, samples]() -> ph_result_t {
+            if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+            {
+                return ready;
+            }
+            if(!ctx->has_track(track_id))
+            {
+                return PH_RESULT_INVALID_ARGUMENT;
+            }
 
-        *samples = ctx->get_track_samples(track_id, start_ts, end_ts);
+            *samples = ctx->get_track_samples(track_id, start_ts, end_ts);
 
-        return PH_RESULT_SUCCESS;
-    });
+            return PH_RESULT_SUCCESS;
+        });
 }
 
 ph_result_t

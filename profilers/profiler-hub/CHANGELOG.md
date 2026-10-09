@@ -66,6 +66,12 @@ downstream consumer of the library.
   With a future it returns the context at once and reads the trace in the background,
   reporting progress and the end through the future's callbacks. Calls that return data
   wait for the read; `ph_ctx_free()` cancels a read that is still running.
+- `ph_get_track_list()`, `ph_get_node()`, `ph_get_track_events()` and
+  `ph_get_track_samples()` take a `ph_future_t` as their last argument (null for the
+  previous blocking behaviour). With a future the call returns at once, the work runs on
+  the context's thread pool, and the future ends with the `ph_result_t` the call would
+  have returned or is cancelled; the out parameter may be read once it finished.
+  `ph_ctx_free()` cancels the calls still waiting.
 - `ph_ctx_create()` now reads the events of every track and the samples of every PMC
   track and keeps them in memory until `ph_ctx_free()`. Opening a trace takes longer
   and uses memory proportional to its event count; `ph_get_track_events()` and

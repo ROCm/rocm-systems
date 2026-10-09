@@ -77,6 +77,14 @@ extern "C"
      * @brief Retrieves the list of tracks contained in the trace.
      * @param ctx Context to query.
      * @param track_list Out parameter receiving the track list.
+     * @param future Null to run the call before returning. Otherwise a future from
+     *        ph_future_create() that was not passed to an operation yet: the call
+     *        returns at once with PH_RESULT_SUCCESS, and the work runs in the
+     *        background. The future ends with the ph_result_t the call would have
+     *        returned (see ph_future_result()), or with PH_FUTURE_CANCELLED. The
+     *        out parameter may be read only after the future ended with
+     *        PH_FUTURE_FINISHED. A future that already serves an operation gives
+     *        PH_RESULT_INVALID_ARGUMENT.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p track_list is
      *         null.
@@ -84,18 +92,28 @@ extern "C"
      *       point into memory owned by @p ctx. They remain valid until
      *       @p ctx is freed.
      */
-    ph_result_t ph_get_track_list(ph_ctx_t ctx, ph_track_list_t* track_list);
+    ph_result_t ph_get_track_list(ph_ctx_t         ctx,
+                                  ph_track_list_t* track_list,
+                                  ph_future_t      future);
 
     /**
      * @brief Retrieves node information (agents and tracks) for the trace.
      * @param ctx Context to query.
      * @param node Out parameter receiving the node info.
+     * @param future Null to run the call before returning. Otherwise a future from
+     *        ph_future_create() that was not passed to an operation yet: the call
+     *        returns at once with PH_RESULT_SUCCESS, and the work runs in the
+     *        background. The future ends with the ph_result_t the call would have
+     *        returned (see ph_future_result()), or with PH_FUTURE_CANCELLED. The
+     *        out parameter may be read only after the future ended with
+     *        PH_FUTURE_FINISHED. A future that already serves an operation gives
+     *        PH_RESULT_INVALID_ARGUMENT.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p node is null.
      * @note String and array fields of @p node point into memory owned by
      *       @p ctx and follow the same lifetime rule as ph_get_track_list().
      */
-    ph_result_t ph_get_node(ph_ctx_t ctx, ph_node_t* node);
+    ph_result_t ph_get_node(ph_ctx_t ctx, ph_node_t* node, ph_future_t future);
 
     /**
      * @brief Retrieves duration events (region/kernel dispatch/memory
@@ -113,6 +131,14 @@ extern "C"
      *        returned.
      * @param events Out parameter receiving the event list; it is set to an
      *        empty list before any other work, so it is valid on failure.
+     * @param future Null to run the call before returning. Otherwise a future from
+     *        ph_future_create() that was not passed to an operation yet: the call
+     *        returns at once with PH_RESULT_SUCCESS, and the work runs in the
+     *        background. The future ends with the ph_result_t the call would have
+     *        returned (see ph_future_result()), or with PH_FUTURE_CANCELLED. The
+     *        out parameter may be read only after the future ended with
+     *        PH_FUTURE_FINISHED. A future that already serves an operation gives
+     *        PH_RESULT_INVALID_ARGUMENT.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p events is
      *         null or @p track_id does not identify a known track,
@@ -135,7 +161,8 @@ extern "C"
                                     uint32_t         track_id,
                                     uint64_t         start_ts,
                                     uint64_t         end_ts,
-                                    ph_event_list_t* events);
+                                    ph_event_list_t* events,
+                                    ph_future_t      future);
 
     /**
      * @brief Retrieves PMC/counter samples for a track within an optional
@@ -151,6 +178,14 @@ extern "C"
      *        window has no upper bound.
      * @param samples Out parameter receiving the sample list; it is set to
      *        an empty list before any other work, so it is valid on failure.
+     * @param future Null to run the call before returning. Otherwise a future from
+     *        ph_future_create() that was not passed to an operation yet: the call
+     *        returns at once with PH_RESULT_SUCCESS, and the work runs in the
+     *        background. The future ends with the ph_result_t the call would have
+     *        returned (see ph_future_result()), or with PH_FUTURE_CANCELLED. The
+     *        out parameter may be read only after the future ended with
+     *        PH_FUTURE_FINISHED. A future that already serves an operation gives
+     *        PH_RESULT_INVALID_ARGUMENT.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p samples is
      *         null or @p track_id does not identify a known track,
@@ -172,7 +207,8 @@ extern "C"
                                      uint32_t          track_id,
                                      uint64_t          start_ts,
                                      uint64_t          end_ts,
-                                     ph_sample_list_t* samples);
+                                     ph_sample_list_t* samples,
+                                     ph_future_t       future);
 
     /**
      * @brief Creates a future that can be passed to an API call to run it

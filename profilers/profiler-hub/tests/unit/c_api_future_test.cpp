@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -297,7 +298,7 @@ TEST_F(c_api_async_ctx_test, the_context_is_read_in_the_background_and_reports_i
     EXPECT_EQ(g_log.progress_calls, 2);
 
     ph_track_list_t tracks{};
-    ASSERT_EQ(ph_get_track_list(m_ctx, &tracks), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_get_track_list(m_ctx, &tracks, nullptr), PH_RESULT_SUCCESS);
     EXPECT_EQ(tracks.list_size, 2U);
 }
 
@@ -307,7 +308,7 @@ TEST_F(c_api_async_ctx_test, a_data_call_waits_for_the_read_to_end)
     ASSERT_EQ(ph_ctx_create(&m_ctx, m_db_path.c_str(), m_future), PH_RESULT_SUCCESS);
 
     ph_track_list_t tracks{};
-    ASSERT_EQ(ph_get_track_list(m_ctx, &tracks), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_get_track_list(m_ctx, &tracks, nullptr), PH_RESULT_SUCCESS);
 
     EXPECT_EQ(tracks.list_size, 2U);
     EXPECT_EQ(tracks.tracks[0].nesting_depth, 1U);
@@ -366,7 +367,7 @@ TEST_F(c_api_async_ctx_test,
     EXPECT_EQ(g_log.status, PH_FUTURE_CANCELLED);
     EXPECT_EQ(g_log.result, PH_RESULT_CANCELLED);
     ph_track_list_t tracks{};
-    EXPECT_EQ(ph_get_track_list(m_ctx, &tracks), PH_RESULT_CANCELLED);
+    EXPECT_EQ(ph_get_track_list(m_ctx, &tracks, nullptr), PH_RESULT_CANCELLED);
 }
 
 TEST_F(c_api_async_ctx_test, freeing_the_context_ends_the_future_exactly_once)
@@ -390,11 +391,193 @@ TEST_F(c_api_async_ctx_test, a_future_can_be_freed_while_the_read_runs)
     m_future = nullptr;
 
     ph_track_list_t tracks{};
-    EXPECT_EQ(ph_get_track_list(m_ctx, &tracks), PH_RESULT_SUCCESS);
+    EXPECT_EQ(ph_get_track_list(m_ctx, &tracks, nullptr), PH_RESULT_SUCCESS);
 
     ASSERT_EQ(ph_ctx_free(m_ctx), PH_RESULT_SUCCESS);
     m_ctx = nullptr;
     EXPECT_EQ(g_log.finished_calls, 1);
+}
+
+struct worker_block
+{
+    std::atomic<bool> release{ false };
+    std::atomic<int>  blocked{ 0 };
+};
+
+worker_block g_block;
+
+void
+blocking_finished(ph_future_t, ph_future_status_t, ph_result_t)
+{
+    ++g_block.blocked;
+    while(!g_block.release)
+    {
+        std::this_thread::sleep_for(1ms);
+    }
+}
+
+class c_api_async_call_test : public c_api_future_test
+{
+protected:
+    void SetUp() override
+    {
+        c_api_future_test::SetUp();
+        g_block.release = false;
+        g_block.blocked = 0;
+        m_db_path       = profiler_hub::test::temp_trace_path("c_api_async_call_test");
+        profiler_hub::test::write_two_thread_tracks(m_db_path);
+        ASSERT_EQ(ph_ctx_create(&m_ctx, m_db_path.c_str(), nullptr), PH_RESULT_SUCCESS);
+    }
+
+    void TearDown() override
+    {
+        g_block.release = true;
+        for(auto* blocker : m_blockers)
+        {
+            std::ignore = ph_future_wait(blocker);
+            std::ignore = ph_future_free(blocker);
+        }
+        if(m_ctx != nullptr) ph_ctx_free(m_ctx);
+        c_api_future_test::TearDown();
+        std::filesystem::remove(m_db_path);
+    }
+
+    // The context pool has max(1, hardware threads / 2) workers; keeping every one of
+    // them busy makes the next submitted operation wait in the queue.
+    void occupy_every_worker()
+    {
+        const int workers =
+            static_cast<int>(std::max(1U, std::thread::hardware_concurrency() / 2));
+        for(int i = 0; i < workers; ++i)
+        {
+            ph_future_t blocker = nullptr;
+            ASSERT_EQ(ph_future_create(nullptr, blocking_finished, &blocker),
+                      PH_RESULT_SUCCESS);
+            m_blockers.push_back(blocker);
+            ASSERT_EQ(ph_get_track_list(m_ctx, &m_blocker_tracks, blocker),
+                      PH_RESULT_SUCCESS);
+        }
+        while(g_block.blocked < workers)
+        {
+            std::this_thread::sleep_for(1ms);
+        }
+    }
+
+    std::string              m_db_path;
+    ph_ctx_t                 m_ctx{ nullptr };
+    ph_track_list_t          m_blocker_tracks{};
+    std::vector<ph_future_t> m_blockers;
+};
+
+TEST_F(c_api_async_call_test,
+       a_call_with_a_future_returns_and_fills_the_out_parameter_later)
+{
+    create();
+    ph_event_list_t events{};
+
+    ASSERT_EQ(ph_get_track_events(m_ctx, 0, 0, 0, &events, m_future), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_future_wait(m_future), PH_RESULT_SUCCESS);
+
+    EXPECT_EQ(events.list_size, 2U);
+    EXPECT_EQ(g_log.finished_calls, 1);
+    EXPECT_EQ(g_log.status, PH_FUTURE_FINISHED);
+    EXPECT_EQ(g_log.result, PH_RESULT_SUCCESS);
+}
+
+TEST_F(c_api_async_call_test, every_data_call_accepts_a_future)
+{
+    ph_track_list_t  tracks{};
+    ph_node_t        node{};
+    ph_sample_list_t samples{};
+    ph_event_list_t  events{};
+    ph_future_t      futures[4] = {};
+    for(auto& future : futures)
+    {
+        ASSERT_EQ(ph_future_create(nullptr, nullptr, &future), PH_RESULT_SUCCESS);
+    }
+
+    EXPECT_EQ(ph_get_track_list(m_ctx, &tracks, futures[0]), PH_RESULT_SUCCESS);
+    EXPECT_EQ(ph_get_node(m_ctx, &node, futures[1]), PH_RESULT_SUCCESS);
+    EXPECT_EQ(ph_get_track_samples(m_ctx, 0, 0, 0, &samples, futures[2]),
+              PH_RESULT_SUCCESS);
+    EXPECT_EQ(ph_get_track_events(m_ctx, 0, 0, 0, &events, futures[3]),
+              PH_RESULT_SUCCESS);
+
+    for(auto* future : futures)
+    {
+        EXPECT_EQ(ph_future_wait(future), PH_RESULT_SUCCESS);
+        EXPECT_EQ(ph_future_free(future), PH_RESULT_SUCCESS);
+    }
+    EXPECT_EQ(tracks.list_size, 2U);
+    EXPECT_EQ(node.track_list.list_size, 2U);
+    EXPECT_EQ(events.list_size, 2U);
+}
+
+TEST_F(c_api_async_call_test, a_failing_call_ends_the_future_with_its_result)
+{
+    create();
+    ph_event_list_t events{};
+
+    ASSERT_EQ(ph_get_track_events(m_ctx, 999999, 0, 0, &events, m_future),
+              PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_future_wait(m_future), PH_RESULT_SUCCESS);
+
+    EXPECT_EQ(g_log.status, PH_FUTURE_ERROR);
+    EXPECT_EQ(g_log.result, PH_RESULT_INVALID_ARGUMENT);
+    EXPECT_EQ(events.list_size, 0U);
+}
+
+TEST_F(c_api_async_call_test, a_future_that_serves_an_operation_is_rejected)
+{
+    create();
+    ASSERT_TRUE(m_future->try_attach());
+    ph_track_list_t tracks{};
+
+    EXPECT_EQ(ph_get_track_list(m_ctx, &tracks, m_future), PH_RESULT_INVALID_ARGUMENT);
+}
+
+TEST_F(c_api_async_call_test, invalid_arguments_are_reported_by_the_call_itself)
+{
+    create();
+
+    EXPECT_EQ(ph_get_track_list(m_ctx, nullptr, m_future), PH_RESULT_INVALID_ARGUMENT);
+    EXPECT_EQ(ph_future_wait(m_future), PH_RESULT_INVALID_ARGUMENT);
+}
+
+TEST_F(c_api_async_call_test, a_call_that_has_not_started_is_skipped_when_cancelled)
+{
+    occupy_every_worker();
+    create();
+    ph_track_list_t tracks{};
+    ASSERT_EQ(ph_get_track_list(m_ctx, &tracks, m_future), PH_RESULT_SUCCESS);
+
+    ASSERT_EQ(ph_future_cancel(m_future), PH_RESULT_SUCCESS);
+    g_block.release = true;
+    ASSERT_EQ(ph_future_wait(m_future), PH_RESULT_SUCCESS);
+
+    EXPECT_EQ(g_log.status, PH_FUTURE_CANCELLED);
+    EXPECT_EQ(g_log.result, PH_RESULT_CANCELLED);
+    EXPECT_EQ(tracks.list_size, 0U);
+}
+
+TEST_F(c_api_async_call_test, freeing_the_context_cancels_the_calls_still_waiting)
+{
+    occupy_every_worker();
+    create();
+    ph_track_list_t tracks{};
+    ASSERT_EQ(ph_get_track_list(m_ctx, &tracks, m_future), PH_RESULT_SUCCESS);
+
+    std::thread releaser{ [] {
+        std::this_thread::sleep_for(50ms);
+        g_block.release = true;
+    } };
+    ASSERT_EQ(ph_ctx_free(m_ctx), PH_RESULT_SUCCESS);
+    m_ctx = nullptr;
+    releaser.join();
+
+    EXPECT_EQ(g_log.finished_calls, 1);
+    EXPECT_EQ(g_log.status, PH_FUTURE_CANCELLED);
+    EXPECT_EQ(ph_future_wait(m_future), PH_RESULT_SUCCESS);
 }
 
 }  // namespace

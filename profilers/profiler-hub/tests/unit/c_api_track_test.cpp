@@ -27,7 +27,7 @@ protected:
         ASSERT_EQ(ph_ctx_create(&m_ctx, m_db_path.c_str(), nullptr), PH_RESULT_SUCCESS);
 
         ph_track_list_t tracks{};
-        ASSERT_EQ(ph_get_track_list(m_ctx, &tracks), PH_RESULT_SUCCESS);
+        ASSERT_EQ(ph_get_track_list(m_ctx, &tracks, nullptr), PH_RESULT_SUCCESS);
         ASSERT_EQ(tracks.list_size, 1U);
         m_track_id = tracks.tracks[0].id;
     }
@@ -56,7 +56,7 @@ protected:
 TEST_F(c_api_track_test, the_track_list_describes_the_seeded_thread_track)
 {
     ph_track_list_t tracks{};
-    ASSERT_EQ(ph_get_track_list(m_ctx, &tracks), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_get_track_list(m_ctx, &tracks, nullptr), PH_RESULT_SUCCESS);
 
     EXPECT_EQ(tracks.tracks[0].category, PH_TRACK_CATEGORY_THREAD);
     EXPECT_EQ(tracks.tracks[0].event_count, 2U);
@@ -68,8 +68,8 @@ TEST_F(c_api_track_test, the_track_list_stays_valid_across_later_calls)
 {
     ph_track_list_t first{};
     ph_track_list_t second{};
-    ASSERT_EQ(ph_get_track_list(m_ctx, &first), PH_RESULT_SUCCESS);
-    ASSERT_EQ(ph_get_track_list(m_ctx, &second), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_get_track_list(m_ctx, &first, nullptr), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_get_track_list(m_ctx, &second, nullptr), PH_RESULT_SUCCESS);
 
     EXPECT_EQ(first.tracks, second.tracks);
 }
@@ -77,7 +77,8 @@ TEST_F(c_api_track_test, the_track_list_stays_valid_across_later_calls)
 TEST_F(c_api_track_test, whole_track_events_come_in_start_order)
 {
     ph_event_list_t events{};
-    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 0, 0, &events), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 0, 0, &events, nullptr),
+              PH_RESULT_SUCCESS);
 
     EXPECT_THAT(names_of(events), ::testing::ElementsAre("region-a", "region-b"));
     EXPECT_EQ(events.events[0].start, 1000U);
@@ -88,8 +89,10 @@ TEST_F(c_api_track_test, whole_track_events_share_their_storage_between_calls)
 {
     ph_event_list_t first{};
     ph_event_list_t second{};
-    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 0, 0, &first), PH_RESULT_SUCCESS);
-    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 0, 0, &second), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 0, 0, &first, nullptr),
+              PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 0, 0, &second, nullptr),
+              PH_RESULT_SUCCESS);
 
     EXPECT_EQ(first.events, second.events);
 }
@@ -98,15 +101,15 @@ TEST_F(c_api_track_test, a_window_returns_the_events_that_overlap_it)
 {
     ph_event_list_t events{};
 
-    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 4000, 7000, &events),
+    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 4000, 7000, &events, nullptr),
               PH_RESULT_SUCCESS);
     EXPECT_THAT(names_of(events), ::testing::ElementsAre("region-b"));
 
-    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 1500, 1800, &events),
+    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 1500, 1800, &events, nullptr),
               PH_RESULT_SUCCESS);
     EXPECT_THAT(names_of(events), ::testing::ElementsAre("region-a"));
 
-    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 3000, 4000, &events),
+    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 3000, 4000, &events, nullptr),
               PH_RESULT_SUCCESS);
     EXPECT_EQ(events.list_size, 0U);
 }
@@ -115,8 +118,9 @@ TEST_F(c_api_track_test, a_window_that_covers_everything_matches_the_whole_track
 {
     ph_event_list_t whole{};
     ph_event_list_t window{};
-    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 0, 0, &whole), PH_RESULT_SUCCESS);
-    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 1, 100000, &window),
+    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 0, 0, &whole, nullptr),
+              PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 1, 100000, &window, nullptr),
               PH_RESULT_SUCCESS);
 
     EXPECT_THAT(names_of(window), ::testing::UnorderedElementsAreArray(names_of(whole)));
@@ -126,7 +130,7 @@ TEST_F(c_api_track_test, a_huge_end_bound_means_no_upper_bound)
 {
     ph_event_list_t events{};
 
-    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 1, UINT64_MAX, &events),
+    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 1, UINT64_MAX, &events, nullptr),
               PH_RESULT_SUCCESS);
 
     EXPECT_EQ(events.list_size, 2U);
@@ -136,8 +140,9 @@ TEST_F(c_api_track_test, a_window_starting_in_the_future_is_empty)
 {
     ph_event_list_t events{};
 
-    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, UINT64_MAX, UINT64_MAX, &events),
-              PH_RESULT_SUCCESS);
+    ASSERT_EQ(
+        ph_get_track_events(m_ctx, m_track_id, UINT64_MAX, UINT64_MAX, &events, nullptr),
+        PH_RESULT_SUCCESS);
 
     EXPECT_EQ(events.list_size, 0U);
 }
@@ -146,9 +151,9 @@ TEST_F(c_api_track_test, a_window_result_stays_valid_after_a_later_window)
 {
     ph_event_list_t first{};
     ph_event_list_t second{};
-    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 1500, 1800, &first),
+    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 1500, 1800, &first, nullptr),
               PH_RESULT_SUCCESS);
-    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 4000, 7000, &second),
+    ASSERT_EQ(ph_get_track_events(m_ctx, m_track_id, 4000, 7000, &second, nullptr),
               PH_RESULT_SUCCESS);
 
     EXPECT_THAT(names_of(first), ::testing::ElementsAre("region-a"));
@@ -160,7 +165,7 @@ TEST_F(c_api_track_test, an_unknown_track_clears_the_event_list_and_reports_the_
     ph_event_list_t events{ .list_size = 7,
                             .events    = reinterpret_cast<ph_event_t*>(0x1) };
 
-    EXPECT_EQ(ph_get_track_events(m_ctx, 999999, 0, 0, &events),
+    EXPECT_EQ(ph_get_track_events(m_ctx, 999999, 0, 0, &events, nullptr),
               PH_RESULT_INVALID_ARGUMENT);
 
     EXPECT_EQ(events.list_size, 0U);
@@ -170,14 +175,14 @@ TEST_F(c_api_track_test, an_unknown_track_clears_the_event_list_and_reports_the_
 TEST_F(c_api_track_test, the_track_list_reports_the_nesting_depth_of_a_flat_track)
 {
     ph_track_list_t tracks{};
-    ASSERT_EQ(ph_get_track_list(m_ctx, &tracks), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_get_track_list(m_ctx, &tracks, nullptr), PH_RESULT_SUCCESS);
 
     EXPECT_EQ(tracks.tracks[0].nesting_depth, 1U);
 }
 
 TEST_F(c_api_track_test, a_null_event_list_is_an_invalid_argument)
 {
-    EXPECT_EQ(ph_get_track_events(m_ctx, m_track_id, 0, 0, nullptr),
+    EXPECT_EQ(ph_get_track_events(m_ctx, m_track_id, 0, 0, nullptr, nullptr),
               PH_RESULT_INVALID_ARGUMENT);
 }
 
@@ -186,9 +191,9 @@ TEST_F(c_api_track_test, a_null_context_is_rejected_by_the_event_and_sample_gett
     ph_event_list_t  events{};
     ph_sample_list_t samples{};
 
-    EXPECT_EQ(ph_get_track_events(nullptr, m_track_id, 0, 0, &events),
+    EXPECT_EQ(ph_get_track_events(nullptr, m_track_id, 0, 0, &events, nullptr),
               PH_RESULT_INVALID_CONTEXT);
-    EXPECT_EQ(ph_get_track_samples(nullptr, m_track_id, 0, 0, &samples),
+    EXPECT_EQ(ph_get_track_samples(nullptr, m_track_id, 0, 0, &samples, nullptr),
               PH_RESULT_INVALID_CONTEXT);
 }
 
@@ -197,7 +202,8 @@ TEST_F(c_api_track_test, samples_of_a_thread_track_are_empty)
     ph_sample_list_t samples{ .list_size = 5,
                               .samples   = reinterpret_cast<ph_sample_t*>(0x1) };
 
-    ASSERT_EQ(ph_get_track_samples(m_ctx, m_track_id, 0, 0, &samples), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_get_track_samples(m_ctx, m_track_id, 0, 0, &samples, nullptr),
+              PH_RESULT_SUCCESS);
 
     EXPECT_EQ(samples.list_size, 0U);
 }
@@ -207,7 +213,7 @@ TEST_F(c_api_track_test, an_unknown_track_clears_the_sample_list_and_reports_the
     ph_sample_list_t samples{ .list_size = 5,
                               .samples   = reinterpret_cast<ph_sample_t*>(0x1) };
 
-    EXPECT_EQ(ph_get_track_samples(m_ctx, 999999, 0, 0, &samples),
+    EXPECT_EQ(ph_get_track_samples(m_ctx, 999999, 0, 0, &samples, nullptr),
               PH_RESULT_INVALID_ARGUMENT);
 
     EXPECT_EQ(samples.list_size, 0U);
@@ -218,7 +224,7 @@ TEST_F(c_api_track_test, the_node_describes_the_seeded_machine)
 {
     ph_node_t node{};
 
-    ASSERT_EQ(ph_get_node(m_ctx, &node), PH_RESULT_SUCCESS);
+    ASSERT_EQ(ph_get_node(m_ctx, &node, nullptr), PH_RESULT_SUCCESS);
 
     EXPECT_EQ(node.info.id, 1U);
     EXPECT_STREQ(node.info.machine_id, "machine-1");
@@ -229,8 +235,8 @@ TEST_F(c_api_track_test, the_node_arguments_are_checked)
 {
     ph_node_t node{};
 
-    EXPECT_EQ(ph_get_node(nullptr, &node), PH_RESULT_INVALID_CONTEXT);
-    EXPECT_EQ(ph_get_node(m_ctx, nullptr), PH_RESULT_INVALID_ARGUMENT);
+    EXPECT_EQ(ph_get_node(nullptr, &node, nullptr), PH_RESULT_INVALID_CONTEXT);
+    EXPECT_EQ(ph_get_node(m_ctx, nullptr, nullptr), PH_RESULT_INVALID_ARGUMENT);
 }
 
 TEST_F(c_api_track_test, the_schema_version_is_reported)

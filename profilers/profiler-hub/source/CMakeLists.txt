@@ -16,6 +16,8 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/storage_impl.cpp
     ${CMAKE_CURRENT_LIST_DIR}/ph_ctx.cpp
     ${CMAKE_CURRENT_LIST_DIR}/ph_ctx.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/pending_futures.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/pending_futures.hpp
     ${CMAKE_CURRENT_LIST_DIR}/ph_future.cpp
     ${CMAKE_CURRENT_LIST_DIR}/ph_future.hpp
     ${CMAKE_CURRENT_LIST_DIR}/profiler_hub_c_api.cpp

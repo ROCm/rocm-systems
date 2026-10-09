@@ -124,6 +124,36 @@ ph_ctx::load_async(std::shared_ptr<ph_future> future)
     });
 }
 
+void
+ph_ctx::run_async(std::shared_ptr<ph_future>   future,
+                  std::function<ph_result_t()> operation)
+{
+    m_operations.add(future);
+    try
+    {
+        std::ignore =
+            m_thread_pool.submit([this, future, operation = std::move(operation)](
+                                     const std::stop_token& token) {
+                if(token.stop_requested() || future->stop_token().stop_requested())
+                {
+                    future->finish(PH_FUTURE_CANCELLED, PH_RESULT_CANCELLED);
+                }
+                else
+                {
+                    const auto result = operation();
+                    future->finish(result == PH_RESULT_SUCCESS ? PH_FUTURE_FINISHED
+                                                               : PH_FUTURE_ERROR,
+                                   result);
+                }
+                m_operations.remove(future);
+            });
+    } catch(...)
+    {
+        m_operations.remove(future);
+        throw;
+    }
+}
+
 ph_result_t
 ph_ctx::wait_until_ready()
 {

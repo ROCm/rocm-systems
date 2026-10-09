@@ -277,7 +277,7 @@ demo_track_events(ph_ctx_t ctx, uint32_t track_id)
 {
     ph_event_list_t events;
     TIME_CALL("ph_get_track_events (all)",
-              ph_get_track_events(ctx, track_id, 0, 0, &events));
+              ph_get_track_events(ctx, track_id, 0, 0, &events, NULL));
 
     printf("\n=== Events for track %d (%d, showing first %d) ===\n",
            track_id,
@@ -301,7 +301,7 @@ demo_track_events(ph_ctx_t ctx, uint32_t track_id)
 
     ph_event_list_t slice;
     TIME_CALL("ph_get_track_events (slice)",
-              ph_get_track_events(ctx, track_id, slice_start, slice_end, &slice));
+              ph_get_track_events(ctx, track_id, slice_start, slice_end, &slice, NULL));
 
     printf("\n=== Events for track %d in [%lu, %lu] (%d, showing first %d) ===\n",
            track_id,
@@ -313,11 +313,38 @@ demo_track_events(ph_ctx_t ctx, uint32_t track_id)
 }
 
 static void
+on_events_finished(ph_future_t future, ph_future_status_t status, ph_result_t result)
+{
+    (void) future;
+    printf("events call finished: status %d, result %d\n", (int) status, (int) result);
+}
+
+static void
+demo_async_track_events(ph_ctx_t ctx, uint32_t track_id)
+{
+    ph_future_t future = NULL;
+    ph_future_create(NULL, on_events_finished, &future);
+
+    ph_event_list_t events;
+    TIME_CALL("ph_get_track_events (future)",
+              ph_get_track_events(ctx, track_id, 0, 0, &events, future));
+    TIME_CALL("ph_future_wait (events)", ph_future_wait(future));
+
+    printf("\n=== Async events for track %d (%d, showing first %d) ===\n",
+           track_id,
+           events.list_size,
+           PRINT_LIMIT);
+    print_events(&events, PRINT_LIMIT);
+
+    ph_future_free(future);
+}
+
+static void
 demo_track_samples(ph_ctx_t ctx, uint32_t track_id)
 {
     ph_sample_list_t samples;
     TIME_CALL("ph_get_track_samples (all)",
-              ph_get_track_samples(ctx, track_id, 0, 0, &samples));
+              ph_get_track_samples(ctx, track_id, 0, 0, &samples, NULL));
 
     printf("\n=== Samples for track %d (%d, showing first %d) ===\n",
            track_id,
@@ -341,7 +368,7 @@ demo_track_samples(ph_ctx_t ctx, uint32_t track_id)
 
     ph_sample_list_t slice;
     TIME_CALL("ph_get_track_samples (slice)",
-              ph_get_track_samples(ctx, track_id, slice_start, slice_end, &slice));
+              ph_get_track_samples(ctx, track_id, slice_start, slice_end, &slice, NULL));
 
     printf("\n=== Samples for track %d in [%lu, %lu] (%d, showing first %d) ===\n",
            track_id,
@@ -384,7 +411,7 @@ main(int argc, char** argv)
     print_version(ctx);
 
     ph_node_t node;
-    TIME_CALL("ph_get_node", ph_get_node(ctx, &node));
+    TIME_CALL("ph_get_node", ph_get_node(ctx, &node, NULL));
 
     print_node_info(&node.info);
     print_agents(&node.agents);
@@ -398,6 +425,7 @@ main(int argc, char** argv)
     if(duration_track_id != 0)
     {
         demo_track_events(ctx, duration_track_id);
+        demo_async_track_events(ctx, duration_track_id);
     }
     if(counter_track_id != 0)
     {

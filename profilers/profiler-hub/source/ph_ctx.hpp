@@ -3,6 +3,7 @@
 #include "cached_track_reader.hpp"
 #include "common/connection_pool.hpp"
 #include "common/thread_pool.hpp"
+#include "pending_futures.hpp"
 #include "pooled_connection_source.hpp"
 #include "profiler-hub/c/profiler_hub_types.h"
 #include "profiler-hub/cpp/reader.hpp"
@@ -40,6 +41,15 @@ struct ph_ctx
      * cancelled or the ctx is destroyed meanwhile.
      */
     void load_async(std::shared_ptr<ph_future> future);
+
+    /**
+     * Runs @p operation on a worker of the ctx pool and ends @p future with its
+     * ph_result_t. @p future must have been attached by the caller. It ends with
+     * PH_FUTURE_CANCELLED if it is cancelled before the operation starts or the ctx is
+     * destroyed first.
+     */
+    void run_async(std::shared_ptr<ph_future>   future,
+                   std::function<ph_result_t()> operation);
 
     /**
      * Blocks until the trace is read.
@@ -112,6 +122,7 @@ private:
     std::vector<std::shared_ptr<profiler_hub::reader_types::node_info_t>> m_nodes;
     std::shared_ptr<ph_node_t>                                            m_c_node;
 
+    profiler_hub::pending_futures     m_operations;
     profiler_hub::common::thread_pool m_thread_pool{ default_thread_pool_size() };
     profiler_hub::cached_track_reader m_track_reader{ m_connection_source,
                                                       m_thread_pool,
