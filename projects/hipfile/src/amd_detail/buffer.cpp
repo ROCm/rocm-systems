@@ -64,9 +64,7 @@ Buffer::Buffer(const void *_buffer, size_t _length, int _flags, const PassKey<Bu
     }
     type = _attrs.type;
 
-    if (type != hipMemoryTypeHost) {
-        gpu_id = _attrs.device;
-    }
+    gpu_id = type == hipMemoryTypeDevice ? _attrs.device : -1;
 
     if (type == hipMemoryTypeDevice && !isValidBufferRegion(buffer, length)) {
         throw InvalidPointerRange();
