@@ -2196,6 +2196,20 @@ class Device : public RuntimeObject {
   }
 
   /**
+   * Recovers the location and size of a VMM allocation.
+   *
+   * @param amd_mem_obj physical memory object of the allocation
+   * @param location_type [out] where the allocation resides
+   * @param device_id [out] owning device for device memory, InvalidDeviceId otherwise
+   * @param size [out] allocation size in bytes
+   * @return True when the backend reported them; false leaves the caller on its default.
+   */
+  virtual bool getVmmAllocInfo(amd::Memory& amd_mem_obj, VmmLocationType* location_type,
+                               int* device_id, size_t* size) const {
+    return false;
+  }
+
+  /**
    * @return True if the device successfully applied the SVM attributes in HMM for device memory
    */
   virtual bool SetSvmAttributes(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
