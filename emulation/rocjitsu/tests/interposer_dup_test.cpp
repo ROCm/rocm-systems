@@ -1290,8 +1290,8 @@ TEST(InterposerDrmTest, ExportOfAUserptrBufferFailsAndLeavesTheCallersMemoryAlon
   uint32_t gpu_id = 0;
   ASSERT_TRUE(read_gpu_id(gpu_id));
   constexpr size_t kBytes = 4096;
-  auto *buffer = static_cast<uint32_t *>(mmap(nullptr, kBytes, PROT_READ | PROT_WRITE,
-                                              MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  auto *buffer = static_cast<uint32_t *>(
+      mmap(nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
   ASSERT_NE(buffer, MAP_FAILED);
   buffer[0] = 0x1111u;
   kfd_ioctl_alloc_memory_of_gpu_args allocation{};
