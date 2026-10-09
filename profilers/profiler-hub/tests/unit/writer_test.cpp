@@ -1,10 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "profiler-hub/reader.hpp"
-#include "profiler-hub/storage.hpp"
-#include "profiler-hub/writer.hpp"
-#include "profiler-hub/writer_types.hpp"
+#include "profiler-hub/cpp/reader.hpp"
+#include "profiler-hub/cpp/storage.hpp"
+#include "profiler-hub/cpp/writer.hpp"
+#include "profiler-hub/cpp/writer_types.hpp"
 
 #include <gtest/gtest.h>
 

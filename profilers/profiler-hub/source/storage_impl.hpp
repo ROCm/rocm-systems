@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "profiler-hub/storage.hpp"
+#include "profiler-hub/cpp/storage.hpp"
 
-#include "profiler-hub/version.hpp"
+#include "profiler-hub/cpp/version.hpp"
 
 #include "data_storage/backends/sqlite_backend.hpp"
 
