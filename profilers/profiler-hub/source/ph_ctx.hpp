@@ -34,6 +34,7 @@ struct ph_ctx
     [[nodiscard]] ph_event_list_t  get_track_events(uint32_t track_id,
                                                     uint64_t start_ts,
                                                     uint64_t end_ts);
+    [[nodiscard]] uint32_t         get_track_nesting_depth(uint32_t track_id);
     [[nodiscard]] ph_sample_list_t get_track_samples(uint32_t track_id,
                                                      uint64_t start_ts,
                                                      uint64_t end_ts);

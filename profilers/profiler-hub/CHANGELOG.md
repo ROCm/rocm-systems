@@ -52,6 +52,14 @@ downstream consumer of the library.
 - `track_info_t::value_range` and `ph_track_t::value_range` (`ph_value_range_t { min, max, is_valid }`)
   expose the smallest and largest sample value of PMC counter tracks. Other
   tracks, and counters with no non-NULL sample, have `value_range.is_valid == 0`.
+- `ph_event_t` gains `id`, `type` (new `ph_event_type_t`) and `depth`. `id` is only
+  unique together with `type`. `depth` is the number of events of the track, itself
+  included, that are active when the event starts, relative to the whole track. A
+  `ph_get_track_events()` request with a time window is now served from the
+  whole-track events, so its events keep that depth and come ordered by start.
+- New `ph_get_track_nesting_depth()` returns the largest `ph_event_t::depth` of a
+  track. It reads the whole track on the first call, as `ph_get_track_events()`
+  does.
 - New `PH_TRACK_CATEGORY_THREAD_SAMPLE`/`track_kind_t::thread_sample`
   category: duration events explicitly tagged with a named track (via
   `writer_t::register_track_info()` + `trace_environment_t::track_name`)

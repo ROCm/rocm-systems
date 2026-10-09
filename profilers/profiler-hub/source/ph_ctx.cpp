@@ -159,6 +159,19 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
     return m_track_reader.events(track_it->second, start_ts, end_ts);
 }
 
+uint32_t
+ph_ctx::get_track_nesting_depth(uint32_t track_id)
+{
+    LOG_DEBUG("[Profiler-Hub] Get track nesting depth. Track id {}", track_id);
+    const auto track_it = m_track_by_id.find(track_id);
+    if(track_it == m_track_by_id.end())
+    {
+        return 0;
+    }
+
+    return m_track_reader.nesting_depth(track_it->second);
+}
+
 ph_sample_list_t
 ph_ctx::get_track_samples(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
 {

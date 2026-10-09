@@ -219,6 +219,24 @@ cached_track_reader::events(const reader_types::track_info_ptr_t& track,
     return as_list(m_windowed_events.emplace_back(std::move(windowed)));
 }
 
+uint32_t
+cached_track_reader::nesting_depth(const reader_types::track_info_ptr_t& track)
+{
+    if(!track || track->category == reader_types::track_kind_t::pmc_agent) return 0;
+
+    const auto& whole = cached(m_events_cache, track, [&] {
+        return with_reader(m_source, [&](track_row_reader& reader) {
+            return build_sorted_events(reader, track);
+        });
+    });
+
+    const auto deepest = std::max_element(
+        whole.begin(), whole.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.depth < rhs.depth;
+        });
+    return deepest == whole.end() ? 0 : deepest->depth;
+}
+
 ph_sample_list_t
 cached_track_reader::samples(const reader_types::track_info_ptr_t& track,
                              uint64_t                              start_ts,

@@ -383,6 +383,48 @@ TEST_F(cached_track_reader_test, events_carry_their_depth_in_the_whole_track)
     EXPECT_EQ(list.events[4].depth, 1U);
 }
 
+TEST_F(cached_track_reader_test, the_nesting_depth_is_the_deepest_event_of_the_track)
+{
+    m_state.events = { timeline_event(0, 10, "outer"),
+                       timeline_event(2, 5, "inner"),
+                       timeline_event(3, 4, "innermost"),
+                       timeline_event(20, 30, "alone") };
+    auto reader    = make_reader();
+
+    EXPECT_EQ(reader.nesting_depth(make_track(1, track_kind_t::thread)), 3U);
+}
+
+TEST_F(cached_track_reader_test, the_nesting_depth_shares_the_whole_track_read)
+{
+    give_three_unsorted_events();
+    auto       reader = make_reader();
+    const auto track  = make_track(1, track_kind_t::thread);
+
+    std::ignore = reader.events(track, 0, 0);
+    std::ignore = reader.nesting_depth(track);
+    std::ignore = reader.nesting_depth(track);
+
+    EXPECT_EQ(m_state.events_calls, 1);
+}
+
+TEST_F(cached_track_reader_test, a_track_without_events_has_nesting_depth_zero)
+{
+    auto reader = make_reader();
+
+    EXPECT_EQ(reader.nesting_depth(make_track(1, track_kind_t::thread, 0)), 0U);
+}
+
+TEST_F(cached_track_reader_test,
+       a_pmc_or_null_track_has_nesting_depth_zero_without_a_read)
+{
+    give_three_unsorted_events();
+    auto reader = make_reader();
+
+    EXPECT_EQ(reader.nesting_depth(make_track(1, track_kind_t::pmc_agent)), 0U);
+    EXPECT_EQ(reader.nesting_depth(nullptr), 0U);
+    EXPECT_EQ(m_state.events_calls, 0);
+}
+
 TEST_F(cached_track_reader_test, a_windowed_event_keeps_its_depth_from_the_whole_track)
 {
     m_state.events = { timeline_event(0, 100, "outer"), timeline_event(40, 50, "inner") };
@@ -627,6 +669,14 @@ TEST_F(large_thread_track_test, tables_without_rows_are_skipped)
     const auto list = reader.events(make_track(1, track_kind_t::thread, 6), 0, 0);
 
     EXPECT_THAT(starts_of(list), ::testing::ElementsAre(10, 20, 30, 40, 50, 60));
+}
+
+TEST_F(large_thread_track_test, the_nesting_depth_is_read_from_the_merged_track)
+{
+    auto reader = make_reader(m_options);
+
+    EXPECT_EQ(reader.nesting_depth(make_track(1, track_kind_t::thread, 10)), 1U);
+    EXPECT_EQ(m_state.visit_calls, 3);
 }
 
 TEST_F(large_thread_track_test, parts_get_their_depth_after_the_merge)

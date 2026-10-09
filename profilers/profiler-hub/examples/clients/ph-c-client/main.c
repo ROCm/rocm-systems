@@ -282,6 +282,11 @@ demo_track_events(ph_ctx_t ctx, uint32_t track_id)
            PRINT_LIMIT);
     print_events(&events, PRINT_LIMIT);
 
+    uint32_t nesting_depth = 0;
+    TIME_CALL("ph_get_track_nesting_depth",
+              ph_get_track_nesting_depth(ctx, track_id, &nesting_depth));
+    printf("nesting depth: %u\n", (unsigned) nesting_depth);
+
     if(events.list_size == 0) return;
 
     uint64_t min_start = events.events[0].start;
