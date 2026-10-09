@@ -776,7 +776,7 @@ impl Runtime {
             for cache in endpoint
                 .caches()
                 .iter()
-                .filter(|cache| rocddi::gpu::is_compute_data_cache(cache))
+                .filter(|cache| rocddi::device::gpu::is_compute_data_cache(cache))
             {
                 caches.push(Cache::new(
                     agent,
@@ -1078,7 +1078,7 @@ pub(crate) fn translate_gpu_interval(
 }
 
 pub(crate) fn translate_gpu_tick(
-    counters: rocddi::gpu::profiling::ClockCounters,
+    counters: rocddi::device::gpu::profiling::ClockCounters,
     tick: u64,
 ) -> Result<u64, Status> {
     if counters.system_frequency == 0 || counters.gpu_frequency == 0 {
@@ -1291,7 +1291,7 @@ pub(crate) fn initialized_mut(runtime: &mut Option<Runtime>) -> Result<&mut Runt
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use rocddi::gpu::profiling::ClockCounters;
+    use rocddi::device::gpu::profiling::ClockCounters;
     use std::ffi::c_void;
     use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering as AtomicOrdering};
 

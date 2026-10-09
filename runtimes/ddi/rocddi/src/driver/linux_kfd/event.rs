@@ -9,7 +9,7 @@
 //! that uncertainty and refuses to replay the event ID.
 
 use super::{errno, error, native_error, sys, uapi};
-use crate::event::linux::SignalEventInfo;
+use crate::device::gpu::event::linux::SignalEventInfo;
 use crate::host_storage::{Allocator, Owned, Shared};
 use crate::{Error, ErrorKind};
 

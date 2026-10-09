@@ -23,7 +23,6 @@ use crate::device::Device;
 use crate::driver::{
     self, AddressSpaceInfo, AllocationOperations, CachedInfo, VirtualMemoryOperations,
 };
-use crate::gpu::GpuDevice;
 use crate::host_storage::{Buffer, Owned, Shared};
 use crate::os;
 use crate::{Error, ErrorKind};
@@ -1114,15 +1113,6 @@ pub unsafe fn host_cache_control(pointer: usize, length: u64, line_size: u32) ->
 }
 
 impl Device {
-    /// Returns the current bytes available for allocation on this GPU device.
-    ///
-    /// This compatibility entry point requires a GPU endpoint. New GPU callers
-    /// can use [`GpuDevice::available_memory`] directly.
-    #[doc(hidden)]
-    pub fn available_memory(&self) -> Result<u64, Error> {
-        self.gpu()?.available_memory()
-    }
-
     /// Creates owned backing and establishes its device mapping before
     /// returning. `kind` selects owned system or local placement; borrowed
     /// caller pages must use [`Self::register_host`]. Permissions are never
@@ -1189,25 +1179,6 @@ impl Device {
             self.driver_state
                 .register_host(self.endpoint.driver_instance, request)
         }
-    }
-
-    /// Creates device-local backing inside this process's native scratch
-    /// aperture. The returned owner keeps both the physical allocation and its
-    /// aperture range live until [`Allocation::free`] succeeds.
-    ///
-    /// # Errors
-    /// Rejects invalid extents or unavailable local storage. Native scratch-base
-    /// programming, allocation, mapping, and loss checks may also fail.
-    pub(crate) fn allocate_queue_scratch(&self, size: u64) -> Result<Allocation, Error> {
-        self.driver_state
-            .allocate_queue_scratch(self.endpoint.driver_instance, size)
-    }
-
-    /// Maps the device's process-level MMIO remap page.
-    #[doc(hidden)]
-    pub(crate) fn map_mmio_remap(&self) -> Result<Allocation, Error> {
-        self.driver_state
-            .map_mmio_remap(self.endpoint.driver_instance)
     }
 
     /// Creates detached physical backing for later virtual-address mappings.
@@ -1380,33 +1351,6 @@ impl Device {
             states.try_push(peer_state)?;
         }
         Ok(states)
-    }
-}
-
-impl GpuDevice<'_> {
-    /// Creates device-local backing inside this GPU's native scratch aperture.
-    /// The returned owner keeps both the physical allocation and its aperture
-    /// range live until [`Allocation::free`] succeeds.
-    ///
-    /// # Errors
-    /// Rejects invalid extents or unavailable local storage. Native
-    /// scratch-base programming, allocation, mapping, and loss checks may also
-    /// fail.
-    pub fn allocate_queue_scratch(&self, size: u64) -> Result<Allocation, Error> {
-        self.device.allocate_queue_scratch(size)
-    }
-
-    /// Maps this GPU's process-level MMIO remap page.
-    ///
-    /// This is a GPU transport capability rather than a universal device
-    /// memory operation. Callers must keep the returned allocation alive for
-    /// every use of addresses derived from the mapping.
-    ///
-    /// # Errors
-    /// Returns `Unsupported` when the backend or GPU exposes no MMIO remap page,
-    /// and otherwise reports native allocation or mapping failures.
-    pub fn map_mmio_remap(&self) -> Result<Allocation, Error> {
-        self.device.map_mmio_remap()
     }
 }
 

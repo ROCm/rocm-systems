@@ -619,7 +619,7 @@ pub unsafe extern "C" fn hsa_agent_get_info(
         let available_memory = if attribute == AMD_AGENT_INFO_MEMORY_AVAIL {
             native_device
                 .as_ref()
-                .map(|(device, _)| device.available_memory())
+                .map(|(device, _)| device.gpu().and_then(|gpu| gpu.available_memory()))
         } else {
             None
         };

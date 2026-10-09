@@ -7,8 +7,8 @@
 //! the native submission context and its bounded progress state; packet
 //! encoding, public handles, and submission policy belong to the frontend.
 
+use crate::device::gpu::GpuDevice;
 use crate::driver::{self, Driver, KernelQueueResource};
-use crate::gpu::GpuDevice;
 use crate::host_storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
 

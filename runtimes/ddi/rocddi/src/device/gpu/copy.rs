@@ -8,8 +8,10 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering, fence};
 
-use crate::gpu::GpuDevice;
-use crate::kernel_queue::{KernelCommand, KernelQueue, KernelQueueFormat, KernelQueueWait};
+use crate::device::gpu::GpuDevice;
+use crate::device::gpu::kernel_queue::{
+    KernelCommand, KernelQueue, KernelQueueFormat, KernelQueueWait,
+};
 use crate::memory::{Allocation, DeviceAccess, MemoryKind};
 use crate::{Error, ErrorKind};
 
@@ -947,20 +949,15 @@ impl Drop for GpuCopySequence<'_, '_> {
 }
 
 impl<'device> GpuDevice<'device> {
-    fn copy_resource_pool(&self) -> Result<&'device CopyResourcePool, CopyFailure> {
-        self.device.copy_pool.as_deref().ok_or_else(|| {
-            CopyFailure::retired(Error::Operation {
-                kind: ErrorKind::DriverContract,
-                detail: "activated GPU has no SDMA copy resource pool",
-            })
-        })
+    fn copy_resource_pool(&self) -> &'device CopyResourcePool {
+        &self.resources.copy_pool
     }
 
     fn copy_resources(
         &self,
         format: KernelQueueFormat,
     ) -> Result<CopyResourceLease<'device>, CopyFailure> {
-        self.copy_resource_pool()?.take(self, format)
+        self.copy_resource_pool().take(self, format)
     }
 
     /// Prepares default and advertised-engine SDMA queues and command allocations
@@ -977,7 +974,7 @@ impl<'device> GpuDevice<'device> {
                 detail: "linear SDMA copy is not qualified for this GPU",
             }));
         }
-        let pool = self.copy_resource_pool()?;
+        let pool = self.copy_resource_pool();
         pool.preload(self, KernelQueueFormat::Sdma)?;
         let mut engines = self
             .available_sdma_engines()

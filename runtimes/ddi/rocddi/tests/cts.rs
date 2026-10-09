@@ -17,11 +17,11 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU16, AtomicU64, Ordering, fence};
 use std::time::{Duration, Instant};
 
-use rocddi::gpu::queue::{
+use rocddi::device::gpu::queue::{
     KernelCommand, KernelQueueFormat, QueueAccessWidth, QueueParameters, QueuePriority,
     QueueProducerMode, QueueRequest, QueueRingMemory, SdmaEngineSelection, ring_doorbell,
 };
-use rocddi::gpu::{CopyRect, GpuCopySequence};
+use rocddi::device::gpu::{CopyRect, GpuCopySequence};
 use rocddi::memory::interop::linux::{AisFileOperation, ais_transfer};
 use rocddi::memory::{DeviceAccess, HostMappingPolicy, MemoryKind};
 use rocddi::session::{DriverContextLifetime, Session};

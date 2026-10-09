@@ -10,7 +10,7 @@ use crate::generated::amdf::*;
 use crate::instance::{self, Device};
 use crate::memory;
 use crate::support::*;
-use rocddi::gpu::queue::{
+use rocddi::device::gpu::queue::{
     KernelQueue as NativeQueue, KernelQueueFormat, KernelQueueStatus as NativeStatus,
     KernelQueueWait,
 };

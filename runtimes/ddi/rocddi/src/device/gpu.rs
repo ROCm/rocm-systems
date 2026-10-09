@@ -10,12 +10,23 @@
 //! requirements.
 
 use crate::device::Device;
+use crate::memory::Allocation;
 use crate::topology::{CacheInfo, GpuInfo};
 use crate::{Error, ErrorKind};
 
 mod copy;
-pub(crate) use copy::CopyResourcePool;
+pub mod event;
+pub(crate) mod kernel_queue;
+pub mod profiling;
+pub mod queue;
 pub use copy::{CopyFailure, CopyRect, GpuCopySequence, GpuCopyTimestamps};
+
+/// Services shared by cloned handles for one activated GPU.
+#[derive(Default)]
+pub(crate) struct GpuResources {
+    /// Bounded SDMA contexts shared across clones of the activated device.
+    copy_pool: copy::CopyResourcePool,
+}
 
 /// Returns whether a topology cache is a non-instruction GPU compute-unit
 /// cache.
@@ -38,8 +49,12 @@ pub const fn is_compute_data_cache(cache: &CacheInfo) -> bool {
 /// a caller convention. Linux KFD currently supplies the GPU operations.
 #[derive(Clone, Copy)]
 pub struct GpuDevice<'a> {
+    /// Activated owner from which this capability view borrows.
     pub(crate) device: &'a Device,
+    /// GPU topology and transport facts captured at activation.
     pub(crate) info: &'a GpuInfo,
+    /// Shared GPU service owners retained by the activated device.
+    pub(super) resources: &'a GpuResources,
 }
 
 impl GpuDevice<'_> {
@@ -99,26 +114,27 @@ impl GpuDevice<'_> {
     pub fn available_memory(&self) -> Result<u64, Error> {
         self.device.driver_state.available_memory()
     }
-}
 
-/// GPU event and notification contracts.
-pub mod event {
-    /// Linux KFD event interoperability.
-    #[cfg(target_os = "linux")]
-    pub mod linux {
-        pub use crate::event::linux::{
-            SignalEvent, SignalEventInfo, SignalEventPage, create_signal_event,
-        };
+    /// Creates device-local backing inside this GPU's scratch aperture.
+    /// The returned owner retains its backing and aperture range until free.
+    ///
+    /// # Errors
+    /// Reports invalid extents, unavailable local storage, or driver failures.
+    pub fn allocate_queue_scratch(&self, size: u64) -> Result<Allocation, Error> {
+        self.device
+            .driver_state
+            .allocate_queue_scratch(self.device.endpoint.driver_instance, size)
     }
-}
 
-/// GPU timing and performance-monitoring contracts.
-pub mod profiling {
-    pub use crate::profiling::*;
-}
-
-/// AMD GPU queue formats, transports, and resource owners.
-pub mod queue {
-    pub use crate::kernel_queue::*;
-    pub use crate::queue::*;
+    /// Maps this GPU's process-level MMIO remap page.
+    ///
+    /// The allocation must remain live while any derived address is in use.
+    ///
+    /// # Errors
+    /// Reports unsupported mappings or driver allocation and mapping failures.
+    pub fn map_mmio_remap(&self) -> Result<Allocation, Error> {
+        self.device
+            .driver_state
+            .map_mmio_remap(self.device.endpoint.driver_instance)
+    }
 }

@@ -117,11 +117,13 @@ The core source is organized by ownership domain:
   GPU, NPU, and future endpoint kinds; PCI attachment is optional, while
   `topology::platform::linux` carries KFD and DRM identities and procfs/sysfs
   host facts needed by Linux compatibility frontends;
-- `device.rs` owns explicitly activated endpoint state, core lifecycle checks,
-  kind-neutral introspection, and device-event subscriptions. `gpu/` is the
-  checked GPU capability view and exposes GPU queues and profiling.
-  Linux-specific signal events live in `event/linux.rs` and are exposed below
-  `gpu::event::linux`;
+- `device.rs` owns explicitly activated endpoint state and kind-neutral
+  introspection. `device/event.rs` owns driver-independent subscriptions and
+  event records. `device/gpu.rs` defines the checked `GpuDevice` view; its
+  `device/gpu/` children own copy, queue, profiling, and GPU event services.
+  Cloned devices share family-specific service state, including the GPU copy
+  pool. Linux KFD signal events live under `device/gpu/event/linux.rs` and are
+  exposed through `device::gpu::event::linux`;
 - `memory.rs` and `memory/` own driver-generic allocation,
   address-reservation, and mapping owners. A virtual-address reservation
   verifies that every device uses the selected driver, intersects their
@@ -133,10 +135,10 @@ The core source is organized by ownership domain:
   `driver/instance.rs` owns installed-driver and activated-device routing, while
   `driver/resources.rs` pairs concrete drivers with allocation, virtual-memory,
   and queue owners. Validation and retryable cleanup stay in the generic owner
-  modules. The Linux KFD and DRM implementation lives in `driver/linux_kfd.rs` and
-  `driver/linux_kfd/`. Its `operations.rs` implements the shared driver
-  contracts; `interop.rs` provides KFD and DRM sharing operations. KFD and DRM
-  owners remain with that driver;
+  modules. The Linux KFD and DRM implementation lives in
+  `driver/linux_kfd.rs` and `driver/linux_kfd/`. Its `operations.rs` implements
+  the shared driver contracts; `interop.rs` provides KFD and DRM sharing
+  operations. KFD and DRM owners remain with that driver;
 - `os.rs` selects host allocation and page-size discovery.
   Owned files use `std::fs::File` directly. `os/linux.rs` and `os/linux/` own
   Linux host services used by the KFD driver. `file.rs` owns raw descriptor

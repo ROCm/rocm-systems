@@ -8,10 +8,11 @@
 //! responsibilities of the frontend using rocddi.
 
 mod types;
+pub use super::kernel_queue::*;
 pub use types::*;
 
+use crate::device::gpu::GpuDevice;
 use crate::driver::{self, Driver, UserQueueResource};
-use crate::gpu::GpuDevice;
 use crate::host_storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
 

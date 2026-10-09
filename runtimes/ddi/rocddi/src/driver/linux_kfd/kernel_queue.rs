@@ -10,8 +10,10 @@
 
 use super::memory::DeviceVm;
 use super::{drm, errno, error, native_error, os_process};
+use crate::device::gpu::kernel_queue::{
+    KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait,
+};
 use crate::host_storage::{Owned, Shared};
-use crate::kernel_queue::{KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait};
 use crate::{Error, ErrorKind};
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};

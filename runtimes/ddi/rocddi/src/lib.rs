@@ -19,15 +19,9 @@ mod cpu_cache;
 pub mod device;
 mod driver;
 mod error;
-#[cfg(target_os = "linux")]
-mod event;
-pub mod gpu;
 pub mod host_storage;
-mod kernel_queue;
 pub mod memory;
 mod os;
-mod profiling;
-mod queue;
 pub mod session;
 pub mod topology;
 pub use error::{Error, ErrorKind};

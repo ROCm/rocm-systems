@@ -6,7 +6,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use rocddi::gpu::queue::{
+use rocddi::device::gpu::queue::{
     self, QueueAccessWidth, QueueParameters, QueuePriority, QueueProducerMode, QueueRequest,
     QueueRingMemory, QueueScratch,
 };

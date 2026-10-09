@@ -1491,7 +1491,7 @@ pub(crate) unsafe fn kernel_command(
     reset_epoch: u64,
     byte_offset: u64,
     byte_length: u64,
-) -> Result<rocddi::gpu::queue::KernelCommand, u64> {
+) -> Result<rocddi::device::gpu::queue::KernelCommand, u64> {
     if byte_length == 0 || byte_offset % 4 != 0 || byte_length % 4 != 0 {
         return Err(INVALID);
     }
@@ -1523,7 +1523,7 @@ pub(crate) unsafe fn kernel_command(
     if device_address == 0 || device_address % 4 != 0 {
         return Err(INVALID);
     }
-    Ok(rocddi::gpu::queue::KernelCommand {
+    Ok(rocddi::device::gpu::queue::KernelCommand {
         device_address,
         byte_length,
     })
