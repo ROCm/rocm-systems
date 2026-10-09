@@ -7116,6 +7116,10 @@ class CodeGenerator:
             L.append(
                 '      value = (wf.shader_engine_id() & 0xf) | ((wf.cu().xcc_id() & 0xf) << 16);'
             )
+            L.append('    else if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)')
+            L.append(
+                '      value = wf.shader_engine_id() & 0xf; // AID[11:8] is zero on the modeled single-AID device.'
+            )
             L.append('    break;')
             L.append('  case 0x80:')  # MSG_RTN_GET_DOORBELL
             L.append('  case 0x81:')  # MSG_RTN_GET_DDID

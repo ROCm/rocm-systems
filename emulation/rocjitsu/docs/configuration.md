@@ -301,10 +301,11 @@ write zero.
 Whole-register `WAVE_HW_ID1` reads expose the modeled wave, SIMD, WGP, and
 shader-array IDs on gfx1200, gfx1201, and gfx1250. The model supports two shader
 arrays per engine; RDNA4 (gfx1200 and gfx1201) represents two CUs per WGP and
-accepts shader-array widths up to 32 CUs. RDNA4 also exposes the shader-engine
-ID in `WAVE_HW_ID1`;
-gfx1250 obtains it through `MSG_RTN_GET_SE_AID_ID`, with SE in bits [3:0]
-and the command processor's XCC rank in bits [19:16].
+accepts shader-array widths up to 32 CUs. RDNA4 exposes the shader-engine ID in
+`WAVE_HW_ID1` and returns SE in bits [3:0] through `MSG_RTN_GET_SE_AID_ID`;
+AID bits [11:8] are zero for the modeled single-AID device. gfx1250 obtains SE
+through the same message, with SE in bits [3:0] and the command processor's
+XCC rank in bits [19:16].
 Unmodeled capability and reserved bits read as zero in a whole-register read;
 field reads that span those bits remain unsupported.
 

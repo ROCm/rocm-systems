@@ -8126,8 +8126,9 @@ TEST(HwregTest, Gfx12WholeIdentityDistinguishesSiblingCusArraysAndEngines) {
           EXPECT_EQ((value >> 16) & 1, sa);
           EXPECT_EQ((value >> 8) & 3, sibling);
           EXPECT_EQ((value >> 18) & 7, gfx1250 ? 0u : se);
-          if (gfx1250) {
-            const auto words = encode_sop1(cdna5::kSSendmsgRtnB32Sop1, 4, 0x87);
+          {
+            const auto opcode = gfx1250 ? cdna5::kSSendmsgRtnB32Sop1 : rdna4::kSSendmsgRtnB32Sop1;
+            const auto words = encode_sop1(opcode, 4, 0x87);
             std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
             ASSERT_NE(instruction, nullptr);
             EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded());
@@ -8137,6 +8138,37 @@ TEST(HwregTest, Gfx12WholeIdentityDistinguishesSiblingCusArraysAndEngines) {
         }
       }
     }
+  }
+}
+
+TEST(HwregTest, Gfx12IdentityWrapsWaveIdsAndRepresentsTheLastSlot) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    amdgpu::GpuMemory memory("identity_mem");
+    amdgpu::L2Cache l2("identity_l2");
+    const bool gfx1250 = arch == ROCJITSU_CODE_ARCH_CDNA5;
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = gfx1250 ? 64 : 32;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 256;
+    auto cu = amdgpu::ComputeUnitCore::create("identity", config, &memory, &l2);
+    for (uint32_t sibling = 0; sibling < (gfx1250 ? 1u : 2u); ++sibling) {
+      cu->set_shader_engine_location(0, sibling, gfx1250 ? 4 : 8);
+      for (uint32_t slot : {17u, config.num_wf_slots - 1}) {
+        SCOPED_TRACE(slot);
+        auto *wave = cu->dispatch_wf_at(slot, 0, 0, 128, 256);
+        ASSERT_NE(wave, nullptr);
+        uint32_t value = 0;
+        ASSERT_EQ(amdgpu::read_hwreg_field(*wave, encode_hwreg(23), value),
+                  amdgpu::HwregAccessResult::Success);
+        EXPECT_EQ(value & 31, slot % 16);
+        EXPECT_EQ((value >> 8) & 3, gfx1250 ? slot / 16 : 2 * (slot / 16) + sibling);
+        wave->halt();
+      }
+    }
+    // The CU rejects the first unrepresentable slot before a wave can expose it.
+    EXPECT_EQ(cu->dispatch_wf_at(config.num_wf_slots, 0, 0, 128, 256), nullptr);
   }
 }
 

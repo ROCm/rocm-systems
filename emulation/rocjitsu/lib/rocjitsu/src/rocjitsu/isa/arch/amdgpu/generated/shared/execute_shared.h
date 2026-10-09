@@ -2382,6 +2382,8 @@ inline void execute_s_sendmsg_rtn_b32_sop1([[maybe_unused]] Inst &inst,
   case 0x87:
     if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5)
       value = (wf.shader_engine_id() & 0xf) | ((wf.cu().xcc_id() & 0xf) << 16);
+    else if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)
+      value = wf.shader_engine_id() & 0xf; // AID[11:8] is zero on the modeled single-AID device.
     break;
   case 0x80:
   case 0x81:
@@ -2414,6 +2416,8 @@ inline void execute_s_sendmsg_rtn_b64_sop1([[maybe_unused]] Inst &inst,
   case 0x87:
     if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5)
       value = (wf.shader_engine_id() & 0xf) | ((wf.cu().xcc_id() & 0xf) << 16);
+    else if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)
+      value = wf.shader_engine_id() & 0xf; // AID[11:8] is zero on the modeled single-AID device.
     break;
   case 0x80:
   case 0x81:
