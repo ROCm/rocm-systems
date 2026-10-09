@@ -746,9 +746,12 @@ void ComputeUnitCore::gws_barrier_arrive(Wavefront &wf, uint32_t rid, uint32_t c
   // be provably resident in the dispatch; if that set is larger than the resident
   // waves it would reference arrivals that may never happen, so fall back to a
   // non-blocking structural no-op. A releasing arrival (outstanding == 0) never
-  // blocks, so it is exempt from the gate.
+  // blocks, so it is exempt from the gate. The gate is written as
+  // (outstanding >= resident), which is equivalent to (outstanding + 1 > resident)
+  // for integers but cannot overflow when count is near UINT32_MAX (a huge count
+  // must take the fallback, never wrap the sum to zero and park).
   const uint32_t outstanding = res.armed ? res.counter : count;
-  if (outstanding != 0 && outstanding + 1 > resident)
+  if (outstanding != 0 && outstanding >= resident)
     return;
   if (!res.armed) {
     res.counter = count;

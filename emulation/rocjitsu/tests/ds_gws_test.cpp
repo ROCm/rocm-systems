@@ -144,12 +144,13 @@ std::array<uint32_t, 1> build_s_barrier(rj_code_arch_t arch) {
 }
 
 // Build a GWS op carrying the DS acc bit (CDNA2/3 only, where the field exists).
-std::array<uint32_t, 2> build_gws_acc(rj_code_arch_t arch, uint16_t op, uint8_t acc, uint8_t addr) {
+std::array<uint32_t, 2> build_gws_acc(rj_code_arch_t arch, uint16_t op, uint8_t acc, uint8_t addr,
+                                      uint8_t offset0 = 0) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA2:
-    return cdna2::build_ds(op, {.gds = 1, .acc = acc, .addr = addr});
+    return cdna2::build_ds(op, {.offset0 = offset0, .gds = 1, .acc = acc, .addr = addr});
   case ROCJITSU_CODE_ARCH_CDNA3:
-    return cdna3::build_ds(op, {.gds = 1, .acc = acc, .addr = addr});
+    return cdna3::build_ds(op, {.offset0 = offset0, .gds = 1, .acc = acc, .addr = addr});
   default:
     ADD_FAILURE() << "DS acc bit only exists on CDNA2/3: " << unsigned(arch);
     return {};
@@ -414,8 +415,34 @@ TEST_P(DsGwsTest, BarrierFallsBackWhenCountExceedsResident) {
   wf1->halt();
 }
 
+// Boundary: a near-UINT32_MAX count must take the oversized-count fallback, not
+// overflow (count + 1) to zero and park. The residency gate is written to avoid
+// that wrap, so this huge count is a structural no-op with two resident waves.
+TEST_P(DsGwsTest, BarrierHugeCountDoesNotOverflowResidencyGate) {
+  const auto arch = GetParam();
+  amdgpu::GpuMemory mem("ds_gws_overflow_mem");
+  amdgpu::L2Cache l2("ds_gws_overflow_l2");
+  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto decoder = Decoder::create(arch);
+  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  ASSERT_NE(wf0, nullptr);
+  ASSERT_NE(wf1, nullptr);
+  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
+  wf0->set_exec(0x1);
+  wf0->set_m0(0);
+
+  // count = 0xffffffff on a fresh resource: outstanding + 1 would wrap to 0 under
+  // a naive gate and wrongly park; the overflow-safe gate takes the fallback.
+  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/0xffffffffu);
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
+
+  wf0->halt();
+  wf1->halt();
+}
+
 // ds_gws_sema_p parks when no credit is available; ds_gws_sema_v then releases a
-// parked waiter within the co-resident scope.
+// parked waiter within the dispatch.
 TEST_P(DsGwsTest, SemaphorePParksAndVReleases) {
   const auto arch = GetParam();
   amdgpu::GpuMemory mem("ds_gws_sema_mem");
@@ -800,10 +827,17 @@ TEST_P(DsGwsTest, AccBitSelectsAgprCountOperand) {
   ASSERT_TRUE(cu->execute_instruction(acc_inst.get(), *wf0).succeeded());
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
 
-  // wf1: acc=0 reads the VGPR slot (count 5 -> participants 6 > resident 2 ->
-  // structural no-op, keeps running) before touching the parked resource.
+  // wf1: acc=0 on a *fresh* resource (rid 1 via offset0=1), so its arrival is not
+  // short-circuited by the already-released rid-0 counter. Both banks are seeded:
+  // the VGPR with a non-parking count (5 -> participants 6 > resident 2 ->
+  // structural no-op, keeps running) and the AGPR with a parking count (1). A
+  // correct acc=0 read picks the VGPR and stays RUNNING; a mutation that read the
+  // AGPR would see count 1 and park, so the RUNNING assertion detects wrong-bank
+  // selection.
   cu->write_vgpr(wf1->vgpr_alloc().base + kAddrVgpr, /*lane=*/0, /*vgpr=*/5);
-  const auto vgpr_words = build_gws_acc(arch, op, /*acc=*/0, kAddrVgpr);
+  cu->write_vgpr(wf1->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET + kAddrVgpr, /*lane=*/0,
+                 /*agpr=*/1);
+  const auto vgpr_words = build_gws_acc(arch, op, /*acc=*/0, kAddrVgpr, /*offset0=*/1);
   std::unique_ptr<Instruction> vgpr_inst(decode_valid(*decoder, vgpr_words.data()));
   ASSERT_NE(vgpr_inst, nullptr);
   // acc=0 keeps the ADDR source operand on the VGPR bank.
