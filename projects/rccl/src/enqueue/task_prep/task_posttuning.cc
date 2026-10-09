@@ -33,6 +33,7 @@ int64_t ncclParamMinCTAs();
 int64_t ncclParamMaxCTAs();
 int64_t ncclParamNvlsChannels();
 int64_t ncclParamCGAClusterSize();
+int64_t rcclParamP2pDirectFullChannels();
 
 static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
   switch (func) {
@@ -150,7 +151,7 @@ static ncclResult_t postTuneP2pChannelBase(struct ncclComm* comm, int peer, bool
   return ncclSuccess;
 }
 
-static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer, bool isSendNotRecv,
+static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer, bool isSendNotRecv, ncclFunc_t collAPI,
                                                 bool* needPreconnect) {
   struct ncclKernelPlanner* planner = &comm->planner;
   uint8_t base;
@@ -164,9 +165,10 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer,
   // Mark channels that need pre-connect. planner->peers[peer].send/recvSeen is
   // private to each comm, so we need to set it anyway.
   (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
-  for (int c = 0; c < comm->p2pnChannelsPerPeer; c++) {
-    int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
-                                          comm->p2pChannelShiftSize);
+  int channelStride = rcclP2pChannelStrideForApi(comm, collAPI, rcclParamP2pDirectFullChannels());
+  for (int c = 0; c < channelStride; c++) {
+    int channelId =
+      ncclP2pChannelForPart(comm->p2pnChannels, base, c, channelStride, comm->nNodes, comm->p2pChannelShiftSize);
 
     // P2P uses only 1 connector. The send/recv connector is shared among split
     // shared comms, so set hasSeen to avoid duplicate connection setup if user
@@ -230,8 +232,9 @@ static ncclResult_t postTuneP2pRegisterBuffer(struct ncclComm* comm, struct nccl
 
   NCCLCHECK(postTuneP2pChannelBase(comm, peer, isSendNotRecv, &base));
 
-  int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, 0, comm->p2pnChannelsPerPeer, comm->nNodes,
-                                        comm->p2pChannelShiftSize);
+  int channelStride = rcclP2pChannelStrideForApi(comm, task->collAPI, rcclParamP2pDirectFullChannels());
+  int channelId =
+    ncclP2pChannelForPart(comm->p2pnChannels, base, 0, channelStride, comm->nNodes, comm->p2pChannelShiftSize);
   struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
   struct ncclConnector* conn =
     isSendNotRecv ? &channelPeers[peer]->send[connIndex] : &channelPeers[peer]->recv[connIndex];
@@ -901,7 +904,7 @@ static ncclResult_t postTuneP2pTasks(
     struct ncclRawTaskSendRecv* raw = &tInfo->raw->sendRecv;
     bool isSendNotRecv = raw->func == ncclFuncSend;
 
-    NCCLCHECK(postTuneP2pRecordPreconnect(comm, raw->peer, isSendNotRecv, &needPreconnect));
+    NCCLCHECK(postTuneP2pRecordPreconnect(comm, raw->peer, isSendNotRecv, raw->collAPI, &needPreconnect));
   }
 
   if (needPreconnect) {

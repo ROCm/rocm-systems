@@ -19,12 +19,14 @@
 #include <gtest/gtest.h>
 
 #include <cstring>
+#include <memory>
 #include <string>
 
 #include "checks.h"
 #include "comm.h"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "device.h"
+#include "enqueue.h"
 #include "graph.h"
 #include "graph/topo.h"
 #include "nccl.h"
@@ -121,6 +123,40 @@ struct P2pChannelsComm
 void checkMaxP2pResolver(int expected)
 {
     EXPECT_EQ(ncclMaxP2pNchannels(), expected);
+}
+
+TEST(P2pDirectFullChannelsTests, DirectApisUseFullPoolWhenEnabled)
+{
+    auto comm                    = std::make_unique<ncclComm>();
+    comm->p2pnChannels           = 64;
+    comm->p2pnChannelsPerPeer    = 16;
+    comm->workArgsBytes          = sizeof(ncclDevKernelArgs) + 64 * sizeof(ncclDevWorkBatch);
+
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSend, true), 64);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncRecv, true), 64);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, true), 64);
+}
+
+TEST(P2pDirectFullChannelsTests, DisabledAndP2pBackedCollectivesKeepPeerSplit)
+{
+    auto comm                    = std::make_unique<ncclComm>();
+    comm->p2pnChannels           = 64;
+    comm->p2pnChannelsPerPeer    = 16;
+    comm->workArgsBytes          = sizeof(ncclDevKernelArgs) + 64 * sizeof(ncclDevWorkBatch);
+
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSend, false), 16);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncAlltoAll, true), 16);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncGather, true), 16);
+}
+
+TEST(P2pDirectFullChannelsTests, FullPoolRespectsKernelArgsBudget)
+{
+    auto comm                    = std::make_unique<ncclComm>();
+    comm->p2pnChannels           = 64;
+    comm->p2pnChannelsPerPeer    = 16;
+    comm->workArgsBytes          = sizeof(ncclDevKernelArgs) + 32 * sizeof(ncclDevWorkBatch);
+
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, true), 32);
 }
 
 void checkUpperBound(int expectedUpper, bool expectedOptedHigher)

@@ -30,6 +30,7 @@ int64_t ncclParamAllgathervEnable();
 int64_t ncclParamP2pLLThreshold();
 int64_t ncclParamChunkSize();
 int64_t ncclParamLaunchOrderImplicit();
+int rcclP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t collAPI, bool directFullChannels);
 
 ncclResult_t ncclGroupJobLaunch(struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next>* asyncJobsMain,
                                 volatile bool* groupAbortFlag);
