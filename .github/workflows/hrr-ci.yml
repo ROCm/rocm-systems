@@ -62,6 +62,11 @@ on:
         description: "Run id whose hrr-build artifact to download (gpu_only)"
         type: string
         default: ""
+      # workflow_dispatch allows at most ten inputs; this list is full.
+      build_sha:
+        description: "Commit the build compiled; the GPU job checks this out (gpu_only)"
+        type: string
+        default: ""
       dispatch_id:
         description: "Unique id the dispatcher uses to find this run (gpu_only)"
         type: string
@@ -597,7 +602,9 @@ jobs:
   # time, and cancelling one job inside this run would cancel the run, so a
   # family that has no runner within 30 minutes is cancelled over there and
   # reported green here. A device-less runner is handled inside the GPU job
-  # the same way: skip the suite, upload a skipped result, exit 0.
+  # the same way: skip the suite, upload a skipped result, exit 0. A push to
+  # develop uses this same result. A suite failure or the execution timeout
+  # still fails the job.
   # ---------------------------------------------------------------------------
   integration:
     name: "Integration (${{ matrix.family }})"
@@ -648,7 +655,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          # A branch, not a SHA: workflow_dispatch selects its workflow file
+          # from this ref. The GPU job then checks out BUILD_SHA, which is
+          # the commit this run compiled (the pull request's merge commit, or
+          # the pushed commit). The branch tip can move while the build runs.
           REF: ${{ github.head_ref || github.ref_name }}
+          BUILD_SHA: ${{ github.sha }}
           FAMILY: ${{ matrix.family }}
           RUNNER: ${{ matrix.runner }}
           USE_CONTAINER: ${{ matrix.container && 'true' || 'false' }}
@@ -677,6 +689,7 @@ jobs:
             -f "sdk_version=${SDK_VERSION}" \
             -f "build_workspace=${BUILD_WORKSPACE}" \
             -f "build_run_id=${BUILD_RUN_ID}" \
+            -f "build_sha=${BUILD_SHA}" \
             -f "dispatch_id=${DISPATCH_ID}" \
             -f "ignore_test_config=${IGNORE_TEST_CONFIG}" 2>&1)"
           dispatch_rc=$?
@@ -855,9 +868,13 @@ jobs:
       # Only the test runner: this job compiles nothing and takes its binaries
       # from the build artifact. It has to come first, because checkout cleans
       # the workspace and would delete an artifact unpacked before it.
+      # build_sha is the parent run's commit. Without it, this checkout follows
+      # the branch named in the dispatch and can pick up a newer config than
+      # the binaries.
       - name: Checkout test runner
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ inputs.build_sha || github.sha }}
           sparse-checkout: |
             projects/hrr/tests/scripts/run_catch2.py
             projects/hrr/tests/scripts/hrr_test_config.py
