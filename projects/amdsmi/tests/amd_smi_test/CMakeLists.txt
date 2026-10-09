@@ -123,12 +123,61 @@ target_link_libraries(
     c
     stdc++
     pthread
-    ${AMDSMINIC_PATH}
+    amdsminic
     ${FILESYSTEM_LIB}
 )
 
+# Self-contained NIC telemetry contract suite. It drives the telemetry facade
+# against injected fakes (IDevlinkClient) and a tmpdir hwmon tree, so it needs no
+# live NIC and no root and is safe to run in CI. Building it here (under
+# BUILD_TESTS) means it can no longer silently rot the way a script-only target
+# does, and add_test() lets `ctest` gate it. The remaining NIC test tools
+# (test_nic_transport_suite, benchmark_nic_transport, probe_devlink_*) stay in
+# tests/nic/build_tests.sh by design: they require a live interface + root and
+# cannot run unattended. -fno-rtti matches the ABI amdsminic is built against.
+add_executable(test_nic_telemetry_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/test_nic_telemetry_suite.cpp)
+target_compile_options(test_nic_telemetry_suite PRIVATE -fno-rtti)
+target_link_libraries(test_nic_telemetry_suite amdsminic ${FILESYSTEM_LIB})
+add_test(NAME nic_telemetry_suite COMMAND test_nic_telemetry_suite)
+
+# Self-contained NIC discovery suite. Redirects vendor driver sysfs lookups to a
+# tmpdir tree, so it needs no live NIC and no root and is safe to run in CI.
+add_executable(test_nic_discovery_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/test_nic_discovery_suite.cpp)
+target_compile_options(test_nic_discovery_suite PRIVATE -fno-rtti)
+# Vendor subsystem headers live under the NIC src tree (a PRIVATE include of
+# amdsminic), so expose it here for the direct vendor include this suite needs.
+target_include_directories(test_nic_discovery_suite PRIVATE ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/src)
+target_link_libraries(test_nic_discovery_suite amdsminic ${FILESYSTEM_LIB})
+add_test(NAME nic_discovery_suite COMMAND test_nic_discovery_suite)
+
+add_executable(test_nic_stats_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/test_nic_stats_suite.cpp)
+target_compile_options(test_nic_stats_suite PRIVATE -fno-rtti)
+target_include_directories(test_nic_stats_suite PRIVATE ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/src)
+target_link_libraries(test_nic_stats_suite amdsminic ${FILESYSTEM_LIB})
+add_test(NAME nic_stats_suite COMMAND test_nic_stats_suite)
+
+# Flat RDMA port index -> unified library triple. Header-only subject: no library link needed.
+add_executable(test_nic_rdma_resolver_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/test_nic_rdma_resolver_suite.cpp)
+target_include_directories(test_nic_rdma_resolver_suite PRIVATE ${PROJECT_SOURCE_DIR}/include)
+add_test(NAME nic_rdma_resolver_suite COMMAND test_nic_rdma_resolver_suite)
+
+# Debug-log seam and read-chokepoint logging (real tmpdir files, capture sink).
+add_executable(test_nic_log_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/test_nic_log_suite.cpp)
+target_compile_options(test_nic_log_suite PRIVATE -fno-rtti)
+target_include_directories(test_nic_log_suite PRIVATE ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/src)
+if(LIBNL3_FOUND)
+    target_compile_definitions(test_nic_log_suite PRIVATE HAVE_LIBNL3)
+    target_include_directories(test_nic_log_suite PRIVATE ${LIBNL3_INCLUDE_DIRS})
+endif()
+target_link_libraries(test_nic_log_suite PRIVATE amdsminic ${FILESYSTEM_LIB})
+add_test(NAME nic_log_suite COMMAND test_nic_log_suite)
+
 # Install tests
-install(TARGETS ${TEST} DESTINATION ${SHARE_INSTALL_PREFIX}/tests COMPONENT ${TESTS_COMPONENT})
+install(
+    TARGETS ${TEST} test_nic_telemetry_suite test_nic_discovery_suite test_nic_stats_suite test_nic_log_suite
+    DESTINATION ${SHARE_INSTALL_PREFIX}/tests
+    COMPONENT ${TESTS_COMPONENT}
+)
 
 install(
     FILES amdsmitst.exclude detect_asic_filter.sh
