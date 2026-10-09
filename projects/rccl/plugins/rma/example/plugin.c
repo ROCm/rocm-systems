@@ -2,16 +2,29 @@
  * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
+ * Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
  * See LICENSE.txt for more license information
  *************************************************************************/
 
 #include <stdlib.h>
 #include <string.h>
 #include "nccl/rma.h"
+#include "nccl/net_device.h"
 
 #define __hidden __attribute__((visibility("hidden")))
 
 #define NCCL_MAX_NET_SIZE_BYTES (1*1024*1024*1024*1024L) // 1TB
+
+static ncclDebugLogger_t logFn;
+// Process-wide counts of iput/iputSignal/iget calls, reported at finalize.
+static uint64_t nDataOps;
+static uint64_t nAggregatedOps;
+
+static void rmaCountDataOp(uint32_t optFlags) {
+  __atomic_fetch_add(&nDataOps, 1, __ATOMIC_RELAXED);
+  if (optFlags & ncclRmaOptFlagsAggregateRequests) __atomic_fetch_add(&nAggregatedOps, 1, __ATOMIC_RELAXED);
+}
 
 /* Opaque data structures */
 
@@ -51,6 +64,7 @@ __hidden ncclResult_t rmaInit(void** ctx, uint64_t commId, ncclDebugLogger_t log
   if (c == NULL) return ncclSystemError;
   c->commId = commId;
   *ctx = c;
+  __atomic_store_n(&logFn, logFunction, __ATOMIC_RELAXED);
   return ncclSuccess;
 }
 
@@ -71,7 +85,8 @@ __hidden ncclResult_t rmaGetProperties(int dev, ncclNetProperties_v12_t* props) 
   props->latency = 0;
   props->maxComms = 1024 * 1024;
   props->maxRecvs = 1;
-  props->netDeviceType = 0; // NCCL_NET_DEVICE_HOST
+  // Serves the GIN proxy, so NCCL_GIN_TYPE=2 keeps it selected.
+  props->netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
   props->netDeviceVersion = 0;
   props->vProps.ndevs = 1;
   props->vProps.devs[0] = dev;
@@ -150,6 +165,12 @@ __hidden ncclResult_t rmaQueryLastError(void* rmaCtx, bool* hasError) {
 }
 
 __hidden ncclResult_t rmaFinalize(void* ctx) {
+  ncclDebugLogger_t log = __atomic_load_n(&logFn, __ATOMIC_RELAXED);
+  if (log) {
+    log(NCCL_LOG_INFO, NCCL_INIT | NCCL_NET, __FILE__, __LINE__, "RMA/Example: %lu data ops, %lu aggregated",
+          (unsigned long)__atomic_load_n(&nDataOps, __ATOMIC_RELAXED),
+          (unsigned long)__atomic_load_n(&nAggregatedOps, __ATOMIC_RELAXED));
+  }
   free(ctx);
   return ncclSuccess;
 }
@@ -166,6 +187,7 @@ __hidden ncclResult_t rmaIput(void* rmaCtx, int context, uint64_t srcOff, void* 
     uint64_t dstOff, void* dstMhandle, uint32_t rank, uint32_t optFlags, void** request) {
   struct rmaRequest* r = rmaAllocRequest(optFlags);
   if (r == NULL) return ncclSystemError;
+  rmaCountDataOp(optFlags);
   *request = r;
   return ncclSuccess;
 }
@@ -176,6 +198,7 @@ __hidden ncclResult_t rmaIputSignal(void* rmaCtx, int context, uint64_t srcOff, 
     uint64_t signalValue, uint32_t signalOp, bool isStrongSignal, uint32_t optFlags, void** request) {
   struct rmaRequest* r = rmaAllocRequest(optFlags);
   if (r == NULL) return ncclSystemError;
+  rmaCountDataOp(optFlags);
   *request = r;
   return ncclSuccess;
 }
@@ -184,6 +207,7 @@ __hidden ncclResult_t rmaIget(void* rmaCtx, int context, uint64_t remoteOff, voi
     uint64_t localOff, void* localMhandle, uint32_t rank, uint32_t optFlags, void** request) {
   struct rmaRequest* r = rmaAllocRequest(optFlags);
   if (r == NULL) return ncclSystemError;
+  rmaCountDataOp(optFlags);
   *request = r;
   return ncclSuccess;
 }
