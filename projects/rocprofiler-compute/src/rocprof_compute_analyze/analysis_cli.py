@@ -401,6 +401,7 @@ class cli_analysis(OmniAnalyze_Base):
                 "ml api trace",
                 f"No {labels} kernels mapped to kernel-top IDs",
             )
+            workload.ml_api_call_trees = {}
             return
         selected_ids = sorted(kernel_ids)
         if workload.filter_kernel_ids:
@@ -413,6 +414,7 @@ class cli_analysis(OmniAnalyze_Base):
                     "ml api trace",
                     f"No {labels} operators matched the -k filter: {args.gpu_kernel}",
                 )
+                workload.ml_api_call_trees = {}
                 return
         workload.filter_kernel_ids = selected_ids
 
