@@ -23,6 +23,11 @@ VERSION.sha
 # temp files
 /tests/Testing
 
+# sample workloads copied by tests/CMakeLists.txt
+/tests/simple_net.py
+/tests/torch_triton_net.py
+/tests/triton_ffn.py
+
 # documentation artifacts
 /_build
 _toc.yml
