@@ -2184,7 +2184,11 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
     int mflags = MAP_SHARED;
     if (flags & MAP_FIXED)
       mflags |= MAP_FIXED;
-    host_ptr = safe_mmap(addr, length, prot, mflags, alloc.memfd, 0);
+    // The emulator reads and writes a caller-reserved range through this
+    // mapping, so keep it accessible when the caller asked for PROT_NONE, the
+    // way the anonymous path's mprotect did.
+    const int host_prot = alloc.user_va ? (prot | PROT_READ | PROT_WRITE) : prot;
+    host_ptr = safe_mmap(addr, length, host_prot, mflags, alloc.memfd, 0);
     if (host_ptr == MAP_FAILED)
       return MAP_FAILED;
   } else {
