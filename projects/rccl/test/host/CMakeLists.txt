@@ -290,7 +290,7 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS). Own
+  # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity). Own
   # binary: gin-plugin-init-test.cc already defines ncclParamGinEnable in
   # rccl-UnitTestsMicro, and gin_fakes.cc supplies ncclGinQueryLastError to Init.
   set(TEST_MICRO_GIN_HOST_SOURCE_FILES
@@ -807,7 +807,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
 # ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS)
+# rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity)
 # ---------------------------------------------------------------------------
 rccl_add_micro_binary(rccl-UnitTestsMicroGinHost
   SOURCES ${TEST_MICRO_GIN_HOST_SOURCE_FILES}

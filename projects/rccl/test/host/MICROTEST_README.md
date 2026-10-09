@@ -29,6 +29,30 @@ This document is the standing record of:
 
 If you just want to *run* it, jump to [Running and rebuilding](#running-and-rebuilding).
 
+## Naming a new microtest
+
+One unit under test fixes every other name, mechanically, so nothing has to be
+invented per binary. For a unit at `src/<dirs>/<stem>.cc`:
+
+| Thing | Rule | `src/gin/gin_host.cc` |
+|---|---|---|
+| Path macro | `<STEM>_CC_PATH`, `<STEM>` upper-snake | `GIN_HOST_CC_PATH` |
+| Test TU | `test/host/<stem>-test.cc`, `_` → `-` | `test/host/gin-host-test.cc` |
+| Binary | `rccl-UnitTestsMicro<Stem>`, `<Stem>` UpperCamel | `rccl-UnitTestsMicroGinHost` |
+| gtest suites | `<Stem>…Microtest` — every suite in the TU starts with `<Stem>` | `GinHostProxyAffinityMicrotest` |
+| CTest categories | `test/test_categories_micro_<stem>.yaml`, lowercase | `test/test_categories_micro_gin_host.yaml` |
+| JUnit XML | `host_tests_micro_<stem>.xml` (in `run_host_tests.sh`) | `host_tests_micro_gin_host.xml` |
+| Test-runner config | `unit_tests_micro_<stem>` (in `configs/ci-precheckin.json`) | `unit_tests_micro_gin_host` |
+
+Because every suite starts with the binary's `<Stem>`, the categories yaml needs
+exactly one pattern (`GinHost*`) and a new suite in the same TU is picked up
+without editing it — gtest's `*` does not cross the `.`, so a per-suite list
+silently drops any suite someone forgets to add.
+
+A new binary is named in four places: `rccl_add_micro_binary()` in
+`test/host/CMakeLists.txt`, the `binaries` array in `run_host_tests.sh`, the
+`test_configurations` + `test_suites` pair in `configs/ci-precheckin.json`, and
+the microtest list in `lib/test_executor.py` that llvm-cov reads as `--object`.
 
 ## Units under test
 
@@ -296,11 +320,15 @@ test:
    hipified copy, and `#include` it from the test TU *after* the fakes/macro shims
    are in scope. A new unit generally warrants its own binary (see
    [Units under test](#units-under-test)) so its file-scope state stays isolated.
+   The unit's path fixes the test file, binary, suite and yaml names — see
+   [Naming a new microtest](#naming-a-new-microtest).
 2. **Register the source.** Add the test `.cc` to the target's source list in
    `rccl_define_micro_source_lists()` in `test/host/CMakeLists.txt`
    (`TEST_MICRO_SOURCE_FILES` for `rccl-UnitTestsMicro`), which both build paths
    share. If you add a new gtest suite, add its pattern to the target's
-   `test/test_categories_micro*.yaml` so CTest runs it.
+   `test/test_categories_micro*.yaml` so CTest runs it (a suite named for its
+   binary's stem is already matched). A new *binary* also has to be named in the
+   four places [Naming a new microtest](#naming-a-new-microtest) lists.
 3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls the
    unit's reset entry point (`ResetP2pFakes()`, `ResetInitFakes()`, ...) so
    hooks do not leak between tests. Install per-test behaviour by overwriting a
