@@ -790,9 +790,16 @@ TEST_P(ProfilerKernelChSplitMPITest, SplitThreadOwnership)
     KernelChStats both = checkBalanced(recs, "parent and child", share ? 1 : 2);
     EXPECT_EQ((size_t)(2 * kIters), both.tasks);
 
+    // Start, stop state and stop all count, so a communicator whose callbacks
+    // land on the other one's thread shows up as two threads for it.
     std::map<uint64_t, std::set<long>> tidsByComm;
     for(const auto& r : recs)
-        if(r.type == ncclProfileKernelCh) tidsByComm[r.commId].insert(r.startTid);
+    {
+        if(r.type != ncclProfileKernelCh) continue;
+        tidsByComm[r.commId].insert(r.startTid);
+        if(r.stopTid) tidsByComm[r.commId].insert(r.stopTid);
+        if(r.stateTid) tidsByComm[r.commId].insert(r.stateTid);
+    }
     EXPECT_EQ(2u, tidsByComm.size()) << "expected KernelCh from parent and child";
     std::set<long> all;
     for(auto& [comm, tids] : tidsByComm)
