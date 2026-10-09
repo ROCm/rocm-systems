@@ -1163,10 +1163,28 @@ TEST_F(TopoTest, ComputePaths_GrowsDivertedPathBeyondInitialReserve) {
 // Removing a node shifts the node array under every computed path, so it is refused until the
 // paths are dropped, and the topology must still recompute afterwards (AICOMRCCL-2016).
 TEST_F(TopoTest, RemoveNode_RefusedWhilePathsComputed) {
-  struct ncclTopoSystem* built = buildRailSystem(0x2018, /*nGpus=*/1, /*partitioned=*/false);
+  const uint64_t host = 0x2018;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  addRail(cpu, /*rail=*/0);
+  addRail(cpu, /*rail=*/1);
+  struct ncclTopoSystem* built = buildSystemWithPaths(host);
   ASSERT_NE(built, nullptr);
-  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
-  ASSERT_EQ(built->nodes[NET].count, 1);
+  ASSERT_EQ(built->nodes[NET].count, 2);
+
+  // Removing NET 0 shifts NET 1 down, so every link to it has to follow.
+  struct ncclTopoNode* survivor = built->nodes[NET].nodes + 1;
+  const int64_t survivorId = survivor->id;
+  std::vector<struct ncclTopoNode*> survivorPeers;
+  for (int t = 0; t < NCCL_TOPO_NODE_TYPES; t++) {
+    if (t == NET) continue;
+    for (int n = 0; n < built->nodes[t].count; n++) {
+      struct ncclTopoNode* node = built->nodes[t].nodes + n;
+      for (int l = 0; l < node->nlinks; l++) {
+        if (node->links[l].remNode == survivor) survivorPeers.push_back(node);
+      }
+    }
+  }
+  ASSERT_FALSE(survivorPeers.empty());
 
   auto linkTargets = [&]() {
     std::vector<std::vector<struct ncclTopoNode*>> targets;
@@ -1181,7 +1199,7 @@ TEST_F(TopoTest, RemoveNode_RefusedWhilePathsComputed) {
   };
   const auto linksBefore = linkTargets();
   ASSERT_EQ(ncclTopoRemoveNode(built, NET, 0), ncclInternalError);
-  EXPECT_EQ(built->nodes[NET].count, 1);
+  EXPECT_EQ(built->nodes[NET].count, 2);
   EXPECT_EQ(linkTargets(), linksBefore) << "a refused removal must not touch any link";
 
   ncclTopoRemovePaths(built);
@@ -1192,8 +1210,14 @@ TEST_F(TopoTest, RemoveNode_RefusedWhilePathsComputed) {
       }
     }
   }
-  EXPECT_EQ(ncclTopoRemoveNode(built, NET, 0), ncclSuccess);
-  EXPECT_EQ(built->nodes[NET].count, 0);
+  ASSERT_EQ(ncclTopoRemoveNode(built, NET, 0), ncclSuccess);
+  ASSERT_EQ(built->nodes[NET].count, 1);
+  EXPECT_EQ(built->nodes[NET].nodes[0].id, survivorId);
+  for (struct ncclTopoNode* peer : survivorPeers) {
+    bool linked = false;
+    for (int l = 0; l < peer->nlinks; l++) linked |= (peer->links[l].remNode == built->nodes[NET].nodes);
+    EXPECT_TRUE(linked) << "node " << peer->type << "/" << peer->id << " lost its link to the shifted NET";
+  }
   for (int t = 0; t < NCCL_TOPO_NODE_TYPES; t++) {
     for (int n = 0; n < built->nodes[t].count; n++) {
       struct ncclTopoNode* node = built->nodes[t].nodes + n;
