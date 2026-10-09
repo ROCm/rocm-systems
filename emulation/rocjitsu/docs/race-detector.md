@@ -378,7 +378,7 @@ Source files are under `lib/rocjitsu/src/rocjitsu/vm/plugins/race_detector/`:
 ```
 race_detector/
 ├── plugin.h/.cpp            rocjitsu plugin adapter (translates hooks to core API)
-└── core/                    event tracking and lifetime, independent of instruction execution
+└── core/                    event tracking and lifetime
     ├── race_detector.h/.cpp  main detector: event allocation, validation, retirement
     ├── wave_race_state.h/.cpp  per-wave state: register tracking, waitcnt resolution
     ├── event_registry.h      append-only event store with prefix trimming
@@ -389,12 +389,7 @@ race_detector/
     └── profiler_interface.h  optional hook profiling
 ```
 
-The plugin uses `isa/arch/amdgpu/shared/wait_counter_policy.h` to decode explicit
-waits, including `s_wait_idle` and RDNA4's compatibility `s_waitcnt`. The same
-policy serves the core memory-wait scoreboard and static waitcheck analyzer.
-Counter decoding is shared; register tracking and cross-wave LDS event lifetime
-remain separate. See [memory wait diagnostic coverage](memory-wait-counter-coverage.md)
-for the core checker's scope.
+Wait decoding is in `isa/arch/amdgpu/shared/wait_counter_policy.h`.
 
 ## Tests
 
@@ -404,8 +399,7 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
   via `race_test_builder.h`, covering VGPR, SGPR, LDS, D16, DTL, exec mask,
   multi-workgroup, and mixed counter scenarios.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
-- `wait_hazard_test.cpp` — shared wait/readiness scenarios run against both the
-  core scoreboard and the race plugin, with detector-specific adapters.
+- `wait_hazard_test.cpp` — wait/readiness tests shared with the core checker.
 - The `race` suite in
   [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
   owns the gfx950 and gfx1151 end-to-end HIP programs. The
