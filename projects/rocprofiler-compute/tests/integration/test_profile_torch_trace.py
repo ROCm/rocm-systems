@@ -302,11 +302,16 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     this sample.
     """
     require_torch(gpu=True)
+    profile_config = dict(config)
+    profile_config["torch_test_app"] = [
+        sys.executable,
+        *config["torch_test_app"][1:],
+    ]
     # Run WITHOUT --torch-trace (baseline)
     workload_dir_baseline = common.get_output_dir(param_id="torch_trace_baseline")
     start_baseline = time.time()
     returncode_baseline = binary_handler_profile_rocprof_compute(
-        config,
+        profile_config,
         workload_dir_baseline,
         ["--iteration-multiplexing"],  # Baseline without --torch-trace
         check_success=True,
@@ -327,7 +332,7 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     workload_dir_with_flag = common.get_output_dir(param_id="torch_trace_with_flag")
     start_with_flag = time.time()
     returncode_with_flag = binary_handler_profile_rocprof_compute(
-        config,
+        profile_config,
         workload_dir_with_flag,
         ["--experimental", "--torch-trace", "--iteration-multiplexing"],
         check_success=True,
