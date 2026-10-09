@@ -58,7 +58,7 @@ Every skill directory holds:
 ```
 
 `SKILL.md` states which command to run, when, and where the boundaries are. The skills
-are self-contained: they describe behavior that `--help` does not state and point to
+are self-contained: they describe behaviour that `--help` does not state and point to
 `<tool> --help` for the full, current flag list instead of copying it, so they do not
 go stale when options are added. The install script leaves `evals/` out of the copy
 it makes for the agent.
@@ -71,7 +71,7 @@ hand before a release:
 ```bash
 ./skills/run_evals.py --list                                # validate the datasets
 ./skills/run_evals.py                                       # does the right skill load?
-./skills/run_evals.py --mode behavioral                     # also grade the agent
+./skills/run_evals.py --mode behavioural                     # also grade the agent
 ./skills/run_evals.py --skill instrumenting-binaries        # one skill
 ./skills/run_evals.py --model <model>                       # pick the model under test
 ./skills/run_evals.py --save-transcripts /tmp/transcripts   # keep transcripts to debug
@@ -83,10 +83,12 @@ every case passes, 1 on a failure, and 77 when `claude` is not installed, so a c
 can treat that as skipped rather than failed. `--list` needs no CLI.
 
 Routing mode denies the agent its tools and only checks which skill it chose, so it is
-quick (about a minute for all cases). Behavioral mode lets the agent work and grades
+quick (about a minute for all cases). Behavioural mode lets the agent work and grades
 `logs_contain`, `files_exist`, and the plain-language `expected_behavior` and
 `unexpected_behavior` claims with a second agent, so it takes longer and uses more
-quota; the agent may run the profiler tools if they are on `PATH`.
+quota. The agent may edit files, but a shell command that needs approval, such as a
+compound command, is denied, and for these answer-style skills the agent mostly answers
+from the skill without running anything, so it mainly grades the written answer.
 
 How a case is graded:
 
@@ -98,17 +100,29 @@ How a case is graded:
   also see your personal skills, which can answer a prompt instead of the skill under
   test. `--keep-user-settings` turns that off, and the report then warns about any
   personal skill that was visible.
+- Each workspace folder gets an opaque name. The agent sees its working directory, and
+  a name containing the skill or the case id hinted at the answer: with such names a
+  vague negative prompt loaded the preset skill in about 1 run in 7, against 0 in 120
+  with neutral names.
 - The agent is a language model, so a result can differ between runs. Re-run a failing
   case before changing a skill or its dataset, and use `--save-transcripts` to see what
   the agent actually did.
 
 Each dataset needs at least three cases that should trigger the skill, two that should
-not, and one triggering case with judged behavior. Negative cases carry only an id, a
+not, and one triggering case with judged behaviour. Negative cases carry only an id, a
 prompt, and an optional note. The runner also rejects a case id that two skills share;
 uniqueness across the whole repository is still a manual check:
 
 ```bash
 grep -rhoE --include=evals.json '"id": *"[^"]+"' ../.. | sed -E 's/"id": *//' | sort | uniq -d   # must print nothing
+```
+
+`run_evals.py` has its own unit tests in `test_run_evals.py`. They need only `pytest`,
+never call the `claude` CLI or read your home folder, and build their own throwaway
+skill trees, so they run from anywhere and take under a second:
+
+```bash
+python3 -m pytest skills/test_run_evals.py
 ```
 
 The install script has no automated test of its own; `run_evals.py` exercises it for

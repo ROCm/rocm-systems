@@ -10,7 +10,7 @@ on the ones it should not.
 
 Usage:
     ./skills/run_evals.py                      # routing only, no tools
-    ./skills/run_evals.py --mode behavioral    # also grade what the agent did
+    ./skills/run_evals.py --mode behavioural    # also grade what the agent did
     ./skills/run_evals.py --skill instrumenting-binaries  # one skill
     ./skills/run_evals.py --model sonnet       # pick the model under test
     ./skills/run_evals.py --save-transcripts /tmp/t   # keep transcripts to debug
@@ -21,6 +21,7 @@ is missing so a caller can treat that as skipped rather than broken.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -49,7 +50,7 @@ KNOWN_KEYS = {
     "files_exist",
 }
 JUDGED_KEYS = ("expected_behavior", "unexpected_behavior")
-BEHAVIORAL_KEYS = (*JUDGED_KEYS, "logs_contain", "files_exist")
+BEHAVIOURAL_KEYS = (*JUDGED_KEYS, "logs_contain", "files_exist")
 
 JUDGE_SCHEMA = {
     "type": "object",
@@ -67,7 +68,7 @@ class Options:
 
     model: Optional[str]
     isolate: bool
-    behavioral: bool
+    behavioural: bool
     transcripts: Optional[Path] = None
 
 
@@ -130,7 +131,7 @@ def load_cases(skill: Path) -> list[dict[str, Any]]:
     if positive < 3 or negative < 2:
         sys.exit(f"{skill.name}: needs at least 3 positive and 2 negative cases")
     if not judged:
-        sys.exit(f"{skill.name}: needs at least one positive case with judged behavior")
+        sys.exit(f"{skill.name}: needs at least one positive case with judged behaviour")
 
     return cases
 
@@ -189,7 +190,7 @@ def run_agent(
         str(workspace),
         *claude_flags(options),
     ]
-    if options.behavioral:
+    if options.behavioural:
         command += ["--permission-mode", "acceptEdits"]
     else:
         # Routing only: the decision to load a skill is all we grade, so deny
@@ -202,7 +203,7 @@ def run_agent(
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
-        timeout=900 if options.behavioral else 300,
+        timeout=900 if options.behavioural else 300,
         check=False,
     )
 
@@ -214,6 +215,8 @@ def run_agent(
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
             continue
         transcript.append(line)
         loaded.extend(_skills_in(event))
@@ -232,7 +235,10 @@ def _skills_in(event: dict[str, Any]) -> list[str]:
     skills and reads them, which would fail a case that should not route.
     """
     names: list[str] = []
-    content = event.get("message", {}).get("content")
+    # Not every event carries a message object: a permission denial, for example,
+    # has "message" set to a plain string.
+    message = event.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
     if not isinstance(content, list):
         return names
 
@@ -243,8 +249,10 @@ def _skills_in(event: dict[str, Any]) -> list[str]:
             and block.get("name") == "Skill"
         )
         if is_skill_call:
-            skill = str(block.get("input", {}).get("skill", ""))
-            names.append(skill.split(":")[-1])
+            payload = block.get("input")
+            skill = str(payload.get("skill", "")) if isinstance(payload, dict) else ""
+            if skill:
+                names.append(skill.split(":")[-1])
     return names
 
 
@@ -308,7 +316,7 @@ def grade(
         want = "trigger" if case["skill_should_trigger"] else "not trigger"
         failures.append(f"expected {skill} to {want}, loaded={loaded or 'none'}")
 
-    if not options.behavioral:
+    if not options.behavioural:
         return failures
 
     for needle in case.get("logs_contain", []):
@@ -322,19 +330,22 @@ def grade(
     for claim in case.get("expected_behavior", []):
         ok, reason = grade_judged(claim, transcript, True, options)
         if not ok:
-            failures.append(f"expected behavior not met: {claim} ({reason})")
+            failures.append(f"expected behaviour not met: {claim} ({reason})")
 
     for claim in case.get("unexpected_behavior", []):
         ok, reason = grade_judged(claim, transcript, False, options)
         if not ok:
-            failures.append(f"unexpected behavior occurred: {claim} ({reason})")
+            failures.append(f"unexpected behaviour occurred: {claim} ({reason})")
 
     return failures
 
 
 def run_case(name: str, case: dict[str, Any], tmp: Path, options: Options) -> Outcome:
     """Run and grade one case."""
-    workspace = build_workspace(tmp / f"{name}-{case['id']}")
+    # The agent sees its working directory, so the folder name must not give away
+    # the skill under test or the case: an opaque, unique name avoids that.
+    folder = hashlib.sha1(f"{name}/{case['id']}".encode()).hexdigest()[:10]
+    workspace = build_workspace(tmp / folder)
     try:
         transcript, loaded, visible, model = run_agent(case["prompt"], workspace, options)
     except subprocess.TimeoutExpired:
@@ -348,7 +359,7 @@ def run_case(name: str, case: dict[str, Any], tmp: Path, options: Options) -> Ou
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=["routing", "behavioral"], default="routing")
+    parser.add_argument("--mode", choices=["routing", "behavioural"], default="routing")
     parser.add_argument("--skill", help="Run one skill instead of all of them.")
     parser.add_argument("--list", action="store_true", help="Validate datasets only.")
     parser.add_argument("--model", help="Model to run the agent and the judge on.")
@@ -388,13 +399,13 @@ def main() -> int:
     options = Options(
         model=args.model,
         isolate=not args.keep_user_settings,
-        behavioral=args.mode == "behavioral",
+        behavioural=args.mode == "behavioural",
         transcripts=args.save_transcripts,
     )
-    if not options.behavioral:
+    if not options.behavioural:
         for cases in datasets.values():
             for case in cases:
-                for key in BEHAVIORAL_KEYS:
+                for key in BEHAVIOURAL_KEYS:
                     case.pop(key, None)
 
     queued = [(name, case) for name, cases in datasets.items() for case in cases]
