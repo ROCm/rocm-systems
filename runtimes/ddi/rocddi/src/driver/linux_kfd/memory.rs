@@ -61,7 +61,7 @@ struct ScratchPool {
 }
 
 impl ScratchPool {
-    fn new(properties: sysfs::NativeQueueProperties, allocator: Allocator) -> Self {
+    fn new(properties: sysfs::KfdQueueProperties, allocator: Allocator) -> Self {
         let per_xcc =
             crate::topology::GpuInfo::scratch_bytes_per_xcc(properties.gfx_target / 10_000);
         let capacity = per_xcc
@@ -308,7 +308,7 @@ impl VmBindings {
     pub(super) fn device(
         &self,
         kfd: &Shared<sys::Kfd>,
-        node: &sysfs::NativeNode,
+        node: &sysfs::KfdNode,
     ) -> Result<Shared<DeviceVm>, Error> {
         self.device_with_render(kfd, node, sysfs::open_render)
     }
@@ -322,7 +322,7 @@ impl VmBindings {
     fn device_with_render(
         &self,
         kfd: &Shared<sys::Kfd>,
-        node: &sysfs::NativeNode,
+        node: &sysfs::KfdNode,
         open_render: impl FnOnce(u32) -> io::Result<File>,
     ) -> Result<Shared<DeviceVm>, Error> {
         kfd.check_process()
@@ -505,8 +505,9 @@ impl DeviceVm {
         self.loss.poll_memory_fault()
     }
 
-    pub(super) fn has_observed_loss(&self) -> bool {
-        self.loss.has_observed_loss()
+    /// Reads the connection's terminal latch without polling KFD.
+    pub(super) fn has_latched_loss(&self) -> bool {
+        self.loss.has_latched_loss()
     }
 
     pub(super) fn kfd(&self) -> &sys::Kfd {
@@ -572,11 +573,11 @@ impl DeviceVm {
     }
 }
 
-/// Shared hardware- and memory-exception events for all owners of one KFD VM.
+/// Hardware and memory exception events for one KFD process connection.
 ///
-/// Once loss is observed it remains sticky. The memory event can be claimed by
-/// detailed fault reporting so the general health check does not consume it a
-/// second time.
+/// Activated VMs on that connection share the sticky loss state. Detailed
+/// fault reporting may claim the memory event so operation prechecks do not
+/// consume it a second time.
 struct LossEvent {
     kfd: Shared<sys::Kfd>,
     hardware_event_id: AtomicU32,
@@ -716,7 +717,7 @@ impl LossEvent {
         }
     }
 
-    fn has_observed_loss(&self) -> bool {
+    fn has_latched_loss(&self) -> bool {
         self.lost.load(Ordering::Acquire)
     }
 
@@ -2369,7 +2370,7 @@ mod tests;
 pub(super) fn queue_fixture(
     kfd: Shared<sys::Kfd>,
     render: File,
-    node: sysfs::NativeNode,
+    node: sysfs::KfdNode,
 ) -> Shared<DeviceVm> {
     queue_fixture_with_range(kfd, render, node, (0x10000, isize::MAX as u64))
 }
@@ -2379,7 +2380,7 @@ pub(super) fn queue_fixture(
 pub(super) fn queue_fixture_with_range(
     kfd: Shared<sys::Kfd>,
     render: File,
-    node: sysfs::NativeNode,
+    node: sysfs::KfdNode,
     bounds: (u64, u64),
 ) -> Shared<DeviceVm> {
     let allocator = kfd.allocator();
@@ -2411,10 +2412,10 @@ pub(super) fn queue_fixture_with_range(
             scratch_base: 0x2000_0000_0000,
             sdma_next_engine: AtomicU32::new(0),
             scratch: Mutex::new(ScratchPool::new(
-                sysfs::NativeQueueProperties {
+                sysfs::KfdQueueProperties {
                     gfx_target: 120_001,
                     xcc_count: 1,
-                    ..sysfs::NativeQueueProperties::default()
+                    ..sysfs::KfdQueueProperties::default()
                 },
                 allocator,
             )),

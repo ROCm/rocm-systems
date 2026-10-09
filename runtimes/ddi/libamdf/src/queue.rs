@@ -377,7 +377,9 @@ fn rollback_creation(
     // any external address firmware could still reach after failed cleanup.
     let result = unsafe { queue.abandon_unpublished_with_dependencies(scratch_borrow) };
     unregister(&device.queues);
-    result.err().map_or(status, |error| native(&error))
+    result
+        .err()
+        .map_or(status, |error| device.native_error_status(&error))
 }
 
 fn wait_consumed(
@@ -461,7 +463,7 @@ pub(crate) unsafe extern "C" fn create(
                 Ok(created) => created,
                 Err(error) => {
                     unregister(&device.queues);
-                    return Err(native(&error));
+                    return Err(device.native_error_status(&error));
                 }
             };
         let native_info = native_queue.info();
@@ -586,7 +588,7 @@ pub(crate) unsafe extern "C" fn map(
                 queue
                     .native
                     .map_device(producer)
-                    .map_err(|error| native(&error))?,
+                    .map_err(|error| producer.native_error_status(&error))?,
                 queue.info.command_type,
                 queue.info.format_version,
                 queue.info.format_features,

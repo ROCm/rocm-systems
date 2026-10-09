@@ -4,7 +4,7 @@
 # rocddi safety boundaries
 
 This document describes the ownership proof expected from the current Linux
-KFD backend and its AMDF and HSA adapters. The public C ABIs, their caller
+KFD driver and its AMDF and HSA adapters. The public C ABIs, their caller
 preconditions, and hardware behavior still require independent qualification.
 
 ## Native reachability
@@ -49,12 +49,12 @@ An overlapping request is rejected without replacing a live mapping; failed
 unmap keeps the interval occupied. Both the address reservation and physical
 backing remain owned while a mapping can refer to them.
 Device mappings likewise reserve an interval before native submission and
-release it only after unmap succeeds. Occupancy is scoped to the provider's
+release it only after unmap succeeds. Occupancy is scoped to the driver's
 native device VM so distinct address spaces may map the same reservation
 address. An ambiguous map marks the native reservation unusable before the
 tentative interval is removed. A failed host map must restore the reservation
-before the core releases its tentative interval. The same provider-generic
-owners enforce these rules for the current KFD backend and a fake provider.
+before the core releases its tentative interval. The same driver-generic
+owners enforce these rules for the current KFD driver and a fake driver.
 
 Async HSA signal registrations retain their signal storage. Callback-triggered
 shutdown requests worker exit and defers cleanup until another thread can join
@@ -141,10 +141,19 @@ published into the runtime registry afterward.
 
 ## Shared process connection
 
+The session owns a registry of driver instances. A passive endpoint names its
+driver instance; activation retains that exact instance with the resulting
+device state. Resource owners retain their concrete driver's cleanup state.
+Session shutdown first checks that no device or resource still borrows any
+driver instance. If one driver shutdown fails, the registry retains unfinished
+instances for retry and never replays a successful shutdown. Linux KFD
+memory and GPU operations accept only activated KFD state.
+
 The workspace-root shared image loads both public ABIs from one shared
-object. Their PROCESS sessions use one Linux KFD connection and exact DRM VM
-binding. A process owner allocated with the Rust system allocator retains
-these native handles through process exit; no frontend callback allocator is
+object. Sessions with `DriverContextLifetime::Process` share the primary KFD
+context, one Linux KFD connection, and the exact DRM VM bindings acquired for
+each GPU. A process owner allocated with the Rust system allocator retains
+these driver handles through process exit; no frontend callback allocator is
 captured by that owner. A session joins the process owner before any KFD call
 that might enable runtime state. The last joined session disables KFD runtime
 enablement under the owner's lock. Failure leaves the session joined so its
@@ -155,19 +164,19 @@ same DRM file object.
 The AMDF static archive has an independent process owner if linked into an
 application; it does not share native state with the shared image.
 An inherited post-fork session is rejected before touching its old locks; the
-Linux backend publishes a fresh process owner in the child before accessing
+Linux KFD driver publishes a fresh process owner in the child before accessing
 its mutex.
 
-The Linux descriptor provider validates and duplicates raw C descriptors
+The Linux descriptor interop code validates and duplicates raw C descriptors
 before a frontend creates a Rust borrowed descriptor. It also duplicates
-borrowed descriptors before native import. Positioned reads leave the caller's
+borrowed descriptors before driver import. Positioned reads leave the caller's
 shared file offset unchanged, and closing a duplicate cannot close the
 original descriptor.
 
 ## Foreign call boundary
 
 Hand-authored foreign function declarations for Linux system and device calls
-are confined to `src/driver/builtin/linux_kfd/{sys,drm,util,process_identity}.rs`.
+are confined to `src/driver/linux_kfd/{sys,drm,util,process_identity}.rs`.
 The AMDF and HSA frontends export C ABI entry points and invoke
 caller-provided callbacks. The core host allocator invokes AMDF
 caller-provided allocation callbacks. These ABI calls do not import a native
@@ -181,7 +190,7 @@ authors call foreign functions; it does not establish GPU memory safety.
 
 The workspace tests exercise native failure injection, owner retention,
 callback shutdown, overlapping host mappings, descriptor ownership, and
-bounded progress sampling. A fake CPU provider test checks discovery,
+bounded progress sampling. A fake CPU driver test checks discovery,
 activation, host and device allocation ownership, and failed cleanup retry.
 Queue fault injection verifies the core transaction with an external owner.
 Scripted DRM ioctls exercise ambiguous map, failed map wait, ambiguous unmap,

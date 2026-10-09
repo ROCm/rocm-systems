@@ -8,12 +8,12 @@
 
 use super::super::LinuxKfdDriver;
 use super::*;
-use crate::driver::ProviderDriver;
+use crate::driver::Driver;
 use crate::test_support::allocator::State;
 use std::sync::Arc;
 
-fn controller(allocator: Allocator) -> LinuxKfdDriver {
-    let mut controller = LinuxKfdDriver::new(allocator);
+fn scripted_driver(allocator: Allocator) -> LinuxKfdDriver {
+    let mut driver = LinuxKfdDriver::new(allocator);
     let mut endpoint = sys::Kfd::with_hook(
         File::open("/dev/null").unwrap(),
         Arc::new(|call| match call {
@@ -52,10 +52,10 @@ fn controller(allocator: Allocator) -> LinuxKfdDriver {
             scratch_base: 0x2000_0000_0000,
             sdma_next_engine: AtomicU32::new(0),
             scratch: Mutex::new(ScratchPool::new(
-                sysfs::NativeQueueProperties {
+                sysfs::KfdQueueProperties {
                     gfx_target: 120_001,
                     xcc_count: 1,
-                    ..sysfs::NativeQueueProperties::default()
+                    ..sysfs::KfdQueueProperties::default()
                 },
                 allocator,
             )),
@@ -69,11 +69,11 @@ fn controller(allocator: Allocator) -> LinuxKfdDriver {
         allocator,
     )
     .unwrap();
-    assert!(controller.local.kfd.set(kfd).is_ok());
-    let bindings = controller.local.bindings.bindings.get_mut().unwrap();
+    assert!(driver.local.kfd.set(kfd).is_ok());
+    let bindings = driver.local.bindings.bindings.get_mut().unwrap();
     bindings.loss = Some(loss);
     bindings.devices.try_push(vm).unwrap();
-    controller
+    driver
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn forgotten_callback_resource_keeps_its_vm_and_instance_alive() {
     let callbacks = State::default();
     // SAFETY: Callback state remains stationary until all owners are reclaimed.
     let allocator = unsafe { callbacks.allocator() };
-    let mut driver = controller(allocator);
+    let mut driver = scripted_driver(allocator);
     let vm = driver.local.bindings.bindings.get_mut().unwrap().devices[0].clone();
     // This callback-owned resource has the same retained VM dependency as a
     // forgotten allocation or queue backing. No normal destructor owns it now.
@@ -147,9 +147,9 @@ fn forgotten_callback_resource_keeps_its_vm_and_instance_alive() {
 #[test]
 fn retained_loss_owner_preserves_the_remaining_shutdown_records() {
     let callbacks = State::default();
-    // SAFETY: Callback state outlives the controller and recovered resource.
+    // SAFETY: Callback state outlives the driver instance and recovered resource.
     let allocator = unsafe { callbacks.allocator() };
-    let mut driver = controller(allocator);
+    let mut driver = scripted_driver(allocator);
     let loss = driver
         .local
         .bindings
@@ -208,9 +208,9 @@ fn retained_loss_owner_preserves_the_remaining_shutdown_records() {
 #[test]
 fn retained_kfd_owner_prevents_success_after_other_cleanup_finishes() {
     let callbacks = State::default();
-    // SAFETY: Callback state outlives the controller and recovered resource.
+    // SAFETY: Callback state outlives the driver instance and recovered resource.
     let allocator = unsafe { callbacks.allocator() };
-    let mut driver = controller(allocator);
+    let mut driver = scripted_driver(allocator);
     let kfd = driver.local.kfd.get().unwrap().clone();
     let abandoned = Owned::new(kfd, allocator).unwrap().into_raw();
     assert_eq!(

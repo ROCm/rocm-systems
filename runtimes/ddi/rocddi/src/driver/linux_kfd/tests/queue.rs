@@ -10,7 +10,7 @@
 use super::super::memory;
 use super::*;
 use crate::host_storage::Allocator;
-use crate::session::SessionLifetime;
+use crate::session::DriverContextLifetime;
 use std::sync::Arc;
 fn shared<T>(value: T) -> Shared<T> {
     Shared::new(value, Allocator::default()).unwrap()
@@ -41,14 +41,14 @@ fn backing_file() -> File {
     file
 }
 
-fn native_node() -> sysfs::NativeNode {
-    sysfs::NativeNode {
+fn native_node() -> sysfs::KfdNode {
+    sysfs::KfdNode {
         node: 1,
         gpu_id: 42,
         render_minor: Some(128),
         unique_id: Some(123),
         identity: [0; 16],
-        queues: sysfs::NativeQueueProperties {
+        queues: sysfs::KfdQueueProperties {
             gfx_target: 120_001,
             compute_units: 4,
             maximum_wave_count_per_compute_unit: 32,
@@ -663,13 +663,13 @@ impl Fixture {
     }
 
     fn create(&self, desc: QueueRequest) -> Result<Owned<KfdQueue>, Error> {
-        self.create_with_lifetime(desc, SessionLifetime::Process)
+        self.create_with_lifetime(desc, DriverContextLifetime::Process)
     }
 
     fn create_with_lifetime(
         &self,
         desc: QueueRequest,
-        lifetime: SessionLifetime,
+        lifetime: DriverContextLifetime,
     ) -> Result<Owned<KfdQueue>, Error> {
         let mut state = self.state.lock().unwrap();
         state.expected_ring_backing = match desc.parameters {
@@ -681,7 +681,7 @@ impl Fixture {
                 ring_memory: QueueRingMemory::HostVisibleLocal,
                 ..
             } => RingBacking::Local,
-            QueueParameters::Aql { .. } if lifetime == SessionLifetime::Process => {
+            QueueParameters::Aql { .. } if lifetime == DriverContextLifetime::Process => {
                 RingBacking::Userptr
             }
             _ => RingBacking::Gtt,
@@ -818,7 +818,7 @@ fn concurrent_queue_creation_enables_runtime_once_before_acquisition() {
                             vm,
                             &native,
                             descriptor(QueueParameters::Sdma),
-                            SessionLifetime::Process
+                            DriverContextLifetime::Process
                         )
                         .err()
                         .unwrap()
@@ -863,7 +863,7 @@ fn runtime_enable_failure_prevents_queue_backing_acquisition() {
             vm.clone(),
             &native_node(),
             descriptor(QueueParameters::Sdma),
-            SessionLifetime::Process,
+            DriverContextLifetime::Process,
         )
         .err()
         .unwrap()
@@ -1089,7 +1089,7 @@ fn instance_aql_ring_uses_coherent_gtt_when_kfd_rejects_userptr() {
     let mut queue = fixture
         .create_with_lifetime(
             descriptor(aql(QueueProducerMode::Single)),
-            SessionLifetime::Session,
+            DriverContextLifetime::Session,
         )
         .unwrap();
     assert_eq!(queue.info().unwrap().index_unit_bytes, 64);

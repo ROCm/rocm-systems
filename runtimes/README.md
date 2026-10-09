@@ -86,7 +86,7 @@ in the helper, with explicit errors for Windows/Darwin until implemented.
 The configure helper recognizes native Linux x86-64, AArch64, PPC64/PPC64LE,
 and RISC-V64 toolchains. This is not runtime backend support: rocddi currently
 supports only Linux x86-64/AArch64 and rejects other architectures at compile
-time in `ddi/rocddi/src/driver/builtin.rs`. Only x86-64 has been validated locally.
+time in `ddi/rocddi/src/driver.rs`. Only x86-64 has been validated locally.
 Python's standard-library TOML parser requires Python 3.11 or newer.
 `runtime-rust-config.cmake` in the build directory records the generated Cargo
 command and environment for inspection.

@@ -8,23 +8,31 @@
 //! are implemented beside memory, queue, event, and profiling ownership.
 
 use crate::Error;
-use crate::driver::{self, DeviceDriver};
+use crate::driver::{self, DriverActivation};
 use crate::host_storage::Shared;
 use crate::topology::Endpoint;
 
-/// One explicitly activated endpoint and a borrow of its session controller.
-/// Dropping this wrapper releases that borrow; its VM binding remains owned by
-/// the session for recreation. Allocations and queues retain concrete native
-/// dependencies without extending the lifetime of this public-facing wrapper.
+/// One explicitly activated endpoint and its concrete driver state.
+/// Dropping this wrapper releases its driver borrow. A driver may retain
+/// context bindings for recreation under the session's lifetime policy.
+/// Allocations and queues retain their own concrete dependencies without
+/// extending this wrapper's lifetime.
 #[derive(Clone)]
 pub struct Device {
-    pub(crate) driver: Shared<driver::PlatformDriver>,
-    pub(crate) state: driver::DeviceState,
+    pub(crate) activation: DriverActivation,
     pub(crate) endpoint: Endpoint,
     pub(crate) copy_pool: Option<Shared<crate::gpu::CopyResourcePool>>,
 }
 
 impl Device {
+    /// Borrows the KFD driver instance and state for a service implemented by KFD.
+    /// Other driver families cannot enter KFD-specific operations.
+    pub(crate) fn linux_kfd(
+        &self,
+    ) -> Result<(&Shared<driver::KfdDriver>, &driver::KfdDeviceState), Error> {
+        self.activation.linux_kfd()
+    }
+
     /// Returns the endpoint snapshot accepted at activation. This is a borrowed
     /// metadata view with no native observation or freshness guarantee.
     #[must_use]
@@ -32,39 +40,20 @@ impl Device {
         &self.endpoint
     }
 
-    /// Observes this device's native loss source without waiting for work.
-    /// A previously observed loss stays latched. This check does not refresh
-    /// endpoint metadata, acquire mappings, or establish execution retirement.
-    ///
-    /// # Errors
-    /// Returns `DeviceLost` once loss is observed, `Unsupported` for inherited
-    /// process state after fork, or the native error from the observation.
-    pub fn check(&self) -> Result<(), Error> {
-        self.driver.check(&self.state)
-    }
-
-    /// Returns whether a prior native observation latched terminal device loss.
-    /// This reads cached process state and performs no system call or wait.
-    #[must_use]
-    pub fn has_observed_loss(&self) -> bool {
-        driver::DeviceStateInfo::has_observed_loss(&self.state)
-    }
-
     /// Returns whether two activated handles address the same native memory
     /// domain.
     /// This is a cached identity check; it grants no access or lifetime by itself.
     #[must_use]
     pub fn shares_address_domain(&self, other: &Self) -> bool {
-        Shared::ptr_eq(&self.driver, &other.driver)
-            && driver::AddressSpaceInfo::shares_address_domain(&self.state, &other.state)
+        self.activation.shares_address_domain(&other.activation)
     }
 
-    /// Returns the inclusive device-address bounds captured from the installed
-    /// process address space during activation. This performs no native query
+    /// Returns the inclusive device-address bounds captured from the driver's
+    /// activated address domain. This performs no native query
     /// and does not promise that every address in the interval is allocatable.
     #[must_use]
     pub fn address_range(&self) -> (u64, u64) {
-        driver::AddressSpaceInfo::address_range(&self.state)
+        self.activation.address_range()
     }
 
     /// Borrows the GPU-specific capability view when this device was activated
@@ -75,14 +64,19 @@ impl Device {
     /// zero-valued capability field.
     ///
     /// # Errors
-    /// Returns `Unsupported` when the activated endpoint is not a GPU.
+    /// Returns `Unsupported` when the endpoint is not a GPU or its driver has
+    /// no GPU capability view. The current view is implemented by Linux KFD.
     pub fn gpu(&self) -> Result<crate::gpu::GpuDevice<'_>, Error> {
-        self.endpoint
-            .gpu()
-            .map(|info| crate::gpu::GpuDevice { device: self, info })
-            .ok_or(Error::Operation {
-                kind: crate::ErrorKind::Unsupported,
-                detail: "activated endpoint is not a GPU",
-            })
+        let info = self.endpoint.gpu().ok_or(Error::Operation {
+            kind: crate::ErrorKind::Unsupported,
+            detail: "activated endpoint is not a GPU",
+        })?;
+        let (driver, state) = self.linux_kfd()?;
+        Ok(crate::gpu::GpuDevice {
+            device: self,
+            driver,
+            state,
+            info,
+        })
     }
 }

@@ -47,7 +47,7 @@ pub(crate) struct Endpoint {
 /// Explicitly activated device handle borrowing its endpoint.
 ///
 /// Queue ownership is counted for BUSY destruction, while `reset_epoch`
-/// monotonically records native loss observed by this device or its children.
+/// monotonically records terminal loss reported by operations on this device.
 pub(crate) struct Device {
     pub endpoint: *mut Endpoint,
     pub native: native_device::Device,
@@ -66,10 +66,16 @@ impl Device {
     }
 
     pub(crate) fn current_reset_epoch(&self) -> u64 {
-        if self.native.has_observed_loss() {
+        self.reset_epoch.load(Ordering::Acquire)
+    }
+
+    /// Records terminal device loss reported by a native operation before
+    /// converting its error to an AMDF status.
+    pub(crate) fn native_error_status(&self, error: &rocddi::Error) -> u64 {
+        if error.kind() == rocddi::ErrorKind::DeviceLost {
             self.observe_loss(INITIAL_RESET_EPOCH);
         }
-        self.reset_epoch.load(Ordering::Acquire)
+        native(error)
     }
 }
 
@@ -324,10 +330,12 @@ pub(crate) unsafe extern "C" fn create(
         )
         .map_err(|_| INVALID)?;
         let slot = Owned::<Instance>::try_new_uninit(allocator).map_err(|_| EXHAUSTED)?;
+        // The C ABI calls this native_lifetime; rocddi names the policy after
+        // the driver context and its retained bindings.
         let lifetime = if info.native_lifetime == AMDF_NATIVE_LIFETIME_PROCESS {
-            session::SessionLifetime::Process
+            session::DriverContextLifetime::Process
         } else {
-            session::SessionLifetime::Session
+            session::DriverContextLifetime::Session
         };
         let native = session::Session::with_allocator(lifetime, allocator)
             .map_err(|e| crate::support::native(&e))?;

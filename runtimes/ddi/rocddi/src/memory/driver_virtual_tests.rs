@@ -1,24 +1,15 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Provider-independent virtual-memory ownership and interval tests.
+//! Driver-independent virtual-memory ownership and interval tests.
 
 use super::*;
-use crate::driver::{
-    DeviceStateInfo, ProviderTypes, VirtualAddressOwnerInfo, VirtualMemoryOwnerInfo,
-    VirtualMemoryTypes,
-};
+use crate::driver::{CachedInfo, DeviceStateType};
 use crate::host_storage::Allocator;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 struct State(u8);
-
-impl DeviceStateInfo for State {
-    fn has_observed_loss(&self) -> bool {
-        false
-    }
-}
 
 impl AddressSpaceInfo for State {
     fn address_range(&self) -> (u64, u64) {
@@ -36,7 +27,7 @@ struct FakeDriver {
 
 impl Drop for FakeDriver {
     fn drop(&mut self) {
-        self.drops.lock().unwrap().push("provider");
+        self.drops.lock().unwrap().push("driver");
     }
 }
 
@@ -51,7 +42,8 @@ impl Drop for Address {
     }
 }
 
-impl VirtualAddressOwnerInfo for Address {
+impl CachedInfo for Address {
+    type Info = VirtualAddressInfo;
     fn cached_info(&self) -> VirtualAddressInfo {
         self.info
     }
@@ -68,7 +60,8 @@ impl Drop for Backing {
     }
 }
 
-impl VirtualMemoryOwnerInfo for Backing {
+impl CachedInfo for Backing {
+    type Info = VirtualMemoryInfo;
     fn cached_info(&self) -> VirtualMemoryInfo {
         self.info
     }
@@ -78,18 +71,15 @@ struct Mapping {
     fail_once: bool,
 }
 
-impl ProviderTypes for FakeDriver {
+impl DeviceStateType for FakeDriver {
     type DeviceState = State;
 }
 
-impl VirtualMemoryTypes for FakeDriver {
+impl VirtualMemoryDriver for FakeDriver {
     type VirtualAddress = Address;
     type VirtualDeviceMapping = Mapping;
     type VirtualHostMapping = Mapping;
     type VirtualMemory = Backing;
-}
-
-impl VirtualMemoryDriver for FakeDriver {
     fn reserve_virtual_address(
         &self,
         bounds: (u64, u64),
@@ -187,14 +177,14 @@ fn owners(
     driver: &Shared<FakeDriver>,
 ) -> Result<
     (
-        ProviderVirtualAddress<FakeDriver>,
-        ProviderVirtualMemory<FakeDriver>,
+        DriverVirtualAddress<FakeDriver>,
+        DriverVirtualMemory<FakeDriver>,
     ),
     Error,
 > {
     let allocator = Allocator::system();
     let reservation = driver.reserve_virtual_address((0x1000, u64::MAX), 0x4000, 0x1000, 0)?;
-    let address = ProviderVirtualAddress::new(
+    let address = DriverVirtualAddress::new(
         driver.clone(),
         Shared::new(reservation, allocator)?,
         Shared::new(HostIntervals::new(allocator), allocator)?,
@@ -207,16 +197,16 @@ fn owners(
         false,
         false,
     )?;
-    let memory = ProviderVirtualMemory::new(driver.clone(), Shared::new(backing, allocator)?);
+    let memory = DriverVirtualMemory::new(driver.clone(), Shared::new(backing, allocator)?);
     Ok((address, memory))
 }
 
 #[test]
 #[allow(
     clippy::too_many_lines,
-    reason = "one fake-provider lifecycle covers occupancy, retry, and owner drop order"
+    reason = "one fake-driver lifecycle covers occupancy, retry, and owner drop order"
 )]
-fn fake_provider_preserves_mapping_occupancy_and_cleanup_order() -> Result<(), Error> {
+fn fake_driver_preserves_mapping_occupancy_and_cleanup_order() -> Result<(), Error> {
     let drops = Arc::new(Mutex::new(Vec::new()));
     let driver = Shared::new(
         FakeDriver {
@@ -315,9 +305,9 @@ fn fake_provider_preserves_mapping_occupancy_and_cleanup_order() -> Result<(), E
     drop(address);
     drop(driver);
     let sequence = drops.lock().unwrap();
-    let provider = sequence
+    let driver_drop = sequence
         .iter()
-        .position(|entry| *entry == "provider")
+        .position(|entry| *entry == "driver")
         .unwrap();
     let backing = sequence
         .iter()
@@ -327,6 +317,6 @@ fn fake_provider_preserves_mapping_occupancy_and_cleanup_order() -> Result<(), E
         .iter()
         .position(|entry| *entry == "reservation")
         .unwrap();
-    assert!(backing < provider && reservation < provider);
+    assert!(backing < driver_drop && reservation < driver_drop);
     Ok(())
 }

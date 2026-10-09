@@ -30,7 +30,7 @@ impl GpuDevice<'_> {
     /// Returns one driver-correlated device, host, and system clock sample.
     #[doc(hidden)]
     pub fn clock_counters(&self) -> Result<ClockCounters, Error> {
-        self.device.driver.clock_counters(&self.device.state)
+        self.driver.clock_counters(self.state)
     }
 
     /// Replaces this device's process-level second-stage trap handler.
@@ -53,22 +53,21 @@ impl GpuDevice<'_> {
         // SAFETY: The public caller retains the handler code and argument
         // storage until successful removal or conclusive device teardown.
         unsafe {
-            self.device
-                .driver
-                .set_trap_handler(&self.device.state, handler_address, memory_address)
+            self.driver
+                .set_trap_handler(self.state, handler_address, memory_address)
         }
     }
 
     /// Acquires this device's stream performance monitor.
     #[doc(hidden)]
     pub fn spm_acquire(&self) -> Result<(), Error> {
-        self.device.driver.spm_acquire(&self.device.state)
+        self.driver.spm_acquire(self.state)
     }
 
     /// Releases this device's stream performance monitor.
     #[doc(hidden)]
     pub fn spm_release(&self) -> Result<(), Error> {
-        self.device.driver.spm_release(&self.device.state)
+        self.driver.spm_release(self.state)
     }
 
     /// Replaces the stream performance monitor destination buffer.
@@ -96,8 +95,8 @@ impl GpuDevice<'_> {
         // SAFETY: The public caller retains both potentially reachable
         // destinations until a successful unset or conclusive teardown.
         unsafe {
-            self.device.driver.spm_set_destination(
-                &self.device.state,
+            self.driver.spm_set_destination(
+                self.state,
                 size,
                 timeout,
                 bytes_copied,

@@ -55,16 +55,16 @@ fn fixture() -> (
         allocator,
     )
     .unwrap();
-    let node = sysfs::NativeNode {
+    let node = sysfs::KfdNode {
         node: 1,
         gpu_id: 42,
         render_minor: Some(128),
         unique_id: Some(123),
         identity: [0; 16],
-        queues: sysfs::NativeQueueProperties {
+        queues: sysfs::KfdQueueProperties {
             gfx_target: 120_001,
             xcc_count: 1,
-            ..sysfs::NativeQueueProperties::default()
+            ..sysfs::KfdQueueProperties::default()
         },
         local_memory_bytes: 1 << 30,
         public_memory_bytes: 0,

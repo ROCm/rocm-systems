@@ -26,7 +26,7 @@ use std::time::Duration;
 use crate::platform::event::{GpuMemoryFault, SignalEvent, SignalEventPage, poll_memory_fault};
 use rocddi::device::Device;
 use rocddi::memory::Allocation;
-use rocddi::session::{Session, SessionLifetime};
+use rocddi::session::{DriverContextLifetime, Session};
 use rocddi::topology::{Endpoint, GpuInfo};
 
 use crate::callback_arg::CallbackArg;
@@ -584,7 +584,9 @@ pub(crate) struct Runtime {
     pub(crate) caches: Vec<Cache>,
     pub(crate) gpus: Vec<Gpu>,
     pub(crate) session: Session,
-    pub(crate) lifetime: SessionLifetime,
+    /// Lifetime policy for the KFD context used by this runtime generation.
+    /// Memory-pool choices that require the primary context use this value.
+    pub(crate) lifetime: DriverContextLifetime,
 }
 
 pub(crate) fn defer_cleanup<T: Send + 'static>(
@@ -637,12 +639,13 @@ impl Runtime {
             name: "CPU".to_owned(),
             compute_units: 0,
         });
-        // The HSA lifecycle gate admits one initialization at a time. Passive
-        // enumeration may fail before a primary KFD VM is acquired.
+        // The HSA lifecycle gate admits one initialization at a time. A first
+        // GPU activation attempt may retain the primary KFD VM even if it
+        // fails, so later generations must select a secondary context.
         let lifetime = if PRIMARY_CONTEXT_USED.load(Ordering::Acquire) {
-            SessionLifetime::Session
+            DriverContextLifetime::Session
         } else {
-            SessionLifetime::Process
+            DriverContextLifetime::Process
         };
         let mut pending = PendingInit {
             session: Some(Session::new(lifetime).map_err(map_error)?),
@@ -668,7 +671,7 @@ impl Runtime {
         host_page_size: usize,
         host_memory_bytes: usize,
         host: CpuInfo,
-        lifetime: SessionLifetime,
+        lifetime: DriverContextLifetime,
     ) -> Result<Self, Status> {
         let session = pending.session.as_ref().ok_or(ERROR)?;
         let mut endpoints = Vec::new();
@@ -726,7 +729,7 @@ impl Runtime {
                 ));
             }
             let presentation = session.gpu_presentation(&endpoint).map_err(map_error)?;
-            if lifetime == SessionLifetime::Process {
+            if lifetime == DriverContextLifetime::Process {
                 // Activation may retain a primary VM even when it returns an
                 // error. A later generation must use a private context.
                 PRIMARY_CONTEXT_USED.store(true, Ordering::Release);

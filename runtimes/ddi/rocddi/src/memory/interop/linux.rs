@@ -13,8 +13,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 
 use crate::device::Device;
-use crate::driver::ProviderDriver;
-use crate::driver::linux_interop::LinuxMemoryInteropDriver;
+use crate::driver::Driver;
 use crate::host_storage::{Buffer, Shared};
 use crate::memory::{Allocation, DeviceAccess, VirtualMemory};
 use crate::session::Session;
@@ -32,7 +31,7 @@ use crate::{Error, ErrorKind};
 #[allow(unsafe_code)]
 pub unsafe fn close_owned_descriptor(descriptor: RawFd) -> io::Result<()> {
     // SAFETY: The caller transfers descriptor ownership to this operation.
-    unsafe { crate::driver::PlatformDriver::close_owned_descriptor(descriptor) }
+    unsafe { crate::driver::linux_fd::close_owned_descriptor(descriptor) }
 }
 
 /// Validates and duplicates a caller descriptor before constructing a Rust
@@ -41,7 +40,7 @@ pub unsafe fn close_owned_descriptor(descriptor: RawFd) -> io::Result<()> {
 /// # Errors
 /// Reports an invalid or closed descriptor, or native descriptor exhaustion.
 pub fn duplicate_descriptor(descriptor: RawFd) -> Result<OwnedFd, Error> {
-    crate::driver::PlatformDriver::duplicate_descriptor(descriptor)
+    crate::driver::linux_fd::duplicate_descriptor(descriptor)
 }
 
 /// Returns the length of a borrowed descriptor without taking its ownership.
@@ -49,7 +48,7 @@ pub fn duplicate_descriptor(descriptor: RawFd) -> Result<OwnedFd, Error> {
 /// # Errors
 /// Reports an invalid descriptor or native metadata failure.
 pub fn descriptor_length(descriptor: RawFd) -> io::Result<u64> {
-    crate::driver::PlatformDriver::descriptor_length(descriptor)
+    crate::driver::linux_fd::descriptor_length(descriptor)
 }
 
 /// Resolves a reopenable filesystem path for a borrowed Linux descriptor.
@@ -87,7 +86,7 @@ pub fn read_descriptor_exact_at(
     buffer: &mut [u8],
     offset: u64,
 ) -> io::Result<()> {
-    crate::driver::PlatformDriver::read_descriptor_exact_at(descriptor, buffer, offset)
+    crate::driver::linux_fd::read_descriptor_exact_at(descriptor, buffer, offset)
 }
 
 /// Reads from a borrowed descriptor at a fixed offset.
@@ -95,7 +94,7 @@ pub fn read_descriptor_exact_at(
 /// # Errors
 /// Preserves the Linux read error, including its errno.
 pub fn read_descriptor_at(descriptor: RawFd, buffer: &mut [u8], offset: i64) -> io::Result<usize> {
-    crate::driver::PlatformDriver::read_descriptor_at(descriptor, buffer, offset)
+    crate::driver::linux_fd::read_descriptor_at(descriptor, buffer, offset)
 }
 
 /// Writes to a borrowed descriptor at a fixed offset.
@@ -103,7 +102,7 @@ pub fn read_descriptor_at(descriptor: RawFd, buffer: &mut [u8], offset: i64) -> 
 /// # Errors
 /// Preserves the Linux write error, including its errno.
 pub fn write_descriptor_at(descriptor: RawFd, buffer: &[u8], offset: i64) -> io::Result<usize> {
-    crate::driver::PlatformDriver::write_descriptor_at(descriptor, buffer, offset)
+    crate::driver::linux_fd::write_descriptor_at(descriptor, buffer, offset)
 }
 
 /// Maximum bytes submitted in one AIS operation, matching Linux `MAX_RW_COUNT`.
@@ -222,8 +221,8 @@ pub fn ais_transfer(
     file_offset: i64,
     operation: AisFileOperation,
 ) -> Result<AisFileResult, Error> {
-    crate::driver::PlatformDriver::ais_transfer(
-        allocation.inner.native(),
+    crate::driver::KfdDriver::ais_transfer(
+        allocation.inner.driver_state(),
         descriptor,
         allocation_offset,
         size,
@@ -353,13 +352,11 @@ pub fn import_virtual_memory(
     session: &Session,
     descriptor: BorrowedFd<'_>,
 ) -> Result<VirtualMemory, Error> {
-    let owner = crate::host_storage::Shared::try_new_uninit(session.driver().allocator())?;
-    let inner = session.driver().import_virtual_memory(descriptor)?;
+    let driver = session.linux_kfd()?;
+    let owner = crate::host_storage::Shared::try_new_uninit(driver.allocator())?;
+    let inner = driver.import_virtual_memory(descriptor)?;
     Ok(VirtualMemory {
-        inner: crate::memory::ProviderVirtualMemory::new(
-            session.driver().clone(),
-            owner.write(inner),
-        ),
+        inner: crate::memory::DriverVirtualMemory::new(driver.clone(), owner.write(inner)),
     })
 }
 
@@ -368,10 +365,10 @@ pub fn import_virtual_memory(
 /// # Errors
 /// Reports descriptor duplication or backing-validation failures.
 pub fn export_virtual_memory(memory: &VirtualMemory) -> Result<DmaBuf, Error> {
-    crate::driver::PlatformDriver::export_virtual_memory(memory.inner.native())
+    crate::driver::KfdDriver::export_virtual_memory(memory.inner.driver_state())
 }
 
-/// Imports one same-provider system allocation from a borrowed DMA-BUF.
+/// Imports one same-driver system allocation from a borrowed DMA-BUF.
 ///
 /// The logical range is established in `device`'s address space with exactly
 /// `permissions`. The backend duplicates `descriptor` before native acquisition,
@@ -389,8 +386,9 @@ pub fn import_dma_buf(
     alignment: u64,
     permissions: DeviceAccess,
 ) -> Result<Allocation, Error> {
-    let inner = device.driver.import_dma_buf(
-        &device.state,
+    let (driver, state) = device.linux_kfd()?;
+    let inner = driver.import_dma_buf(
+        state,
         descriptor,
         source_offset,
         byte_length,
@@ -399,7 +397,7 @@ pub fn import_dma_buf(
     )?;
     Ok(Allocation::from_native(
         inner,
-        device.endpoint.provider_instance,
+        device.endpoint.driver_instance,
     ))
 }
 
@@ -407,7 +405,9 @@ pub fn import_dma_buf(
 /// DMA-BUF with explicit GPU permissions and a write-back host view.
 #[must_use]
 pub fn supports_system_dma_buf_import(device: &Device) -> bool {
-    crate::driver::PlatformDriver::supports_system_dma_buf_import(&device.state)
+    device
+        .linux_kfd()
+        .is_ok_and(|(_, state)| crate::driver::KfdDriver::supports_system_dma_buf_import(state))
 }
 
 /// Imports a qualified SYSTEM DMA-BUF into one native GPU address domain.
@@ -436,17 +436,19 @@ pub fn import_system_dma_buf(
             detail: "system import requires a device",
         });
     }
-    let mut states = Buffer::try_with_capacity(devices.len(), session.driver().allocator())?;
+    let driver = session.linux_kfd()?;
+    let mut states = Buffer::try_with_capacity(devices.len(), driver.allocator())?;
     for device in devices {
-        if !Shared::ptr_eq(session.driver(), &device.driver) {
+        let (device_driver, state) = device.linux_kfd()?;
+        if !Shared::ptr_eq(driver, device_driver) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
                 detail: "system import devices must belong to this session",
             });
         }
-        states.try_push(&device.state)?;
+        states.try_push(state)?;
     }
-    let inner = session.driver().import_system_dma_buf(
+    let inner = driver.import_system_dma_buf(
         states.as_slice(),
         descriptor,
         source_offset,
@@ -454,10 +456,7 @@ pub fn import_system_dma_buf(
         alignment,
         permissions,
     )?;
-    Ok(Allocation::from_native(
-        inner,
-        session.driver().provider_instance(),
-    ))
+    Ok(Allocation::from_native(inner, driver.driver_instance()))
 }
 
 /// Imports a Linux graphics DMA-BUF into the common address range of `devices`.
@@ -482,24 +481,20 @@ pub fn import_graphics_dma_buf(
             detail: "graphics import requires at least one device",
         });
     }
-    let mut states = Buffer::try_with_capacity(devices.len(), session.driver().allocator())?;
+    let driver = session.linux_kfd()?;
+    let mut states = Buffer::try_with_capacity(devices.len(), driver.allocator())?;
     for device in devices {
-        if !Shared::ptr_eq(session.driver(), &device.driver) {
+        let (device_driver, state) = device.linux_kfd()?;
+        if !Shared::ptr_eq(driver, device_driver) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
                 detail: "graphics import devices must belong to this session",
             });
         }
-        states.try_push(&device.state)?;
+        states.try_push(state)?;
     }
-    let inner =
-        session
-            .driver()
-            .import_graphics_dma_buf(states.as_slice(), descriptor, size_hint)?;
-    Ok(Allocation::from_native(
-        inner,
-        session.driver().provider_instance(),
-    ))
+    let inner = driver.import_graphics_dma_buf(states.as_slice(), descriptor, size_hint)?;
+    Ok(Allocation::from_native(inner, driver.driver_instance()))
 }
 
 /// Exports a live allocation as an independently owned DMA-BUF.
@@ -508,7 +503,7 @@ pub fn import_graphics_dma_buf(
 /// Returns a native error if Linux cannot export the allocation, or a driver
 /// contract error if the resulting file does not describe the same backing.
 pub fn export_dma_buf(allocation: &Allocation) -> Result<DmaBuf, Error> {
-    crate::driver::PlatformDriver::export_dma_buf(allocation.inner.native())
+    crate::driver::KfdDriver::export_dma_buf(allocation.inner.driver_state())
 }
 
 /// Imports one KFD IPC allocation and maps it to the requested GPU devices.
@@ -529,37 +524,32 @@ pub fn import_kfd_ipc_memory(
     handle: KfdIpcMemoryHandle,
     size: u64,
 ) -> Result<Allocation, Error> {
-    let mut states = Buffer::try_with_capacity(devices.len(), session.driver().allocator())?;
+    let driver = session.linux_kfd()?;
+    let mut states = Buffer::try_with_capacity(devices.len(), driver.allocator())?;
     for device in devices {
-        if !Shared::ptr_eq(session.driver(), &device.driver) {
+        let (device_driver, state) = device.linux_kfd()?;
+        if !Shared::ptr_eq(driver, device_driver) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
                 detail: "KFD IPC import devices must belong to this session",
             });
         }
-        states.try_push(&device.state)?;
+        states.try_push(state)?;
     }
-    let mut mapping_states =
-        Buffer::try_with_capacity(mapping_devices.len(), session.driver().allocator())?;
+    let mut mapping_states = Buffer::try_with_capacity(mapping_devices.len(), driver.allocator())?;
     for device in mapping_devices {
-        if !Shared::ptr_eq(session.driver(), &device.driver) {
+        let (device_driver, state) = device.linux_kfd()?;
+        if !Shared::ptr_eq(driver, device_driver) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
                 detail: "KFD IPC mapping devices must belong to this session",
             });
         }
-        mapping_states.try_push(&device.state)?;
+        mapping_states.try_push(state)?;
     }
-    let inner = session.driver().import_kfd_ipc_memory(
-        states.as_slice(),
-        mapping_states.as_slice(),
-        handle,
-        size,
-    )?;
-    Ok(Allocation::from_native(
-        inner,
-        session.driver().provider_instance(),
-    ))
+    let inner =
+        driver.import_kfd_ipc_memory(states.as_slice(), mapping_states.as_slice(), handle, size)?;
+    Ok(Allocation::from_native(inner, driver.driver_instance()))
 }
 
 /// Exports a live native allocation as a process-independent KFD IPC handle.
@@ -569,7 +559,7 @@ pub fn import_kfd_ipc_memory(
 /// Rejects unsupported backing or an unavailable allocation and reports the
 /// native export failure without changing ownership.
 pub fn export_kfd_ipc_memory(allocation: &Allocation) -> Result<KfdIpcMemoryHandle, Error> {
-    crate::driver::PlatformDriver::export_kfd_ipc_memory(allocation.inner.native())
+    crate::driver::KfdDriver::export_kfd_ipc_memory(allocation.inner.driver_state())
 }
 
 /// Applies Linux KFD SVM attributes to a process virtual-address range.
@@ -584,7 +574,7 @@ pub fn set_kfd_svm_attributes(
     attributes: &[KfdSvmAttribute],
 ) -> Result<(), Error> {
     session
-        .driver()
+        .linux_kfd()?
         .set_kfd_svm_attributes(address, size, attributes)
 }
 
@@ -600,7 +590,7 @@ pub fn get_kfd_svm_attributes(
     attributes: &mut [KfdSvmAttribute],
 ) -> Result<(), Error> {
     session
-        .driver()
+        .linux_kfd()?
         .get_kfd_svm_attributes(address, size, attributes)
 }
 

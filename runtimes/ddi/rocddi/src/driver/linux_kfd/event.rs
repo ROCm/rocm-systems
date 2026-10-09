@@ -122,7 +122,7 @@ fn signal_event_error(operation: &'static str, source: std::io::Error) -> Error 
 #[allow(unsafe_code, clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::driver::builtin::linux_kfd::sys::{Call, IoctlHook, Kfd};
+    use crate::driver::linux_kfd::sys::{Call, IoctlHook, Kfd};
     use std::ffi::c_void;
     use std::fs::File;
     use std::sync::{Arc, Mutex};

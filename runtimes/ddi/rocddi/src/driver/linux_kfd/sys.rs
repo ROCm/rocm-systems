@@ -26,7 +26,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use super::uapi;
 use super::util::{check_process, close_descriptor, close_file, page_size};
-use crate::session::SessionLifetime;
+use crate::session::DriverContextLifetime;
 
 /// DMA-BUF extent and metadata copied out of one synchronous KFD query.
 pub(super) struct DmaBufDetails {
@@ -412,22 +412,22 @@ impl Kfd {
     /// A version or open failure leaves the primary context retryable. An ioctl
     /// failure has no portable proof of whether selection took effect, so only
     /// closing this descriptor can recover from that outcome.
-    pub(super) fn prepare_context(&self, lifetime: SessionLifetime) -> io::Result<()> {
+    pub(super) fn prepare_context(&self, lifetime: DriverContextLifetime) -> io::Result<()> {
         let mut runtime = self.runtime_guard()?;
         match (lifetime, runtime.state.context) {
-            (SessionLifetime::Process, ContextState::Primary)
-            | (SessionLifetime::Session, ContextState::Secondary) => return Ok(()),
+            (DriverContextLifetime::Process, ContextState::Primary)
+            | (DriverContextLifetime::Session, ContextState::Secondary) => return Ok(()),
             (_, ContextState::SelectionUncertain) => {
                 return Err(invalid_data(
                     "KFD context selection outcome requires teardown",
                 ));
             }
-            (SessionLifetime::Process, ContextState::Secondary) => {
+            (DriverContextLifetime::Process, ContextState::Secondary) => {
                 return Err(invalid_data(
                     "KFD endpoint already owns a secondary context",
                 ));
             }
-            (SessionLifetime::Session, ContextState::Primary) => {}
+            (DriverContextLifetime::Session, ContextState::Primary) => {}
         }
         if runtime.state.enable != RuntimeState::Disabled {
             return Err(invalid_data(

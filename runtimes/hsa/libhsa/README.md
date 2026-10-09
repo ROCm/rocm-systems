@@ -16,8 +16,15 @@ KFD activation, memory, queue, event, and cleanup mechanisms.
 
 One process-global registry owns the active runtime and its reference count.
 Final shutdown removes the runtime from that registry before stopping workers
-and releasing native state. Blocking native work and user callbacks must remain
-outside global registry locks.
+and releasing driver resources. Blocking driver calls and user callbacks must
+remain outside global registry locks.
+
+The first runtime generation that attempts GPU activation uses
+`DriverContextLifetime::Process` and may leave the primary KFD context and its
+VM bindings alive after shutdown. Later generations use
+`DriverContextLifetime::Session`, which selects a secondary KFD context when
+supported and releases it at shutdown. An activation attempt counts even if
+it fails, because KFD may already have retained a primary VM binding.
 
 `hsa_amd_queue_create` accepts compute and SDMA descriptors. Compute queues
 use the rocddi AQL control layout; their public header aliases the native
