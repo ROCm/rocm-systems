@@ -795,12 +795,19 @@ come from pass 0. Analyze parses Function, then nests marker intervals per
 markers. Analyze does not write ``ml_api_trace/consolidated.csv``. Missing
 or null marker columns make analyze exit.
 
-Operator analyze reports warnings after the call tree and does not exit:
+Operator analyze exits when:
 
-* a kernel's ``Correlation_ID`` is not in any ROCTX range
-* operator calls or kernel names disagree across passes
 * two markers on the same ``Thread_Id`` overlap in time (neither nested
   nor adjacent)
+* a marker is not nested in the call forest
+* kernel-name and timestamp lists on a marker have unequal lengths
+* operator calls or kernel names disagree across passes
+
+Operator analyze warns during the join and continues when:
+
+* a kernel's ``Correlation_ID`` is not in any ROCTX range
+* attach cannot find the launcher thread
+* a worker interval is not contained in any launcher interval
 * a torch or triton call-tree root has no file/line and no launcher thread
 
 A Function whose first token is the legacy stacked shape (``:#`` or
