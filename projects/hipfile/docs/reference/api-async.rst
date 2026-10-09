@@ -13,6 +13,18 @@ alignment to the driver.
 For a step-by-step guide to using these functions, see
 :doc:`/tutorials/async-multistream-io`.
 
+Scalability considerations
+===========================
+
+Asynchronous transfers are dispatched through per-stream HIP hardware queues.
+When many streams perform I/O concurrently, they contend for a limited pool of
+hardware queues, and this contention can limit scalability as the number of
+active streams grows.
+
+Increasing the number of available hardware queues can mitigate some of this
+contention. Set the ``GPU_MAX_HW_QUEUES`` environment variable to raise the
+per-process hardware queue limit before running your application.
+
 Stream registration flags
 ===========================
 
