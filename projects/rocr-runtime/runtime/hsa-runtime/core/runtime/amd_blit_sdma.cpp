@@ -1948,6 +1948,23 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearFillCommand(void* ptr, u
   return SubmitBlockingCommand(buff, num_fill_command * sizeof(SDMA_PKT_CONSTANT_FILL), size);
 }
 
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearFillCommandBytes(void* ptr, uint8_t value,
+                                                                         size_t size) {
+  if (size == 0) return HSA_STATUS_SUCCESS;
+
+  const uint32_t num_fill_command = (size + kMaxSingleFillSize - 1) / kMaxSingleFillSize;
+
+  // Avoid heap allocation for common single-packet case.
+  SDMA_PKT_CONSTANT_FILL stack_buff;
+  std::vector<SDMA_PKT_CONSTANT_FILL> heap_buff(num_fill_command > 1 ? num_fill_command : 0);
+  auto* buff = num_fill_command <= 1 ? &stack_buff : heap_buff.data();
+
+  BuildFillCommandBytes(reinterpret_cast<char*>(buff), num_fill_command, ptr, value, size);
+
+  return SubmitBlockingCommand(buff, num_fill_command * sizeof(SDMA_PKT_CONSTANT_FILL), size);
+}
+
 template <bool useGCR, bool scopeFields> hsa_status_t BlitSdma<useGCR, scopeFields>::EnableProfiling(bool enable) {
   return HSA_STATUS_SUCCESS;
 }
@@ -2637,6 +2654,45 @@ void BlitSdma<useGCR, scopeFields>::BuildFillCommand(char* cmd_addr, uint32_t nu
     count -= fill_count;
   }
   assert(count == 0 && "SDMA fill command count error.");
+}
+
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::BuildFillCommandBytes(char* cmd_addr,
+                                                          uint32_t num_fill_command, void* ptr,
+                                                          uint8_t value, size_t size) {
+  char* cur_ptr = reinterpret_cast<char*>(ptr);
+  SDMA_PKT_CONSTANT_FILL* packet_addr = reinterpret_cast<SDMA_PKT_CONSTANT_FILL*>(cmd_addr);
+
+  // The byte value is replicated across the data field because the engine
+  // picks the byte lanes it needs from the fill size.
+  const uint32_t data_value = uint32_t(value) * 0x01010101u;
+
+  for (uint32_t i = 0; i < num_fill_command; i++) {
+    assert(size != 0 && "SDMA byte fill command count error.");
+    const size_t fill_size = Min(size, kMaxSingleFillSize);
+
+    memset(packet_addr, 0, sizeof(SDMA_PKT_CONSTANT_FILL));
+
+    packet_addr->HEADER_UNION.op = SDMA_OP_CONST_FILL;
+    if (scopeFields) {
+      packet_addr->HEADER_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
+      packet_addr->HEADER_UNION.npd = 1;
+    }
+    packet_addr->HEADER_UNION.fillsize = 0;  // Byte fill
+
+    packet_addr->DST_ADDR_LO_UNION.dst_addr_31_0 = ptrlow32(cur_ptr);
+    packet_addr->DST_ADDR_HI_UNION.dst_addr_63_32 = ptrhigh32(cur_ptr);
+
+    packet_addr->DATA_UNION.src_data_31_0 = data_value;
+
+    /* count is 1-based */
+    packet_addr->COUNT_UNION.count = fill_size - 1;
+
+    packet_addr++;
+    cur_ptr += fill_size;
+    size -= fill_size;
+  }
+  assert(size == 0 && "SDMA byte fill command count error.");
 }
 
 template <bool useGCR, bool scopeFields>

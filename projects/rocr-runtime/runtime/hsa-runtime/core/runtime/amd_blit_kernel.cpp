@@ -527,6 +527,15 @@ DEFINE_KERNEL_PARAM_FUNC(kCopyMisalignedUnroll)
 DEFINE_KERNEL_PARAM_FUNC(kFillVecWidth)
 DEFINE_KERNEL_PARAM_FUNC(kFillUnroll)
 
+// The byte fill shader lives in blit_shaders/blit_fillBytes.s, which is not the
+// inline source GetKernelSourceParam scrapes, so its vector width and unroll
+// factor are mirrored here.  They must stay equal to kFillBytesVecWidth and
+// kFillBytesUnroll in that file: the host computes the dwordx4 phase extent
+// from them, and a mismatch would let that phase store past the end of the
+// fill.
+static constexpr uint32_t kFillBytesVecWidth = 4;
+static constexpr uint32_t kFillBytesUnroll = 1;
+
 static unsigned extractAqlBits(unsigned v, unsigned pos, unsigned width) {
   return (v >> pos) & ((1 << width) - 1);
 };
@@ -573,6 +582,13 @@ hsa_status_t BlitKernel::Initialize(const core::Agent& agent) {
       {KernelType::CopyAligned, "CopyAligned"},
       {KernelType::CopyMisaligned, "CopyMisaligned"},
       {KernelType::Fill, "Fill"}};
+
+  // The byte fill shader is only available from gfx9 onwards.  The gfx7 and
+  // gfx8 blit shaders are checked in as pre-built blobs that are not
+  // regenerated, so those targets keep using the SDMA byte fill path.
+  if (gpuAgent->supported_isas()[0]->GetMajorVersion() >= 9) {
+    kernel_names[KernelType::FillBytes] = "FillBytes";
+  }
 
   for (auto kernel_name : kernel_names) {
     KernelCode& kernel = kernels_[kernel_name.first];
@@ -851,6 +867,79 @@ hsa_status_t BlitKernel::SubmitLinearFillCommand(void* ptr, uint32_t value,
 
   PopulateQueue(write_index, uintptr_t(kernels_[KernelType::Fill].code_buf_),
                 args, num_workitems, completion_signal_);
+
+  ReleaseWriteIndex(write_index, 1);
+
+  // Wait for the packet to finish.
+  if (HSA::hsa_signal_wait_scacquire(completion_signal_, HSA_SIGNAL_CONDITION_LT, 1, uint64_t(-1),
+                                     HSA_WAIT_STATE_ACTIVE) != 0) {
+    // Signal wait returned unexpected value.
+    return HSA_STATUS_ERROR;
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t BlitKernel::SubmitLinearFillCommandBytes(void* ptr, uint8_t value, size_t size) {
+  if (size == 0) return HSA_STATUS_SUCCESS;
+
+  const uint32_t dword_value = uint32_t(value) * 0x01010101u;
+
+  // A dword aligned, dword sized fill is the common case and is already served
+  // by the dword fill shader.
+  if ((uintptr_t(ptr) & 0x3) == 0 && (size & 0x3) == 0) {
+    return SubmitLinearFillCommand(ptr, dword_value, size / sizeof(uint32_t));
+  }
+
+  // Byte granularity needs the dedicated shader, which Initialize only
+  // registers from gfx9 onwards.  GpuAgent::DmaFillBytes already rejects the
+  // older agents, so this is a backstop rather than a reachable path.
+  auto kernel = kernels_.find(KernelType::FillBytes);
+  if (kernel == kernels_.end()) return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  std::lock_guard<std::mutex> guard(lock_);
+
+  const int num_workitems = 64 * num_cus_;
+
+  const uintptr_t start = uintptr_t(ptr);
+  const uintptr_t end = start + size;
+
+  // Phase 1 is the head bytes before the first whole dword, phase 4 the tail
+  // bytes after the last whole dword.  Both are shorter than one dword, and so
+  // shorter than num_workitems, which is why a single masked pass covers them.
+  uintptr_t dword_start = AlignUp(start, sizeof(uint32_t));
+  if (dword_start > end) dword_start = end;
+  uintptr_t dword_end = AlignDown(end, sizeof(uint32_t));
+  if (dword_end < dword_start) dword_end = dword_start;
+
+  // Phase 2 covers whole blocks only so that every lane stays in range and the
+  // dwordx4 stores never run past the end of the fill.  Phase 3 fills whatever
+  // whole dwords are left over.
+  const uint64_t phase2_block =
+      uint64_t(num_workitems) * sizeof(uint32_t) * kFillBytesUnroll * kFillBytesVecWidth;
+  const uint64_t phase2_size = ((dword_end - dword_start) / phase2_block) * phase2_block;
+
+  KernelArgs* args = ObtainAsyncKernelCopyArg();
+  args->fill_bytes.phase1_dst_start = start;
+  args->fill_bytes.phase2_dst_start = dword_start;
+  args->fill_bytes.phase3_dst_start = dword_start + phase2_size;
+  args->fill_bytes.phase4_dst_start = dword_end;
+  args->fill_bytes.phase4_dst_end = end;
+  args->fill_bytes.fill_value = dword_value;
+  args->fill_bytes.num_workitems = num_workitems;
+
+  // Submit a single dispatch packet covering all four phases.
+  HSA::hsa_signal_store_relaxed(completion_signal_, 1);
+
+  uint64_t write_index;
+  {
+    std::lock_guard<std::mutex> lock(reservation_lock_);
+    write_index = AcquireWriteIndex(1);
+    RecordBlitHistory(size, write_index);
+  }
+
+  PopulateQueue(write_index, uintptr_t(kernel->second.code_buf_), args, num_workitems,
+                completion_signal_);
 
   ReleaseWriteIndex(write_index, 1);
 
