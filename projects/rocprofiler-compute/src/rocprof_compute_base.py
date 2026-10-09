@@ -295,6 +295,10 @@ class RocProfCompute:
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
         args = self.__args
+        args.ignore_amd_smi = "ignore-amd-smi" in args.debug_options
+        if "table-view" in args.debug_options:
+            args.view = "table"
+
         operator_filter = (
             args.torch_operator is not None or args.triton_operator is not None
         )

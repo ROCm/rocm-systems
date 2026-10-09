@@ -1001,7 +1001,23 @@ Examples:
         ),
     )
     analyze_advanced_group.add_argument(
-        "-g", dest="debug", action="store_true", help="\t\tDebug single metric."
+        "-g",
+        dest="debug",
+        action="store_true",
+        help="\t\tDebug single metric.",
+    )
+    analyze_advanced_group.add_argument(
+        "--debug",
+        dest="debug_options",
+        metavar="OPTION",
+        nargs="+",
+        choices=["table-view", "ignore-amd-smi"],
+        default=[],
+        help=(
+            "\t\tEnable debug options. Can provide multiple space separated options.\n"
+            "\t\t   table-view: force plain tables and ignore cli_style from YAML.\n"
+            "\t\t   ignore-amd-smi: skip AMD-SMI queries when probing local hardware."
+        ),
     )
     analyze_advanced_group.add_argument(
         "--view",
@@ -1009,12 +1025,7 @@ Examples:
         metavar="NAME",
         choices=["table"],  # future: e.g. "bar" for additional TTY views
         default=None,
-        help=(
-            "\t\tTTY output view. "
-            "table: force plain tables and ignore cli_style from YAML "
-            "(e.g. mem_chart, Roofline charts as tables). "
-            "Additional views may be added in future releases."
-        ),
+        help=argparse.SUPPRESS,
     )
     analyze_advanced_group.add_argument(
         "--dependency",
