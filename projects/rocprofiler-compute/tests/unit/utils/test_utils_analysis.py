@@ -18,8 +18,6 @@ from utils.ml_api_trace_errors import (
     KernelSequenceLengthMismatchError,
     MissingSourceLocationError,
     OverlappingMarkerRangeError,
-    PassMarkerMismatchError,
-    UnaccountedKernelError,
     UncorrelatedLauncherIntervalError,
 )
 from utils.utils_analysis import (
@@ -2799,9 +2797,10 @@ def test_parse_marker_function_aten_addmm_n_a():
     )
     assert parsed["Operator_Name"] == "aten::addmm"
     assert parsed["File_Name"] == ""
-    assert parsed["Line_Number"] == ""
-    assert parsed["T_Tid"] == "1"
+    assert parsed["Line_Number"] is None
     assert parsed["Backend"] == "torch"
+    assert parsed["launcher_thread_id"] == ""
+    assert parsed["args"] == "()"
 
 
 def test_parse_marker_function_autograd_keeps_inner_colon_and_space():
@@ -2813,7 +2812,7 @@ def test_parse_marker_function_autograd_keeps_inner_colon_and_space():
         parsed["Operator_Name"] == "autograd::engine::evaluate_function: SumBackward0"
     )
     assert parsed["File_Name"] == ""
-    assert parsed["Line_Number"] == ""
+    assert parsed["Line_Number"] is None
 
 
 def test_parse_marker_function_linear_forward_file_and_line():
@@ -2824,7 +2823,6 @@ def test_parse_marker_function_linear_forward_file_and_line():
     assert parsed["Operator_Name"] == "nn.Module.Linear.forward"
     assert parsed["File_Name"] == "simple_torch_code.py"
     assert parsed["Line_Number"] == 19
-    assert parsed["T_Tid"] == ""
 
 
 def test_parse_marker_function_triton_backend_and_location():
@@ -2841,27 +2839,30 @@ def test_parse_marker_function_user_range_without_keys():
     parsed = parse_marker_function("training_loop")
     assert parsed["Operator_Name"] == "training_loop"
     assert parsed["File_Name"] == ""
-    assert parsed["Line_Number"] == ""
+    assert parsed["Line_Number"] is None
     assert parsed["Backend"] == "user"
 
 
-def test_parse_marker_function_stacked_wire_exits(monkeypatch):
+def test_stacked_marker_wire_exits(monkeypatch):
     messages = record_console_error_and_exit(monkeypatch)
+    stacked = pd.DataFrame({
+        "Function": ["triton.JITFunction.foo:#1@file.py:1"],
+    })
     with pytest.raises(SystemExit) as excinfo:
-        parse_marker_function("triton.JITFunction.foo:#1@file.py:1")
+        utils_analysis._apply_parsed_function_columns(stacked)
     assert excinfo.value.code == 1
     assert "Stacked marker wire is not supported" in messages[0]
 
 
-def test_parse_marker_function_ftid_and_thread_id_unchanged(tmp_path):
+def test_parse_marker_function_ltid_and_thread_id_unchanged(tmp_path):
     parsed = parse_marker_function(
-        "aten::addmm:n/a|seqNr=1|tid=1|ftid=1|scope=FUNCTION|args=()|torch"
+        "aten::addmm:n/a|seqNr=1|tid=1|ftid=1|ltid=7|scope=FUNCTION|args=()|torch"
     )
-    assert parsed["F_Tid"] == "1"
-    workload_dir = tmp_path / "ftid_thread"
+    assert parsed["launcher_thread_id"] == "7"
+    workload_dir = tmp_path / "ltid_thread"
     function = (
         "nn.Module.Linear.forward:simple_torch_code.py:19"
-        "|seqNr=n/a|tid=n/a|ftid=1|scope=n/a|args=()|torch"
+        "|seqNr=n/a|tid=n/a|ftid=1|ltid=7|scope=n/a|args=()|torch"
     )
     write_ml_api_pass(
         workload_dir,
@@ -2889,7 +2890,7 @@ def test_parse_marker_function_ftid_and_thread_id_unchanged(tmp_path):
     workload = schema.Workload()
     process_ml_api_trace_output(workload, str(workload_dir))
     assert workload.ml_api_trace_df["Thread_Id"].tolist() == [42]
-    assert workload.ml_api_trace_df["F_Tid"].tolist() == ["1"]
+    assert workload.ml_api_trace_df["launcher_thread_id"].tolist() == ["7"]
 
 
 def test_nest_marker_intervals_three_deep_with_file_line():
@@ -3182,7 +3183,13 @@ def test_process_two_dispatches_same_marker_keep_both_kernel_names(tmp_path):
     assert set(workload.ml_api_call_trees["1"][0].kernels) == {"kernel_a", "kernel_b"}
 
 
-def test_process_unmatched_kernel_records_error(tmp_path):
+def test_process_unmatched_kernel_warns_and_continues(tmp_path, monkeypatch):
+    warnings = []
+    monkeypatch.setattr(
+        utils_analysis,
+        "console_warning",
+        lambda *argv: warnings.append(argv),
+    )
     workload_dir = tmp_path / "unmatched"
     write_ml_api_pass(
         workload_dir,
@@ -3194,11 +3201,9 @@ def test_process_unmatched_kernel_records_error(tmp_path):
     process_ml_api_trace_output(workload, str(workload_dir))
     assert len(workload.unmatched_kernel_frames) == 1
     assert not workload.unmatched_kernel_frames[0].empty
-    assert any(
-        isinstance(err, UnaccountedKernelError) for err in workload.ml_api_trace_errors
-    )
-    assert "orphan_kernel" in str(workload.ml_api_trace_errors[0])
-    assert "unmatched dispatches" in str(workload.ml_api_trace_errors[0])
+    warning_text = str(warnings)
+    assert "orphan_kernel" in warning_text
+    assert "unmatched dispatches" in warning_text
     assert not workload.ml_api_trace_df.empty
 
 
@@ -3345,7 +3350,8 @@ def test_process_two_wraps_same_stitch_key_keep_ordinals(tmp_path):
     assert [root.call_count for root in roots] == [1, 1]
 
 
-def test_process_pass_null_kernel_name_mismatch_records_error(tmp_path):
+def test_process_pass_null_kernel_name_mismatch_exits(tmp_path, monkeypatch):
+    messages = record_console_error_and_exit(monkeypatch)
     workload_dir = tmp_path / "kernel_mismatch"
     write_ml_api_pass(
         workload_dir,
@@ -3378,14 +3384,15 @@ def test_process_pass_null_kernel_name_mismatch_records_error(tmp_path):
         compression="gzip",
     )
     workload = schema.Workload()
-    process_ml_api_trace_output(workload, str(workload_dir))
-    assert any(
-        isinstance(err, PassMarkerMismatchError) for err in workload.ml_api_trace_errors
-    )
-    assert not workload.ml_api_trace_df.empty
+    with pytest.raises(SystemExit) as excinfo:
+        process_ml_api_trace_output(workload, str(workload_dir))
+    assert excinfo.value.code == 1
+    assert "Pass marker mismatch" in messages[0]
+    assert "Kernel_Names" in messages[0]
 
 
-def test_process_pass_marker_count_mismatch_records_error(tmp_path):
+def test_process_pass_marker_count_mismatch_exits(tmp_path, monkeypatch):
+    messages = record_console_error_and_exit(monkeypatch)
     workload_dir = tmp_path / "count_mismatch"
     write_ml_api_pass(
         workload_dir,
@@ -3403,8 +3410,7 @@ def test_process_pass_marker_count_mismatch_records_error(tmp_path):
         [counter_row(1, "kernel_a", 10, 20)],
     )
     workload = schema.Workload()
-    process_ml_api_trace_output(workload, str(workload_dir))
-    assert any(
-        isinstance(err, PassMarkerMismatchError) for err in workload.ml_api_trace_errors
-    )
-    assert "per-pass marker counts" in str(workload.ml_api_trace_errors[0])
+    with pytest.raises(SystemExit) as excinfo:
+        process_ml_api_trace_output(workload, str(workload_dir))
+    assert excinfo.value.code == 1
+    assert "per-pass marker counts" in messages[0]
