@@ -60,7 +60,7 @@ void allocTypedPaths(struct ncclTopoNode* node, int type, int count, int pathTyp
 {
     node->paths[type] =
         static_cast<struct ncclTopoLinkList*>(calloc(count, sizeof(struct ncclTopoLinkList)));
-    if (node->paths[type] == nullptr) return;
+    if (node->paths[type] == nullptr) abort();
     for (int i = 0; i < count; i++)
     {
         node->paths[type][i].type = pathType;
@@ -232,6 +232,8 @@ const std::unordered_map<std::string, std::string> kPxnLevel1Env = {
     {"NCCL_P2P_PXN_LEVEL", "1"},
     {"NCCL_PXN_DISABLE", "0"},
     {"NCCL_CROSS_NIC", "2"},
+    {"NCCL_NET_GDR_READ", "1"},
+    {"NCCL_NET_GDR_LEVEL", "SYS"},
 };
 
 const std::unordered_map<std::string, std::string> kPxnLevel0Env = {
@@ -398,7 +400,7 @@ TEST(P2pPxnLevel1NetId, GetPxnRanks_Level1PackedIdSucceeds)
 }
 
 // Same init path on the fused MNNVL shape: GetPxnRanks must report the
-// PATH_PXN intermediate. Pre-fix *dev yields proxyRank == kRank and an empty list.
+// PATH_PXN intermediate. Pre-fix this SIGSEGVs: GetPxnRanks passes dev == NULL.
 TEST(P2pPxnLevel1NetId, GetPxnRanks_Level1MnnvlHost0NicReturnsProxy)
 {
     RUN_ISOLATED_TEST_WITH_ENV(
