@@ -79,8 +79,9 @@ registry()
     return *_v;
 }
 
-thread_local std::unique_ptr<range_context_t> tl_range     = {};
-thread_local bool                             tl_replaying = false;
+thread_local std::unique_ptr<range_context_t>      tl_range           = {};
+thread_local bool                                  tl_replaying       = false;
+thread_local std::optional<rocprofiler_agent_id_t> tl_replaying_agent = std::nullopt;
 
 // kernel_object -> (kernarg segment size, alignment, parent code object), memoized. Resolving it
 // means walking the loaded code objects' symbols, which is far too slow to repeat per recorded
@@ -287,6 +288,18 @@ void
 set_this_thread_replaying(bool replaying)
 {
     tl_replaying = replaying;
+}
+
+std::optional<rocprofiler_agent_id_t>
+this_thread_replaying_agent()
+{
+    return tl_replaying_agent;
+}
+
+void
+set_this_thread_replaying_agent(std::optional<rocprofiler_agent_id_t> agent)
+{
+    tl_replaying_agent = agent;
 }
 
 range_context_t*

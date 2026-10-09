@@ -1016,7 +1016,12 @@ WriteInterceptor(const void* packets,
     // graph_launch_active from the gate declines the graph gracefully instead of aborting: it falls
     // through to the ordinary path and runs once, and the one-shot warning above already told the
     // tool. Non-graph single dispatches replay as usual below.
-    if(has_kernel_replay && pkt_count == 1 && num_dispatch_packets == 1 && !graph_launch_active)
+    // A range replay resubmits its passes through this interceptor; a single-dispatch range must
+    // not start a kernel replay inside the pass, which would take the agent's replay lock as a
+    // writer again on this thread (std::system_error, EDEADLK) and hand the tool a spurious CONFIG
+    // callback.
+    if(has_kernel_replay && pkt_count == 1 && num_dispatch_packets == 1 && !graph_launch_active &&
+       !range_replay::this_thread_replaying())
     {
         const auto thr_id           = corr_id->thread_idx;
         const auto internal_corr_id = corr_id->internal;
@@ -1191,12 +1196,19 @@ WriteInterceptor(const void* packets,
     // dispatch's device writes. Hold the per-agent SHARED lock across the submit below so a replay
     // writer waits for in-flight submits to finish and cannot open its window until we return,
     // while ordinary dispatches still run concurrently with each other. Gated on the replay
-    // services so non-replay runs take no lock at all, and skipped on a thread that is replaying a
-    // range: it already holds this same mutex as a writer. (The async GPU tail is handled by the
-    // replay window's agent-wide drain, not by this lock.)
+    // services so non-replay runs take no lock at all, and skipped for the agent whose range this
+    // thread is replaying: it already holds that agent's mutex as a writer. A dispatch this thread
+    // sends to any other agent still waits out that agent's replay window. (The async GPU tail is
+    // handled by the replay window's agent-wide drain, not by this lock.)
     std::optional<std::shared_lock<std::shared_mutex>> replay_reader_guard{};
-    if((has_kernel_replay || has_range_replay) && !range_replay::this_thread_replaying())
-        replay_reader_guard.emplace(agent_replay_mutex(queue.get_agent().get_rocp_agent()->id));
+    if(has_kernel_replay || has_range_replay)
+    {
+        const auto agent_id         = queue.get_agent().get_rocp_agent()->id;
+        const auto replaying_agent  = range_replay::this_thread_replaying_agent();
+        const bool own_range_window = range_replay::this_thread_replaying() &&
+                                      (!replaying_agent || *replaying_agent == agent_id);
+        if(!own_range_window) replay_reader_guard.emplace(agent_replay_mutex(agent_id));
+    }
 
     bool should_batch_packets = true;
     queue.signal_callback([&should_batch_packets](const auto& map) {

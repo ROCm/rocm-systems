@@ -29,6 +29,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <thread>
 
 namespace range_replay = ::rocprofiler::range_replay;
 
@@ -294,4 +295,24 @@ TEST(range_replay_state, code_object_unload_with_no_range_open_is_harmless)
     ASSERT_FALSE(range_replay::any_range_open());
     range_replay::note_code_object_unload();
     EXPECT_FALSE(range_replay::any_range_open());
+}
+
+// The replaying agent is per thread and only set for a replay window: the queue path relies on it
+// to skip the replay lock for that agent alone.
+TEST(range_replay_state, replaying_agent_is_thread_scoped)
+{
+    EXPECT_FALSE(range_replay::this_thread_replaying_agent().has_value());
+
+    range_replay::set_this_thread_replaying_agent(rocprofiler_agent_id_t{.handle = 42});
+    ASSERT_TRUE(range_replay::this_thread_replaying_agent().has_value());
+    EXPECT_EQ(range_replay::this_thread_replaying_agent()->handle, 42u);
+
+    bool other_thread_sees_it = true;
+    std::thread([&]() {
+        other_thread_sees_it = range_replay::this_thread_replaying_agent().has_value();
+    }).join();
+    EXPECT_FALSE(other_thread_sees_it);
+
+    range_replay::set_this_thread_replaying_agent(std::nullopt);
+    EXPECT_FALSE(range_replay::this_thread_replaying_agent().has_value());
 }

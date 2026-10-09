@@ -389,9 +389,11 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
     // Mark the thread as replaying for the duration: the queue path uses it to skip re-recording
     // the packets we submit and to skip the per-agent reader lock we already hold as a writer.
     set_this_thread_replaying(true);
+    set_this_thread_replaying_agent(ctx.agent_id);
     tl_submit_queue     = &queue;
     const auto _restore = common::scope_destructor{[]() {
         set_this_thread_replaying(false);
+        set_this_thread_replaying_agent(std::nullopt);
         tl_submit_queue = nullptr;
     }};
 

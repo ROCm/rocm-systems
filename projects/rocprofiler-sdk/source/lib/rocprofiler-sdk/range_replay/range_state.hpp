@@ -50,6 +50,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace rocprofiler
@@ -199,6 +200,15 @@ this_thread_replaying();
 
 void
 set_this_thread_replaying(bool replaying);
+
+// The agent whose range this thread is replaying, recorded with set_this_thread_replaying_agent()
+// for the replay window. The queue path skips the per-agent replay lock only for that agent: a
+// dispatch this thread sends elsewhere must still wait out that agent's own replay window.
+std::optional<rocprofiler_agent_id_t>
+this_thread_replaying_agent();
+
+void
+set_this_thread_replaying_agent(std::optional<rocprofiler_agent_id_t> agent);
 
 // This thread's open range, or nullptr.
 range_context_t*
