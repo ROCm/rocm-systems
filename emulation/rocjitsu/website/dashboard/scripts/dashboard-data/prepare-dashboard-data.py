@@ -3,9 +3,9 @@
 # SPDX-License-Identifier: MIT
 """Build one schema-2 run file and its catalog from recorded benchmark executions.
 
-This does not create or modify index.json or metadata.json.
-publish-dashboard-run.py copies the built files onto a publication snapshot
-and updates that snapshot's index. Metadata is bundled website configuration.
+This does not create or modify index.json or metadata.json. The publication
+workflow copies the candidate files into the results branch and updates the
+index separately. Metadata is bundled website configuration.
 
 Completed results use the median of accepted timing_results_s samples. Failed
 and timed-out results always have null duration, even with partial samples:

@@ -15,7 +15,7 @@ import unittest
 
 HERE = Path(__file__).resolve().parent
 SCRIPT = HERE.parent / 'prepare-dashboard-data.py'
-PUBLISH = HERE.parent / 'publish-dashboard-run.py'
+UPDATE = HERE.parent / 'update-dashboard-index.py'
 SHA = 'a' * 40
 CORPUS = 'b' * 40
 
@@ -76,22 +76,21 @@ class PrepareTests(unittest.TestCase):
 
     def invoke(self, inputs=None, run_id='attempt-1', extra=(), env=None):
         extra = list(extra)
-        publication = self.data
+        destination = self.data
         filtered = []
         index = 0
         while index < len(extra):
             if extra[index] == '--data-dir':
-                publication = Path(extra[index + 1])
+                destination = Path(extra[index + 1])
                 index += 2
                 continue
             filtered.append(extra[index])
             index += 1
-        staging = Path(tempfile.mkdtemp(dir=self.root))
         args = [
             sys.executable,
             str(SCRIPT),
             '--data-dir',
-            str(staging),
+            str(destination),
             '--run-id',
             run_id,
             '--expected-sha',
@@ -111,24 +110,7 @@ class PrepareTests(unittest.TestCase):
             path = self.root / f'raw-{i}.json'
             path.write_text(json.dumps(value))
             args.extend(['--raw-run', str(path)])
-        built = subprocess.run(args + filtered, text=True, capture_output=True, env=env)
-        if built.returncode != 0:
-            return built
-        self.assertFalse((staging / 'index.json').exists())
-        self.assertFalse((staging / 'metadata.json').exists())
-        return subprocess.run(
-            [
-                sys.executable,
-                str(PUBLISH),
-                '--from',
-                str(staging),
-                '--data-dir',
-                str(publication),
-            ],
-            text=True,
-            capture_output=True,
-            env=env,
-        )
+        return subprocess.run(args + filtered, text=True, capture_output=True, env=env)
 
     def read(self, name):
         return json.loads((self.data / name).read_text())
@@ -144,13 +126,12 @@ class PrepareTests(unittest.TestCase):
         }
 
     def test_cli_omits_unused_website_metadata_arguments(self):
-        for script in (SCRIPT, PUBLISH):
-            result = subprocess.run(
-                [sys.executable, str(script), '--help'], text=True, capture_output=True
-            )
-            self.assert_ok(result)
-            self.assertNotIn('--repository', result.stdout)
-            self.assertNotIn('--is-beta', result.stdout)
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), '--help'], text=True, capture_output=True
+        )
+        self.assert_ok(result)
+        self.assertNotIn('--repository', result.stdout)
+        self.assertNotIn('--is-beta', result.stdout)
 
     def test_cli_requires_raw_runs_not_a_prepared_dataset(self):
         prepared = self.root / 'prepared'
@@ -219,9 +200,8 @@ class PrepareTests(unittest.TestCase):
         # An empty PATH also prevents platform-default executable lookup.
         environment['PATH'] = ''
         self.assert_ok(self.invoke(env=environment))
-        self.assertEqual(
-            self.read('index.json')['runFiles'], ['runs/default-branch/attempt-1.json']
-        )
+        self.assertTrue((self.data / 'runs/default-branch/attempt-1.json').is_file())
+        self.assertFalse((self.data / 'index.json').exists())
 
     def test_produces_schema_two_consumable_median_results(self):
         self.assert_ok(self.invoke())
@@ -229,7 +209,7 @@ class PrepareTests(unittest.TestCase):
         run = self.read('runs/default-branch/attempt-1.json')
         self.assertIs(type(run['schemaVersion']), int)
         self.assertEqual(run['schemaVersion'], 2)
-        self.assertNotIn('schemaVersion', self.read('index.json'))
+        self.assertFalse((self.data / 'index.json').exists())
         self.assertNotIn('schemaVersion', self.read(run['testCatalog']))
         self.assertEqual(run['source']['commit'], SHA)
         self.assertEqual(run['execution']['completedAt'], '2026-01-01T01:01:00Z')
@@ -238,7 +218,16 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(config['results'][0]['durationSeconds'], 2)
         self.assertEqual(config['results'][0]['error'], None)
         self.assertEqual(
-            self.read('index.json')['runFiles'], ['runs/default-branch/attempt-1.json']
+            sorted(
+                path.relative_to(self.data).as_posix()
+                for path in self.data.rglob('*.json')
+            ),
+            sorted(
+                [
+                    'runs/default-branch/attempt-1.json',
+                    run['testCatalog'],
+                ]
+            ),
         )
 
     def test_uppercase_git_shas_are_published_in_lowercase(self):
@@ -383,7 +372,7 @@ class PrepareTests(unittest.TestCase):
             )
         )
 
-    def test_history_retry_and_definition_changes_are_immutable(self):
+    def test_candidate_retry_and_definition_changes_are_immutable(self):
         self.assert_ok(self.invoke())
         original = self.snapshot()
         self.assert_ok(self.invoke())
@@ -408,14 +397,6 @@ class PrepareTests(unittest.TestCase):
         self.assertNotEqual(
             old['configurations'][0]['results'][0]['testId'],
             changed['configurations'][0]['results'][0]['testId'],
-        )
-        self.assertEqual(
-            self.read('index.json')['runFiles'],
-            [
-                'runs/default-branch/attempt-1.json',
-                'runs/default-branch/attempt-2.json',
-                'runs/default-branch/attempt-3.json',
-            ],
         )
         self.assertEqual(
             (self.data / 'runs/default-branch/attempt-1.json').read_bytes(),
@@ -579,9 +560,7 @@ class PrepareTests(unittest.TestCase):
         self.assertIn('Duplicate JSON key', result.stderr)
         self.assertFalse(self.data.exists())
 
-    def test_stale_metadata_is_ignored_and_history_preserved_for_external_validation(
-        self,
-    ):
+    def test_metadata_and_unrelated_runs_are_not_read_or_updated(self):
         self.data.mkdir()
         metadata = self.data / 'metadata.json'
         metadata.write_bytes(b'not even JSON: stale website settings\n')
@@ -598,48 +577,24 @@ class PrepareTests(unittest.TestCase):
             json.dumps(old_run)
         )
         before = self.snapshot()
-        # The separate workflow validator owns full wire-schema checks. Preparation
-        # must preserve existing run bytes, including invalid historical results.
+        # Full wire-schema validation is separate. Preparing a new candidate does
+        # not inspect or rewrite unrelated run history.
         self.assert_ok(self.invoke(run_id='attempt-2'))
         self.assertEqual(
             (self.data / 'runs/default-branch/attempt-1.json').read_bytes(),
             before['runs/default-branch/attempt-1.json'],
         )
-        self.assertEqual(
-            self.read('index.json')['runFiles'],
-            [
-                'runs/default-branch/attempt-1.json',
-                'runs/default-branch/attempt-2.json',
-            ],
-        )
+        self.assertTrue((self.data / 'runs/default-branch/attempt-2.json').is_file())
+        self.assertFalse((self.data / 'index.json').exists())
 
-    def test_staged_entire_history_checks_source_timestamp_conflicts(self):
+    def test_candidate_resources_are_reused_but_conflicts_rejected(self):
         self.assert_ok(self.invoke())
-        before = self.snapshot()
-        record = raw()
-        record['provenance']['rocjitsu'][
-            'rocjitsu_commit_timestamp'
-        ] = '2025-12-31T00:00:00Z'
-        result = self.invoke([record], run_id='attempt-2')
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('conflicting committedAt', result.stderr)
-        self.assertEqual(self.snapshot(), before)
-
-    def test_orphan_immutable_resources_are_reused_but_conflicts_rejected(self):
-        self.assert_ok(self.invoke())
-        index = self.read('index.json')
-        index['runFiles'] = []
-        (self.data / 'index.json').write_text(json.dumps(index))
         existing_run = (self.data / 'runs/default-branch/attempt-1.json').read_bytes()
         self.assert_ok(self.invoke())
-        self.assertEqual(
-            self.read('index.json')['runFiles'], ['runs/default-branch/attempt-1.json']
-        )
         self.assertEqual(
             (self.data / 'runs/default-branch/attempt-1.json').read_bytes(),
             existing_run,
         )
-        (self.data / 'index.json').write_text(json.dumps(index))
         run = self.read('runs/default-branch/attempt-1.json')
         catalog = self.read(run['testCatalog'])
         catalog['tests'][0]['name'] = 'Corrupted orphan'
@@ -735,16 +690,11 @@ class PrepareTests(unittest.TestCase):
                 extra=arguments + ('https://github.com/ROCm/rocm-systems/pull/1',)
             )
         )
-        self.assert_ok(
-            subprocess.run(
-                [
-                    'node',
-                    str(HERE.parent.parent / 'validate-dashboard-data.mjs'),
-                    str(self.data),
-                ],
-                capture_output=True,
-                text=True,
-            )
+        self.assertEqual(
+            self.read('runs/side-branches/attempt-1.json')['source']['pullRequest'][
+                'url'
+            ],
+            'https://github.com/ROCm/rocm-systems/pull/1',
         )
 
     def test_side_branch_source_base_without_pull_request_is_published(self):
@@ -816,9 +766,7 @@ class PrepareTests(unittest.TestCase):
                 [value], extra=('--branch', 'feature/example', '--trigger', 'manual')
             )
         )
-        self.assertEqual(
-            self.read('index.json')['runFiles'], ['runs/side-branches/attempt-1.json']
-        )
+        self.assertFalse((self.data / 'index.json').exists())
         run = self.read('runs/side-branches/attempt-1.json')
         self.assertEqual(run['execution']['trigger'], 'manual')
         self.assertEqual(run['source']['branch'], 'feature/example')
@@ -948,14 +896,21 @@ def test_export_prepared_data_for_workflow(tmp_path):
         assert result.returncode == 0, result.stderr
         assert not (build / 'index.json').exists()
         assert not (build / 'metadata.json').exists()
+        run_dir = 'default-branch' if branch == 'develop' else 'side-branches'
+        run_path = f'runs/{run_dir}/{run_id}.json'
+        run = json.loads((build / run_path).read_text())
+        for candidate in (Path(run_path), Path(run['testCatalog'])):
+            target = destination / candidate
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(build / candidate, target)
         result = subprocess.run(
             [
                 sys.executable,
-                str(PUBLISH),
-                '--from',
-                str(build),
+                str(UPDATE),
                 '--data-dir',
                 str(destination),
+                '--run-path',
+                run_path,
             ],
             capture_output=True,
             text=True,

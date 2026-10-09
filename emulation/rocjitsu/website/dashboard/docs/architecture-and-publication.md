@@ -77,16 +77,18 @@ The benchmark workflow runs on relevant develop pushes or manual dispatch; its �
 Run ST and MT benchmarks
   → upload raw result directories as a GitHub Actions artifact
   → publish job downloads that artifact
+  → checkout gh-pages-rocjitsu and the source dashboard scripts
   → prepare-dashboard-data.py (once)
-  → fetch latest gh-pages-rocjitsu
-  → publish-dashboard-run.py
+  → copy the run and catalog without overwriting existing files
+  → update-dashboard-index.py
   → validate-dashboard-data.mjs
   → Git commit + push
 ```
 
-- **Prepare:** validate raw ST/MT results and provenance, lowercase commit SHAs, calculate median completed timings, and generate one schema-2 run plus its catalog. Catalog IDs are content hashes.
-- **Stage:** reuse/add the catalog, add the run, then update `index.json` last while preserving history.
-- **Publish:** validate the staged dataset before pushing. If the branch moves, fetch its latest state and retry staging/pushing the same prepared files—not the benchmarks.
+- **Prepare:** validate raw ST/MT results and provenance, lowercase commit SHAs, calculate median completed timings, and generate one schema-2 run plus its content-addressed catalog in an isolated build directory.
+- **Copy:** place the run and catalog at their fixed publication paths without overwriting them. An identical existing file is an idempotent retry; different content at the same path is an error.
+- **Index:** append the run path when absent. An already indexed run preserves `index.json` bytes and `generatedAt` exactly.
+- **Publish:** validate the complete dataset, stage only the index, run, and catalog, then commit and push once when the staged diff is nonempty.
 
 The Actions artifact only transfers raw results between jobs. The Git push makes dashboard JSON available.
 

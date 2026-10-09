@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { isExcludedPluginRun } from '../src/data/runSchema.js';
-import { readFile, realpath } from 'node:fs/promises';
+import { lstat, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
@@ -11,8 +11,20 @@ import {
   validatePublishedDashboardData,
 } from '../src/data/dashboardValidation.js';
 
+async function rejectSymbolicLinks(file, root) {
+  let current = path.resolve(file);
+  while (true) {
+    if ((await lstat(current)).isSymbolicLink()) {
+      throw new Error(`Resource path contains a symbolic link: ${current}`);
+    }
+    if (current === root) return;
+    current = path.dirname(current);
+  }
+}
+
 async function readJson(file, label, root) {
   try {
+    await rejectSymbolicLinks(file, root);
     const resolved = await realpath(file);
     const relative = path.relative(root, resolved);
     if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
@@ -25,7 +37,11 @@ async function readJson(file, label, root) {
 }
 
 export async function validateDashboardDataDirectory(directory) {
-  const root = await realpath(path.resolve(directory));
+  const requestedRoot = path.resolve(directory);
+  if ((await lstat(requestedRoot)).isSymbolicLink()) {
+    throw new Error(`Dashboard data directory is a symbolic link: ${requestedRoot}`);
+  }
+  const root = await realpath(requestedRoot);
   const index = await readJson(path.join(root, 'index.json'), 'dashboard data index', root);
 
   validatePublishedManifest(index);

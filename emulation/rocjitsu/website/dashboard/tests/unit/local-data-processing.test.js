@@ -71,7 +71,7 @@ test('local validation rejects symlink escapes and invalid snapshots never creat
     const outside = path.join(root, 'outside.json');
     await writeFile(outside, JSON.stringify(source.runs[0]));
     await rm(runPath); await symlink(outside, runPath);
-    await expect(validateDashboardDataDirectory(directory)).rejects.toThrow(/outside.*data directory/i);
+    await expect(validateDashboardDataDirectory(directory)).rejects.toThrow(/symbolic link/i);
     const output = path.join(root, 'must-not-exist.json');
     await expect(processing.processDashboardDataDirectory(directory, { output })).rejects.toThrow();
     await expect(access(output)).rejects.toThrow();

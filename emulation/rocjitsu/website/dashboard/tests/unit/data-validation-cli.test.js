@@ -1,4 +1,6 @@
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  cp, mkdtemp, readFile, rename, rm, symlink, writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,3 +51,30 @@ test('rejects generated data that the website also rejects', async () => {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
 });
+
+test.each(['run file', 'run directory', 'catalog file'])(
+  'rejects a symbolic-link %s inside the publication',
+  async (resource) => {
+    const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'rocjitsu-dashboard-data-'));
+    try {
+      await cp(fixtureDataDirectory, temporaryDirectory, { recursive: true });
+      const index = JSON.parse(await readFile(path.join(temporaryDirectory, 'index.json'), 'utf8'));
+      const runPath = path.join(temporaryDirectory, index.runFiles[0]);
+      const run = JSON.parse(await readFile(runPath, 'utf8'));
+      const selected = resource === 'run file'
+        ? runPath
+        : resource === 'run directory'
+          ? path.dirname(runPath)
+          : path.join(temporaryDirectory, run.testCatalog);
+      const target = `${selected}-target`;
+      await rename(selected, target);
+      await symlink(path.basename(target), selected, resource === 'run directory' ? 'dir' : 'file');
+
+      await expect(validateDashboardDataDirectory(temporaryDirectory)).rejects.toThrow(
+        /symbolic link/i,
+      );
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  },
+);

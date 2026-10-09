@@ -275,9 +275,9 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           path: publication
-          ref: ${{ github.sha }}
+          ref: ${{ env.RESULTS_BRANCH }}
 
-      - name: Checkout dashboard publisher and validator
+      - name: Checkout dashboard scripts and validator
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ROCm/rocm-systems
@@ -296,14 +296,6 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Test dashboard data preparation
-        run: |
-          python -m venv "${RUNNER_TEMP}/dashboard-tests-venv"
-          "${RUNNER_TEMP}/dashboard-tests-venv/bin/python" -m pip install pytest
-          "${RUNNER_TEMP}/dashboard-tests-venv/bin/python" -m pytest \
-            dashboard/emulation/rocjitsu/website/dashboard/scripts/dashboard-data/tests \
-            -v
-
       - name: Publish dashboard-ready result
         working-directory: publication
         run: |
@@ -311,14 +303,19 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           RUN_ID="github-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}"
+          if [[ "${BENCHMARK_BRANCH}" == "develop" ]]; then
+            RUN_PATH="runs/default-branch/${RUN_ID}.json"
+          else
+            RUN_PATH="runs/side-branches/${RUN_ID}.json"
+          fi
           TRIGGER=auto
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             TRIGGER=manual
           fi
 
-          # Build the run and catalog once. Retries only republish that build
-          # onto the latest results branch.
           BUILD_DIR="${RUNNER_TEMP}/dashboard-built"
+          DATA_DIR="${GITHUB_WORKSPACE}/publication/rocjitsu-dashboard/data"
+          SCRIPTS_DIR="${GITHUB_WORKSPACE}/dashboard/emulation/rocjitsu/website/dashboard/scripts"
           PREPARE_ARGS=(
             --raw-run "${RESULTS_DOWNLOAD_DIR}/${SINGLE_THREAD_MODE}/run.json"
             --raw-run "${RESULTS_DOWNLOAD_DIR}/${MULTI_THREAD_MODE}/run.json"
@@ -343,56 +340,48 @@ jobs:
               --pull-request-url "${SOURCE_PULL_REQUEST_URL}"
             )
           fi
-          python "${GITHUB_WORKSPACE}/dashboard/emulation/rocjitsu/website/dashboard/scripts/dashboard-data/prepare-dashboard-data.py" \
+          python "${SCRIPTS_DIR}/dashboard-data/prepare-dashboard-data.py" \
             "${PREPARE_ARGS[@]}"
 
-          MAX_ATTEMPTS=20
-          for ATTEMPT in $(seq 1 "${MAX_ATTEMPTS}"); do
-            # Fetch the latest results branch and append this run to its index.
-            # A failed push means that tip moved.
-            git reset --hard HEAD
-            git clean -ffd
+          CATALOGS=("${BUILD_DIR}"/test-catalogs/*.json)
+          if [[ ${#CATALOGS[@]} -ne 1 || ! -f "${CATALOGS[0]}" ]]; then
+            echo "::error::Expected exactly one prepared test catalog."
+            exit 1
+          fi
+          CATALOG_PATH="test-catalogs/$(basename "${CATALOGS[0]}")"
 
-            set +e
-            git ls-remote --exit-code --heads origin \
-              "refs/heads/${RESULTS_BRANCH}" >/dev/null
-            REMOTE_STATUS=$?
-            set -e
-            if [[ "${REMOTE_STATUS}" == 0 ]]; then
-              git fetch --no-tags origin \
-                "+refs/heads/${RESULTS_BRANCH}:refs/remotes/origin/${RESULTS_BRANCH}"
-              git switch --detach "refs/remotes/origin/${RESULTS_BRANCH}"
-            elif [[ "${REMOTE_STATUS}" == 2 ]]; then
-              git switch --orphan \
-                "publish-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${ATTEMPT}"
-              git rm -rf --ignore-unmatch .
-            else
-              exit "${REMOTE_STATUS}"
-            fi
-
-            python "${GITHUB_WORKSPACE}/dashboard/emulation/rocjitsu/website/dashboard/scripts/dashboard-data/publish-dashboard-run.py" \
-                --from "${BUILD_DIR}" \
-                --data-dir "${GITHUB_WORKSPACE}/publication/rocjitsu-dashboard/data"
-
-            node "${GITHUB_WORKSPACE}/dashboard/emulation/rocjitsu/website/dashboard/scripts/validate-dashboard-data.mjs" \
-              "${GITHUB_WORKSPACE}/publication/rocjitsu-dashboard/data"
-
-            git add rocjitsu-dashboard/data
-            if git diff --cached --quiet; then
-              echo "Dashboard run ${RUN_ID} is already published"
-              exit 0
-            fi
-            git commit --signoff \
-              -m "Publish rocjitsu benchmark run ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
-            if git push origin "HEAD:refs/heads/${RESULTS_BRANCH}"; then
-              exit 0
-            fi
-            if [[ "${ATTEMPT}" == "${MAX_ATTEMPTS}" ]]; then
+          for PATH_COMPONENT in \
+            "${GITHUB_WORKSPACE}/publication/rocjitsu-dashboard" \
+            "${DATA_DIR}" \
+            "${DATA_DIR}/runs" \
+            "$(dirname "${DATA_DIR}/${RUN_PATH}")" \
+            "${DATA_DIR}/${RUN_PATH}" \
+            "${DATA_DIR}/test-catalogs" \
+            "${DATA_DIR}/${CATALOG_PATH}"; do
+            if [[ -L "${PATH_COMPONENT}" ]]; then
+              echo "::error::Dashboard publication path is a symbolic link: ${PATH_COMPONENT}"
               exit 1
             fi
-            DELAY=$((ATTEMPT * 2))
-            if ((DELAY > 30)); then
-              DELAY=30
-            fi
-            sleep "$((DELAY + RANDOM % 5))"
           done
+
+          mkdir -p "$(dirname "${DATA_DIR}/${RUN_PATH}")" "${DATA_DIR}/test-catalogs"
+          cp -n "${BUILD_DIR}/${RUN_PATH}" "${DATA_DIR}/${RUN_PATH}"
+          cmp -s "${BUILD_DIR}/${RUN_PATH}" "${DATA_DIR}/${RUN_PATH}"
+          cp -n "${CATALOGS[0]}" "${DATA_DIR}/${CATALOG_PATH}"
+          cmp -s "${CATALOGS[0]}" "${DATA_DIR}/${CATALOG_PATH}"
+
+          python "${SCRIPTS_DIR}/dashboard-data/update-dashboard-index.py" \
+            --data-dir "${DATA_DIR}" \
+            --run-path "${RUN_PATH}"
+          node "${SCRIPTS_DIR}/validate-dashboard-data.mjs" "${DATA_DIR}"
+
+          git add "rocjitsu-dashboard/data/index.json" \
+            "rocjitsu-dashboard/data/${RUN_PATH}" \
+            "rocjitsu-dashboard/data/${CATALOG_PATH}"
+          if git diff --cached --quiet; then
+            echo "Dashboard run ${RUN_ID} is already published"
+            exit 0
+          fi
+          git commit --signoff \
+            -m "Publish rocjitsu benchmark run ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+          git push origin "HEAD:refs/heads/${RESULTS_BRANCH}"
