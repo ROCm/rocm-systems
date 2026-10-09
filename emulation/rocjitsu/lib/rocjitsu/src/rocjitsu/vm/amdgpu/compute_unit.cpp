@@ -682,9 +682,9 @@ bool ComputeUnitCore::named_barrier_leave(Wavefront &wf) {
 }
 
 // Global Wave Sync (GWS) is device-global and shared across the CUs that run a
-// dispatch; all state and scheduling policy live in GwsDevice (see gws_device.h
-// / gws_device.cpp for the authoritative description). These forward to the
-// store this CU participates in.
+// dispatch; all state and scheduling policy live in GwsDevice (see its class doc
+// in gws_device.h for the authoritative description). These forward to the store
+// this CU participates in.
 void ComputeUnitCore::gws_init(Wavefront &wf, uint32_t rid, uint32_t count) {
   gws_device_->init(wf, rid, count);
 }

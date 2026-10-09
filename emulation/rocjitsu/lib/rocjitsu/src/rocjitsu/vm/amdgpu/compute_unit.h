@@ -424,7 +424,7 @@ public:
   /// The CU registers itself with the store so its waves participate in shared
   /// wake and deadlock-escape.
   void set_gws_device(GwsDevice *device) {
-    GwsDevice *replacement = device ? device : default_gws_device_.get();
+    GwsDevice *replacement = device ? device : &default_gws_device_;
     if (replacement == gws_device_)
       return;
     gws_device_->unregister_compute_unit(this);
@@ -459,29 +459,19 @@ public:
   /// @brief Leave the wave's currently joined named barrier.
   bool named_barrier_leave(Wavefront &wf);
 
+  // GWS hooks called by the generated DS execute bodies. These forward to the
+  // device-global GWS store this CU participates in; see GwsDevice (gws_device.h)
+  // for the authoritative scheduling policy.
   /// @brief Seed a GWS resource's barrier count / semaphore credits.
-  /// @details Forwards to the device-global GWS store (see GwsDevice); state is
-  /// shared across all CUs of the device and persists across dispatches.
   void gws_init(Wavefront &wf, uint32_t rid, uint32_t count);
-
-  /// @brief Arrive at a GWS barrier. Parks the wave when the participant set is
-  /// provably resident in the dispatch and more arrivals are pending; the final
-  /// arrival releases the parked peers (on any CU). Non-resident/degenerate
-  /// counts fall back to a non-blocking structural no-op.
+  /// @brief Arrive at a GWS barrier (may park the wave).
   void gws_barrier_arrive(Wavefront &wf, uint32_t rid, uint32_t count);
-
-  /// @brief Signal (V) a GWS semaphore: add one credit, release one waiter
-  /// (parked by any wave of the process, on any CU).
+  /// @brief Signal (V) a GWS semaphore.
   void gws_sema_v(Wavefront &wf, uint32_t rid);
-
-  /// @brief Wait (P) on a GWS semaphore: consume a credit, else park until any
-  /// wave of the process signals the shared resource.
+  /// @brief Wait (P) on a GWS semaphore (may park the wave).
   void gws_sema_p(Wavefront &wf, uint32_t rid);
-
-  /// @brief Bulk-signal (BR) a GWS semaphore: add @p count credits and release
-  /// up to that many waiters.
+  /// @brief Bulk-signal (BR) a GWS semaphore by @p count credits.
   void gws_sema_br(Wavefront &wf, uint32_t rid, uint32_t count);
-
   /// @brief Release every wave parked on a GWS resource.
   void gws_sema_release_all(Wavefront &wf, uint32_t rid);
 
@@ -1439,11 +1429,11 @@ protected:
   /// @brief Device-global GWS resource store (see GwsDevice).
   /// @details GWS state is device-global, matching hardware: the store is shared
   /// across every CU that can run a dispatch (via set_gws_device) and persists
-  /// across dispatches. Standalone CUs keep a private default store so single-CU
+  /// across dispatches. Standalone CUs use the embedded default store so single-CU
   /// use needs no wiring. The store scans this CU's wfs_ / active_wgs_ for shared
   /// wakeups and the dispatch-wide quiescence backstop, so it is a friend.
-  std::unique_ptr<GwsDevice> default_gws_device_ = std::make_unique<GwsDevice>();
-  GwsDevice *gws_device_ = default_gws_device_.get();
+  GwsDevice default_gws_device_;
+  GwsDevice *gws_device_ = &default_gws_device_;
 
   uint64_t shared_aperture_base_ = 0;
   uint64_t shared_aperture_limit_ = 0;

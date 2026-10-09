@@ -20,6 +20,10 @@ class Wavefront;
 
 /// @brief Device-global Global Wave Sync (GWS) resource store shared by CUs.
 ///
+/// This class is the single authoritative description of the GWS scheduling
+/// policy; other GWS sites (ComputeUnitCore's forwarding hooks, the
+/// implementation file) carry only brief API notes and reference this doc.
+///
 /// @details Hardware GWS resources are a small fixed set of global registers,
 /// allocated per process and shared by every wave on the device regardless of
 /// which compute unit or dispatch it belongs to. Unlike @c s_barrier (which
@@ -31,20 +35,61 @@ class Wavefront;
 ///
 /// This object models that scope. One resource table is kept per @c process_id
 /// (the 6-bit resource id selects within it), shared across every registered CU
-/// and never torn down on workgroup or dispatch retirement. A mutex serializes
-/// all transitions so CUs that step concurrently observe a consistent resource.
-/// Wakeups and the deadlock-escape quiescence check both span all registered CUs
-/// (a signal/arrival on one CU releases a waiter parked on another; counting
-/// only local residents cannot establish dispatch-wide quiescence).
+/// and never torn down on workgroup or dispatch retirement. A signal/arrival
+/// from any wave reaches the same entry and wakes a waiter parked by any other
+/// wave (any workgroup, any CU, even a later dispatch), so the rendezvous is
+/// event-driven and needs no producer-identity guess.
 ///
-/// Cross-CU wavefront state transitions performed by a wakeup are serialized by
-/// this object's mutex, which is the synchronization boundary for the functional
-/// execution model the emulator uses for GWS.
+/// Per-operation policy:
+///  * Barrier: hardware/LLVM program the resource with (participants - 1); the
+///    CDNA/RDNA barrier pseudocode queues an arrival while the counter is
+///    positive and, on the arrival that observes zero, releases every queued
+///    arrival and reloads the counter from that arrival's own value (so
+///    consecutive phases may differ in size). A blocking arrival is gated on the
+///    outstanding counter: the still-required participant set is (counter + 1),
+///    and it parks only when that whole set is provably resident in the dispatch
+///    (summed across all CUs); larger sets fall back to a non-blocking structural
+///    no-op. The gate is overflow-safe for counts near UINT32_MAX.
+///  * Semaphore: V/BR add credits and wake queued P waiters; P consumes a credit
+///    or parks until any wave of the process signals the resource.
+///  * Deadlock-escape (@ref escape_deadlocks): a parked GWS wave is released only
+///    when every non-halted wave of the dispatch -- across all CUs -- is already
+///    blocked in GWS_WAIT or at an s_barrier (true quiescence, where no wave can
+///    ever signal/arrive). This is a genuine-deadlock backstop (the step budget
+///    must terminate); it never fires while any wave can still run and signal.
+///
+/// Synchronization: a mutex serializes all transitions so CUs that step
+/// concurrently observe a consistent resource. Cross-CU wavefront state
+/// transitions performed by a wakeup are serialized by that same mutex, which is
+/// the synchronization boundary for the functional execution model the emulator
+/// uses for GWS.
 class GwsDevice {
 public:
   /// @brief Number of GWS resources (6-bit resource id space).
   static constexpr uint32_t kResourceCount = 64;
 
+  /// @brief Register a CU so its waves participate in shared wake/quiescence.
+  void register_compute_unit(ComputeUnitCore *cu);
+  /// @brief Stop routing shared wake/quiescence to a CU being destroyed.
+  void unregister_compute_unit(ComputeUnitCore *cu);
+
+  /// @brief Seed a GWS resource's barrier count / semaphore credits.
+  void init(Wavefront &wf, uint32_t rid, uint32_t count);
+  /// @brief Arrive at a GWS barrier (may park the wave). See class doc for policy.
+  void barrier_arrive(Wavefront &wf, uint32_t rid, uint32_t count);
+  /// @brief Signal (V) a semaphore: add one credit, release one waiter (any CU).
+  void sema_v(Wavefront &wf, uint32_t rid);
+  /// @brief Wait (P) on a semaphore: consume a credit, else park (any CU wakes it).
+  void sema_p(Wavefront &wf, uint32_t rid);
+  /// @brief Bulk-signal (BR): add @p count credits and release up to that many.
+  void sema_br(Wavefront &wf, uint32_t rid, uint32_t count);
+  /// @brief Release every wave parked on a resource and clear its credits.
+  void sema_release_all(Wavefront &wf, uint32_t rid);
+  /// @brief Genuine-deadlock backstop; see class doc. Releases parked GWS waves
+  /// of any dispatch that is quiescent across all registered CUs.
+  void escape_deadlocks();
+
+private:
   /// @brief Per-resource barrier/semaphore state.
   struct Resource {
     /// Live barrier counter: decremented per arrival, reloaded from the releasing
@@ -54,35 +99,6 @@ public:
     bool armed = false;   ///< Whether the barrier counter has been seeded.
   };
 
-  /// @brief Register a CU so its waves participate in shared wake/quiescence.
-  void register_compute_unit(ComputeUnitCore *cu);
-  /// @brief Stop routing shared wake/quiescence to a CU being destroyed.
-  void unregister_compute_unit(ComputeUnitCore *cu);
-
-  /// @brief Seed a GWS resource's barrier count / semaphore credits.
-  void init(Wavefront &wf, uint32_t rid, uint32_t count);
-
-  /// @brief Arrive at a GWS barrier. Parks the wave while the participant set is
-  /// provably resident in the dispatch and more arrivals are pending; the final
-  /// arrival releases parked peers on any CU. Non-resident/degenerate counts fall
-  /// back to a non-blocking structural no-op.
-  void barrier_arrive(Wavefront &wf, uint32_t rid, uint32_t count);
-
-  /// @brief Signal (V) a semaphore: add one credit, release one waiter (on any CU).
-  void sema_v(Wavefront &wf, uint32_t rid);
-  /// @brief Wait (P) on a semaphore: consume a credit, else park until any CU signals.
-  void sema_p(Wavefront &wf, uint32_t rid);
-  /// @brief Bulk-signal (BR): add @p count credits and release up to that many waiters.
-  void sema_br(Wavefront &wf, uint32_t rid, uint32_t count);
-  /// @brief Release every wave parked on a resource and clear its credits.
-  void sema_release_all(Wavefront &wf, uint32_t rid);
-
-  /// @brief Genuine-deadlock backstop: release parked GWS waves of any dispatch
-  /// whose every non-halted wave (across all registered CUs) is already blocked
-  /// in GWS_WAIT or at an s_barrier, so no wave can ever reach a signal/arrival.
-  void escape_deadlocks();
-
-private:
   /// @brief Total resident (not-yet-retired) waves of a dispatch across all CUs.
   /// Used as the GWS barrier's provable-participant bound. Requires @ref mutex_.
   uint32_t dispatch_resident_waves(uint32_t dispatch_id) const;
