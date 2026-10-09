@@ -27,6 +27,10 @@
 # a captured no-op is exactly what the matrix needs to observe — and asserts
 # every API's replay class still matches what HRR's generator declares.
 #
+# hrr_capture_access_test.cc covers what capture does with the file system: a
+# private archive, no writes through planted symbolic and hard links, and no
+# wait on a planted FIFO.
+#
 # hrr_api_matrix_expectations.h is GENERATED from the pair api_classes.json +
 # api_matrix.yaml, both in ../../tools/api-matrix.  Regenerate after an upstream
 # classification change with:
@@ -35,6 +39,10 @@
 # hrr_kernel_args_test.cc covers what replay does with a pointer-typed kernel
 # argument no allocation explains: a sentinel keeps its value, an
 # address-shaped lost pointer becomes null. Contains its own hidden
+# [.][hrr-direct] workload.
+#
+# hrr_va_placement_test.cc covers capture-address placement: a device pointer
+# stored in device memory by an H2D copy (ROCM-31827). Contains its own hidden
 # [.][hrr-direct] workload.
 #
 # hrr_fatbin_header_test.cc covers which registered fat binaries capture stores:
@@ -47,13 +55,17 @@
 # fake a small file system under HIP_HRR_CAPTURE_OUTPUT when the test sets
 # HRR_TEST_FAKE_FS_TOTAL; every other call goes on to libc. Contains its own
 # hidden [.][hrr-direct] workloads. POSIX only.
+#
+# hrr_clock_hook.cc defines clock_gettime for the binary, so a workload can run
+# a hook on one thread's clock reads, as the capture writer timestamps a record.
+# POSIX only.
 
 # The workload translation units carry __global__ kernels, device built-ins
 # (blockIdx/blockDim/threadIdx), hipLaunchKernelGGL, and HIP_SYMBOL, so they must
 # be compiled with the HIP device toolchain rather than a plain C++ compiler.
-# hrr_roundtrip_test.cc, hrr_api_matrix_test.cc and hrr_secure_exec_test.cc are
-# host-only drivers (subprocess orchestration + hipRTC host calls) and stay plain
-# C++ translation units.
+# hrr_roundtrip_test.cc, hrr_api_matrix_test.cc, hrr_capture_access_test.cc and
+# hrr_secure_exec_test.cc are host-only drivers (subprocess orchestration +
+# host-side HIP and hipRTC calls) and stay plain C++ translation units.
 set(HRR_GPU_WORKLOAD_SOURCES
   hrr_workload_test.cc
   hrr_repro_workload_test.cc
@@ -61,6 +73,7 @@ set(HRR_GPU_WORKLOAD_SOURCES
   hrr_regions_test.cc
   hrr_api_matrix_workload_test.cc
   hrr_kernel_args_test.cc
+  hrr_va_placement_test.cc
   hrr_disk_space_test.cc
 )
 
@@ -78,8 +91,10 @@ add_executable(hrr-integration-tests
   hrr_pitched_d2h_test.cc
   hrr_roundtrip_test.cc
   hrr_api_matrix_test.cc
+  hrr_capture_access_test.cc
   hrr_fatbin_header_test.cc
   hrr_secure_exec_test.cc
+  hrr_clock_hook.cc
 )
 set_target_properties(hrr-integration-tests PROPERTIES
   CXX_STANDARD 17

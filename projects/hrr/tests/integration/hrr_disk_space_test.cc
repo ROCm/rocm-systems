@@ -57,6 +57,12 @@
 // 32-bit targets.
 static_assert(sizeof(void*) == 8, "the statvfs fake assumes an LP64 target");
 
+// Set by a workload in another file of this binary. Each statvfs and statvfs64
+// call runs it first, faked or not. The capture writer reads free space on its
+// pid-<pid> directory while it opens the archive, after it has removed a stale
+// active marker and before it creates its own.
+std::atomic<void (*)(const char*)> g_hrr_statvfs_hook{nullptr};
+
 namespace {
 
 constexpr uint64_t kBlock = 4096;
@@ -147,6 +153,7 @@ bool wait_for(const std::atomic<bool>& flag, int timeout_ms) {
 }
 
 int fake_statvfs(const char* name, const char* path, struct statvfs* buf) {
+  if (auto hook = g_hrr_statvfs_hook.load(std::memory_order_acquire)) hook(path);
   if (!is_faked(path)) {
     using Fn = int (*)(const char*, struct statvfs*);
     static Fn real[2] = {reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "statvfs")),
@@ -194,7 +201,11 @@ extern "C" int hrr_disk_space_statvfs64(const char* path, struct statvfs* buf) {
   return fake_statvfs("statvfs64", path, buf);
 }
 
+// Defined in hrr_workload_test.cc: the fork cases there hold a thread in fsync.
+extern "C" void hrr_workload_fsync_hook(int fd);
+
 extern "C" int hrr_disk_space_fsync(int fd) {
+  hrr_workload_fsync_hook(fd);
   using Fn = int (*)(int);
   static Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "fsync"));
   if (g_fsync_hold.exchange(false)) {
@@ -263,6 +274,17 @@ std::vector<unsigned char> pattern(size_t len, uint32_t seed) {
 void copy_to_device(void* dev, uint32_t seed, size_t len) {
   const std::vector<unsigned char> host = pattern(len, seed);
   HRR_HIP_CHECK(hipMemcpy(dev, host.data(), len, hipMemcpyHostToDevice));
+}
+
+// A forked child opens its archive on its first record, not at fork. This
+// records one without touching the device, which a forked child must not use:
+// a launch configuration pushed and popped through the compiler dispatch table.
+void record_in_child() {
+  dim3 grid, block;
+  size_t shared = 0;
+  hipStream_t stream = nullptr;
+  (void)__hipPushCallConfiguration(dim3(1), dim3(1), 0, nullptr);
+  (void)__hipPopCallConfiguration(&grid, &block, &shared, &stream);
 }
 
 // Wait for a forked child for at most 60 s; -1 when it had to be killed.
@@ -336,12 +358,18 @@ TEST_CASE("Unit_HRR_DiskSpace_StopsBeforeReserve_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMalloc(&dev, 1u << 20));
   // Larger than the interval, so it is checked and the count starts from zero.
   copy_to_device(dev, 100, 1u << 20);
+  const fs::path active =
+      fs::path(fake_root()) / ("pid-" + std::to_string(getpid())) / "active";
+  REQUIRE(fs::exists(active));
 
   const int64_t headroom = 2 << 20;
   arm_shrinking(headroom);
   for (int i = 0; i < kStepCount; ++i) copy_to_device(dev, 200 + i, kStepCopy);
   const uint64_t used = used_bytes() - g_used_base.load();
   disarm();
+
+  // Stopped while the program runs on, so producers must stop writing sidecars.
+  CHECK_FALSE(fs::exists(active));
 
   // The capture went no further into the reserve than one check interval.
   INFO("used " << used << " headroom " << headroom << " interval " << interval);
@@ -389,6 +417,7 @@ TEST_CASE("Unit_HRR_DiskSpace_ForkAfterStop_Direct", "[.][hrr-direct]") {
   const pid_t child = fork();
   if (child == 0) {
     g_quick_exit_pid.store(getpid());
+    record_in_child();
     std::exit(0);
   }
   REQUIRE(child > 0);
@@ -417,6 +446,8 @@ TEST_CASE("Unit_HRR_DiskSpace_RefusedForkChild_Direct", "[.][hrr-direct]") {
   const pid_t child = fork();
   if (child == 0) {
     g_quick_exit_pid.store(getpid());
+    // Its open, and so the refusal, comes with its first record.
+    record_in_child();
     std::exit(0);
   }
   REQUIRE(child > 0);

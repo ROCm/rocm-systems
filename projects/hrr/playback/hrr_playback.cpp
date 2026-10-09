@@ -1226,6 +1226,8 @@ static void print_usage(const char* argv0) {
     "  --progress-seconds S  Print heartbeat at most every S seconds\n"
     "  --version             Print the archive format version this build reads and\n"
     "                        the revision it was built from, then exit\n"
+    "  --no-placement        Do not place hipMalloc/hipMallocAsync allocations at\n"
+    "                        their recorded addresses (see DESIGN.md)\n"
     "  --warn-untranslated-args\n"
     "                        Report kernel-argument pointers that resolve in no\n"
     "                        allocation, VMM reservation or annotated region.\n"
@@ -1290,6 +1292,7 @@ int main(int argc, char** argv) {
   bool show_events   = false;
   bool do_repair     = false;
   bool no_regions    = false;
+  bool no_placement  = false;
 
   for (int i = 1; i < argc; i++) {
     if      (!strcmp(argv[i], "--info"))              show_info              = true;
@@ -1314,6 +1317,7 @@ int main(int argc, char** argv) {
     else if (!strcmp(argv[i], "--trace-kernels"))     ctx.trace_kernels      = true;
     else if (!strcmp(argv[i], "--trace-sync"))        ctx.trace_sync         = true;
     else if (!strcmp(argv[i], "--no-regions"))        no_regions             = true;
+    else if (!strcmp(argv[i], "--no-placement"))      no_placement           = true;
     else if (!strcmp(argv[i], "--regions-strict"))    ctx.regions_strict     = true;
     else if (!strcmp(argv[i], "--warn-untranslated-args"))
       ctx.warn_untranslated_args = true;
@@ -1436,6 +1440,26 @@ int main(int argc, char** argv) {
          archive.blob_count, archive.code_object_count);
   printf("[HRR] Threads : %zu captured\n", archive.threads.size());
 
+  // Capture-address placement: hold every recorded hipMalloc and
+  // hipMallocAsync range before hipInit, so the runtime cannot take it.
+  if (!no_placement && !ctx.guard_segments) {
+    std::vector<HrrVaRange> allocs;
+    std::vector<uint64_t> exported;
+    for (const auto& ev : archive.events) {
+      const auto t = ev.header().event_type;
+      if (t == HRR_API_HIPMALLOC)
+        allocs.push_back({ev.malloc_ev.ptr_handle, ev.malloc_ev.ptr_handle + ev.malloc_ev.size});
+      else if (t == HRR_API_HIPMALLOCASYNC)
+        allocs.push_back({ev.malloc_async_ev.ptr_handle,
+                          ev.malloc_async_ev.ptr_handle + ev.malloc_async_ev.size});
+      else if (t == HRR_API_HIPIPCGETMEMHANDLE &&
+               ev.raw_payload.size() >= sizeof(hrr_args_hipIpcGetMemHandle))
+        exported.push_back(
+            reinterpret_cast<const hrr_args_hipIpcGetMemHandle*>(ev.raw_payload.data())->devPtr);
+    }
+    hrr_place_hold(ctx, hrr_place_plan(std::move(allocs), exported));
+  }
+
   HIP_CHECK(hipInit(0));
 
   int device_count = 0;
@@ -1551,6 +1575,7 @@ int main(int argc, char** argv) {
     ctx.region_oob_ptrs.store(0, std::memory_order_relaxed);
     ctx.guard_blocks_relocated.store(0, std::memory_order_relaxed);
     ctx.guard_blind_max.store(0, std::memory_order_relaxed);
+    hrr_place_reset(ctx);
     printf("[HRR] Warm-up done. Running filtered pass...\n");
   }
 
@@ -1689,6 +1714,11 @@ int main(int argc, char** argv) {
     // when the caller asked for that.
     if (oob > 0 && ctx.regions_strict) ok = false;
   }
+
+  if (ctx.place)
+    printf("[HRR]   Placement      : %llu placed at capture address, %llu fell back\n",
+           (unsigned long long)ctx.placed.load(),
+           (unsigned long long)ctx.place_fell_back.load());
 
   if (ctx.guard_blocks || ctx.guard_segments) {
     printf("[HRR]   Guard          : %s%s%llu block relocation(s), largest "

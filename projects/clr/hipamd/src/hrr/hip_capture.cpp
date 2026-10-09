@@ -2544,6 +2544,11 @@ void hip_capture_uninstall() {
   if (!g_installed.exchange(false)) return;
   std::memcpy(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()),
               &g_real_table, sizeof(HipDispatchTable));
+  // The compiler shims go as well, or a forked child whose archive failed to
+  // open keeps running them with capture off.
+  if (g_compiler_installed.exchange(false))
+    std::memcpy(const_cast<HipCompilerDispatchTable*>(hip::GetHipCompilerDispatchTable()),
+                &g_real_compiler_table, sizeof(HipCompilerDispatchTable));
 }
 
 // ---------------------------------------------------------------------------
@@ -2727,8 +2732,9 @@ void hip_capture_init() {
   }
 
     // Open the events writer now — Flag::init() has run so output_dir is valid.
-    // A refused open leaves capture off, so take the shims out of the dispatch
-    // table too rather than leave every call going through them for nothing.
+    // A refused open leaves capture off. Without a writer the shims would only
+    // cost time, and the D2H ones still synchronize streams, so take them out
+    // of the dispatch table again.
     if (!hrr_cap::writer::open(hip_capture_output_dir())) {
       hip_capture_uninstall();
       return;

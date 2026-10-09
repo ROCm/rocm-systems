@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime.h>
 #include <algorithm>
+#include <iterator>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -47,6 +48,65 @@ inline bool hrr_zero_init_needs_drain(bool zero_init_enabled,
                                       bool in_graph_capture) {
     return zero_init_enabled && !in_graph_capture;
 }
+
+// ---- Capture-address placement (DESIGN.md, "GPU Allocator Address
+// Non-Determinism"). Half-open [base, end).
+struct HrrVaRange { uint64_t base = 0, end = 0; };
+
+// The ranges to hold before hipInit: every recorded allocation rounded out to
+// `page`, minus the ones holding an address in `exported` (IPC refuses VMM
+// memory), merged where they overlap or touch.
+inline std::vector<HrrVaRange> hrr_place_plan(std::vector<HrrVaRange> allocs,
+                                              const std::vector<uint64_t>& exported,
+                                              uint64_t page = 4096) {
+    std::sort(allocs.begin(), allocs.end(),
+              [](const HrrVaRange& a, const HrrVaRange& b) { return a.base < b.base; });
+    std::vector<HrrVaRange> out;
+    for (const auto& r : allocs) {
+        if (r.base == 0 || r.end <= r.base || r.end > (1ull << 47)) continue;
+        if (std::any_of(exported.begin(), exported.end(),
+                        [&](uint64_t x) { return x >= r.base && x < r.end; }))
+            continue;
+        const uint64_t b = r.base - r.base % page;
+        const uint64_t e = r.end + (page - r.end % page) % page;
+        if (!out.empty() && b <= out.back().end)
+            out.back().end = std::max(out.back().end, e);
+        else
+            out.push_back({b, e});
+    }
+    return out;
+}
+
+// The placeholders still standing, base -> end, kept merged.
+struct HrrHeldRanges {
+    std::map<uint64_t, uint64_t> r;
+    void add(uint64_t b, uint64_t e) {
+        auto it = r.upper_bound(b);
+        if (it != r.begin() && std::prev(it)->second >= b) {
+            --it;
+            b = it->first;
+            e = std::max(e, it->second);
+            it = r.erase(it);
+        }
+        while (it != r.end() && it->first <= e) {
+            e = std::max(e, it->second);
+            it = r.erase(it);
+        }
+        r[b] = e;
+    }
+    // Drop [b, e) if one held range covers all of it.
+    bool take(uint64_t b, uint64_t e) {
+        auto it = r.upper_bound(b);
+        if (it == r.begin()) return false;
+        --it;
+        const uint64_t hb = it->first, he = it->second;
+        if (e > he) return false;
+        r.erase(it);
+        if (hb < b) r[hb] = b;
+        if (e < he) r[e] = he;
+        return true;
+    }
+};
 
 // ---------------------------------------------------------------------------
 // PlaybackContext — central replay state
@@ -329,16 +389,23 @@ struct PlaybackContext {
     std::atomic<uint64_t> guard_blocks_relocated{0};
     std::atomic<uint64_t> guard_blind_max{0};  // largest unguarded tail seen
 
-    // VMM-backed allocations created for --guard-segments, keyed by the mapped
-    // base that was handed out. hipFree cannot release these, so the free path
+    // VMM-backed allocations created for --guard-segments or placement, keyed
+    // by the pointer that was handed out. hipFree cannot release these, so the free path
     // has to recognise them. Guarded by map_mutex.
     struct GuardAlloc {
         void*  va_base  = nullptr;  // reserved VA base (== mapped base)
         size_t reserved = 0;        // total reserved VA (mapped + guard)
         size_t mapped   = 0;        // mapped/backed bytes
         hipMemGenericAllocationHandle_t handle{};
+        bool   placed   = false;    // a placed allocation, not a guarded one
     };
     std::unordered_map<void*, GuardAlloc> guard_allocs;
+
+    // Capture-address placement. Placed allocations live in guard_allocs.
+    bool place = false;           // set by hrr_place_hold
+    std::mutex place_mutex;       // guards place_held
+    HrrHeldRanges place_held;
+    std::atomic<uint64_t> placed{0}, place_fell_back{0};
 
     // Graphs this replay could not build faithfully: a node the recording
     // added that no handler here can reconstruct. Before the node API was
@@ -769,6 +836,13 @@ void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live);
 // Under --guard-segments an allocation is a VMM mapping rather than a hipMalloc
 // and hipFree cannot release it, so every teardown path has to go through here.
 void hrr_free_device_alloc(PlaybackContext& ctx, void* live);
+
+// Capture-address placement. hrr_place_hold runs before hipInit and holds the
+// planned ranges with PROT_NONE placeholders (Linux only; a no-op on Windows,
+// which leaves placement off). hrr_place_reset releases every placed
+// allocation between the --kernel-filter warm-up and the timed pass.
+void hrr_place_hold(PlaybackContext& ctx, const std::vector<HrrVaRange>& plan);
+void hrr_place_reset(PlaybackContext& ctx);
 
 // ---------------------------------------------------------------------------
 // hrr_note_unreplayable — this API cannot be reproduced, and here is why.
