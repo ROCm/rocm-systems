@@ -8991,45 +8991,73 @@ class CodeGenerator:
           zero-payload LOCAL_MEM VectorMemState so the DS pipeline still
           increments and retires the lgkmcnt/GDS wait counter and plugins
           observe the instruction (the structural accounting path).
-        * When EXEC is zero the wave contributes no active lane, so the
-          operation is a pure structural no-op (no rid decode, no count read,
-          no hook call) -- this keeps GWS EXEC-independent.
+        * EXEC=0 handling is target-specific. On RDNA3/3.5 the count-carrying
+          operations (init/barrier/sema_br) execute even with EXEC=0, reading
+          their operand from lane 0 -- the lane-0 fallback documented in those
+          ISA manuals (section 13.4.2). Every other case (all ops on the older
+          targets, and the count-less sema_v/p/release_all) stays a pure
+          structural no-op when EXEC is zero, since no such rule is documented
+          for them and it must not be extrapolated silently.
         """
         op = sem.operation
         has_count = op in ('init', 'barrier', 'sema_br')
-        L = []
-        L.append('  uint64_t exec = wf.exec();')
-        L.append('  if (exec) {')
-        L.append(
-            '    uint32_t rid = (((wf.m0() >> 16) & 0x3fu) + '
+        # RDNA3/3.5 (ISA section 13.4.2) run the count-carrying GWS operations
+        # even when EXEC is zero, taking the operand from lane 0. No other target
+        # documents that rule, so they keep the EXEC-gated structural no-op.
+        exec_independent = has_count and self.isa_spec.arch_name in ('rdna3', 'rdna3_5')
+        rid_decl = (
+            'uint32_t rid = (((wf.m0() >> 16) & 0x3fu) + '
             '(static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;'
         )
-        if has_count:
+        L = []
+        L.append('  uint64_t exec = wf.exec();')
+        if exec_independent:
+            # No EXEC guard: the operation always takes effect, falling back to
+            # lane 0 when EXEC selects no active lane.
+            body_indent = '  '
+            L.append(f'  {rid_decl}')
             L.append(
-                '    uint32_t lane = static_cast<uint32_t>(std::countr_zero(exec));'
+                '  uint32_t lane = exec ? '
+                'static_cast<uint32_t>(std::countr_zero(exec)) : 0u;'
             )
-            L.append('    auto &cu = wf.cu();')
+            L.append('  auto &cu = wf.cu();')
             L.append(
-                f'    uint32_t gws_base = {self._vgpr_base_expr("addr", use_acc=True)};'
+                f'  uint32_t gws_base = {self._vgpr_base_expr("addr", use_acc=True)};'
             )
             L.append(
-                '    uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);'
+                '  uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);'
             )
-        if op == 'init':
-            L.append('    wf.gws_init(rid, gws_count);')
-        elif op == 'barrier':
-            L.append('    wf.gws_barrier_arrive(rid, gws_count);')
-        elif op == 'sema_br':
-            L.append('    wf.gws_sema_br(rid, gws_count);')
-        elif op == 'sema_v':
-            L.append('    wf.gws_sema_v(rid);')
-        elif op == 'sema_p':
-            L.append('    wf.gws_sema_p(rid);')
-        elif op == 'sema_release_all':
-            L.append('    wf.gws_sema_release_all(rid);')
         else:
-            L.append(f'    (void)rid; // {op} has no stateful effect')
-        L.append('  }')
+            body_indent = '    '
+            L.append('  if (exec) {')
+            L.append(f'    {rid_decl}')
+            if has_count:
+                L.append(
+                    '    uint32_t lane = static_cast<uint32_t>(std::countr_zero(exec));'
+                )
+                L.append('    auto &cu = wf.cu();')
+                L.append(
+                    f'    uint32_t gws_base = {self._vgpr_base_expr("addr", use_acc=True)};'
+                )
+                L.append(
+                    '    uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);'
+                )
+        if op == 'init':
+            L.append(f'{body_indent}wf.gws_init(rid, gws_count);')
+        elif op == 'barrier':
+            L.append(f'{body_indent}wf.gws_barrier_arrive(rid, gws_count);')
+        elif op == 'sema_br':
+            L.append(f'{body_indent}wf.gws_sema_br(rid, gws_count);')
+        elif op == 'sema_v':
+            L.append(f'{body_indent}wf.gws_sema_v(rid);')
+        elif op == 'sema_p':
+            L.append(f'{body_indent}wf.gws_sema_p(rid);')
+        elif op == 'sema_release_all':
+            L.append(f'{body_indent}wf.gws_sema_release_all(rid);')
+        else:
+            L.append(f'{body_indent}(void)rid; // {op} has no stateful effect')
+        if not exec_independent:
+            L.append('  }')
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )

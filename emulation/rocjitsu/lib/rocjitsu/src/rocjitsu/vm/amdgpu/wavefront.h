@@ -319,8 +319,8 @@ public:
   /// @brief Seed a Global Wave Sync resource (init count / credits).
   void gws_init(uint32_t rid, uint32_t count);
 
-  /// @brief Arrive at a GWS barrier; may park this wave until the dispatch's
-  /// participants arrive.
+  /// @brief Arrive at a GWS barrier; may park the wave. The resource is process-
+  /// global and accepts arrivals across dispatches (see GwsDevice for the policy).
   void gws_barrier_arrive(uint32_t rid, uint32_t count);
 
   /// @brief Signal (V) a GWS semaphore, releasing one waiter if present.

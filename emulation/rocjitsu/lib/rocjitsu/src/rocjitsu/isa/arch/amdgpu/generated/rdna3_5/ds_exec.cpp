@@ -582,15 +582,13 @@ void DsGwsSemaReleaseAllDs::execute_impl(amdgpu::Wavefront &wf) {
 
 void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  if (exec) {
-    uint32_t rid =
-        (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
-    uint32_t lane = static_cast<uint32_t>(std::countr_zero(exec));
-    auto &cu = wf.cu();
-    uint32_t gws_base = wf.vgpr_alloc().base + 0u + inst_.addr;
-    uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);
-    wf.gws_init(rid, gws_count);
-  }
+  uint32_t rid =
+      (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
+  uint32_t lane = exec ? static_cast<uint32_t>(std::countr_zero(exec)) : 0u;
+  auto &cu = wf.cu();
+  uint32_t gws_base = wf.vgpr_alloc().base + 0u + inst_.addr;
+  uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);
+  wf.gws_init(rid, gws_count);
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 0;
@@ -618,15 +616,13 @@ void DsGwsSemaVDs::execute_impl(amdgpu::Wavefront &wf) {
 
 void DsGwsSemaBrDs::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  if (exec) {
-    uint32_t rid =
-        (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
-    uint32_t lane = static_cast<uint32_t>(std::countr_zero(exec));
-    auto &cu = wf.cu();
-    uint32_t gws_base = wf.vgpr_alloc().base + 0u + inst_.addr;
-    uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);
-    wf.gws_sema_br(rid, gws_count);
-  }
+  uint32_t rid =
+      (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
+  uint32_t lane = exec ? static_cast<uint32_t>(std::countr_zero(exec)) : 0u;
+  auto &cu = wf.cu();
+  uint32_t gws_base = wf.vgpr_alloc().base + 0u + inst_.addr;
+  uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);
+  wf.gws_sema_br(rid, gws_count);
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 0;
@@ -654,15 +650,13 @@ void DsGwsSemaPDs::execute_impl(amdgpu::Wavefront &wf) {
 
 void DsGwsBarrierDs::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  if (exec) {
-    uint32_t rid =
-        (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
-    uint32_t lane = static_cast<uint32_t>(std::countr_zero(exec));
-    auto &cu = wf.cu();
-    uint32_t gws_base = wf.vgpr_alloc().base + 0u + inst_.addr;
-    uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);
-    wf.gws_barrier_arrive(rid, gws_count);
-  }
+  uint32_t rid =
+      (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
+  uint32_t lane = exec ? static_cast<uint32_t>(std::countr_zero(exec)) : 0u;
+  auto &cu = wf.cu();
+  uint32_t gws_base = wf.vgpr_alloc().base + 0u + inst_.addr;
+  uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);
+  wf.gws_barrier_arrive(rid, gws_count);
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 0;

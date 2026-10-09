@@ -264,6 +264,18 @@ void GwsDevice::notify_parked_wave_gone(const Wavefront &wf) {
   parked_total_.fetch_sub(1, std::memory_order_release);
 }
 
+void GwsDevice::invalidate_resource(uint32_t process, uint32_t rid) {
+  if (rid >= kResourceCount)
+    return;
+  Resource &res = resources_[process][rid];
+  res.counter = 0;
+  res.credits = 0;
+  res.armed = false;
+  // Bump the generation so any peer-CU waiter still parked on this resource also
+  // abandons it on its next poll rather than observing a stale pre-escape phase.
+  ++res.release_gen;
+}
+
 void GwsDevice::step_maintenance(ComputeUnitCore &cu) {
   if (!any_parked())
     return; // Fast path: nothing parked anywhere, no store work this step.
@@ -283,8 +295,13 @@ void GwsDevice::step_maintenance(ComputeUnitCore &cu) {
     auto rit = ready.find(process);
     if (rit == ready.end())
       rit = ready.emplace(process, escape_ready(process)).first;
-    if (rit->second)
+    if (rit->second) {
+      // Abandoning a genuinely deadlocked rendezvous is not a silent wake: drop
+      // the resource's unfinished phase so a later dispatch reusing this rid does
+      // not inherit a stale counter/credit (recovery policy, see class doc).
+      invalidate_resource(process, slot->gws_wait_rid_);
       wake_wave(cu, *slot);
+    }
   }
 }
 
