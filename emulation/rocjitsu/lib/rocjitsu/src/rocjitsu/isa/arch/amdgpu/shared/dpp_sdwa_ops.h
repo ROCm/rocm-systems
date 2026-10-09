@@ -548,8 +548,11 @@ inline void apply_dpp8(const Operand &source, uint32_t lane_sel, uint32_t fi,
 
 namespace sdwa {
 
-/// @brief MODE or fixed flush-nearest policy for SDWA OMOD eligibility, shared with VOP3.
-/// This selects whether OMOD is enabled; producer helpers determine scaling order.
+/// @brief Select the SDWA OMOD eligibility and F32 scaling policy.
+/// @details Selects the denormal mode used for OMOD eligibility, shared with VOP3.
+/// For F32, FLUSH_NEAREST uses apply_omod_f32 under the producer's nearest-rounding
+/// environment; MODE uses scale_f32 with guest rounding. F16 scaling order remains
+/// the producer helper's responsibility.
 enum class OutputPolicy : uint8_t { MODE, FLUSH_NEAREST };
 
 /// @brief Return the architectural source bytes selected by an SDWA selector.
@@ -892,7 +895,7 @@ inline uint32_t scale_result(const Inst &inst, const Wavefront &wf, uint32_t val
   if (omod == 0)
     return value;
   if constexpr (Format == ResultFormat::F16) {
-    // F16 scaling precedes narrowing in the semantic result producer.
+    // The producer has already applied F16 scaling; finalize its encoded result.
     return fp_mode::finalize_omod_f16(static_cast<uint16_t>(value), omod);
   } else if constexpr (Format == ResultFormat::PK_F16) {
     const uint32_t low = fp_mode::finalize_omod_f16(static_cast<uint16_t>(value), omod);

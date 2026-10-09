@@ -2241,9 +2241,9 @@ def _is_integral_rounding(node: SemaNode) -> bool:
 def _uses_shared_f64_arithmetic_output(node: SemaNode, ctx: LoweringContext) -> bool:
     """Whether F64 arithmetic uses the migrated destination modifier stage.
 
-    LDEXP retains expression-level div_apply_omod/CLAMP. Its result is already
-    MODE-rounded, but this PR does not migrate that output path; changing it
-    requires validating its modifier policy separately.
+    LDEXP retains expression-level div_apply_omod/CLAMP, although its result is
+    already MODE-rounded. Moving it to the shared stage requires validating its
+    modifier policy separately.
     """
     return (
         node.ty == SemaType.F64

@@ -1041,7 +1041,10 @@ inline util::native<double> fma_f64_mode_simd(util::native<double> src0, util::n
   return std::bit_cast<util::native<double>>(U(result_bits, util::stdx::vector_aligned));
 }
 
-/// @brief Apply architectural F64 OMOD and CLAMP to a native batch.
+/// @brief Apply the retained finish_f64 OMOD/CLAMP policy to a native batch.
+/// @details F64 FMA/FMAC share this policy with their scalar bodies. Unlike
+/// migrated ADD/MUL, they do not use output_modifier::apply, although V_FMA_F64
+/// captures favor that stage; see output_modifier.h.
 inline util::native<double> finish_f64_mode_simd(util::native<double> value, uint32_t round_mode,
                                                  uint32_t omod, bool clamp,
                                                  bool clamp_nan_to_zero) {

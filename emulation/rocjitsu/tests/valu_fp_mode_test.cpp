@@ -2439,7 +2439,10 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
                    {{0, 0x38007e00u}, {1, 0x34007e00u}},
                    {{6, 0xdead4000u}},
                    0xf0u,
-                   FE_TONEAREST});
+                   FE_TONEAREST,
+                   0,
+                   0,
+                   expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_FP16)});
   const auto minimum3 = rdna4::build_vop3(rdna4::kVMinimum3F16Vop3, {.vdst = 6,
                                                                      .abs = 1,
                                                                      .opsel = 13,
@@ -2454,7 +2457,10 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
                    {{0, 0x40007e00u}, {1, 0x7c013800u}, {2, 0x3c007e00u}},
                    {{6, 0xbc00beefu}},
                    0xf0u,
-                   FE_TONEAREST});
+                   FE_TONEAREST,
+                   0,
+                   0,
+                   expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)});
   return cases;
 }
 
@@ -2625,12 +2631,12 @@ std::vector<ArithmeticCase> rounded_result_modifier_cases() {
 }
 
 // The emulator's pre-RDNA4 gate applies OMOD only with MODE.IEEE clear and F16
-// output denormals flushed. Captures cover MODE 0x00/0x50 and IEEE controls on
-// gfx1100, gfx1030, and gfx1010. The output-keep case (MODE 0xf0/0xa0, OMOD
-// ignored) is captured on gfx1030/gfx1010. When OMOD applies, these GPUs scale
-// after rounding to half, as gfx1201 does. Each case transcribes a
-// lane from external VALU probe captures (v_mul_f16_e64 and v_add_f16_e64 with
-// div:2); the raw artifacts are not checked into this tree. The captures return
+// output denormals flushed. Captures cover MODE 0x00/0x50, IEEE controls and the
+// output-keep case (MODE 0xf0/0xa0, OMOD ignored) on gfx1100, gfx1030, and
+// gfx1010. When OMOD applies, these GPUs scale after rounding to half, as
+// gfx1201 does. Each case transcribes a lane from external VALU probe captures
+// (v_mul_f16_e64 and v_add_f16_e64 with div:2); the raw artifacts are not
+// checked into this tree. The captures return
 // the same half and keep the initialized 0xa5a5 high half. RDNA1/2 cases start
 // from a zero high half because their shared emulator executor clears it, a
 // separate difference from hardware.
@@ -2686,8 +2692,6 @@ std::vector<ArithmeticCase> legacy_rounded_result_modifier_cases() {
         0x00u);
     add("AddF16Div2NegativeMinNormalKeepInputs", target.addition, 0x8400u, 0x0000u, 0x8000u, 0x50u);
     add("AddF16Div2IeeeIgnoresOmod", target.addition, 0x8400u, 0x0000u, 0x8400u, kIeee);
-    if (target.arch == ROCJITSU_CODE_ARCH_RDNA3)
-      continue;
     // Preserved F16 output denormals disable OMOD, with or without input flushing.
     add("MulF16Div2KeepOutputsIgnoresOmod", target.mul, 0x3c00u, 0x3c00u, 0x3c00u, 0xf0u);
     add("MulF16Div2FlushInputsKeepOutputsIgnoresOmod", target.mul, 0x3c00u, 0x3c00u, 0x3c00u,
@@ -3059,20 +3063,31 @@ INSTANTIATE_TEST_SUITE_P(F16BinaryModifiers, ValuF16BinaryModifierTest,
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
 void expect_f16_binary_host_environment(uint32_t host_mxcsr, int host_rounding = FE_TONEAREST) {
   ForceScalarGuard guard;
-  for (const bool multiply : {false, true}) {
-    const auto words = rdna4::build_vop3(multiply ? rdna4::kVMulF16Vop3 : rdna4::kVAddF16Vop3,
-                                         {.vdst = 6, .src0 = 256, .src1 = 257});
-    const ArithmeticCase test{
-        multiply ? "InvalidMultiply" : "InexactAdd",
-        ROCJITSU_CODE_ARCH_RDNA4,
-        {words[0], words[1], 0},
-        {{0, multiply ? 0x7c00u : 0x7bffu}, {1, multiply ? 0u : 1u}, {6, 0xa5a5a5a5u}},
-        {{6, multiply ? 0xa5a5fe00u : 0xa5a57bffu}},
-        0x40u,
-        host_rounding,
-        0xffffu,
-        host_mxcsr,
-        expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)};
+  struct Sample {
+    const char *name;
+    bool multiply;
+    uint32_t a, b, expected;
+  };
+  constexpr std::array<Sample, 3> samples = {{
+      {"InexactAdd", false, 0x7bffu, 1u, 0x7bffu},
+      {"InvalidMultiply", true, 0x7c00u, 0u, 0xfe00u},
+      // Exact cancellation is +0 under guest RNE, but -0 under host round-down.
+      {"ExactCancellationAdd", false, 0x3c00u, 0xbc00u, 0x0000u},
+  }};
+  for (const Sample &sample : samples) {
+    const auto words =
+        rdna4::build_vop3(sample.multiply ? rdna4::kVMulF16Vop3 : rdna4::kVAddF16Vop3,
+                          {.vdst = 6, .src0 = 256, .src1 = 257});
+    const ArithmeticCase test{sample.name,
+                              ROCJITSU_CODE_ARCH_RDNA4,
+                              {words[0], words[1], 0},
+                              {{0, sample.a}, {1, sample.b}, {6, 0xa5a5a5a5u}},
+                              {{6, 0xa5a50000u | sample.expected}},
+                              0x40u,
+                              host_rounding,
+                              0xffffu,
+                              host_mxcsr,
+                              expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)};
     for (const bool scalar : {true, false}) {
       SCOPED_TRACE(test.name);
       SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");

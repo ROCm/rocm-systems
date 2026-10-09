@@ -6688,6 +6688,10 @@ class CodeGenerator:
                     and dtype == 'f64'
                     and is_vop3
                 ):
+                    # F64 FMA/FMAC retain finish_f64 OMOD/CLAMP on scalar and
+                    # SIMD paths instead of output_modifier::apply, unlike
+                    # ADD/MUL. output_modifier.h records the V_FMA_F64 captures
+                    # that favor the shared stage.
                     src_loads = ''.join(
                         f'    double src{i}_value = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({src_ops[i]}, lane));\n'
                         for i in range(3)
@@ -6717,6 +6721,7 @@ class CodeGenerator:
                         '  }\n'
                     )
                 if cls == 'vector_binop' and op == 'fmac' and dtype == 'f64':
+                    # VOP3 retains the same finish_f64 output policy as FMA above.
                     src_mods = ''
                     finish = ''
                     if is_vop3:
