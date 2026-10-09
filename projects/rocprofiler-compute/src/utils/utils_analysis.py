@@ -889,9 +889,9 @@ def filter_forest_by_backends(
     forest: dict[str, list[CallTreeNode]],
     backends: list[str],
 ) -> dict[str, list[CallTreeNode]]:
-    """Copy a forest, keeping ``backends`` nodes and their ancestors.
+    """Copy a forest, keeping nodes for the requested backends and their ancestors.
 
-    ``backends=[]`` keeps every node, including ``user``. Ancestors kept
+    An empty backends list keeps every node, including user. Ancestors kept
     only as scaffolding have their own kernels cleared, so a torch parent
     of a triton child does not contribute GPU time or kernel lines to a
     triton listing. Inclusive stats on each copy are recomputed from the

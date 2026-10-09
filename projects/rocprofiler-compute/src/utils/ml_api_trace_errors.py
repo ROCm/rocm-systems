@@ -117,7 +117,7 @@ class OverlappingMarkerRangeError(MlApiTraceError):
 
 
 class MissingSourceLocationError(MlApiTraceError):
-    """A torch or triton marker has no file/line and no ancestor with one."""
+    """An unlocated torch or triton call-tree root with no launcher thread."""
 
     def __init__(
         self,

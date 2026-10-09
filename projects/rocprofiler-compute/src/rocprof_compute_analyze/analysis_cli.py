@@ -42,10 +42,10 @@ _ML_API_ANALYSIS_CLI_OPTIONS = {
 def parse_operator_patterns(
     args: argparse.Namespace, backends: list[str]
 ) -> dict[str, list[str]] | None:
-    """Parse operator glob patterns from ``args`` for each backend in ``backends``.
+    """Parse operator glob patterns from args for each backend in backends.
 
-    Returns a ``{backend: patterns}`` dict, or ``None`` when no filter flag is
-    set for any backend. An empty flag value maps to ``["**"]``.
+    Returns a {backend: patterns} dict, or None when no filter flag is
+    set for any backend. An empty flag value maps to ["**"].
     """
     framewise_patterns: dict[str, list[str]] = {}
     for backend in backends:
