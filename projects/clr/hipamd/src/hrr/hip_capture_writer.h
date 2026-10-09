@@ -92,8 +92,10 @@ void note_unreplayable(const char* api, const char* reason);
 // Store the 128-bit digest of `src` at the start of `dst` and zero the rest,
 // for an argument that is a capability, such as an IPC handle: the archive can
 // tell two calls with the same handle apart from two with different ones, and
-// holds nothing that opens anything. A `dst_len` under 16 leaves `dst` zeroed.
-// Does not need the writer to be open.
+// holds nothing that opens anything. The digest is keyed with a secret drawn
+// once per process and never written out, so a reader cannot hash candidate
+// handles to find one. A `dst_len` under 16 leaves `dst` zeroed. Does not need
+// the writer to be open.
 void digest_into(void* dst, size_t dst_len, const void* src, size_t src_len);
 
 // Write a buffer as a content-addressed blob. Returns hash, or {} when the

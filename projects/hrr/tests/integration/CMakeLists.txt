@@ -38,8 +38,9 @@
 #
 # hrr_capture_capabilities_test.cc covers what capture leaves out of the archive
 # when a call hands back a capability or an address: an IPC handle is recorded
-# as a digest, a resolved entry point not at all. Contains its own hidden
-# [.][hrr-direct] workload, which calls host APIs only.
+# as a keyed digest, a resolved entry point not at all. Contains its own hidden
+# [.][hrr-direct] workloads, which call host APIs only; the IPC exporter starts
+# the importer as a second process of this binary.
 #
 # hrr_kernel_args_test.cc covers what replay does with a pointer-typed kernel
 # argument no allocation explains: a sentinel keeps its value, an

@@ -54,6 +54,7 @@
 #include <thread>
 #include <unordered_set>
 #include <algorithm>
+#include <random>
 #include <vector>
 
 #ifdef _WIN32
@@ -97,6 +98,7 @@ static inline uint64_t current_parent_process_id() {
 #  include <unistd.h>
 #  include <fcntl.h>
 #  include <sys/stat.h>
+#  include <sys/random.h>
 #  include <sys/statvfs.h>
 #  include <sys/syscall.h>
 #  include <pthread.h>
@@ -147,8 +149,87 @@ static Hash128 hash_buffer(const void* data, size_t len) {
   return {h1, h2};
 }
 
+// ---------------------------------------------------------------------------
+// Capability digest: SipHash-2-4 with 128-bit output
+//
+// A capability such as an IPC handle has little entropy: an emulated IPC event
+// is named /hip_<pid>_<counter>, and a memory handle is mostly an address and
+// small integers. An unkeyed hash of it lets an archive reader hash every
+// candidate and find the handle. The digest is therefore keyed, with a key
+// drawn from the system's random source once per process when capture opens
+// and kept only in memory: it is never written to the archive, its manifest,
+// writer state or a log. Replay only compares digests recorded in one
+// per-process archive with each other, so it never needs the key. A forked
+// child keeps its parent's key.
+// ---------------------------------------------------------------------------
+
+struct DigestKey { uint64_t k0, k1; };
+
+static DigestKey draw_digest_key() {
+  uint64_t k[2] = {0, 0};
+#ifdef _WIN32
+  std::random_device rd;  // RtlGenRandom on MSVC
+  for (auto& w : k) w = (static_cast<uint64_t>(rd()) << 32) | rd();
+#else
+  auto* p = reinterpret_cast<uint8_t*>(k);
+  size_t got = 0;
+  while (got < sizeof(k)) {
+    const ssize_t n = getrandom(p + got, sizeof(k) - got, 0);
+    if (n > 0) { got += static_cast<size_t>(n); continue; }
+    if (n < 0 && errno == EINTR) continue;
+    std::random_device rd;  // getrandom(2) missing from the kernel
+    for (auto& w : k) w = (static_cast<uint64_t>(rd()) << 32) | rd();
+    break;
+  }
+#endif
+  return {k[0], k[1]};
+}
+
+static const DigestKey& digest_key() {
+  static const DigestKey key = draw_digest_key();
+  return key;
+}
+
+static inline uint64_t rotl64(uint64_t x, int b) { return (x << b) | (x >> (64 - b)); }
+
+static inline void sip_round(uint64_t& v0, uint64_t& v1, uint64_t& v2, uint64_t& v3) {
+  v0 += v1; v1 = rotl64(v1, 13); v1 ^= v0; v0 = rotl64(v0, 32);
+  v2 += v3; v3 = rotl64(v3, 16); v3 ^= v2;
+  v0 += v3; v3 = rotl64(v3, 21); v3 ^= v0;
+  v2 += v1; v1 = rotl64(v1, 17); v1 ^= v2; v2 = rotl64(v2, 32);
+}
+
+static Hash128 siphash128(const DigestKey& key, const void* data, size_t len) {
+  uint64_t v0 = key.k0 ^ 0x736f6d6570736575ULL;
+  uint64_t v1 = key.k1 ^ 0x646f72616e646f6dULL ^ 0xee;
+  uint64_t v2 = key.k0 ^ 0x6c7967656e657261ULL;
+  uint64_t v3 = key.k1 ^ 0x7465646279746573ULL;
+  const auto* p = static_cast<const uint8_t*>(data);
+  const size_t whole = len & ~size_t{7};
+  auto absorb = [&](uint64_t m) {
+    v3 ^= m;
+    sip_round(v0, v1, v2, v3);
+    sip_round(v0, v1, v2, v3);
+    v0 ^= m;
+  };
+  for (size_t i = 0; i < whole; i += 8) {
+    uint64_t m = 0;
+    for (int j = 0; j < 8; ++j) m |= static_cast<uint64_t>(p[i + j]) << (8 * j);
+    absorb(m);
+  }
+  uint64_t b = static_cast<uint64_t>(len) << 56;
+  for (size_t j = 0; j < (len & 7); ++j) b |= static_cast<uint64_t>(p[whole + j]) << (8 * j);
+  absorb(b);
+  v2 ^= 0xee;
+  for (int r = 0; r < 4; ++r) sip_round(v0, v1, v2, v3);
+  const uint64_t lo = v0 ^ v1 ^ v2 ^ v3;
+  v1 ^= 0xdd;
+  for (int r = 0; r < 4; ++r) sip_round(v0, v1, v2, v3);
+  return {lo, v0 ^ v1 ^ v2 ^ v3};
+}
+
 void digest_into(void* dst, size_t dst_len, const void* src, size_t src_len) {
-  const Hash128 h = hash_buffer(src, src_len);
+  const Hash128 h = siphash128(digest_key(), src, src_len);
   auto* out = static_cast<uint8_t*>(dst);
   memset(out, 0, dst_len);
   if (dst_len < sizeof(h.lo) + sizeof(h.hi)) return;
@@ -1206,6 +1287,7 @@ bool open(const char* output_dir) {
 #ifndef _WIN32
   install_atfork_handlers_once();
 #endif
+  (void)digest_key();  // drawn at capture start, not at the first IPC call
   // The archive is prepared in locals and published below under the writer
   // mutex and g_buf_busy. A forked child opens its archive while other threads
   // may checkpoint, crash or finalize, and none of them may see the events fd

@@ -1062,7 +1062,7 @@ class Deref:
     # struct does.
     elem_ptr: bool = False
     # For a pointee that is a capability, such as an IPC handle: capture stores
-    # its 128-bit digest at the start of the bytes field, and zeros after it,
+    # its keyed 128-bit digest (digest_into) at the start of the bytes field, and zeros after it,
     # instead of the bytes. The field keeps its size, so archives from before
     # still read. Replay pairs an export with an import by comparing recorded
     # fields, which a digest does as well as the bytes did, and the archive no
