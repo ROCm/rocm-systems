@@ -2145,10 +2145,10 @@ rj_add_interposer_test_suite(
     DmabufExportKeepsAReservedCpuMapping
     DmabufExportKeepsStoresMadeDuringTheExport
     DmabufExportLeavesPagesPastAPartialMapping
+    DupRacingTheCloseOfAPrimeExportKeepsTheBoState
     ExportOfAUserptrBufferFailsAndLeavesTheCallersMemoryAlone
     GemMetadataRoundTripsOnABuffer
     GemOpReportsTheCreateSize
-    DupRacingTheCloseOfAPrimeExportKeepsTheBoState
     GemOpSetPlacementChangesTheReportedDomain
     IpcImportSharesThePagesOfTheExportedAllocation
     KfdBufferKeepsItsMetadataAfterEveryHandleCloses
