@@ -120,10 +120,12 @@ Unless stated otherwise:
   seconds, and either `Z` or an explicit `+HH:mm`/`-HH:mm` offset. Date-only values,
   timezone-free strings, impossible dates, hour 24 and leap-second 60 are rejected.
   Offset hours/minutes are checked at 0–23/0–59. Ordering compares parsed instants.
-- Source commit fields require a primitive string of exactly 40 hexadecimal characters,
-  case-insensitive at validation. Arrays and other coerced values are rejected,
-  including on normalized reload. No abbreviated SHA is accepted. Identity comparisons use the
-  supplied strings; validation does not lowercase them or verify Git objects.
+- Source and recorded-base commit fields require a primitive lowercase string
+  matching `^[0-9a-f]{40}$`, including on normalized reload. Uppercase/mixed-case
+  spellings, arrays, coerced values and abbreviated SHAs are rejected. The preparer
+  canonicalizes valid input SHAs before publication; the website does not silently
+  lowercase wire values. Identity comparisons use these already-canonical strings;
+  validation does not verify Git-object existence.
 
 The validator is not a blanket unknown-property rejector. Extra properties are
 not generally forbidden, but their presence is not a supported extension or a
@@ -377,10 +379,10 @@ source SHA or a target/mode batch identity.
 | Field | Requirement |
 | --- | --- |
 | `branch` | Required nonempty string; develop and non-develop branches are accepted |
-| `commit` | Required primitive string containing a full 40-hex source SHA |
+| `commit` | Required primitive string containing a full lowercase 40-hex source SHA |
 | `committedAt` | Required strict timestamp of that source commit |
 | `message` | Optional nonempty string |
-| `base` | Optional object with required nonempty string `branch` and primitive string full 40-hex `commit` |
+| `base` | Optional object with required nonempty string `branch` and primitive string full lowercase 40-hex `commit` |
 | `pullRequest` | Optional object with required positive integer `number` |
 | `pullRequest.url` | Optional GitHub HTTPS URL with the matching `/pull/<number>` pathname suffix |
 
@@ -566,7 +568,7 @@ A normalized run contains:
 | `trigger`, `machineId`, `branch` | Raw execution trigger/machine and source branch |
 | `sourceBase`, `pullRequest` | Present only when the corresponding optional raw metadata exists |
 | `environmentId` | Sorted key/value JSON identity described above |
-| `provenance.rocjitsuCommitSha` | Full source commit SHA |
+| `provenance.rocjitsuCommitSha` | Full lowercase source commit SHA |
 | `provenance.commitMessage` | Optional source message |
 | `provenance.details` | Raw generic environment items |
 | `targets`, `modes` | Targets actually included; included modes in ST/MT order |
@@ -655,11 +657,17 @@ separate from the mounted summary table and searchable result inspector.
 
 ## 9. Scope, zero, failure and comparison calculations
 
-Selector filters are `{ targets: string[], suites: string[], modes: string[] }`.
+Selector filters are `{ targets: string[], suites: string[], modes?: string[] }`.
 The intersection is exact. Explicit empty arrays mean empty selections, not
-"all". Omitting `modes` in the retained selector API means both supported modes;
-it never synthesizes missing mode results. Availability is determined by catalog
-membership and actual published configurations/results, not `data.modes` alone.
+"all". Omitting `modes` means both ST and MT, including Benchmark Explorer
+availability; it never synthesizes missing mode results. `selectBenchmarkCatalog`
+is the single availability authority; the explorer's `explorerCatalog` delegates
+to it. A catalog workload is available when at least one result in the supplied
+canonical runs matches the selected target, suite and mode, regardless of result
+status. For direct callers that omit result-level suite metadata or supply null,
+the selector resolves the suite from the matching catalog definition; an explicit
+result suite retains precedence. It preserves catalog order and returns
+`{ all, available, hiddenCount }`. Availability does not derive from `data.modes` alone.
 
 Pairwise comparison uses the union of selected candidate and reference IDs:
 
@@ -819,6 +827,30 @@ zero rules and symmetric exclusions as general comparison. Optional search
 matches workload name, logical ID or suite. Comparable rows are sorted by
 absolute seconds change descending, then normalized test ID. Percentage sorting,
 when offered by a UI, is a presentation choice, not a different denominator.
+
+### Branch configuration controls and partial failures
+
+Entering Branch Runs shows every target present in the validated publication's
+run configurations, not a fixed architecture list or only the selected pair.
+Columns are sorted, with ST then MT rows. An explicitly selected target absent
+from the current publication remains visible and unavailable; unavailable cells
+are still selectable for inspection. Narrow matrices scroll internally.
+
+Absent target/mode route fields remain uninitialized until data is available.
+First use chooses the first sorted target from the candidate's configurations,
+then the reference's, then another published attempt if necessary. For that target,
+ST is preferred when published in the first applicable attempt; otherwise MT.
+Explicit target/mode selections are preserved, including missing identities.
+
+Each matrix card compares only workloads completed in both selected attempts for
+that target/mode and the current suite/search scope. Partial failures do not hide
+the target: if completed matches remain, the card shows their aggregate change,
+"Less time"/"More time"/"Same measured time", and the matched count. This is not an
+all-tests-passed status and may show an improvement even when other workloads fail.
+Failed/timed-out or missing workloads are excluded, never counted as zero. Select
+the card to see matched/excluded counts and diagnostics in Benchmark differences.
+With no completed matches, it shows "Unavailable" and "No matched completed
+benchmarks"; entirely unpublished configurations have their own unavailable reason.
 
 ## 12. Local validation and processing
 

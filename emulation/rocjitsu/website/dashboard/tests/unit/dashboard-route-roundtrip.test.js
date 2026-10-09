@@ -74,7 +74,7 @@ describe('static-hosted dashboard routes', () => {
   it('keeps absent filters uninitialized and defaults safely without a browser', () => {
     const route = dashboardState.readDashboardRoute();
     expect(route).toMatchObject({ tab: 'overview', historyRange: 'ALL', preferences: { targets: null, suites: null, modes: null }, comparisonCandidateId: null, comparisonBaselineId: null, routeError: '' });
-    expect(route.branchSelection).toEqual({ branch: null, candidateId: null, referenceId: null, manual: false, target: 'gfx1250', mode: 'ST', detail: false });
+    expect(route.branchSelection).toEqual({ branch: null, candidateId: null, referenceId: null, manual: false, target: null, mode: null, detail: false });
   });
   it('round-trips repeated scopes without treating an explicit empty as absent', () => {
     const route = dashboardState.readDashboardRoute('https://example.test/app/?targets=gfx950&targets=gfx1250&suites=gemm&suites=memory&modes=ST&modes=MT&compareCandidate=unpublished-c&compareBaseline=unpublished-b');

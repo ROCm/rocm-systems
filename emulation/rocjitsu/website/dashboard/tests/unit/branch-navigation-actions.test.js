@@ -53,7 +53,8 @@ test('branch list exposes its scroll position and selects exact entry through ke
 
 test('all configuration cells including unpublished ones remain inspectable and emit an exact target/mode pair', () => {
   const scope = [];
-  const matrix = ConfigurationMatrix({ candidate, reference, selection, suites: [], onSelect: (target, mode) => scope.push([target, mode]) });
+  const runs = [candidate, reference, { configurations: [{ target: 'gfx1250', threadingMode: 'ST' }] }];
+  const matrix = ConfigurationMatrix({ candidate, reference, runs, selection, suites: [], onSelect: (target, mode) => scope.push([target, mode]) });
   const cells = nodes(matrix).filter((node) => node.props['data-testid']?.startsWith('branch-config-'));
   expect(cells).toHaveLength(4);
   for (const cell of cells) { expect(cell.props.disabled).not.toBe(true); cell.props.onClick(); }

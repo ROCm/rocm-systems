@@ -4,20 +4,22 @@ import { selectConfigurationComparison } from '../../data/branchSelectors';
 import { formatDuration, formatPercent } from '../../utils/formatters';
 import { monoFont } from '../../theme/tokens';
 import CategoryTag from '../shared/CategoryTag';
+import { configurationTargets } from './branchSelection';
 import { configurationState } from './branchPresentation';
 
-export default function ConfigurationMatrix({ candidate, reference, selection, suites, query = '', onSelect }) {
+export default function ConfigurationMatrix({ candidate, reference, selection, suites, query = '', onSelect, runs = [candidate, reference] }) {
+  const targets = configurationTargets(runs, selection.target);
   return <Box component="section" aria-labelledby="branch-matrix-heading" sx={{ mt: 2.5 }}>
     <Box sx={{ display: 'flex', gap: 1, justifyContent: 'space-between', flexWrap: 'wrap', mb: 1.5 }}>
       <Typography id="branch-matrix-heading" component="h3" variant="subtitle1" sx={{ fontWeight: 600 }}>Change by configuration</Typography>
       <Typography variant="caption" color="text.secondary">Matched benchmark wall time</Typography>
     </Box>
-    <Box sx={{ display: 'grid', gridTemplateColumns: '40px minmax(0,1fr) minmax(0,1fr)', gap: 1, alignItems: 'stretch' }}>
+    <Box sx={{ display: 'grid', gridTemplateColumns: `40px repeat(${Math.max(targets.length, 1)}, minmax(120px,1fr))`, minWidth: 0, overflowX: 'auto', gap: 1, alignItems: 'stretch' }}>
       <Box />
-      {['gfx1250', 'gfx950'].map((target) => <Box key={target} sx={{ textAlign: 'center' }}><CategoryTag kind="target" label={target} /></Box>)}
+      {targets.map((target) => <Box key={target} sx={{ textAlign: 'center' }}><CategoryTag kind="target" label={target} /></Box>)}
       {['ST', 'MT'].map((mode) => <Fragment key={mode}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CategoryTag kind="mode" label={mode} /></Box>
-        {['gfx1250', 'gfx950'].map((target) => {
+        {targets.map((target) => {
           const comparison = selectConfigurationComparison(candidate, reference, { target, mode, suites, query });
           const summary = configurationState(candidate, reference, comparison, target, mode);
           const selected = selection.target === target && selection.mode === mode;

@@ -1,5 +1,6 @@
 import { formatDuration, formatFullDate, shortSha } from '../../utils/formatters';
 import { commitTimestampFor } from '../../data/runOrdering';
+import { selectBenchmarkCatalog } from '../../data/selectors';
 
 export function benchmarkResultChoices(viewModel) {
   return viewModel.runs.flatMap((run, index) => viewModel.series.map((series) => {
@@ -24,11 +25,7 @@ export function filterBenchmarkOptions(options, query) {
 }
 
 export function explorerCatalog(data, filters) {
-  const targetIds = new Set(data.runs.flatMap((run) => run.tests
-    .filter((test) => filters.targets.includes(test.target) && (filters.modes ?? []).includes(test.mode))
-    .map((test) => test.logicalTestId)));
-  const available = data.testCatalog.filter((test) => filters.suites.includes(test.suite) && targetIds.has(test.id));
-  return { all: data.testCatalog, available, hiddenCount: data.testCatalog.length - available.length };
+  return selectBenchmarkCatalog(data, filters);
 }
 
 // Like canonical Overview, the range is commit-time based and anchored to published

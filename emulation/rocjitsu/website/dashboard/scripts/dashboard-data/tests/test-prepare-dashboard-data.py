@@ -160,6 +160,43 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(config['results'][0]['error'], None)
         self.assertEqual(self.read('index.json')['runFiles'], ['runs/default-branch/attempt-1.json'])
 
+    def test_uppercase_git_shas_are_published_in_lowercase(self):
+        value = raw()
+        value['provenance']['rocjitsu']['rocjitsu_commit_sha'] = SHA.upper()
+        value['provenance']['corpus']['corpus_commit_sha'] = CORPUS.upper()
+        self.assert_ok(self.invoke([value], extra=(
+            '--expected-sha', SHA.upper(), '--expected-corpus-sha', CORPUS.upper())))
+        run = self.read('runs/default-branch/attempt-1.json')
+        self.assertEqual(run['source']['commit'], SHA)
+        details = {entry['key']: entry['value'] for entry in run['environment']}
+        self.assertEqual(details['corpus.corpus_commit_sha'], CORPUS)
+        before = self.snapshot()
+        self.assert_ok(self.invoke())
+        self.assertEqual(self.snapshot(), before)
+
+    def test_git_sha_provenance_matching_ignores_only_hex_case(self):
+        single, multi = raw(), raw('default')
+        single['provenance']['rocjitsu']['rocjitsu_commit_sha'] = 'Aa' * 20
+        single['provenance']['corpus']['corpus_commit_sha'] = CORPUS.upper()
+        self.assert_ok(self.invoke([single, multi], extra=(
+            '--expected-sha', SHA.upper(), '--expected-corpus-sha', 'bB' * 20)))
+        run = self.read('runs/default-branch/attempt-1.json')
+        self.assertEqual(run['source']['commit'], SHA)
+        self.assertEqual(len(run['configurations']), 2)
+        details = {entry['key']: entry['value'] for entry in run['environment']}
+        self.assertEqual(details['corpus.corpus_commit_sha'], CORPUS)
+        before = self.snapshot()
+        for flag, expected in (('--expected-sha', 'D' * 40),
+                               ('--expected-corpus-sha', 'D' * 40),
+                               ('--expected-sha', 'A' * 39),
+                               ('--expected-corpus-sha', 'B' * 40 + ' ')):
+            with self.subTest(flag=flag, expected=expected):
+                result = self.invoke([single, multi], extra=(flag, expected))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('SHA', result.stderr)
+                self.assertNotIn('Traceback', result.stderr)
+                self.assertEqual(self.snapshot(), before)
+
     def test_completed_result_accepts_null_exit_code(self):
         value = raw()
         value['benchmark_results'][0]['exit_code'] = None

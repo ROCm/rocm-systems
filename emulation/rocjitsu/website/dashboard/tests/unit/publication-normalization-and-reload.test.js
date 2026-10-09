@@ -172,12 +172,36 @@ test.each(['publication', 'normalized reload'])('DATA-06 rejects array source.ba
   expect(() => validate(input)).toThrow(/Run fictional-branch-01 has an invalid source base/);
 });
 
-test.each(['publication', 'normalized reload'])('DATA-06 preserves primitive full SHAs for branch search and exact base via %s', (entrypoint) => {
+test.each(['publication', 'normalized reload'].flatMap((entrypoint) =>
+  ['source.commit', 'source.base.commit'].flatMap((field) =>
+    ['uppercase', 'mixed-case'].map((casing) => ({ entrypoint, field, casing })))))('rejects $casing $field via $entrypoint before reference selection', ({ entrypoint, field, casing }) => {
   const source = createSchema2Publication();
   source.runs = source.runs.filter(({ id }) => ['fictional-branch-01', 'fictional-develop-20', 'fictional-develop-21'].includes(id));
   source.index.runFiles = source.runs.map(fixtureRunPath);
   const branch = source.runs.find(({ id }) => id === 'fictional-branch-01');
-  branch.source.commit = branch.source.commit.toUpperCase();
+  const normalized = validatePublishedDashboardData(source).data;
+  const candidate = normalized.allRuns.find(({ runId }) => runId === branch.id);
+  expect(selectAutomaticReference(normalized, candidate)).toMatchObject({ reason: 'exact-base', run: { runId: 'fictional-develop-20' } });
+  expect(selectAutomaticReference(normalized, { ...candidate, sourceBase: undefined })).toMatchObject({ reason: 'earlier-develop', run: { runId: 'fictional-develop-21' } });
+  const input = entrypoint === 'publication' ? source : JSON.parse(JSON.stringify(normalized));
+  const run = entrypoint === 'publication' ? branch : input.allRuns.find(({ runId }) => runId === branch.id);
+  const identity = field === 'source.base.commit'
+    ? (entrypoint === 'publication' ? run.source.base : run.sourceBase)
+    : (entrypoint === 'publication' ? run.source : run.provenance);
+  const key = field === 'source.commit' && entrypoint === 'normalized reload' ? 'rocjitsuCommitSha' : 'commit';
+  identity[key] = casing === 'uppercase' ? identity[key].toUpperCase() : identity[key].replace(/[a-f]/, (letter) => letter.toUpperCase());
+  const invalidSha = identity[key];
+  const validate = entrypoint === 'publication' ? validatePublishedDashboardData : loadDashboardData;
+  expect(() => validate(input)).toThrow(field === 'source.commit' ? /schema-2 run contract/ : /invalid source base/);
+  expect(identity[key]).toBe(invalidSha);
+});
+
+test.each(['publication', 'normalized reload'])('DATA-06 preserves canonical lowercase full SHAs for branch search and exact base via %s', (entrypoint) => {
+  const source = createSchema2Publication();
+  source.runs = source.runs.filter(({ id }) => ['fictional-branch-01', 'fictional-develop-20', 'fictional-develop-21'].includes(id));
+  source.index.runFiles = source.runs.map(fixtureRunPath);
+  const branch = source.runs.find(({ id }) => id === 'fictional-branch-01');
+  expect(branch.source.commit).toMatch(/^[0-9a-f]{40}$/);
   const normalized = validatePublishedDashboardData(source).data;
   const data = entrypoint === 'publication' ? normalized : loadDashboardData(JSON.parse(JSON.stringify(normalized)));
   const candidate = data.allRuns.find(({ runId }) => runId === branch.id);

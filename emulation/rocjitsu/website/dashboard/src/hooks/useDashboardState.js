@@ -4,7 +4,7 @@ const FILTER_STORAGE_KEY = 'rocjitsu-dashboard-filters';
 const BENCHMARK_STORAGE_KEY = 'rocjitsu-dashboard-benchmarks';
 const pages = new Set(['overview', 'branch', 'benchmarks', 'compare']);
 const ranges = new Set(['1W', '1M', '3M', 'ALL']);
-const emptyBranchSelection = { branch: null, candidateId: null, referenceId: null, manual: false, target: 'gfx1250', mode: 'ST', detail: false };
+const emptyBranchSelection = { branch: null, candidateId: null, referenceId: null, manual: false, target: null, mode: null, detail: false };
 
 export function readDashboardRoute(href = globalThis.window?.location?.href ?? 'http://localhost/') {
   const preferences = {};
@@ -45,8 +45,8 @@ export function readDashboardRoute(href = globalThis.window?.location?.href ?? '
       candidateId: field('run', null),
       referenceId: field('reference', null),
       manual: field('manual', '0', new Set(['0', '1'])) === '1',
-      target: field('target', 'gfx1250'),
-      mode: field('mode', 'ST', new Set(['ST', 'MT'])),
+      target: field('target', null),
+      mode: field('mode', null, new Set(['ST', 'MT'])),
       detail: field('detail', '0', new Set(['0', '1'])) === '1',
     },
     comparisonCandidateId: field('compareCandidate', null),

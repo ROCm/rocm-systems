@@ -166,3 +166,17 @@ test('measured zero remains a matched result but never manufactures a percentage
   expect(html.includes('NaN')).toBe(false);
   expect(html.includes('Infinity')).toBe(false);
 });
+
+test('partial failures leave a matched-subset card and expose failed workloads in exclusions', () => {
+  const base = { ...baseline, tests: [testResult('ok', 10), testResult('broken', 30)] };
+  const next = { ...candidate, tests: [testResult('ok', 8), { ...testResult('broken', null), status: 'failed', error: 'Fictional partial failure' }] };
+  const html = render({ ...data, allRuns: [base, next], runs: [base] });
+  const card = html.match(/<button[^>]*data-testid="branch-config-gfx1250-ST"[\s\S]*?<\/button>/)?.[0];
+  expect(card).toContain('data-comparison-state="measured"');
+  expect(card).toContain('Less time · 1 matched');
+  expect(html.includes('1 matched · 1 excluded')).toBe(true);
+  expect(html.includes('Fictional partial failure')).toBe(true);
+  const allFailed = { ...next, tests: next.tests.map((test) => ({ ...test, status: 'failed', durationSeconds: null, error: 'Fictional failure' })) };
+  const unavailable = render({ ...data, allRuns: [base, allFailed], runs: [base] });
+  expect(unavailable.includes('No matched completed benchmarks')).toBe(true);
+});

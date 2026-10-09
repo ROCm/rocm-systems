@@ -1,5 +1,18 @@
 import { compareRunExecution } from '../../data/runOrdering';
 
+export function configurationTargets(runs, selectedTarget = null) {
+  return [...new Set(runs.flatMap((run) => (run?.configurations ?? []).map(({ target }) => target))
+    .concat(selectedTarget == null ? [] : [selectedTarget]))].sort();
+}
+
+function configurationDefaults(snapshot, runs) {
+  const preferred = runs.find((run) => run?.configurations?.length);
+  const target = snapshot.target ?? configurationTargets(preferred ? [preferred] : runs)[0] ?? null;
+  const configurations = runs.find((run) => run?.configurations?.some((c) => c.target === target))?.configurations ?? [];
+  const mode = snapshot.mode ?? ['ST', 'MT'].find((value) => configurations.some((c) => c.target === target && c.threadingMode === value)) ?? 'ST';
+  return { target, mode };
+}
+
 // Atomic snapshots keep route identities and displayed scope together.
 export function selectionForAction(current, action) {
   switch (action.type) {
@@ -13,7 +26,7 @@ export function selectionForAction(current, action) {
 
 export function selectionForBranch(current, entry, referenceId) {
   return { branch: entry.branch, candidateId: entry.latestRun.runId, referenceId: referenceId ?? null, manual: false,
-    target: current.target ?? 'gfx1250', mode: current.mode ?? 'ST', detail: true };
+    ...configurationDefaults(current, [entry.latestRun]), detail: true };
 }
 
 export function selectionForCandidate(current, candidateId, automaticReferenceId) {
@@ -23,11 +36,11 @@ export function selectionForCandidate(current, candidateId, automaticReferenceId
 export function resolveBranchSelection(snapshot = {}, { branches = [], runs = [], automaticReferenceId = null }) {
   const branch = snapshot.branch ?? runs.find((run) => run.runId === snapshot.candidateId)?.branch ?? branches[0]?.branch ?? null;
   const branchRuns = runs.filter((run) => run.branch === branch).sort(compareRunExecution).reverse();
+  const candidateId = snapshot.candidateId ?? branchRuns[0]?.runId ?? null;
+  const referenceId = snapshot.referenceId ?? (snapshot.manual ? null : automaticReferenceId);
   return {
-    branch,
-    candidateId: snapshot.candidateId ?? branchRuns[0]?.runId ?? null,
-    referenceId: snapshot.referenceId ?? (snapshot.manual ? null : automaticReferenceId),
+    branch, candidateId, referenceId,
     manual: snapshot.manual ?? false,
-    target: snapshot.target ?? 'gfx1250', mode: snapshot.mode ?? 'ST', detail: snapshot.detail ?? false,
+    ...configurationDefaults(snapshot, [runs.find((run) => run.runId === candidateId), runs.find((run) => run.runId === referenceId), ...runs]), detail: snapshot.detail ?? false,
   };
 }

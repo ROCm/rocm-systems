@@ -5,7 +5,7 @@ import { backfillRunIds, compareRunExecution, sortRunsByCommit } from './runOrde
 export const CURRENT_SCHEMA_VERSION = CURRENT_RUN_SCHEMA_VERSION;
 export const RUN_FILE_PATTERN = /^runs\/(?:(?:default-branch|side-branches)\/)?[A-Za-z0-9._-]+\.json$/;
 export const CATALOG_FILE_PATTERN = /^test-catalogs\/[A-Za-z0-9._-]+\.json$/;
-const SHA = /^[0-9a-f]{40}$/i;
+const SHA = /^[0-9a-f]{40}$/;
 const TOKEN = /^[A-Za-z0-9._-]+$/;
 const CONFIGURATION = /^([A-Za-z0-9._-]+):(ST|MT)$/;
 const ISO = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))$/;

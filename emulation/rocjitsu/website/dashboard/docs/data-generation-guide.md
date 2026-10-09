@@ -54,9 +54,15 @@ Filenames and references are relative to the data root; do not put absolute path
 ## 2. Map execution facts without inventing data
 
 - Keep source commit time separate from execution completion time. Use a
-  primitive full 40-hex SHA and enforce
+  primitive lowercase full 40-hex SHA and enforce
   `source.committedAt <= execution.completedAt <= index.generatedAt`.
   Every occurrence of the same SHA must have the same source commit instant.
+  The preparer accepts valid uppercase/mixed-case Rocjitsu and corpus Git SHAs,
+  checks expected identity case-insensitively after validating both full SHA
+  strings, and emits lowercase. Malformed or different identities still fail.
+  The website rejects noncanonical SHA spellings instead of changing them.
+  The preparer does not currently emit optional `source.base`; other producers
+  must also lowercase `source.base.commit` before publication.
 - Record the actual source branch, machine, `auto`/`manual` trigger and generic
   scalar environment facts. Optional source base and PR metadata must be
   truthful. The recorded base is not proof of a measured baseline.

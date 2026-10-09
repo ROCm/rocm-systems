@@ -119,7 +119,10 @@ def validate_raw(raw, *, expected_sha, expected_corpus_sha):
         actual = provenance[section][prefix + '_commit_sha']
         require(isinstance(actual, str) and re.fullmatch(r'[a-fA-F0-9]{40}', actual),
                 f'{prefix}_commit_sha must be a full 40-hex SHA')
-        require(actual == expected, f'{prefix}_commit_sha does not match expected SHA')
+        require(isinstance(expected, str) and re.fullmatch(r'[a-fA-F0-9]{40}', expected),
+                f'Expected {prefix} SHA must be a full 40-hex SHA')
+        require(actual.lower() == expected.lower(),
+                f'{prefix}_commit_sha does not match expected SHA')
         committed = instant(provenance[section][prefix + '_commit_timestamp'])
         require(committed <= start, f'{prefix} commit is later than execution start')
     rocjitsu = provenance['rocjitsu']
@@ -302,6 +305,9 @@ def prepare(raw_run, *, data_dir, run_id, repository, expected_sha, expected_cor
     require(raw_runs, 'Supply at least one raw run')
     for raw in raw_runs:
         validate_raw(raw, expected_sha=expected_sha, expected_corpus_sha=expected_corpus_sha)
+        for section in ('rocjitsu', 'corpus'):
+            key = section + '_commit_sha'
+            raw['provenance'][section][key] = raw['provenance'][section][key].lower()
     validate_consistency(raw_runs)
     run, catalog = normalize_runs(
         raw_runs, run_id=run_id, branch=branch, commit_message=commit_message,

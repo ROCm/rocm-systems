@@ -35,7 +35,7 @@ export default function BranchDetail({ selection, candidate, reference, automati
       {selection.referenceId && !reference ? 'Saved reference attempt is unavailable. Its exact identity is retained; choose a published reference above.' : selection.manual ? 'Manual reference · any published attempt; only matching target, mode and completed workloads are compared.' : reference && reference.runId !== automatic.run?.runId ? 'Saved automatic reference attempt retained. Only matching completed workloads are compared.' : automatic.description}
     </Typography>
     {selection.manual && <Button onClick={onAutomatic} sx={{ minHeight: 44 }}>Restore automatic base</Button>}
-    <ConfigurationMatrix candidate={candidate} reference={reference} selection={selection} suites={suites} query={query} onSelect={(target, mode) => {
+    <ConfigurationMatrix runs={runs} candidate={candidate} reference={reference} selection={selection} suites={suites} query={query} onSelect={(target, mode) => {
       onConfiguration(target, mode);
       differencesRef.current?.focus({ preventScroll: true });
     }} />

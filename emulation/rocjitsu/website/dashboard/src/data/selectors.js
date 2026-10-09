@@ -265,7 +265,12 @@ export function selectBenchmarkRecords(data, filters, logicalTestId, offset = 0,
 }
 
 export function selectBenchmarkCatalog(data, filters) {
-  const ids = new Set(data.runs.flatMap((run) => selected(run, filters).map(({ logicalTestId }) => logicalTestId)));
+  const suites = new Map(data.testCatalog.map(({ id, suite }) => [id, suite]));
+  // Direct explorer callers may omit result-level suite metadata. Resolve it
+  // from the catalog here so availability still uses the shared scope policy.
+  const ids = new Set(data.runs.flatMap((run) => (run.tests ?? [])
+    .filter((test) => testMatches({ ...test, suite: test.suite ?? suites.get(test.logicalTestId) }, filters))
+    .map(({ logicalTestId }) => logicalTestId)));
   const available = data.testCatalog.filter(({ id }) => ids.has(id));
   return { all: data.testCatalog, available, hiddenCount: data.testCatalog.length - available.length };
 }
