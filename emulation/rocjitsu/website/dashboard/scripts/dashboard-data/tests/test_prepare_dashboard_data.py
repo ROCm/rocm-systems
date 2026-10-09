@@ -984,4 +984,14 @@ def test_export_prepared_data_for_workflow(tmp_path):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    raise SystemExit(
+        subprocess.call(
+            [
+                sys.executable,
+                '-m',
+                'pytest',
+                str(Path(__file__).resolve()),
+                *sys.argv[1:],
+            ]
+        )
+    )
