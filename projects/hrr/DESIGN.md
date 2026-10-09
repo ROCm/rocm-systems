@@ -1136,7 +1136,9 @@ process on the machine open the allocation while its exporter lives, so
 128-bit digest of the handle in the first 16 bytes of `handle_bytes`, and zeros after
 it. A handle has little entropy, so the digest is SipHash-2-4 keyed with a secret each
 capturing process draws from the system's random source when capture opens and never
-writes down; the same handle digests differently in two processes. Replay pairs an
+writes down. A forked child drops its parent's key at the fork and draws its own when
+its archive opens, before it can digest anything. The same handle digests differently
+in two processes, a parent and its forked child included. Replay pairs an
 import with an export from the same archive by that digest, and
 reports an import whose export is in another process instead of opening it. The other
 shims call the real APIs with zeroed or stale handles, so the imported memory or

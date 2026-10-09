@@ -160,7 +160,9 @@ static Hash128 hash_buffer(const void* data, size_t len) {
 // and kept only in memory: it is never written to the archive, its manifest,
 // writer state or a log. Replay only compares digests recorded in one
 // per-process archive with each other, so it never needs the key. A forked
-// child keeps its parent's key.
+// child does not keep its parent's key: atfork_child() drops it, and the child
+// draws its own when its archive opens, or at its first digest if that comes
+// first, so no digest in the child uses the parent's key.
 // ---------------------------------------------------------------------------
 
 struct DigestKey { uint64_t k0, k1; };
@@ -185,9 +187,20 @@ static DigestKey draw_digest_key() {
   return {k[0], k[1]};
 }
 
-static const DigestKey& digest_key() {
-  static const DigestKey key = draw_digest_key();
-  return key;
+// g_digest_key_mu is a leaf: nothing else is locked under it.
+static std::mutex        g_digest_key_mu;
+static DigestKey         g_digest_key{};
+static std::atomic<bool> g_digest_key_ready{false};
+
+static DigestKey digest_key() {
+  if (!g_digest_key_ready.load(std::memory_order_acquire)) {
+    std::lock_guard<std::mutex> lk(g_digest_key_mu);
+    if (!g_digest_key_ready.load(std::memory_order_relaxed)) {
+      g_digest_key = draw_digest_key();
+      g_digest_key_ready.store(true, std::memory_order_release);
+    }
+  }
+  return g_digest_key;
 }
 
 static inline uint64_t rotl64(uint64_t x, int b) { return (x << b) | (x >> (64 - b)); }
@@ -261,7 +274,8 @@ static constexpr size_t   kMetadataJsonMax  = 128u * 1024u;
 static constexpr size_t   kEmergencyManifestMax = kMetadataJsonMax + 1024u;
 
 // Lock order: g_reopen_mu, then g_blob_mu, then g_file_mu, then
-// g_unreplayable_mu. atfork_prepare is the only path that holds them all.
+// g_unreplayable_mu, then g_digest_key_mu. atfork_prepare is the only path that
+// holds them all.
 static std::mutex   g_file_mu;
 static int          g_events_fd = -1;
 // g_base_dir is the archive path requested via HIP_HRR_CAPTURE_OUTPUT.
@@ -811,9 +825,12 @@ static void atfork_prepare() {
   g_buf_busy.clear(std::memory_order_release);
   // The child's shutdown writes its manifest under this one.
   g_unreplayable_mu.lock();
+  // The child draws its own digest key under this one.
+  g_digest_key_mu.lock();
 }
 
 static void atfork_parent() {
+  g_digest_key_mu.unlock();
   g_unreplayable_mu.unlock();
   g_file_mu.unlock();
   g_blob_mu.unlock();
@@ -821,6 +838,7 @@ static void atfork_parent() {
 }
 
 static void atfork_child() {
+  g_digest_key_mu.unlock();
   g_unreplayable_mu.unlock();
   g_file_mu.unlock();
   g_blob_mu.unlock();
@@ -844,6 +862,10 @@ static void atfork_child() {
   g_events_finalized = false;
   g_output_dir.clear();
   g_manifest_path[0] = '\0';
+  // The child is another capturing process: it must not digest with the
+  // parent's key. digest_key() draws a new one.
+  g_digest_key = DigestKey{};
+  g_digest_key_ready.store(false, std::memory_order_relaxed);
   // The child's archive is a new one: an event the parent dropped is not
   // missing from it.
   g_capture_incomplete.store(false, std::memory_order_relaxed);
@@ -1287,7 +1309,9 @@ bool open(const char* output_dir) {
 #ifndef _WIN32
   install_atfork_handlers_once();
 #endif
-  (void)digest_key();  // drawn at capture start, not at the first IPC call
+  // Drawn at capture start, not at the first IPC call; in a forked child, when
+  // its archive opens.
+  (void)digest_key();
   // The archive is prepared in locals and published below under the writer
   // mutex and g_buf_busy. A forked child opens its archive while other threads
   // may checkpoint, crash or finalize, and none of them may see the events fd

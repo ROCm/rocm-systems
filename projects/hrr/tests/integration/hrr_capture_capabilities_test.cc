@@ -38,6 +38,39 @@
 #include <string>
 #include <vector>
 
+#ifndef _WIN32
+#include <fcntl.h>
+#include <sys/syscall.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+// Every getrandom in this binary, the HIP runtime's included, comes here
+// through the dynamic list in CMakeLists.txt. With HRR_CAPS_KEYS set, each draw
+// of up to 64 bytes is appended to that file as "<pid> <hex>", which is how
+// Unit_HRR_CaptureCapabilitiesForkedChild sees the digest keys. The asm label
+// keeps the C++ name apart from the libc declaration.
+extern "C" ssize_t hrr_caps_getrandom(void* buf, size_t len, unsigned int flags)
+    __asm__("getrandom");
+
+extern "C" ssize_t hrr_caps_getrandom(void* buf, size_t len, unsigned int flags) {
+  const long n = syscall(SYS_getrandom, buf, len, flags);
+  const char* log = getenv("HRR_CAPS_KEYS");
+  if (n > 0 && n <= 64 && log) {
+    char line[160];
+    int off = snprintf(line, sizeof(line), "%d ", static_cast<int>(getpid()));
+    for (long i = 0; i < n; ++i)
+      off += snprintf(line + off, sizeof(line) - off, "%02x", static_cast<const uint8_t*>(buf)[i]);
+    line[off++] = '\n';
+    const int fd = open(log, O_WRONLY | O_APPEND | O_CREAT, 0600);
+    if (fd >= 0) {
+      (void)!write(fd, line, off);
+      close(fd);
+    }
+  }
+  return n;
+}
+#endif
+
 #if defined(HRR_PLAYBACK_EXE) && defined(HRR_TEST_EXE)
 
 namespace {
@@ -51,6 +84,9 @@ namespace {
 #define HRR_CAPS_OPEN_MEM "HRR_CAPS_OPEN_MEM"
 #define HRR_CAPS_OPEN_EVENT "HRR_CAPS_OPEN_EVENT"
 #define HRR_CAPS_IMPORTER "HRR_CAPS_IMPORTER"
+#define HRR_CAPS_PARENT "HRR_CAPS_PARENT"
+#define HRR_CAPS_CHILD "HRR_CAPS_CHILD"
+#define HRR_CAPS_CHILD_STATUS "HRR_CAPS_CHILD_STATUS"
 
 constexpr size_t kHandleBytes = sizeof(hipIpcMemHandle_t);
 constexpr size_t kEventHandleBytes = sizeof(hipIpcEventHandle_t);
@@ -187,6 +223,34 @@ TEST_CASE("Unit_HRR_CaptureCapabilitiesImport_Direct", "[.][hrr-direct]") {
   if (re == hipSuccess) HRR_HIP_CHECK(hipEventDestroy(ev));
   if (rm == hipSuccess) HRR_HIP_CHECK(hipIpcCloseMemHandle(mem));
 }
+
+#ifndef _WIN32
+// A forked child is another capturing process. It cannot use the HIP device, so
+// no IPC call of its succeeds and none is recorded; what it can do is record a
+// host call, which opens its archive, and draw its own digest key for it.
+TEST_CASE("Unit_HRR_CaptureCapabilitiesFork_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  void* mem = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&mem, 1 << 20));
+  hipIpcMemHandle_t mh{};
+  HRR_HIP_CHECK(hipIpcGetMemHandle(&mh, mem));
+  printf(HRR_CAPS_EXPORT_MEM " %s\n", to_hex(&mh, kHandleBytes).c_str());
+  printf(HRR_CAPS_PARENT " %d\n", static_cast<int>(getpid()));
+  fflush(stdout);
+  fflush(stderr);
+  const pid_t child = fork();
+  if (child == 0) {
+    (void)hipGetLastError();
+    _exit(0);
+  }
+  REQUIRE(child > 0);
+  int status = -1;
+  REQUIRE(waitpid(child, &status, 0) == child);
+  printf(HRR_CAPS_CHILD " %d\n" HRR_CAPS_CHILD_STATUS " %d\n", static_cast<int>(child), status);
+  fflush(stdout);
+  HRR_HIP_CHECK(hipFree(mem));
+}
+#endif
 
 namespace {
 bool all_zero(const uint8_t* p, size_t n) {
@@ -527,6 +591,71 @@ HRR_TEST_CASE(Unit_HRR_CaptureCapabilitiesAcrossProcesses) {
                          &scanned) == "");
   CHECK(scanned > 0);
 }
+
+#ifndef _WIN32
+// ---------------------------------------------------------------------------
+// A forked child does not digest with its parent's key. Its IPC calls fail, so
+// the key is read where it is drawn: the parent's key is the draw that turns
+// the exported handle into the recorded digest, and the child must have drawn
+// another, which digests the same handle differently.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_CaptureCapabilitiesForkedChild) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_capture_capabilities_fork.hrr");
+  ScopedDir keys_dir(fs::temp_directory_path() / "hrr_capture_capabilities_fork.keys");
+  fs::create_directories(keys_dir.path);
+  const fs::path keys = keys_dir.path / "draws";
+  std::string out;
+  { hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    proc.setEnv("HRR_CAPS_KEYS", keys.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_CaptureCapabilitiesFork_Direct\"");
+    out = proc.getOutput();
+    INFO("Capture exit: " << ret << "\n" << out);
+    REQUIRE(ret == 0); }
+  INFO("Capture output:\n" << out);
+
+  const auto tags = tagged_lines(out);
+  REQUIRE(tags.count(HRR_CAPS_EXPORT_MEM));
+  REQUIRE(tags.count(HRR_CAPS_PARENT));
+  REQUIRE(tags.count(HRR_CAPS_CHILD));
+  REQUIRE(tags.count(HRR_CAPS_CHILD_STATUS));
+  CHECK(tags.at(HRR_CAPS_CHILD_STATUS) == "0");
+  const std::vector<uint8_t> mem = parse_hex(tags.at(HRR_CAPS_EXPORT_MEM));
+  REQUIRE(mem.size() == kHandleBytes);
+  const std::string parent = tags.at(HRR_CAPS_PARENT);
+  const std::string child = tags.at(HRR_CAPS_CHILD);
+  // The child recorded, so it opened an archive of its own.
+  REQUIRE(fs::is_directory(cap.path / ("pid-" + child)));
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive((cap.path / ("pid-" + parent)).string(), arc));
+  const hrr_args_hipIpcGetMemHandle* exported = nullptr;
+  for (const auto& ev : arc.events)
+    if (ev.header().event_type == HRR_API_HIPIPCGETMEMHANDLE) {
+      REQUIRE(ev.raw_payload.size() >= sizeof(hrr_args_hipIpcGetMemHandle));
+      exported = reinterpret_cast<const hrr_args_hipIpcGetMemHandle*>(ev.raw_payload.data());
+    }
+  REQUIRE(exported != nullptr);
+  const Digest recorded = digest_of(exported->handle_bytes);
+
+  std::map<std::string, std::vector<std::vector<uint8_t>>> draws;
+  { std::ifstream in(keys);
+    std::string pid, hex;
+    while (in >> pid >> hex) {
+      std::vector<uint8_t> k = parse_hex(hex);
+      if (k.size() == kDigestBytes) draws[pid].push_back(k);
+    } }
+  INFO("16-byte draws: parent " << draws[parent].size() << ", child " << draws[child].size());
+  // The parent's key is among its draws, so this sees the key capture uses.
+  bool parent_key = false;
+  for (const auto& k : draws[parent]) parent_key |= siphash128(k.data(), mem) == recorded;
+  REQUIRE(parent_key);
+  // The child drew its own, and under it the same handle digests differently.
+  REQUIRE_FALSE(draws[child].empty());
+  for (const auto& k : draws[child]) CHECK(siphash128(k.data(), mem) != recorded);
+}
+#endif
 
 #endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE
 
