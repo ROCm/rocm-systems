@@ -467,3 +467,83 @@ HRR_TEST_CASE(Unit_HRR_Format_UnknownEventType) {
   CHECK(archive.events[0].header().event_type == 0xFFFFu);
   CHECK(archive.events[0].malloc_ev.ptr_handle == 0u);
 }
+
+// A kernel launch event with no arguments and one pinned host snapshot record,
+// cut `cut` bytes short of a whole record (v8 layout, as capture writes it).
+static std::vector<uint8_t> make_launch_with_snapshot(uint64_t seq,
+                                                      const std::vector<uint8_t>& rec,
+                                                      size_t cut = 0) {
+  std::vector<uint8_t> p(sizeof(hrr_event_header), 0);
+  auto put = [&](const void* d, size_t n) {
+    p.insert(p.end(), static_cast<const uint8_t*>(d), static_cast<const uint8_t*>(d) + n);
+  };
+  const uint64_t stream = 0, co_hash[2] = {0, 0};
+  const uint16_t name_len = 1, counts[2] = {0, 1};  // num_args, num_snapshots
+  const uint32_t dims[7] = {1, 1, 1, 1, 1, 1, 0}, attrs[2] = {0, 0};
+  put(&stream, 8); put(&name_len, 2); put("k", 1); put(co_hash, 16);
+  put(dims, sizeof(dims)); put(counts, sizeof(counts));
+  put(rec.data(), rec.size() - cut);
+  if (!cut) put(attrs, sizeof(attrs));
+  auto* h = reinterpret_cast<hrr_event_header*>(p.data());
+  h->event_type     = static_cast<uint16_t>(HRR_API_HIPMODULELAUNCHKERNEL);
+  h->sequence_id    = seq;
+  h->payload_length = static_cast<uint32_t>(p.size());
+  return p;
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A pinned host snapshot record round-trips through the reader, and replay
+ *     points it at its own pinned buffer at the recorded offset.
+ *   - A launch whose record runs past the event is not decoded, and replay
+ *     refuses a record that names a device allocation or the inside of one,
+ *     runs past its allocation, differs from its blob in length, or has an
+ *     unknown direction.
+ */
+HRR_TEST_CASE(Unit_HRR_Format_HostSnapshotRecord) {
+  auto record = [](uint64_t ptr, uint64_t off, uint64_t len, uint8_t direction) {
+    const uint64_t f[5] = {ptr, off, len, 0x1122334455667788ULL, 0x99aabbccddeeff00ULL};
+    std::vector<uint8_t> r(kHostSnapRecordSize);
+    std::memcpy(r.data(), f, sizeof(f));
+    r[40] = direction;
+    return r;
+  };
+  const auto good = record(0x2000, 16, 64, 0);
+  TmpArchive arc("host_snapshot");
+  auto body = make_launch_with_snapshot(0, good);
+  const auto torn = make_launch_with_snapshot(1, good, 1);
+  body.insert(body.end(), torn.begin(), torn.end());
+  arc.write_events(body);
+
+  hrr::Archive archive;
+  REQUIRE(hrr::load_archive(arc.path(), archive));
+  REQUIRE(archive.events.size() == 2);
+  REQUIRE(archive.events[0].kernel_launch != nullptr);
+  REQUIRE(archive.events[0].kernel_launch->snapshots.size() == 1);
+  const hrr::BufferSnapshot& s = archive.events[0].kernel_launch->snapshots[0];
+  CHECK(s.ptr_handle == 0x2000);
+  CHECK(s.offset == 16);
+  CHECK(s.length == 64);
+  CHECK(s.hash_lo == 0x1122334455667788ULL);
+  CHECK(s.hash_hi == 0x99aabbccddeeff00ULL);
+  CHECK(s.direction == 0);
+  CHECK(archive.events[1].kernel_launch == nullptr);
+
+  PlaybackContext ctx;
+  std::vector<uint8_t> pinned(128), device(128), blob(64);
+  ctx.record_alloc(0x2000, pinned.data(), pinned.size(), AllocKind::HostMalloc);
+  ctx.record_alloc(0x3000, device.data(), device.size(), AllocKind::Device);
+  const char* why = nullptr;
+  CHECK(hrr_host_snapshot_target(ctx, good.data(), blob.data(), blob.size(), &why) ==
+        pinned.data() + 16);
+  CHECK(why == nullptr);
+  CHECK(hrr_host_snapshot_target(ctx, good.data(), nullptr, 0, &why) == nullptr);
+  for (const auto& bad : {record(0x3000, 0, 64, 0), record(0x2008, 0, 64, 0),
+                          record(0x2000, 80, 64, 0), record(0x2000, 16, 32, 0),
+                          record(0x2000, 16, 64, 1)}) {
+    why = nullptr;
+    CHECK(hrr_host_snapshot_target(ctx, bad.data(), blob.data(), blob.size(), &why) == nullptr);
+    CHECK(why != nullptr);
+  }
+}
