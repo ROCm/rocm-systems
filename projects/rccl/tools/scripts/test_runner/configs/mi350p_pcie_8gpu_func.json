@@ -779,13 +779,12 @@
     "alltoall_perf": {
       "extends": "func_base",
       "binary": "alltoall_perf",
-      "description": "AllToAll spot checks. Ring only, 4 channels.",
+      "description": "AllToAll SHM and IPC spot checks at 4 channels. Protocol follows the message size and NCCL_P2P_LL_THRESHOLD, not NCCL_PROTO.",
       "tests": [
         {
-          "name": "AllToAll_Simple_SHM_ch4",
-          "description": "AllToAll correctness: Simple + SHM, 4 channels. NCCL_ALGO is left unset; this collective does not use the Tree/Ring tuner.",
+          "name": "AllToAll_SHM_ch4",
+          "description": "AllToAll correctness: SHM, 4 channels. NCCL_PROTO is left unset; AllToAll does not read it.",
           "env_variables": {
-            "NCCL_PROTO": "Simple",
             "NCCL_MIN_NCHANNELS": "4",
             "NCCL_MAX_NCHANNELS": "4",
             "NCCL_SHM_DISABLE": "0",
@@ -793,33 +792,9 @@
           }
         },
         {
-          "name": "AllToAll_LL_SHM_ch4",
-          "description": "AllToAll correctness: LL + SHM, 4 channels. NCCL_ALGO is left unset; this collective does not use the Tree/Ring tuner.",
+          "name": "AllToAll_IPC_ch4",
+          "description": "AllToAll correctness: IPC, 4 channels. NCCL_PROTO is left unset; AllToAll does not read it.",
           "env_variables": {
-            "NCCL_PROTO": "LL",
-            "NCCL_MIN_NCHANNELS": "4",
-            "NCCL_MAX_NCHANNELS": "4",
-            "NCCL_SHM_DISABLE": "0",
-            "NCCL_P2P_DISABLE": "1"
-          }
-        },
-        {
-          "name": "AllToAll_Simple_IPC_ch4",
-          "description": "AllToAll correctness: Simple + IPC, 4 channels. NCCL_ALGO is left unset; this collective does not use the Tree/Ring tuner.",
-          "env_variables": {
-            "NCCL_PROTO": "Simple",
-            "NCCL_MIN_NCHANNELS": "4",
-            "NCCL_MAX_NCHANNELS": "4",
-            "NCCL_SHM_DISABLE": "1",
-            "NCCL_P2P_DISABLE": "0",
-            "NCCL_P2P_LEVEL": "SYS"
-          }
-        },
-        {
-          "name": "AllToAll_LL_IPC_ch4",
-          "description": "AllToAll correctness: LL + IPC, 4 channels. NCCL_ALGO is left unset; this collective does not use the Tree/Ring tuner.",
-          "env_variables": {
-            "NCCL_PROTO": "LL",
             "NCCL_MIN_NCHANNELS": "4",
             "NCCL_MAX_NCHANNELS": "4",
             "NCCL_SHM_DISABLE": "1",

@@ -9,14 +9,19 @@ algorithm cells RCCL will not select, and the smoke versus full channel split.
 """
 
 import json
+import re
 import unittest
+from fnmatch import fnmatch
 from pathlib import Path
 
 from lib.test_config import TestConfigProcessor
 
+_RCCL = Path(__file__).resolve().parents[4]
 _CONFIG_DIR = Path(__file__).resolve().parents[1] / "configs"
 _FUNC = _CONFIG_DIR / "mi350p_pcie_8gpu_func.json"
 _PERF = _CONFIG_DIR / "mi350p_pcie_8gpu_perf.json"
+_TOPO_CPP = _RCCL / "test/graph/Mi350pPcieTopoTests.cpp"
+_FIXTURES_YAML = _RCCL / "test/test_categories_fixtures_debug.yaml"
 
 _RING_ONLY = ("AllGather", "ReduceScatter", "Broadcast")
 
@@ -72,6 +77,7 @@ class Mi350pPcieConfigTest(unittest.TestCase):
                             self.assertNotEqual(algo, "Tree", test["name"])
                     if test["name"].startswith("AllToAll"):
                         self.assertNotIn("NCCL_ALGO", env, test["name"])
+                        self.assertNotIn("NCCL_PROTO", env, test["name"])
 
     def test_tree_ll_allreduce_is_kept(self):
         names = [t["name"] for t in _tests(self.func, "allreduce_smoke")]
@@ -118,6 +124,30 @@ class Mi350pPcieConfigTest(unittest.TestCase):
         self.assertEqual(len(set(args.values())), 1, args)
         self.assertIn("-n 20", next(iter(args.values())))
         self.assertIn("-w 5", next(iter(args.values())))
+
+    def test_topo_names_stay_tied(self):
+        """A renamed TEST() must not leave the plan green with the suite gone."""
+        source = _TOPO_CPP.read_text(encoding="utf-8")
+        match = re.search(r"TEST\((\w+),\s*(\w+)\)", source)
+        self.assertIsNotNone(match)
+        suite, case = match.group(1), match.group(2)
+        gtest_name = f"{suite}.{case}"
+
+        topo = self.func["test_configurations"]["mi350p_topo_unit"]
+        self.assertEqual(topo["tests"][0]["test_filter"], gtest_name)
+
+        model = re.search(r"topo_expl/models/([\w.]+\.xml)", source)
+        self.assertIsNotNone(model)
+        model_path = _RCCL / "tools" / "topo_expl" / "models" / model.group(1)
+        self.assertTrue(model_path.is_file(), model_path)
+
+        yaml_text = _FIXTURES_YAML.read_text(encoding="utf-8")
+        patterns_block = yaml_text.split("test_patterns:", 1)[1].split("exclude_windows:", 1)[0]
+        patterns = re.findall(r'"([^"]+)"', patterns_block)
+        self.assertTrue(
+            any(fnmatch(gtest_name, pattern) for pattern in patterns),
+            f"{gtest_name} is not covered by {_FIXTURES_YAML.name}",
+        )
 
     def test_extends_resolves_shared_ranks(self):
         combined = self.func_proc.combine_configs("allreduce_smoke")
