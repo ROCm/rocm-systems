@@ -199,12 +199,13 @@ pointer passed to ``ncclFindWindow`` lies within that registration.
 including its resource and team lists, so you can free or reuse that structure
 as soon as the call returns. The copy keeps the ``outBufferHandle``,
 ``outGinSignalStart``, ``outGinCounterStart`` and ``outMultimemHandle``
-pointers as they are, and RCCL writes through them when the device
-communicator is actually created. Inside a ``ncclGroupStart``/``ncclGroupEnd``
-block that happens at ``ncclGroupEnd``, and on a nonblocking communicator only
-once the operation completes, so the objects those pointers target, such as a
-handle filled in by ``ncclLsaBarrierCreateRequirement``, must stay valid until
-then. A request that ``ncclDevCommCreate`` itself rejects, for example with
+pointers as they are, and RCCL writes through them, and fills in the
+``ncclDevComm_t`` you pass, when the device communicator is actually created.
+Inside a ``ncclGroupStart``/``ncclGroupEnd`` block that happens at
+``ncclGroupEnd``, and on a nonblocking communicator only once the operation
+completes, so the ``ncclDevComm_t`` and the objects those pointers target, such
+as a handle filled in by ``ncclLsaBarrierCreateRequirement``, must stay valid
+until then. A request that ``ncclDevCommCreate`` itself rejects, for example with
 ``ncclInvalidArgument`` for ``cftCaps`` that the communicator does not support,
 releases its copy before returning, so you can change the requirements and call
 it again without leaking memory.

@@ -541,9 +541,6 @@ static long long heapInUseBytes()
 // dwarfs allocator noise.
 static void runDevCommCreateRejectedAfterCopyTest()
 {
-    if(getVisibleGpuCount() < kNegativeRanks)
-        GTEST_SKIP() << "This test requires at least 1 visible GPU.";
-
     constexpr int kResourceNodes = 256;
     constexpr int kWarmupCalls   = 16;
     constexpr int kCalls         = 2000;
@@ -585,9 +582,9 @@ static void runDevCommCreateRejectedAfterCopyTest()
     const long long copyBytes = static_cast<long long>(
         sizeof(ncclDevCommRequirements_t) + kResourceNodes * sizeof(ncclDevResourceRequirements_t));
     EXPECT_EQ(rejected, kCalls);
-    // A leaked copy per call would add kCalls * copyBytes; allow a tenth of that for
+    // A leaked copy per call would add kCalls * copyBytes; allow one copy for
     // allocations made meanwhile by RCCL's own threads.
-    EXPECT_LT(growth, kCalls * copyBytes / 10)
+    EXPECT_LT(growth, copyBytes)
         << kCalls << " rejected calls left " << growth << " heap bytes behind; one copy is "
         << copyBytes;
 }
@@ -700,8 +697,13 @@ TEST(DeviceApi, WinDisabled)
         makeWinDisabledConfig("DeviceApi.WinDisabled", []() { runDevCommCreateFailureTest(); }));
 }
 
+// Gated here for the reason given at FindWindowRemoteRead: a GTEST_SKIP() in
+// the isolated child is reported as a pass by the parent.
 TEST(DeviceApi, RejectedCreateReleasesRequirements)
 {
+    if(getVisibleGpuCount() < kNegativeRanks)
+        GTEST_SKIP() << "This test requires at least 1 visible GPU.";
+
     RUN_ISOLATED_TESTS(makeDeviceApiSingleGpuConfig("DeviceApi.RejectedCreateReleasesRequirements",
                                                     []() { runDevCommCreateRejectedAfterCopyTest(); },
                                                     false));
@@ -709,6 +711,9 @@ TEST(DeviceApi, RejectedCreateReleasesRequirements)
 
 TEST(DeviceApi, RejectedCreateReleasesRequirementsRearch)
 {
+    if(getVisibleGpuCount() < kNegativeRanks)
+        GTEST_SKIP() << "This test requires at least 1 visible GPU.";
+
     RUN_ISOLATED_TESTS(
         makeDeviceApiSingleGpuConfig("DeviceApi.RejectedCreateReleasesRequirementsRearch",
                                      []() { runDevCommCreateRejectedAfterCopyTest(); },
