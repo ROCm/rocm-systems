@@ -210,9 +210,10 @@ static bool     g_events_finalized   = false;
 // reader treats it like a truncated archive rather than a faithful capture.
 static std::atomic<bool> g_capture_incomplete{false};
 
-// Set when a write or fsync of events.bin failed, so records may be missing
-// or torn. Only an atomic store, so the crash callback can set it too; the
-// other paths turn it into mark_incomplete() through note_events_io_locked().
+// Set when a write, fsync or close of events.bin failed, so records may be
+// missing or torn. Only an atomic store, so the crash callback can set it too;
+// the other paths turn it into mark_incomplete() through
+// note_events_io_locked().
 static std::atomic<bool> g_events_io_failed{false};
 
 // Where the clean-shutdown trailer starts in events.bin once flush() wrote it,
@@ -320,11 +321,11 @@ static void sync_events_locked() {
     g_events_io_failed.store(true, std::memory_order_relaxed);
 }
 
-// Mark the archive incomplete once a write or fsync of events.bin has failed,
-// and say whether one has. Logs, so not for the crash callback.
+// Mark the archive incomplete once a write, fsync or close of events.bin has
+// failed, and say whether one has. Logs, so not for the crash callback.
 static bool note_events_io_locked() {
   if (!g_events_io_failed.load(std::memory_order_relaxed)) return false;
-  mark_incomplete("a write to events.bin failed, so records may be missing");
+  mark_incomplete("a write, fsync or close of events.bin failed, so records may be missing");
   return true;
 }
 
