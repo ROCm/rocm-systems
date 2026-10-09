@@ -117,7 +117,6 @@ setup() ROCPROFSYS_INTERNAL_API;
 
 namespace
 {
-const auto         library_load_time = std::chrono::steady_clock::now();
 std::atomic<bool>  rocprofsys_init_library_done{ false };
 std::atomic<pid_t> rocprofsys_init_tooling_done{ 0 };
 std::atomic<bool>  rocprofsys_finalization_done{ false };
@@ -1396,10 +1395,8 @@ rocprofsys_finalize_hidden(void)
     {
         LOG_DEBUG("Registering causal output files...");
         auto _base = config::get_causal_output_filename();
-        output::registry::instance().register_file(fmt::format("{}.json", _base),
-                                                   output::output_format::json);
-        output::registry::instance().register_file(fmt::format("{}.txt", _base),
-                                                   output::output_format::text);
+        output::registry::instance().register_file(fmt::format("{}.json", _base));
+        output::registry::instance().register_file(fmt::format("{}.txt", _base));
     }
 
     if(get_use_process_sampling())
@@ -1509,11 +1506,9 @@ rocprofsys_finalize_hidden(void)
                 }
 
                 output::registry::instance().register_file(
-                    settings::compose_output_filename(_comp_name, "txt", _cfg),
-                    output::output_format::text);
+                    settings::compose_output_filename(_comp_name, "txt", _cfg));
                 output::registry::instance().register_file(
-                    settings::compose_output_filename(_comp_name, "json", _cfg),
-                    output::output_format::json);
+                    settings::compose_output_filename(_comp_name, "json", _cfg));
             }
         }
     }
@@ -1523,7 +1518,7 @@ rocprofsys_finalize_hidden(void)
         output::registry::instance().record_process(output::process_metadata{
             .pid = getpid(), .ppid = getppid(), .command = config::get_exe_name() });
 
-        std::cout << output::registry::instance().format_summary(library_load_time);
+        std::cout << output::registry::instance().format_summary();
     }
 
     categories::shutdown();

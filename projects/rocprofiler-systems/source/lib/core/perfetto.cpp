@@ -306,8 +306,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
                 {
                     _timemory_manager->add_file_output("protobuf", "perfetto", _filename);
                 }
-                output::registry::instance().register_file(
-                    _filename, output::output_format::perfetto);
+                output::registry::instance().register_file(_filename);
             }
             ofs.close();
         }

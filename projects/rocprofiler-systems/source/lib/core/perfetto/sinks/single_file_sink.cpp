@@ -196,8 +196,7 @@ single_file_sink::finalize()
             append_with_file_lock(filename, m_buffer.data(), m_buffer.size());
         if(status == locked_append_status::success)
         {
-            output::registry::instance().register_file(std::move(filename),
-                                                       output::output_format::perfetto);
+            output::registry::instance().register_file(std::move(filename));
         }
         else
         {

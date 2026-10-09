@@ -64,7 +64,7 @@ write_proto_to(const std::string& filename, const char* data, std::size_t size)
         return false;
     }
 
-    output::registry::instance().register_file(filename, output::output_format::perfetto);
+    output::registry::instance().register_file(filename);
     return true;
 }
 

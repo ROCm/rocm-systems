@@ -6,12 +6,9 @@
 #include <sys/types.h>
 
 #include <chrono>
-#include <cstddef>
 #include <cstdint>
 #include <mutex>
-#include <span>
 #include <string>
-#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -29,65 +26,11 @@ struct process_metadata
     std::string command;
 };
 
-enum class output_format
-{
-    perfetto,
-    rocpd,
-    json,
-    text
-};
-
 struct artifact
 {
     std::string   path;
     pid_t         pid{ k_no_pid };
     std::uint64_t size_bytes{ 0 };
-    output_format format{ output_format::perfetto };
-};
-
-struct process_node
-{
-    process_metadata          meta;
-    std::vector<artifact>     rows;
-    std::vector<process_node> children;
-};
-
-/*
- * Keep the track of the missing or excluded pids while
- * building the process tree for rendering
- *
- * missing_metadata_pids - PIDs seen in registered rows/process records
- * but missing their own metadata record
- *
- * cyclic_ppid_pids - PIDs excluded from every root's tree because their
- * ppid chain forms a cycle (corrupted metadata)
- */
-struct process_tree_diagnostics
-{
-    std::vector<pid_t> missing_metadata_pids;
-    std::vector<pid_t> cyclic_ppid_pids;
-};
-
-class process_tree
-{
-public:
-    // Builds a tree from `rows`/`processes` grouped by pid/ppid
-    process_tree(std::span<const artifact>         rows,
-                 std::span<const process_metadata> processes);
-
-    [[nodiscard]] const std::vector<process_node>& roots() const noexcept
-    {
-        return m_roots;
-    }
-
-    [[nodiscard]] const process_tree_diagnostics& diagnostics() const noexcept
-    {
-        return m_diagnostics;
-    }
-
-private:
-    std::vector<process_node> m_roots;
-    process_tree_diagnostics  m_diagnostics;
 };
 
 class registry
@@ -95,28 +38,26 @@ class registry
 public:
     [[nodiscard]] static registry& instance();
 
-    void register_file(std::string path, output_format format);
+    void register_file(std::string path);
 
     void record_process(process_metadata meta);
 
-    [[nodiscard]] std::vector<artifact>         rows() const;
-    [[nodiscard]] std::vector<process_metadata> processes() const;
-
-    // Attach/detach lifecycle: clears a prior session's registrations
-    // before a new one starts.
     void start_new_session();
 
-    // Renders a process/output summary from everything registered so far.
-    // Returns an empty string if nothing has been registered.
-    [[nodiscard]] std::string format_summary(
-        std::chrono::steady_clock::time_point load_baseline) const;
+    [[nodiscard]] std::string format_summary() const;
 
 private:
     registry() = default;
 
+    [[nodiscard]] std::vector<artifact>         rows() const;
+    [[nodiscard]] std::vector<process_metadata> processes() const;
+
     mutable std::mutex                          m_mutex;
     std::vector<artifact>                       m_files;
     std::unordered_map<pid_t, process_metadata> m_processes;
+    std::chrono::steady_clock::time_point       m_start_time{
+        std::chrono::steady_clock::now()
+    };
 };
 
 struct run_metadata
@@ -124,8 +65,7 @@ struct run_metadata
     std::string              run_label;
     std::chrono::nanoseconds duration{ 0 };
 
-    [[nodiscard]] static run_metadata capture(
-        std::chrono::steady_clock::time_point load_baseline);
+    explicit run_metadata(std::chrono::nanoseconds elapsed);
 };
 
 }  // namespace rocprofsys::output

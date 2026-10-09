@@ -2,25 +2,28 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/output/output_summary.hpp"
+#include "core/state.hpp"
 
 #include "common/units/data_size.hpp"
 #include "logger/debug.hpp"
 
 #include <spdlog/fmt/chrono.h>
 #include <spdlog/fmt/fmt.h>
-#include <spdlog/fmt/ranges.h>
 
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <filesystem>
-#include <iterator>
 #include <map>
 #include <numeric>
 #include <ranges>
 #include <set>
+#include <span>
+#include <stdexcept>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -51,19 +54,19 @@ get_file_size(const std::string& path)
 registry&
 registry::instance()
 {
-    static registry inst{};
-    return inst;
+    static registry s_inst{};
+    return s_inst;
 }
 
 void
-registry::register_file(std::string path, output_format format)
+registry::register_file(std::string path)
 {
     artifact entry{};
     entry.pid        = getpid();
     entry.size_bytes = get_file_size(path);
     entry.path       = std::move(path);
-    entry.format     = format;
 
+    const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
     std::lock_guard<std::mutex> lock(m_mutex);
     m_files.push_back(std::move(entry));
 }
@@ -71,6 +74,7 @@ registry::register_file(std::string path, output_format format)
 void
 registry::record_process(process_metadata meta)
 {
+    const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
     std::lock_guard<std::mutex> lock(m_mutex);
     auto [iter, inserted] = m_processes.try_emplace(meta.pid, meta);
     if(!inserted)
@@ -89,6 +93,7 @@ registry::record_process(process_metadata meta)
 std::vector<artifact>
 registry::rows() const
 {
+    const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_files;
 }
@@ -96,6 +101,7 @@ registry::rows() const
 std::vector<process_metadata>
 registry::processes() const
 {
+    const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
     std::lock_guard<std::mutex>   lock(m_mutex);
     std::vector<process_metadata> result;
     result.reserve(m_processes.size());
@@ -109,6 +115,7 @@ registry::processes() const
 void
 registry::start_new_session()
 {
+    const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
     std::lock_guard<std::mutex> lock(m_mutex);
     m_files.clear();
     m_processes.clear();
@@ -116,11 +123,22 @@ registry::start_new_session()
 
 namespace
 {
+inline constexpr std::string_view k_unknown_value_placeholder = "?";
+
+inline constexpr std::size_t k_format_name_width = 9;
+inline constexpr std::size_t k_file_size_width   = 10;
+
+struct process_node
+{
+    process_metadata          meta;
+    std::vector<artifact>     rows;
+    std::vector<process_node> children;
+};
+
 // Metadata is attached by pid; a pid with rows but no metadata keeps the
-// default k_no_pid and is reported as missing.
+// default k_no_pid and is logged as missing.
 [[nodiscard]] std::map<pid_t, process_node>
-build_nodes(std::span<const artifact> rows, std::span<const process_metadata> processes,
-            process_tree_diagnostics& diagnostics)
+build_nodes(std::span<const artifact> rows, std::span<const process_metadata> processes)
 {
     std::map<pid_t, process_node> nodes;
     for(const auto& row : rows)
@@ -141,15 +159,15 @@ build_nodes(std::span<const artifact> rows, std::span<const process_metadata> pr
         if(node.meta.pid == k_no_pid)
         {
             node.meta.pid = pid;
-            diagnostics.missing_metadata_pids.push_back(pid);
+            LOG_WARNING("Output Summary: missing process metadata for pid {}; it "
+                        "renders at root depth without role/parent",
+                        pid);
         }
         std::ranges::sort(node.rows, std::greater{}, &artifact::size_bytes);
     }
     return nodes;
 }
 
-// Extracting from `nodes` means whatever remains afterwards was never reached
-// from a root, i.e. it sits on (or hangs off) a ppid cycle.
 [[nodiscard]] process_node
 extract_subtree(pid_t pid, std::map<pid_t, process_node>& nodes,
                 const std::map<pid_t, std::vector<pid_t>>& children_of)
@@ -164,51 +182,15 @@ extract_subtree(pid_t pid, std::map<pid_t, process_node>& nodes,
     }
     return node;
 }
+
 }  // namespace
 
-process_tree::process_tree(std::span<const artifact>         rows,
-                           std::span<const process_metadata> processes)
+run_metadata::run_metadata(std::chrono::nanoseconds elapsed)
+: duration{ elapsed }
 {
-    auto nodes = build_nodes(rows, processes, m_diagnostics);
-
-    std::map<pid_t, std::vector<pid_t>> children_of;
-    std::vector<pid_t>                  root_pids;
-    for(const auto& [pid, node] : nodes)
-    {
-        (nodes.contains(node.meta.ppid) ? children_of[node.meta.ppid] : root_pids)
-            .push_back(pid);
-    }
-
-    for(const pid_t pid : root_pids)
-    {
-        m_roots.push_back(extract_subtree(pid, nodes, children_of));
-    }
-
-    std::ranges::copy(std::views::keys(nodes),
-                      std::back_inserter(m_diagnostics.cyclic_ppid_pids));
-}
-
-namespace
-{
-inline constexpr std::string_view k_unknown_value_placeholder = "?";
-
-inline constexpr std::size_t k_format_name_width = 9;
-inline constexpr std::size_t k_file_size_width   = 10;
-}  // namespace
-
-run_metadata
-run_metadata::capture(std::chrono::steady_clock::time_point load_baseline)
-{
-    run_metadata meta{};
-
-    const auto tt =
+    const auto start_time =
         std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    meta.run_label = fmt::format("{:%FT%TZ}", fmt::gmtime(tt));
-
-    meta.duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::steady_clock::now() - load_baseline);
-
-    return meta;
+    run_label = fmt::format("{:%FT%TZ}", fmt::gmtime(start_time));
 }
 
 namespace
@@ -249,50 +231,33 @@ format_data_size(std::uint64_t size_bytes)
     return fmt::format("{:.2f}", data_size_cast<megabytes>(value));
 }
 
-struct format_badge
+struct file_type
 {
-    std::string_view glyph;
+    std::string_view extension;
     std::string_view name;
     std::string_view viewer_hint;
 };
 
-[[nodiscard]] constexpr format_badge
-badge_for(output_format format) noexcept
+[[nodiscard]] const file_type&
+extract_file_type(const std::string& path)
 {
-    switch(format)
-    {
-        case output_format::perfetto:
-            return { .glyph       = "◈",
-                     .name        = "perfetto",
-                     .viewer_hint = "https://ui.perfetto.dev" };
-        case output_format::rocpd:
-            return { .glyph       = "◆",
-                     .name        = "rocpd",
-                     .viewer_hint = "sqlite3 / ROCm Optiq" };
-        case output_format::json:
-            return { .glyph = "▪", .name = "json", .viewer_hint = "jq" };
-        case output_format::text:
-            return { .glyph = "▪", .name = "text", .viewer_hint = "cat" };
-    }
-    return { .glyph = "▪", .name = "output", .viewer_hint = "" };
-}
+    static constexpr std::array<file_type, 4> k_file_types{ {
+        { ".pftrace", "perfetto", "https://ui.perfetto.dev" },
+        { ".db", "rocpd", "sqlite3 / ROCm Optiq" },
+        { ".txt", "text", "cat" },
+        { ".json", "json", "jq" },
+    } };
 
-inline void
-report_diagnostics(const process_tree_diagnostics& diagnostics)
-{
-    if(!diagnostics.missing_metadata_pids.empty())
+    const auto ext = std::filesystem::path{ path }.extension().string();
+    for(const auto& type : k_file_types)
     {
-        LOG_WARNING("Output Summary: missing process metadata for pid(s) [{}]; "
-                    "they render at root depth without role/parent",
-                    fmt::join(diagnostics.missing_metadata_pids, ","));
+        if(type.extension == ext)
+        {
+            return type;
+        }
     }
-    if(!diagnostics.cyclic_ppid_pids.empty())
-    {
-        LOG_WARNING("Output Summary: pid(s) [{}] excluded — their parent-process "
-                    "chain forms a cycle (corrupted metadata) instead of reaching a "
-                    "real root",
-                    fmt::join(diagnostics.cyclic_ppid_pids, ","));
-    }
+    throw std::runtime_error(fmt::format(
+        "Unrecognized output file type! Missing implementation for: '{}'", ext));
 }
 
 [[nodiscard]] std::string
@@ -320,10 +285,10 @@ display_path(const std::string& path, const std::filesystem::path& cwd)
 file_row_line(std::string_view branch, const artifact& file,
               const std::filesystem::path& cwd)
 {
-    const auto badge = badge_for(file.format);
-    return fmt::format("{}{} {:<{}} {:>{}}  {}\n", branch, badge.glyph, badge.name,
-                       k_format_name_width, format_data_size(file.size_bytes),
-                       k_file_size_width, display_path(file.path, cwd));
+    const auto& type = extract_file_type(file.path);
+    return fmt::format("{}{:<{}} {:>{}}  {}\n", branch, type.name, k_format_name_width,
+                       format_data_size(file.size_bytes), k_file_size_width,
+                       display_path(file.path, cwd));
 }
 
 [[nodiscard]] std::string
@@ -383,16 +348,12 @@ format_header(const run_metadata& meta, std::span<const artifact> rows,
 [[nodiscard]] std::string
 build_legend(std::span<const artifact> rows)
 {
-    std::set<output_format> formats;
+    std::set<std::string_view> seen;
+    std::string                legend;
     for(const auto& row : rows)
     {
-        formats.insert(row.format);
-    }
-    std::string legend;
-    for(const output_format format : formats)
-    {
-        const auto badge = badge_for(format);
-        if(badge.viewer_hint.empty())
+        const auto& type = extract_file_type(row.path);
+        if(!seen.insert(type.name).second)
         {
             continue;
         }
@@ -400,14 +361,14 @@ build_legend(std::span<const artifact> rows)
         {
             legend += "    ";
         }
-        legend += fmt::format("{} → {}", badge.name, badge.viewer_hint);
+        legend += fmt::format("{} → {}", type.name, type.viewer_hint);
     }
     return legend;
 }
 }  // namespace
 
 std::string
-registry::format_summary(std::chrono::steady_clock::time_point load_baseline) const
+registry::format_summary() const
 {
     const auto rows_snapshot      = rows();
     const auto processes_snapshot = processes();
@@ -416,10 +377,36 @@ registry::format_summary(std::chrono::steady_clock::time_point load_baseline) co
         return {};
     }
 
-    const auto tree = process_tree{ rows_snapshot, processes_snapshot };
-    const auto meta = run_metadata::capture(load_baseline);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - m_start_time);
+    const run_metadata meta{ elapsed };
 
-    report_diagnostics(tree.diagnostics());
+    // Extracting every reachable root leaves whatever remains in `nodes`
+    // unreachable, i.e. sitting on (or hanging off) a ppid cycle.
+    auto nodes = build_nodes(rows_snapshot, processes_snapshot);
+
+    std::map<pid_t, std::vector<pid_t>> children_of;
+    std::vector<pid_t>                  root_pids;
+    for(const auto& [pid, node] : nodes)
+    {
+        (nodes.contains(node.meta.ppid) ? children_of[node.meta.ppid] : root_pids)
+            .push_back(pid);
+    }
+
+    std::vector<process_node> roots;
+    roots.reserve(root_pids.size());
+    for(const pid_t pid : root_pids)
+    {
+        roots.push_back(extract_subtree(pid, nodes, children_of));
+    }
+
+    for(const pid_t pid : std::views::keys(nodes))
+    {
+        LOG_WARNING("Output Summary: pid {} excluded — its parent-process chain "
+                    "forms a cycle (corrupted metadata) instead of reaching a real "
+                    "root",
+                    pid);
+    }
 
     std::error_code cwd_error;
     const auto      cwd = std::filesystem::current_path(cwd_error);
@@ -427,7 +414,7 @@ registry::format_summary(std::chrono::steady_clock::time_point load_baseline) co
     std::string out =
         fmt::format("\nOutput Summary\n{}\nProcess tree\n",
                     format_header(meta, rows_snapshot, processes_snapshot.size()));
-    for(const auto& root : tree.roots())
+    for(const auto& root : roots)
     {
         out += format_process_subtree(root, "", "  ", getpid(), cwd);
     }
