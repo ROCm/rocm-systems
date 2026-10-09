@@ -212,7 +212,7 @@ class Event : public RuntimeObject {
 
   /*! \brief Notifies current command queue about execution status
    */
-  bool notifyCmdQueue(bool cpu_wait = false);
+  bool notifyCmdQueue(bool cpu_wait = false, bool cross_queue = false);
 
   //! RTTI internal implementation
   virtual ObjectType objectType() const { return ObjectTypeEvent; }
@@ -343,6 +343,7 @@ class Command : public Event {
   std::vector<void*> data_;
   const Event* waitingEvent_;  //!< Waiting event associated with the marker
 
+  bool crossStreamProducer_ = false;
   bool packetCapturing_ = false;       //!< Flag to enable/disable graph gpu packet capture
   GraphPacketCaptureContext* graphCapture_ = nullptr;  //!< Capture context, owned by the graph node
   address kernArgOffset_ = nullptr;  //!< KernelArg buffer to used when graph capturing is enabled
@@ -389,6 +390,12 @@ class Command : public Event {
     }
   }
   bool getPktCapturingState() const { return packetCapturing_; }
+
+  //! Declare that another stream will wait on this command's completion.  Must be set before
+  //! enqueue(): the device layer reads it while submitting.
+  void setCrossStreamProducer(bool value) { crossStreamProducer_ = value; }
+
+  bool isCrossStreamProducer() const { return crossStreamProducer_; }
 
   //! Sets AQL capture state and context; a non-null ctx->gpuMetadataPackets also captures metadata packets.
   void setPktCapturingState(bool state, GraphPacketCaptureContext* ctx) {

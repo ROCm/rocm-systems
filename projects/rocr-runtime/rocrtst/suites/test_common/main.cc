@@ -84,6 +84,7 @@
 #include "suites/functional/reference_count.h"
 #include "suites/functional/signal_concurrent.h"
 #include "suites/functional/signal_allocation_validation.h"
+#include "suites/functional/signal_create_v2.h"
 #include "suites/functional/signal_wait_multi.h"
 #include "suites/functional/metadata_prefetch.h"
 #include "suites/functional/aql_barrier_bit.h"
@@ -276,6 +277,27 @@ TEST(rocrtstFunc, Signal_Allocation_Validation) {
   RunCustomTestProlog(&sav);
   sav.TestSignalAllocationValidation();
   RunCustomTestEpilog(&sav);
+}
+
+TEST(rocrtstFunc, Signal_Create_V2_Rejections) {
+  SignalCreateV2Test sc;
+  if (!RunCustomTestProlog(&sc)) return;
+  sc.TestRejections();
+  RunCustomTestEpilog(&sc);
+}
+
+TEST(rocrtstFunc, Signal_Create_V2_Partial_Batch) {
+  SignalCreateV2Test sc;
+  if (!RunCustomTestProlog(&sc)) return;
+  sc.TestPartialBatch();
+  RunCustomTestEpilog(&sc);
+}
+
+TEST(rocrtstFunc, Signal_Create_V2_Device_Resident) {
+  SignalCreateV2Test sc;
+  if (!RunCustomTestProlog(&sc)) return;
+  sc.TestDeviceResident();
+  RunCustomTestEpilog(&sc);
 }
 
 TEST(rocrtstFunc, Signal_Wait_Any_Nonzero_Index) {

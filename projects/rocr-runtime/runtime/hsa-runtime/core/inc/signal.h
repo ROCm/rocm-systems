@@ -253,10 +253,22 @@ class LocalSignal {
   }
   LocalSignal(hsa_signal_value_t initial_value, bool exportable);
 
-  SharedSignal* signal() const { return local_signal_.shared_object(); }
+  /// @brief Place the ABI block in a slot of device_agent's ordering edge slab.
+  LocalSignal(hsa_signal_value_t initial_value, core::Agent& device_agent);
+
+  ~LocalSignal();
+
+  SharedSignal* signal() const {
+    return (device_block_ != nullptr) ? device_block_ : local_signal_.shared_object();
+  }
+
+  bool device_resident_value() const { return device_block_ != nullptr; }
 
  private:
   Shared<SharedSignal, SharedSignalPool_t> local_signal_;
+  SharedSignal* device_block_ = nullptr;
+  /// @brief Null iff device_block_ is null.
+  core::Agent* device_agent_ = nullptr;
 };
 
 /// @brief An abstract base class which helps implement the public hsa_signal_t
@@ -266,8 +278,12 @@ class LocalSignal {
 class Signal {
  public:
   /// @brief Constructor Links and publishes the signal interface object.
-  explicit Signal(SharedSignal* abi_block, bool enableIPC = false)
-      : signal_(abi_block->amd_signal), async_copy_agent_(NULL), refcount_(1) {
+  explicit Signal(SharedSignal* abi_block, bool enableIPC = false,
+                  bool device_resident_value = false)
+      : signal_(abi_block->amd_signal),
+        async_copy_agent_(NULL),
+        refcount_(1),
+        device_resident_value_(device_resident_value) {
     assert(abi_block != nullptr && "Signal abi_block must not be NULL");
 
     waiting_ = 0;
@@ -281,12 +297,16 @@ class Signal {
     }
   }
 
+  /// @brief True iff the value word lives in device memory.
+  bool IsDeviceResidentValue() const { return device_resident_value_; }
+
   /// @brief Interface to discard a signal handle (hsa_signal_t)
   /// Decrements signal ref count and invokes doDestroySignal() when
   /// Signal is no longer in use.
   void DestroySignal() {
-    // If handle is now invalid wake any retained sleepers.
-    if (--refcount_ == 0) CasRelaxed(0, 0);
+    // If handle is now invalid wake any retained sleepers. Waiters on a device resident word
+    // never park in MWAITX, and a host CAS on it would abort.
+    if (--refcount_ == 0 && !device_resident_value_) CasRelaxed(0, 0);
     // Release signal, last release will destroy the object.
     Release();
   }
@@ -526,6 +546,8 @@ class Signal {
 
   /// @variable Count of handle references and Retain() calls for this handle (see IPC APIs)
   std::atomic<uint32_t> retained_;
+
+  const bool device_resident_value_ = false;
 
   void registerIpc();
   bool deregisterIpc();

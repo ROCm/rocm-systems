@@ -48,6 +48,7 @@
 #include <climits>
 #include <cstring>
 #include <map>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -323,6 +324,8 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 
 GpuAgent::~GpuAgent() {
   for (auto& blit : blits_) blit.reset();
+
+  DestroyOrderingEdgeSlab();  // before regions_ is cleared
 
   regions_.clear();
 }
@@ -2750,6 +2753,9 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
         *((size_t*)value) = GetMaxPersistingL2CacheSize();
         break;
       }
+    case HSA_AMD_AGENT_INFO_ORDERING_EDGE_SIGNAL_SUPPORTED:
+      *((bool*)value) = SupportsOrderingEdgeSignal();
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;
@@ -3693,6 +3699,99 @@ void GpuAgent::InitAllocators() {
   }
   assert(finegrain_allocator_ && "GPU agent does not have a fine-grain allocator");
   assert(coarsegrain_allocator_ && "GPU agent does not have a coarse-grain allocator");
+}
+
+// Host visible, coarse grain device local memory. HSA_AMD_REGION_INFO_HOST_ACCESSIBLE
+// reads 0 for device local regions even where the host can map them, so it is not used.
+static bool IsOrderingEdgeSignalRegion(const AMD::MemoryRegion* region) {
+  return region->IsLocalMemory() && region->IsPublic() && !region->fine_grain() &&
+      !region->extended_scope_fine_grain();
+}
+
+const core::MemoryRegion* GpuAgent::OrderingEdgeSignalRegion() const {
+  for (const auto& region : regions()) {
+    const core::MemoryRegion* r = &*region;
+    if (IsOrderingEdgeSignalRegion(static_cast<const AMD::MemoryRegion*>(r))) return r;
+  }
+  return nullptr;
+}
+
+hsa_status_t GpuAgent::GrowOrderingEdgeSlab() {
+  const core::MemoryRegion* local = OrderingEdgeSignalRegion();
+  if (local == nullptr) return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  void* ptr = nullptr;
+  if (core::Runtime::runtime_singleton_->AllocateMemory(
+          local, kOrderingEdgeBlockSize,
+          core::MemoryRegion::AllocateDirect | core::MemoryRegion::AllocateUncached,
+          &ptr) != HSA_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  // Slots are constructed when handed out, not here.
+  constexpr size_t slots = kOrderingEdgeBlockSize / kOrderingEdgeDefaultStride;
+  const size_t base_index = edge_slab_.blocks.size() * slots;
+  edge_slab_.blocks.push_back(static_cast<char*>(ptr));
+
+  edge_slab_.free_slots.reserve(edge_slab_.free_slots.size() + slots);
+  // Descending, so the first hand-outs walk the block forwards.
+  for (size_t i = slots; i-- > 0;)
+    edge_slab_.free_slots.push_back(static_cast<uint32_t>(base_index + i));
+
+  return HSA_STATUS_SUCCESS;
+}
+
+void* GpuAgent::AcquireOrderingEdgeSlot(hsa_status_t* why) {
+  std::lock_guard<std::mutex> lock(edge_slab_.lock);
+
+  if (edge_slab_.free_slots.empty()) {
+    const hsa_status_t st = GrowOrderingEdgeSlab();
+    if (st != HSA_STATUS_SUCCESS) {
+      if (why != nullptr) *why = st;
+      return nullptr;
+    }
+  }
+  if (edge_slab_.free_slots.empty()) {
+    if (why != nullptr) *why = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    return nullptr;
+  }
+
+  const uint32_t idx = edge_slab_.free_slots.back();
+  edge_slab_.free_slots.pop_back();
+
+  constexpr size_t slots = kOrderingEdgeBlockSize / kOrderingEdgeDefaultStride;
+  char* base = edge_slab_.blocks[idx / slots];
+
+  if (why != nullptr) *why = HSA_STATUS_SUCCESS;
+  return base + (idx % slots) * kOrderingEdgeDefaultStride;
+}
+
+void GpuAgent::ReleaseOrderingEdgeSlot(void* slot) {
+  if (slot == nullptr) return;
+  std::lock_guard<std::mutex> lock(edge_slab_.lock);
+
+  constexpr size_t slots = kOrderingEdgeBlockSize / kOrderingEdgeDefaultStride;
+  char* p = static_cast<char*>(slot);
+
+  for (size_t b = 0; b < edge_slab_.blocks.size(); ++b) {
+    char* base = edge_slab_.blocks[b];
+    if (p < base || p >= base + kOrderingEdgeBlockSize) continue;
+    const size_t off = static_cast<size_t>(p - base);
+    assert((off % kOrderingEdgeDefaultStride) == 0 &&
+           "Ordering edge slot pointer is not slot aligned.");
+    edge_slab_.free_slots.push_back(
+        static_cast<uint32_t>(b * slots + off / kOrderingEdgeDefaultStride));
+    return;
+  }
+  assert(false && "Ordering edge slot released to an agent that does not own it.");
+}
+
+void GpuAgent::DestroyOrderingEdgeSlab() {
+  std::lock_guard<std::mutex> lock(edge_slab_.lock);
+
+  for (char* base : edge_slab_.blocks)
+    core::Runtime::runtime_singleton_->FreeMemory(base);
+  edge_slab_.blocks.clear();
+  edge_slab_.free_slots.clear();
 }
 
 core::Agent* GpuAgent::GetNearestCpuAgent() const {

@@ -477,6 +477,25 @@ class GpuAgent : public GpuAgentInt {
   /// did not request a specific engine, rotating round-robin across all engines.
   uint32_t NextSdmaUserQueueEngineId();
 
+  bool SupportsOrderingEdgeSignal() const { return OrderingEdgeSignalRegion() != nullptr; }
+
+  /// @brief The device local memory region an ordering edge signal's ABI block
+  /// is allocated from, or nullptr if this agent has none.
+  const core::MemoryRegion* OrderingEdgeSignalRegion() const;
+
+  /// @brief KFD charges VRAM in 2 MiB units per allocation, so a smaller block saves nothing.
+  static constexpr size_t kOrderingEdgeBlockSize = 2 * 1024 * 1024;
+
+  /// @brief Slot stride in bytes.  128 == sizeof(SharedSignal); signal.cpp
+  /// static_asserts the constraints any other value must satisfy.
+  static constexpr size_t kOrderingEdgeDefaultStride = 128;
+
+  /// @brief Unconstructed storage for one SharedSignal, or nullptr with the reason in @p why.
+  void* AcquireOrderingEdgeSlot(hsa_status_t* why);
+
+  /// @brief Return a slot to the free list. Slots stay mapped for the agent's lifetime.
+  void ReleaseOrderingEdgeSlot(void* slot);
+
   /// @brief Force a WC flush on PCIe devices by doing a write and then read-back
   __forceinline void PcieWcFlush(void *ptr, size_t size) const {
     if (!xgmi_cpu_gpu_) {
@@ -772,6 +791,19 @@ class GpuAgent : public GpuAgentInt {
   hsa_amd_hdp_flush_t HDP_flush_ = {nullptr, nullptr};
 
  private:
+  struct OrderingEdgeSlab {
+    std::mutex lock;
+    std::vector<char*> blocks;
+    std::vector<uint32_t> free_slots;
+  };
+  OrderingEdgeSlab edge_slab_;
+
+  // @brief Add one block to the slab. Caller holds edge_slab_.lock.
+  hsa_status_t GrowOrderingEdgeSlab();
+
+  // @brief Free every slab block; must run before this agent's regions are torn down.
+  void DestroyOrderingEdgeSlab();
+
   // @brief Query the driver to get the region list owned by this agent.
   void InitRegionList();
 
