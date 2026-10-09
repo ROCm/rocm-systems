@@ -9,7 +9,9 @@
 #include "alloc.h"
 #include "bootstrap.h"
 #include "comm.h"
+#include "rma.h"
 #include "rocmwrap.h"
+#include "transport.h"
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 ncclResult_t rcclDevrProbeNonSymWindow(struct ncclComm* comm, void* userPtr, size_t userSize, int winFlags) {
@@ -116,3 +118,8 @@ ncclResult_t rcclDevrGinSegmentRegType(bool isHost, int maxGlobalNumSegments, in
   return ncclSuccess;
 }
 #endif
+
+bool rcclDevrRmaRegistersMultiSegment(struct ncclComm* comm) {
+  // Only RMA backends that register one MR per physical segment can take a multi-segment window.
+  return ncclParamMultiSegmentRegister() && comm->rmaState.rmaProxyState.ncclRma == &ncclRmaIbProxy;
+}

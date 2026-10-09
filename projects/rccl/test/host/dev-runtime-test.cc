@@ -2266,6 +2266,7 @@ TEST_F(SymMemoryRegisterRmaTest, MultiSegmentRegisterOff_ConnectsWithoutRegister
 // whole range, so hierarchical CE puts have an RMA handle.
 TEST_F(SymMemoryRegisterRmaTest, MultiSegmentRegisterOn_RegistersWholeRange) {
   mem.maxGlobalNumSegments = 2;
+  comm->rmaState.rmaProxyState.ncclRma = &ncclRmaIbProxy;
   ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
     return std::string(env) == "MULTI_SEGMENT_REGISTER" ? 1 : deftVal;
   });
@@ -2281,6 +2282,23 @@ TEST_F(SymMemoryRegisterRmaTest, MultiSegmentRegisterOn_RegistersWholeRange) {
   EXPECT_EQ(reg.calls, 1);
   EXPECT_EQ(registeredAddr, mem.primaryAddr);
   EXPECT_EQ(registeredSize, mem.size);
+}
+
+// Branch: with =1 but an RMA backend without per-segment MRs, a multi-segment
+// window connects and skips registration instead of failing it.
+TEST_F(SymMemoryRegisterRmaTest, MultiSegmentRegisterOn_BackendWithoutPerSegmentMrs_SkipsRegister) {
+  mem.maxGlobalNumSegments = 2;
+  ncclRma_t otherBackend{};
+  comm->rmaState.rmaProxyState.ncclRma = &otherBackend;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "MULTI_SEGMENT_REGISTER" ? 1 : deftVal;
+  });
+  ScopedHook connect(g_devrRmaProxyConnectOnce, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
+
+  EXPECT_EQ(symMemoryRegisterRma(comm, &mem), ncclSuccess);
+  EXPECT_EQ(connect.calls, 1);
+  EXPECT_EQ(reg.calls, 0);
 }
 
 // Branch: teardown releases a multi-segment window's RMA MR; rmaHostWins[0] is
