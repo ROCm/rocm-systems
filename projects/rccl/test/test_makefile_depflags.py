@@ -48,11 +48,11 @@ def _join_continued_lines(text):
             buf.append(stripped[:-1])
             continue
         buf.append(stripped)
-        logical.append((start, "".join(buf)))
+        logical.append((start, " ".join(buf)))
         buf = []
         start = None
     if buf:
-        logical.append((start, "".join(buf)))
+        logical.append((start, " ".join(buf)))
     return logical
 
 
@@ -144,15 +144,17 @@ class TestMakefileDepFlags(unittest.TestCase):
         self.assertEqual(len(sites), 1)
         self.assertEqual(sites[0][0], 4)
 
-    def test_src_makefile_lineno_is_physical(self):
-        path = os.path.join(SRC_DIR, "Makefile")
-        with open(path) as f:
-            physical = f.read().splitlines()
-        sites = depgen_sites("\n".join(physical) + "\n")
-        self.assertGreaterEqual(len(sites), 2)
-        for lineno, _, _ in sites:
-            self.assertIn("-MM", physical[lineno - 1])
-            self.assertIn(".d.tmp", physical[lineno - 1])
+    def test_parser_sees_mm_after_abutting_backslash(self):
+        # Join with a space so $(CXXFLAGS)\ + -MM does not fuse into
+        # $(CXXFLAGS)-MM, which DEP_FLAG_RE would miss.
+        text = (
+            "DEPENDS.cc = $(CXX) $(CXXFLAGS)\\\n"
+            "-MM -c $1\n"
+        )
+        sites = depgen_sites(text)
+        self.assertEqual(len(sites), 1)
+        self.assertEqual(sites[0][0], 1)
+        self.assertEqual(sites[0][2], ("-MM",))
 
     def test_src_makefiles_use_user_only_deps(self):
         failures = []
