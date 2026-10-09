@@ -66,8 +66,7 @@ config=/path/to/rocjitsu-config.json
 cmake -S "$repo/emulation/rocjitsu" -B "$build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_TESTING=OFF \
-  -DLTO=OFF \
-  -DROCM_PATH="$rocm_sdk"
+  -DLTO=OFF
 cmake --build "$build" --target \
   rocjitsu_bin rocjitsu_shared rocjitsu_plugin_throughput_so
 
