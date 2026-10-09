@@ -1464,7 +1464,7 @@ def _register_bulk_unary_float_builders() -> None:
     def template(device: str) -> Tuple[List[Any], Dict[str, Any]]:
         return ([float_tensor(device, 8, 8)], {})
 
-    # fmt: off
+    # fmt: off  # dense unary-float name list
     bulk_short_names = (
         # trig / inverse trig / hyperbolic
         "acos", "acosh", "asin", "asinh", "atan", "atanh",
