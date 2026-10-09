@@ -3150,8 +3150,8 @@ int SimulatedKfd::destroy_queue_ioctl(KfdProcess &proc, void *arg) {
     (void)gpus_[queue->gpu_ordinal].soc->queue_registry().unregister_queue(
         queue->queue_handle, amdgpu::QueueCloseMode::ForceCancel);
   }
-  // Real CP sends EOP interrupt when queue is deactivated; KFD broadcasts to
-  // all type-0 events. This wakes ROCR's signal threads blocked on queue events.
+  // A queue-deactivation interrupt scans pending signal slots. Unrelated
+  // unpublished events must remain asleep; process teardown cancels waiters.
   proc.event_state_.signal_interrupt(0);
   return 0;
 }

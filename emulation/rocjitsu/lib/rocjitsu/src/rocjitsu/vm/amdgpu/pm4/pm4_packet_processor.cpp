@@ -310,6 +310,9 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       }
       case Pm4Opcode::ReleaseMem: {
         require(7);
+        const uint32_t interrupt = (words[1] >> 24) & 7;
+        if (interrupt > 3)
+          throw std::runtime_error("unsupported RELEASE_MEM interrupt selection");
         context.flush_caches();
         const uint32_t selection = words[1] >> 29;
         uint64_t value = address(4);
@@ -317,11 +320,11 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           value = hsa_system_timestamp();
         else if (selection != 0 && selection != 1 && selection != 2)
           throw std::runtime_error("unsupported RELEASE_MEM data source");
-        const size_t bytes = selection == 0 ? 0 : selection == 1 ? 4 : 8;
-        if (bytes && access->write(address(2), {reinterpret_cast<const std::byte *>(&value),
-                                                bytes}) != VmAccessOutcome::Complete)
+        const uint32_t width = selection == 0   ? 0
+                               : selection == 1 ? sizeof(uint32_t)
+                                                : sizeof(uint64_t);
+        if (width && access->atomic_store(address(2), width, value) != VmAccessOutcome::Complete)
           throw std::runtime_error("PM4 RELEASE_MEM failed");
-        const uint32_t interrupt = (words[1] >> 24) & 7;
         if (interrupt == 1 || interrupt == 2)
           queue.interrupt_sink.deliver(queue.process_id, words[6]);
         break;
@@ -369,6 +372,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       case Pm4Opcode::WaitRegMem:
       case Pm4Opcode::WaitRegMem64: {
         const bool wide = opcode == uint32_t(Pm4Opcode::WaitRegMem64);
+        const char *mnemonic = wide ? "WAIT_REG_MEM64" : "WAIT_REG_MEM";
         require(wide ? 8 : 6);
         context.flush_caches();
         uint64_t value = 0;
@@ -387,25 +391,21 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           // completes the modeled request before its acknowledgement.
           value = words[3];
         } else if (space == 1 && (operation == 0 || operation == 3)) {
-          VmAccessOutcome loaded;
-          if (wide) {
-            // Pair with the producer's release store of the entire wait operand.
-            const auto result = access->atomic_load(address(1), sizeof(uint64_t));
-            loaded = result.outcome;
-            value = result.value;
-          } else {
-            loaded = access->read(address(1), {reinterpret_cast<std::byte *>(&value), 4u});
-          }
-          if (loaded == VmAccessOutcome::Unavailable) {
+          // Pair with the producer's release publication of the entire operand.
+          const uint32_t width = wide ? sizeof(uint64_t) : sizeof(uint32_t);
+          const AtomicLoadResult loaded = access->atomic_load(address(1), width);
+          value = loaded.value;
+          if (loaded.outcome == VmAccessOutcome::Unavailable) {
             ib.address -= count * 4;
             ib.dwords += count;
             context.retry();
             return;
           }
-          if (loaded != VmAccessOutcome::Complete)
-            throw std::runtime_error("PM4 WAIT_REG_MEM read failed");
+          if (loaded.outcome != VmAccessOutcome::Complete)
+            throw std::runtime_error(std::string("PM4 ") + mnemonic + " read failed");
         } else {
-          throw std::runtime_error("unsupported WAIT_REG_MEM register space or operation");
+          throw std::runtime_error(std::string("unsupported ") + mnemonic +
+                                   " register space or operation");
         }
         const uint64_t mask = wide ? address(5) : words[4];
         value &= mask;
@@ -434,7 +434,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           ready = value > reference;
           break;
         default:
-          throw std::runtime_error("invalid WAIT_REG_MEM comparison");
+          throw std::runtime_error(std::string("invalid ") + mnemonic + " comparison");
         }
         if (!ready) {
           ib.address -= count * 4;

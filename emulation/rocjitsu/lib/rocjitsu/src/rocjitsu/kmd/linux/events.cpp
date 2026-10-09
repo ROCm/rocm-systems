@@ -44,10 +44,6 @@ void EventState::adopt_page(void *ptr, size_t size) {
     return;
   page_ = ptr;
   page_size_ = size;
-  for (const auto &[id, ev] : events_) {
-    if (ev.signaled)
-      write_event_slot(page_, page_size_, id, ev.event_age);
-  }
 }
 
 bool EventState::release_page(void *ptr) {
@@ -76,38 +72,38 @@ bool EventState::has_signal_waiters(const GpuEvent &event) {
                      [](const EventWaiter *waiter) { return waiter->listen_for_signals; });
 }
 
-/// @brief Signal event(s) from the CP's interrupt callback.
-/// @details When event_id is non-zero, signals that specific event. When
-///          event_id is zero, broadcasts to all type-0 events — matching real
-///          KFD's kfd_signal_event_interrupt(pasid, partial_id=0, valid_id_bits=0).
+/// @brief Deliver a targeted interrupt, or scan published slots for a generic interrupt.
 void EventState::signal_interrupt(uint32_t event_id) {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (event_id == 0) {
-    for (auto &[id, ev] : events_) {
-      if (ev.event_type == 0) {
-        ev.signaled = !ev.auto_reset || !has_signal_waiters(ev);
-        if (!(++ev.event_age))
-          ev.event_age = 2;
-        write_event_slot(page_, page_size_, id, ev.event_age);
-        util::Logger::cp("SIGNAL_BROADCAST: event_id=", id, " age=", ev.event_age,
-                         " waiters=", ev.waiters.size());
-        activate_waiters(ev);
-      }
+  const auto signal = [&](GpuEvent &event) {
+    event.signaled = !event.auto_reset || !has_signal_waiters(event);
+    if (!(++event.event_age))
+      event.event_age = 2;
+    util::Logger::cp("SIGNAL_INTERRUPT: event_id=", event.event_id, " age=", event.event_age,
+                     " waiters=", event.waiters.size());
+    activate_waiters(event);
+  };
+  if (event_id != 0) {
+    const auto event = events_.find(event_id);
+    if (event != events_.end() && event->second.event_type == KFD_IOC_EVENT_SIGNAL) {
+      write_event_slot(page_, page_size_, event_id, KFD_SIGNAL_EVENT_LIMIT);
+      signal(event->second);
     }
     return;
   }
-  auto it = events_.find(event_id);
-  if (it != events_.end() && it->second.event_type == 0) {
-    it->second.signaled = !it->second.auto_reset || !has_signal_waiters(it->second);
-    if (!(++it->second.event_age))
-      it->second.event_age = 2;
-    write_event_slot(page_, page_size_, event_id, it->second.event_age);
-    util::Logger::cp("SIGNAL_INTERRUPT: event_id=", event_id, " age=", it->second.event_age,
-                     " waiters=", it->second.waiters.size(), " page=", page_ ? "valid" : "null");
-    activate_waiters(it->second);
-  } else {
-    util::Logger::cp("SIGNAL_INTERRUPT_MISS: event_id=", event_id,
-                     " NOT FOUND or wrong type, events_.size()=", events_.size());
+  if (!page_)
+    return;
+  for (auto &[id, event] : events_) {
+    if (event.event_type != KFD_IOC_EVENT_SIGNAL || id >= page_size_ / sizeof(uint64_t))
+      continue;
+    // A generic interrupt has no identity. Consume only the GPU's published
+    // trigger data, once. Event ages belong to WAIT_EVENTS and must never
+    // masquerade as new publications in these slots.
+    uint64_t expected = id;
+    if (std::atomic_ref<uint64_t>(static_cast<uint64_t *>(page_)[id])
+            .compare_exchange_strong(expected, KFD_SIGNAL_EVENT_LIMIT, std::memory_order_acq_rel,
+                                     std::memory_order_acquire))
+      signal(event);
   }
 }
 
@@ -260,7 +256,7 @@ int EventState::set_event(void *arg) {
   it->second.signaled = !it->second.auto_reset || !has_signal_waiters(it->second);
   if (!(++it->second.event_age))
     it->second.event_age = 2;
-  write_event_slot(page_, page_size_, args->event_id, it->second.event_age);
+  write_event_slot(page_, page_size_, args->event_id, KFD_SIGNAL_EVENT_LIMIT);
   util::Logger::cp("SET_EVENT: event_id=", args->event_id, " age=", it->second.event_age,
                    " waiters=", it->second.waiters.size());
   activate_waiters(it->second);

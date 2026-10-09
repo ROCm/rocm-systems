@@ -1572,6 +1572,107 @@ TEST_P(KfdNativePm4Test, HostDoorbellExecutesWrappedPacketHdpFlushAndIndirectBuf
     EXPECT_FALSE(soc_->xcd(i)->command_processor()->doorbell_monitor_running_for_test());
 }
 
+TEST_F(KfdIoctlTest, IdleAqlInterruptDoesNotCompletePendingPm4Event) {
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  kfd_ioctl_create_event_args aql_event{};
+  aql_event.event_type = KFD_IOC_EVENT_SIGNAL;
+  aql_event.auto_reset = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_EVENT, &aql_event), 0);
+  kfd_ioctl_create_event_args event{};
+  event.event_type = KFD_IOC_EVENT_SIGNAL;
+  event.auto_reset = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_EVENT, &event), 0);
+  void *event_page = driver_->mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                   static_cast<off_t>(event.event_page_offset));
+  ASSERT_NE(event_page, MAP_FAILED);
+  const uint64_t slot =
+      reinterpret_cast<uint64_t>(event_page) + event.event_slot_index * sizeof(uint64_t);
+  alignas(4096) std::array<std::byte, 1024> aql_ring{};
+  alignas(4096) std::array<uint32_t, 256> pm4_ring{};
+  alignas(4096) std::array<uint64_t, 5> pointers{};
+  process->map_pages(reinterpret_cast<uint64_t>(pointers.data()), pointers.data(),
+                     sizeof(pointers));
+  const uint64_t gate = reinterpret_cast<uint64_t>(&pointers[4]);
+  const std::array<uint32_t, 15> commands{0xc0053c00,
+                                          0x13,
+                                          uint32_t(gate),
+                                          uint32_t(gate >> 32),
+                                          1,
+                                          UINT32_MAX,
+                                          0,
+                                          0xc0064900,
+                                          0,
+                                          (2u << 29) | (2u << 24),
+                                          uint32_t(slot),
+                                          uint32_t(slot >> 32),
+                                          event.event_trigger_data,
+                                          0,
+                                          event.event_id};
+  std::ranges::copy(commands, pm4_ring.begin());
+  std::array<kfd_ioctl_create_queue_args, 2> queues{};
+  for (size_t index = 0; index < queues.size(); ++index) {
+    auto &queue = queues[index];
+    queue.gpu_id = kGpuId;
+    queue.queue_type = index == 0 ? KFD_IOC_QUEUE_TYPE_COMPUTE_AQL : KFD_IOC_QUEUE_TYPE_COMPUTE;
+    queue.ring_base_address = index == 0 ? reinterpret_cast<uint64_t>(aql_ring.data())
+                                         : reinterpret_cast<uint64_t>(pm4_ring.data());
+    queue.ring_size = 1024;
+    queue.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[index * 2]);
+    queue.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[index * 2 + 1]);
+    queue.queue_percentage = 100;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  }
+  void *doorbell_page = driver_->mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                      static_cast<off_t>(queues[0].doorbell_offset));
+  ASSERT_NE(doorbell_page, MAP_FAILED);
+  auto *doorbells = static_cast<uint64_t *>(doorbell_page);
+  std::atomic_ref<uint64_t>(pointers[3]).store(commands.size(), std::memory_order_release);
+  std::atomic_ref<uint64_t>(doorbells[queues[1].doorbell_offset % 4096 / sizeof(uint64_t)])
+      .store(commands.size(), std::memory_order_release);
+  for (uint32_t step = 0; step < 100; ++step) {
+    (void)engine_->step();
+    std::this_thread::sleep_for(std::chrono::microseconds(50));
+  }
+  // Deliver the idle AQL queue's generic interrupt deterministically while
+  // the native PM4 queue is blocked before its RELEASE_MEM publication.
+  std::atomic_ref<uint64_t>(static_cast<uint64_t *>(event_page)[aql_event.event_slot_index])
+      .store(aql_event.event_trigger_data, std::memory_order_release);
+  process->event_state_.signal_interrupt(0);
+  kfd_event_data data{};
+  data.event_id = event.event_id;
+  kfd_ioctl_wait_events_args wait{};
+  wait.events_ptr = reinterpret_cast<uint64_t>(&data);
+  wait.num_events = 1;
+  wait.wait_for_all = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+  EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_TIMEOUT);
+  data.event_id = aql_event.event_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+  EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_COMPLETE);
+  data.event_id = event.event_id;
+  std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t *>(&pointers[4]))
+      .store(1, std::memory_order_release);
+  for (uint32_t step = 0; step < 2000; ++step) {
+    (void)engine_->step();
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+    if (wait.wait_result == KFD_IOC_WAIT_RESULT_COMPLETE)
+      break;
+    std::this_thread::sleep_for(std::chrono::microseconds(50));
+  }
+  EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_COMPLETE);
+  for (const auto &queue : queues) {
+    kfd_ioctl_destroy_queue_args destroy{};
+    destroy.queue_id = queue.queue_id;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  }
+  // Queue destruction also scans pending slots and must not replay this event.
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+  EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_TIMEOUT);
+  EXPECT_EQ(driver_->munmap(doorbell_page, 4096), 0);
+  EXPECT_EQ(driver_->munmap(event_page, 4096), 0);
+}
+
 TEST_P(KfdNativePm4Test, NativePm4PauseResumeRejectsInvalidRingAndTerminalFault) {
   alignas(4096) std::array<uint32_t, 1024> ring{};
   alignas(4096) std::array<uint64_t, 512> pointers{};

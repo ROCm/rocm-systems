@@ -1637,7 +1637,10 @@ TEST_F(SimulatedKfdTest, ResolvableAddressRaisesNoMemoryException) {
   EXPECT_EQ(drv->close(), 0);
 }
 
-TEST_F(SimulatedKfdTest, BeginLocalShutdownLeavesSignaledEventPageIntact) {
+TEST_F(SimulatedKfdTest, BeginLocalShutdownLeavesPublishedEventPageIntact) {
+  // Keep adopted storage alive through driver teardown, including assertion failures.
+  constexpr size_t kSlots = 64;
+  std::vector<uint64_t> page(kSlots, KFD_SIGNAL_EVENT_LIMIT);
   auto t = create_test_vm();
   ASSERT_NE(t.driver(), nullptr);
   auto *drv = t.driver();
@@ -1647,12 +1650,9 @@ TEST_F(SimulatedKfdTest, BeginLocalShutdownLeavesSignaledEventPageIntact) {
   ASSERT_NE(proc, nullptr);
 
   // Provide a real event page and adopt it, mirroring the CREATE_EVENT mmap path.
-  constexpr size_t kSlots = 64;
-  std::vector<uint64_t> page(kSlots, 0);
   proc->event_state_.adopt_page(page.data(), page.size() * sizeof(uint64_t));
 
-  // Create a signal event and signal it, so its page slot holds a real (non-zero,
-  // non-sentinel) age.
+  // A published GPU trigger must survive cancellation of parked CPU waits.
   kfd_ioctl_create_event_args create{};
   create.event_type = 0; // signal event
   ASSERT_EQ(drv->ioctl(AMDKFD_IOC_CREATE_EVENT, &create), 0);
@@ -1661,12 +1661,12 @@ TEST_F(SimulatedKfdTest, BeginLocalShutdownLeavesSignaledEventPageIntact) {
   set.event_id = create.event_id;
   ASSERT_EQ(drv->ioctl(AMDKFD_IOC_SET_EVENT, &set), 0);
 
-  const uint64_t signaled_age = page[create.event_id];
-  ASSERT_NE(signaled_age, 0u);
-  ASSERT_NE(signaled_age, static_cast<uint64_t>(KFD_SIGNAL_EVENT_LIMIT));
+  std::atomic_ref<uint64_t>(page[create.event_id])
+      .store(create.event_trigger_data, std::memory_order_release);
+  const uint64_t published_trigger = create.event_trigger_data;
 
   drv->begin_local_shutdown();
-  EXPECT_EQ(page[create.event_id], signaled_age)
+  EXPECT_EQ(page[create.event_id], published_trigger)
       << "begin_local_shutdown must not disturb the event page";
   EXPECT_FALSE(proc->event_state_.is_closing())
       << "begin_local_shutdown must not mark the driver closing: that turns a live "
@@ -1689,13 +1689,12 @@ TEST_F(SimulatedKfdTest, BeginLocalShutdownLeavesSignaledEventPageIntact) {
   EXPECT_EQ(drv->close(), 0);
 }
 
-// An AUTO-RESET event that was signaled while a waiter was parked is the state the
-// old speculative-shutdown design lost: signaling advances and publishes the age but
-// deliberately leaves signaled == false, so a rollback that rebuilt the page from
-// `signaled` events alone replaced a real pending completion with the unsignaled
-// sentinel. The wake must therefore leave the page alone even in this state. There is
-// no rollback any more, but the property is what makes that safe, so pin it.
+// Cancellation must preserve a GPU publication even when an earlier auto-reset
+// notification activated a waiter without leaving the event's signaled flag set.
 TEST_F(SimulatedKfdTest, WakeDoesNotDisturbPendingAutoResetEventPage) {
+  // Keep adopted storage alive through driver teardown, including assertion failures.
+  constexpr size_t kSlots = 64;
+  std::vector<uint64_t> page(kSlots, KFD_SIGNAL_EVENT_LIMIT);
   auto t = create_test_vm();
   ASSERT_NE(t.driver(), nullptr);
   auto *drv = t.driver();
@@ -1703,8 +1702,6 @@ TEST_F(SimulatedKfdTest, WakeDoesNotDisturbPendingAutoResetEventPage) {
   auto proc = drv->find_process(drv->local_process_id());
   ASSERT_NE(proc, nullptr);
 
-  constexpr size_t kSlots = 64;
-  std::vector<uint64_t> page(kSlots, 0);
   proc->event_state_.adopt_page(page.data(), page.size() * sizeof(uint64_t));
 
   kfd_ioctl_create_event_args create{};
@@ -1716,8 +1713,8 @@ TEST_F(SimulatedKfdTest, WakeDoesNotDisturbPendingAutoResetEventPage) {
 
   // Register a waiter deterministically: poll the event's waiter count rather than
   // sleeping, so the SET_EVENT below is guaranteed to take the "waiters present"
-  // auto-reset path (which advances and publishes the age while deliberately
-  // leaving signaled == false).
+  // auto-reset path (which advances the internal age while deliberately leaving
+  // signaled == false).
   std::atomic<int> wait_rc{-1};
   std::atomic<uint32_t> wait_result{0};
   std::thread waiter([&] {
@@ -1740,17 +1737,16 @@ TEST_F(SimulatedKfdTest, WakeDoesNotDisturbPendingAutoResetEventPage) {
   kfd_ioctl_set_event_args set{};
   set.event_id = create.event_id;
   ASSERT_EQ(drv->ioctl(AMDKFD_IOC_SET_EVENT, &set), 0);
-  const uint64_t pending_age =
-      std::atomic_ref<uint64_t>(page[create.event_id]).load(std::memory_order_acquire);
-  ASSERT_NE(pending_age, 0u);
-  ASSERT_NE(pending_age, static_cast<uint64_t>(KFD_SIGNAL_EVENT_LIMIT));
+  std::atomic_ref<uint64_t>(page[create.event_id])
+      .store(create.event_trigger_data, std::memory_order_release);
+  const uint64_t pending_trigger = create.event_trigger_data;
 
   drv->begin_local_shutdown();
   waiter.join();
 
   // The slot is written with atomic_ref by the driver, so read it the same way.
   EXPECT_EQ(std::atomic_ref<uint64_t>(page[create.event_id]).load(std::memory_order_acquire),
-            pending_age)
+            pending_trigger)
       << "the wake must not overwrite a pending auto-reset completion whose event is "
          "not flagged signaled; that is the lost signal the old page rollback caused";
   EXPECT_EQ(wait_rc.load(std::memory_order_acquire), 0)

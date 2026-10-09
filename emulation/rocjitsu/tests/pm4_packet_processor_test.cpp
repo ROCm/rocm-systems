@@ -28,7 +28,7 @@ namespace {
 
 class FlatMemory final : public AddressSpaceTranslator, public PhysicalMemoryAccess {
 public:
-  FlatMemory() : bytes_(0x4000) {}
+  explicit FlatMemory(size_t size = 0x4000) : bytes_(size) {}
 
   VmTranslationResult translate(uint64_t address, std::size_t size, VmAccessKind) const override {
     if (size == 0 || address > bytes_.size() || size > bytes_.size() - address)
@@ -105,14 +105,14 @@ public:
     return value;
   }
 
-  std::vector<std::pair<uint64_t, uint32_t>> atomic_loads;
-
   void make_read_unavailable(uint64_t address) { unavailable_read_ = address; }
   void make_reads_available() { unavailable_read_.reset(); }
   void make_store_unavailable_once(uint64_t address) { unavailable_store_once_ = address; }
   void make_store_faulted_once(uint64_t address) {
     store_outcome_once_ = std::pair{address, VmAccessOutcome::Faulted};
   }
+
+  std::vector<std::pair<uint64_t, uint32_t>> atomic_loads;
 
 private:
   std::vector<std::byte> bytes_;
@@ -461,8 +461,8 @@ TEST_F(Pm4PacketProcessorTest, ConcurrentWideWaitCannotPassOnMixedHalves) {
   test::LegacyGpuMemoryFixture host_memory("memory");
   host_memory.set_passthrough(true);
   host_memory.register_process(7, &page_table, &page_table_mutex);
-  auto &gpu_vm = host_memory.gpu_vm();
-  const auto handle = gpu_vm.find_vmid(7);
+  GpuVm &gpu_vm = host_memory.gpu_vm();
+  const std::optional<AddressSpaceHandle> handle = gpu_vm.find_vmid(7);
   ASSERT_TRUE(handle);
   constexpr uint64_t first = 0x1111111122222222ull;
   constexpr uint64_t second = 0x3333333344444444ull;
@@ -529,23 +529,181 @@ TEST_F(Pm4PacketProcessorTest, ConcurrentWideWaitCannotPassOnMixedHalves) {
 
 TEST_F(Pm4PacketProcessorTest, ReleaseInterruptFollowsWriteAndUsesContextId) {
   uint32_t calls = 0;
+  uint64_t expected = 0;
   InterruptSubscription subscription([&](uint32_t process_id, uint32_t event_id) {
     ++calls;
     EXPECT_EQ(process_id, 42u);
     EXPECT_EQ(event_id, 73u);
-    EXPECT_EQ(memory->load<uint64_t>(kOutput), 0x123456789abcdef0ull);
+    EXPECT_EQ(memory->load<uint64_t>(kOutput), expected);
   });
   queue.process_id = 42;
   queue.interrupt_sink = subscription.sink();
-  for (uint32_t interrupt : {0u, 2u}) {
-    const std::array words{0xc0064900u, 0u, (2u << 29) | (interrupt << 24),
+  for (uint32_t interrupt : {0u, 1u, 2u, 3u}) {
+    SCOPED_TRACE(interrupt);
+    calls = 0;
+    memory->store<uint64_t>(kOutput, 0);
+    const uint32_t selection = interrupt == 1 ? 0 : 2;
+    expected = selection == 0 ? 0 : 0x123456789abcdef0ull;
+    const std::array words{0xc0064900u, 0u, (selection << 29) | (interrupt << 24),
                            kOutput,     0u, 0x9abcdef0u,
                            0x12345678u, 73u};
     submit(words);
     EXPECT_EQ(service(), Pm4TestStatus::Ready);
-    EXPECT_EQ(calls, interrupt == 0 ? 0u : 1u);
+    EXPECT_EQ(memory->load<uint64_t>(kOutput), expected);
+    EXPECT_EQ(calls, interrupt == 1 || interrupt == 2 ? 1u : 0u);
     EXPECT_EQ(service(), Pm4TestStatus::Ready);
-    EXPECT_EQ(calls, interrupt == 0 ? 0u : 1u);
+    EXPECT_EQ(calls, interrupt == 1 || interrupt == 2 ? 1u : 0u);
+  }
+}
+
+TEST_F(Pm4PacketProcessorTest, UnsupportedReleaseInterruptHasNoEffects) {
+  uint32_t calls = 0;
+  InterruptSubscription subscription([&](uint32_t, uint32_t) { ++calls; });
+  queue.interrupt_sink = subscription.sink();
+  for (uint32_t interrupt : {4u, 5u, 6u, 7u}) {
+    SCOPED_TRACE(interrupt);
+    queue.faulted = false;
+    queue.commands.submissions.clear();
+    completed = false;
+    memory->store<uint64_t>(kOutput, 0);
+    const std::array words{0xc0064900u, 0u,           (2u << 29) | (interrupt << 24),
+                           kOutput,     0u,           1u,
+                           0u,          73u,          0xc0033700u,
+                           0x100u,      kOutput + 16, 0u,
+                           99u};
+    submit(words);
+    EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+    EXPECT_EQ(memory->load<uint64_t>(kOutput), 0u);
+    EXPECT_EQ(memory->load<uint32_t>(kOutput + 16), 0u);
+    EXPECT_EQ(calls, 0u);
+    EXPECT_FALSE(completed);
+  }
+}
+
+TEST_F(Pm4PacketProcessorTest, Gfx12WaitAndReleaseRespectDirectionalPermissions) {
+  memory = std::make_shared<FlatMemory>(0xa000);
+  constexpr uint64_t valid = 1, readable = 1u << 5, writable = 1u << 6;
+  constexpr uint64_t leaf = uint64_t{1} << 63;
+  for (uint64_t table = 0x1000; table < 0x5000; table += 0x1000)
+    memory->store<uint64_t>(table, (table + 0x1000) | valid);
+  memory->store<uint64_t>(0x5000, leaf | valid | readable | writable);
+  memory->store<uint64_t>(0x5040, 0x8000 | leaf | valid | readable);
+  memory->store<uint64_t>(0x5048, 0x9000 | leaf | valid | writable);
+  auto translator = std::make_shared<Gfx12PageTableTranslator>(memory, 0x1000);
+  std::vector<VmAccessKind> faults;
+  address_space = vm.register_address_space(
+      2, translator, memory, [&](uint64_t, VmAccessKind kind) { faults.push_back(kind); });
+  const std::optional<GpuVmAccess> access = vm.snapshot(address_space);
+  ASSERT_TRUE(access);
+  constexpr uint64_t value = 0x123456789abcdef0ull;
+  for (bool wide : {false, true}) {
+    SCOPED_TRACE(wide);
+    memory->store<uint64_t>(0x8000, value);
+    memory->store<uint64_t>(0x9000, 0);
+    std::vector<uint32_t> words{wide ? 0xc0079300u : 0xc0053c00u, 0x13u, 0x8000u, 0u,
+                                uint32_t(value)};
+    if (wide)
+      words.push_back(uint32_t(value >> 32));
+    words.push_back(UINT32_MAX);
+    if (wide)
+      words.push_back(UINT32_MAX);
+    words.push_back(0);
+    words.insert(words.end(), {0xc0064900u, 0u, (wide ? 2u : 1u) << 29, 0x9000u, 0u,
+                               uint32_t(value), uint32_t(value >> 32), 0u});
+    submit(words);
+    EXPECT_EQ(service(), Pm4TestStatus::Ready);
+    EXPECT_EQ(memory->load<uint64_t>(0x9000), wide ? value : uint32_t(value));
+    EXPECT_TRUE(faults.empty());
+    const uint32_t width = wide ? sizeof(uint64_t) : sizeof(uint32_t);
+    EXPECT_EQ(access->atomic_load(0x9000, width).outcome, VmAccessOutcome::Faulted);
+    EXPECT_EQ(access->atomic_store(0x8000, width, 0), VmAccessOutcome::Faulted);
+    EXPECT_EQ(access->compare_exchange(0x8000, width, value, 0).outcome, VmAccessOutcome::Faulted);
+    EXPECT_EQ(access->compare_exchange(0x9000, width, value, 0).outcome, VmAccessOutcome::Faulted);
+    EXPECT_EQ(faults, (std::vector{VmAccessKind::Read, VmAccessKind::Write, VmAccessKind::Atomic,
+                                   VmAccessKind::Atomic}));
+    faults.clear();
+  }
+}
+
+TEST_F(Pm4PacketProcessorTest, ConcurrentWaitAcquiresNarrowPublicationAndWideReleasePacket) {
+  LegacyPageTable page_table;
+  util::DistributedSharedMutex page_table_mutex;
+  test::LegacyGpuMemoryFixture host_memory("memory");
+  host_memory.set_passthrough(true);
+  host_memory.register_process(7, &page_table, &page_table_mutex);
+  GpuVm &gpu_vm = host_memory.gpu_vm();
+  const std::optional<AddressSpaceHandle> handle = gpu_vm.find_vmid(7);
+  ASSERT_TRUE(handle);
+  for (bool wide : {false, true}) {
+    SCOPED_TRACE(wide);
+    uint64_t wide_operand = 0;
+    uint32_t narrow_operand = 0, payload = 0, output = 0;
+    const uint64_t operand_address = wide ? reinterpret_cast<uint64_t>(&wide_operand)
+                                          : reinterpret_cast<uint64_t>(&narrow_operand);
+    const uint64_t payload_address = reinterpret_cast<uint64_t>(&payload);
+    const uint64_t output_address = reinterpret_cast<uint64_t>(&output);
+    constexpr uint32_t expected = 0x12345678;
+    std::vector<uint32_t> words{wide ? 0xc0079300u : 0xc0053c00u, 0x13u, uint32_t(operand_address),
+                                uint32_t(operand_address >> 32), 1u};
+    if (wide)
+      words.push_back(0);
+    words.push_back(UINT32_MAX);
+    if (wide)
+      words.push_back(UINT32_MAX);
+    words.push_back(0);
+    // COPY_DATA reads ordinary payload only after the acquire wait passes.
+    words.insert(words.end(), {0xc0044000u, 1u | (1u << 8), uint32_t(payload_address),
+                               uint32_t(payload_address >> 32), uint32_t(output_address),
+                               uint32_t(output_address >> 32)});
+    queue = ComputeQueueRecord{};
+    queue.address_space = *handle;
+    queue.packet_format = QueuePacketFormat::Pm4;
+    queue.submission_queue = true;
+    Pm4Submission submission;
+    submission.buffers.push_back(
+        {.address = reinterpret_cast<uint64_t>(words.data()), .dwords = uint32_t(words.size())});
+    queue.commands.submissions.push_back(std::move(submission));
+    const std::array release{
+        0xc0064900u, 0u, 2u << 29, uint32_t(operand_address), uint32_t(operand_address >> 32),
+        1u,          0u, 0u};
+    ComputeQueueRecord producer_queue;
+    producer_queue.address_space = *handle;
+    producer_queue.packet_format = QueuePacketFormat::Pm4;
+    producer_queue.submission_queue = true;
+    Pm4Submission producer_submission;
+    producer_submission.buffers.push_back({.address = reinterpret_cast<uint64_t>(release.data()),
+                                           .dwords = uint32_t(release.size())});
+    producer_queue.commands.submissions.push_back(std::move(producer_submission));
+    Pm4ExecutionContext producer_context{};
+    producer_context.flush_caches = [] {};
+    producer_context.wake = [] {};
+    producer_context.fault_queue = [&] { producer_queue.faulted = true; };
+    producer_context.retry = [&] { producer_queue.command_retry_pending = true; };
+    // Snapshot creation takes an exclusive VM lock: do it before publication
+    // so that lock cannot substitute for the operand's acquire/release edge.
+    queue.command_access = gpu_vm.snapshot_pinned(*handle);
+    producer_queue.command_access = gpu_vm.snapshot_pinned(*handle);
+    ASSERT_TRUE(queue.command_access);
+    ASSERT_TRUE(producer_queue.command_access);
+    std::jthread producer([&] {
+      payload = expected;
+      if (wide)
+        process_pm4_packets(producer_queue, &gpu_vm, producer_context);
+      else
+        std::atomic_ref<uint32_t>(narrow_operand).store(1, std::memory_order_release);
+    });
+    for (uint32_t poll = 0; poll < 10000 && !queue.commands.submissions.empty(); ++poll) {
+      queue.command_retry_pending = false;
+      process_pm4_packets(queue, &gpu_vm, context);
+      std::this_thread::yield();
+    }
+    // No join or auxiliary acquire may hide the wait/release synchronization edge.
+    EXPECT_EQ(output, expected);
+    EXPECT_TRUE(queue.commands.submissions.empty());
+    EXPECT_FALSE(queue.faulted);
+    producer.join();
+    EXPECT_FALSE(producer_queue.faulted);
+    EXPECT_FALSE(producer_queue.command_retry_pending);
   }
 }
 
