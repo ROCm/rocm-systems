@@ -3125,15 +3125,11 @@ def build_structural_builder_registry() -> Dict[str, StructuralBuilder]:
         ("torch.autograd.functional.jvp", builder_autograd_functional_jvp),
         (
             "torch.autograd.functional.hvp",
-            builder_autograd_functional_hvp_family(
-                "torch.autograd.functional.hvp"
-            ),
+            builder_autograd_functional_hvp_family("torch.autograd.functional.hvp"),
         ),
         (
             "torch.autograd.functional.vhp",
-            builder_autograd_functional_hvp_family(
-                "torch.autograd.functional.vhp"
-            ),
+            builder_autograd_functional_hvp_family("torch.autograd.functional.vhp"),
         ),
         ("torch.eq", builder_torch_eq),
         (
