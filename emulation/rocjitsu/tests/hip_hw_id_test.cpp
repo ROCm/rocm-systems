@@ -8,6 +8,12 @@
 
 #include <gtest/gtest.h>
 
+#define HIP_ASSERT(call)                                                                           \
+  do {                                                                                             \
+    const hipError_t error = (call);                                                               \
+    ASSERT_EQ(error, hipSuccess) << "HIP error: " << hipGetErrorString(error);                     \
+  } while (0)
+
 namespace {
 
 constexpr uint32_t kWaveSize = 64;
@@ -37,22 +43,22 @@ protected:
 
   void TearDown() override {
     if (device_results_) {
-      EXPECT_EQ(hipFree(device_results_), hipSuccess);
+      const hipError_t error = hipFree(device_results_);
+      EXPECT_EQ(error, hipSuccess) << "HIP error: " << hipGetErrorString(error);
     }
   }
 };
 
 TEST_F(HipHwIdTest, FourWaveWorkgroupPreservesSimdIdsAcrossBarrier) {
   std::array<SimdResult, kThreads> results{};
-  ASSERT_EQ(hipMalloc(&device_results_, sizeof(results)), hipSuccess);
-  ASSERT_EQ(hipMemset(device_results_, 0xff, sizeof(results)), hipSuccess);
+  HIP_ASSERT(hipMalloc(&device_results_, sizeof(results)));
+  HIP_ASSERT(hipMemset(device_results_, 0xff, sizeof(results)));
 
   // An idle CU assigns this workgroup's four waves to slots 0 through 3.
   read_simd_ids<<<1, kThreads>>>(device_results_);
-  ASSERT_EQ(hipGetLastError(), hipSuccess);
-  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-  ASSERT_EQ(hipMemcpy(results.data(), device_results_, sizeof(results), hipMemcpyDeviceToHost),
-            hipSuccess);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  HIP_ASSERT(hipMemcpy(results.data(), device_results_, sizeof(results), hipMemcpyDeviceToHost));
 
   for (uint32_t thread = 0; thread < kThreads; ++thread) {
     SCOPED_TRACE(thread);

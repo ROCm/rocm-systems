@@ -164,6 +164,7 @@ void set_gfx12_trap_ctrl_raw(Wavefront &wf, uint32_t value) { wf.set_gfx12_trap_
 // UserWritable records ISA privilege, not simulator completeness. If a
 // user-writable register has no HwregState backing yet, writes return
 // Unsupported rather than fabricating hidden state or side effects.
+
 // CDNA2 backs HW_ID.SIMD_ID. CDNA1's public ISA omits the field layout, so
 // instantiate its otherwise shared register table with HW_ID unsupported.
 template <HwregState HwIdState>
