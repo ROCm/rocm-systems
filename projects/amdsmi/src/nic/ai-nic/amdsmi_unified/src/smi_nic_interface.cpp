@@ -28,6 +28,14 @@ struct smi_nic_ctx {
   smi_nic_ctx() : init(false) {}
 };
 
+static constexpr const char* kNotAvailable = "N/A";
+
+// Empty values render as "N/A", matching the optional::value_or("N/A") fields.
+template <size_t N>
+static void copy_or_na(char (&dst)[N], const std::string& value) {
+  std::snprintf(dst, N, "%s", value.empty() ? kNotAvailable : value.c_str());
+}
+
 static SmiNicSystem* get_nic_system_from_context(smi_nic_ctx* ctx) {
   if (!ctx || !ctx->init || !ctx->nic_system) {
     return nullptr;
@@ -218,10 +226,14 @@ smi_nic_status_t smi_get_nic_asic_info(smi_nic_ctx_t ctx, uint64_t device,
   // trip costs ~1s per NIC and has never yet produced a serial in that case.
   std::string serial = nic->serial_number().value_or("");
   if (serial.empty() && nic->is_vpd_readable()) {
-    auto devlink = amd::nic::netlink::create_devlink_client();
-    auto dev_info = devlink->get_device_info(nic->telemetry_bdf());
-    if (dev_info.success && (dev_info.value.board_serial_number[0] != '\0')) {
-      serial = dev_info.value.board_serial_number;
+    // The devlink client allocates netlink messages that throw; the serial is optional here.
+    try {
+      auto devlink = amd::nic::netlink::create_devlink_client();
+      auto dev_info = devlink->get_device_info(nic->telemetry_bdf());
+      if (dev_info.success && (dev_info.value.board_serial_number[0] != '\0')) {
+        serial = dev_info.value.board_serial_number;
+      }
+    } catch (...) {
     }
   }
   std::snprintf(info->serial_number, SMI_NIC_MAX_STRING_LENGTH, "%s",
@@ -357,32 +369,18 @@ smi_nic_status_t smi_get_nic_port_info(smi_nic_ctx_t ctx, uint64_t device,
       port_info->bdf = parse_bdf(port.bdf());
       port_info->port_num = port.port_num().value_or(std::numeric_limits<uint32_t>::max());
 
-      auto port_type = port.port_type();
-      std::snprintf(port_info->type, SMI_NIC_MAX_STRING_LENGTH, "%s",
-                    !port_type.empty() ? port_type.c_str() : "N/A");
-
-      std::string flavour = port.flavour();
-      std::snprintf(port_info->flavour, SMI_NIC_MAX_STRING_LENGTH, "%s",
-                    !flavour.empty() ? flavour.c_str() : "N/A");
-
-      const std::string& netdev = port.interface();
-      std::snprintf(port_info->netdev, SMI_NIC_MAX_STRING_LENGTH, "%s",
-                    !netdev.empty() ? netdev.c_str() : "N/A");
+      copy_or_na(port_info->type, port.port_type());
+      copy_or_na(port_info->flavour, port.flavour());
+      copy_or_na(port_info->netdev, port.interface());
 
       port_info->ifindex = port.ifindex().value_or(0);
 
-      auto mac = port.mac_address();
-      std::snprintf(port_info->mac_address, SMI_NIC_MAX_STRING_LENGTH, "%s",
-                    (mac.has_value() && !mac.value().empty()) ? mac.value().c_str() : "N/A");
+      copy_or_na(port_info->mac_address, port.mac_address().value_or(""));
 
       port_info->carrier = port.carrier().value_or(std::numeric_limits<uint8_t>::max());
       port_info->mtu = port.mtu().value_or(std::numeric_limits<uint16_t>::max());
 
-      auto link_state = port.link_state();
-      std::snprintf(port_info->link_state, SMI_NIC_MAX_STRING_LENGTH, "%s",
-                    (link_state.has_value() && !link_state.value().empty())
-                        ? link_state.value().c_str()
-                        : "N/A");
+      copy_or_na(port_info->link_state, port.link_state().value_or(""));
 
       port_info->link_speed = port.link_speed().value_or(std::numeric_limits<uint32_t>::max());
 
@@ -841,8 +839,15 @@ smi_nic_status_t smi_get_nic_telemetry(smi_nic_ctx_t ctx, uint64_t device,
 
   // get_snapshot is total: an unexposed metric comes back as its reserved value, never
   // as a failure, so there is no unsuccessful result to branch on here.
-  amd::smi::nic::telemetry::NicTelemetry telemetry(amd::nic::netlink::create_devlink_client());
-  *snapshot = telemetry.get_snapshot(*nic).value;
+  // The devlink client allocates netlink messages that throw; keep that off the C ABI boundary.
+  try {
+    amd::smi::nic::telemetry::NicTelemetry telemetry(amd::nic::netlink::create_devlink_client());
+    *snapshot = telemetry.get_snapshot(*nic).value;
+  } catch (const std::bad_alloc&) {
+    return SMI_NIC_STATUS_NO_RESOURCE;
+  } catch (...) {
+    return SMI_NIC_STATUS_ERROR;
+  }
   return SMI_NIC_STATUS_SUCCESS;
 }
 
@@ -871,12 +876,18 @@ smi_nic_status_t smi_get_nic_fw_info(smi_nic_ctx_t ctx, uint64_t device,
     telemetry_bdf = nic->telemetry_bdf();
   }
 
-  auto devlink = amd::nic::netlink::create_devlink_client();
-  auto dev = devlink->get_device_info(telemetry_bdf);
-  if (!dev.success) {
-    return SMI_NIC_STATUS_NOT_SUPPORTED;
-  }
+  try {
+    auto devlink = amd::nic::netlink::create_devlink_client();
+    auto dev = devlink->get_device_info(telemetry_bdf);
+    if (!dev.success) {
+      return SMI_NIC_STATUS_NOT_SUPPORTED;
+    }
 
-  *info = dev.value;
+    *info = dev.value;
+  } catch (const std::bad_alloc&) {
+    return SMI_NIC_STATUS_NO_RESOURCE;
+  } catch (...) {
+    return SMI_NIC_STATUS_ERROR;
+  }
   return SMI_NIC_STATUS_SUCCESS;
 }

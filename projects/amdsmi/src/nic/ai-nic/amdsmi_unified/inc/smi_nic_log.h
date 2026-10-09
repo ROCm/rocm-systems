@@ -35,6 +35,12 @@ auto mask_tail(const std::string& value) -> std::string;
 
 }  // namespace amd::smi::nic::log
 
-#define NIC_LOG_DEBUG(msg) amd::smi::nic::log::debug(__PRETTY_FUNCTION__, (msg))
+// msg is not evaluated when logging is off.
+#define NIC_LOG_DEBUG(msg)                                   \
+  do {                                                       \
+    if (amd::smi::nic::log::is_enabled()) {                  \
+      amd::smi::nic::log::debug(__PRETTY_FUNCTION__, (msg)); \
+    }                                                        \
+  } while (false)
 
 #endif  // AMDSMI_UNIFIED_NIC_LOG_H_

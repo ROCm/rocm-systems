@@ -18,6 +18,9 @@ constexpr uint8_t kSmallItemShift = 3;          // small item name (bits 6:3)
 constexpr uint8_t kSmallItemMask = 0x0f;
 constexpr uint8_t kSmallLenMask = 0x07;  // small length (bits 2:0)
 constexpr uint8_t kSmallItemEnd = 0x0f;  // End Tag
+constexpr size_t kLargeHeaderLen = 3;    // tag + 2-byte little-endian length
+constexpr size_t kKeywordHeaderLen = 3;  // 2-char keyword + 1-byte length
+constexpr unsigned kLenHighByteShift = 8;
 
 // VPD strings are ASCII, right-padded with spaces or NULs; drop that trailing
 // filler so callers see the bare value.
@@ -35,20 +38,20 @@ std::optional<std::string> trimmed(const uint8_t* data, size_t len) {
 // Decodes the { keyword[2], len[1], data[len] } entries inside a VPD-R block.
 void parse_vpd_r(const std::vector<uint8_t>& image, size_t start, size_t end, VpdFields& out) {
   size_t j = start;
-  while (j + 3 <= end) {
+  while (j + kKeywordHeaderLen <= end) {
     const char k0 = static_cast<char>(image[j]);
     const char k1 = static_cast<char>(image[j + 1]);
     const size_t klen = image[j + 2];
-    if (j + 3 + klen > end) {
+    if (j + kKeywordHeaderLen + klen > end) {
       return;  // truncated keyword; stop rather than read past the block
     }
-    const uint8_t* kdata = image.data() + j + 3;
+    const uint8_t* kdata = image.data() + j + kKeywordHeaderLen;
     if ((k0 == 'P') && (k1 == 'N')) {
       out.part_number = trimmed(kdata, klen);
     } else if ((k0 == 'S') && (k1 == 'N')) {
       out.serial_number = trimmed(kdata, klen);
     }
-    j += 3 + klen;
+    j += kKeywordHeaderLen + klen;
   }
 }
 
@@ -60,12 +63,12 @@ VpdFields parse_pci_vpd(const std::vector<uint8_t>& image) {
   while (i < image.size()) {
     const uint8_t tag = image[i];
     if (tag & kLargeResourceFlag) {
-      if (i + 3 > image.size()) {
+      if (i + kLargeHeaderLen > image.size()) {
         break;  // incomplete large-resource header
       }
       const uint8_t item = tag & kLargeItemMask;
-      const size_t len = image[i + 1] | (static_cast<size_t>(image[i + 2]) << 8);
-      const size_t data = i + 3;
+      const size_t len = image[i + 1] | (static_cast<size_t>(image[i + 2]) << kLenHighByteShift);
+      const size_t data = i + kLargeHeaderLen;
       if (data + len > image.size()) {
         break;  // declared length runs past the image
       }

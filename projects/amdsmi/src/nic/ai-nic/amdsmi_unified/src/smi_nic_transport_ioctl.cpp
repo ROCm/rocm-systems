@@ -28,12 +28,35 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 #include "smi_ethtool_ioctl.h"
 #include "smi_nic_transport.h"
 
 namespace amd::smi::nic::transport {
+
+namespace {
+
+// ETHTOOL_GLINKSETTINGS trails the struct with supported, advertising and lp_advertising masks.
+constexpr size_t kLinkModeMaskCount = 3;
+constexpr size_t kMacLen = ETH_ALEN;
+static_assert(sizeof(PermanentAddress::mac) == kMacLen, "PermanentAddress::mac must hold one MAC");
+
+struct FreeDeleter {
+  void operator()(void* ptr) const { std::free(ptr); }
+};
+
+template <typename T>
+using ZeroedPtr_t = std::unique_ptr<T, FreeDeleter>;
+
+// Zero-filled heap block of `bytes` for the variable-length ethtool structs.
+template <typename T>
+ZeroedPtr_t<T> make_zeroed(size_t bytes) {
+  return ZeroedPtr_t<T>(static_cast<T*>(std::calloc(1, bytes)));
+}
+
+}  // namespace
 
 Result<PermanentAddress> parse_perm_addr(uint32_t reported_size, const uint8_t* mac_bytes) {
   PermanentAddress result{};
@@ -43,6 +66,8 @@ Result<PermanentAddress> parse_perm_addr(uint32_t reported_size, const uint8_t* 
   std::copy(mac_bytes, mac_bytes + result.mac.size(), result.mac.begin());
   return {true, result, 0};
 }
+
+namespace {
 
 /**
  * Ioctl (SIOCETHTOOL) transport backend. Works on all ethtool-capable kernels.
@@ -95,9 +120,9 @@ class IoctlBackend : public NicTransport {
       return {false, {}, EINVAL};
     }
 
-    size_t len = sizeof(ethtool_link_settings) + 3 * static_cast<size_t>(nwords) * sizeof(uint32_t);
-    std::unique_ptr<ethtool_link_settings, decltype(&std::free)> link(
-        static_cast<ethtool_link_settings*>(std::calloc(1, len)), &std::free);
+    size_t len = sizeof(ethtool_link_settings) +
+                 (kLinkModeMaskCount * static_cast<size_t>(nwords) * sizeof(uint32_t));
+    auto link = make_zeroed<ethtool_link_settings>(len);
 
     if (!link) {
       return {false, {}, ENOMEM};
@@ -158,8 +183,7 @@ class IoctlBackend : public NicTransport {
      */
     size_t strings_len =
         sizeof(ethtool_gstrings) + static_cast<size_t>(stats_num) * ETH_GSTRING_LEN;
-    std::unique_ptr<ethtool_gstrings, decltype(&std::free)> strings(
-        static_cast<ethtool_gstrings*>(std::calloc(1, strings_len)), &std::free);
+    auto strings = make_zeroed<ethtool_gstrings>(strings_len);
 
     if (!strings) {
       return {false, {}, ENOMEM};
@@ -175,8 +199,7 @@ class IoctlBackend : public NicTransport {
     }
 
     size_t stats_len = sizeof(ethtool_stats) + stats_num * sizeof(uint64_t);
-    std::unique_ptr<ethtool_stats, decltype(&std::free)> stats(
-        static_cast<ethtool_stats*>(std::calloc(1, stats_len)), &std::free);
+    auto stats = make_zeroed<ethtool_stats>(stats_len);
 
     if (!stats) {
       return {false, {}, ENOMEM};
@@ -213,11 +236,11 @@ class IoctlBackend : public NicTransport {
      * both. Heap-allocate so the storage is suitably aligned for the struct's
      * __u32 fields (a plain uint8_t[] would be alignment-1).
      */
-    std::vector<uint8_t> buffer(sizeof(ethtool_perm_addr) + 6, 0);
+    std::vector<uint8_t> buffer(sizeof(ethtool_perm_addr) + kMacLen, 0);
 
     auto* perm = reinterpret_cast<ethtool_perm_addr*>(buffer.data());
     perm->cmd = ETHTOOL_GPERMADDR;
-    perm->size = 6;
+    perm->size = kMacLen;
 
     int ret = smi_ethtool_ioctl(iface, perm);
     if (ret != 0) {
@@ -230,6 +253,8 @@ class IoctlBackend : public NicTransport {
 
   std::string backend_name() const override { return "ioctl"; }
 };
+
+}  // namespace
 
 namespace ioctl_internal {
 std::shared_ptr<NicTransport> create_ioctl_backend() { return std::make_shared<IoctlBackend>(); }

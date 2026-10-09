@@ -16,6 +16,8 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <system_error>
+#include <utility>
 #include <vector>
 
 #include "smi_nic.h"
@@ -40,7 +42,7 @@ static void check(const std::string& name, bool passed) {
   std::cout << (passed ? "  PASS: " : "  FAIL: ") << name << "\n";
 }
 
-// Creates a unique tmp sysfs root; caller removes it.
+// Creates a unique tmp sysfs root; pair it with a TmpRootGuard_t.
 static fs::path make_tmp_root() {
   fs::path base = fs::temp_directory_path() / "amdsmi_nic_disc_XXXXXX";
   std::string tmpl = base.string();
@@ -51,6 +53,21 @@ static fs::path make_tmp_root() {
   }
   return fs::path(buf);
 }
+
+// Removes the tree on scope exit, so a failed check or throw cannot leak it.
+class TmpRootGuard_t {
+ public:
+  explicit TmpRootGuard_t(fs::path root) : m_root(std::move(root)) {}
+  ~TmpRootGuard_t() {
+    auto ec = std::error_code{};
+    fs::remove_all(m_root, ec);
+  }
+  TmpRootGuard_t(const TmpRootGuard_t&) = delete;
+  TmpRootGuard_t& operator=(const TmpRootGuard_t&) = delete;
+
+ private:
+  fs::path m_root;
+};
 
 // Builds root/sys/{class/net/<iface>, bus/pci/devices/<bdf>} such that
 // <iface>/device resolves to the pci device dir, the device advertises
@@ -192,6 +209,7 @@ class StubAmdSubsystem : public SmiNicSubsystem {
 int main() {
   const std::string bdf = "0000:c1:00.0";
   fs::path root = make_tmp_root();
+  TmpRootGuard_t root_guard(root);
 
   // Populate ONLY the ionic (Main) driver dir with a symlink named after the BDF.
   fs::path ionic_dir = root / "sys/bus/pci/drivers/ionic";
@@ -226,6 +244,7 @@ int main() {
 
   // ---- Broadcom discover(): netdev-walk bound to bnxt_en, vendor 0x14e4 ----
   fs::path disc_root = make_tmp_root();
+  TmpRootGuard_t disc_root_guard(disc_root);
   make_fake_netdev(disc_root, "bnxt_test0", "0000:e1:00.0", "0x14e4", "0x1750", "bnxt_en");
   // Broadcom vendor but wrong driver -> must be ignored.
   make_fake_netdev(disc_root, "bnxt_legacy", "0000:e1:00.1", "0x14e4", "0x16d7", "tg3");
@@ -248,12 +267,12 @@ int main() {
     check("broadcom NIC has one port", false);
     check("broadcom port iface correct", false);
   }
-  fs::remove_all(disc_root);
 
   // ---- Broadcom Rdma positive: an aux-driver symlink whose resolved target
   //      passes through /<bdf>/ exercises the match_canonical=true branch of
   //      the shared is_driver_bound_to_bdf helper (its most intricate path). ----
   fs::path rdma_root = make_tmp_root();
+  TmpRootGuard_t rdma_root_guard(rdma_root);
   const std::string rdma_bdf = "0000:e1:00.0";
   fs::path aux_dev = rdma_root / "sys/bus/pci/devices" / rdma_bdf / "bnxt_en.rdma.0";
   fs::create_directories(aux_dev);
@@ -267,12 +286,12 @@ int main() {
         rdma_sub.is_driver_loaded(rdma_bdf, DriverType::Rdma));
   check("broadcom Rdma driver absent for other bdf",
         !rdma_sub.is_driver_loaded("0000:e1:00.1", DriverType::Rdma));
-  fs::remove_all(rdma_root);
 
   // ---- Pensando discover(): a bridge with no port beneath it (0x1dd8:0008) ----
   // The bridge is the NIC handle. With no ionic port under it the card carries
   // no netdev, and discovery must still register it, with zero ports.
   fs::path pen_root = make_tmp_root();
+  TmpRootGuard_t pen_root_guard(pen_root);
   make_fake_pci_device(pen_root, "0000:a1:00.0", "0x1dd8", "0x0008");  // bridge
   // Pensando vendor but a port device id, not a bridge id -> not a handle, ignore.
   make_fake_pci_device(pen_root, "0000:a1:00.1", "0x1dd8", "0x1002");
@@ -293,13 +312,13 @@ int main() {
     check("pensando NIC vendor is AMD", false);
     check("pensando fwctl-only NIC has zero ports", false);
   }
-  fs::remove_all(pen_root);
 
   // ---- Pensando discover(): the second bridge device id (0x1dd8:1008) ----
   // Matching a single device id silently dropped every bridge reporting 0x1008,
   // which on a multi-domain host is most of them.
   {
     fs::path pen2_root = make_tmp_root();
+    TmpRootGuard_t pen2_root_guard(pen2_root);
     make_fake_pci_device(pen2_root, "0001:01:00.0", "0x1dd8", "0x1008");
 
     SmiNicSubsystemPensando pen2_disc;
@@ -309,7 +328,6 @@ int main() {
     check("pensando discover finds the 0x1008 bridge", p2nics.size() == 1);
     check("pensando 0x1008 bridge bdf correct",
           (p2nics.size() == 1) && (p2nics[0]->bdf() == "0001:01:00.0"));
-    fs::remove_all(pen2_root);
   }
 
   // ---- Pensando discover(): port attaches two bridge levels below ----
@@ -318,6 +336,7 @@ int main() {
   // unregistered, or every card would report three NICs.
   {
     fs::path nest_root = make_tmp_root();
+    TmpRootGuard_t nest_root_guard(nest_root);
     make_fake_pci_tree(nest_root, "0001:40", "0001:41:00.0", "0x1008", "0001:42:01.0",
                        "0001:44:00.0", "enP1p68s0");
 
@@ -333,7 +352,6 @@ int main() {
     check("nested port iface correct",
           (nnics.size() == 1) && (nnics[0]->nic_ports_num() == 1) &&
               (nnics[0]->nic_ports().at(0).interface() == "enP1p68s0"));
-    fs::remove_all(nest_root);
   }
 
   // ---- Pensando discover(): the 0x1dd8:1478 upstream bridge ----
@@ -342,6 +360,7 @@ int main() {
   // function beside the ionic must still be adopted.
   {
     fs::path b1478_root = make_tmp_root();
+    TmpRootGuard_t b1478_root_guard(b1478_root);
     make_fake_pci_tree(b1478_root, "0001:00", "0001:01:00.0", "0x1478", "0001:02:00.0",
                        "0001:03:00.3", "enP1p3s0f3");
     const fs::path b1478_mgmt =
@@ -361,7 +380,6 @@ int main() {
                                                   (b1478_nics[0]->nic_ports_num() == 1));
     check("0x1478 NIC adopts its management function",
           (b1478_nics.size() == 1) && (b1478_nics[0]->mgmt_bdf() == "0001:03:00.2"));
-    fs::remove_all(b1478_root);
   }
 
   // ---- Pensando discover(): an unlisted 1dd8 bridge is named in the debug log ----
@@ -370,6 +388,7 @@ int main() {
   // and must not add a line per scan.
   {
     fs::path log_root = make_tmp_root();
+    TmpRootGuard_t log_root_guard(log_root);
     make_fake_pci_tree(log_root, "0001:00", "0001:01:00.0", "0x1234", "0001:02:00.0",
                        "0001:03:00.3", "enP1p3s0f3");
     const fs::path log_bridge = log_root / "sys/devices/pci0001:00/0001:01:00.0";
@@ -388,9 +407,10 @@ int main() {
     check("0x1001 middle bridge is not logged",
           !has_log_line_with("unlisted Pensando bridge 0001:02:00.0"));
     check("unlisted bridge registers no NIC", log_disc.get_nics().empty());
-    fs::remove_all(log_root);
 
     fs::path quiet_root = make_tmp_root();
+
+    TmpRootGuard_t quiet_root_guard(quiet_root);
     make_fake_pci_tree(quiet_root, "0001:00", "0001:01:00.0", "0x1478", "0001:02:00.0",
                        "0001:03:00.3", "enP1p3s0f3");
     const fs::path quiet_bridge = quiet_root / "sys/devices/pci0001:00/0001:01:00.0";
@@ -405,7 +425,6 @@ int main() {
     amd::smi::nic::log::set_sink(nullptr);
 
     check("listed bridge is not logged", !has_log_line_with("unlisted Pensando bridge"));
-    fs::remove_all(quiet_root);
   }
 
   // ---- Identity falls back to the ionic port when the bridge carries no VPD ----
@@ -413,6 +432,7 @@ int main() {
   // function beneath it exposes a vpd node, so a bridge-only read reports N/A.
   {
     fs::path vpd_root = make_tmp_root();
+    TmpRootGuard_t vpd_root_guard(vpd_root);
     make_fake_pci_tree(vpd_root, "0000:00", "0000:01:00.0", "0x0008", "0000:02:01.0",
                        "0000:04:00.0", "enP0p4s0");
     write_fake_vpd(vpd_root / "sys/devices/pci0000:00/0000:01:00.0/0000:02:01.0/0000:04:00.0",
@@ -432,7 +452,6 @@ int main() {
           has_one_nic && (vnics[0]->serial_number() == std::string("FPK2615006E")));
     check("is_vpd_readable is true when only the port's vpd opens",
           has_one_nic && vnics[0]->is_vpd_readable());
-    fs::remove_all(vpd_root);
   }
 
   // ---- The NIC's own VPD wins when both it and the port carry one ----
@@ -441,6 +460,7 @@ int main() {
   // hardware while silently changing which device the identity comes from.
   {
     fs::path pref_root = make_tmp_root();
+    TmpRootGuard_t pref_root_guard(pref_root);
     make_fake_pci_tree(pref_root, "0001:40", "0001:41:00.0", "0x1008", "0001:42:01.0",
                        "0001:44:00.0", "enP1p68s0");
     const fs::path bridge_dir = pref_root / "sys/devices/pci0001:40/0001:41:00.0";
@@ -456,7 +476,6 @@ int main() {
           has_one_pref_nic && (pnics2[0]->product_name() == std::string("BRIDGE-NAME")));
     check("own VPD preference applies to serial_number",
           has_one_pref_nic && (pnics2[0]->serial_number() == std::string("BRIDGE-SN")));
-    fs::remove_all(pref_root);
   }
 
   // ---- A partial bridge image still fills its gaps from the port ----
@@ -464,6 +483,7 @@ int main() {
   // no serial must not suppress the serial the ionic beneath it does carry.
   {
     fs::path part_root = make_tmp_root();
+    TmpRootGuard_t part_root_guard(part_root);
     make_fake_pci_tree(part_root, "0002:40", "0002:41:00.0", "0x1008", "0002:42:01.0",
                        "0002:44:00.0", "enP2p68s0");
     const fs::path part_bridge = part_root / "sys/devices/pci0002:40/0002:41:00.0";
@@ -483,7 +503,6 @@ int main() {
           has_one_part_nic && (partnics[0]->product_name() == std::string("PORT-NAME")));
     check("is_vpd_readable is true when the bridge's own vpd opens, even partial",
           has_one_part_nic && partnics[0]->is_vpd_readable());
-    fs::remove_all(part_root);
   }
 
   // ---- is_vpd_readable() is false when neither the bridge nor its port has a
@@ -492,6 +511,7 @@ int main() {
   // fallback in smi_get_nic_asic_info() must not fire in the former case.
   {
     fs::path novpd_root = make_tmp_root();
+    TmpRootGuard_t novpd_root_guard(novpd_root);
     make_fake_pci_tree(novpd_root, "0003:40", "0003:41:00.0", "0x1008", "0003:42:01.0",
                        "0003:44:00.0", "enP3p68s0");
 
@@ -503,7 +523,6 @@ int main() {
     check("no vpd anywhere registers one NIC", has_one_novpd_nic);
     check("is_vpd_readable is false with no vpd node on bridge or port",
           has_one_novpd_nic && !novpd_nics[0]->is_vpd_readable());
-    fs::remove_all(novpd_root);
   }
 
   // ---- IFoE discovery: an AMD fabric endpoint (0x1022:0x1747) ----
@@ -511,6 +530,7 @@ int main() {
   // hwmon, so its PCI ids are the only thing that identifies it.
   {
     fs::path ifoe_root = make_tmp_root();
+    TmpRootGuard_t ifoe_root_guard(ifoe_root);
     make_fake_pci_device(ifoe_root, "0001:01:00.1", "0x1022", "0x1747");
     // Same vendor, a different function on the package -> not an endpoint.
     make_fake_pci_device(ifoe_root, "0001:01:00.0", "0x1022", "0x14a0");
@@ -527,7 +547,6 @@ int main() {
     check("ifoe endpoint vendor is AMD", has_one_ifoe && (inics[0]->vendor() == NicVendor::AMD));
     check("ifoe endpoint product is AINIC",
           has_one_ifoe && (inics[0]->product() == NicProduct::AINIC));
-    fs::remove_all(ifoe_root);
   }
 
   // ---- a fabric endpoint survives the AINIC-only filter ----
@@ -536,6 +555,7 @@ int main() {
   // runs the filter, while still appearing in an unfiltered enumeration.
   {
     fs::path filter_root = make_tmp_root();
+    TmpRootGuard_t filter_root_guard(filter_root);
     make_fake_pci_device(filter_root, "0001:01:00.1", "0x1022", "0x1747");
     fs::create_directories(filter_root / "sys/class/net");
 
@@ -543,7 +563,6 @@ int main() {
                             (filter_root / "sys/class/net").string());
     filter_sys.discover_nics(/*ainic_only=*/true);
     check("fabric endpoint survives ainic_only", filter_sys.get_nics().size() == 1);
-    fs::remove_all(filter_root);
   }
 
   // ---- IFoE is_driver_loaded maps Main to the ifoe PCI driver dir ----
@@ -551,6 +570,7 @@ int main() {
   // stay negative rather than aliasing onto the Main path.
   {
     fs::path ifoe_drv_root = make_tmp_root();
+    TmpRootGuard_t ifoe_drv_root_guard(ifoe_drv_root);
     const std::string ifoe_bdf = "0001:01:00.1";
     fs::path ifoe_dir = ifoe_drv_root / "sys/bus/pci/drivers/ifoe";
     fs::create_directories(ifoe_dir);
@@ -563,7 +583,6 @@ int main() {
           !ifoe_sub.is_driver_loaded("0001:01:00.0", DriverType::Main));
     check("ifoe Rdma driver absent (no rdma aux driver)",
           !ifoe_sub.is_driver_loaded(ifoe_bdf, DriverType::Rdma));
-    fs::remove_all(ifoe_drv_root);
   }
 
   // ---- hwmon resolves through the port, not the bridge ----
@@ -571,6 +590,7 @@ int main() {
   // has no hwmon directory at all, so a bridge-only lookup reports no sensor.
   {
     fs::path hw_root = make_tmp_root();
+    TmpRootGuard_t hw_root_guard(hw_root);
     make_fake_pci_tree(hw_root, "0000:00", "0000:01:00.0", "0x0008", "0000:02:01.0", "0000:04:00.0",
                        "enP0p4s0");
     fs::create_directories(
@@ -593,7 +613,6 @@ int main() {
     }
     check("asic hwmon path resolves through the port",
           asic_path.has_value() && (asic_path.value() == expected.string()));
-    fs::remove_all(hw_root);
   }
 
   // ---- the management function is found on the far side of the switch ----
@@ -602,6 +621,7 @@ int main() {
   // own. It is the function that registers the devlink health reporter.
   {
     fs::path mgmt_root = make_tmp_root();
+    TmpRootGuard_t mgmt_root_guard(mgmt_root);
     make_fake_pci_tree(mgmt_root, "0000:00", "0000:01:00.0", "0x0008", "0000:02:01.0",
                        "0000:04:00.0", "enP0p4s0");
     const fs::path mgmt_mid = mgmt_root / "sys/devices/pci0000:00/0000:01:00.0/0000:02:00.0";
@@ -623,7 +643,6 @@ int main() {
       mgmt_bdf = mnics[0]->mgmt_bdf();
     }
     check("management BDF resolves to the pds_core function", mgmt_bdf == "0000:03:00.2");
-    fs::remove_all(mgmt_root);
   }
 
   // ---- each card adopts its own management function, not a neighbour's ----
@@ -632,6 +651,7 @@ int main() {
   // health. Without it a flat scan hands both cards whichever it reaches first.
   {
     fs::path two_root = make_tmp_root();
+    TmpRootGuard_t two_root_guard(two_root);
     const fs::path two_bus = two_root / "sys/bus/pci/devices";
 
     auto add_mgmt_function = [&two_root, &two_bus](
@@ -690,13 +710,13 @@ int main() {
     check("each card claims only the port beneath its own bridge",
           (ports_of("0000:01:00.0") == 1) && (ports_of("0001:41:00.0") == 1) &&
               (ports_of("0002:41:00.0") == 1));
-    fs::remove_all(two_root);
   }
 
   // ---- a portless NIC keeps reading hwmon from its own path ----
   // Delegating to port 0 must not cost a single-function NIC its own sensor.
   {
     fs::path own_root = make_tmp_root();
+    TmpRootGuard_t own_root_guard(own_root);
     const fs::path own_dev = own_root / "0000:c1:00.0";
     fs::create_directories(own_dev / "hwmon/hwmon7");
     std::ofstream(own_dev / "hwmon/hwmon7/temp1_input") << "51000\n";
@@ -706,7 +726,6 @@ int main() {
     check("portless NIC resolves its own hwmon node",
           own_path.has_value() &&
               (own_path.value() == (own_dev / "hwmon/hwmon7/temp1_input").string()));
-    fs::remove_all(own_root);
   }
 
   // ---- SmiNicSystem discovery filter: ALL vs AINIC-only over a mixed tree ----
@@ -714,6 +733,7 @@ int main() {
   // The default (ainic_only=false) keeps both; ainic_only=true drops non-AINIC.
   {
     fs::path mix_root = make_tmp_root();
+    TmpRootGuard_t mix_root_guard(mix_root);
     make_fake_pci_device(mix_root, "0000:a1:00.0", "0x1dd8", "0x0008");  // Pensando AINIC
     make_fake_netdev(mix_root, "bnxt_mix0", "0000:e1:00.0", "0x14e4", "0x1750", "bnxt_en");
 
@@ -735,7 +755,6 @@ int main() {
       check("filtered NIC product is AINIC", false);
       check("filtered NIC vendor is AMD", false);
     }
-    fs::remove_all(mix_root);
   }
 
   // ---- a NIC resolves to the plugin that discovered it, not the first plugin
@@ -744,6 +763,7 @@ int main() {
   // hands every AMD query to the Pensando plugin and its ionic driver path.
   {
     fs::path own_root = make_tmp_root();
+    TmpRootGuard_t own_root_guard(own_root);
     fs::create_directories(own_root / "sys/bus/pci/devices");
     fs::create_directories(own_root / "sys/class/net");
 
@@ -756,7 +776,6 @@ int main() {
           own_sys.get_nics().size() == 1);
     check("driver query resolves through the plugin that owns the NIC",
           own_sys.is_driver_loaded(stub_bdf, DriverType::Main));
-    fs::remove_all(own_root);
   }
 
   // ---- BDF order weights the domain above the bus ----
@@ -765,6 +784,7 @@ int main() {
   // reorder the cards behind them.
   {
     fs::path sort_root = make_tmp_root();
+    TmpRootGuard_t sort_root_guard(sort_root);
     make_fake_pci_device(sort_root, "0001:01:00.1", "0x1022", "0x1747");  // fabric endpoint
     make_fake_pci_device(sort_root, "0002:01:00.1", "0x1022", "0x1747");  // fabric endpoint
     make_fake_pci_device(sort_root, "0001:41:00.0", "0x1dd8", "0x1008");  // card
@@ -781,10 +801,7 @@ int main() {
           has_four && (sorted[0]->bdf() == "0001:01:00.1") &&
               (sorted[1]->bdf() == "0001:41:00.0") && (sorted[2]->bdf() == "0002:01:00.1") &&
               (sorted[3]->bdf() == "0002:41:00.0"));
-    fs::remove_all(sort_root);
   }
-
-  fs::remove_all(root);
 
   // ---- add_nic_port owns port order, so port 0 is the lowest BDF on insert ----
   // The netdev walk yields ports in readdir order, which is not BDF order.
@@ -859,6 +876,7 @@ int main() {
     // A fabric endpoint has no host port, so the ifoe.cmd.N nodes are the only
     // thing separating MODE: fwctl-only from MODE: unknown on the row.
     fs::path ifoe_root = make_tmp_root();
+    TmpRootGuard_t ifoe_root_guard(ifoe_root);
     fs::path with_cmd = ifoe_root / "0001:01:00.1";
     fs::create_directories(with_cmd);
     std::ofstream(with_cmd / "mcdi_logging") << "0\n";
@@ -882,8 +900,6 @@ int main() {
     SmiNicIfoe ifoe_no_path("0003:01:00.1", "");
     check("ifoe endpoint with no sysfs path lacks FWCTL",
           (ifoe_no_path.capabilities() & SMI_NIC_CAP_FWCTL) == 0);
-
-    fs::remove_all(ifoe_root);
     check("ifoe endpoint has zero ports", ifoe.nic_ports_num() == 0);
     check("ifoe endpoint port type is Fabric", ifoe.port_type() == "Fabric");
 

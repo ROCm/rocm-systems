@@ -292,7 +292,7 @@ static void test_large_table_not_truncated_by_mechanism() {
     stats.names.push_back("stat_" + std::to_string(i));
     stats.values.push_back(static_cast<uint64_t>(i));
   }
-  static std::vector<std::string> owned_names = stats.names;  // keep c_str() storage alive
+  const auto owned_names = stats.names;  // keep c_str() storage alive
   for (const auto& name : owned_names) {
     big_table.push_back({name.c_str(), StatTier_t::Default});
   }

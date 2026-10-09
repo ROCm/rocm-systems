@@ -7,7 +7,6 @@
 
 #include <climits>
 #include <filesystem>
-#include <stdexcept>
 
 #include "smi_sysfs.h"
 
@@ -27,27 +26,15 @@ std::pair<uint16_t, uint16_t> SmiNicSubsystem::read_pci_ids(
        SmiSysfsReader::SysfsStatus::Success) &&
       (SmiSysfsReader::readLine(device_path, device_val, kIsSuccessLogged) ==
        SmiSysfsReader::SysfsStatus::Success)) {
-    try {
-      if (std::holds_alternative<int>(vendor_val)) {
-        vendor_id = static_cast<uint16_t>(std::get<int>(vendor_val));
-      } else if (std::holds_alternative<std::string>(vendor_val)) {
-        vendor_id =
-            static_cast<uint16_t>(std::stoul(std::get<std::string>(vendor_val), nullptr, 0));
-      }
-
-      if (std::holds_alternative<int>(device_val)) {
-        device_id = static_cast<uint16_t>(std::get<int>(device_val));
-      } else if (std::holds_alternative<std::string>(device_val)) {
-        device_id =
-            static_cast<uint16_t>(std::stoul(std::get<std::string>(device_val), nullptr, 0));
-      }
-    } catch (const std::invalid_argument&) {
+    const auto parsed_vendor = parse_sysfs_uint(vendor_val);
+    const auto parsed_device = parse_sysfs_uint(device_val);
+    if (!parsed_vendor.has_value() || !parsed_device.has_value()) {
       // One malformed id must not abort discovery; {0,0} (unknown) beats a
       // half-parsed pair, which could only cause a false vendor match.
       return {0, 0};
-    } catch (const std::out_of_range&) {
-      return {0, 0};
     }
+    vendor_id = static_cast<uint16_t>(*parsed_vendor);
+    device_id = static_cast<uint16_t>(*parsed_device);
   }
 
   return {vendor_id, device_id};

@@ -12,6 +12,7 @@
 
 #include <array>
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -105,6 +106,12 @@ class LogFixture_t {
  private:
   fs::path m_dir;
 };
+
+// snprintf always NUL-terminates, unlike strncpy at sizeof(dst) - 1 on a non-zeroed buffer.
+template <size_t N>
+auto set_cstr(char (&dst)[N], const std::string& src) -> void {
+  std::snprintf(dst, N, "%s", src.c_str());
+}
 
 auto test_no_sink_is_disabled_and_silent() -> void {
   std::cout << "\nSeam: no sink installed\n";
@@ -280,19 +287,15 @@ auto test_discovery_pci_scan_logs_failures_only() -> void {
 
 auto test_sysfs_silent_without_sink() -> void {
   std::cout << "\nSysfs: no sink means no logging and an unchanged result\n";
-  g_captured.clear();
-  nlog::set_sink(nullptr);
-  const auto dir = fs::temp_directory_path() / ("nic_log_nosink_" + std::to_string(::getpid()));
-  fs::create_directories(dir);
-  std::ofstream(dir / "x") << "7\n";
+  const auto fx = LogFixture_t{};
+  nlog::set_sink(nullptr);  // the fixture installs the capture sink; this test needs none
+  const auto path = fx.write("x", "7\n");
 
   auto value = SmiSysfsReader::SysfsValue{};
-  const auto status = SmiSysfsReader::readLine((dir / "x").string(), value);
+  const auto status = SmiSysfsReader::readLine(path, value);
 
   check("read succeeds", (status == SmiSysfsReader::SysfsStatus::Success));
   check("nothing captured", g_captured.empty());
-  auto ec = std::error_code{};
-  fs::remove_all(dir, ec);
 }
 
 auto test_ioctl_failure_logged() -> void {
@@ -423,16 +426,16 @@ auto test_devlink_describe_device_info_masks_serials() -> void {
   std::cout << "\nDevlink describe: serials are masked, versions are shown\n";
   const auto eui_serial = std::string{"0490 81b4eee0"};
   auto info = nl::DevlinkDeviceInfo{};
-  std::strncpy(info.driver_name, "ifoe", sizeof(info.driver_name) - 1);
-  std::strncpy(info.serial_number, eui_serial.c_str(), sizeof(info.serial_number) - 1);
-  std::strncpy(info.board_serial_number, kSerialText.c_str(), sizeof(info.board_serial_number) - 1);
+  set_cstr(info.driver_name, "ifoe");
+  set_cstr(info.serial_number, eui_serial);
+  set_cstr(info.board_serial_number, kSerialText);
   info.version_count = 2;
   info.versions[0].type = static_cast<uint8_t>(nl::DevlinkVersionType::Running);
-  std::strncpy(info.versions[0].name, "fw.mgmt", sizeof(info.versions[0].name) - 1);
-  std::strncpy(info.versions[0].value, "0.21.6.0", sizeof(info.versions[0].value) - 1);
+  set_cstr(info.versions[0].name, "fw.mgmt");
+  set_cstr(info.versions[0].value, "0.21.6.0");
   info.versions[1].type = static_cast<uint8_t>(nl::DevlinkVersionType::Fixed);
-  std::strncpy(info.versions[1].name, "board.serial_number", sizeof(info.versions[1].name) - 1);
-  std::strncpy(info.versions[1].value, kSerialText.c_str(), sizeof(info.versions[1].value) - 1);
+  set_cstr(info.versions[1].name, "board.serial_number");
+  set_cstr(info.versions[1].value, kSerialText);
 
   const auto text = nl::devlink_describe(info);
 

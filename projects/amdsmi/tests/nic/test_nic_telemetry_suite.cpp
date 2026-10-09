@@ -17,11 +17,13 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "smi_nic_interface.h"
@@ -616,5 +618,7 @@ int main() {
   test_snapshot_all_unsupported();
 
   std::cout << "\n" << (tests_run - tests_failed) << "/" << tests_run << " checks passed\n";
+  auto ec = std::error_code{};
+  std::filesystem::remove_all(g_tmpdir, ec);
   return tests_failed == 0 ? 0 : 1;
 }

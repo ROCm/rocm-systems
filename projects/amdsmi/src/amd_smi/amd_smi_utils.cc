@@ -1733,9 +1733,9 @@ void init_fabric_info_defaults(amdsmi_fabric_info_t* info) {
   v1.bandwidth = std::numeric_limits<decltype(v1.bandwidth)>::max();
   v1.latency = std::numeric_limits<decltype(v1.latency)>::max();
 
-  // Reserved value when sysfs provides no ppod_id: UUID 99999999-9999-9999-9999-999999999999 (16 ×
-  // 0x99)
-  std::fill(std::begin(v1.ppod_id), std::end(v1.ppod_id), static_cast<std::uint8_t>(0x99));
+  // Reserved value when sysfs provides no ppod_id: UUID 99999999-9999-9999-9999-999999999999
+  constexpr std::uint8_t kPpodIdUnsetByte = 0x99;
+  std::fill(std::begin(v1.ppod_id), std::end(v1.ppod_id), kPpodIdUnsetByte);
 
   v1.ppod_size = std::numeric_limits<decltype(v1.ppod_size)>::max();
   v1.vpod_id = std::numeric_limits<decltype(v1.vpod_id)>::max();

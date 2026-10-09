@@ -958,6 +958,17 @@ amdsmi_status_t amdsmi_get_nic_device_bdf(amdsmi_processor_handle processor_hand
   return AMDSMI_STATUS_NOT_YET_IMPLEMENTED;
 }
 
+// Copies up to *num_stats entries and sets *num_stats to the count copied.
+static void copy_nic_stats(const smi_nic_stat_info_t& info, uint32_t* num_stats,
+                           amdsmi_nic_stat_t* stats) {
+  const uint32_t n = std::min(info.count, *num_stats);
+  for (uint32_t i = 0; i < n; ++i) {
+    std::snprintf(stats[i].name, sizeof(stats[i].name), "%s", info.stats[i].name);
+    stats[i].value = info.stats[i].value;
+  }
+  *num_stats = n;
+}
+
 amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor_handle,
                                                uint32_t port_index, uint32_t* num_stats,
                                                amdsmi_nic_stat_t* stats) {
@@ -996,12 +1007,7 @@ amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor
     return amd::smi::ainic_to_amdsmi_status(nic_status);
   }
 
-  const uint32_t n = std::min(info->count, *num_stats);
-  for (uint32_t i = 0; i < n; ++i) {
-    std::snprintf(stats[i].name, sizeof(stats[i].name), "%s", info->stats[i].name);
-    stats[i].value = info->stats[i].value;
-  }
-  *num_stats = n;
+  copy_nic_stats(*info, num_stats, stats);
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -1046,12 +1052,7 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
     return amd::smi::ainic_to_amdsmi_status(nic_status);
   }
 
-  const uint32_t n = std::min(info->count, *num_stats);
-  for (uint32_t i = 0; i < n; ++i) {
-    std::snprintf(stats[i].name, sizeof(stats[i].name), "%s", info->stats[i].name);
-    stats[i].value = info->stats[i].value;
-  }
-  *num_stats = n;
+  copy_nic_stats(*info, num_stats, stats);
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -1105,12 +1106,7 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
     return amd::smi::ainic_to_amdsmi_status(nic_status);
   }
 
-  const uint32_t n = std::min(info->count, *num_stats);
-  for (uint32_t i = 0; i < n; ++i) {
-    std::snprintf(stats[i].name, sizeof(stats[i].name), "%s", info->stats[i].name);
-    stats[i].value = info->stats[i].value;
-  }
-  *num_stats = n;
+  copy_nic_stats(*info, num_stats, stats);
   return AMDSMI_STATUS_SUCCESS;
 }
 

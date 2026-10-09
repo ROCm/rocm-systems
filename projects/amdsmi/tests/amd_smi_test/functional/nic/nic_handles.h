@@ -30,6 +30,7 @@ inline auto nic_handles() -> std::vector<amdsmi_processor_handle> {
     auto handles = std::vector<amdsmi_processor_handle>(count);
     if (amdsmi_get_processor_handles_by_type(socket, AMDSMI_PROCESSOR_TYPE_AMD_NIC, handles.data(),
                                              &count) == AMDSMI_STATUS_SUCCESS) {
+      handles.resize(count);
       nics.insert(nics.end(), handles.begin(), handles.end());
     }
   }
