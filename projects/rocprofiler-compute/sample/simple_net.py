@@ -91,9 +91,20 @@ def main(argv=None):
             output = model(x)
             loss = output.sum()
             if args.backward_thread:
-                worker = threading.Thread(target=loss.backward)
+                caught = []
+
+                def run_backward():
+                    try:
+                        loss.backward()
+                    except BaseException:
+                        caught.append(sys.exc_info()[1:])
+
+                worker = threading.Thread(target=run_backward)
                 worker.start()
                 worker.join()
+                if caught:
+                    err, tb = caught[0]
+                    raise err.with_traceback(tb)
             elif not args.no_backward:
                 loss.backward()
     finally:
