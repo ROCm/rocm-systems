@@ -1116,15 +1116,15 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
       break;
     case SignalAddTestType:
       test_name = "Signal Add";
-      testers.push_back(new SignalingOperationsTester(args));
+      PUSH_TESTER(SignalingOperationsTester(args));
       break;
     case SignalSetTestType:
       test_name = "Signal Set";
-      testers.push_back(new SignalingOperationsTester(args));
+      PUSH_TESTER(SignalingOperationsTester(args));
       break;
     case SignalWaitUntilTestType:
       test_name = "Signal Wait Until";
-      testers.push_back(new SignalingOperationsTester(args));
+      PUSH_TESTER(SignalingOperationsTester(args));
       break;
     case FloodPutTestType:
       test_name = "Flood Put (multidirectional)";
@@ -1176,7 +1176,7 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
       break;
     case BufferRegisterSymmetricTestType:
       test_name = "Buffer Register Symmetric Test";
-      testers.push_back(new BufferRegisterSymmetricTester(args));
+      PUSH_TESTER(BufferRegisterSymmetricTester(args));
       break;
     case FenceOrderPutWaveSignalTestType:
       test_name = "Fence PutWaveSignal Ordering";
@@ -1252,35 +1252,35 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
       break;
     case TilePutWaveRowMajorTestType:
       test_name = "Tile Put Wave Row-Major";
-      testers.push_back(new TileRMATester(args));
+      PUSH_TESTER(TileRMATester(args));
       break;
     case TilePutWaveColumnMajorTestType:
       test_name = "Tile Put Wave Column-Major";
-      testers.push_back(new TileRMATester(args));
+      PUSH_TESTER(TileRMATester(args));
       break;
     case TileGetWaveRowMajorTestType:
       test_name = "Tile Get Wave Row-Major";
-      testers.push_back(new TileRMATester(args));
+      PUSH_TESTER(TileRMATester(args));
       break;
     case TileGetWaveColumnMajorTestType:
       test_name = "Tile Get Wave Column-Major";
-      testers.push_back(new TileRMATester(args));
+      PUSH_TESTER(TileRMATester(args));
       break;
     case TilePutWGRowMajorTestType:
       test_name = "Tile Put WG Row-Major";
-      testers.push_back(new TileRMATester(args));
+      PUSH_TESTER(TileRMATester(args));
       break;
     case TilePutWGColumnMajorTestType:
       test_name = "Tile Put WG Column-Major";
-      testers.push_back(new TileRMATester(args));
+      PUSH_TESTER(TileRMATester(args));
       break;
     case TileGetWGRowMajorTestType:
       test_name = "Tile Get WG Row-Major";
-      testers.push_back(new TileRMATester(args));
+      PUSH_TESTER(TileRMATester(args));
       break;
     case TileGetWGColumnMajorTestType:
       test_name = "Tile Get WG Column-Major";
-      testers.push_back(new TileRMATester(args));
+      PUSH_TESTER(TileRMATester(args));
       break;
     case HostTeamSyncBarrierTestType:
       test_name = "Host Team Sync/Barrier";
@@ -1325,9 +1325,9 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
     case TileReduceTestType:
       test_name = "Tile Reduce";
       // float, short, int, long × SUM, MAX, MIN
-#define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                     \
-      testers.push_back(new TileReduceTester<T, OP>(args,                    \
-          [](T &s, T &r) { s = INIT_S; r = INIT_R; },                       \
+#define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                      \
+      PUSH_TESTER(TileReduceTester<T, OP>(args,                              \
+          [](T &s, T &r) { s = INIT_S; r = INIT_R; },                        \
           [](T v, int n_pes, [[maybe_unused]] int idx) { return VERIFY; }))
       TILE_REDUCE_PUSH(float, ROCSHMEM_SUM,  1.0f, 0.0f, static_cast<int>(v) == n_pes);
       TILE_REDUCE_PUSH(float, ROCSHMEM_MAX,  1.0f, 0.0f, static_cast<int>(v) == 1);
@@ -1346,7 +1346,7 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
     case TileReduceWaveTestType:
       test_name = "Tile Reduce Wave-Collective";
 #define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                     \
-      testers.push_back(new TileReduceTester<T, OP>(args,                    \
+      PUSH_TESTER(TileReduceTester<T, OP>(args,                             \
           [](T &s, T &r) { s = INIT_S; r = INIT_R; },                       \
           [](T v, int n_pes, [[maybe_unused]] int idx) { return VERIFY; }))
       TILE_REDUCE_PUSH(float, ROCSHMEM_SUM,  1.0f, 0.0f, static_cast<int>(v) == n_pes);
@@ -1366,7 +1366,7 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
     case TileReduceWGTestType:
       test_name = "Tile Reduce Workgroup-Collective";
 #define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                     \
-      testers.push_back(new TileReduceTester<T, OP>(args,                    \
+      PUSH_TESTER(TileReduceTester<T, OP>(args,                             \
           [](T &s, T &r) { s = INIT_S; r = INIT_R; },                       \
           [](T v, int n_pes, [[maybe_unused]] int idx) { return VERIFY; }))
       TILE_REDUCE_PUSH(float, ROCSHMEM_SUM,  1.0f, 0.0f, static_cast<int>(v) == n_pes);
