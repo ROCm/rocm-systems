@@ -570,7 +570,11 @@ HIP_TEST_CASE(Unit_hipGraphSegmentOrdering_EmptyNodeCrossStreamCompletion) {
   // Force multi-stream so the EMPTY-only segment is guaranteed to need a cross-stream
   // completion signal.  Without the fix, E0's signal slot is allocated but never fired
   // and hipStreamSynchronize hangs.
+#ifdef _WIN32
+  _putenv_s("DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING", "2");
+#else
   setenv("DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING", "2", /*overwrite=*/0);
+#endif
 
   hipGraph_t g;
   HIP_CHECK(hipGraphCreate(&g, 0));
