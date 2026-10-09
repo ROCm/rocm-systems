@@ -6,6 +6,7 @@
 #include "context.h"
 #include "hip.h"
 
+#include <cerrno>
 #include <cstdlib>
 #include <system_error>
 
@@ -46,6 +47,22 @@ throwOnHipError(hipError_t error)
         throw ExceptionType(error);
     }
     return error;
+}
+
+void
+throwOnAisIoError(hipError_t hip_error, int32_t status, int ais_errno)
+{
+    // A KFD without the AIS ioctl (e.g. the inbox amdgpu driver) rejects it
+    // with ENOTTY before writing the out-args, so status is not meaningful.
+    if (hip_error && ais_errno == ENOTTY) {
+        throw std::system_error(ENOTTY, std::generic_category());
+    }
+    if (status) {
+        throw std::system_error(abs(status), std::generic_category());
+    }
+    if (hip_error) {
+        throw Hip::RuntimeError(hip_error);
+    }
 }
 
 hipPointerAttribute_t
@@ -127,14 +144,9 @@ Hip::hipAmdFileRead(hipAmdFileHandle_t handle, void *devicePtr, uint64_t size, i
         throw Hip::SymbolNotFound("Could not find hipAmdFileRead()");
     }
 
+    errno = 0;
     auto hip_error{(*hipAmdFileReadPtr)(handle, devicePtr, size, file_offset, &bytes_read, &status)};
-
-    if (status) {
-        throw std::system_error(abs(status), std::generic_category());
-    }
-    else if (hip_error) {
-        throw Hip::RuntimeError(hip_error);
-    }
+    throwOnAisIoError(hip_error, status, errno);
 
     return bytes_read;
 }
@@ -150,14 +162,9 @@ Hip::hipAmdFileWrite(hipAmdFileHandle_t handle, void *devicePtr, uint64_t size, 
         throw Hip::SymbolNotFound("Could not find hipAmdFileWrite()");
     }
 
+    errno = 0;
     auto hip_error{(*hipAmdFileWritePtr)(handle, devicePtr, size, file_offset, &bytes_written, &status)};
-
-    if (status) {
-        throw std::system_error(abs(status), std::generic_category());
-    }
-    else if (hip_error) {
-        throw Hip::RuntimeError(hip_error);
-    }
+    throwOnAisIoError(hip_error, status, errno);
 
     return bytes_written;
 }

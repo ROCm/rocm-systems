@@ -13,6 +13,7 @@
 
 * The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now applies the clang `-Wunsafe-buffer-usage` and `-fsafe-buffer-usage-suggestions` flags to C++ sources. Previously, the flags were never passed to the compiler.
 * hipFile now returns `hipFileGetNewFDFailed` instead of `hipFileInternalError` when the process or system runs out of file descriptors. API calls that need a new file descriptor, such as `hipFileHandleRegister()`, can return this error.
+* `hipFileRead()`, `hipFileWrite()`, and the asynchronous and batch I/O APIs now fall back to the compatibility path when the amdgpu kernel driver doesn't support AIS (for example, the inbox Linux driver). Previously, they failed with `ENOTTY` ("Inappropriate ioctl for device") or, with ROCr versions that don't include the matching libhsakmt fix, with an unrelated error code.
 
 
 ### Removed
