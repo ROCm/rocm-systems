@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include "comm.h"
+#include "fakes/ras_registry_test_support.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
 #include "fakes/signature-drift.h"
@@ -149,10 +150,7 @@ class RasMicrotest : public ::testing::Test {
     rasInitialized = false;
     rasInitRefCount = 0;
     rasNotificationPipe[0] = rasNotificationPipe[1] = NCCL_SOCKET_PAIR_INVALID;
-    std::free(ncclComms);
-    ncclComms = nullptr;
-    nNcclComms = 0;
-    ncclCommsSorted = false;
+    ras_test::ResetNcclComms();
     std::free(rasPfds);
     rasPfds = nullptr;
     nRasPfds = 0;
@@ -164,9 +162,7 @@ class RasMicrotest : public ::testing::Test {
     std::free(rasPfds);
     rasPfds = nullptr;
     nRasPfds = 0;
-    std::free(ncclComms);
-    ncclComms = nullptr;
-    nNcclComms = 0;
+    ras_test::ResetNcclComms();
     rasInitialized = false;
     rasInitRefCount = 0;
     g_socketProgress = DefaultSocketProgress;
@@ -200,11 +196,9 @@ TEST_F(RasMicrotest, CommInitAlreadyInitializedAcceptsNullRank) {
 
 TEST_F(RasMicrotest, CommInitReusesVacantCommSlot) {
   rasInitialized = true;
-  nNcclComms = 2;
-  ncclComms = static_cast<ncclComm**>(std::calloc(2, sizeof(*ncclComms)));
   auto incumbent = std::make_unique<ncclComm>();
   auto newcomer = std::make_unique<ncclComm>();
-  ncclComms[0] = incumbent.get();
+  ras_test::InstallNcclComms({incumbent.get(), nullptr});
   rasRankInit rank{};
   ASSERT_EQ(ncclSuccess, ncclRasCommInit(newcomer.get(), &rank));
   EXPECT_EQ(newcomer.get(), ncclComms[1]);
@@ -213,13 +207,10 @@ TEST_F(RasMicrotest, CommInitReusesVacantCommSlot) {
 
 TEST_F(RasMicrotest, CommInitGrowthPreservesRegisteredComms) {
   rasInitialized = true;
-  nNcclComms = 2;
-  ncclComms = static_cast<ncclComm**>(std::calloc(2, sizeof(*ncclComms)));
   auto first = std::make_unique<ncclComm>();
   auto second = std::make_unique<ncclComm>();
   auto newcomer = std::make_unique<ncclComm>();
-  ncclComms[0] = first.get();
-  ncclComms[1] = second.get();
+  ras_test::InstallNcclComms({first.get(), second.get()});
   rasRankInit rank{};
   ASSERT_EQ(ncclSuccess, ncclRasCommInit(newcomer.get(), &rank));
   EXPECT_EQ(first.get(), ncclComms[0]);
@@ -286,12 +277,9 @@ TEST_F(RasMicrotest, CommFiniUninitializedIsNoOp) {
 TEST_F(RasMicrotest, CommFiniRemovesMatchingCommAndDropsReference) {
   rasInitialized = true;
   rasInitRefCount = 1;
-  nNcclComms = 2;
-  ncclComms = static_cast<ncclComm**>(std::calloc(2, sizeof(*ncclComms)));
   auto first = std::make_unique<ncclComm>();
   auto second = std::make_unique<ncclComm>();
-  ncclComms[0] = first.get();
-  ncclComms[1] = second.get();
+  ras_test::InstallNcclComms({first.get(), second.get()});
   ncclCommsSorted = true;
   EXPECT_EQ(ncclSuccess, ncclRasCommFini(second.get()));
   EXPECT_EQ(first.get(), ncclComms[0]);
@@ -389,8 +377,7 @@ TEST_F(RasMicrotest, LocalHandleRunsDiagnosticsAndIgnoresHandlerFailure) {
 TEST_F(RasMicrotest, ThreadCleanupResetsAllGlobalState) {
   rasInitialized = true;
   rasInitRefCount = 3;
-  nNcclComms = 1;
-  ncclComms = static_cast<ncclComm**>(std::calloc(1, sizeof(*ncclComms)));
+  ras_test::InstallNcclComms({nullptr});
   InitPollFds(1);
   rasThreadCleanup();
   for (int calls : g_cleanupCalls) EXPECT_EQ(1, calls);
