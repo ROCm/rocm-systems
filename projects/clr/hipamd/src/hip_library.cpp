@@ -665,7 +665,7 @@ hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hi
   amd::device::Kernel* deviceKernel =
       const_cast<amd::device::Kernel*>(amdKernel->getDeviceKernel(amdDevice));
   if (deviceKernel == nullptr) {
-    HIP_RETURN(hipErrorInvalidDevice);
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
 
   device::Kernel::WorkGroupInfo* wrkGrpInfo = deviceKernel->workGroupInfo();
