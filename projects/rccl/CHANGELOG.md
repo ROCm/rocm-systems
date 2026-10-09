@@ -45,6 +45,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed tuner plugins receiving uninitialized cost-model constants.
 * Fixed GIN proxy descriptor shared-memory sizing and alignment.
 * Fixed virtual address space exhaustion when symmetric windows backed by the same physical allocation are registered repeatedly.
+* Fixed Copy Engine `ncclAlltoAllv` hanging on intra-node communicators of more than 8 ranks with uneven send sizes. Each rank decided from its own send sizes whether to add intra-batch barriers, so ranks could issue different barrier counts. The decision now uses the full send-size matrix, which every rank shares.
 
 ### Known issues
 * The FP8 ReduceSum and ReduceCopy device APIs are not exported in the LLVM bitcode library.
