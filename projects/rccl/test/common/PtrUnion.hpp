@@ -91,9 +91,9 @@ namespace RcclUnitTesting
 
     // Device data-op layer (reusable by any collective/test). Fills this (device)
     // buffer with the shared pattern via a kernel; the pattern at position j uses
-    // global index (startIdx + j). IsEqualDevice compares two device buffers with
-    // the same per-type tolerance as IsEqual, returns the mismatch count, and on a
-    // mismatch logs the first divergent index with its expected/actual value.
+    // global index (startIdx + j). IsEqualDevice compares an actual buffer against
+    // the expected one, returns the mismatch count, and logs the first divergent
+    // index with its expected/actual value.
     ErrCode FillPatternDevice(ncclDataType_t const dataType,
                               size_t         const numElements,
                               int            const globalRank,
@@ -103,11 +103,13 @@ namespace RcclUnitTesting
                                  size_t         const numElements,
                                  void*          const actualGpu,
                                  void*          const expectedGpu,
-                                 size_t&              mismatches);
+                                 size_t&              mismatches,
+                                 bool           const verbose = true);
 
     // Device-build the all-ranks reduction of the pattern into this (device) buffer,
     // mirroring PtrUnion::Reduce + DivideByInt. Used for AllReduce's expected in
     // device-data mode. Handles ncclSum/Prod/Max/Min/Avg (no scalar/bias/const).
+    // FP8 is rejected: FP8 reductions use the verifiable generator (VerifiableData.hpp).
     // startIdx offsets the pattern's global element index (0 for AllReduce's full
     // buffer; globalRank*numOutput for ReduceScatter's per-rank scattered slice).
     ErrCode FillReducedPatternDevice(ncclDataType_t const dataType,

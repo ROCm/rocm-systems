@@ -9410,16 +9410,30 @@ class CodeGenerator:
         L.append(
             f"  uint32_t addr_base = {self._vgpr_base_expr('addr', use_acc=False)};"
         )
-        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-        L.append('    if (!(exec & (1ULL << lane))) continue;')
+        # Keep DS_READ2's existing per-lane callbacks: coalescing them changes
+        # what observers see. Only the unobserved path shares the region lookup.
+        L.append('  auto calculate_addresses = [&](auto read_address) {')
+        L.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+        L.append('      if (!(exec & (1ULL << lane))) continue;')
+        L.append('      uint32_t base = read_address(lane);')
         L.append(
-            '    uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);'
+            f'      d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * {stride_scale} + wf.lds_base();'
         )
         L.append(
-            f'    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * {stride_scale} + wf.lds_base();'
+            f'      d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * {stride_scale} + wf.lds_base();'
+        )
+        L.append('    }')
+        L.append('  };')
+        L.append('  if (cu.observes_register_access()) {')
+        L.append('    calculate_addresses([&](uint32_t lane) {')
+        L.append('      return amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);')
+        L.append('    });')
+        L.append('  } else {')
+        L.append(
+            '    const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();'
         )
         L.append(
-            f'    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * {stride_scale} + wf.lds_base();'
+            '    calculate_addresses([&](uint32_t lane) { return addresses[lane]; });'
         )
         L.append('  }')
         L.append('  set_data(std::move(d));')

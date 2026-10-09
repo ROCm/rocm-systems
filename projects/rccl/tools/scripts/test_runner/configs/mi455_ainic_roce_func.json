@@ -1466,6 +1466,11 @@
           "name": "CeAlltoAllvEligibilityTest",
           "description": "CE AlltoAllv eligibility, metadata layout, and ncclCeImplemented/ncclCeAvailable gating tests",
           "test_filter": "CeAlltoAllvEligibilityTest.*"
+        },
+        {
+          "name": "CeHierAlltoAllvEligibilityTest",
+          "description": "Hierarchical CE AlltoAllv eligibility and gating tests",
+          "test_filter": "CeHierAlltoAllvEligibilityTest.*"
         }
       ]
     },
@@ -2125,6 +2130,11 @@
           "test_filter": "CollImplInfo.AllReduceSymmetricMatchesDispatchLog"
         },
         {
+          "name": "CollImplInfo.AllReduceCeRegisteredMatchesDispatchLog",
+          "description": "Forced CE AllReduce with one thread driving every GPU; hangs if CE staging is set up at launch",
+          "test_filter": "CollImplInfo.AllReduceCeRegisteredMatchesDispatchLog"
+        },
+        {
           "name": "CollImplInfo.AllGatherSymmetricMatchesDispatchLog",
           "description": "Same for AllGather with buffers registered as symmetric windows (-R 2 path)",
           "test_filter": "CollImplInfo.AllGatherSymmetricMatchesDispatchLog"
@@ -2716,6 +2726,11 @@
           "test_filter": "CeMPI_AlltoAll.TwoRanks"
         },
         {
+          "name": "CE_AlltoAllv_2Ranks",
+          "description": "AlltoAllv CE correctness and 'Init CE' log marker (2 ranks)",
+          "test_filter": "CeMPI_AlltoAllv.TwoRanks"
+        },
+        {
           "name": "CE_Fallback_AllReduce",
           "description": "AllReduce must NOT take CE path; verifies SM fallback",
           "test_filter": "CeMPI_Fallback.AllReduceNeverUsesCE"
@@ -2756,6 +2771,11 @@
           "test_filter": "CeMPI_AlltoAll.ThreeRanks"
         },
         {
+          "name": "CE_AlltoAllv_3Ranks",
+          "description": "AlltoAllv CE correctness with odd (non-power-of-two) rank count",
+          "test_filter": "CeMPI_AlltoAllv.ThreeRanks"
+        },
+        {
           "name": "CE_AllReduce_3Ranks",
           "description": "AllReduce CE correctness with odd (non-power-of-two) rank count",
           "test_filter": "CeMPI_AllReduce.ThreeRanks"
@@ -2783,6 +2803,11 @@
           "name": "CE_AlltoAll_4Ranks",
           "description": "AlltoAll CE correctness and 'Init CE' log marker (4 ranks)",
           "test_filter": "CeMPI_AlltoAll.FourRanks"
+        },
+        {
+          "name": "CE_AlltoAllv_4Ranks",
+          "description": "AlltoAllv CE correctness and 'Init CE' log marker (4 ranks)",
+          "test_filter": "CeMPI_AlltoAllv.FourRanks"
         },
         {
           "name": "CE_Scatter_4Ranks_Root0",
@@ -2823,6 +2848,11 @@
           "test_filter": "CeMPI_AlltoAll.EightRanks"
         },
         {
+          "name": "CE_AlltoAllv_8Ranks",
+          "description": "AlltoAllv CE correctness — default production topology (8 ranks)",
+          "test_filter": "CeMPI_AlltoAllv.EightRanks"
+        },
+        {
           "name": "CE_Scatter_8Ranks",
           "description": "Scatter CE correctness, root=0 — default production topology (8 ranks)",
           "test_filter": "CeMPI_Scatter.EightRanksRoot0"
@@ -2847,6 +2877,31 @@
           "description": "AllReduce CE multi-chunk pipeline at a power-of-two rank count: 512 MiB yields 4 chunks per shard with no tail, covering slot recycling and the drain loop where slotChunkBytes == maxChunkBytes",
           "test_filter": "CeMPI_AllReduce.PipelinedMultiChunk",
           "timeout": 300
+        }
+      ]
+    },
+    "ce_hier_alltoallv": {
+      "extends": "ce_base",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "CE_AlltoAllv_MultiNodeHierarchical",
+          "description": "Hierarchical CE AlltoAllv on 2 nodes (2 ranks/node): intra-node CE plus inter-node RMA",
+          "test_filter": "CeMPI_AlltoAllv.MultiNodeHierarchical"
+        },
+        {
+          "name": "CE_AlltoAllv_MultiNodeHierarchicalChunkBoundary",
+          "description": "Hierarchical CE AlltoAllv with a 68 MiB pair that crosses the 64 MiB chunk boundary",
+          "test_filter": "CeMPI_AlltoAllv.MultiNodeHierarchicalChunkBoundary",
+          "timeout": 600
+        },
+        {
+          "name": "CE_AlltoAllv_MultiNodeHierarchicalSparse",
+          "description": "Hierarchical CE AlltoAllv with zero-byte remote and local pairs",
+          "test_filter": "CeMPI_AlltoAllv.MultiNodeHierarchicalSparse"
         }
       ]
     },
@@ -4909,6 +4964,12 @@
       "name": "CE Tests - 8-Rank (AllGather, AlltoAll, Scatter, Gather)",
       "description": "CE collective tests on 8 GPUs/ranks — default production topology. Skips automatically on unsupported driver version.",
       "config": "ce_8rank",
+      "enabled": true
+    },
+    {
+      "name": "CE Tests - Hierarchical AlltoAllv (multi-node)",
+      "description": "Hierarchical CE AlltoAllv on 2 nodes (2 ranks/node): MultiNodeHierarchical, ChunkBoundary, and Sparse. Skips when scale-out CE prerequisites are absent.",
+      "config": "ce_hier_alltoallv",
       "enabled": true
     },
     {

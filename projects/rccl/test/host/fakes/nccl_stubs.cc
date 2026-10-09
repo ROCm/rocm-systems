@@ -64,7 +64,8 @@ ncclResult_t initChannel(struct ncclComm* comm, int channelid) {
 // "commFree entered" marker for commCleanup's ordering oracle and as the only knob that fails commFree.
 std::vector<std::string> g_cleanupCallOrder;
 ncclResult_t g_ncclCeFinalizeResult = ncclSuccess;
-// Omitted under RCCL_STUBS_OMIT_ncclCeFinalize, for a target whose unit under test is ce_coll.cc itself.
+// Omitted when RCCL_STUBS_OMIT_ncclCeFinalize is defined: the unit under test
+// defines this itself (ce_coll.cc:272).
 #ifndef RCCL_STUBS_OMIT_ncclCeFinalize
 ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
   g_cleanupCallOrder.push_back("commFree");
@@ -236,6 +237,8 @@ unsigned int g_rocmVersionMajor = 0;
 unsigned int g_rocmVersionMinor = 0;
 unsigned int g_rocmVersionPatch = 0;
 
+static ncclResult_t DefaultNcclMemAlloc(void**, size_t) { ::abort(); }
+std::function<ncclResult_t(void**, size_t)> g_ncclMemAlloc = DefaultNcclMemAlloc;
 static ncclResult_t DefaultNcclMemFree(void*) { return ncclSuccess; }
 std::function<ncclResult_t(void*)> g_ncclMemFree = DefaultNcclMemFree;
 
@@ -248,7 +251,7 @@ int getROCmVersion(unsigned int* major, unsigned int* minor, unsigned int* patch
   if (patch) *patch = g_rocmVersionPatch;
   return g_getROCmVersionResult;
 }
-ncclResult_t ncclMemAlloc(void** ptr, size_t size) { ::abort(); }
+ncclResult_t ncclMemAlloc(void** ptr, size_t size) { return g_ncclMemAlloc(ptr, size); }
 ncclResult_t ncclMemFree(void* ptr) { return g_ncclMemFree(ptr); }
 }
 
@@ -257,6 +260,7 @@ void ResetNcclStubs() {
   g_ncclInitKernelsForDevice = DefaultNcclInitKernelsForDevice;
 #endif
   g_ncclAsyncLaunch = DefaultNcclAsyncLaunch;
+  g_ncclMemAlloc = DefaultNcclMemAlloc;
   g_ncclMemFree = DefaultNcclMemFree;
   g_ncclCommDestroy = DefaultNcclCommDestroy;
   g_ncclCommSplit = DefaultNcclCommSplit;
