@@ -57,26 +57,16 @@
 #include "plugin/nccl_net.h"
 #include "gin/gin_host.h"
 
+#include "JoinThreadsOnExit.h"
+#include "ScopeExit.h"
+#include "ScriptedFailure.h"
+#include "WaitUntil.h"
 #include "fakes/bootstrap_stubs.h"
 #include "fakes/nccl_device_core_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/os_fakes.h"
 
 namespace {
-
-// Scripted failure for one faked entry point: return `result` on call number
-// `onCall` (1-based), or on every call when `onCall` is 0. Lets a test say "fail
-// the second connection" without a bespoke counter per entry point.
-struct ScriptedFailure {
-  ncclResult_t result = ncclSuccess;
-  int onCall = 0;
-
-  ncclResult_t at(int callNumber) const {
-    if (result == ncclSuccess) return ncclSuccess;
-    if (onCall == 0 || onCall == callNumber) return result;
-    return ncclSuccess;
-  }
-};
 
 int g_nLocalGinDevs = 1;
 int g_peerGinCommCount = -1;  // -1: AllGather is a no-op copy; else fill other ranks
@@ -165,18 +155,6 @@ ncclResult_t ncclTopoGetLocalGinDevs(struct ncclComm*, int* localGinDevs, int* l
 #include GIN_HOST_CC_PATH
 
 namespace {
-
-constexpr auto kWait = std::chrono::milliseconds(2000);
-
-template <typename Pred>
-bool waitUntil(Pred pred, std::chrono::milliseconds budget = kWait) {
-  const auto deadline = std::chrono::steady_clock::now() + budget;
-  while (!pred()) {
-    if (std::chrono::steady_clock::now() >= deadline) return false;
-    std::this_thread::yield();
-  }
-  return true;
-}
 
 struct FakeSlot {
   int idx = 0;
@@ -437,6 +415,12 @@ class GinHostTest : public ::testing::Test {
     gs->backends[0].ginInstance = reinterpret_cast<void*>(0x33);
   }
 
+  // ncclGinHostFinalize memsets the GIN state, which ends the C++ lifetime of
+  // its std::thread and std::atomic members. Any test that lets a finalize run
+  // to completion has to start a fresh state in place before the fixture's
+  // teardown (and ~ncclSharedResources) touch those members again.
+  void restoreGinStateAfterFinalize() { new (gin()) ncclGinState{}; }
+
   void joinProgressThreads() {
     auto* gs = gin();
     gs->proxyThreadStopSignal.store(true);
@@ -535,28 +519,11 @@ class GinHostTest : public ::testing::Test {
 
 void stopProgress(ncclGinState* gs) { gs->proxyThreadStopSignal.store(true); }
 
-// Joins every spawned worker on scope exit, including a fatal ASSERT return.
-// Destroying a still-joinable std::thread calls std::terminate().
-class JoinProgressThreads {
- public:
-  explicit JoinProgressThreads(ncclGinState* gs) : gs_(gs) {}
-  ~JoinProgressThreads() {
-    stopProgress(gs_);
-    for (auto& t : threads_) {
-      if (t.joinable()) t.join();
-    }
-  }
-  template <class Fn>
-  void spawn(Fn&& fn) {
-    threads_.emplace_back(std::forward<Fn>(fn));
-  }
-  JoinProgressThreads(const JoinProgressThreads&) = delete;
-  JoinProgressThreads& operator=(const JoinProgressThreads&) = delete;
-
- private:
-  ncclGinState* gs_;
-  std::vector<std::thread> threads_;
-};
+// Test-spawned ncclGinProgress workers: they only leave the progress loop when
+// the stop signal is raised, so that is the stop action their joiner needs.
+JoinThreadsOnExit progressWorkers(ncclGinState* gs) {
+  return JoinThreadsOnExit([gs] { stopProgress(gs); });
+}
 
 // Unset GIN_PROXY_NTHREADS → proxyNthreads and ginCommCount stay 1.
 TEST_F(GinHostTest, DefaultNthreadsIsOne) {
@@ -612,7 +579,7 @@ TEST_F(GinHostTest, RoundRobinOwnership) {
   attachProgressList(/*ginCommCount=*/4, /*proxyNthreads=*/2, {1, 1, 1, 1});
   auto* gs = gin();
   {
-    JoinProgressThreads workers(gs);
+    auto workers = progressWorkers(gs);
     workers.spawn([gs] { ncclGinProgress(gs, 0); });
     workers.spawn([gs] { ncclGinProgress(gs, 1); });
     ASSERT_TRUE(waitUntil([&] {
@@ -626,7 +593,7 @@ TEST_F(GinHostTest, RoundRobinOwnership) {
   fake_.totalProgressCalls.store(0);
   gs->proxyThreadStopSignal.store(false);
   {
-    JoinProgressThreads only0(gs);
+    auto only0 = progressWorkers(gs);
     only0.spawn([gs] { ncclGinProgress(gs, 0); });
     ASSERT_TRUE(waitUntil([&] {
       return fake_.slots[0]->progressCalls.load() > 0 && fake_.slots[2]->progressCalls.load() > 0;
@@ -642,7 +609,7 @@ TEST_F(GinHostTest, SkipsConnectionsThatDoNotNeedProxyProgress) {
   attachProgressList(2, 1, {1, 0});
   auto* gs = gin();
   {
-    JoinProgressThreads worker(gs);
+    auto worker = progressWorkers(gs);
     worker.spawn([gs] { ncclGinProgress(gs, 0); });
     ASSERT_TRUE(waitUntil([&] { return fake_.slots[0]->progressCalls.load() > 0; }));
   }
@@ -657,7 +624,7 @@ TEST_F(GinHostTest, WritePendingBacksOffReaders) {
   gs->writePending.store(true);
   g_ncclOsCpuCountCalls.store(0);
   {
-    JoinProgressThreads worker(gs);
+    auto worker = progressWorkers(gs);
     worker.spawn([gs] { ncclGinProgress(gs, 0); });
     // Entry is the positive control: the 50 ms window starts only after the
     // worker has reached ncclGinProgress, so an ignored writePending cannot pass as 0 == 0.
@@ -679,7 +646,7 @@ TEST_F(GinHostTest, ProgressErrorSetsAsyncResultAndExits) {
   {
     // On the test thread a missed error return spins in while(1) until the
     // whole binary's timeout. A worker plus waitUntil fails this case instead.
-    JoinProgressThreads worker(gs);
+    auto worker = progressWorkers(gs);
     worker.spawn([gs] { ncclGinProgress(gs, 0); });
     ASSERT_TRUE(waitUntil([&] { return gs->asyncResult == ncclSystemError; }))
         << "ginProgress error did not stop the worker";
@@ -783,17 +750,13 @@ TEST_F(GinHostTest, FinalizeJoinsAllProgressThreads) {
     finalizeDone.store(true, std::memory_order_release);
   });
   // Release the held worker and join finalize on every exit, including a fatal
-  // ASSERT. HostFinalize memsets ginState, so restore C++ lifetime afterwards.
-  auto restoreAfterFinalize = [&]() {
+  // ASSERT.
+  ScopeExit finalizeGuard([&] {
     fake_.holdProgress.store(0, std::memory_order_release);
     if (fin.joinable()) fin.join();
-    new (gin()) ncclGinState{};
+    restoreGinStateAfterFinalize();
     std::free(dc);
-  };
-  struct FinalizeGuard {
-    decltype(restoreAfterFinalize)* restore;
-    ~FinalizeGuard() { (*restore)(); }
-  } finalizeGuard{&restoreAfterFinalize};
+  });
 
   ASSERT_TRUE(waitUntil([&] { return gin()->proxyThreadStopSignal.load(); }))
       << "HostFinalize did not reach the progress-thread join";
@@ -818,7 +781,7 @@ TEST_F(GinHostTest, IdleExtraThreadsNeverCallGinProgress) {
   auto* gs = gin();
   g_ncclOsCpuCountCalls.store(0);
   {
-    JoinProgressThreads idle(gs);
+    auto idle = progressWorkers(gs);
     idle.spawn([gs] { ncclGinProgress(gs, 2); });
     idle.spawn([gs] { ncclGinProgress(gs, 3); });
     ASSERT_TRUE(waitUntil([&] { return g_ncclOsCpuCountCalls.load() >= 2; }))
@@ -1530,8 +1493,7 @@ TEST_F(GinHostFinalizeMicrotest, ClosesEveryConnectionAndClearsState) {
   EXPECT_EQ(2, fake_.closeCollCalls);
   EXPECT_FALSE(gin()->connected);
   EXPECT_EQ(0, gin()->numActiveBackends);
-  // Finalize memsets the state; restore C++ lifetime for the fixture's teardown.
-  new (gin()) ncclGinState{};
+  restoreGinStateAfterFinalize();
 }
 
 // A progress-thread slot that was never spawned is skipped rather than joined.
@@ -1541,7 +1503,7 @@ TEST_F(GinHostFinalizeMicrotest, SkipsProgressThreadSlotsThatWereNeverSpawned) {
   ASSERT_FALSE(gin()->thread[0].joinable());
 
   EXPECT_EQ(ncclSuccess, ncclGinHostFinalize(comm()));
-  new (gin()) ncclGinState{};
+  restoreGinStateAfterFinalize();
 }
 
 // A connection slot that is already empty is skipped instead of being closed a
@@ -1553,7 +1515,7 @@ TEST_F(GinHostFinalizeMicrotest, SkipsConnectionSlotsThatAreAlreadyClosed) {
 
   ASSERT_EQ(ncclSuccess, ncclGinHostFinalize(comm()));
   EXPECT_EQ(1, fake_.closeCollCalls);
-  new (gin()) ncclGinState{};
+  restoreGinStateAfterFinalize();
 }
 
 // A close that fails surfaces to the caller instead of being swallowed by the

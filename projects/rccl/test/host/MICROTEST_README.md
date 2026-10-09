@@ -350,7 +350,9 @@ test:
    `ScopedHook` helper in `ScopedHook.h` (see
    [Installing per-test behaviour with `ScopedHook`](#installing-per-test-behaviour-with-scopedhook)),
    which installs the hook, counts calls, and restores the previous behaviour
-   automatically on scope exit.
+   automatically on scope exit. Reach for the other
+   [shared test-side helpers](#shared-test-side-helpers) before hand-rolling a
+   failure counter, a wait loop, or a scope guard.
 4. **Only exercise faked seams.** Every external symbol the `#include`d `.cc`
    reaches must be satisfied by `fakes/`: a missing symbol surfaces as a
    link error, a wrongly
@@ -637,6 +639,28 @@ single branch depends on HIP version (only one arm is live per build, but the
 test can't know which at authoring time), pair the factories that drive each
 version's arm so the test passes regardless of the toolchain — see
 `ForceLegacyCudaRegister` + `ForceLegacyIpcCapable` in `p2p-test.cc`.
+
+## Shared test-side helpers
+
+The scaffolding a test needs on *its* side of the seam — scripting a fake's
+failure, waiting for a worker thread, cleaning up on the fatal-assert path — is
+the same in every binary, so it lives in a header next to the tests rather than
+being re-invented per TU. Each is one small header named after the type it
+declares:
+
+| Header | Use it for |
+|---|---|
+| `ScopedHook.h` | Install behaviour on a `std::function` seam, count the calls, restore the previous behaviour on scope exit. See [Installing per-test behaviour with `ScopedHook`](#installing-per-test-behaviour-with-scopedhook). |
+| `ScriptedFailure.h` | "Fail call N of this entry point." A fake holds one per entry point and asks `at(++calls)` what to return; the test writes `fake_.failConnect = {ncclSystemError, 2}`. Replaces the `g_fooCalls` + `g_failFooCall` pair that otherwise grows per seam. |
+| `WaitUntil.h` | `waitUntil(pred)` — bounded poll for something another thread will do, returning false when the budget elapses so the test fails with its own message instead of hanging. Never `sleep_for` and hope. |
+| `JoinThreadsOnExit.h` | Spawn worker threads and stop/join them on every exit from the scope. The stop action is a callback, because what ends the worker's loop belongs to the unit under test. |
+| `ScopeExit.h` | The one-off cleanup that has no purpose-built RAII type. A fatal `ASSERT_*` returns immediately, so cleanup written after it does not run. |
+
+When a test grows a helper that is not specific to its unit under test, promote
+it here rather than leaving it in the TU — a per-TU copy is how four tests end
+up with four slightly different "wait for the thread" loops. Helpers that *are*
+specific to one unit stay with it (`TaskPrepScene.h` for the task-prep scene,
+`fakes/ras_*_test_support.h` for the RAS fixtures).
 
 ## Dealing with each kind of dependency
 
