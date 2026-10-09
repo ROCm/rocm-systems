@@ -29,32 +29,43 @@ When run with the verbose option, a list of discovered HIP runtime libraries is 
 
 The mounted volumes table indicates whether a hipFile can use fastpath with each mount point. Each row in the table describes one block-backed mount. Pseudo file systems are omitted. Only mount points with "yes" in the``HIPFILE`` column are eligible for fastpath.
 
-For example, this table indicates that ``/``, ``/home``, and ``/data`` are eligible for fastpath, while ``/mnt/raid`` is not:
+For example, this table indicates that ``/``, ``/home``, ``/data``, and ``/mnt/raid10`` are eligible for fastpath, while ``/mnt/raid5`` and ``/mnt/secure`` are not:
 
 .. code-block:: shell-session
 
    Mounted volumes:
-   MOUNTPOINT  FSTYPE          DEVICE  BACKING  O_DIRECT  HIPFILE
-   /           ext4 (ordered)  nvme0n1  nvme     yes       yes
-   /home       xfs             nvme1n1  nvme     yes       yes
-   /data       ext4 (ordered)  dm-0     lvm      yes       yes
-   /mnt/raid   xfs             md0      md       yes       no
+   MOUNTPOINT   FSTYPE          DEVICE  BACKING  O_DIRECT  HIPFILE
+   /            ext4 (ordered)  nvme0n1  nvme     yes       yes
+   /home        xfs             nvme1n1  nvme     yes       yes
+   /data        ext4 (ordered)  dm-0     lvm      yes       yes
+   /mnt/raid10  xfs             md0      md       yes       yes
+   /mnt/raid5   xfs             md1      md       yes       no
+   /mnt/secure  xfs             dm-1     crypt    yes       no
 
 | ``MOUNTPOINT``: Location where the file system is mounted.
 | ``FSTYPE``: The file system type. hipFile's fastpath accepts only ``xfs`` or ``ext4`` with ``data=ordered`` journaling. When ext4 uses the default mode, ``ais-check`` labels it ``ext4 (ordered)``.
 | ``DEVICE``: The underlying block device.
-| ``BACKING``: The type of block device that backs the mount. For example ``nvme``, ``lvm``, ``md``, or ``mpath``. Direct local NVMe backing is required, either raw or through an LVM logical volume whose physical volumes are all local NVMe.
+| ``BACKING``: The type of block device that backs the mount. For example ``nvme``, ``lvm``, ``md``, or ``mpath``. Direct local NVMe backing is required, either raw or through LVM logical volumes and non-parity MD RAID arrays whose member devices are all local NVMe.
 | ``O_DIRECT``: Whether an ``O_DIRECT`` open succeeded on the volume.
-| ``HIPFILE``: Will be "yes" when the file system qualifies, the backing is direct local NVMe (raw or LVM on local NVMe), and ``O_DIRECT`` works. Will be "no" otherwise.
+| ``HIPFILE``: Will be "yes" when the file system qualifies, the backing is direct local NVMe (raw, or LVM or a non-parity MD RAID array on local NVMe), and ``O_DIRECT`` works. Will be "no" otherwise.
 
 .. note::
 
-   For ``lvm`` backing, ``ais-check`` follows the device-mapper stack and reports
-   the volume as capable only when every layer is an LVM target and all of the
-   underlying physical volumes are local NVMe. RAID logical volumes are
-   reported as capable on this basis, because LVM builds each RAID member as an
-   LVM sub-volume. ``md`` backing is MD software RAID, a different block layer,
-   and is always reported as not capable.
+   For ``lvm`` and ``md`` backing, ``ais-check`` follows the block stack and
+   reports the volume as capable only when every layer is an LVM target or an
+   MD RAID array, every RAID layer runs a pass-through personality (``linear``,
+   ``raid0``, ``raid1``, ``raid10``), and all of the devices underneath them
+   are local NVMe. The two can be stacked on each other in either order. The
+   parity personalities (``raid4``, ``raid5``, ``raid6``) are reported as not
+   capable, because they stage the transfer in the MD stripe cache rather than
+   passing it to a member device. That applies to an LVM RAID logical volume
+   just as it does to an MD array, since LVM implements a RAID LV with the
+   ``dm-raid`` target, which runs the same personality code.
+
+   The RAID level of an LVM volume is not exposed in sysfs, so ``ais-check``
+   reads it from the device-mapper table. When it cannot run ``dmsetup`` with
+   enough privilege, a RAID LV is reported as ``unverified``; linear and
+   striped volumes are classified from sysfs alone and are unaffected.
 
 The ``AIS support in`` table at the end of the report is a final pass or fail summary. It shows whether the four parts of the fastpath stack are
 present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, and at least one qualifying mounted volume. Each line reads ``True`` or

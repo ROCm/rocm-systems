@@ -17,8 +17,8 @@ A volume is reported as hipFile-capable when it mirrors the fast-path
 eligibility the hipFile library enforces for a regular file:
 
   * filesystem is xfs, or ext4 mounted with data=ordered (the ext4 default),
-  * the backing device is a local NVMe, or an LVM logical volume whose physical
-    volumes are all local NVMe, and
+  * the backing device is a local NVMe, or a non-parity LVM logical volume or
+    MD RAID array whose member devices are all local NVMe, and
   * direct I/O (O_DIRECT) opens succeed on the filesystem.
 
 See src/amd_detail/mountinfo.cpp (fstype/journaling classification) and
@@ -26,11 +26,15 @@ src/amd_detail/backend/fastpath.cpp (the accept rule) for the authoritative
 logic the volume scan reproduces.
 
 The BACKING column (nvme, lvm, md, ...) names the block layer under the
-filesystem. Raw local NVMe and LVM stacked directly on local NVMe qualify,
-including RAID logical volumes: LVM builds those out of sub-LVs that are
-themselves LVM targets, so every layer down to the physical volumes is still
-LVM. Any other interposing layer (multipath, dm-crypt, MD RAID, loopback)
-breaks the direct P2P-DMA path and forces the compatibility fallback.
+filesystem. Raw local NVMe qualifies, as do LVM and MD RAID stacked over local
+NVMe, in any combination and to any depth, as long as every RAID layer runs a
+pass-through personality (linear, raid0, raid1, raid10): those hand the I/O to
+their members without interposing a buffer, so the direct P2P-DMA path
+survives. The parity personalities (raid4, raid5, raid6) stage the transfer in
+the MD stripe cache instead, which rules out both a parity MD array and an LVM
+RAID logical volume built on one, since LVM implements those with dm-raid, the
+same personality code. Any other interposing layer (multipath, dm-crypt,
+loopback) also breaks the direct path and forces the compatibility fallback.
 """
 
 # pylint: enable=invalid-name
@@ -89,6 +93,29 @@ KFD_TOPOLOGY_NODES = "/sys/class/kfd/kfd/topology/nodes"
 # amd-smi reports a virtual function's market name with a "VF" suffix (e.g.
 # "AMD Instinct MI300X VF"); see docs/troubleshooting/known-issues.rst.
 AMD_SMI = "amd-smi"
+
+# MD personalities (as reported by /sys/block/md*/md/level) that remap the
+# original bio onto their member devices instead of staging it. Only these keep
+# the pages of a P2P-DMA transfer on their way to the NVMe. The parity
+# personalities (raid4, raid5, raid6) route writes -- and any read that is not
+# chunk-aligned on a healthy array -- through the stripe cache, copying the
+# data into host pages first, so they do not qualify.
+MD_PASSTHROUGH_LEVELS = {"linear", "raid0", "raid1", "raid10"}
+
+# The dm-raid target types (as reported by "dmsetup table") built on those same
+# pass-through personalities. LVM implements a RAID logical volume as a dm-raid
+# target, which runs the MD personality code, so a RAID LV is subject to the
+# same rule as an MD array: the parity types (raid4, raid5_*, raid6_*) stage
+# the transfer in the MD stripe cache and do not qualify. The names come from
+# the raid_types table in the kernel's drivers/md/dm-raid.c.
+DM_RAID_PASSTHROUGH_TYPES = {
+    "raid0",
+    "raid1",
+    "raid10",
+    "raid10_far",
+    "raid10_near",
+    "raid10_offset",
+}
 
 
 def amdgpu_dkms_version():
@@ -616,6 +643,51 @@ def dm_uuid_prefix(sysfs_dir):
     return uuid.split("-", 1)[0].lower()
 
 
+def dm_name(sysfs_dir):
+    """
+    Return the device-mapper name of a sysfs block directory (e.g. "vg-lv"), or
+    None when it is not a device-mapper device or the name can't be read.
+    """
+    try:
+        with open(os.path.join(sysfs_dir, "dm", "name"), "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def dm_raid_segment_types(name):
+    """
+    Return the set of dm-raid target types a device-mapper device is built from
+    (e.g. {"raid5_ls"}), empty when it has no dm-raid segment, or None when the
+    table can't be read (dmsetup missing, or running without the privileges it
+    needs).
+
+    "dmsetup table --target raid <name>" prints one line per dm-raid segment,
+    whose third and fourth fields are the target type and the raid type:
+
+        0 2097152 raid raid5_ls 3 128 region_size 1024 - 253:2 253:3 ...
+    """
+    try:
+        result = subprocess.run(
+            ["dmsetup", "table", "--target", "raid", name],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    types = set()
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) > 3 and fields[2] == "raid":
+            types.add(fields[3].lower())
+    return types
+
+
 def block_slaves(sysfs_dir):
     """
     Return the realpaths of the block devices a device-mapper or MD node is
@@ -629,23 +701,80 @@ def block_slaves(sysfs_dir):
     return [os.path.realpath(os.path.join(slaves_dir, n)) for n in names]
 
 
-def lvm_over_nvme(devno):
+def lvm_raid_supported(sysfs_dir):
     """
-    Whether an LVM (device-mapper) mount is stacked directly on local NVMe.
+    Whether an LVM logical volume's dm-raid layer, if it has one, keeps the
+    direct path.
 
-    Walks the dm slave tree from the mount's block device. Returns True only
-    when every device-mapper layer in the stack is an LVM target and every
-    underlying physical block device is NVMe. Returns False when a non-LVM dm
-    layer (multipath, dm-crypt, ...) or a non-NVMe leaf (scsi, MD RAID, ...) is
-    found, and None when the topology can't be resolved from sysfs.
+    A RAID LV is a dm-raid target running an MD personality, so it is held to
+    the same rule as an MD array (see MD_PASSTHROUGH_LEVELS): the pass-through
+    levels qualify, the parity levels stage the transfer in the stripe cache
+    and do not. Unlike an MD array the level is not in sysfs, so it has to be
+    read out of the device-mapper table.
 
-    RAID logical volumes are accepted by that same walk rather than by a case
-    of their own: LVM implements a dm-raid LV as a tree of rimage/rmeta
-    sub-LVs, and every one of them carries an "LVM-" dm uuid, so the recursion
-    classifies each member as an LVM layer and keeps descending until it
-    reaches the physical volumes. A top-level MD RAID is not device-mapper, so
-    backing_storage labels it "md" and backing_supported rejects it outright;
-    if MD is nested beneath LVM, this walk rejects it as a non-NVMe leaf.
+    Returns True for a plain (linear or striped) LV and for a pass-through RAID
+    LV, False for a parity or otherwise unrecognized RAID LV, and None when the
+    LV is a RAID LV whose table could not be read.
+    """
+    name = dm_name(sysfs_dir)
+    if name is None:
+        return None
+
+    types = dm_raid_segment_types(name)
+    if types is None:
+        # Without the table a RAID LV can't be classified, but a plain LV is
+        # recognizable from sysfs alone: LVM carves the members of a RAID LV
+        # into "<lv>_rimage_N" sub-LVs, and nothing else is named that way.
+        return None if lvm_has_raid_images(sysfs_dir) else True
+    return not types or types <= DM_RAID_PASSTHROUGH_TYPES
+
+
+def lvm_has_raid_images(sysfs_dir):
+    """
+    Whether a device-mapper node is stacked on LVM RAID image sub-LVs
+    ("<lv>_rimage_N"), the sysfs-visible shape of a RAID logical volume.
+    """
+    for slave in block_slaves(sysfs_dir) or []:
+        name = dm_name(slave)
+        if name and "_rimage_" in name:
+            return True
+    return False
+
+
+def md_level(sysfs_dir):
+    """
+    Return the MD personality of an array's sysfs block directory, lowercased
+    (e.g. "raid0", "raid5"), or None when md/level cannot be read.
+    """
+    try:
+        with open(os.path.join(sysfs_dir, "md", "level"), "r", encoding="utf-8") as f:
+            return f.read().strip().lower()
+    except OSError:
+        return None
+
+
+def stack_over_nvme(devno):
+    """
+    Whether a stacked (LVM or MD RAID) mount bottoms out on local NVMe.
+
+    Walks the slave tree from the mount's block device. LVM device-mapper
+    targets and the pass-through MD personalities are transparent layers: they
+    hand the I/O to their member devices without interposing a buffer, so the
+    direct P2P-DMA path survives them at any depth and in any combination (LVM
+    over MD, MD over LVM, either nested in itself). Returns True only when
+    every layer in the stack is one of those two and every device underneath
+    them is NVMe. Returns False when a layer that does break the direct path
+    (multipath, dm-crypt, a parity array, ...) or a non-NVMe leaf (scsi,
+    loopback, ...) is found, and None when the topology can't be resolved from
+    sysfs.
+
+    LVM RAID logical volumes are descended into by that same walk rather than
+    by a case of their own: LVM implements a dm-raid LV as a tree of
+    rimage/rmeta sub-LVs, and every one of them carries an "LVM-" dm uuid, so
+    the recursion classifies each member as an LVM layer and keeps descending
+    until it reaches the physical volumes. Their RAID level is checked on the
+    way down (see lvm_raid_supported), because dm-raid runs the same MD
+    personalities an MD array does.
     """
     try:
         start = os.path.realpath(os.path.join("/sys/dev/block", devno))
@@ -661,22 +790,47 @@ def lvm_over_nvme(devno):
             continue
         seen.add(node)
 
+        name = os.path.basename(node)
         prefix = dm_uuid_prefix(node)
-        if prefix is None:
+        if prefix is not None:
+            # A device-mapper layer. Only LVM targets keep the direct path;
+            # multipath, dm-crypt and friends do not.
+            if prefix != "lvm":
+                return False
+            # A RAID LV is dm-raid, i.e. an MD personality under another name,
+            # so the parity levels are rejected here just as they are below.
+            raid_ok = lvm_raid_supported(node)
+            if raid_ok is not True:
+                return raid_ok
+        elif os.path.isdir(os.path.join(node, "dm")):
             # A device-mapper node always carries a dm/ directory in sysfs. If
             # one is present but its uuid couldn't be read (permissions or a
             # transient error), the layer's target type is unknown and the
             # topology is unresolvable rather than a leaf.
-            if os.path.isdir(os.path.join(node, "dm")):
+            return None
+        elif name.startswith("md"):
+            # MD software RAID. Not device-mapper, so it has no dm/uuid. A
+            # partition of an MD array (md0p1) carries no slaves or md/ state of
+            # its own, so step up to the array it was carved out of.
+            if os.path.exists(os.path.join(node, "partition")):
+                stack.append(os.path.dirname(node))
+                continue
+            # Only the personalities that remap the original bio pass the
+            # transfer through to their members; parity arrays stage it in the
+            # stripe cache. An unreadable level leaves the stack unresolvable.
+            level = md_level(node)
+            if level is None:
                 return None
-            # Otherwise it's a physical leaf, which must be NVMe.
-            if not os.path.basename(node).startswith("nvme"):
+            if level not in MD_PASSTHROUGH_LEVELS:
                 return False
+        elif name.startswith("nvme"):
+            # A physical leaf of the right kind; nothing below it to check.
             saw_leaf = True
             continue
-        # Only LVM targets are allowed anywhere in the stack.
-        if prefix != "lvm":
+        else:
+            # Any other leaf (scsi, virtio, loopback, ...) is not P2P-capable.
             return False
+
         slaves = block_slaves(node)
         if not slaves:
             return None
@@ -726,11 +880,12 @@ def backing_supported(backing, devno):
     """
     Whether the backing storage allows hipFile's direct P2P-DMA path.
 
-    Raw local NVMe qualifies, as does an LVM logical volume whose underlying
-    physical volumes are all local NVMe -- linear, striped and RAID alike (see
-    lvm_over_nvme). Any other interposing layer (multipath, dm-crypt, MD RAID,
-    loopback) breaks the direct path to the device, so the kernel rejects the
-    IO at runtime.
+    Raw local NVMe qualifies, as do LVM logical volumes and MD RAID arrays
+    running a pass-through personality (linear, raid0, raid1, raid10), whenever
+    every device underneath them is local NVMe (see stack_over_nvme). A parity
+    array (raid4, raid5, raid6), whether MD or LVM RAID, or any other
+    interposing layer (multipath, dm-crypt, loopback) breaks the direct path to
+    the device, so the kernel rejects the IO at runtime.
 
     Returns None when the backing could not be determined.
     """
@@ -738,8 +893,8 @@ def backing_supported(backing, devno):
         return None
     if backing == "nvme":
         return True
-    if backing == "lvm":
-        return lvm_over_nvme(devno)
+    if backing in ("lvm", "md"):
+        return stack_over_nvme(devno)
     return False
 
 
@@ -772,8 +927,8 @@ def collect(mounts):
         odirect = probe_odirect(m.mountpoint) if supported_fs else None
 
         # A volume is capable only when the filesystem qualifies, the backing is
-        # a direct local NVMe (or LVM stacked on local NVMe), and O_DIRECT works.
-        # Unknown backing leaves the verdict unverified.
+        # a direct local NVMe (or LVM/MD RAID stacked on local NVMe), and
+        # O_DIRECT works. Unknown backing leaves the verdict unverified.
         if not supported_fs or backing_ok is False:
             capable = False
         elif backing_ok is None:

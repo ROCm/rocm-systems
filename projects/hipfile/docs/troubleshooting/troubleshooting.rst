@@ -26,6 +26,8 @@ fallback path instead.
   /           ext4 (ordered)  nvme0n1  nvme     yes       yes
   /home       xfs             nvme1n1  nvme     yes       yes
   /data       ext4 (ordered)  dm-0     lvm      yes       yes
+  /mnt/raid10 xfs             md0      md       yes       yes
+  /mnt/raid5  xfs             md1      md       yes       no
 
   AIS support in:
           Kernel P2PDMA support   : True
@@ -49,7 +51,14 @@ uses one of the following storage configurations:
 * raw NVMe block device (without multipathing)
 * ext4 on an NVMe block device mounted with ``data=ordered``
 * xfs on an NVMe block device
-* an LVM logical volume whose physical volumes are all local NVMe
+* an LVM logical volume whose physical volumes are all local NVMe, and which is
+  linear, striped, or a ``raid0``, ``raid1``, or ``raid10`` RAID LV
+* an MD software RAID array running a ``linear``, ``raid0``, ``raid1``, or
+  ``raid10`` personality whose member devices are all local NVMe
+
+Parity RAID (``raid4``, ``raid5``, ``raid6``) is not supported, as an MD array
+or as an LVM RAID LV: it stages the transfer in the MD stripe cache instead of
+handing it to a member device.
 
 If the target file or device is backed by any other storage configuration,
 hipFile uses the fallback path.
