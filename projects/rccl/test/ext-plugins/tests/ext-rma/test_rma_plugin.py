@@ -286,3 +286,92 @@ def test_rma_example_backs_the_gin_proxy(paths):
         f"GIN proxy is backed by {match.group(1)!r}, expected the adopted RMA example, see {log_file}"
     )
 
+
+_PUT_BURST_TEST = "GinMPIDeviceTests.PutBurst_LocalCounter"
+_PUT_BURST_PUTS = 256
+_PUT_BURST_QUEUE = 32
+_RMA_EXAMPLE_COUNTS = re.compile(r"RMA/Example: (\d+) data ops, (\d+) aggregated")
+
+
+def _unit_tests_mpi(rccl_install_dir):
+    """Locate rccl-UnitTestsMPI, or return None when MPI tests were not built."""
+    for build_type in ("release", "debug"):
+        path = os.path.join(rccl_install_dir, "build", build_type, "test", "rccl-UnitTestsMPI")
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def _run_put_burst(paths, unit_bin, extra_env, log_name):
+    """Run the 2-rank GIN put burst over the RMA example; return (rc, log, log_file)."""
+    env = os.environ.copy()
+    for var in ("NCCL_RMA_PLUGIN", "NCCL_GIN_PLUGIN", "NCCL_NET_PLUGIN", "NCCL_TUNER_PLUGIN",
+                "NCCL_PROFILER_PLUGIN", "NCCL_ENV_PLUGIN", "NCCL_GIN_PROXY_POLL_BATCH",
+                "NCCL_GIN_PROXY_QUEUE_SIZE"):
+        env.pop(var, None)
+    run_env = {
+        "LD_LIBRARY_PATH": f"{paths.OMPI_INSTALL_DIR}/lib:{paths.RCCL_INSTALL_DIR}:{env.get('LD_LIBRARY_PATH', '')}",
+        "HSA_NO_SCRATCH_RECLAIM": "1",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "INIT,NET",
+        "NCCL_RMA_PLUGIN": paths.RMA_SO,
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_PROXY_QUEUE_SIZE": str(_PUT_BURST_QUEUE),
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "RCCL_ENABLE_INTRANET": "1",
+    }
+    run_env.update(extra_env)
+    env.update(run_env)
+    env["PATH"] = f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}"
+
+    # Both ranks share a node, so let Open MPI pick its own transport.
+    args = [os.path.join(paths.OMPI_INSTALL_DIR, "bin", "mpirun"), "-np", "2"]
+    for var in run_env:
+        args += ["-x", var]
+    args += [unit_bin, f"--gtest_filter={_PUT_BURST_TEST}"]
+
+    log_dir = os.path.join(paths.LOGDIR, "rma_plugin_test_logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, log_name)
+    with open(log_file, "w") as logfile:
+        try:
+            run = subprocess.run(args, env=env, stdout=logfile, stderr=subprocess.STDOUT,
+                                 universal_newlines=True, timeout=300)
+        except subprocess.TimeoutExpired:
+            pytest.fail(f"GIN put burst timed out after 300s, see {log_file}")
+
+    with open(log_file) as logfile:
+        log = logfile.read()
+    if f"[  SKIPPED ] {_PUT_BURST_TEST}" in log:
+        pytest.skip(f"{_PUT_BURST_TEST} skipped on this system, see {log_file}")
+    return run.returncode, log, log_file
+
+
+@pytest.mark.ext_rma
+def test_gin_proxy_batches_and_hints_through_rma_example(paths):
+    """The GIN proxy forwards device puts to the adopted RMA plugin with the aggregation hint."""
+    unit_bin = _unit_tests_mpi(paths.RCCL_INSTALL_DIR)
+    if unit_bin is None:
+        pytest.skip("rccl-UnitTestsMPI not built; rebuild with --enable-mpi-tests")
+    if not os.path.exists(os.path.join(paths.OMPI_INSTALL_DIR, "bin", "mpirun")):
+        pytest.skip("mpirun not found under OMPI_INSTALL_DIR")
+
+    # A run is capped by the batch and the queue, and its last op is never hinted, so
+    # hinted <= puts - puts / min(batch, queue); a batch of one hints nothing.
+    for batch, extra_env in ((1, {"NCCL_GIN_PROXY_POLL_BATCH": "1"}),
+                             (4, {"NCCL_GIN_PROXY_POLL_BATCH": "4"}),
+                             (32, {})):
+        rc, log, log_file = _run_put_burst(paths, unit_bin, extra_env, f"gin_put_burst_poll_batch_{batch}.log")
+        assert rc == 0, f"GIN put burst failed with poll batch {batch}, see {log_file}"
+        counts = [(int(ops), int(agg)) for ops, agg in _RMA_EXAMPLE_COUNTS.findall(log)]
+        hinted = [agg for ops, agg in counts if ops == _PUT_BURST_PUTS]
+        assert hinted, f"RMA example did not report {_PUT_BURST_PUTS} puts: {counts}, see {log_file}"
+        cap = _PUT_BURST_PUTS - _PUT_BURST_PUTS // min(batch, _PUT_BURST_QUEUE)
+        low = 0 if batch == 1 else 1
+        assert low <= hinted[0] <= cap, (
+            f"Poll batch {batch}: {hinted[0]} of {_PUT_BURST_PUTS} puts hinted, expected {low}..{cap}, "
+            f"see {log_file}"
+        )
+
