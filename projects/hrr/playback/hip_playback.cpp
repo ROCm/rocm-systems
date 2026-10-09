@@ -4865,7 +4865,20 @@ hipError_t playback_hipStreamBatchMemOp(PlaybackContext& ctx, const uint8_t* pl)
 // live ones, so an import later in the same archive has something to open. An
 // import whose export is in another process (the cross-rank case) has no such
 // pairing and says so rather than opening a handle from a dead process.
+//
+// The archive holds a keyed digest of each handle, not the handle. A capture
+// with no random source had no key and recorded zeros instead: such a field
+// says nothing about the handle, so it is never paired, and every export and
+// import recorded that way would otherwise look alike. A real digest is all
+// zeros with probability 2^-128, and that export would then go unpaired, which
+// replay reports rather than gets wrong.
 // ---------------------------------------------------------------------------
+static bool ipc_digest_missing(const uint8_t* bytes, size_t n) {
+    for (size_t i = 0; i < n; ++i)
+        if (bytes[i]) return false;
+    return true;
+}
+
 hipError_t playback_hipIpcGetMemHandle(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipIpcGetMemHandle*>(pl);
     void* live_ptr = ctx.translate_ptr(a->devPtr);
@@ -4879,7 +4892,7 @@ hipError_t playback_hipIpcGetMemHandle(PlaybackContext& ctx, const uint8_t* pl) 
     hipIpcMemHandle_t live{};
     hipError_t r = hipIpcGetMemHandle(&live, live_ptr);
     if (r != hipSuccess) return r;
-    if (a->handle_present)
+    if (a->handle_present && !ipc_digest_missing(a->handle_bytes, sizeof(live)))
         ctx.record_ipc_handle(
             PlaybackContext::ipc_key(a->handle_bytes, sizeof(live)),
             PlaybackContext::ipc_key(&live, sizeof(live)));
@@ -4889,8 +4902,11 @@ hipError_t playback_hipIpcGetMemHandle(PlaybackContext& ctx, const uint8_t* pl) 
 hipError_t playback_hipIpcOpenMemHandle(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipIpcOpenMemHandle*>(pl);
     hipIpcMemHandle_t handle{};
-    const std::string live_bytes = ctx.translate_ipc_handle(
-        PlaybackContext::ipc_key(a->handle_bytes, sizeof(handle)));
+    const std::string live_bytes =
+        ipc_digest_missing(a->handle_bytes, sizeof(handle))
+            ? std::string()
+            : ctx.translate_ipc_handle(
+                  PlaybackContext::ipc_key(a->handle_bytes, sizeof(handle)));
     if (live_bytes.size() != sizeof(handle)) {
         fprintf(stderr,
                 "[HRR] hipIpcOpenMemHandle: no replayed export matches this "

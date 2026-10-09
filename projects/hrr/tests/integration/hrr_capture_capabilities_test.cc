@@ -143,6 +143,7 @@ namespace {
 #define HRR_CAPS_OPEN_MEM "HRR_CAPS_OPEN_MEM"
 #define HRR_CAPS_OPEN_EVENT "HRR_CAPS_OPEN_EVENT"
 #define HRR_CAPS_IMPORTER "HRR_CAPS_IMPORTER"
+#define HRR_CAPS_IMPORTER_EXPORTS "HRR_CAPS_IMPORTER_EXPORTS"
 #define HRR_CAPS_PARENT "HRR_CAPS_PARENT"
 #define HRR_CAPS_CHILD "HRR_CAPS_CHILD"
 #define HRR_CAPS_CHILD_STATUS "HRR_CAPS_CHILD_STATUS"
@@ -272,6 +273,17 @@ TEST_CASE("Unit_HRR_CaptureCapabilitiesImport_Direct", "[.][hrr-direct]") {
   std::memcpy(&eh, event_bytes.data(), kEventHandleBytes);
 
   HRR_HIP_CHECK(hipSetDevice(0));
+  // With HRR_CAPS_IMPORTER_EXPORTS=n it first exports n allocations of its own,
+  // so its archive holds exports as well as the imports.
+  std::vector<void*> own;
+  const char* own_n = getenv(HRR_CAPS_IMPORTER_EXPORTS);
+  for (int i = 0; own_n && i < atoi(own_n); ++i) {
+    void* p = nullptr;
+    HRR_HIP_CHECK(hipMalloc(&p, 1 << 20));
+    hipIpcMemHandle_t h{};
+    HRR_HIP_CHECK(hipIpcGetMemHandle(&h, p));
+    own.push_back(p);
+  }
   void* mem = nullptr;
   const hipError_t rm = hipIpcOpenMemHandle(&mem, mh, hipIpcMemLazyEnablePeerAccess);
   printf(HRR_CAPS_OPEN_MEM " %d\n", static_cast<int>(rm));
@@ -281,6 +293,7 @@ TEST_CASE("Unit_HRR_CaptureCapabilitiesImport_Direct", "[.][hrr-direct]") {
   fflush(stdout);
   if (re == hipSuccess) HRR_HIP_CHECK(hipEventDestroy(ev));
   if (rm == hipSuccess) HRR_HIP_CHECK(hipIpcCloseMemHandle(mem));
+  for (void* p : own) HRR_HIP_CHECK(hipFree(p));
 }
 
 #ifndef _WIN32
@@ -801,6 +814,66 @@ HRR_TEST_CASE(Unit_HRR_CaptureCapabilitiesWithoutRandom) {
     const int ret = replay.run(hrr_quote_path(cap.path));
     INFO("Playback stdout:\n" << replay.getOutput());
     CHECK(ret == 0); }
+
+  // Last, as it can skip. An archive with two exports and an unrelated import,
+  // all recorded as zeros: replay pairs none of them, so the import is
+  // reported as unmatched instead of opening one of the local exports.
+  { INFO("no random source, exports and an import in one archive");
+    ScopedDir cap(fs::temp_directory_path() / "hrr_capture_capabilities_none_ipc.hrr");
+    std::string out;
+    { hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
+      proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+      proc.setEnv("HRR_CAPS_RANDOM", "none");
+      proc.setEnv(HRR_CAPS_IMPORTER_EXPORTS, "2");
+      set_proc_search_path(proc);
+      int ret = proc.run("\"Unit_HRR_CaptureCapabilitiesExport_Direct\"");
+      out = proc.getOutput();
+      INFO("Capture exit: " << ret << "\n" << out);
+      REQUIRE(ret == 0); }
+    INFO("Capture output:\n" << out);
+    const auto tags = tagged_lines(out);
+    REQUIRE(tags.count(HRR_CAPS_IMPORTER));
+    REQUIRE(tags.at(HRR_CAPS_IMPORTER) == "0");
+    REQUIRE(tags.count(HRR_CAPS_OPEN_MEM));
+    if (tags.at(HRR_CAPS_OPEN_MEM) != "0")
+      HRR_SKIP("this machine cannot open an IPC handle from another process");
+
+    fs::path importer;
+    for (const auto& dir : hrr_process_archives(cap.path)) {
+      hrr::Archive arc;
+      REQUIRE(hrr::load_archive(dir.string(), arc));
+      int exports = 0, imports = 0;
+      for (const auto& ev : arc.events) {
+        const uint16_t t = ev.header().event_type;
+        if (t == HRR_API_HIPIPCGETMEMHANDLE) {
+          REQUIRE(ev.raw_payload.size() >= sizeof(hrr_args_hipIpcGetMemHandle));
+          const auto* a = reinterpret_cast<const hrr_args_hipIpcGetMemHandle*>(ev.raw_payload.data());
+          CHECK(all_zero(a->handle_bytes, sizeof(a->handle_bytes)));
+          ++exports;
+        } else if (t == HRR_API_HIPIPCOPENMEMHANDLE) {
+          REQUIRE(ev.raw_payload.size() >= sizeof(hrr_args_hipIpcOpenMemHandle));
+          const auto* a = reinterpret_cast<const hrr_args_hipIpcOpenMemHandle*>(ev.raw_payload.data());
+          CHECK(all_zero(a->handle_bytes, sizeof(a->handle_bytes)));
+          ++imports;
+        }
+      }
+      if (imports) {
+        CHECK(exports == 2);
+        CHECK(imports == 1);
+        importer = dir;
+      }
+    }
+    REQUIRE_FALSE(importer.empty());
+
+    // The event import cannot be opened from zeros either; keep going past it.
+    hrr::test::SpawnProc replay(HRR_PLAYBACK_EXE, /*capture_stdout=*/true,
+                                /*capture_stderr=*/true);
+    set_proc_search_path(replay);
+    (void)replay.run("--continue-on-error " + hrr_quote_path(importer));
+    const std::string log = replay.getOutput();
+    INFO("Playback output:\n" << log);
+    CHECK(log.find("hipIpcOpenMemHandle: no replayed export matches") != std::string::npos);
+    CHECK(log.find("(hipIpcOpenMemHandle) returned") == std::string::npos); }
 }
 #endif
 
