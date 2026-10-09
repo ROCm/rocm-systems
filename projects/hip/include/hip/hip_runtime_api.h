@@ -2988,8 +2988,39 @@ hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute a
  */
 hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel);
 
-
-hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t dev);
+/**
+ * @brief Sets the preferred carveout setting for the specific kernel on a device
+ *
+ * On devices that allow setting a L1/shared memory split, this function allows to specify a
+ * preference:
+ * - hipFuncCachePreferNone no preference for shared memory or L1 (default)
+ * - hipFuncCachePreferShared prefer larger shared memory and smaller L1 cache
+ * - hipFuncCachePreferL1 prefer larger L1 cache and smaller shared memory
+ * - hipFuncCachePreferEqual prefer equal size L1 cache and shared memory
+ * This is only a hint and the underlying driver might not honor the setting. Additionally,
+ * a call to hipFuncSetCacheConfig(), referring to the same symbol and device, would override the
+ * value passed here, regardless of the relative execution order between the calls.
+ *
+ * hipKernelSetAttributeForDevice() can also be used to set a L1/shared memory split preference,
+ * in a more fine grained fashion. All AMD devices that support setting the carveout support this
+ * function too.
+ *
+ * As not all Nvidia devices allow setting a fine grained (numeric percentage) carveout
+ * value, when having a mixture of devices, where some support and others do not support numeric
+ * carveouts, hipKernelSetCacheConfig could be use to establish a baseline.
+ *
+ * The call does nothing on devices whose carveout is fixed.
+ *
+ * @param [in] kernel  The kernel whose carveout will be specified
+ * @param [in] config  The enumeration specifying the L1/shared memory split
+ * @param [in] device  The device where change the carveout for the specific kernel
+ *
+ * @returns #hipErrorInvalidResourceHandle, #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction,
+ * #hipErrorMissingConfiguration, #hipErrorInvalidValue
+ *
+ * @see hipKernelSetAttributeForDevice
+ */
+hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t device);
 
 /**
  * @brief Set Cache configuration for a specific function
