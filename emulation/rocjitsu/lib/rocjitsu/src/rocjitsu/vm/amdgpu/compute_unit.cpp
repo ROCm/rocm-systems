@@ -120,6 +120,8 @@ std::string_view instruction_execution_error_name(InstructionExecutionError erro
     return "unsupported operand value";
   case InstructionExecutionError::UnimplementedInstruction:
     return "unimplemented instruction";
+  case InstructionExecutionError::DecodeFailure:
+    return "instruction decode failure";
   }
   return "unknown instruction execution error";
 }
@@ -875,6 +877,25 @@ void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
   active_wgs_.erase(wg_key(dispatch_id, wg_id));
   barrier_wgs_.erase(wg_key(dispatch_id, wg_id));
   maybe_reset_lds_alloc();
+}
+
+void ComputeUnitCore::handle_instruction_failure(Wavefront &wf, const std::string &failure) {
+  util::Logger::warn(failure);
+  if (!wf.fail_pm4_submission()) {
+    // Keep upstream queue-owner exception delivery before cancelling the dispatch.
+    const bool claimed = execution_failure_handler_ && execution_failure_handler_(wf, /*retain_wave=*/true);
+    pending_dispatch_failures_.push_back({.queue_id = wf.queue_id(),
+                                          .process_id = wf.process_id(),
+                                          .dispatch_id = wf.dispatch_id(),
+                                          .vm_outcome = std::nullopt});
+    if (auto *sim_engine = engine())
+      sim_engine->request_exit(failure, /*code=*/1);
+    if (claimed)
+      return;
+  }
+  // halt() follows the successful workgroup-completion path. A rejected
+  // instruction instead cancels resident waves and their pending memory work.
+  abort_dispatch(wf.dispatch_id());
 }
 
 void ComputeUnitCore::abort_dispatch(uint32_t dispatch_id) {
@@ -1751,25 +1772,7 @@ void ComputeUnitCore::fail_wave_instruction(Wavefront &wf, std::string_view inst
       "CU {}: wf{} could not execute {} at pc={:#x} (pid={} qid={} dispatch={} wg={}): {}",
       this->name(), wf.wf_id(), instruction, pc, wf.process_id(), wf.queue_id(), wf.dispatch_id(),
       wf.wg_id(), reason);
-  util::Logger::warn(failure);
-  if (!wf.fail_pm4_submission()) {
-    // Notify the queue owner without hiding the simulator's failure status.
-    // WaveStateGuard flushes deferred notifications before this step returns,
-    // even after request_exit records the terminal engine result.
-    const bool claimed =
-        execution_failure_handler_ && execution_failure_handler_(wf, /*retain_wave=*/true);
-    pending_dispatch_failures_.push_back({.queue_id = wf.queue_id(),
-                                          .process_id = wf.process_id(),
-                                          .dispatch_id = wf.dispatch_id(),
-                                          .vm_outcome = std::nullopt});
-    if (auto *sim_engine = this->engine())
-      sim_engine->request_exit(failure, /*code=*/1);
-    if (claimed)
-      return;
-  }
-  // halt() follows the successful workgroup-completion path. A rejected
-  // instruction instead cancels resident waves and their pending memory work.
-  abort_dispatch(wf.dispatch_id());
+  handle_instruction_failure(wf, failure);
 }
 
 void AsyncInstructionWindow::materialize() {
@@ -1981,14 +1984,18 @@ template <bool EnableAsync>
                                                     decode_error.emitter(), reuse_decoded);
   if (decoded.failed()) {
     drain_async_window();
-    util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(decode rejection) pc=0x",
-                     std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
-                     ",0x", words[3], "]", std::dec, " what=", decode_error.message());
-    // Let the queue owner observe the illegal instruction before retiring the
-    // wave. A debugger may claim the exception before the runtime sees it.
-    if (!active->fail_pm4_submission() && illegal_inst_handler_ && illegal_inst_handler_(*active))
+    // Preserve debugger-first handling of illegal instructions. PM4 failures
+    // remain exclusive to their submission and are handled below.
+    if (!active->has_pm4_submission() && illegal_inst_handler_ && illegal_inst_handler_(*active))
       return IssueOutcome::NotIssued;
-    active->halt();
+    active->report_instruction_execution_error(InstructionExecutionError::DecodeFailure);
+    const std::string failure = std::format(
+        "CU {}: wf{} could not decode instruction at pc={:#x} (pid={} qid={} dispatch={} wg={}) "
+        "words=[{:#x},{:#x},{:#x},{:#x}]: {}",
+        this->name(), active->wf_id(), active->pc, active->process_id(), active->queue_id(),
+        active->dispatch_id(), active->wg_id(), words[0], words[1], words[2], words[3],
+        decode_error.message());
+    handle_instruction_failure(*active, failure);
     return IssueOutcome::NotIssued;
   }
   Instruction *inst = decoded.value().get();

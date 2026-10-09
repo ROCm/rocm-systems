@@ -15,6 +15,7 @@ namespace {
 constexpr int kInitializationFailure = 10;
 constexpr int kLaunchFailure = 11;
 constexpr int kSynchronizationReturned = 12;
+enum class FailureKind { Unsupported, Decode };
 } // namespace
 
 __global__ void unsupported_instruction() {
@@ -22,10 +23,15 @@ __global__ void unsupported_instruction() {
   asm volatile(".long 0xb8000000");
 }
 
-[[noreturn]] void wait_for_unsupported_instruction() {
+__global__ void undecodable_instruction() { asm volatile(".long 0xbfff0000"); }
+
+[[noreturn]] void wait_for_instruction_failure(FailureKind kind) {
   if (hipInit(0) != hipSuccess)
     std::_Exit(kInitializationFailure);
-  unsupported_instruction<<<4, 64>>>();
+  if (kind == FailureKind::Unsupported)
+    unsupported_instruction<<<4, 64>>>();
+  else
+    undecodable_instruction<<<4, 64>>>();
   if (hipGetLastError() != hipSuccess)
     std::_Exit(kLaunchFailure);
   // Any return is unexpected, regardless of synchronization's status.
@@ -36,9 +42,17 @@ __global__ void unsupported_instruction() {
 TEST(HipInstructionFailureTest, UnsupportedInstructionExitsWithFailure) {
   // Re-exec so the child owns its HIP runtime and interposer engine threads.
   GTEST_FLAG_SET(death_test_style, "threadsafe");
-  EXPECT_EXIT(wait_for_unsupported_instruction(), ::testing::ExitedWithCode(EXIT_FAILURE),
+  EXPECT_EXIT(wait_for_instruction_failure(FailureKind::Unsupported),
+              ::testing::ExitedWithCode(EXIT_FAILURE),
               "rocjitsu: local VM failed: .*s_cbranch_i_fork.*pid=.*qid=.*dispatch=.*unimplemented "
               "instruction");
+}
+
+TEST(HipInstructionFailureTest, DecodeFailureExitsWithFailure) {
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  EXPECT_EXIT(wait_for_instruction_failure(FailureKind::Decode),
+              ::testing::ExitedWithCode(EXIT_FAILURE),
+              "rocjitsu: local VM failed: .*could not decode.*pid=.*qid=.*dispatch=.*0xbfff0000");
 }
 
 int main(int argc, char **argv) {
