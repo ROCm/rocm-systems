@@ -1096,6 +1096,37 @@ recorded address that was never passed through a HIP API (e.g. computed from an
 `hipGetDeviceProperties` query or a device-side `malloc`), the capture layer cannot
 know about it and translation will fail.
 
+Translation cannot reach a pointer the application stored in device memory: it
+arrives inside an H2D payload, byte for byte. vLLM's block table is such a case
+([ROCM-31827](https://amd-hub.atlassian.net/browse/ROCM-31827)). On Linux, replay
+therefore places `hipMalloc` and `hipMallocAsync` allocations at their recorded
+addresses, so that pointer is right again; `--no-placement` turns this off.
+
+- Before `hipInit`, the recorded ranges of both APIs, rounded to 4 KiB and merged,
+  are held with `PROT_NONE` placeholders (`MAP_FIXED_NOREPLACE`), so the runtime
+  cannot take them. A range something else already occupies is not held.
+- Each replayed allocation drops the placeholder over the VMM granules holding it
+  (a `hipMallocAsync` pointer need not start on one), then `hipMemAddressReserve`
+  there, `hipMemCreate` on the current device, `hipMemMap` and `hipMemSetAccess`.
+  If any step misses (granules not held, or shared with a live placed allocation,
+  runtime answers with another address, no VMM support), that allocation falls
+  back to the normal allocator, named under `--verbose`. The summary prints
+  `Placement : N placed at capture address, M fell back`.
+- `hipFree` unmaps and releases at once; `hipFreeAsync` first synchronizes its
+  stream. The range is then held again for the next allocation recorded there.
+- After each such unmap replay allocates and frees 4 MiB with `hipMalloc`: on
+  gfx1201 with Linux 7.0.0-34's in-box amdgpu, `hipMemUnmap` leaves stale GPU TLB
+  entries, and KFD flushes them when it frees ordinary memory. This flushes the
+  current device only, and is skipped while a graph capture is open, where
+  `hipMalloc` is illegal; a remap at that address before the next flush can then
+  still reach the old pages on that driver.
+- Not placed, as before: `hipMallocAsync` inside a graph capture (a graph
+  allocation node), allocations exported with `hipIpcGetMemHandle` (IPC refuses VMM
+  memory), every other allocation API, and everything under `--guard-segments`
+  or on Windows. A placed allocation is accessible from its own device only.
+- Between the `--kernel-filter` warm-up and the timed pass, placed allocations are
+  released so the timed pass can place them again.
+
 ### `hipMemcpyDeviceToDevice` — Not Captured
 
 Source data for D2D copies is not snapshotted. At replay, D2D copies execute correctly
