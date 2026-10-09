@@ -130,7 +130,7 @@ typedef enum __HIP_NODISCARD hipError_t UINT32_BASE {
   hipErrorInvalidDevicePointer = 17,    ///< Invalid Device Pointer
   hipErrorInvalidMemcpyDirection = 21,  ///< Invalid memory copy direction
   hipErrorInsufficientDriver = 35,
-  hipErrorMissingConfiguration = 52,
+  hipErrorMissingConfiguration = 52,   ///< Produced when a kernel launch configuration is missing.
   hipErrorPriorLaunchFailure = 53,
   hipErrorInvalidDeviceFunction = 98,  ///< Invalid device function
   hipErrorNoDevice = 100,              ///< Call to hipGetDeviceCount returned 0 devices
@@ -138,7 +138,7 @@ typedef enum __HIP_NODISCARD hipError_t UINT32_BASE {
   hipErrorInvalidImage = 200,          ///< Invalid image
   hipErrorInvalidContext = 201,        ///< Produced when input context is invalid.
   hipErrorContextAlreadyCurrent = 202,
-  hipErrorMapFailed = 205,
+  hipErrorMapFailed = 205,   ///< Produced when a memory mapping operation failed.
   // Deprecated
   hipErrorMapBufferObjectFailed = 205,  ///< Produced when the IPC memory attach failed from ROCr.
   hipErrorUnmapFailed = 206,
@@ -678,9 +678,17 @@ enum hipComputeMode {
   hipComputeModeExclusiveProcess = 3
 };
 
+/**
+ * The ways a device supports flushing of outstanding GPUDirect RDMA writes.
+ *
+ * The supported options are reported as a bitmask by
+ * hipDeviceAttributeGPUDirectRDMAFlushWritesOptions.
+ */
 enum hipFlushGPUDirectRDMAWritesOptions {
-  hipFlushGPUDirectRDMAWritesOptionHost = 1 << 0,
-  hipFlushGPUDirectRDMAWritesOptionMemOps = 1 << 1
+  hipFlushGPUDirectRDMAWritesOptionHost = 1 << 0,   ///< hipDeviceFlushGPUDirectRDMAWrites() is
+                                                    ///< supported
+  hipFlushGPUDirectRDMAWritesOptionMemOps = 1 << 1  ///< The memory operations API supports
+                                                    ///< remote write ordering
 };
 
 enum hipGPUDirectRDMAWritesOrdering {
@@ -1001,7 +1009,7 @@ enum hipLimit_t {
  * @note  This allocation flag is applicable on AMD devices, except for Navi4X, in Linux only.
  */
 #define hipHostMallocUncached 0x10000000
-#define hipHostAllocUncached hipHostMallocUncached
+#define hipHostAllocUncached hipHostMallocUncached  ///< Alias of #hipHostMallocUncached.
 
 /**
  * Host memory allocation will follow numa policy set by user.
@@ -1024,7 +1032,7 @@ enum hipLimit_t {
 /** Memory can only be accessed by a single stream on the associated device.*/
 #define hipMemAttachSingle 0x04
 
-#define hipDeviceMallocDefault 0x0
+#define hipDeviceMallocDefault 0x0  ///< Default device memory allocation flag.
 
 /** Memory is allocated in fine grained region of device.*/
 #define hipDeviceMallocFinegrained 0x1
@@ -1076,10 +1084,10 @@ enum hipLimit_t {
 /** Yield the CPU to the operating system when waiting. May increase latency, but lowers power
  * and is friendlier to other threads in the system.*/
 #define hipDeviceScheduleYield 0x2
-#define hipDeviceScheduleBlockingSync 0x4
+#define hipDeviceScheduleBlockingSync 0x4  ///< Use blocking synchronization when waiting on the device.
 #define hipDeviceScheduleMask 0x7
-#define hipDeviceMapHost 0x8
-#define hipDeviceLmemResizeToMax 0x10
+#define hipDeviceMapHost 0x8  ///< Support mapping host memory into the device address space.
+#define hipDeviceLmemResizeToMax 0x10  ///< Resize the per-thread local memory to the maximum size.
 /** Indicates that the deviceFlags passed to hipInitDevice() are valid and should be applied.*/
 #define hipInitDeviceFlagsAreValid 0x1
 /** Default HIP array allocation flag.*/
@@ -1093,15 +1101,15 @@ enum hipLimit_t {
 #define hipCooperativeLaunchMultiDeviceNoPreSync 0x01
 #define hipCooperativeLaunchMultiDeviceNoPostSync 0x02
 #define hipCpuDeviceId ((int)-1)
-#define hipInvalidDeviceId ((int)-2)
+#define hipInvalidDeviceId ((int)-2)  ///< Sentinel value representing an invalid device ordinal.
 // Flags that can be used with hipExtLaunch Set of APIs.
 /** AnyOrderLaunch of kernels.*/
 #define hipExtAnyOrderLaunch 0x01
 // Flags to be used with hipStreamWaitValue32 and hipStreamWaitValue64.
-#define hipStreamWaitValueGte 0x0
-#define hipStreamWaitValueEq 0x1
-#define hipStreamWaitValueAnd 0x2
-#define hipStreamWaitValueNor 0x3
+#define hipStreamWaitValueGte 0x0  ///< Wait until *ptr & mask >= value.
+#define hipStreamWaitValueEq 0x1  ///< Wait until *ptr & mask == value.
+#define hipStreamWaitValueAnd 0x2  ///< Wait until ((*ptr & mask) & value) != 0.
+#define hipStreamWaitValueNor 0x3  ///< Wait until ~((*ptr & mask) | (value & mask)) != 0.
 // Flags to be used with hipStreamWriteValue32 and hipStreamWriteValue64.
 #define hipStreamWriteValueDefault 0x0
 #define hipExtStreamWriteValueIncrement 0x1000
@@ -1366,7 +1374,7 @@ typedef enum hipMemAllocationType {
    */
   hipMemAllocationTypePinned = 0x1,
   hipMemAllocationTypeManaged = 0x2,
-  hipMemAllocationTypeUncached = 0x40000000,
+  hipMemAllocationTypeUncached = 0x40000000,   ///< Allocation is uncached memory.
   hipMemAllocationTypeMax = 0x7FFFFFFF
 } hipMemAllocationType;
 /**
@@ -3317,7 +3325,7 @@ hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* flags);
  * @brief Queries the Id of a stream.
  *
  * @param[in] stream  Stream to be queried
- * @param[in,out] flags  Pointer to an unsigned long long in which the stream's id is returned
+ * @param[in,out] streamId  Pointer to an unsigned long long in which the stream's id is returned
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle.
  *
  * @see hipStreamCreateWithFlags, hipStreamGetFlags, hipStreamCreateWithPriority, hipStreamGetPriority
@@ -3413,9 +3421,9 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
 
 /**
  *@brief queries stream attribute.
- * @param[in] stream - Stream to geet attributes from
+ * @param[in] stream - Stream to get attributes from
  * @param[in] attr   - Attribute ID for the attribute to query
- * @param[out] value  - Attribute value output
+ * @param[out] value_out  - Attribute value output
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle
  */
 hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
@@ -7332,7 +7340,7 @@ hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library);
  *
  * @param [out] kernels Buffer for kernel handles
  * @param [in] numKernels Maximum number of kernel handles to return to buffer
- * @oaram [in] library Library handle to query from
+ * @param [in] library Library handle to query from
  * @return #hipSuccess, #hipErrorInvalidValue
 */
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,

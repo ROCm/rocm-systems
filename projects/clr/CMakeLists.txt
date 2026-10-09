@@ -51,6 +51,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/CLRHardening.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/CLRWarnings.cmake")
 
 #############
 # Build steps

@@ -254,7 +254,7 @@ bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event, b
     if (HIP_MEM_POOL_USE_VM && (memory->getMemFlags() & CL_MEM_VA_RANGE_AMD) &&
         memory->parent() != nullptr &&
         memory->getUserData().phys_mem_obj != nullptr) {
-      amd::Memory* phys_mem_obj = memory->getUserData().phys_mem_obj;
+      [[maybe_unused]] amd::Memory* phys_mem_obj = memory->getUserData().phys_mem_obj;
     }
 
     // If the free heap grows over the busy heap, then force release
@@ -312,7 +312,7 @@ bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event, b
         if (hipSuccess == e->addMarker(stream, nullptr)) {
           ts.SetEvent(e);
           // Make sure runtime sends a notification
-          auto result = e->ready();
+          (void)e->ready();
         }
       } else {
         // Assume a safe release from hipFree() if stream is nullptr
