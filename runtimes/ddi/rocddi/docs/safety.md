@@ -35,8 +35,9 @@ HSA scratch fault recovery has a separate transaction. It retains the old
 scratch and stages each candidate allocation in the queue record before
 rewriting its control block. A successful stopped-queue update makes the
 candidate current before releasing the inactive signal. A failed or unwound
-update leaves the candidate in the record because firmware may have observed
-its address. Candidates remain owned through native queue teardown.
+update leaves the candidate in the record because the command processor may
+have observed its address. Candidates remain owned through native queue
+teardown.
 
 HSA batch queue creation reads descriptor input fields without referencing the
 output-only queue field, which may be uninitialized. It copies a caller CU mask
@@ -175,8 +176,11 @@ original descriptor.
 
 ## Foreign call boundary
 
-Hand-authored foreign function declarations for Linux system and device calls
-are confined to `src/driver/linux_kfd/{sys,drm,util,process_identity}.rs`.
+Most Linux descriptor and mapping calls and flags come from the `libc` crate.
+`src/os/linux/memory.rs` declares `getpagesize` and `madvise`, and
+`src/os/linux/memory/reservation.rs` defines `MAP_FIXED_NOREPLACE`; the crate
+does not expose these for the supported GNU targets. KFD and DRM calls remain in
+`src/driver/linux_kfd/{sys,drm}.rs`.
 The AMDF and HSA frontends export C ABI entry points and invoke
 caller-provided callbacks. The core host allocator invokes AMDF
 caller-provided allocation callbacks. These ABI calls do not import a native
@@ -208,8 +212,8 @@ ABI probes compare AMDF and HSA layouts, and the HSA probe calls the local
 versioned finalizer symbol.
 Focused Miri tests exercise the custom host owners and buffer, including
 panicking destructors and partial iteration, under tree borrows and alignment
-checks. They cannot inspect device or firmware behavior. Linux AArch64 CI
+checks. They cannot inspect GPU behavior. Linux AArch64 CI
 cross-checks source compilation and executes the CPU-only suite on native
-hardware. Those tests cannot establish GPU firmware ordering, cache coherence,
-or recovery on a device. Those require the hardware and workload qualification
-described by each frontend's support documentation.
+hardware. Those tests cannot establish command processor packet ordering,
+cache coherence, or recovery on a device. Those require the hardware and
+workload qualification described by each frontend's support documentation.

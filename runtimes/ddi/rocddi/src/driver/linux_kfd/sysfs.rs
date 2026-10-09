@@ -8,8 +8,7 @@
 //! current native identity before publication and again before activation.
 //! Parsers reject incomplete, duplicate, overflowing, or internally inconsistent
 //! properties rather than filling important device facts with defaults.
-use super::memory::{error, native_error};
-use super::sys;
+use super::{errno, error, native_error, sys};
 use crate::host_storage::{Allocator, Buffer, Shared};
 use crate::memory::{DeviceAccess, HostCacheability};
 use crate::topology::{
@@ -361,7 +360,7 @@ pub(super) fn enumerate(
     for _ in 0..3 {
         let before = match scalar(format_args!("{root}/generation_id")) {
             Ok(value) => value,
-            Err(e) if e.native_error_code() == Some(2) => return Ok(()),
+            Err(e) if e.native_error_code() == Some(errno::ENOENT) => return Ok(()),
             Err(e) => return Err(e),
         };
         let mut records = Buffer::new(allocator);

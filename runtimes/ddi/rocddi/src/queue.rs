@@ -100,7 +100,8 @@ impl QueueState {
     }
 
     /// # Safety
-    /// Firmware has stopped the queue and the caller retains scratch backing.
+    /// The command processor has stopped the queue. The caller retains scratch
+    /// backing.
     #[allow(unsafe_code)]
     unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
         match self {
@@ -171,9 +172,9 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
     }
 
     /// # Safety
-    /// Firmware must have stopped the queue. The caller retains the new
-    /// scratch backing and synchronizes its inactive signal until replacement
-    /// or conclusive queue teardown.
+    /// The command processor must have stopped the queue. The caller retains
+    /// the new scratch backing and synchronizes its inactive signal until
+    /// replacement or conclusive queue teardown.
     #[allow(unsafe_code)]
     unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
         // SAFETY: The caller keeps the stopped-queue and backing obligations.
@@ -209,7 +210,7 @@ pub(crate) fn retain_create_dependencies<T, D: 'static>(
     create: impl FnOnce() -> Result<T, Error>,
     dependencies: D,
 ) -> Result<(T, D), Error> {
-    // Native creation may unwind after firmware acquires these addresses.
+    // Native creation may unwind after a GPU engine acquires these addresses.
     let dependencies = std::mem::ManuallyDrop::new(dependencies);
     match create() {
         Ok(queue) => Ok((queue, std::mem::ManuallyDrop::into_inner(dependencies))),
@@ -222,7 +223,7 @@ pub(crate) fn retain_create_dependencies<T, D: 'static>(
 }
 
 /// Discards an unpublished queue only after native destruction succeeds.
-/// A failed or unwinding destructor may leave firmware references live.
+/// A failed or unwinding destructor may leave GPU references live.
 #[allow(unsafe_code)]
 pub(crate) fn abandon_unpublished<T, D: 'static>(
     queue: T,
@@ -302,21 +303,21 @@ impl Queue {
     pub fn set_cu_mask(&mut self, mask: &[u32]) -> Result<(), Error> {
         self.inner.set_cu_mask(mask)
     }
-    /// Replaces the fixed scratch description while firmware has the AQL queue
-    /// stopped for an insufficient-scratch event. The caller must retain the
-    /// described allocation until this queue is destroyed or scratch is
-    /// replaced again, and must release the queue's inactive signal only after
-    /// this update succeeds.
+    /// Replaces the fixed scratch description while the command processor has
+    /// stopped the AQL queue for an insufficient-scratch event. The caller
+    /// must retain the described allocation until this queue is destroyed or
+    /// scratch is replaced again. It must release the queue's inactive signal
+    /// only after this update succeeds.
     ///
     /// # Errors
     /// Rejects non-AQL queues, invalid target geometry, unavailable queues, or
     /// scratch ranges that cannot be represented by the native control block.
     ///
     /// # Safety
-    /// Firmware must have stopped this queue for a scratch fault. The GPU
-    /// address must remain backed and writable until the queue is destroyed or
-    /// a later stopped-queue update replaces it. The caller must synchronize
-    /// release of the inactive signal with this update.
+    /// The command processor must have stopped this queue for a scratch fault.
+    /// The GPU address must remain backed and writable until the queue is
+    /// destroyed or a later stopped-queue update replaces it. The caller must
+    /// synchronize release of the inactive signal with this update.
     #[allow(unsafe_code)]
     pub unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
         // SAFETY: The public caller supplies the stopped-queue and backing contract.
@@ -391,7 +392,7 @@ impl GpuDevice<'_> {
     ///
     /// # Safety
     /// Any raw GPU address in an AQL request must refer to live, suitably
-    /// aligned backing with the required firmware access. The caller must keep
+    /// aligned backing with the required GPU access. The caller must keep
     /// the inactive signal and scratch backing alive until queue destruction,
     /// and obey the selected producer publication protocol. If the queue is
     /// dropped without successful destruction, retain that external backing

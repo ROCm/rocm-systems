@@ -9,9 +9,9 @@
 //! The caller continues to own and keep the complete source page cover live.
 
 use super::drm;
-use super::memory::{DeviceVm, error, native_error};
-use super::sys;
-use super::util;
+use super::memory::DeviceVm;
+use super::os_memory;
+use super::{errno, error, native_error};
 use crate::host_storage::{Buffer, Owned, Shared};
 use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess};
 use crate::{Error, ErrorKind};
@@ -61,7 +61,7 @@ impl VmMapping {
         let result = unsafe { drm::register_userptr(render, host_base, size, &mut self.handle) };
         if let Err(source) = result {
             if self.handle != 0
-                || source.raw_os_error() == Some(14)
+                || source.raw_os_error() == Some(errno::EFAULT)
                 || source.kind() == std::io::ErrorKind::InvalidData
             {
                 self.uncertain = true;
@@ -123,7 +123,7 @@ impl VmMapping {
             if let Err(source) = drm::destroy_syncobj(render, self.timeline) {
                 // EFAULT can follow successful handle removal at copyout.
                 // Quarantine the mapping rather than retrying a recycled ID.
-                self.uncertain = source.raw_os_error() == Some(14);
+                self.uncertain = source.raw_os_error() == Some(errno::EFAULT);
                 return Err(native_error("DRM host registration timeline close", source));
             }
             self.timeline = 0;
@@ -141,7 +141,7 @@ impl VmMapping {
 pub(crate) struct DrmRegisteredHost {
     owner: Shared<DeviceVm>,
     mappings: Buffer<VmMapping>,
-    reservation: Option<sys::Reservation>,
+    reservation: Option<os_memory::Reservation>,
     host_address: usize,
     byte_offset: usize,
     size: u64,
@@ -167,7 +167,7 @@ impl DrmRegisteredHost {
                 "registered GPU pages require READ permission",
             ));
         }
-        let page = util::page_size()
+        let page = os_memory::page_size()
             .map_err(|source| native_error("registered host page size", source))?;
         let size = usize::try_from(desc.size).map_err(|_| {
             error(
@@ -238,7 +238,7 @@ impl DrmRegisteredHost {
         let owner_slot = Owned::try_new_uninit(allocator)?;
         let alignment = usize::try_from(desc.alignment)
             .map_err(|_| error(ErrorKind::InvalidArgument, "alignment exceeds host width"))?;
-        let reservation = sys::Reservation::new(size, alignment, bounds, false)
+        let reservation = os_memory::Reservation::new(size, alignment, bounds, false)
             .map_err(|source| native_error("registered GPU address reservation", source))?;
         let mut allocation = owner_slot.write(Self {
             owner,

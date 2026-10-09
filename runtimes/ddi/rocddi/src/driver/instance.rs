@@ -151,6 +151,22 @@ pub(crate) enum DeviceDriverState {
 }
 
 impl DeviceDriverState {
+    /// Checks the exact installed driver owner of an activated device.
+    /// A matching numeric endpoint identity alone cannot establish ownership.
+    pub(crate) fn belongs_to(&self, instance: &DriverInstance) -> bool {
+        match (self, instance) {
+            (Self::LinuxKfd { driver, .. }, DriverInstance::LinuxKfd(installed)) => {
+                Shared::ptr_eq(driver, installed)
+            }
+            #[cfg(test)]
+            (Self::Test { driver, .. }, DriverInstance::Test(installed)) => {
+                Shared::ptr_eq(driver, installed)
+            }
+            #[cfg(test)]
+            _ => false,
+        }
+    }
+
     pub(crate) fn is_gpu(&self) -> bool {
         match self {
             Self::LinuxKfd { .. } => true,

@@ -121,7 +121,7 @@ impl GpuDriver for LinuxKfdDriver {
         self.ensure_open()?;
         device.vm.check()?;
         drm::set_persisting_l2_cache_size(device.vm.render()?, size_bytes).map_err(|source| {
-            if source.raw_os_error() == Some(22) {
+            if source.raw_os_error() == Some(errno::EINVAL) {
                 Error::NativeOperation {
                     kind: ErrorKind::InvalidArgument,
                     operation: "DRM persisting L2 cache request",
@@ -139,8 +139,8 @@ impl GpuDriver for LinuxKfdDriver {
         size: u64,
     ) -> Result<Owned<LinuxAllocation>, Error> {
         self.ensure_open()?;
-        let page =
-            util::page_size().map_err(|source| native_error("native page size", source))? as u64;
+        let page = os_memory::page_size()
+            .map_err(|source| native_error("native page size", source))? as u64;
         let native_size = size
             .checked_add(page - 1)
             .map(|size| size & !(page - 1))
@@ -418,7 +418,8 @@ impl AllocationOperations for LinuxKfdDriver {
 
 fn checked_allocation_desc(size: u64, alignment: u64) -> Result<AllocationDesc, Error> {
     let desc = AllocationDesc { size, alignment };
-    let page = util::page_size().map_err(|source| native_error("native page size", source))? as u64;
+    let page =
+        os_memory::page_size().map_err(|source| native_error("native page size", source))? as u64;
     let limits = AllocationLimits {
         alignment: page,
         granularity: page,

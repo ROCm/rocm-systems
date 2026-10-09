@@ -1,74 +1,17 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Linux file-descriptor, shared-memory, and KFD event operations.
+//! KFD and DRM memory sharing and event operations on Linux.
 //!
 //! These are concrete Linux services used by rocddi's Linux interop
 //! modules. They do not belong to the portable driver capabilities because
-//! their inputs and outputs carry Linux descriptors or KFD event state.
+//! their inputs and outputs carry KFD or DRM state.
 //! Imports retain or duplicate the descriptor state needed after return;
 //! resource owners keep it through successful cleanup or a retryable failure.
 
 // This module extends the concrete driver's Linux implementation scope.
 #[allow(clippy::wildcard_imports)]
 use super::*;
-
-/// Closes a raw descriptor whose ownership the caller transfers to this
-/// function.
-///
-/// # Safety
-/// If `descriptor` names an open file, the caller must own it. No other
-/// owner may close it or use the integer after this call, even when close
-/// fails. An invalid descriptor is permitted and reported by the kernel.
-#[allow(unsafe_code)]
-pub(crate) unsafe fn close_owned_descriptor(descriptor: RawFd) -> io::Result<()> {
-    util::close_descriptor(descriptor)
-}
-
-pub(crate) fn duplicate_descriptor(descriptor: RawFd) -> Result<OwnedFd, Error> {
-    util::duplicate_file(descriptor)
-        .map(Into::into)
-        .map_err(|source| Error::NativeOperation {
-            kind: match source.raw_os_error() {
-                // Linux EBADF and the explicit negative-descriptor rejection.
-                Some(9) => ErrorKind::InvalidArgument,
-                // Linux ENFILE, EMFILE, and ENOMEM.
-                Some(23 | 24 | 12) => ErrorKind::ResourceExhausted,
-                _ if source.kind() == io::ErrorKind::InvalidInput => ErrorKind::InvalidArgument,
-                _ => ErrorKind::Driver,
-            },
-            operation: "descriptor duplication",
-            source,
-        })
-}
-
-pub(crate) fn descriptor_length(descriptor: RawFd) -> io::Result<u64> {
-    util::descriptor_length(descriptor)
-}
-
-pub(crate) fn read_descriptor_exact_at(
-    descriptor: RawFd,
-    buffer: &mut [u8],
-    offset: u64,
-) -> io::Result<()> {
-    util::read_descriptor_exact_at(descriptor, buffer, offset)
-}
-
-pub(crate) fn read_descriptor_at(
-    descriptor: RawFd,
-    buffer: &mut [u8],
-    offset: i64,
-) -> io::Result<usize> {
-    util::read_descriptor_at(descriptor, buffer, offset)
-}
-
-pub(crate) fn write_descriptor_at(
-    descriptor: RawFd,
-    buffer: &[u8],
-    offset: i64,
-) -> io::Result<usize> {
-    util::write_descriptor_at(descriptor, buffer, offset)
-}
 
 impl LinuxKfdDriver {
     pub(crate) fn ais_transfer(

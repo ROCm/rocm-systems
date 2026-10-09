@@ -7,8 +7,9 @@
 //! lifecycle records so each cleanup path resumes only its own unfinished
 //! work.
 
+use super::error;
 use super::imported_system::DrmImportedSystem;
-use super::memory::{self, DeviceVm, KfdAllocation, error};
+use super::memory::{self, DeviceVm, KfdAllocation};
 use super::registered_host::DrmRegisteredHost;
 use crate::host_storage::{Owned, Shared};
 use crate::memory::interop::linux::{AisFileOperation, AisFileResult, DmaBuf, KfdIpcMemoryHandle};

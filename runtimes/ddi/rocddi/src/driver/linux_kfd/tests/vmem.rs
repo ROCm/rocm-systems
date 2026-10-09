@@ -5,7 +5,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use super::super::{memory, sysfs};
+use super::super::{memory, sys, sysfs};
 use super::*;
 use crate::host_storage::Allocator;
 use std::fs::{File, OpenOptions};
@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static FILE_ID: AtomicUsize = AtomicUsize::new(0);
 
 fn page() -> u64 {
-    util::page_size().unwrap() as u64
+    os_memory::page_size().unwrap() as u64
 }
 
 fn backing_file() -> File {
@@ -85,7 +85,7 @@ fn ambiguous_map_retains_address_backing_gem_and_pending_point() {
         [
             drm::TestCall::ImportGem(11),
             drm::TestCall::CreateSyncobj(7),
-            drm::TestCall::Map(Err(14)),
+            drm::TestCall::Map(Err(errno::EFAULT)),
         ],
         || {
             let result = KfdVirtualDeviceMapping::create(
@@ -125,7 +125,7 @@ fn failed_unmap_wait_retries_only_the_wait_and_keeps_gem_until_completion() {
             drm::TestCall::Map(Ok(())),
             drm::TestCall::Wait(Ok(())),
             drm::TestCall::Unmap(Ok(())),
-            drm::TestCall::Wait(Err(110)),
+            drm::TestCall::Wait(Err(errno::ETIMEDOUT)),
             drm::TestCall::Wait(Ok(())),
             drm::TestCall::CloseGem(Ok(())),
             drm::TestCall::DestroySyncobj,
@@ -166,7 +166,7 @@ fn failed_map_wait_quarantines_the_possible_native_mapping() {
             drm::TestCall::ImportGem(11),
             drm::TestCall::CreateSyncobj(7),
             drm::TestCall::Map(Ok(())),
-            drm::TestCall::Wait(Err(110)),
+            drm::TestCall::Wait(Err(errno::ETIMEDOUT)),
         ],
         || {
             let result = KfdVirtualDeviceMapping::create(
@@ -203,7 +203,7 @@ fn ambiguous_unmap_is_not_replayed_or_treated_as_retired() {
             drm::TestCall::CreateSyncobj(7),
             drm::TestCall::Map(Ok(())),
             drm::TestCall::Wait(Ok(())),
-            drm::TestCall::Unmap(Err(14)),
+            drm::TestCall::Unmap(Err(errno::EFAULT)),
         ],
         || {
             let mut mapping = KfdVirtualDeviceMapping::create(
@@ -243,7 +243,7 @@ fn failed_gem_close_retries_without_repeating_native_unmap() {
             drm::TestCall::Wait(Ok(())),
             drm::TestCall::Unmap(Ok(())),
             drm::TestCall::Wait(Ok(())),
-            drm::TestCall::CloseGem(Err(5)),
+            drm::TestCall::CloseGem(Err(errno::EIO)),
             drm::TestCall::CloseGem(Ok(())),
             drm::TestCall::DestroySyncobj,
         ],
@@ -288,7 +288,7 @@ fn ambiguous_syncobj_destroy_quarantines_the_id_and_render_vm() {
             assert_eq!(state.ensure_syncobj(render).unwrap(), 7);
             assert_eq!(
                 state.close(render).unwrap_err().native_error_code(),
-                Some(14)
+                Some(errno::EFAULT)
             );
             let replacement = drm::create_syncobj(render).unwrap();
             assert_eq!(replacement, 7);

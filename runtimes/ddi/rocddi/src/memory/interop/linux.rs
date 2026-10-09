@@ -16,6 +16,7 @@ use crate::device::Device;
 use crate::driver::Driver;
 use crate::host_storage::{Buffer, Shared};
 use crate::memory::{Allocation, DeviceAccess, VirtualMemory};
+use crate::os::linux::{errno, file as os_file};
 use crate::session::Session;
 use crate::{Error, ErrorKind};
 
@@ -30,17 +31,28 @@ use crate::{Error, ErrorKind};
 /// Preserves the Linux close error, if any.
 #[allow(unsafe_code)]
 pub unsafe fn close_owned_descriptor(descriptor: RawFd) -> io::Result<()> {
-    // SAFETY: The caller transfers descriptor ownership to this operation.
-    unsafe { crate::driver::linux_fd::close_owned_descriptor(descriptor) }
+    os_file::close_descriptor(descriptor)
 }
 
-/// Validates and duplicates a caller descriptor before constructing a Rust
-/// borrowed descriptor. The returned owner is independent of the caller's fd.
+/// Validates and duplicates a caller descriptor into an owned Rust descriptor.
+/// The returned owner is independent of the caller's descriptor.
 ///
 /// # Errors
 /// Reports an invalid or closed descriptor, or native descriptor exhaustion.
 pub fn duplicate_descriptor(descriptor: RawFd) -> Result<OwnedFd, Error> {
-    crate::driver::linux_fd::duplicate_descriptor(descriptor)
+    os_file::duplicate_file(descriptor)
+        .map(Into::into)
+        .map_err(|source| Error::NativeOperation {
+            kind: match source.raw_os_error() {
+                // EBADF and the explicit negative-descriptor rejection.
+                Some(errno::EBADF) => ErrorKind::InvalidArgument,
+                Some(errno::ENFILE | errno::EMFILE | errno::ENOMEM) => ErrorKind::ResourceExhausted,
+                _ if source.kind() == io::ErrorKind::InvalidInput => ErrorKind::InvalidArgument,
+                _ => ErrorKind::Driver,
+            },
+            operation: "descriptor duplication",
+            source,
+        })
 }
 
 /// Returns the length of a borrowed descriptor without taking its ownership.
@@ -48,7 +60,7 @@ pub fn duplicate_descriptor(descriptor: RawFd) -> Result<OwnedFd, Error> {
 /// # Errors
 /// Reports an invalid descriptor or native metadata failure.
 pub fn descriptor_length(descriptor: RawFd) -> io::Result<u64> {
-    crate::driver::linux_fd::descriptor_length(descriptor)
+    os_file::descriptor_length(descriptor)
 }
 
 /// Resolves a reopenable filesystem path for a borrowed Linux descriptor.
@@ -86,7 +98,7 @@ pub fn read_descriptor_exact_at(
     buffer: &mut [u8],
     offset: u64,
 ) -> io::Result<()> {
-    crate::driver::linux_fd::read_descriptor_exact_at(descriptor, buffer, offset)
+    os_file::read_descriptor_exact_at(descriptor, buffer, offset)
 }
 
 /// Reads from a borrowed descriptor at a fixed offset.
@@ -94,7 +106,7 @@ pub fn read_descriptor_exact_at(
 /// # Errors
 /// Preserves the Linux read error, including its errno.
 pub fn read_descriptor_at(descriptor: RawFd, buffer: &mut [u8], offset: i64) -> io::Result<usize> {
-    crate::driver::linux_fd::read_descriptor_at(descriptor, buffer, offset)
+    os_file::read_descriptor_at(descriptor, buffer, offset)
 }
 
 /// Writes to a borrowed descriptor at a fixed offset.
@@ -102,13 +114,11 @@ pub fn read_descriptor_at(descriptor: RawFd, buffer: &mut [u8], offset: i64) -> 
 /// # Errors
 /// Preserves the Linux write error, including its errno.
 pub fn write_descriptor_at(descriptor: RawFd, buffer: &[u8], offset: i64) -> io::Result<usize> {
-    crate::driver::linux_fd::write_descriptor_at(descriptor, buffer, offset)
+    os_file::write_descriptor_at(descriptor, buffer, offset)
 }
 
 /// Maximum bytes submitted in one AIS operation, matching Linux `MAX_RW_COUNT`.
 pub const AIS_MAX_TRANSFER_BYTES: u64 = 0x7fff_f000;
-const EIO: i32 = 5;
-const EOVERFLOW: i32 = 75;
 
 /// Direction of a Linux AIS transfer between a file and device VRAM.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -167,7 +177,7 @@ pub fn ais_host_transfer(
             .ok()
             .and_then(|copied| file_offset.checked_add(copied))
         else {
-            break -EOVERFLOW;
+            break -errno::EOVERFLOW;
         };
         let transferred = match &mut buffer {
             AisHostBuffer::Read(bytes) => {
@@ -179,20 +189,20 @@ pub fn ais_host_transfer(
         };
         let transferred = match transferred {
             Ok(transferred) => transferred,
-            Err(error) => break -error.raw_os_error().unwrap_or(EIO),
+            Err(error) => break -error.raw_os_error().unwrap_or(errno::EIO),
         };
         if transferred == 0 {
             if matches!(&buffer, AisHostBuffer::Read(_)) || remaining == 0 {
                 break 0;
             }
             if write_retries == 0 {
-                break -EIO;
+                break -errno::EIO;
             }
             write_retries -= 1;
             continue;
         }
         if transferred > remaining {
-            break -EIO;
+            break -errno::EIO;
         }
         copied += transferred;
     };

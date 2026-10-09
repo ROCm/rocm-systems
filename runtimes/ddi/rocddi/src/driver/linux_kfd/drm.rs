@@ -12,6 +12,7 @@
 
 #![allow(unsafe_code)]
 
+use super::errno;
 use std::ffi::{c_int, c_ulong, c_void};
 use std::fs::File;
 use std::io;
@@ -815,7 +816,9 @@ pub(super) fn wait_timeline_point(
     };
     match call(file, SYNCOBJ_TIMELINE_WAIT, &mut body) {
         Ok(()) => Ok(true),
-        Err(error) if matches!(error.raw_os_error(), Some(62 | 110)) => Ok(false),
+        Err(error) if matches!(error.raw_os_error(), Some(errno::ETIME | errno::ETIMEDOUT)) => {
+            Ok(false)
+        }
         Err(error) => Err(error),
     }
 }
@@ -891,7 +894,8 @@ pub(super) fn list_gem_handles(file: &File, entries: &mut [GemHandleInfo]) -> io
 /// A cold activation probe; unsupported ioctls keep IMPORT unadvertised.
 pub(super) fn supports_system_dma_buf_import(file: &File) -> bool {
     list_gem_handles(file, &mut []).is_ok()
-        && gem_create_info(file, 0).is_err_and(|source| source.raw_os_error() == Some(2))
+        && gem_create_info(file, 0)
+            .is_err_and(|source| source.raw_os_error() == Some(errno::ENOENT))
 }
 
 /// Registers a borrowed, page-aligned host extent in this render VM. The
@@ -1107,11 +1111,14 @@ fn persisting_l2_request_uses_vm_ioctl_layout() -> io::Result<()> {
     with_script([TestCall::SetPersistingL2CacheSize(4096, Ok(()))], || {
         assert!(set_persisting_l2_cache_size(&file, 4096).is_ok());
     });
-    with_script([TestCall::SetPersistingL2CacheSize(8192, Err(22))], || {
-        assert!(matches!(
-            set_persisting_l2_cache_size(&file, 8192),
-            Err(error) if error.raw_os_error() == Some(22)
-        ));
-    });
+    with_script(
+        [TestCall::SetPersistingL2CacheSize(8192, Err(errno::EINVAL))],
+        || {
+            assert!(matches!(
+                set_persisting_l2_cache_size(&file, 8192),
+                Err(error) if error.raw_os_error() == Some(errno::EINVAL)
+            ));
+        },
+    );
     Ok(())
 }

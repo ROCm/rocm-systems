@@ -27,8 +27,8 @@ can also be implemented by a non-GPU driver. A created queue implements either
 distinct progress and teardown rules but do not represent additional drivers.
 `AddressSpaceInfo` and `CachedInfo` expose the immutable values needed by
 generic resource owners.
-Host-only storage and cache maintenance are Linux platform services and do not
-acquire a GPU driver context.
+Host-only storage uses the selected host OS services. CPU cache maintenance is
+qualified by `cpu_cache.rs`. Neither acquires a GPU driver context.
 
 A public `Session` is the caller's logical scope for endpoint identity,
 activation, driver context lifetime, and shutdown. It can discover and activate
@@ -110,7 +110,8 @@ depend on the other.
 The core source is organized by ownership domain:
 
 - `session.rs` owns the public session, routes endpoint identities across its
-  installed drivers, and coordinates shutdown. Each driver retains the
+  installed drivers, selects the installed driver for a multi-device virtual
+  address reservation, and coordinates shutdown. Each driver retains the
   selected context lifetime policy;
 - `topology/` owns passive endpoint metadata. `EndpointKind` separates CPU,
   GPU, NPU, and future endpoint kinds; PCI attachment is optional, while
@@ -120,18 +121,38 @@ The core source is organized by ownership domain:
   kind-neutral introspection, and device-event subscriptions. `gpu/` is the
   checked GPU capability view and exposes GPU queues and profiling.
   Linux-specific signal events remain below `gpu::event::linux`;
-- `memory/` owns driver-generic allocation, address-reservation, and
-  mapping owners. `memory::interop::linux` contains DMA-BUF, KFD IPC, KFD
-  SVM, and AIS file-transfer contracts used with Linux APIs and other
-  processes;
+- `memory.rs` and `memory/` own driver-generic allocation,
+  address-reservation, and mapping owners. A virtual-address reservation
+  verifies that every device uses the selected driver, intersects their
+  address apertures, and allocates mapping records before asking that driver
+  to reserve the native range. `memory::interop::linux` contains DMA-BUF,
+  KFD IPC, KFD SVM, and AIS file-transfer contracts used with Linux APIs and
+  other processes;
 - `driver.rs` defines the private driver and resource interfaces;
-  `driver/instance.rs` owns installed-driver and activated-device routing. Linux
-  host allocation and process identity are in `driver/linux_host.rs` and
-  `driver/process_identity.rs`; `driver/linux.rs` shares Linux error mapping.
-  The Linux KFD and DRM implementation lives in
-  `driver/linux_kfd.rs` and `driver/linux_kfd/`. Its `operations.rs` implements
-  the shared driver contracts; `interop.rs` provides Linux descriptor and KFD
-  sharing operations. Native KFD and DRM owners remain in the Linux modules.
+  `driver/instance.rs` owns installed-driver and activated-device routing. The
+  Linux KFD and DRM implementation lives in `driver/linux_kfd.rs` and
+  `driver/linux_kfd/`. Its `operations.rs` implements the shared driver
+  contracts; `interop.rs` provides KFD and DRM sharing operations. KFD and DRM
+  owners remain with that driver;
+- `os.rs` selects host allocation and page-size discovery.
+  Owned files use `std::fs::File` directly. `os/linux.rs` and `os/linux/` own
+  Linux host services used by the KFD driver. `file.rs` owns raw descriptor
+  transfer, positioned I/O, and DMA-BUF file identity. `memory.rs` owns page
+  discovery, host allocation, and the fork marker page; `memory/reservation.rs`
+  owns Linux virtual address reservations and file mappings.
+  `process_identity.rs` publishes and checks the marker to reject owners
+  inherited across `fork`, and `os/linux.rs` translates I/O failures. Linux
+  positioned file I/O uses `std::os::unix::fs::FileExt`. Another OS
+  implementation supplies host allocation and page-size operations without
+  exposing its native handle to the core.
+  Host allocation reports a numeric extent and retains failed cleanup for
+  retry; `memory.rs` constructs the public information record. The core
+  host-memory API uses these services without activating a device.
+  `topology::platform::linux` remains public endpoint metadata for runtime
+  frontends; it does not own host services;
+- `cpu_cache.rs` qualifies the host CPU cache-line recipe and runs cache
+  maintenance without an OS handle. The memory API and GPU queue setup use
+  this shared CPU service.
 
 Each activated KFD process connection owns one hardware-exception event and
 one memory-exception event. Device checks and `device::event` subscriptions use a

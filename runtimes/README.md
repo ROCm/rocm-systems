@@ -53,7 +53,9 @@ the CMake configure or build.
 From the rocm-systems repository root:
 
 ```sh
-cmake -S runtimes -B build/runtimes -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cargo fetch --manifest-path runtimes/Cargo.toml --locked
+cmake -S runtimes -B build/runtimes -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+  -DROCM_RUNTIMES_CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
 cmake --build build/runtimes
 ctest --test-dir build/runtimes --output-on-failure
 ```
@@ -99,8 +101,8 @@ remain explicit qualification tools, not automatic build tests.
 ## Dependency inputs
 
 All CMake-driven Cargo metadata/build/test commands run frozen and offline.
-The current lockfile has no external dependencies. Future dependency inputs
-must be prepared before configuration; missing inputs fail rather than fetch.
+The lockfile includes the `libc` crate for Linux error numbers. Its source must
+be prepared before configuration; missing inputs fail rather than fetch.
 
 - `ROCM_RUNTIMES_CARGO_HOME`: writable Cargo home, defaulting to `cargo-home/`
   in the binary directory. Can point to a prepared registry/Git cache.

@@ -210,7 +210,7 @@ fn destroy_native_queue(
         native.inactivate()?;
         *teardown_started = true;
     }
-    // SAFETY: Inactivation stopped firmware consumption. The HSA caller must
+    // SAFETY: Inactivation stopped GPU queue consumption. The HSA caller must
     // not publish through this queue concurrently with its destruction.
     unsafe { native.destroy() }
 }
@@ -230,7 +230,8 @@ fn abandon_unpublished_queue<D: 'static>(
     status: Status,
 ) -> Status {
     // SAFETY: This queue has no public producer. The owner tuple retains every
-    // external GPU address that firmware could still reach after failed cleanup.
+    // external GPU address that a GPU engine could still reach after failed
+    // cleanup.
     unsafe { native.abandon_unpublished_with_dependencies(dependencies) }
         .map_or_else(map_error, |()| status)
 }
@@ -555,7 +556,7 @@ fn pending_error_callback(
 
 /// Publishes a new owner only after the control update completes. The
 /// candidate is retained before the control update, so failure or
-/// unwind cannot release backing that firmware may have observed.
+/// unwind cannot release backing that the command processor may have observed.
 fn update_scratch_owner<T>(
     current: &mut Option<T>,
     uncertain: &mut Vec<T>,
@@ -606,9 +607,9 @@ fn handle_queue_event(
             &mut queue.uncertain_scratch,
             allocation,
             || {
-                // SAFETY: The firmware inactive signal reports a stopped
-                // queue's scratch fault. Both old and candidate allocations
-                // remain owned even if the control update fails or unwinds.
+                // SAFETY: The command processor's inactive signal reports a
+                // stopped queue's scratch fault. Both old and candidate
+                // allocations remain owned if the update fails or unwinds.
                 unsafe { queue.native.set_scratch(scratch) }.map_err(map_error)
             },
         )?;
@@ -849,9 +850,10 @@ unsafe fn create_hardware_queue(
                 Err(status) => return status,
             }
         };
-    // From CREATE onward firmware may retain both external addresses. Stage
-    // every allocation needed for public registration before that call so
-    // successful creation can be published without another allocation.
+    // From CREATE onward the command processor may retain both external
+    // addresses. Stage every allocation needed for public registration before
+    // that call so successful creation can be published without another
+    // allocation.
     if runtime.queues.try_reserve(1).is_err() {
         return OUT_OF_RESOURCES;
     }
@@ -863,7 +865,7 @@ unsafe fn create_hardware_queue(
     let saved_cu_mask = cu_mask.unwrap_or_default();
     let (native, (inactive_signal, scratch_allocation)) =
         match runtime.gpus[index].device.gpu().and_then(|gpu| {
-            // SAFETY: The supplied owner tuple retains the firmware event
+            // SAFETY: The supplied owner tuple retains the AQL event
             // signals and scratch backing through native creation and, on
             // success, remains with the queue until its destruction.
             unsafe {

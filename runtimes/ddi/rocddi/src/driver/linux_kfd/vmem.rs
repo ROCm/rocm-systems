@@ -25,8 +25,8 @@ use crate::memory::{
 };
 use crate::{Error, ErrorKind};
 
-use super::memory::{DeviceVm, error, native_error};
-use super::{drm, sys, uapi, util};
+use super::memory::DeviceVm;
+use super::{drm, errno, error, native_error, os_file, os_memory, uapi};
 
 /// Imported GEM handle shared by mappings of the same physical backing.
 struct ImportedGem {
@@ -78,7 +78,7 @@ impl VmState {
         }
         if self.syncobj != 0 {
             if let Err(source) = drm::destroy_syncobj(render, self.syncobj) {
-                self.syncobj_destroy_uncertain = source.raw_os_error() == Some(14);
+                self.syncobj_destroy_uncertain = source.raw_os_error() == Some(errno::EFAULT);
                 return Err(native_error("DRM sync object destruction", source));
             }
             self.syncobj = 0;
@@ -238,7 +238,7 @@ impl VmState {
 
 /// Owned virtual-address reservation with explicit release progress.
 pub(crate) struct KfdVirtualAddress {
-    reservation: Option<sys::Reservation>,
+    reservation: Option<os_memory::Reservation>,
     mapping_granularity: u64,
     uncertain: AtomicBool,
 }
@@ -252,7 +252,7 @@ impl KfdVirtualAddress {
         allocator: Allocator,
     ) -> Result<Owned<Self>, Error> {
         let desc = AllocationDesc { size, alignment };
-        let page = util::page_size()
+        let page = os_memory::page_size()
             .map_err(|source| native_error("virtual-address page size", source))?
             as u64;
         let limits = AllocationLimits {
@@ -280,7 +280,7 @@ impl KfdVirtualAddress {
         })?;
         let address = usize::try_from(address).unwrap_or(0);
         let owner = Owned::try_new_uninit(allocator)?;
-        let reservation = sys::Reservation::new_at(size, alignment, bounds, address)
+        let reservation = os_memory::Reservation::new_at(size, alignment, bounds, address)
             .map_err(|source| native_error("virtual-address reservation", source))?;
         Ok(owner.write(Self {
             reservation: Some(reservation),
@@ -350,7 +350,7 @@ impl Drop for KfdVirtualAddress {
 /// Physical KFD allocation or imported DMA-BUF backing for virtual mappings.
 pub(crate) struct KfdVirtualMemory {
     vm: Option<Shared<DeviceVm>>,
-    reservation: Option<sys::Reservation>,
+    reservation: Option<os_memory::Reservation>,
     handle: Option<u64>,
     dma_buf: Option<File>,
     info: VirtualMemoryInfo,
@@ -371,8 +371,8 @@ impl KfdVirtualMemory {
         pinned: bool,
         uncached: bool,
     ) -> Result<Owned<Self>, Error> {
-        let host_page =
-            util::page_size().map_err(|source| native_error("virtual-memory page size", source))?;
+        let host_page = os_memory::page_size()
+            .map_err(|source| native_error("virtual-memory page size", source))?;
         let page = host_page as u64;
         let desc = AllocationDesc {
             size,
@@ -411,7 +411,7 @@ impl KfdVirtualMemory {
         let allocator = vm.allocator();
         let owner = Owned::try_new_uninit(allocator)?;
         let reservation =
-            sys::Reservation::new(size_usize, host_page, vm.address_range(), false)
+            os_memory::Reservation::new(size_usize, host_page, vm.address_range(), false)
                 .map_err(|source| native_error("virtual-memory physical reservation", source))?;
         let mut memory = owner.write(Self {
             vm: Some(vm),
@@ -461,7 +461,7 @@ impl KfdVirtualMemory {
         memory.uncertain = result
             .as_ref()
             .err()
-            .is_some_and(|source| source.raw_os_error() == Some(14));
+            .is_some_and(|source| source.raw_os_error() == Some(errno::EFAULT));
         result.map_err(|source| native_error("AMDKFD_IOC_ALLOC_MEMORY_OF_GPU", source))?;
         let handle = memory.handle.ok_or_else(|| {
             memory.uncertain = true;
@@ -477,7 +477,7 @@ impl KfdVirtualMemory {
             .kfd()
             .export_dma_buf(handle)
             .map_err(|source| native_error("AMDKFD_IOC_EXPORT_DMABUF", source))?;
-        let file_info = util::dma_buf_file_info(&dma_buf)
+        let file_info = os_file::dma_buf_file_info(&dma_buf)
             .map_err(|source| native_error("virtual-memory DMA-BUF information", source))?;
         if file_info.size != size {
             return Err(error(
@@ -491,11 +491,11 @@ impl KfdVirtualMemory {
     }
 
     pub(super) fn import(descriptor: i32, allocator: Allocator) -> Result<Owned<Self>, Error> {
-        let dma_buf = util::duplicate_file(descriptor)
+        let dma_buf = os_file::duplicate_file(descriptor)
             .map_err(|source| native_error("virtual-memory descriptor duplication", source))?;
-        let file_info = util::dma_buf_file_info(&dma_buf)
+        let file_info = os_file::dma_buf_file_info(&dma_buf)
             .map_err(|source| native_error("virtual-memory DMA-BUF information", source))?;
-        let page = util::page_size()
+        let page = os_memory::page_size()
             .map_err(|source| native_error("virtual-memory page size", source))?
             as u64;
         Owned::new(
@@ -535,7 +535,7 @@ impl KfdVirtualMemory {
                 "virtual-memory handle lost its DMA-BUF",
             )
         })?;
-        let duplicate = util::duplicate_file(file.as_raw_fd())
+        let duplicate = os_file::duplicate_file(file.as_raw_fd())
             .map_err(|source| native_error("virtual-memory descriptor duplication", source))?;
         Ok(DmaBuf::new(
             duplicate.into(),
@@ -755,7 +755,7 @@ impl Drop for KfdVirtualDeviceMapping {
 
 /// Host mapping joining one address reservation to CPU-accessible backing.
 pub(crate) struct KfdVirtualHostMapping {
-    reservation: Option<sys::Reservation>,
+    reservation: Option<os_memory::Reservation>,
 }
 
 impl KfdVirtualHostMapping {
@@ -789,7 +789,7 @@ impl KfdVirtualHostMapping {
             )
         })?;
         let owner = Owned::try_new_uninit(allocator)?;
-        let mut reservation = sys::Reservation::view(address, size);
+        let mut reservation = os_memory::Reservation::view(address, size);
         reservation
             .map_dma_buf_with_permissions(memory.dma_buf()?, offset, permissions.bits())
             .map_err(|source| native_error("virtual-memory host map", source))?;

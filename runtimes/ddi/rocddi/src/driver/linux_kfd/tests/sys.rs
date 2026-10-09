@@ -10,28 +10,6 @@ use std::os::fd::{AsRawFd, IntoRawFd};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-#[test]
-fn wrapping_index_snapshot_returns_a_stable_window() {
-    let mut writes = [7_u64, 8, 8, 8].into_iter();
-    let progress = sample_wrapping_indices(7, || writes.next().unwrap(), || 0).unwrap();
-    assert_eq!(progress, (8, 8));
-}
-
-#[test]
-fn wrapping_index_snapshot_stops_when_producer_never_pauses() {
-    let mut write = 0_u64;
-    let result = sample_wrapping_indices(
-        7,
-        || {
-            write += 1;
-            write
-        },
-        || 0,
-    );
-    assert_eq!(result.unwrap_err().kind(), io::ErrorKind::WouldBlock);
-    assert_eq!(write, (MAX_WRAPPING_INDEX_SAMPLES * 2) as u64);
-}
-
 fn endpoint(hook: IoctlHook) -> Kfd {
     Kfd::with_hook(File::open("/dev/null").unwrap(), hook)
 }
@@ -249,7 +227,7 @@ fn dma_buf_metadata_size_is_retried_with_owned_storage() {
         if observed.fetch_add(1, Ordering::Relaxed) == 0 {
             assert!(metadata.is_empty());
             args.metadata_size = 4;
-            Err(io::Error::from_raw_os_error(22))
+            Err(io::Error::from_raw_os_error(errno::EINVAL))
         } else {
             assert_eq!(metadata.len(), 4);
             metadata.copy_from_slice(&[1, 2, 3, 4]);
@@ -272,7 +250,7 @@ fn export_owns_the_returned_descriptor_on_success_and_failure() {
     use std::io::Read;
     use std::os::unix::net::UnixStream;
 
-    for errno in [None, Some(5)] {
+    for errno in [None, Some(errno::EIO)] {
         let (mut observer, returned_stream) = UnixStream::pair().unwrap();
         observer.set_nonblocking(true).unwrap();
         let returned = returned_stream.into_raw_fd();
@@ -381,7 +359,7 @@ fn ipc_import_preserves_kernel_outputs_on_failure() {
         args.handle = 17;
         args.mmap_offset = 0x20000;
         args.flags = uapi::GTT | uapi::WRITABLE;
-        Err(io::Error::from_raw_os_error(12))
+        Err(io::Error::from_raw_os_error(errno::ENOMEM))
     }));
     let mut args = uapi::IpcImportHandle {
         va_addr: 0x10000,
@@ -391,7 +369,7 @@ fn ipc_import_preserves_kernel_outputs_on_failure() {
     };
     assert_eq!(
         kfd.import_ipc_handle(&mut args).unwrap_err().raw_os_error(),
-        Some(12)
+        Some(errno::ENOMEM)
     );
     assert_eq!(args.handle, 17);
     assert_eq!(args.mmap_offset, 0x20000);
@@ -475,7 +453,7 @@ fn spm_preserves_the_complete_kernel_record() {
         args.timeout = 7;
         args.bytes_copied = 4096;
         args.has_data_loss = 2;
-        Err(io::Error::from_raw_os_error(5))
+        Err(io::Error::from_raw_os_error(errno::EIO))
     }));
     let mut args = uapi::Spm {
         destination: 0x10_000,
@@ -486,7 +464,10 @@ fn spm_preserves_the_complete_kernel_record() {
         bytes_copied: 0,
         has_data_loss: 0,
     };
-    assert_eq!(kfd.spm(&mut args).unwrap_err().raw_os_error(), Some(5));
+    assert_eq!(
+        kfd.spm(&mut args).unwrap_err().raw_os_error(),
+        Some(errno::EIO)
+    );
     assert_eq!(args.timeout, 7);
     assert_eq!(args.bytes_copied, 4096);
     assert_eq!(args.has_data_loss, 2);
@@ -526,7 +507,7 @@ fn mapping_retries_preserve_zero_partial_and_full_prefixes() {
                 if observed.fetch_add(1, Ordering::Relaxed) == 0 {
                     assert_eq!(args.success, 0);
                     args.success = progress;
-                    Err(io::Error::from_raw_os_error(4))
+                    Err(io::Error::from_raw_os_error(errno::EINTR))
                 } else {
                     assert_eq!(args.success, progress);
                     args.success = 3;
@@ -538,7 +519,7 @@ fn mapping_retries_preserve_zero_partial_and_full_prefixes() {
                 kfd.transfer(17, &[42, 53, 64], &mut completed, map)
                     .unwrap_err()
                     .raw_os_error(),
-                Some(4)
+                Some(errno::EINTR)
             );
             assert_eq!(completed, progress);
             assert_eq!(
@@ -564,7 +545,7 @@ fn malformed_prefixes_and_aperture_counts_are_rejected() {
             if succeeds {
                 Ok(())
             } else {
-                Err(io::Error::from_raw_os_error(5))
+                Err(io::Error::from_raw_os_error(errno::EIO))
             }
         }));
         let mut completed = initial;
@@ -695,7 +676,7 @@ fn unsupported_exception_type_is_rejected_before_the_ioctl() {
 }
 
 #[test]
-fn forked_endpoints_and_reservations_reject_native_work() {
+fn forked_endpoint_rejects_native_work() {
     let mut kfd = endpoint(Arc::new(|_| panic!("child reached ioctl")));
     kfd.process = std::process::id().wrapping_add(1);
     assert_eq!(
@@ -719,23 +700,6 @@ fn forked_endpoints_and_reservations_reject_native_work() {
             .kind(),
         io::ErrorKind::Unsupported
     );
-    let page = page_size().unwrap();
-    let mut reservation = Reservation::new(page, page * 4, (0, u64::MAX), false).unwrap();
-    assert_eq!(reservation.address() % (page * 4), 0);
-    let length = reservation.length;
-    reservation.process = kfd.process;
-    assert_eq!(
-        reservation.release().unwrap_err().kind(),
-        io::ErrorKind::Unsupported
-    );
-    assert_eq!(reservation.length, length);
-    reservation.process = std::process::id();
-    reservation.fail_release_once(12);
-    assert!(reservation.release().is_err());
-    assert_eq!(reservation.length, length);
-    reservation.release().unwrap();
-    assert_eq!(reservation.length, 0);
-    reservation.release().unwrap();
 }
 
 #[test]
@@ -749,94 +713,6 @@ fn doorbell_mmap_preserves_kfds_high_type_bits() {
     // Rejecting it during signed integer conversion loses valid KFD offsets.
     assert!(error.raw_os_error().is_some());
     assert_ne!(error.kind(), io::ErrorKind::InvalidData);
-}
-
-#[test]
-fn render_mapping_replaces_only_the_owned_usable_extent() {
-    use std::os::unix::fs::FileExt;
-    let page = page_size().unwrap();
-    let path = std::env::temp_dir().join(format!("rocddi-render-map-{}", std::process::id()));
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .unwrap();
-    std::fs::remove_file(&path).unwrap();
-    file.set_len(page as u64).unwrap();
-    file.write_all_at(&[0x5a], 0).unwrap();
-    let mut reservation = Reservation::new(page, page * 4, (0, u64::MAX), false).unwrap();
-    let base = reservation.base;
-    let length = reservation.length;
-    reservation.map_render(&file, 0).unwrap();
-    assert_eq!(reservation.base, base);
-    assert_eq!(reservation.length, length);
-    assert!(reservation.address >= base && reservation.address + page <= base + length);
-    // SAFETY: The live writable file mapping covers this byte and no other
-    // thread uses the private file. No Rust reference aliases the mapped bytes.
-    unsafe {
-        let byte = reservation.address as *mut u8;
-        assert_eq!(byte.read_volatile(), 0x5a);
-        byte.write_volatile(0xa5);
-    }
-    reservation.release().unwrap();
-    let mut bytes = [0];
-    file.read_exact_at(&mut bytes, 0).unwrap();
-    assert_eq!(bytes, [0xa5]);
-}
-
-#[test]
-fn inaccessible_view_restores_its_parent_reservation() {
-    let page = page_size().unwrap();
-    let path = std::env::temp_dir().join(format!(
-        "rocddi-inaccessible-render-map-{}",
-        std::process::id()
-    ));
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .unwrap();
-    std::fs::remove_file(&path).unwrap();
-    file.set_len(page as u64).unwrap();
-    let parent = Reservation::new(page * 2, page, (0, u64::MAX), false).unwrap();
-    let mut view = Reservation::view(parent.address(), page);
-
-    view.map_render_inaccessible(&file, 0).unwrap();
-    assert_eq!(view.length, page);
-    assert!(!view.writable);
-    view.release().unwrap();
-    assert_eq!(view.length, 0);
-
-    drop(view);
-    drop(parent);
-}
-
-#[test]
-fn requested_virtual_address_falls_back_without_replacing_live_memory() {
-    let page = page_size().unwrap();
-    let occupied = Reservation::new(page, page, (0, u64::MAX), false).unwrap();
-    let requested = occupied.address();
-    let fallback = Reservation::new_at(page, page, (0, u64::MAX), requested).unwrap();
-
-    assert_ne!(fallback.address(), requested);
-    assert_eq!(occupied.address(), requested);
-}
-
-#[test]
-fn virtual_host_mapping_rejects_unknown_permission_bits() {
-    let page = page_size().unwrap();
-    let parent = Reservation::new(page, page, (0, u64::MAX), false).unwrap();
-    let file = File::open("/dev/zero").unwrap();
-    let mut view = Reservation::view(parent.address(), page);
-
-    assert_eq!(
-        view.map_dma_buf_with_permissions(&file, 0, 4)
-            .unwrap_err()
-            .kind(),
-        io::ErrorKind::InvalidInput
-    );
 }
 
 #[test]
@@ -941,7 +817,7 @@ fn ambiguous_secondary_selection_requires_descriptor_teardown() {
         }
         Call::CreateProcess(_) => {
             observed.fetch_add(1, Ordering::Relaxed);
-            Err(io::Error::from_raw_os_error(5))
+            Err(io::Error::from_raw_os_error(errno::EIO))
         }
         _ => panic!("ambiguous selection replayed or touched runtime"),
     }));
@@ -949,7 +825,7 @@ fn ambiguous_secondary_selection_requires_descriptor_teardown() {
         kfd.prepare_context(DriverContextLifetime::Session)
             .unwrap_err()
             .raw_os_error(),
-        Some(5)
+        Some(errno::EIO)
     );
     assert_eq!(
         kfd.prepare_context(DriverContextLifetime::Session)
@@ -1002,15 +878,18 @@ fn interrupted_runtime_enable_and_failed_disable_preserve_retry_state() {
         };
         let call = observed.fetch_add(1, Ordering::Relaxed);
         match (call, args.mode_mask) {
-            (0, 1) => Err(io::Error::from_raw_os_error(4)),
+            (0, 1) => Err(io::Error::from_raw_os_error(errno::EINTR)),
             (1, 1) | (3, 0) => Ok(()),
-            (2, 0) => Err(io::Error::from_raw_os_error(5)),
+            (2, 0) => Err(io::Error::from_raw_os_error(errno::EIO)),
             _ => panic!("unexpected runtime retry"),
         }
     }));
-    assert_eq!(kfd.enable_runtime().unwrap_err().raw_os_error(), Some(4));
+    assert_eq!(
+        kfd.enable_runtime().unwrap_err().raw_os_error(),
+        Some(errno::EINTR)
+    );
     kfd.enable_runtime().unwrap();
-    assert_eq!(kfd.close().unwrap_err().raw_os_error(), Some(5));
+    assert_eq!(kfd.close().unwrap_err().raw_os_error(), Some(errno::EIO));
     assert!(kfd.file.is_some());
     kfd.close().unwrap();
     assert!(kfd.file.is_none());
@@ -1050,12 +929,15 @@ fn ambiguous_runtime_enable_requires_cleanup_without_replaying_enable() {
         };
         observed.lock().unwrap().push(args.mode_mask);
         match args.mode_mask {
-            1 => Err(io::Error::from_raw_os_error(5)),
+            1 => Err(io::Error::from_raw_os_error(errno::EIO)),
             0 => Ok(()),
             _ => panic!("invalid runtime mode"),
         }
     }));
-    assert_eq!(kfd.enable_runtime().unwrap_err().raw_os_error(), Some(5));
+    assert_eq!(
+        kfd.enable_runtime().unwrap_err().raw_os_error(),
+        Some(errno::EIO)
+    );
     assert_eq!(
         kfd.enable_runtime().unwrap_err().kind(),
         io::ErrorKind::InvalidData
