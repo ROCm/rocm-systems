@@ -14,8 +14,9 @@
 #include "NetIbMultiSegmentHelpers.hpp"
 #include "MPIHelpers.hpp"
 
-#include "../../../src/transport/net_ib/multiseg.h"
+#include "transport/net_ib/multiseg.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -129,6 +130,8 @@ protected:
             PostSingleRecv(pair.recvComm, buf, size, tag, recvMh_, &req);
             int sz = 0;
             EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
+            EXPECT_EQ(sz, static_cast<int>(size))
+                << "reported recv size srcOff=" << srcOff << " dstOff=" << dstOff;
         } else {
             FillDevice(static_cast<uint8_t*>(sBuf) + srcOff, size, seed);
             void* buf = static_cast<uint8_t*>(sBuf) + srcOff;
@@ -214,6 +217,31 @@ protected:
             return false;
         }
         return true;
+    }
+
+    // SetupConnection pairs ranks 0 and 1 only; this connects any listener/peer pair.
+    ncclResult_t ConnectAsPair(int dev, ConnectionPair& pair, bool listener, int peer) {
+        const int maxAttempts = kConnectTimeoutMs / kPollIntervalMs;
+        if (listener) {
+            const ncclResult_t r = CreateListenComm(dev, &pair.handle, &pair.listenComm);
+            MPI_Send(&pair.handle, sizeof(pair.handle), MPI_BYTE, peer, 0, MPI_COMM_WORLD);
+            if (r != ncclSuccess) return r;
+            for (int i = 0; pair.recvComm == nullptr; i++) {
+                if (i >= maxAttempts) return ncclInternalError;
+                const ncclResult_t a = AcceptConnection(pair.listenComm, &pair.recvComm);
+                if (a != ncclSuccess) return a;
+                if (pair.recvComm == nullptr) usleep(kPollIntervalUs);
+            }
+            return ncclSuccess;
+        }
+        MPI_Recv(&pair.handle, sizeof(pair.handle), MPI_BYTE, peer, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        for (int i = 0; pair.sendComm == nullptr; i++) {
+            if (i >= maxAttempts) return ncclInternalError;
+            const ncclResult_t c = ConnectToRemote(dev, &pair.handle, &pair.sendComm);
+            if (c != ncclSuccess) return c;
+            if (pair.sendComm == nullptr) usleep(kPollIntervalUs);
+        }
+        return ncclSuccess;
     }
 
     std::string            skipReason_;
@@ -336,6 +364,37 @@ TEST_F(NetIbMultiSegmentMPITest, ExceedsMaxSegmentsRejected) {
 #if NCCL_CUMEM_DMABUF_EXPORT_GATE
     EXPECT_EQ(r, ncclInvalidUsage) << "over-cap segment buffer must be rejected";
     EXPECT_EQ(mh, nullptr) << "no handle should be produced for an over-cap buffer";
+#else
+    (void)r;
+    GTEST_SKIP() << "dma-buf export API unavailable at build time";
+#endif
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// OFF SWITCH: with NCCL_MULTI_SEGMENT_REGISTER=0 neither side advertises the CTS side table,
+// so a multi-segment registration is declined and the caller falls back to staging.
+TEST_F(NetIbMultiSegmentMPITest, MultiSegmentRegisterOff_DeclinesRegistration) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                            false, kMinGpusPerNode, kNoNodeLimit);
+    if (SyncSkip(MPIHelpers::getEnvParam<int>("NCCL_MULTI_SEGMENT_REGISTER", 1) != 0))
+        GTEST_SKIP() << "Requires NCCL_MULTI_SEGMENT_REGISTER=0";
+    int ndev = 0; AssertInitAndGetDevices(&ndev);
+    if (SyncSkip(!PtrSupported(NCCL_PTR_DMABUF))) GTEST_SKIP() << "DMA-BUF registration not supported";
+
+    const int rank = MPIEnvironment::world_rank;
+    MultiSegmentVmmBuffer* buf = AllocSym(kNumSegments);
+    if (SyncSkip(buf == nullptr)) GTEST_SKIP() << "multi-segment VMM allocation unavailable";
+
+    ConnectionPair pair; NetConnectionGuard guard(net_);
+    ASSERT_SETUP_CONNECTION(0, pair, guard);
+    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+
+    void* mh = nullptr;
+    ncclResult_t r = RegisterMultiSegmentMr(comm, *buf, &mh);
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
+    EXPECT_EQ(r, ncclInvalidUsage) << "NCCL_MULTI_SEGMENT_REGISTER=0 still registered a multi-segment buffer";
+    EXPECT_EQ(mh, nullptr);
+    if (mh != nullptr) (void)net_->deregMr(comm, mh);
 #else
     (void)r;
     GTEST_SKIP() << "dma-buf export API unavailable at build time";
@@ -522,7 +581,8 @@ TEST_F(NetIbMultiSegmentMPITest, MultiRecvMixesSingleAndMultiSegmentHandles) {
 
     const size_t chunk = 64 * 1024;
     void* singleBuf = static_cast<uint8_t*>(single->ptr) + chunk;
-    void* multiBuf  = static_cast<uint8_t*>(multi->ptr) + multi->segSize - chunk / 2; // crosses seg0/seg1
+    // Starts in seg1 so a flush through segment 0's MR faults.
+    void* multiBuf  = static_cast<uint8_t*>(multi->ptr) + 2 * multi->segSize - chunk / 2; // crosses seg1/seg2
     const int rank = MPIEnvironment::world_rank;
 
     for (int order = 0; order < 2; order++) {
@@ -542,9 +602,11 @@ TEST_F(NetIbMultiSegmentMPITest, MultiRecvMixesSingleAndMultiSegmentHandles) {
             int flushSizes[2] = {static_cast<int>(chunk), static_cast<int>(chunk)};
             void* flushReq = nullptr;
             EXPECT_EQ(FlushRecv(pair.recvComm, 2, bufs, flushSizes, handles, &flushReq), ncclSuccess);
+            if (directGdrFlushEnabled())
+                EXPECT_NE(flushReq, nullptr) << "GDR flush is enabled; iflush must return a request";
             if (flushReq != nullptr) {
                 int flushSize = 0;
-                EXPECT_EQ(WaitForCompletion(flushReq, &flushSize, kDefaultTimeoutMs), ncclSuccess);
+                EXPECT_EQ(WaitForCompletion(flushReq, &flushSize, kDefaultTimeoutMs), ncclSuccess) << "order " << order;
             }
             for (int i = 0; i < 2; i++)
                 EXPECT_TRUE(VerifyDevice(bufs[i], chunk, seeds[i])) << "order " << order << " entry " << i;
@@ -719,6 +781,73 @@ TEST_F(NetIbMultiSegmentMPITest, SendQueueFatChainOversubscribe) {
         }
     }
     MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// SCALE: rank r < N/2 receives from r + N/2, a rank on the other node under the
+// runner's ppr layout. All pairs move chunks across every boundary at once.
+TEST_F(NetIbMultiSegmentMPITest, ConcurrentPairsMoveEverySegmentBoundary) {
+    if (!validateTestPrerequisites(kExactTwoProcesses, MPITestConstants::kNoProcessLimit,
+                                   false, kMinGpusPerNode, kNoNodeLimit))
+        GTEST_SKIP() << "MPI process prerequisites not met; see rank-0 output";
+    const int rank = MPIEnvironment::world_rank;
+    const int half = MPIEnvironment::world_size / 2;
+    if (SyncSkip(MPIEnvironment::world_size % 2 != 0)) GTEST_SKIP() << "needs an even number of ranks";
+    int ndev = 0; AssertInitAndGetDevices(&ndev);
+    if (SyncSkip(!PtrSupported(NCCL_PTR_DMABUF))) GTEST_SKIP() << "DMA-BUF registration not supported";
+#if !NCCL_CUMEM_DMABUF_EXPORT_GATE
+    GTEST_SKIP() << "dma-buf export API unavailable at build time";
+#endif
+    MultiSegmentVmmBuffer* buf = AllocSym(kNumSegments);
+    if (SyncSkip(buf == nullptr)) GTEST_SKIP() << "multi-segment VMM allocation unavailable";
+
+    const bool receiver = rank < half;
+    const int peer = receiver ? rank + half : rank - half;
+    const int dev = (rank % half) % std::max(1, GetPhysicalDeviceCount());
+    ConnectionPair pair; NetConnectionGuard guard(net_);
+    const bool connected = ConnectAsPair(dev, pair, receiver, peer) == ncclSuccess;
+    if (receiver) {
+        guard.setRecvComm(pair.recvComm);
+        guard.setListenComm(pair.listenComm);
+    } else {
+        guard.setSendComm(pair.sendComm);
+    }
+    EXPECT_TRUE(connected) << "pair " << rank << "<->" << peer;
+    if (!MPIHelpers::allRanksTrue(connected)) {
+        if (connected) ADD_FAILURE() << "connection failed on a peer rank";
+        return;
+    }
+    void* comm = receiver ? pair.recvComm : pair.sendComm;
+    void* mh = nullptr;
+    EXPECT_EQ(RegisterMultiSegmentMr(comm, *buf, &mh), ncclSuccess);
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+    if (!MPIHelpers::allRanksTrue(mh != nullptr)) {
+        if (mh != nullptr) ADD_FAILURE() << "multi-segment registration failed on a peer rank";
+        return;
+    }
+
+    const size_t chunk = buf->segSize / 4;
+    const uint8_t pairSeed = static_cast<uint8_t>(0x40 + 7 * (receiver ? rank : peer));
+    for (int s = 1; s < kNumSegments; s++) {
+        const size_t off = (size_t)s * buf->segSize - chunk / 2;
+        uint8_t* p = static_cast<uint8_t*>(buf->ptr) + off;
+        const uint8_t seed = static_cast<uint8_t>(pairSeed + s);
+        void* req = nullptr;
+        int sz = 0;
+        // No ASSERTs here: a rank returning early would hang the final allRanksTrue.
+        if (receiver) {
+            FillDeviceConstant(buf->ptr, buf->totalSize, 0xEE);
+            PostSingleRecv(pair.recvComm, p, chunk, 700 + s, mh, &req);
+            EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
+            EXPECT_EQ(sz, static_cast<int>(chunk)) << "reported size at boundary " << s;
+            EXPECT_TRUE(VerifyDevice(p, chunk, seed)) << "boundary " << s << " from rank " << peer;
+            EXPECT_TRUE(VerifyDeviceConstant(buf->ptr, off, 0xEE)) << "bytes before boundary " << s;
+        } else {
+            FillDevice(p, chunk, seed);
+            PostSendWithRetry(pair.sendComm, p, chunk, 700 + s, mh, &req);
+            EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
+        }
+    }
+    EXPECT_TRUE(MPIHelpers::allRanksTrue(!HasFailure())) << "a pair failed; see that rank's output";
 }
 
 #endif // MPI_TESTS_ENABLED

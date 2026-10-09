@@ -398,17 +398,8 @@ struct alignas(8) ncclIbSendCommDev {
   struct ibv_sge sge;
 };
 
-// NCCL_IB_MAX_SEGMENTS (cap on physical segments per registered buffer) is
-// defined in multiseg.h so the wire-protocol structs above and the pure helpers
-// can both reference it.
-//
-// Wrapper to track an MR per-device, if needed.
-//
-// Single-segment buffers (the common case) use only mrs[]; nSegments == 1.
-// Multi-segment cuMem/VMM buffers register one dma-buf MR per physical segment
-// per device; segStart/segLen describe the segment VA layout and segMrs holds
-// the per-segment, per-device MRs. mrs[] aliases segment 0 for compatibility
-// with the single-segment fast path.
+// Wrapper to track an MR per-device, if needed
+// RCCL: multi-segment buffers add one MR per segment; mrs[] aliases segment 0.
 struct ncclIbMrHandle {
   ibv_mr* mrs[NCCL_IB_MAX_DEVS_PER_NIC];
   int nSegments;                             // 1 = legacy single MR
@@ -416,17 +407,6 @@ struct ncclIbMrHandle {
   size_t segLen[NCCL_IB_MAX_SEGMENTS];       // bytes per segment
   ibv_mr* segMrs[NCCL_IB_MAX_SEGMENTS][NCCL_IB_MAX_DEVS_PER_NIC];
 };
-
-// Select the MR covering [addr, addr+len) for device devIndex.
-// - Single-segment handles return the legacy mrs[devIndex].
-// - Multi-segment handles return the containing segment's MR, or NULL if the
-//   range is not fully contained in one physical segment.
-static inline ibv_mr* ncclIbMrForRange(const struct ncclIbMrHandle* h, uintptr_t addr, size_t len, int devIndex) {
-  if (h == NULL) return NULL;
-  if (h->nSegments <= 1) return h->mrs[devIndex];
-  int s = ncclIbSegmentIndexForRange(h->nSegments, h->segStart, h->segLen, addr, len);
-  return (s < 0) ? NULL : h->segMrs[s][devIndex];
-}
 
 // Forward declaration
 struct ncclIbResiliency;
@@ -635,13 +615,6 @@ static_assert(offsetof(struct ncclIbSendComm, segLayoutFifo) ==
               "segLayoutFifo must immediately follow ctsFifo for a covering MR");
 static_assert((offsetof(struct ncclIbSendComm, sges) % 32) == 0, "sges must be 32-byte aligned");
 static_assert((offsetof(struct ncclIbSendComm, wrs) % 32) == 0, "wrs must be 32-byte aligned");
-
-static inline bool ncclIbCtsRemoteMultiSeg(const struct ncclIbSendComm* comm, int slot, int r) {
-  const volatile struct ncclIbSendFifo* cts = &comm->ctsFifo[slot][r];
-  const volatile struct ncclIbSegLayout* side = &comm->segLayoutFifo[slot][r];
-  return (comm->peerCaps & NCCL_IB_CAP_MULTISEG) && ncclIbCtsHasSideTable(cts->nreqs) && side->idx == cts->idx &&
-         side->nSegments > 1;
-}
 
 struct ncclIbGpuFlush {
   struct ibv_mr* hostMr;
