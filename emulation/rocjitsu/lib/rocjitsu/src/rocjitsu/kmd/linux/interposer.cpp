@@ -3027,6 +3027,10 @@ public:
     // its dmabuf fd, and the importer checks that metadata later.
     if (auto *drv = identified ? drm_file_simulated(drm_file) : nullptr)
       gem.object = drv->retain_bo_state(st, gem.object);
+    // The dmabuf fd is a reference to the buffer too: a KFD export has none of the
+    // state a PRIME export retains, and the allocation may be freed while the fd lives.
+    if (identified)
+      exported_gem_objects_[dmabuf_fd] = gem.object;
     // hsaKmtMemoryGetCpuAddr follows a prime import with GEM_MMAP. A zero offset
     // is "no mapping" and that call fails the VMM handle create.
     const uint64_t map_bytes = (size + 4095) & ~uint64_t{4095};
