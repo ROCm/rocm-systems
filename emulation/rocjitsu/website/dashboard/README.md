@@ -23,6 +23,6 @@ Open `http://localhost:4174`. This preview uses fictional test data, not product
 - [Website and publication](docs/architecture-and-publication.md): source map, deployment, data fetching, publishing workflows, and immutability.
 - [Schema 1](docs/schema-1.md): legacy JSON layout.
 - [Schema 2](docs/schema-2.md): current JSON layout and field constraints.
-- [Schema migration](docs/schema-migration.md): version detection, exclusions, and MT mapping.
+- [Schema migration](docs/schema-migration.md): version detection, exclusions, and per-target ST/MT mapping.
 - [Test fixtures](tests/fixtures/README.md): fictional datasets and test cases.
 - [Publishing setup](../handbook/README.md#verification-and-publishing): GitHub App credentials and Pages configuration.

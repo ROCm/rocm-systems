@@ -36,15 +36,22 @@ if (isExcludedPluginRun(run)) {
 ```text
 schema 1                              schema 2
 run.targets[].id                   →  run.configurations[].target
-(no threading mode)                →  run.configurations[].threadingMode = "MT"
+target.<id>.numThreads = 1         →  run.configurations[].threadingMode = "ST"
+target.<id>.numThreads > 1         →  run.configurations[].threadingMode = "MT"
+missing target-specific fact       →  "MT" compatibility fallback
 run.targets[].results              →  run.configurations[].results (unchanged)
-catalog.targets["gfx950"]          →  catalog.configurations["gfx950:MT"]
+catalog.targets["gfx950"]          →  catalog.configurations["gfx950:<mode>"]
 missing schemaVersion, or 1         →  schemaVersion: 2
 comparisonId, plugin                →  absent from migrated run
 ```
 
 ```js
-// Core transformation after legacy validation:
+// Core transformation after legacy validation. `legacyMode` reads the exact
+// target.<id>.numThreads fact, maps 1 to ST and larger positive integers to MT,
+// falls back to MT when the fact is absent, and rejects duplicate or invalid facts.
+const modes = Object.fromEntries(
+  run.targets.map(({ id }) => [id, legacyMode(run.environment, id)]),
+);
 const patchedRun = {
   schemaVersion: 2,
   id: run.id,
@@ -53,14 +60,16 @@ const patchedRun = {
   execution: run.execution,
   environment: run.environment,
   configurations: run.targets.map(({ id, results }) => ({
-    target: id, threadingMode: "MT", results,
+    target: id, threadingMode: modes[id], results,
   })),
 };
 const patchedCatalog = {
   id: catalog.id,
   tests: catalog.tests,
   configurations: Object.fromEntries(
-    Object.entries(catalog.targets).map(([target, ids]) => [`${target}:MT`, ids]),
+    Object.entries(catalog.targets).map(
+      ([target, ids]) => [`${target}:${modes[target]}`, ids],
+    ),
   ),
 };
 ```

@@ -30,6 +30,22 @@ export function runSchemaVersion(run) {
   return version;
 }
 
+function schema1ThreadingMode(run, target) {
+  const key = `target.${target}.numThreads`;
+  const facts = Array.isArray(run.environment)
+    ? run.environment.filter((fact) => fact?.key === key)
+    : [];
+  if (facts.length === 0) return 'MT';
+  if (facts.length !== 1) {
+    throw new Error(`Run ${run.id} environment ${key} must appear exactly once`);
+  }
+  const threads = facts[0].value;
+  if (!Number.isInteger(threads) || threads <= 0) {
+    throw new Error(`Run ${run.id} environment ${key} must be a positive integer`);
+  }
+  return threads === 1 ? 'ST' : 'MT';
+}
+
 export function migrateSchema1Run(run, catalog) {
   if (!text(run.comparisonId) || !text(run.plugin?.name) || !Array.isArray(run.targets)
     || run.targets.length === 0 || Object.hasOwn(run, 'configurations')
@@ -48,16 +64,16 @@ export function migrateSchema1Run(run, catalog) {
       throw new Error(`Run ${run.id} has invalid schema-1 results`);
     }
   }
-  // Legacy measurements are MT
+  const modes = Object.fromEntries(targets.map((target) => [target, schema1ThreadingMode(run, target)]));
   return {
     run: {
       schemaVersion: 2, id: run.id, testCatalog: run.testCatalog,
       source: run.source, execution: run.execution, environment: run.environment,
-      configurations: run.targets.map(({ id, results }) => ({ target: id, threadingMode: 'MT', results })),
+      configurations: run.targets.map(({ id, results }) => ({ target: id, threadingMode: modes[id], results })),
     },
     catalog: {
       id: catalog.id, tests: catalog.tests,
-      configurations: Object.fromEntries(Object.entries(catalog.targets).map(([target, ids]) => [`${target}:MT`, ids])),
+      configurations: Object.fromEntries(Object.entries(catalog.targets).map(([target, ids]) => [`${target}:${modes[target]}`, ids])),
     },
   };
 }

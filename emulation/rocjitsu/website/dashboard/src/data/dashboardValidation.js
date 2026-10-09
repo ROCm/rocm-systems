@@ -72,6 +72,26 @@ function validateCatalog(catalog, file) {
   return catalog;
 }
 
+function mergeCatalogConfigurations(file, previous, current) {
+  if (!previous) return current;
+  if (previous.id !== current.id || identity(previous.tests) !== identity(current.tests)) {
+    throw new Error(`Test catalog ${file} has inconsistent migrated definitions`);
+  }
+  const configurations = new Map(Object.entries(previous.configurations));
+  for (const [key, members] of Object.entries(current.configurations)) {
+    if (configurations.has(key) && !sameSet(configurations.get(key), members)) {
+      throw new Error(`Test catalog ${file} has conflicting migrated configuration ${key}`);
+    }
+    configurations.set(key, members);
+  }
+  return {
+    ...current,
+    configurations: Object.fromEntries(
+      [...configurations].sort(([left], [right]) => left.localeCompare(right)),
+    ),
+  };
+}
+
 export function validatePublishedResult(result) {
   if (!object(result) || !hasText(result.testId)) throw new Error('Result must contain a testId');
   const removed = ['exitCode', 'findings'].find((key) => Object.hasOwn(result, key));
@@ -174,7 +194,12 @@ export function validatePublishedDashboardData({ index, runs, runErrors = [], ca
       if (migrated.run.schemaVersion !== CURRENT_RUN_SCHEMA_VERSION) {
         throw new Error(`Run ${sourceRun.id} has no migration from schema ${version} to requested schema ${CURRENT_RUN_SCHEMA_VERSION}`);
       }
-      const catalog = validateCatalog(migrated.catalog, catalogFile);
+      const validatedCatalog = validateCatalog(migrated.catalog, catalogFile);
+      const catalog = version === 1
+        ? mergeCatalogConfigurations(
+          catalogFile, normalizedCatalogs.get(catalogFile), validatedCatalog,
+        )
+        : validatedCatalog;
       normalizedCatalogs.set(catalogFile, catalog);
       normalizedRuns.push(normalizeRun(migrated.run, catalog, index.generatedAt));
     } catch (error) { failures.push(`- ${file}: ${error.message}`); }

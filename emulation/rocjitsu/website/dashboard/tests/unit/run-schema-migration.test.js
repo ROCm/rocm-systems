@@ -28,6 +28,30 @@ test('new runs declare their own schema and use branch-class directories without
   expect(sourceData).toEqual(source);
 });
 
+test('schema-2 runs sharing a catalog preserve its published configuration order', () => {
+  const source = publication();
+  const run = source.runs[0];
+  const catalogFile = run.testCatalog;
+  const catalog = source.catalogs[catalogFile];
+  run.configurations = [
+    { target: 'gfx950', threadingMode: 'ST', results: structuredClone(run.configurations[0].results) },
+    ...run.configurations,
+  ];
+  catalog.configurations = {
+    'gfx950:ST': ['a'],
+    'gfx950:MT': ['a'],
+  };
+  const second = structuredClone(run);
+  second.id = 'second-run';
+  source.runs.push(second);
+  source.index.runFiles.push('runs/default-branch/second-run.json');
+  const { data } = validatePublishedDashboardData(source);
+  expect(Object.keys(data.catalogs[catalogFile].configurations)).toEqual([
+    'gfx950:ST',
+    'gfx950:MT',
+  ]);
+});
+
 function legacyPublication() {
   const source = publication();
   const run = source.runs[0];
@@ -43,7 +67,7 @@ function legacyPublication() {
   return source;
 }
 
-test.each([true, false])('schema-1 Vanilla migrates target groups to MT and preserves raw input (declared=%s)', (declared) => {
+test.each([true, false])('schema-1 Vanilla falls back to MT without thread-count provenance and preserves raw input (declared=%s)', (declared) => {
   const source = legacyPublication();
   if (!declared) delete source.runs[0].schemaVersion;
   const before = structuredClone(source);
@@ -53,6 +77,73 @@ test.each([true, false])('schema-1 Vanilla migrates target groups to MT and pres
   expect(data.catalogs['test-catalogs/current.json'].configurations).toEqual({ 'gfx950:MT': ['a'] });
   expect(sourceData).toEqual(before);
   expect(source).toEqual(before);
+});
+
+test('schema-1 migration uses recorded per-target thread counts and preserves raw input', () => {
+  const source = legacyPublication();
+  const run = source.runs[0];
+  const catalog = source.catalogs[run.testCatalog];
+  run.environment = [
+    { key: 'target.gfx950.numThreads', label: 'target.gfx950.numThreads', value: 1 },
+    { key: 'target.gfx1250.numThreads', label: 'target.gfx1250.numThreads', value: 8 },
+  ];
+  run.targets.push({ id: 'gfx1250', results: structuredClone(run.targets[0].results) });
+  catalog.targets.gfx1250 = ['a'];
+  const before = structuredClone(source);
+  const { data, sourceData } = validatePublishedDashboardData(source);
+  expect(data.runs[0].tests).toEqual(expect.arrayContaining([
+    expect.objectContaining({ testId: 'gfx950:ST:a', target: 'gfx950', mode: 'ST' }),
+    expect.objectContaining({ testId: 'gfx1250:MT:a', target: 'gfx1250', mode: 'MT' }),
+  ]));
+  expect(data.catalogs[run.testCatalog].configurations).toEqual({
+    'gfx950:ST': ['a'],
+    'gfx1250:MT': ['a'],
+  });
+  expect(sourceData).toEqual(before);
+  expect(source).toEqual(before);
+});
+
+test.each([
+  [1, 8],
+  [8, 1],
+])('schema-1 runs sharing a catalog preserve ST and MT memberships regardless of order (%s then %s)', (firstThreads, secondThreads) => {
+  const source = legacyPublication();
+  const catalogFile = source.runs[0].testCatalog;
+  const makeRun = (id, threads) => {
+    const run = structuredClone(source.runs[0]);
+    run.id = id;
+    run.environment = [
+      { key: 'target.gfx950.numThreads', label: 'target.gfx950.numThreads', value: threads },
+    ];
+    return run;
+  };
+  source.runs = [makeRun('first-run', firstThreads), makeRun('second-run', secondThreads)];
+  source.index.runFiles = ['runs/first-run.json', 'runs/second-run.json'];
+  const { data } = validatePublishedDashboardData(source);
+  expect(data.catalogs[catalogFile].configurations).toEqual({
+    'gfx950:ST': ['a'],
+    'gfx950:MT': ['a'],
+  });
+  expect(data.allRuns.map((run) => run.modes)).toEqual(expect.arrayContaining([['ST'], ['MT']]));
+});
+
+test.each([
+  ['duplicate', [1, 1]],
+  ['conflicting', [1, 8]],
+])('schema-1 migration rejects %s thread-count provenance', (_label, values) => {
+  const source = legacyPublication();
+  source.runs[0].environment = values.map((value) => ({
+    key: 'target.gfx950.numThreads', label: 'target.gfx950.numThreads', value,
+  }));
+  expect(() => validatePublishedDashboardData(source)).toThrow(/numThreads.*exactly once/i);
+});
+
+test.each([0, -1, 1.5, '1', null])('schema-1 migration rejects invalid thread count %s', (value) => {
+  const source = legacyPublication();
+  source.runs[0].environment = [
+    { key: 'target.gfx950.numThreads', label: 'target.gfx950.numThreads', value },
+  ];
+  expect(() => validatePublishedDashboardData(source)).toThrow(/numThreads.*positive integer/i);
 });
 
 test('non-Vanilla files are skipped rather than relabeled as ordinary measurements', () => {
