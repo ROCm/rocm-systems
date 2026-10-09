@@ -211,11 +211,11 @@ HIP_TEST_CASE(
 #endif
 
 #if HT_AMD || (defined(CUDA_VERSION) && CUDA_VERSION >= 12000)
-// @asserts: Unit_hipKernelSetCacheConfig - all hipFuncCache_t values are supported and kernel
+// @asserts: hipKernelSetCacheConfig - all hipFuncCache_t values are supported and kernel
 //           launches execute correctly, regardless of the carveout (which is a hint and the kernel
 //           must work even if the user choose a carveout that does not provide enough shared memory).
 //           hiprtc launches too.
-HIP_TEST_CASE(Contract_HipKernelSetCacheConfig_ValidValues_Are_Supported)
+HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelSetCacheConfig_Values_AreSupported)
 {
   std::vector<char> code;
   hipFuncCache_t carveouts[] = { hipFuncCachePreferNone,
@@ -268,7 +268,8 @@ HIP_TEST_CASE(Contract_HipKernelSetCacheConfig_ValidValues_Are_Supported)
   HIP_CHECK(hipLibraryUnload(library));
 }
 #else
-HIP_TEST_CASE(Contract_HipKernelSetCacheConfig_ValidValues_Are_Supported)
+// @asserts: hipKernelSetAttributeForDevice - unavailable before CUDA 12.8
+HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelSetCacheConfig_Values_AreSupported)
 {
    HIP_SKIP_TEST("hipKernelSetCacheConfig requires CUDA 12.0 or later")
 }
