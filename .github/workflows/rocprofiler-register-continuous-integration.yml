@@ -79,9 +79,14 @@ jobs:
             ci-args: ''
             ci-tag: ''
             runner_type: 'gfx94x'
+          # The sandbox hosts run with vm.mmap_rnd_bits=32, which the gcc-12
+          # TSan and LSan runtimes cannot handle: TSan aborts with "unexpected
+          # memory mapping" and LSan segfaults. setarch -R disables ASLR for the
+          # test processes only, so the host setting stays untouched.
           - compiler: 'gcc-12'
             ci-args: '--memcheck ThreadSanitizer'
             ci-tag: '-thread-sanitizer'
+            test-wrap: 'setarch $(uname -m) -R'
             # DO NOT UPDATE: sanitizer builds and tests cause issue on prod machines
             runner_type: 'sandbox'
           - compiler: 'gcc-12'
@@ -92,6 +97,7 @@ jobs:
           - compiler: 'gcc-12'
             ci-args: '--memcheck LeakSanitizer'
             ci-tag: '-leak-sanitizer'
+            test-wrap: 'setarch $(uname -m) -R'
             # DO NOT UPDATE: sanitizer builds and tests cause issue on prod machines
             runner_type: 'sandbox'
         #   - compiler: 'gcc-12'
@@ -171,7 +177,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-register
       run:
-        python3 ./scripts/run-ci.py -B build
+        ${{ matrix.test-wrap }} python3 ./scripts/run-ci.py -B build
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-azure-mi300x-${{ matrix.compiler }}${{ matrix.ci-tag }}
           --build-jobs 2
           --site GitHub
