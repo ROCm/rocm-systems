@@ -230,12 +230,28 @@ find_sample_tracks(const ph_track_list_t* tracks,
     }
 }
 
+static const char*
+event_type_name(ph_event_type_t type)
+{
+    switch(type)
+    {
+        case PH_EVENT_TYPE_REGION: return "region";
+        case PH_EVENT_TYPE_KERNEL_DISPATCH: return "kernel_dispatch";
+        case PH_EVENT_TYPE_MEMORY_COPY: return "memory_copy";
+        case PH_EVENT_TYPE_MEMORY_ALLOCATE: return "memory_allocate";
+    }
+    return "unknown";
+}
+
 static void
 print_events(const ph_event_list_t* events, uint32_t limit)
 {
     for(uint32_t i = 0; i < events->list_size && i < limit; ++i)
     {
-        printf("start: %lu, end: %lu, name: %s\n",
+        printf("id: %lu, type: %s, depth: %u, start: %lu, end: %lu, name: %s\n",
+               (unsigned long) events->events[i].id,
+               event_type_name(events->events[i].type),
+               (unsigned) events->events[i].depth,
                (unsigned long) events->events[i].start,
                (unsigned long) events->events[i].end,
                events->events[i].name);

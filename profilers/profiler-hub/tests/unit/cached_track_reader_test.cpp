@@ -303,20 +303,46 @@ TEST_F(cached_track_reader_test, a_failed_read_is_not_cached)
     EXPECT_EQ(m_state.events_calls, 2);
 }
 
-TEST_F(cached_track_reader_test,
-       a_windowed_request_is_read_each_time_with_a_clamped_filter)
+TEST_F(cached_track_reader_test, a_windowed_request_is_served_from_the_whole_track_read)
 {
     give_three_unsorted_events();
     auto       reader = make_reader();
     const auto track  = make_track(1, track_kind_t::thread);
 
-    std::ignore = reader.events(track, 10, std::numeric_limits<uint64_t>::max());
-    std::ignore = reader.events(track, 10, std::numeric_limits<uint64_t>::max());
+    const auto windowed = reader.events(track, 15, 25);
+    const auto whole    = reader.events(track, 0, 0);
 
-    EXPECT_EQ(m_state.events_calls, 2);
-    ASSERT_TRUE(m_state.last_event_filter.has_value());
-    EXPECT_EQ(m_state.last_event_filter->time_window.start, 10U);
-    EXPECT_EQ(m_state.last_event_filter->time_window.end, int64_max);
+    EXPECT_EQ(m_state.events_calls, 1);
+    EXPECT_THAT(starts_of(windowed), ::testing::ElementsAre(20));
+    EXPECT_EQ(whole.list_size, 3U);
+}
+
+TEST_F(cached_track_reader_test,
+       a_window_returns_events_overlapping_it_including_its_edges)
+{
+    m_state.events    = { timeline_event(0, 100, "long"),
+                          timeline_event(10, 20, "ends_at_start"),
+                          timeline_event(30, 40, "inside"),
+                          timeline_event(50, 60, "starts_at_end"),
+                          timeline_event(70, 80, "after") };
+    auto       reader = make_reader();
+    const auto track  = make_track(1, track_kind_t::thread);
+
+    const auto list = reader.events(track, 20, 50);
+
+    EXPECT_THAT(
+        names_of(list),
+        ::testing::ElementsAre("long", "ends_at_start", "inside", "starts_at_end"));
+}
+
+TEST_F(cached_track_reader_test, a_window_without_an_upper_bound_reaches_the_track_end)
+{
+    give_three_unsorted_events();
+    auto reader = make_reader();
+
+    const auto list = reader.events(make_track(1, track_kind_t::thread), 15, 0);
+
+    EXPECT_THAT(starts_of(list), ::testing::ElementsAre(20, 30));
 }
 
 TEST_F(cached_track_reader_test, windowed_results_stay_valid_after_later_requests)
@@ -324,9 +350,10 @@ TEST_F(cached_track_reader_test, windowed_results_stay_valid_after_later_request
     auto       reader = make_reader();
     const auto track  = make_track(1, track_kind_t::thread);
 
-    m_state.events   = { timeline_event(1, 2, "first") };
-    const auto first = reader.events(track, 1, 5);
-    m_state.events   = { timeline_event(7, 8, "second"), timeline_event(9, 10, "third") };
+    m_state.events    = { timeline_event(1, 2, "first"),
+                          timeline_event(7, 8, "second"),
+                          timeline_event(9, 10, "third") };
+    const auto first  = reader.events(track, 1, 2);
     const auto second = reader.events(track, 6, 12);
 
     EXPECT_NE(first.events, second.events);
@@ -334,6 +361,39 @@ TEST_F(cached_track_reader_test, windowed_results_stay_valid_after_later_request
     EXPECT_EQ(first.events[0].start, 1U);
     EXPECT_STREQ(first.events[0].name, "first");
     EXPECT_EQ(second.list_size, 2U);
+}
+
+TEST_F(cached_track_reader_test, events_carry_their_depth_in_the_whole_track)
+{
+    m_state.events    = { timeline_event(0, 10, "outer"),
+                          timeline_event(2, 5, "inner"),
+                          timeline_event(3, 4, "innermost"),
+                          timeline_event(6, 8, "later"),
+                          timeline_event(10, 12, "touching") };
+    auto       reader = make_reader();
+    const auto track  = make_track(1, track_kind_t::thread);
+
+    const auto list = reader.events(track, 0, 0);
+
+    ASSERT_EQ(list.list_size, 5U);
+    EXPECT_EQ(list.events[0].depth, 1U);
+    EXPECT_EQ(list.events[1].depth, 2U);
+    EXPECT_EQ(list.events[2].depth, 3U);
+    EXPECT_EQ(list.events[3].depth, 2U);
+    EXPECT_EQ(list.events[4].depth, 1U);
+}
+
+TEST_F(cached_track_reader_test, a_windowed_event_keeps_its_depth_from_the_whole_track)
+{
+    m_state.events = { timeline_event(0, 100, "outer"), timeline_event(40, 50, "inner") };
+    auto       reader = make_reader();
+    const auto track  = make_track(1, track_kind_t::thread);
+
+    const auto list = reader.events(track, 45, 60);
+
+    ASSERT_EQ(list.list_size, 2U);
+    EXPECT_EQ(list.events[0].depth, 1U);
+    EXPECT_EQ(list.events[1].depth, 2U);
 }
 
 TEST_F(cached_track_reader_test, events_carry_their_id_and_type)
@@ -567,6 +627,19 @@ TEST_F(large_thread_track_test, tables_without_rows_are_skipped)
     const auto list = reader.events(make_track(1, track_kind_t::thread, 6), 0, 0);
 
     EXPECT_THAT(starts_of(list), ::testing::ElementsAre(10, 20, 30, 40, 50, 60));
+}
+
+TEST_F(large_thread_track_test, parts_get_their_depth_after_the_merge)
+{
+    auto reader = make_reader(m_options);
+
+    const auto list = reader.events(make_track(1, track_kind_t::thread, 10), 0, 0);
+
+    ASSERT_EQ(list.list_size, 10U);
+    for(uint32_t i = 0; i < list.list_size; ++i)
+    {
+        EXPECT_EQ(list.events[i].depth, 1U);
+    }
 }
 
 }  // namespace

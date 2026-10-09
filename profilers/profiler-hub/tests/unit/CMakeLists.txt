@@ -21,6 +21,7 @@ set(UNIT_TEST_SOURCES
     cached_track_reader_test.cpp
     connection_pool_test.cpp
     connection_source_test.cpp
+    depth_tracker_test.cpp
     event_partitions_test.cpp
     natural_merge_sort_test.cpp
     thread_pool_test.cpp

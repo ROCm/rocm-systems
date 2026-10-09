@@ -4,6 +4,7 @@
 #include "cached_track_reader.hpp"
 
 #include "common/natural_merge_sort.hpp"
+#include "depth_tracker.hpp"
 #include "event_partitions.hpp"
 #include "track_window.hpp"
 
@@ -11,6 +12,7 @@
 #include <array>
 #include <atomic>
 #include <exception>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -63,7 +65,8 @@ to_ph_event(const reader_types::timeline_event_t& event)
                        .end   = event.end_timestamp,
                        .name =
                            event.display_name.empty() ? "" : event.display_name.data(),
-                       .type = to_ph_event_type(event.unique_identifier.type) };
+                       .type  = to_ph_event_type(event.unique_identifier.type),
+                       .depth = 0 };
 }
 
 ph_sample_t
@@ -103,6 +106,35 @@ sort_by_start(std::vector<ph_event_t>& events)
         events.begin(), events.end(), [](const ph_event_t& lhs, const ph_event_t& rhs) {
             return lhs.start < rhs.start;
         });
+}
+
+void
+assign_depths(std::vector<ph_event_t>& events)
+{
+    depth_tracker tracker;
+    for(auto& event : events)
+    {
+        event.depth = static_cast<std::uint32_t>(tracker.add(event.start, event.end));
+    }
+}
+
+std::vector<ph_event_t>
+overlapping(const std::vector<ph_event_t>& sorted,
+            uint64_t                       window_start,
+            uint64_t                       window_end)
+{
+    const auto last = std::upper_bound(
+        sorted.begin(),
+        sorted.end(),
+        window_end,
+        [](uint64_t bound, const ph_event_t& event) { return bound < event.start; });
+
+    std::vector<ph_event_t> result;
+    std::copy_if(sorted.begin(),
+                 last,
+                 std::back_inserter(result),
+                 [&](const ph_event_t& event) { return event.end >= window_start; });
+    return result;
 }
 
 void
@@ -174,10 +206,14 @@ cached_track_reader::events(const reader_types::track_info_ptr_t& track,
         }));
     }
 
-    auto windowed = with_reader(m_source, [&](track_row_reader& reader) {
-        return to_ph_events(
-            reader.events_for_track(track, make_window_filter(start_ts, end_ts)));
+    const auto& whole = cached(m_events_cache, track, [&] {
+        return with_reader(m_source, [&](track_row_reader& reader) {
+            return build_sorted_events(reader, track);
+        });
     });
+
+    const auto window   = make_window_filter(start_ts, end_ts).time_window;
+    auto       windowed = overlapping(whole, window.start.value(), window.end.value());
 
     const std::scoped_lock lock{ m_windowed_mutex };
     return as_list(m_windowed_events.emplace_back(std::move(windowed)));
@@ -220,11 +256,14 @@ cached_track_reader::build_sorted_events(track_row_reader&                     r
     if(track->category == reader_types::track_kind_t::thread &&
        track->event_count >= m_options.parallel_read_min_events)
     {
-        return read_thread_track_in_parts(reader, track);
+        auto merged = read_thread_track_in_parts(reader, track);
+        assign_depths(merged);
+        return merged;
     }
 
     auto sorted = to_ph_events(reader.events_for_track(track, {}));
     sort_by_start(sorted);
+    assign_depths(sorted);
     return sorted;
 }
 
@@ -265,7 +304,8 @@ cached_track_reader::read_thread_track_in_parts(
                         .start = start,
                         .end   = end,
                         .name  = name.empty() ? "" : name.data(),
-                        .type  = to_ph_event_type(id.type) });
+                        .type  = to_ph_event_type(id.type),
+                        .depth = 0 });
     };
 
     std::atomic<size_t> next{ 0 };

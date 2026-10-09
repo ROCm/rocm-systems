@@ -195,6 +195,10 @@ extern "C"
      * @note name points into memory owned by the producing ph_ctx_t.
      * @note id is only unique together with type: every event type has its
      *       own id space.
+     * @note depth is the number of events of the same track, this one
+     *       included, that are active when this event starts (1 = not
+     *       overlapped). It is relative to the whole track, also for a
+     *       time-windowed request.
      */
     typedef struct
     {
@@ -203,6 +207,7 @@ extern "C"
         uint64_t        end;
         const char*     name;
         ph_event_type_t type;
+        uint32_t        depth;
     } ph_event_t;
 
     /** @brief A list of duration events; same lifetime rule as

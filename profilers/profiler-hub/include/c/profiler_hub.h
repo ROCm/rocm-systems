@@ -116,7 +116,8 @@ extern "C"
      *       the same track return the same storage, so the arrays must be
      *       treated as read-only. Events of a whole track are ordered by
      *       ph_event_t::start. A request with a time window gets its own
-     *       private storage and its events are not guaranteed to be ordered.
+     *       private storage; its events are the overlapping ones of the whole
+     *       track, in the same order, with the same ph_event_t::depth.
      */
     ph_result_t ph_get_track_events(ph_ctx_t         ctx,
                                     uint32_t         track_id,

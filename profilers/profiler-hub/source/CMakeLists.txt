@@ -21,6 +21,7 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/cached_track_reader.cpp
     ${CMAKE_CURRENT_LIST_DIR}/cached_track_reader.hpp
     ${CMAKE_CURRENT_LIST_DIR}/connection_source.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/depth_tracker.hpp
     ${CMAKE_CURRENT_LIST_DIR}/event_partitions.cpp
     ${CMAKE_CURRENT_LIST_DIR}/event_partitions.hpp
     ${CMAKE_CURRENT_LIST_DIR}/pooled_connection_source.cpp
