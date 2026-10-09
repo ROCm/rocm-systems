@@ -4,8 +4,8 @@
 """RDNA3.5 memory chart renderer.
 
 Hierarchy (GCEA = Graphics Core Efficiency Arbiter):
-  Kernel -> GL0 (TCP) / SQC -> GL1 -> GL2 -> GCEA -> System Memory
-         -> LDS (on-CU, no GL1 connection)
+  WGPs -> GL0 (TCP) / SQC -> GL1 -> GL2 -> GCEA -> System Memory
+         -> LDS (on-WGP, no GL1 connection)
 
 Metric keys must match ``gfx115x/0300_memory_chart.yaml``.
 """
@@ -22,8 +22,9 @@ from utils.mem_chart_common import (
     COLORS,
     build_arch_notes,
     build_bw_edges,
+    build_cu_panel,
+    build_cu_stats,
     build_ip_block,
-    build_kernel_panel,
     build_legend,
     colored,
     format_edge,
@@ -43,7 +44,7 @@ from utils.mem_chart_common import (
 # ---------------------------------------------------------------------------
 
 # Keys = ``metric:`` names under each ``metric_table`` in
-# ``analysis_configs/gfx115x/0300_memory_chart.yaml`` (tables 301–309), in panel order.
+# ``analysis_configs/gfx115x/0300_memory_chart.yaml`` (tables 301–310).
 # Commented-out YAML metrics (e.g. TCP Atomic) are omitted.
 _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     # Table 301: Instruction Cache
@@ -84,6 +85,13 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     ("SysArb Stall Rate", 12.4),
     ("DRAM Read Bandwidth", 100e9),
     ("DRAM Write Bandwidth", 60e9),
+    # Table 310: Workgroup Processors (WGPs)
+    ("Wavefront Occupancy", 50.0),
+    ("VGPR", 64),
+    ("SGPR", 32),
+    ("LDS Allocation", 32768),
+    ("Scratch Allocation", 0),
+    ("Workgroups", 2.0),
 )
 
 MEM_CHART_PANEL_METRIC_KEYS: tuple[str, ...] = tuple(
@@ -92,7 +100,7 @@ MEM_CHART_PANEL_METRIC_KEYS: tuple[str, ...] = tuple(
 
 DEFAULT_SAMPLE_METRICS: dict[str, Union[int, float]] = dict(_MEM_CHART_DEFAULT_ROWS)
 
-_EDGE_LABEL_W = 11  # fits longest kernel-edge label ("ICache Read")
+_EDGE_LABEL_W = 11  # fits longest CU-edge label ("ICache Read")
 
 # Panel dimensions
 _L0_PANEL_W = 20  # LDS/TCP/SQC: fits hit% + bar + BW line
@@ -102,7 +110,7 @@ _TOTAL_H = 3 * _L0_PANEL_H  # all columns align to this height
 
 # Arrow lengths
 _STD_ARROW_LEN = 8  # edge arrows between cache panels
-_KERNEL_EDGE_W = 20  # wider Kernel->L0 arrows (longer labels)
+_CU_EDGE_W = 20  # wider CU->L0 arrows (longer labels)
 _EDGE_COLS = (5, 7, 9)  # grid column indices that use vertical="middle"
 
 # Console dimensions
@@ -151,6 +159,9 @@ def _scope_bar(gpu_span: int, sysmem_span: int) -> str:
 def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     """Map YAML metric names to short internal keys."""
     metrics: dict[str, Any] = {}
+
+    # WGPs
+    metrics["cu_stats"] = build_cu_stats(metric_dict, "WGP")
 
     metrics["icache_req"] = metric_dict.get("ICache Requests")
     metrics["icache_hit"] = metric_dict.get("ICache Hit Rate")
@@ -201,57 +212,57 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     return metrics
 
 
-def _build_kernel_and_l0(
+def _build_cu_and_l0(
     metrics: dict[str, Any],
-    kernel_arrows: dict[str, str],
+    cu_arrows: dict[str, str],
     std_arrows: dict[str, str],
 ) -> tuple[Panel, Text, Group, Text]:
-    """Kernel panel, kernel edges, L0 stack, and GL1 edges."""
+    """WGPs panel, WGP edges, L0 stack, and GL1 edges."""
 
     color_read = COLORS["read"]
     color_write = COLORS["write"]
 
-    kernel_panel = build_kernel_panel(height=_TOTAL_H, padding_lines=11)
+    cu_panel = build_cu_panel(_TOTAL_H, stats=metrics["cu_stats"], title="WGPs")
 
-    kernel_arrow_left = kernel_arrows["left"]
-    kernel_arrow_right = kernel_arrows["right"]
+    cu_arrow_left = cu_arrows["left"]
+    cu_arrow_right = cu_arrows["right"]
 
     # LDS edge: instruction count only (not data movement)
     lds_edge_zone = [
         "     [white]Request[/white]",
         format_edge("LDS", metrics["lds_req"], _EDGE_LABEL_W),
-        kernel_arrows["plain"],
+        cu_arrows["plain"],
     ]
     tcp_edge_zone = [
         colored(
             format_edge("Read", metrics["tcp_read_req"], _EDGE_LABEL_W),
             color_read,
         ),
-        colored(kernel_arrow_left, color_read),
+        colored(cu_arrow_left, color_read),
         colored(
             format_edge("Write", metrics["tcp_write_req"], _EDGE_LABEL_W),
             color_write,
         ),
-        colored(kernel_arrow_right, color_write),
+        colored(cu_arrow_right, color_write),
     ]
     sqc_edge_zone = [
         colored(
             format_edge("ICache Read", metrics["icache_req"], _EDGE_LABEL_W),
             color_read,
         ),
-        colored(kernel_arrow_left, color_read),
+        colored(cu_arrow_left, color_read),
         colored(
             format_edge("DCache Read", metrics["dcache_req"], _EDGE_LABEL_W),
             color_read,
         ),
-        colored(kernel_arrow_left, color_read),
+        colored(cu_arrow_left, color_read),
     ]
-    kernel_edges_lines = (
+    cu_edges_lines = (
         pad_to(lds_edge_zone, _L0_PANEL_H)
         + pad_to(tcp_edge_zone, _L0_PANEL_H)
         + pad_to(sqc_edge_zone, _L0_PANEL_H)
     )
-    kernel_edges_text = Text.from_markup("\n".join(kernel_edges_lines))
+    cu_edges_text = Text.from_markup("\n".join(cu_edges_lines))
 
     # LDS panel
     lds_util_line = (
@@ -314,21 +325,19 @@ def _build_kernel_and_l0(
     tcp_gl1_content = stack_metrics(
         "\n".join([
             colored("Read BW", color_read),
-            colored(format_value(metrics["tcp_gl1_read_bw"], "Bytes/s", 1), color_read),
+            colored(format_value(metrics["tcp_gl1_read_bw"], "Bytes/s"), color_read),
             colored(std_arrows["left"], color_read),
         ]),
         "\n".join([
             colored("Write BW", color_write),
-            colored(
-                format_value(metrics["tcp_gl1_write_bw"], "Bytes/s", 1), color_write
-            ),
+            colored(format_value(metrics["tcp_gl1_write_bw"], "Bytes/s"), color_write),
             colored(std_arrows["right"], color_write),
         ]),
     )
     tcp_gl1_zone = tcp_gl1_content.split("\n")
     sqc_gl1_zone = [
         colored("Read BW", color_read),
-        colored(format_value(metrics["sqc_gl1_read_bw"], "Bytes/s", 1), color_read),
+        colored(format_value(metrics["sqc_gl1_read_bw"], "Bytes/s"), color_read),
         colored(std_arrows["left"], color_read),
     ]
     gl1_edges_lines = (
@@ -338,7 +347,7 @@ def _build_kernel_and_l0(
     )
     gl1_edges_text = Text.from_markup("\n".join(gl1_edges_lines))
 
-    return kernel_panel, kernel_edges_text, l0_stack, gl1_edges_text
+    return cu_panel, cu_edges_text, l0_stack, gl1_edges_text
 
 
 def _build_cache_columns(
@@ -403,7 +412,7 @@ def _build_memory_columns(
         std_arrows,
     )
 
-    total = format_value(metrics["total_bw"], "Bytes/s", 1)
+    total = format_value(metrics["total_bw"], "Bytes/s")
     dram_content = stack_metrics(
         "[dim]DDR5/LPDDR5[/dim]",
         f"Total: [bold bright_green]{total}[/bold bright_green]",
@@ -429,11 +438,11 @@ def create_mem_chart_diagram(
     metrics = _extract_metrics(metric_dict)
 
     std_arrows = make_arrows(_STD_ARROW_LEN)
-    kernel_arrows = make_arrows(_KERNEL_EDGE_W)
+    cu_arrows = make_arrows(_CU_EDGE_W)
 
     # Build layout columns
-    kernel_panel, kernel_edges, l0_stack, gl1_edges = _build_kernel_and_l0(
-        metrics, kernel_arrows, std_arrows
+    cu_panel, cu_edges, l0_stack, gl1_edges = _build_cu_and_l0(
+        metrics, cu_arrows, std_arrows
     )
     gl1_panel, gl1_gl2_edges, gl2_panel = _build_cache_columns(metrics, std_arrows)
     gl2_gcea_edges, gcea_panel, dram_edges, dram_panel = _build_memory_columns(
@@ -447,8 +456,8 @@ def create_mem_chart_diagram(
         main_layout.add_column(vertical=vert)
 
     main_layout.add_row(
-        kernel_panel,
-        kernel_edges,
+        cu_panel,
+        cu_edges,
         l0_stack,
         gl1_edges,
         gl1_panel,
@@ -479,7 +488,7 @@ def create_mem_chart_diagram(
         sections.append(
             build_arch_notes([
                 ("TCP (Texture Cache Pipe)", "L0 vector cache for VMEM operations"),
-                ("LDS (Local Data Share)", "On-CU scratchpad, NO GL1 Cache connection"),
+                ("LDS (Local Data Share)", "On-WGP scratchpad, no GL1 connection"),
                 ("SQC (Sequencer Cache)", "ICache + DCache for scalar operations"),
             ])
         )

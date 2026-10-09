@@ -43,8 +43,11 @@
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/spm/queue_hooks.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -294,6 +297,33 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
             }
         });
 
+        // PC sampling completion is no longer routed through the per-queue
+        // callback registry; invoke its hook explicitly.
+        pc_sampling::kernel_dispatch_phase_exit_hook(&queue_info_session.queue,
+                                                     packet.kernel_packet,
+                                                     _session,
+                                                     packet,
+                                                     packet.instrumentation_packets,
+                                                     dispatch_time);
+
+        // SPM completion is migrated off the callback registry (see WriteInterceptor); invoke
+        // it explicitly here.
+        spm::kernel_dispatch_phase_exit_hook(&queue_info_session.queue,
+                                             packet.kernel_packet,
+                                             _session,
+                                             packet,
+                                             packet.instrumentation_packets,
+                                             dispatch_time);
+
+        // Thread trace completion is migrated off the callback registry (see WriteInterceptor);
+        // invoke it explicitly here.
+        thread_trace::kernel_dispatch_phase_exit_hook(queue_info_session.queue,
+                                                      packet.kernel_packet,
+                                                      _session,
+                                                      packet,
+                                                      packet.instrumentation_packets,
+                                                      dispatch_time);
+
         CHECK_NOTNULL(hsa::get_queue_controller())
             ->serializer(&queue_info_session.queue)
             .wlock([&](auto& serializer) {
@@ -428,8 +458,25 @@ WriteInterceptor(const void* packets,
 
     auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
     const bool graph_launch_active = (gls != nullptr);
+    // SPM no longer registers a queue-controller callback, so it does not count toward
+    // get_notifiers(); detect it explicitly so an SPM-only run still enters the interceptor.
+    // Scoped to this queue's agent: a context restricted via set_agents() must leave queues on
+    // the other agents on the fast path instead of paying interception and losing batching for
+    // dispatches that kernel_dispatch_phase_enter_hook() would filter out anyway.
+    const bool spm_active =
+        spm::is_active_on_agent(CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id);
+
+    // Thread trace no longer registers a queue-controller callback, so it does not count toward
+    // get_notifiers(); detect it explicitly so an ATT-only run still enters the interceptor.
+    //
+    // Scoped to this queue's agent: a tracer is configured per agent, so queues on agents it was
+    // never configured for must stay on the fast path instead of paying interception and losing
+    // batching for dispatches that kernel_dispatch_phase_enter_hook() would filter out anyway.
+    const bool thread_trace_active =
+        thread_trace::is_active_on_agent(CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id);
     const bool no_real_consumers =
-        (queue.get_notifiers() == 0 &&
+        (queue.get_notifiers() == 0 && !spm_active && !thread_trace_active &&
+         !pc_sampling::is_configured_on_agent(queue.get_agent().get_rocp_agent()->id) &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
 
     const bool has_kernel_replay = kernel_replay::has_active_replay_contexts();
@@ -508,8 +555,8 @@ WriteInterceptor(const void* packets,
         return;
     }
 
-    // these are for the services (dispatch counter collection, pc sampling, ATT) which use
-    // the queue/queue_controller callback mechanism
+    // Services that attach packet instrumentation or need dispatch correlation data. Some are
+    // still routed through queue-controller callbacks while migrated services use explicit hooks.
     const auto queue_callback_context_filter = [](const context::context* ctx) {
         return (ctx->dispatch_counter_collection || ctx->pc_sampler || ctx->dispatch_thread_trace ||
                 ctx->dispatch_spm);
@@ -826,6 +873,32 @@ WriteInterceptor(const void* packets,
                             std::make_pair(std::move(packet), client_id));
                 }
             });
+
+            // SPM is migrated off the per-queue callback registry: call its hook explicitly
+            // (the other services still flow through signal_callback above).
+            spm::kernel_dispatch_phase_enter_hook(
+                &queue,
+                kernel_packet,
+                kernel_id,
+                dispatch_id,
+                &_packet_data.user_data,
+                _packet_data.tracing_data.external_correlation_ids,
+                corr_id,
+                _packet_data.instrumentation_packets,
+                _packet_data.is_serialized);
+
+            // Thread trace is migrated off the per-queue callback registry: call its hook
+            // explicitly (only counter collection still flows through signal_callback above).
+            thread_trace::kernel_dispatch_phase_enter_hook(
+                queue,
+                kernel_packet,
+                kernel_id,
+                dispatch_id,
+                &_packet_data.user_data,
+                _packet_data.tracing_data.external_correlation_ids,
+                corr_id,
+                _packet_data.instrumentation_packets,
+                _packet_data.is_serialized);
 
             bool inserted_before = false;
             if(_packet_data.is_serialized)
@@ -1195,6 +1268,11 @@ WriteInterceptor(const void* packets,
         }
     });
 
+    // SPM requires per-packet mode; it no longer participates in the registry above.
+    if(spm_active) should_batch_packets = false;
+    // Thread trace requires per-packet mode; it no longer participates in the registry above.
+    if(thread_trace_active) should_batch_packets = false;
+
     if(should_batch_packets)
     {
         ROCP_TRACE_IF(pkt_count > 1) << fmt::format(
@@ -1272,7 +1350,8 @@ Queue::Queue(const AgentCache&  agent,
 
     if(!context::get_registered_contexts([](const context::context* ctx) {
             return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
-                    ctx->dispatch_spm || ctx->dispatch_thread_trace || ctx->device_thread_trace);
+                    ctx->dispatch_spm || ctx->device_spm || ctx->dispatch_thread_trace ||
+                    ctx->device_thread_trace);
         }).empty())
     {
         CHECK(_agent.cpu_pool().handle != 0);
@@ -1333,7 +1412,8 @@ Queue::Queue(
 {
     if(!context::get_registered_contexts([](const context::context* ctx) {
             return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
-                    ctx->dispatch_thread_trace || ctx->device_thread_trace);
+                    ctx->dispatch_spm || ctx->device_spm || ctx->dispatch_thread_trace ||
+                    ctx->device_thread_trace);
         }).empty())
     {
         CHECK(_agent.cpu_pool().handle != 0);

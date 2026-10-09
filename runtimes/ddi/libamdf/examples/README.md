@@ -1,9 +1,12 @@
+<!-- Copyright (c) 2026 Advanced Micro Devices, Inc. -->
+<!-- SPDX-License-Identifier: MIT -->
+
 # GFX1201 GPU execution examples
 
 `sdma-copy.c`, `sdma-local-round-trip.c`, `pm4-local-round-trip.c`,
 `sdma-registered-copy.c`, `aql-copy-add.c`, and `device-producer.c` are
 execution-qualified AMDF
-consumers. They use only the imported AMDF core-v3 and GPU-v1 tables, create fresh queues, publish directly
+consumers. They use only the imported AMDF core-v5 and GPU-v1 tables, create fresh queues, publish directly
 to mapped rings, distinguish application completion from queue consumption,
 validate results, and release every public child before its parent.
 `sdma-dmabuf-copy.c` exercises the qualified SYSTEM DMA-BUF import capability.
@@ -13,8 +16,15 @@ The unmodified upstream `Pm4QueueTest` qualifies PM4 SYSTEM copies.
 COPY_DATA, WRITE_DATA, EVENT_WRITE, ACQUIRE_MEM, and NOP packet forms through
 a fixed 4 KiB native KFD COMPUTE ring.
 
-These are standalone C sources. Build `libamdf`, then compile each example
-against `api-headers/include` and the shared or static library. Run them
+These are standalone C sources. From `runtimes`, build the shared
+image with CMake:
+
+```sh
+cmake -S . -B /tmp/rocddi-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/rocddi-cmake
+```
+
+Compile each example against `api-headers/include` and that image. Run them
 only with native GPU access. `sdma-readonly-fault.c` deliberately triggers a
 fault and should be run separately from the non-faulting examples.
 
@@ -55,11 +65,11 @@ stream does not claim compatibility with a different feature combination.
 ```sh
 cc -O2 -std=c11 -Wall -Wextra -Werror -Iapi-headers/include \
   ddi/libamdf/examples/sdma-local-round-trip.c \
-  -Ltarget/release -lamdf -o /tmp/sdma-local-round-trip
-LD_LIBRARY_PATH=target/release /tmp/sdma-local-round-trip private process
-LD_LIBRARY_PATH=target/release /tmp/sdma-local-round-trip private instance
-LD_LIBRARY_PATH=target/release /tmp/sdma-local-round-trip public process
-LD_LIBRARY_PATH=target/release /tmp/sdma-local-round-trip public instance
+  -L/tmp/rocddi-cmake/lib -lamdf -o /tmp/sdma-local-round-trip
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/sdma-local-round-trip private process
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/sdma-local-round-trip private instance
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/sdma-local-round-trip public process
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/sdma-local-round-trip public instance
 ```
 
 Both modes require exact GPU read/write access and verify LOCAL placement,
@@ -82,11 +92,11 @@ need separate qualification. AQL and PM4 LOCAL execution are covered below.
 ```sh
 cc -O2 -std=c11 -Wall -Wextra -Werror -Iapi-headers/include \
   ddi/libamdf/examples/pm4-local-round-trip.c \
-  -Ltarget/release -lamdf -o /tmp/pm4-local-round-trip
-LD_LIBRARY_PATH=target/release /tmp/pm4-local-round-trip private process
-LD_LIBRARY_PATH=target/release /tmp/pm4-local-round-trip private instance
-LD_LIBRARY_PATH=target/release /tmp/pm4-local-round-trip public process
-LD_LIBRARY_PATH=target/release /tmp/pm4-local-round-trip public instance
+  -L/tmp/rocddi-cmake/lib -lamdf -o /tmp/pm4-local-round-trip
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/pm4-local-round-trip private process
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/pm4-local-round-trip private instance
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/pm4-local-round-trip public process
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/pm4-local-round-trip public instance
 ```
 
 The private path verifies GPU copies through unmappable LOCAL storage. The
@@ -186,25 +196,23 @@ those checks and writes the include to the requested path. From `runtimes`
 with ROCm LLVM installed at `/opt/rocm/llvm/bin`:
 
 ```sh
-cargo build --release -p libamdf --locked
 python3 ddi/libamdf/examples/generate-aql-copy-add-gfx1201.py \
   /tmp/aql-copy-add-gfx1201.inc
 cc -O2 -std=c11 -Wall -Wextra -Werror \
   -Iapi-headers/include -I/tmp \
   ddi/libamdf/examples/aql-copy-add.c \
-  -Ltarget/release -lamdf -pthread -o /tmp/aql-copy-add
-LD_LIBRARY_PATH=target/release /tmp/aql-copy-add
-LD_LIBRARY_PATH=target/release /tmp/aql-copy-add instance
-LD_LIBRARY_PATH=target/release /tmp/aql-copy-add local
-LD_LIBRARY_PATH=target/release /tmp/aql-copy-add local instance
+  -L/tmp/rocddi-cmake/lib -lamdf -pthread -o /tmp/aql-copy-add
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/aql-copy-add
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/aql-copy-add instance
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/aql-copy-add local
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/aql-copy-add local instance
 ```
 
 The generated include keeps this example independent of a runtime code-object
 loader while it exercises executable AMDF allocation, kernarg access, kernel
 loads/stores, scratch loads/stores, and completion visibility. The native AQL
-queue owns executable EOP and context-save backing as required by KFD. On the
-2026-09-24 source, 50 fresh dynamic SYSTEM runs in each lifetime passed all
-phases. The LOCAL mode passed one fresh run in each lifetime with CPU-mapped
+queue owns executable EOP and context-save backing as required by KFD. The
+recorded GFX1201 run passed 50 fresh dynamic SYSTEM runs in each lifetime. The LOCAL mode passed one fresh run in each lifetime with CPU-mapped
 WC source and target VRAM, explicit host cache transitions, prospective and
 concrete cache-pair checks, and 516 completed dispatches. INSTANCE uses
 coherent GTT ring backing because secondary KFD VMs reject USERPTR allocation.
@@ -235,7 +243,6 @@ relocations, and zero scratch requirement, then emits C includes. From
 `runtimes`, with ROCm LLVM at `/opt/rocm/llvm/bin`:
 
 ```sh
-cargo build --release -p libamdf --locked
 python3 ddi/libamdf/examples/generate-device-producer-gfx1201.py \
   publisher /tmp/device-producer-publisher-gfx1201.inc
 python3 ddi/libamdf/examples/generate-device-producer-gfx1201.py \
@@ -243,11 +250,11 @@ python3 ddi/libamdf/examples/generate-device-producer-gfx1201.py \
 cc -O2 -std=c11 -Wall -Wextra -Werror \
   -Iapi-headers/include -I/tmp \
   ddi/libamdf/examples/device-producer.c \
-  -Ltarget/release -lamdf -o /tmp/device-producer
-LD_LIBRARY_PATH=target/release /tmp/device-producer sdma process
-LD_LIBRARY_PATH=target/release /tmp/device-producer aql process
-LD_LIBRARY_PATH=target/release /tmp/device-producer sdma instance
-LD_LIBRARY_PATH=target/release /tmp/device-producer aql instance
+  -L/tmp/rocddi-cmake/lib -lamdf -o /tmp/device-producer
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/device-producer sdma process
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/device-producer aql process
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/device-producer sdma instance
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/device-producer aql instance
 ```
 
 Each mode passed five fresh runs of 64 published packets on the current
@@ -265,11 +272,11 @@ faulted resources to process teardown because retirement was not proved.
 ```sh
 cc -O2 -std=c11 -Wall -Wextra -Werror -Iapi-headers/include \
   ddi/libamdf/examples/sdma-readonly-fault.c \
-  -Ltarget/release -lamdf -o /tmp/sdma-readonly-fault
-LD_LIBRARY_PATH=target/release /tmp/sdma-readonly-fault
-LD_LIBRARY_PATH=target/release /tmp/device-producer sdma process
-LD_LIBRARY_PATH=target/release /tmp/sdma-readonly-fault instance
-LD_LIBRARY_PATH=target/release /tmp/device-producer sdma instance
+  -L/tmp/rocddi-cmake/lib -lamdf -o /tmp/sdma-readonly-fault
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/sdma-readonly-fault
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/device-producer sdma process
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/sdma-readonly-fault instance
+LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/device-producer sdma instance
 ```
 
 On the current GFX1201 source, both fault processes reported sticky
