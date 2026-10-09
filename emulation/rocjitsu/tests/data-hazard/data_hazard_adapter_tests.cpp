@@ -3133,3 +3133,229 @@ TEST(DataHazardRaceFoldTest, SinkPassesRepeatsToTheCollector) {
   ASSERT_EQ(report.size(), 1u);
   EXPECT_EQ(report[0].suppressed_occurrences, 1u);
 }
+
+// An LDS write outside the LDS is dropped: by the hardware, and by rocjitsu's
+// Lds::write. Triton relies on it to switch off a direct-to-LDS load on waves
+// whose copy is redundant, by pointing M0 at 0x7fffffff instead of branching.
+// Found on gfx950-gluon-tutorials' inter_wave/a4w4 kernel, where every odd
+// wave's scale loads were recorded as LDS writes and reported as 79 cross-wave
+// write-write races, all at 0x7fffffff.
+namespace {
+
+/// A buffer_load_dword ... lds from @p wave: each active lane writes 4 bytes of
+/// LDS at @p lds_address + 4 * lane, outstanding on VMEM. @p local_memory_limit
+/// is the LDS past the wave's base; 0 means unknown.
+dh::MemoryRouteView direct_to_lds_route(const dh::InstructionView &instruction,
+                                        uint64_t lds_address, uint32_t lanes,
+                                        uint64_t local_memory_limit) {
+  dh::MemoryRouteView route;
+  route.instruction = instruction;
+  route.resource_kind = ResourceKind::GlobalMemory;
+  route.is_load = true;
+  route.size_bytes = 4;
+  route.writes_local_memory = true;
+  route.local_write_wait = WaitCntType::VMEM;
+  route.local_size_bytes = 4;
+  route.local_memory_limit = local_memory_limit;
+  route.exec_mask = lanes == 64 ? ~uint64_t{0} : (uint64_t{1} << lanes) - 1;
+  for (uint32_t lane = 0; lane < lanes; ++lane) {
+    route.per_lane_addresses.push_back(0x10000 + 4 * lane);
+    route.per_lane_local_addresses.push_back(lds_address + 4 * lane);
+  }
+  return route;
+}
+
+std::vector<uint64_t> local_write_addresses(const RecordingSimulatorApi &api) {
+  std::vector<uint64_t> addresses;
+  for (const ResourceAccessEvent &event : api.resources)
+    if (event.resource_kind == ResourceKind::LocalMemory && event.is_write)
+      addresses.push_back(event.address);
+  return addresses;
+}
+
+dh::InstructionView route_instruction(const ExecutionKey &wave, hazard_core::EntityId id,
+                                      uint64_t pc) {
+  dh::InstructionView instruction;
+  instruction.execution = wave;
+  instruction.instruction_id = id;
+  instruction.pc = pc;
+  return instruction;
+}
+
+/// Resolve a workgroup barrier for @p waves, once per wave as the plugin does.
+void resolve_barrier(DataHazardEngine &engine, std::initializer_list<ExecutionKey> waves) {
+  BarrierEvent barrier;
+  barrier.kind = BarrierKind::Workgroup;
+  for (const ExecutionKey &wave : waves) {
+    barrier.wave = wave;
+    engine.on_barrier(barrier);
+  }
+}
+
+} // namespace
+
+TEST(DataHazardAdapterTest, DirectToLdsLaneOutsideTheLdsWritesNothing) {
+  RecordingSimulatorApi api;
+  dh::DataHazardAdapter adapter{api};
+  const auto instruction = route_instruction(ExecutionKey{1, 0, 0, 0}, 1, 0x100);
+  adapter.on_instruction(instruction);
+
+  adapter.on_memory_route(direct_to_lds_route(instruction, 0x7fffffff, 64, 160 * 1024));
+
+  EXPECT_TRUE(local_write_addresses(api).empty());
+}
+
+TEST(DataHazardAdapterTest, DirectToLdsKeepsOnlyTheLanesInsideTheLds) {
+  RecordingSimulatorApi api;
+  dh::DataHazardAdapter adapter{api};
+  const auto instruction = route_instruction(ExecutionKey{1, 0, 0, 0}, 1, 0x100);
+  adapter.on_instruction(instruction);
+
+  // Lane 0 ends exactly at the limit; lane 1 onwards would pass it.
+  const uint64_t limit = 0x1000;
+  adapter.on_memory_route(direct_to_lds_route(instruction, limit - 4, 16, limit));
+
+  EXPECT_EQ(local_write_addresses(api), std::vector<uint64_t>{limit - 4});
+}
+
+TEST(DataHazardAdapterTest, DirectToLdsSwitchedOffOnOddWavesDoesNotRace) {
+  AdapterHarness h;
+  const ExecutionKey even = h.wave, odd_a{1, 0, 0, 1}, odd_b{1, 0, 0, 3};
+  h.adapter.on_wave_begin(odd_a);
+  h.adapter.on_wave_begin(odd_b);
+
+  // The even wave loads the tile; the odd waves' copies are switched off by
+  // aiming them past the end of the LDS, as Triton does.
+  const uint64_t limit = 160 * 1024;
+  hazard_core::EntityId id = 10;
+  for (const auto &[wave, lds] :
+       {std::pair{even, uint64_t{0x400}}, std::pair{odd_a, uint64_t{0x7fffffff}},
+        std::pair{odd_b, uint64_t{0x7fffffff}}}) {
+    const auto instruction = route_instruction(wave, id++, 0x200);
+    h.adapter.on_instruction(instruction);
+    h.adapter.on_memory_route(direct_to_lds_route(instruction, lds, 64, limit));
+  }
+  resolve_barrier(h.engine, {even, odd_a, odd_b});
+
+  EXPECT_TRUE(h.engine.warning_snapshot().empty());
+}
+
+// Regression guards: the limit drops only what the LDS would drop.
+
+TEST(DataHazardAdapterTest, DirectToLdsWithoutALimitKeepsEveryLane) {
+  RecordingSimulatorApi api;
+  dh::DataHazardAdapter adapter{api};
+  const auto instruction = route_instruction(ExecutionKey{1, 0, 0, 0}, 1, 0x100);
+  adapter.on_instruction(instruction);
+
+  // A frontend that does not know the LDS size passes no limit.
+  adapter.on_memory_route(direct_to_lds_route(instruction, 0x7fffffff, 8, 0));
+
+  EXPECT_EQ(local_write_addresses(api).size(), 8u);
+}
+
+TEST(DataHazardAdapterTest, DirectToLdsInsideTheLdsStillRaces) {
+  AdapterHarness h;
+  const ExecutionKey first = h.wave, second{1, 0, 0, 1};
+  h.adapter.on_wave_begin(second);
+
+  // Two waves loading into the same in-range LDS with no barrier between them
+  // is a real write-write race, and the limit must not hide it.
+  const uint64_t limit = 160 * 1024;
+  hazard_core::EntityId id = 10;
+  for (const ExecutionKey &wave : {first, second}) {
+    const auto instruction = route_instruction(wave, id++, 0x200);
+    h.adapter.on_instruction(instruction);
+    h.adapter.on_memory_route(direct_to_lds_route(instruction, 0x400, 64, limit));
+  }
+  resolve_barrier(h.engine, {first, second});
+
+  const auto warnings = h.engine.warning_snapshot();
+  ASSERT_FALSE(warnings.empty());
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::LocalMemoryRace);
+  EXPECT_EQ(warnings[0].finding.address, 0x400u);
+}
+
+TEST(DataHazardAdapterTest, DirectToLdsLastLaneEndingAtTheLimitIsKept) {
+  RecordingSimulatorApi api;
+  dh::DataHazardAdapter adapter{api};
+  const auto instruction = route_instruction(ExecutionKey{1, 0, 0, 0}, 1, 0x100);
+  adapter.on_instruction(instruction);
+
+  // 64 lanes filling the LDS exactly to its last byte.
+  const uint64_t limit = 64 * 4;
+  adapter.on_memory_route(direct_to_lds_route(instruction, 0, 64, limit));
+
+  EXPECT_EQ(local_write_addresses(api).size(), 64u);
+}
+
+// A direct-to-LDS load whose every lane falls outside the LDS writes nothing,
+// but it still issues and still holds a load-counter slot until it completes.
+// Without that slot, "wait until one load remains" retires the wrong load. Found
+// on gfx950-gluon-tutorials' inter_wave/a4w4 kernel, where odd waves' switched
+// off scale loads sit between real tile loads and an s_waitcnt vmcnt(N).
+TEST(DataHazardAdapterTest, DirectToLdsOutsideTheLdsStillHoldsItsLoadcntSlot) {
+  AdapterHarness h;
+  const uint64_t limit = 160 * 1024;
+
+  // A real tile load into LDS 0x400, then a switched-off one.
+  const auto tile = route_instruction(h.wave, 1, 0x100);
+  h.adapter.on_instruction(tile);
+  h.adapter.on_memory_route(direct_to_lds_route(tile, 0x400, 64, limit));
+  const auto switched_off = route_instruction(h.wave, 2, 0x104);
+  h.adapter.on_instruction(switched_off);
+  h.adapter.on_memory_route(direct_to_lds_route(switched_off, 0x7fffffff, 64, limit));
+
+  // s_waitcnt vmcnt(1): only the newer load may still be outstanding, so the
+  // tile has landed.
+  dh::InstructionView wait = h.instruction(3, 0x108);
+  wait.wait.kind = dh::WaitKind::WaitLoadcnt;
+  wait.wait.count = 1;
+  h.adapter.on_instruction(wait);
+
+  h.adapter.on_instruction(h.instruction(4, 0x10c));
+  dh::MemoryRouteView local_read;
+  local_read.instruction.execution = h.wave;
+  local_read.resource_kind = ResourceKind::LocalMemory;
+  local_read.register_class = dh::RegisterClass::None;
+  local_read.address = 0x400;
+  local_read.size_bytes = 16;
+  local_read.is_load = true;
+  h.adapter.on_memory_route(local_read);
+
+  EXPECT_TRUE(h.engine.warning_snapshot().empty());
+}
+
+// The guard for the test above: the same wait one load short still leaves the
+// tile outstanding, and reading it is a real RAW.
+TEST(DataHazardAdapterTest, DirectToLdsReadBeforeItsLoadcntDrainsIsRaw) {
+  AdapterHarness h;
+  const uint64_t limit = 160 * 1024;
+
+  const auto tile = route_instruction(h.wave, 1, 0x100);
+  h.adapter.on_instruction(tile);
+  h.adapter.on_memory_route(direct_to_lds_route(tile, 0x400, 64, limit));
+  const auto switched_off = route_instruction(h.wave, 2, 0x104);
+  h.adapter.on_instruction(switched_off);
+  h.adapter.on_memory_route(direct_to_lds_route(switched_off, 0x7fffffff, 64, limit));
+
+  // s_waitcnt vmcnt(2): both loads may still be outstanding.
+  dh::InstructionView wait = h.instruction(3, 0x108);
+  wait.wait.kind = dh::WaitKind::WaitLoadcnt;
+  wait.wait.count = 2;
+  h.adapter.on_instruction(wait);
+
+  h.adapter.on_instruction(h.instruction(4, 0x10c));
+  dh::MemoryRouteView local_read;
+  local_read.instruction.execution = h.wave;
+  local_read.resource_kind = ResourceKind::LocalMemory;
+  local_read.register_class = dh::RegisterClass::None;
+  local_read.address = 0x400;
+  local_read.size_bytes = 16;
+  local_read.is_load = true;
+  h.adapter.on_memory_route(local_read);
+
+  const auto warnings = h.engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::RAW);
+}

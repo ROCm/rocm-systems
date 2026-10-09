@@ -6,6 +6,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
+#include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/log.h"
@@ -764,6 +765,11 @@ void DataHazardPlugin::route_vector_memory(const Instruction &inst, amdgpu::Wave
     route.local_write_wait = hazard_core::WaitCntType::VMEM;
     route.local_size_bytes = route.size_bytes;
     route.per_lane_local_addresses.reserve(lanes);
+    // The LDS drops a write that runs past its end (Lds::write), and compilers
+    // rely on it to switch a wave's copy off without a branch. The limit is
+    // measured from the wave's LDS base, like the addresses below.
+    const uint64_t lds_bytes = std::as_const(wf).lds().size_bytes();
+    route.local_memory_limit = lds_bytes > wf.lds_base() ? lds_bytes - wf.lds_base() : 0;
     const uint32_t per_lane_bytes = route.size_bytes;
     for (size_t lane = 0; lane < lanes; ++lane) {
       const uint32_t addr = vmem->lds_per_lane_addr

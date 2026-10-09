@@ -118,7 +118,7 @@ process exit. While a run is still going the sink is the only output.
 - **WAW**: a write lands on a register or LDS address that a pending
   asynchronous write still targets.
 - **WAR**: an LDS address is overwritten while an asynchronous read of it is
-  still pending. See the limitation on register-level WAR below.
+  still pending.
 - **Cross-wave LDS races**: two waves in a workgroup touch the same LDS address
   within one barrier epoch and at least one of them writes.
 - **Cross-workgroup global races**: two workgroups touch overlapping global
@@ -175,6 +175,14 @@ transpose DS ops) are compared on every lane. 16-bit halves of a register are no
 tracked separately: an access to either half conflicts with a load into the
 other.
 
+A direct-to-LDS load (`buffer_load ... lds`) whose LDS destination runs past
+the end of the LDS writes nothing there: the hardware drops the write, and so
+does rocjitsu. Compilers rely on this to switch off a wave's copy of a load
+without branching, by pointing M0 far outside the LDS (Triton uses
+`0x7fffffff`). Those lanes are not recorded as LDS writes, so they race with
+nothing. The load still holds its load-counter slot until it completes, so a
+later partial wait counts it as the hardware does.
+
 A tensor DMA into LDS names no address in its encoding: the LDS base, element
 size, tile dimensions, iteration stride and row padding all come from a
 descriptor the transfer reads out of scalar registers. The plugin reads that same
@@ -228,12 +236,6 @@ ctest --test-dir build -R "DataHazard|Hazard"
 - **Performance**: rocjitsu emulates GPU execution on the CPU, and hazard
   detection adds overhead on top of that. This is a correctness tool — use
   targeted test cases, not production workloads.
-
-- **No register-level WAR**: the engine can represent a WAR on a VGPR still
-  being read by a pending store, and the previous `vm/plugins/hazard`
-  integration reported them, but nothing in the current rocjitsu store path
-  feeds `track_vector_read`, so no register WAR is reported today. LDS WAR is
-  reported. This is a known coverage gap rather than a design decision.
 
 - **Wait immediates only**: hazards are resolved by `s_wait_*` and `s_barrier`.
   Software synchronization the hardware does not express through a wait counter

@@ -323,7 +323,8 @@ public:
   /// CU-mode workgroups use their owning CU's LDS. WGP-mode workgroups can
   /// instead use a backing shared by the two sibling CUs in the WGP.
   Lds &lds();
-  const Lds &lds() const;
+  /// Exported so plugins can bound LDS accesses the way the LDS does.
+  RJ_API_EXPORT const Lds &lds() const;
 
   /// @brief Override the LDS backing for this workgroup placement.
   /// Passing nullptr restores the owning CU's LDS.

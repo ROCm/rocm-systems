@@ -452,18 +452,38 @@ void DataHazardAdapter::on_memory_route(const MemoryRouteView &route) {
   }
 
   if (route.writes_local_memory && route.resource_kind != ResourceKind::LocalMemory) {
+    const WaitCntType local_wait =
+        route.local_write_wait != WaitCntType::NONE ? route.local_write_wait : WaitCntType::VMEM;
+    bool wrote_local = false;
     emit_per_lane_or_scalar(route.per_lane_local_addresses, route.local_address, route.exec_mask,
                             [&](uint64_t address) {
+                              // Past the end of the LDS the write is dropped, so
+                              // there is nothing to race. Compilers rely on this
+                              // to switch a wave's copy off without a branch.
+                              if (route.local_memory_limit != 0 &&
+                                  (address >= route.local_memory_limit ||
+                                   local_size_bytes > route.local_memory_limit - address))
+                                return;
                               ResourceAccessEvent local = make_base_resource_event(
                                   instruction, local_size_bytes, route.is_atomic, exec_mask);
                               local.resource_kind = ResourceKind::LocalMemory;
                               local.address = address;
                               local.is_write = true;
-                              local.hazards.write_wait = route.local_write_wait != WaitCntType::NONE
-                                                             ? route.local_write_wait
-                                                             : WaitCntType::VMEM;
+                              local.hazards.write_wait = local_wait;
+                              wrote_local = true;
                               deliver(route.instruction.engine_wave, local);
                             });
+    // With every lane outside the LDS the load writes nothing, but it still
+    // issued, and it holds its counter slot until it completes, so a later
+    // "wait until N remain" counts it. A load with LDS lanes holds the slot
+    // through them.
+    if (!wrote_local && !(route.exec_mask.has_value() && *route.exec_mask == 0)) {
+      ResourceAccessEvent slot =
+          make_base_resource_event(instruction, size_bytes, route.is_atomic, exec_mask);
+      slot.resource_kind = route.resource_kind;
+      slot.hazards.memory_op_wait = local_wait;
+      deliver(route.instruction.engine_wave, slot);
+    }
   }
 
   if (route.reads_local_memory && route.resource_kind != ResourceKind::LocalMemory) {

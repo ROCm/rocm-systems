@@ -121,6 +121,10 @@ struct MemoryRouteView {
   bool is_tensor = false;
   bool writes_local_memory = false;
   hazard_core::WaitCntType local_write_wait = hazard_core::WaitCntType::NONE;
+  /// Bytes of LDS valid from the wave's LDS base, the origin of the local
+  /// addresses; 0 when unknown. A lane whose local write would run past it is
+  /// dropped, as the hardware drops it.
+  uint64_t local_memory_limit = 0;
   /// Whether the route reads LDS asynchronously, as a tensor store streaming
   /// out of it does. The read stays live until local_read_wait drains, and
   /// overwriting the LDS before then is a WAR hazard.
