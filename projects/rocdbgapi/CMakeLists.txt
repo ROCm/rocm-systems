@@ -312,6 +312,15 @@ option(ENABLE_ASSERTIONS "Enable assertions" ${ENABLE_ASSERTIONS_DEFAULT})
 # <https://cmake.org/cmake/help/latest/variable/BUILD_SHARED_LIBS.html>.
 option(BUILD_SHARED_LIBS "Build amd-dbgapi as a shared library" ON)
 
+# Test suite options.  Default OFF so packaging builds are unaffected
+# unless a developer or CI job explicitly opts in.
+option(AMD_DBGAPI_BUILD_UNIT_TESTS "Build rocdbgapi unit tests" OFF)
+
+if(AMD_DBGAPI_BUILD_UNIT_TESTS)
+    enable_testing()
+    add_subdirectory(test)
+endif()
+
 if(ENABLE_ASSERTIONS)
     if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
         # Add -UNDEBUG to the CXXFLAGS (project is C++ only, no CFLAGS needed)
