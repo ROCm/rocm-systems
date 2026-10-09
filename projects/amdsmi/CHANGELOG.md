@@ -117,7 +117,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Added ``amdsmi_get_nic_type()`` and a ``type`` field in ``amdsmi_nic_asic_info_t``**.  
   - The new ``amdsmi_nic_type_t`` reports ``AMDSMI_NIC_TYPE_AINIC``, ``AMDSMI_NIC_TYPE_UALOE``, ``AMDSMI_NIC_TYPE_OTHER`` or ``AMDSMI_NIC_TYPE_UNKNOWN``. Callers no longer have to infer the kind from ``MODE`` or the vendor name; a Pensando card whose ports were not found is ``fwctl-only`` as well. The getter and the field report the same value.
-  - The field is one ``uint8_t`` placed in the alignment padding before ``capability``, so ``sizeof(amdsmi_nic_asic_info_t)`` and every existing offset are unchanged and callers built against the old header keep working.
+  - The field is one ``uint8_t`` placed in the alignment padding before ``capability``, so it adds no size beyond ``capability`` itself. Against the previous release ``sizeof(amdsmi_nic_asic_info_t)`` grows from 1290 to 1296 bytes (``type`` and ``capability`` are new), so callers that allocate it must be rebuilt.
+
+- **``amdsmi_nic_port_t::ifindex`` widened from ``uint8_t`` to ``uint32_t``**.  
+  - A Linux ifindex above 255 was truncated. ``sizeof(amdsmi_nic_port_t)`` grows from 2328 to 2336 bytes and ``mac_address`` and every later member move by 3 bytes (offset 781 to 784), so callers built against the previous header must be rebuilt.
 
 - **Added ``TYPE`` to ``amd-smi list --nic`` and ``amd-smi metric --nic``**.  
   - It shows ``AINIC``, ``UALoE``, or the vendor name for any other NIC, and ``N/A`` when the type is unknown. In ``metric --nic`` it is the first field of each block, so the all-``N/A`` block of a UALoE endpoint is not read as a failure.
@@ -132,7 +135,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Only `0x0008` was matched, so a host whose cards present `0x1008` reported a single NIC instead of one per card. `amd-smi list --nic all` and `amd-smi metric --nic all` now enumerate every card present.
 
 - **AI-NIC identity and telemetry now read the port function instead of the upstream bridge**.  
-  - The NIC handle names the PCIe bridge, while PCI VPD, hwmon, and the devlink instance register on the port function beneath it. `ASIC_TEMP_C` and `PORT_SPLIT` reported `N/A` on every AI-NIC as a result, and `PRODUCT_NAME`, `PART_NUMBER`, and `SERIAL_NUMBER` were empty on cards whose bridge exposes no `vpd` node.
+  - The NIC handle names the PCIe bridge, while PCI VPD, hwmon, and the devlink instance register on the port function beneath it. The `ASIC` temperature and `PORT_SPLIT` reported `N/A` on every AI-NIC as a result, and `PRODUCT_NAME`, `PART_NUMBER`, and `SERIAL_NUMBER` were empty on cards whose bridge exposes no `vpd` node.
   - Identity prefers the NIC's own VPD field by field and fills only the absent fields from the port, so a bridge carrying a partial image no longer suppresses the values the port does carry.
   - On a card with more than one port, the devlink-sourced fields report port 0.
   - `SERIAL_NUMBER` keeps its devlink board-serial fallback, which now also addresses the port function.
@@ -216,6 +219,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Both previously always returned `AMDSMI_STATUS_NOT_YET_IMPLEMENTED`. They now report per-port standard and vendor driver counters.
   - `amdsmi_get_nic_vendor_statistics()` gains a new `amdsmi_nic_stat_scope_t scope` parameter (`DEFAULT` or `EXTENDED`), inserted before `num_stats`. This is a breaking signature change, but no released caller could have depended on the old signature actually returning data.
   - `amd-smi metric --nic --port [--extended]` now shows per-port vendor and standard statistics.
+  - When the caller's array is smaller than the number of statistics, the NIC statistics getters (including `amdsmi_get_nic_rdma_port_statistics()`) fill what fits, set `num_stats` to the count needed and return `AMDSMI_STATUS_INSUFFICIENT_SIZE`. `amdsmi_get_nic_vendor_statistics()` returns `AMDSMI_STATUS_INVAL` for a `scope` outside `amdsmi_nic_stat_scope_t`.
 
 - **NPM sysfs numeric reads (e.g. `cur_node_power_limit`, `max_node_power_limit`) now reject negative or malformed content**.  
   - Previously a leading `-` (e.g. `"-1"`) parsed successfully as `UINT64_MAX`; such content now fails with `RSMI_STATUS_UNEXPECTED_DATA`.
@@ -248,6 +252,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
   These were CLI-internal (not part of the public `amdsmi` Python library), their exit-code behavior is superseded by the reworked CLI process exit codes described above.
+
+- **Removed the Broadcom NIC and switch device path**.  
+  - `amd-smi` no longer accepts `--brcm_nic`, `--brcm_switch`, `--switch`, `topology --nic_topo` or `--nic_switch`, and the C, `rocm_smi` and Python APIs for those devices are gone. Broadcom NICs now appear through `--nic` like every other NIC.
 
 ### Optimized
 

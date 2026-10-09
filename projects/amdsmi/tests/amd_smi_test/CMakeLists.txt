@@ -172,6 +172,11 @@ add_executable(test_nic_rdma_resolver_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/t
 target_include_directories(test_nic_rdma_resolver_suite PRIVATE ${PROJECT_SOURCE_DIR}/include)
 add_test(NAME nic_rdma_resolver_suite COMMAND test_nic_rdma_resolver_suite)
 
+# Statistics copy and scope helpers behind the public getters. Header-only subject.
+add_executable(test_nic_stats_copy_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/test_nic_stats_copy_suite.cpp)
+target_include_directories(test_nic_stats_copy_suite PRIVATE ${PROJECT_SOURCE_DIR}/include)
+add_test(NAME nic_stats_copy_suite COMMAND test_nic_stats_copy_suite)
+
 # Debug-log seam and read-chokepoint logging (real tmpdir files, capture sink).
 add_executable(test_nic_log_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/test_nic_log_suite.cpp)
 target_compile_options(test_nic_log_suite PRIVATE -fno-rtti)
@@ -183,9 +188,23 @@ endif()
 target_link_libraries(test_nic_log_suite PRIVATE amdsminic ${FILESYSTEM_LIB})
 add_test(NAME nic_log_suite COMMAND test_nic_log_suite)
 
+# PCI VPD parser, fed synthetic images.
+add_executable(test_nic_vpd_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/test_nic_vpd_suite.cpp)
+target_compile_options(test_nic_vpd_suite PRIVATE -fno-rtti)
+target_link_libraries(test_nic_vpd_suite amdsminic ${FILESYSTEM_LIB})
+add_test(NAME nic_vpd_suite COMMAND test_nic_vpd_suite)
+
 # Install tests
 install(
-    TARGETS ${TEST} test_nic_telemetry_suite test_nic_discovery_suite test_nic_stats_suite test_nic_log_suite
+    TARGETS
+        ${TEST}
+        test_nic_telemetry_suite
+        test_nic_discovery_suite
+        test_nic_stats_suite
+        test_nic_stats_copy_suite
+        test_nic_rdma_resolver_suite
+        test_nic_log_suite
+        test_nic_vpd_suite
     DESTINATION ${SHARE_INSTALL_PREFIX}/tests
     COMPONENT ${TESTS_COMPONENT}
 )

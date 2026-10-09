@@ -3123,7 +3123,7 @@ typedef struct {
   char vendor_name[AMDSMI_MAX_STRING_LENGTH];
   /**
    * An amdsmi_nic_type_t value. A uint8_t rather than the enum so it fits the alignment padding
-   * before capability and the struct keeps its size and every other offset.
+   * before capability and adds no size beyond capability itself.
    */
   uint8_t type;
   uint32_t capability;  //!< bitmask of amdsmi_nic_capability_bits_t
@@ -10599,11 +10599,13 @@ amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_h
  *    NIC's RDMA devices in the order of ::amdsmi_nic_rdma_devices_info_t (each device's
  *    ports in turn)
  *  @param[in,out] num_stats pointer to the number of statistics
- *    - Input: maximum number of statistics that stats array can hold
- *    - Output: actual number of statistics available/returned
+ *    - Input: maximum number of statistics that stats array can hold; ignored if stats is NULL
+ *    - Output: number of statistics available
  *  @param[out] stats pointer to array of amdsmi_nic_stat_t structures to be filled
  *    - If NULL, only num_stats is filled with the count of available statistics
- *    - If not NULL, must be allocated by user with at least num_stats elements
+ *    - If not NULL, must be allocated by user with at least num_stats elements. When there are
+ *      more statistics, the first num_stats are filled and ::AMDSMI_STATUS_INSUFFICIENT_SIZE
+ *      is returned
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
  *    ::AMDSMI_STATUS_NOT_SUPPORTED if the NIC has no RDMA port at @p rdma_port_index
@@ -10669,11 +10671,13 @@ amdsmi_status_t amdsmi_get_nic_telemetry(amdsmi_processor_handle processor_handl
  *  @param[in] processor_handle NIC for which to query
  *  @param[in] port_index index of the NIC port to query
  *  @param[in,out] num_stats pointer to the number of statistics
- *    - Input: maximum number of statistics that stats array can hold
- *    - Output: actual number of statistics available/returned
+ *    - Input: maximum number of statistics that stats array can hold; ignored if stats is NULL
+ *    - Output: number of statistics available
  *  @param[out] stats pointer to array of amdsmi_nic_stat_t structures to be filled
  *    - If NULL, only num_stats is filled with the count of available statistics
- *    - If not NULL, must be allocated by user with at least num_stats elements
+ *    - If not NULL, must be allocated by user with at least num_stats elements. When there are
+ *      more statistics, the first num_stats are filled and ::AMDSMI_STATUS_INSUFFICIENT_SIZE
+ *      is returned
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -10713,13 +10717,16 @@ typedef enum {
  *  @param[in] processor_handle NIC for which to query
  *  @param[in] port_index index of the NIC port to query
  *  @param[in] scope AMDSMI_NIC_STAT_SCOPE_DEFAULT for the driver's default
- *  counter set, AMDSMI_NIC_STAT_SCOPE_EXTENDED for the full set (a superset)
+ *  counter set, AMDSMI_NIC_STAT_SCOPE_EXTENDED for the full set (a superset). Any other
+ *  value returns ::AMDSMI_STATUS_INVAL
  *  @param[in,out] num_stats pointer to the number of statistics
- *    - Input: maximum number of statistics that stats array can hold
- *    - Output: actual number of statistics available/returned
+ *    - Input: maximum number of statistics that stats array can hold; ignored if stats is NULL
+ *    - Output: number of statistics available
  *  @param[out] stats pointer to array of amdsmi_nic_stat_t structures to be filled
  *    - If NULL, only num_stats is filled with the count of available statistics
- *    - If not NULL, must be allocated by user with at least num_stats elements
+ *    - If not NULL, must be allocated by user with at least num_stats elements. When there are
+ *      more statistics, the first num_stats are filled and ::AMDSMI_STATUS_INSUFFICIENT_SIZE
+ *      is returned
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
