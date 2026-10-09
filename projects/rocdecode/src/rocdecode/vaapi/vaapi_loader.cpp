@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <cstdlib>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 #ifdef _WIN32
 namespace {
@@ -103,18 +104,32 @@ std::filesystem::path VaapiLoader::FindVaDisplayLibPath() {
         }
     }
 
-    // Strategy 3: search PATH, which is how the DLL was found when rocdecode
-    // linked against it directly (e.g. %ROCM_PATH%\lib\rocm_sysdeps\bin on PATH).
-    std::wstring found(MAX_PATH, L'\0');
-    DWORD len = SearchPathW(nullptr, candidate, nullptr, static_cast<DWORD>(found.size()), found.data(), nullptr);
-    if (len > found.size()) {
-        // Buffer too small; len is the required size including the terminator.
-        found.resize(len);
-        len = SearchPathW(nullptr, candidate, nullptr, static_cast<DWORD>(found.size()), found.data(), nullptr);
-    }
-    if (len > 0 && len < found.size()) {
-        found.resize(len);
-        return fs::path(found);
+    // Strategy 3: search the directories listed in PATH, which is how the DLL
+    // was found when rocdecode linked against it directly (e.g.
+    // %ROCM_PATH%\lib\rocm_sysdeps\bin on PATH). PATH is walked explicitly
+    // rather than with SearchPathW, which also searches the current directory
+    // and would let a DLL planted there be loaded. Relative entries (e.g. ".")
+    // are skipped for the same reason.
+    const wchar_t *path_env = _wgetenv(L"PATH");
+    if (path_env) {
+        std::wstring_view entries(path_env);
+        while (!entries.empty()) {
+            size_t sep = entries.find(L';');
+            std::wstring_view entry = entries.substr(0, sep);
+            entries = (sep == std::wstring_view::npos) ? std::wstring_view() : entries.substr(sep + 1);
+            if (entry.size() >= 2 && entry.front() == L'"' && entry.back() == L'"') {
+                entry = entry.substr(1, entry.size() - 2);
+            }
+            fs::path dir(entry);
+            if (!dir.is_absolute()) {
+                continue;
+            }
+            std::error_code ec;
+            fs::path full = dir / candidate;
+            if (fs::is_regular_file(full, ec)) {
+                return full;
+            }
+        }
     }
 
     return {};

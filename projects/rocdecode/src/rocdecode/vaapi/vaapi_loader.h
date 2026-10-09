@@ -144,7 +144,8 @@ private:
     //   Primary strategy: GetModuleHandleExW on a symbol in this translation
     //   unit to locate rocdecode.dll (in <prefix>/bin), then look in
     //   <prefix>/lib/rocm_sysdeps/bin/.
-    //   Fallbacks: %ROCM_PATH%/lib/rocm_sysdeps/bin/, then a PATH search.
+    //   Fallbacks: %ROCM_PATH%/lib/rocm_sysdeps/bin/, then the absolute
+    //   directories listed in PATH (never the current directory).
     static std::filesystem::path FindVaDisplayLibPath();
 
     // Loads the libraries and resolves all symbols; throws on failure.
