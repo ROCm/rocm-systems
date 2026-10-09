@@ -497,13 +497,29 @@ def _call_tree_node_from_marker_row(
     return node
 
 
+_FATAL_ML_API_TRACE_ERRORS = (
+    KernelSequenceLengthMismatchError,
+    MarkerNotNestedError,
+    OverlappingMarkerRangeError,
+    PassMarkerMismatchError,
+)
+
+
 def _record_ml_api_trace_error(
     errors: Optional[list[MlApiTraceError]], err: MlApiTraceError
 ) -> None:
-    """Append err to errors, or raise immediately when no collector is given."""
-    if errors is None:
+    """Append err to errors when collecting.
+
+    With no collector, integrity errors are raised so analyze can exit; coverage
+    issues (unmatched kernels, attach/location) are warned and the forest
+    continues.
+    """
+    if errors is not None:
+        errors.append(err)
+        return
+    if isinstance(err, _FATAL_ML_API_TRACE_ERRORS):
         raise err
-    errors.append(err)
+    console_warning("analysis", str(err))
 
 
 def _record_overlapping_marker(
@@ -615,8 +631,8 @@ def attach_unlocated_trees_by_launcher_thread(
 ) -> None:
     """Stack torch/triton trees with no source onto the autograd launcher thread.
 
-    Roots that cannot be placed stay in the forest. Placement errors are recorded
-    on errors so the caller can report them after the call tree is shown.
+    Roots that cannot be placed stay in the forest. Placement issues are
+    coverage warnings, not fatal.
     """
     pending: list[tuple[str, CallTreeNode]] = []
     for thread_id, roots in forest.items():
@@ -1500,7 +1516,11 @@ def process_ml_api_trace_output(
     workload: schema.Workload,
     workload_dir: str,
 ) -> None:
-    """Load, join, nest, and validate ML API marker rows for operator analyze."""
+    """Load, join, nest, and validate ML API marker rows for operator analyze.
+
+    Integrity failures raise and abort analyze. Coverage issues warn here
+    and the call tree is still built.
+    """
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     csv_pairs = _find_ml_api_trace_csv_pairs(Path(workload_dir))
     if not csv_pairs:
@@ -1519,16 +1539,23 @@ def process_ml_api_trace_output(
         )
         for marker_path, counter_path in csv_pairs
     ]
+    try:
+        _build_ml_api_call_trees(workload)
+    except MlApiTraceError as exc:
+        console_error("analysis", str(exc))
+
+
+def _build_ml_api_call_trees(workload: schema.Workload) -> None:
+    """Join, collapse, nest, and attach operator trees for one workload."""
     unmatched_kernel_frames: list[pd.DataFrame] = []
     for pair in workload.ml_api_trace_pairs:
         pair.joined_df = _join_pass_marker_and_counter(pair)
         unmatched_kernel_frames.append(_unmatched_kernel_rows(pair.joined_df))
     workload.unmatched_kernel_frames = unmatched_kernel_frames
-    errors: list[MlApiTraceError] = []
     nonempty_unmatched = [frame for frame in unmatched_kernel_frames if not frame.empty]
     if nonempty_unmatched:
         _record_ml_api_trace_error(
-            errors,
+            None,
             UnaccountedKernelError(pd.concat(nonempty_unmatched, ignore_index=True)),
         )
     for pair in workload.ml_api_trace_pairs:
@@ -1536,26 +1563,26 @@ def process_ml_api_trace_output(
         pair.joined_df = _add_stitch_key_and_ordinal(
             _group_kernels_onto_markers(marker_rows)
         )
+    skipped_keys: set[tuple[str, str]] = set()
     workload.ml_api_trace_df = _apply_parsed_function_columns(
         _collapse_matching_markers_across_passes(
-            [pair.joined_df for pair in workload.ml_api_trace_pairs],
-            errors,
+            [pair.joined_df for pair in workload.ml_api_trace_pairs]
         )
     )
-    skipped_keys: set[tuple[str, str]] = set()
     workload.ml_api_call_trees = nest_marker_intervals(
-        workload.ml_api_trace_df, errors, skipped_keys
+        workload.ml_api_trace_df, skipped_keys=skipped_keys
     )
-    attach_unlocated_trees_by_launcher_thread(workload.ml_api_call_trees, errors)
+    attach_unlocated_trees_by_launcher_thread(workload.ml_api_call_trees)
     _validate_all_markers_nested(
-        workload.ml_api_trace_df, workload.ml_api_call_trees, errors, skipped_keys
+        workload.ml_api_trace_df,
+        workload.ml_api_call_trees,
+        skipped_keys=skipped_keys,
     )
     _prune_cpu_only_call_trees(workload.ml_api_call_trees)
     for roots in workload.ml_api_call_trees.values():
         for node in roots:
             rollup_node_stats(node)
-    _record_missing_source_location_errors(workload.ml_api_call_trees, errors)
-    workload.ml_api_trace_errors = errors
+    _record_missing_source_location_errors(workload.ml_api_call_trees)
 
 
 def validate_workload(path: str) -> None:
