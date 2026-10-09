@@ -1200,6 +1200,60 @@ TEST(InterposerDrmTest, KfdBufferKeepsItsMetadataAfterEveryHandleCloses) {
   EXPECT_EQ(close(kfd), 0);
 }
 
+TEST(InterposerDrmTest, KfdExportKeepsItsMetadataAfterTheAllocationIsFreed) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  uint32_t gpu_id = 0;
+  ASSERT_TRUE(read_gpu_id(gpu_id));
+  constexpr size_t kBytes = 4096;
+  void *reserved =
+      mmap(nullptr, kBytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  ASSERT_NE(reserved, MAP_FAILED);
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = reinterpret_cast<uint64_t>(reserved);
+  allocation.size = kBytes;
+  allocation.gpu_id = gpu_id;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+                     KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+  kfd_ioctl_export_dmabuf_args exported{};
+  exported.handle = allocation.handle;
+  exported.flags = O_CLOEXEC;
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_EXPORT_DMABUF, &exported), 0);
+  const int dmabuf = static_cast<int>(exported.dmabuf_fd);
+  uint32_t tagged = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf, &tagged));
+  drm_amdgpu_gem_metadata store{};
+  store.handle = tagged;
+  store.op = AMDGPU_GEM_METADATA_OP_SET_METADATA;
+  store.data.data_size_bytes = sizeof(uint32_t);
+  store.data.data[0] = 0x6D82u;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_METADATA, &store), 0);
+  // The dma-buf outlives both the GEM handle and the KFD allocation.
+  ASSERT_EQ(gem_close(drm, tagged), 0);
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = allocation.handle;
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+
+  uint32_t attached = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf, &attached));
+  drm_amdgpu_gem_metadata query{};
+  query.handle = attached;
+  query.op = AMDGPU_GEM_METADATA_OP_GET_METADATA;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_METADATA, &query), 0);
+  EXPECT_EQ(query.data.data_size_bytes, sizeof(uint32_t));
+  EXPECT_EQ(query.data.data[0], 0x6D82u);
+
+  EXPECT_EQ(gem_close(drm, attached), 0);
+  EXPECT_EQ(close(dmabuf), 0);
+  EXPECT_EQ(munmap(reserved, kBytes), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
 TEST(InterposerDrmTest, DmabufExportLeavesPagesPastAPartialMapping) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
