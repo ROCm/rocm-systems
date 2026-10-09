@@ -79,6 +79,7 @@ function(rccl_define_micro_source_lists)
     ras-diagnostics-common-test.cc       # src/ras/diagnostics_checks_common.cc
     ras-collectives-test.cc              # src/ras/collectives.cc
     ras-diagnostics-test.cc              # src/ras/diagnostics.cc
+    ras-diagnostics-env-test.cc          # src/ras/diagnostics_env.cc
     ras-param-test.cc                    # src/ras/ras_param.cc
     tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
@@ -220,6 +221,34 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroCe -- src/ce_coll.cc. Its own binary: every other target links ce_fakes.cc.
+  set(TEST_MICRO_CE_SOURCE_FILES
+    ce-coll-test.cc
+    fakes/allocator_fakes.cc             # src/allocator.cc
+    fakes/bootstrap_stubs.cc
+    fakes/topo_stubs.cc
+    fakes/transport_stubs.cc
+    fakes/nccl_stubs.cc
+    fakes/nccl_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/ce_reduce_fakes.cc             # src/device/ce_reduce.cc
+    fakes/collectives_fakes.cc
+    fakes/comm_fakes.cc
+    fakes/dev_runtime_fakes.cc
+    fakes/devcomm_fakes.cc               # ncclTeamLsa
+    fakes/env_fakes.cc
+    fakes/os_fakes.cc
+    fakes/rccl_wrap_fakes.cc             # rcclParamCeAllReduce, rcclParamCeArStagingBytes
+    fakes/recorder_fakes.cc
+    fakes/rma_fakes.cc
+    fakes/strongstream_stubs.cc
+    fakes/tuning_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroSymKernels -- REAL src/sym_kernels.cc + generated host TU.
   set(TEST_MICRO_SYM_KERNELS_SOURCE_FILES
     sym-kernels-test.cc
@@ -289,7 +318,7 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS). Own
+  # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity). Own
   # binary: gin-plugin-init-test.cc already defines ncclParamGinEnable in
   # rccl-UnitTestsMicro, and gin_fakes.cc supplies ncclGinQueryLastError to Init.
   set(TEST_MICRO_GIN_HOST_SOURCE_FILES
@@ -779,6 +808,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     # so add_file_unique() renames this one. Re-check after any source-list reorder.
     COLLECTIVES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/collectives_tmp.cc"
     RAS_DIAGNOSTICS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_tmp.cc"
+    RAS_DIAGNOSTICS_ENV_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_env.cc"
     RAS_PARAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras_param.cc"
     # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
     TUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_tmp.cc"
@@ -796,6 +826,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     DEVCOMM_V22907_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
     WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_wrap.cc"
     RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
+    RCCL_RMA_FAKES_OMIT_PROXY_LAUNCH_FLOOR
     RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
     DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime.cc"
     DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime_segments.cc"
@@ -805,7 +836,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
 # ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS)
+# rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity)
 # ---------------------------------------------------------------------------
 rccl_add_micro_binary(rccl-UnitTestsMicroGinHost
   SOURCES ${TEST_MICRO_GIN_HOST_SOURCE_FILES}
@@ -886,6 +917,18 @@ if(_ENQ_BUILD_DEVLINKER)
   rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue-devlinker ${_enq_common_args})
   target_compile_definitions(rccl-UnitTestsMicroEnqueue-devlinker PRIVATE RCCL_DEVICE_LINKER)
 endif()
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroCe
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroCe
+  SOURCES ${TEST_MICRO_CE_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ${_MICRO_AMDSMI_DEF}
+    RCCL_STUBS_OMIT_ncclCeFinalize       # ce_coll.cc defines it
+    CE_COLL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ce_coll.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels

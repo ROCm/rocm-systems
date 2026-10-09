@@ -708,11 +708,33 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
   NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
   bool ceCapturing = ncclCudaGraphValid(ceGraph);
 
-  // CE AlltoAllv is single-node only (ncclCeAlltoAllvEligible requires nNodes==1).
-  // Multi-node jobs (e.g. 18x4) use the send/recv fallback below for cross-node traffic.
-  if (ncclCeAlltoAllvEligible(comm, datatype, winRegType, hasSysmemSegment, ceCapturing)) {
+  // CE / hierarchical CE AlltoAllv: gather size metadata, then enqueue CE plan.
+  // Single-node -> ncclCeAlltoAllv; multi-node hier -> ncclHierCeAlltoAllv at launch.
+  const bool ceElig =
+    ncclCeAlltoAllvEligible(comm, datatype, winRegType, hasSysmemSegment, ceCapturing);
+  const bool hierElig =
+    ncclHierCeAlltoAllvEligible(comm, datatype, winRegType, sendWin, recvWin, hasSysmemSegment, ceCapturing);
+  if (ceElig || hierElig) {
     const size_t nLocal = 4 * (size_t)nRanks;
     const size_t nGather = nLocal * (size_t)nRanks;
+    // First call allocates. Doing it here, rather than at init, keeps the
+    // 32 * nRanks^2 byte reservation off communicators that never AlltoAllv.
+    // ncclMemAlloc uses cudaGetDevice(). Init used to run only after the
+    // runtime had selected comm->cudaDev, so select it here and put it back.
+    if (comm->localSizes == nullptr || comm->gatheredSizes == nullptr) {
+      int savedDev = -1;
+      CUDACHECK(cudaGetDevice(&savedDev));
+      CUDACHECK(cudaSetDevice(comm->cudaDev));
+      ncclResult_t allocResult = ncclSuccess;
+      if (comm->localSizes == nullptr) {
+        allocResult = ncclMemAlloc(&comm->localSizes, nLocal * sizeof(size_t));
+      }
+      if (allocResult == ncclSuccess && comm->gatheredSizes == nullptr) {
+        allocResult = ncclMemAlloc(&comm->gatheredSizes, nGather * sizeof(size_t));
+      }
+      CUDACHECK(cudaSetDevice(savedDev));
+      NCCLCHECK(allocResult);
+    }
 
     CUDACHECK(cudaMemcpyAsync(comm->localSizes, sizes.data(), nLocal * sizeof(size_t), cudaMemcpyHostToDevice, stream));
     NCCLCHECK(ncclGroupStart());
@@ -722,6 +744,10 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
       NCCLCHECK(ncclRecv(recvPtr, nLocal, ncclUint64, r, comm, stream));
     }
     NCCLCHECK(ncclGroupEnd());
+    // The CE and hier CE planners walk this matrix on the host (global maxSend,
+    // per-peer chunk counts, RMA put offsets, wait signal counts). The device
+    // copy cannot feed that plan. The exchange is on the user's stream, so the
+    // synchronize is what makes the host matrix visible before enqueue.
     CUDACHECK(cudaMemcpyAsync(gatheredSizes.data(), comm->gatheredSizes, nGather * sizeof(size_t),
                               cudaMemcpyDeviceToHost, stream));
     CUDACHECK(cudaStreamSynchronize(stream));

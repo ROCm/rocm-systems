@@ -43,6 +43,7 @@ test_categories:
       - "RcclCeArGrownBuffer.*"
       - "SkipPresetTopoMatching.*"
       - "CeAlltoAllvEligibilityTest.*"
+      - "CeHierAlltoAllvEligibilityTest.*"
       - "CeAlltoAllEligibilityTest.*"
       - "GinAllReduceEligibilityTest.*"
       - "NetSocketTests.*"

@@ -4092,6 +4092,11 @@ static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* inf
     comm->ceColl.initialized = true;
     ceTask = nullptr; // ceTask is now owned by the ceInitTaskQueue
   }
+  // Staging setup is collective: at launch it deadlocks when one thread drives several ranks (rccl-tests -g N).
+  if (ncclCeCollNeedsStaging(info->coll) && comm->ceColl.ceARTmpBuf == nullptr) {
+    comm->ceColl.stagingPending = true;
+    ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
+  }
 
   // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
   ncclGroupCommJoin(info->comm, ncclGroupTaskTypeCollective);
@@ -4734,7 +4739,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           INFO(NCCL_INIT, "Taking kernel-based collective path");
           NCCLCHECK(collTaskAppend(comm, info, opDev));
         }
-        // hierCeAvailable is AllGather/AlltoAll-only (ncclHierCeAvailable rejects
+        // hierCeAvailable is AllGather/AlltoAll/AlltoAllv-only (ncclHierCeAvailable rejects
         // AllReduce / ReduceScatter), so it never affects this branch.
       } else if ((allGatherDecided || alltoAllDecided) &&
                  (info->decision.algo == RCCL_CE_REGISTERED || info->decision.algo == RCCL_CE_SCRATCH)) {

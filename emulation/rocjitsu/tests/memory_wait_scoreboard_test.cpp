@@ -38,7 +38,7 @@ using namespace rocjitsu;
 using namespace rocjitsu::amdgpu;
 using namespace rocjitsu::test::cdna5;
 
-// Diagnostic tests opt in; explicit empty settings exercise production defaults.
+// Diagnostic tests select warn explicitly; empty settings exercise production defaults.
 std::string memory_wait_test_config(std::string_view setting = "warn",
                                     std::string_view xcnt_setting = "") {
   std::ifstream file(kGfx1250ConfigPath);
@@ -2240,13 +2240,17 @@ void enable_multi_group_replay(std::vector<uint32_t> &code) {
 
 std::array<uint64_t, 2> run_xcnt_kernel(std::vector<uint32_t> code,
                                         std::string_view xcnt_setting = "warn", unsigned vgprs = 32,
-                                        std::string_view memory_setting = "warn") {
+                                        std::string_view memory_setting = "warn",
+                                        std::string_view wait_checking = "") {
   using namespace rocr::llvm::amdhsa;
   append_instruction(code, S_WAIT_KMCNT_0_GFX12);
   append_instruction(code, cdna5::build_sopp(cdna5::kSWaitLoadcntSopp, {.simm16 = 0}));
   append_instruction(code, cdna5::build_sopp(cdna5::kSWaitStorecntSopp, {.simm16 = 0}));
   append_instruction(code, S_ENDPGM_GFX12);
-  Gfx1250Sim sim(memory_wait_test_config(memory_setting, xcnt_setting));
+  std::string config = memory_wait_test_config(memory_setting, xcnt_setting);
+  if (!wait_checking.empty())
+    config.insert(config.find('{') + 1, std::format("\"wait_checking\":\"{}\",", wait_checking));
+  Gfx1250Sim sim(config);
   write_global_u32(*sim.memory, 0x400000, 0x12345678);
   uint32_t properties = 0;
   AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
@@ -2256,7 +2260,8 @@ std::array<uint64_t, 2> run_xcnt_kernel(std::vector<uint32_t> code,
   queue.dispatch(kernel, 32, 32, 0x400000);
   step_until_halted(*sim.engine, *sim.cu());
   EXPECT_EQ(sim.snapshot->snapshots().size(), 1u);
-  if (memory_setting != "warn" && xcnt_setting != "warn") {
+  if (wait_checking == "off" ||
+      (wait_checking.empty() && memory_setting == "off" && xcnt_setting != "warn")) {
     EXPECT_FALSE(sim.cu()->wf(0)->memory_wait_checks_enabled());
     EXPECT_EQ(sim.cu()->wf(0)->memory_wait_scoreboard(), nullptr);
   }
@@ -2378,8 +2383,21 @@ TEST(XcntExecutionTest, CompletionAndReplaySettingsAreIndependent) {
       append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 0}));
       const auto counts = run_xcnt_kernel(code, xcnt, 32, memory);
       EXPECT_EQ(counts[0], xcnt == "warn" ? 1u : 0u);
-      EXPECT_EQ(counts[1], memory == "warn" ? 1u : 0u);
+      EXPECT_EQ(counts[1], memory != "off" ? 1u : 0u);
     }
+}
+
+TEST(XcntExecutionTest, LaunchModesOverridePerCuSettings) {
+  for (std::string_view mode : {"", "on", "off", "all"}) {
+    SCOPED_TRACE(mode);
+    std::vector<uint32_t> code;
+    append_instruction(code, make_s_load_b32_scaled_imm(4, 0, 0));
+    append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 5}));
+    append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 0}));
+    const auto counts = run_xcnt_kernel(code, "warn", 32, "off", mode);
+    EXPECT_EQ(counts[0], mode.empty() || mode == "all" ? 1u : 0u);
+    EXPECT_EQ(counts[1], mode == "on" || mode == "all" ? 1u : 0u);
+  }
 }
 
 TEST(XcntExecutionTest, ReplayOnlyCheckingRetainsCompletionOrdering) {

@@ -25,6 +25,7 @@ ASSERT_HOOK_MATCHES_PROD(g_ceLocalReduceBlocks, ncclCeLocalReduceBlocks);
 ASSERT_HOOK_MATCHES_PROD(g_ceInitBatchOpsParams, ncclCeInitBatchOpsParams);
 ASSERT_HOOK_MATCHES_PROD(g_ceLaunchBatchOps, ncclCeLaunchBatchOps);
 ASSERT_HOOK_MATCHES_PROD(g_ncclCeInit, ncclCeInit);
+ASSERT_HOOK_MATCHES_PROD(g_ncclCeEnsureAllReduceStaging, ncclCeEnsureAllReduceStaging);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 static ncclResult_t DefaultCeInit(struct ncclComm*) {
@@ -33,6 +34,13 @@ static ncclResult_t DefaultCeInit(struct ncclComm*) {
 std::function<ncclResult_t(struct ncclComm*)> g_ncclCeInit = DefaultCeInit;
 
 ncclResult_t ncclCeInit(struct ncclComm* comm) { return g_ncclCeInit(comm); }
+
+static ncclResult_t DefaultCeEnsureAllReduceStaging(struct ncclComm*) {
+  FailLoudUnfaked("ce_fakes", "ncclCeEnsureAllReduceStaging");
+}
+std::function<ncclResult_t(struct ncclComm*)> g_ncclCeEnsureAllReduceStaging = DefaultCeEnsureAllReduceStaging;
+
+ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) { return g_ncclCeEnsureAllReduceStaging(comm); }
 
 bool g_ceImplemented = false;
 bool g_ceAvailableValue = false;
@@ -137,6 +145,7 @@ void ResetCeFakes() {
   g_ceInitBatchOpsParams = DefaultCeInitBatchOpsParams;
   g_ceLaunchBatchOps     = DefaultCeLaunchBatchOps;
   g_ncclCeInit = DefaultCeInit;
+  g_ncclCeEnsureAllReduceStaging = DefaultCeEnsureAllReduceStaging;
   g_ceImplemented = false;
   g_ceAvailableValue = false;
   g_ceScratchAvailableValue = false;
