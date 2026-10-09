@@ -1114,6 +1114,8 @@ addresses, so that pointer is right again; `--no-placement` turns this off.
   `Placement : N placed at capture address, M fell back`.
 - `hipFree` unmaps and releases at once; `hipFreeAsync` first synchronizes its
   stream. The range is then held again for the next allocation recorded there.
+  Inside a graph capture `hipFreeAsync` leaves the mapping in place, since the
+  graph may still use it.
 - After each such unmap replay allocates and frees 4 MiB with `hipMalloc`: on
   gfx1201 with Linux 7.0.0-34's in-box amdgpu, `hipMemUnmap` leaves stale GPU TLB
   entries, and KFD flushes them when it frees ordinary memory. This flushes the
@@ -1121,9 +1123,10 @@ addresses, so that pointer is right again; `--no-placement` turns this off.
   `hipMalloc` is illegal; a remap at that address before the next flush can then
   still reach the old pages on that driver.
 - Not placed, as before: `hipMallocAsync` inside a graph capture (a graph
-  allocation node), allocations exported with `hipIpcGetMemHandle` (IPC refuses VMM
-  memory), every other allocation API, and everything under `--guard-segments`
-  or on Windows. A placed allocation is accessible from its own device only.
+  allocation node), allocations exported with `hipIpcGetMemHandle` and any other
+  recorded over the same pages (IPC refuses VMM memory), every other allocation
+  API, and everything under `--guard-segments` or on Windows. A placed
+  allocation is accessible from its own device only.
 - Between the `--kernel-filter` warm-up and the timed pass, placed allocations are
   released so the timed pass can place them again.
 

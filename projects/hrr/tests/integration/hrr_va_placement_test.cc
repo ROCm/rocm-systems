@@ -80,7 +80,7 @@ TEST_CASE("Unit_HRR_VaPlacement_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipStreamCreate(&s));
   hrr_place_round(out, 1000, s);
   HRR_HIP_CHECK(hipStreamDestroy(s));
-  HRR_HIP_CHECK(hipFree(out));
+  // `out` stays live: the --kernel-filter warm-up must release it.
 }
 
 HRR_TEST_CASE(Unit_HRR_VaPlacement_StoredPointer) {
@@ -104,6 +104,11 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_StoredPointer) {
     CHECK(pass == 2);
     CHECK(fail == 0);
     CHECK(rc == 0);
+    CHECK(out.find("placed at capture address, 0 fell back") != std::string::npos);
+  }
+  {
+    auto [rc, out] = hrr_playback_merged(archive, "--kernel-filter hrr_place_deref");
+    INFO("Replay --kernel-filter:\n" << out);
     CHECK(out.find("placed at capture address, 0 fell back") != std::string::npos);
   }
   {

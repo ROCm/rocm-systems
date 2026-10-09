@@ -54,25 +54,33 @@ inline bool hrr_zero_init_needs_drain(bool zero_init_enabled,
 struct HrrVaRange { uint64_t base = 0, end = 0; };
 
 // The ranges to hold before hipInit: every recorded allocation rounded out to
-// `page`, minus the ones holding an address in `exported` (IPC refuses VMM
-// memory), merged where they overlap or touch.
+// `page`, minus every one overlapping the pages of an allocation that holds an
+// address in `exported` (IPC refuses VMM memory, and an address can be reused),
+// merged where they overlap or touch.
 inline std::vector<HrrVaRange> hrr_place_plan(std::vector<HrrVaRange> allocs,
                                               const std::vector<uint64_t>& exported,
                                               uint64_t page = 4096) {
     std::sort(allocs.begin(), allocs.end(),
               [](const HrrVaRange& a, const HrrVaRange& b) { return a.base < b.base; });
+    for (auto& r : allocs) {
+        r.base -= r.base % page;
+        r.end += (page - r.end % page) % page;
+    }
+    std::vector<HrrVaRange> ipc;
+    for (const auto& r : allocs)
+        if (std::any_of(exported.begin(), exported.end(),
+                        [&](uint64_t x) { return x >= r.base && x < r.end; }))
+            ipc.push_back(r);
     std::vector<HrrVaRange> out;
     for (const auto& r : allocs) {
         if (r.base == 0 || r.end <= r.base || r.end > (1ull << 47)) continue;
-        if (std::any_of(exported.begin(), exported.end(),
-                        [&](uint64_t x) { return x >= r.base && x < r.end; }))
+        if (std::any_of(ipc.begin(), ipc.end(),
+                        [&](const HrrVaRange& x) { return r.base < x.end && x.base < r.end; }))
             continue;
-        const uint64_t b = r.base - r.base % page;
-        const uint64_t e = r.end + (page - r.end % page) % page;
-        if (!out.empty() && b <= out.back().end)
-            out.back().end = std::max(out.back().end, e);
+        if (!out.empty() && r.base <= out.back().end)
+            out.back().end = std::max(out.back().end, r.end);
         else
-            out.push_back({b, e});
+            out.push_back(r);
     }
     return out;
 }

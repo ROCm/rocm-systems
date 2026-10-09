@@ -3178,11 +3178,12 @@ hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
     hipStream_t stream = ctx.translate_stream(a->stream);
     if (!live) return hipSuccess;
     if (hrr_is_placed(ctx, live)) {
-        // Unmapped at once, after the work queued on its stream.
+        // Unmapped at once, after the work queued on its stream. A graph being
+        // captured may still use it, so it then stays mapped.
         if (!ctx.in_graph_capture) {
             if (hipError_t sr = hipStreamSynchronize(stream); sr != hipSuccess) return sr;
+            hrr_guard_free(ctx, live);
         }
-        hrr_guard_free(ctx, live);
         ctx.remove_alloc(a->dev_ptr);
         return hipSuccess;
     }
