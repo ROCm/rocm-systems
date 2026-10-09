@@ -76,7 +76,7 @@ class CallTreeNode:
     """A node in the operator call tree.
 
     children is the list of child operator nodes. file_name, line_number,
-    backend, start_timestamp, end_timestamp, t_tid, f_tid, thread_id, and
+    backend, start_timestamp, end_timestamp, thread_id, and
     launcher_thread_id are optional fields copied from a marker row when set.
     invocation_ids stores marker-start strings for this node. args_invocations
     maps each distinct operator-argument blob to the invocation ids that used
@@ -101,8 +101,6 @@ class CallTreeNode:
     backend: Optional[str] = None
     start_timestamp: Optional[float] = None
     end_timestamp: Optional[float] = None
-    t_tid: Optional[str] = None
-    f_tid: Optional[str] = None
     thread_id: Optional[str] = None
     launcher_thread_id: Optional[str] = None
 
@@ -281,7 +279,7 @@ def _split_name_and_location(first_token: str) -> tuple[str, str, Optional[int]]
 
 
 def parse_marker_function(function_value: object) -> dict[str, Any]:
-    """Parse one Function cell into operator, location, backend, and wire keys."""
+    """Parse one Function cell into operator, location, backend, ltid, and args."""
     if function_value is None or (
         isinstance(function_value, float) and pd.isna(function_value)
     ):
@@ -292,11 +290,7 @@ def parse_marker_function(function_value: object) -> dict[str, Any]:
     first_token = tokens[0]
     operator_name, file_name, line_number = _split_name_and_location(first_token)
     parsed_keys = {
-        "seqNr": "n/a",
-        "tid": "n/a",
-        "ftid": "n/a",
         "ltid": "n/a",
-        "scope": "n/a",
         "args": "n/a",
     }
     backend = "user"
@@ -311,8 +305,6 @@ def parse_marker_function(function_value: object) -> dict[str, Any]:
             parsed_keys["args"] = value.replace("%7C", "|")
         elif key in parsed_keys:
             parsed_keys[key] = value
-    t_tid = "" if parsed_keys["tid"] in ("", "n/a") else parsed_keys["tid"]
-    f_tid = "" if parsed_keys["ftid"] in ("", "n/a") else parsed_keys["ftid"]
     launcher_thread_id = ""
     if parsed_keys["ltid"] not in ("", "n/a"):
         launcher_thread_id = parsed_keys["ltid"]
@@ -321,11 +313,7 @@ def parse_marker_function(function_value: object) -> dict[str, Any]:
         "File_Name": file_name,
         "Line_Number": line_number,
         "Backend": backend,
-        "seqNr": parsed_keys["seqNr"],
-        "T_Tid": t_tid,
-        "F_Tid": f_tid,
         "launcher_thread_id": launcher_thread_id,
-        "scope": parsed_keys["scope"],
         "args": parsed_keys["args"],
     }
 
@@ -369,15 +357,6 @@ def _optional_marker_line_number(value: object) -> Optional[int]:
     if value is None or value == "" or pd.isna(value):
         return None
     return int(value)
-
-
-def _optional_pytorch_tid(value: object) -> Optional[str]:
-    if value is None or value == "" or pd.isna(value):
-        return None
-    text = str(value)
-    if text in ("n/a", "0"):
-        return None
-    return text
 
 
 def _optional_launcher_thread_id(value: object) -> Optional[str]:
@@ -484,8 +463,6 @@ def _call_tree_node_from_marker_row(
         backend=backend,
         start_timestamp=float(row.Start_Timestamp),
         end_timestamp=float(row.End_Timestamp),
-        t_tid=_optional_pytorch_tid(getattr(row, "T_Tid", "")),
-        f_tid=_optional_pytorch_tid(getattr(row, "F_Tid", "")),
         thread_id=str(getattr(row, "Thread_Id", "")),
         launcher_thread_id=_optional_launcher_thread_id(
             getattr(row, "launcher_thread_id", "")
@@ -795,8 +772,6 @@ def clone_call_tree_node(node: CallTreeNode) -> CallTreeNode:
         backend=node.backend,
         start_timestamp=node.start_timestamp,
         end_timestamp=node.end_timestamp,
-        t_tid=node.t_tid,
-        f_tid=node.f_tid,
         thread_id=node.thread_id,
         launcher_thread_id=node.launcher_thread_id,
     )
@@ -875,8 +850,6 @@ def _merge_identical_sibling_group(group: list[CallTreeNode]) -> CallTreeNode:
         file_name=first.file_name,
         line_number=first.line_number,
         backend=first.backend,
-        t_tid=first.t_tid,
-        f_tid=first.f_tid,
         thread_id=first.thread_id,
         launcher_thread_id=first.launcher_thread_id,
     )
