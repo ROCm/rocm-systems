@@ -10,7 +10,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <climits>
 #include <cmath>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <numeric>
@@ -118,6 +120,8 @@ void compare_results(const BenchmarkResult& ioctl_result, const BenchmarkResult&
 
 // Main Benchmark
 
+constexpr int kDefaultIterations = 1000;
+
 int main(int argc, char** argv) {
   if (argc < 2) {
     std::cerr << "Usage: " << argv[0] << " <interface> [iterations]\n";
@@ -130,7 +134,16 @@ int main(int argc, char** argv) {
   }
 
   std::string iface = argv[1];
-  int iterations = (argc >= 3) ? std::atoi(argv[2]) : 1000;
+  auto iterations = int{kDefaultIterations};
+  if (argc >= 3) {
+    char* end = nullptr;
+    const auto parsed = std::strtol(argv[2], &end, 10);
+    if ((*end != '\0') || (parsed <= 0) || (parsed > INT_MAX)) {
+      std::cerr << "Invalid iterations '" << argv[2] << "': expected a positive integer\n";
+      return 1;
+    }
+    iterations = static_cast<int>(parsed);
+  }
   int trials = 10;  // Run each benchmark 10 times for statistics
 
   std::cout << "\n";

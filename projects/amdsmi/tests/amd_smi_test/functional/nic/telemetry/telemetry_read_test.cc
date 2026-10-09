@@ -80,8 +80,16 @@ void TestNicTelemetryRead::Run(void) {
   // ── amdsmi_get_nic_fw_info: succeeds and is bounded ─────────────────────
   {
     amdsmi_nic_fw_info_t fw;
-    ASSERT_EQ(amdsmi_get_nic_fw_info(nic, &fw), AMDSMI_STATUS_SUCCESS);
-    EXPECT_LE(fw.num_fw, static_cast<uint32_t>(AMDSMI_MAX_NIC_FW));
+    const amdsmi_status_t fw_status = amdsmi_get_nic_fw_info(nic, &fw);
+    if (fw_status == AMDSMI_STATUS_NOT_SUPPORTED) {
+      // Firmware versions come over devlink; not every NIC or build exposes them.
+      IF_VERB(STANDARD) {
+        std::cout << "\t**NIC firmware info not supported. Skipping.**" << std::endl;
+      }
+    } else {
+      ASSERT_EQ(fw_status, AMDSMI_STATUS_SUCCESS);
+      EXPECT_LE(fw.num_fw, static_cast<uint32_t>(AMDSMI_MAX_NIC_FW));
+    }
   }
 
   // ── null output pointers are rejected ───────────────────────────────────

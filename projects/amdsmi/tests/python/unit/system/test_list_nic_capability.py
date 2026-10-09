@@ -23,10 +23,17 @@ import unittest
 from typing import List
 from unittest import mock
 
+from common.common import amdsmi_path, cli_search_order, find_cli_dir
+
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-_CLI_DIR = os.path.join(_REPO_ROOT, "amdsmi_cli")
-_MODULE_PATH = os.path.join(_CLI_DIR, "subcommands", "list_devices.py")
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
+_MODULE_PATH = os.path.join(_CLI_DIR, "subcommands", "list_devices.py") if _CLI_DIR else None
 _INTERFACE_PATH = os.path.join(_REPO_ROOT, "py-interface", "amdsmi_interface.py")
+
+if not _MODULE_PATH or not os.path.isfile(_MODULE_PATH):
+    raise unittest.SkipTest(
+        f"amd-smi CLI list_devices.py not found (looked in {_CLI_DIR or amdsmi_path})"
+    )
 
 
 def _load_list_devices():
@@ -198,7 +205,3 @@ class TestDecodeNicCapabilities(unittest.TestCase):
     def test_unknown_bit_is_ignored(self):
         # A bit with no enum entry must not appear in the decoded list.
         self.assertEqual(self.decode(1 | (1 << 5)), ["FWCTL"])
-
-
-if __name__ == "__main__":
-    unittest.main()

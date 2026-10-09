@@ -4,9 +4,9 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
-#include <cstring>
 #include <memory>
 #include <string>
+#include <system_error>
 #include <utility>
 
 #include "smi_nic_log.h"
@@ -73,7 +73,7 @@ auto log_result(const char* func, const std::string& backend, const std::string&
   const auto head = "transport " + backend + " " + op + " " + iface + " -> ";
   if (!result.success) {
     amd::smi::nic::log::debug(func, head + "FAIL code=" + std::to_string(result.error_code) + " " +
-                                        std::strerror(result.error_code));
+                                        std::system_category().message(result.error_code));
     return;
   }
   amd::smi::nic::log::debug(func, head + "SUCCESS " + describe(result.value));
@@ -85,25 +85,19 @@ class LoggingTransport_t : public NicTransport {
 
   auto get_pause_params(const std::string& iface) -> Result<PauseParams> override {
     const auto result = m_inner->get_pause_params(iface);
-    if (amd::smi::nic::log::is_enabled()) {
-      log_result(__PRETTY_FUNCTION__, m_inner->backend_name(), "pause", iface, result);
-    }
+    log_result(__PRETTY_FUNCTION__, m_inner->backend_name(), "pause", iface, result);
     return result;
   }
 
   auto get_link_settings(const std::string& iface) -> Result<LinkSettings> override {
     const auto result = m_inner->get_link_settings(iface);
-    if (amd::smi::nic::log::is_enabled()) {
-      log_result(__PRETTY_FUNCTION__, m_inner->backend_name(), "link", iface, result);
-    }
+    log_result(__PRETTY_FUNCTION__, m_inner->backend_name(), "link", iface, result);
     return result;
   }
 
   auto get_driver_info(const std::string& iface) -> Result<DriverInfo> override {
     const auto result = m_inner->get_driver_info(iface);
-    if (amd::smi::nic::log::is_enabled()) {
-      log_result(__PRETTY_FUNCTION__, m_inner->backend_name(), "driver", iface, result);
-    }
+    log_result(__PRETTY_FUNCTION__, m_inner->backend_name(), "driver", iface, result);
     return result;
   }
 
@@ -121,9 +115,7 @@ class LoggingTransport_t : public NicTransport {
 
   auto get_permanent_address(const std::string& iface) -> Result<PermanentAddress> override {
     const auto result = m_inner->get_permanent_address(iface);
-    if (amd::smi::nic::log::is_enabled()) {
-      log_result(__PRETTY_FUNCTION__, m_inner->backend_name(), "perm_addr", iface, result);
-    }
+    log_result(__PRETTY_FUNCTION__, m_inner->backend_name(), "perm_addr", iface, result);
     return result;
   }
 
@@ -140,7 +132,7 @@ class LoggingTransport_t : public NicTransport {
     if (!result.success) {
       amd::smi::nic::log::debug(func, "transport " + backend + " " + op + " " + iface +
                                           " -> FAIL code=" + std::to_string(result.error_code) +
-                                          " " + std::strerror(result.error_code));
+                                          " " + std::system_category().message(result.error_code));
       return;
     }
     log_counters(func, backend, op, iface, result.value);

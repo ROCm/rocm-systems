@@ -4,6 +4,9 @@
 #ifndef __SMI_SYSFS_H__
 #define __SMI_SYSFS_H__
 
+#include <cstdint>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <variant>
 #include <vector>
@@ -22,5 +25,18 @@ class SmiSysfsReader {
 
   SmiSysfsReader() = delete;
 };
+
+// Numeric value of a sysfs field, base auto-detected. nullopt for text that is not a number
+// (e.g. "Unknown speed"), so callers need no exception handling at the C ABI boundary.
+inline std::optional<uint64_t> parse_sysfs_uint(const SmiSysfsReader::SysfsValue& value) {
+  if (std::holds_alternative<int>(value)) {
+    return static_cast<uint64_t>(std::get<int>(value));
+  }
+  try {
+    return static_cast<uint64_t>(std::stoul(std::get<std::string>(value), nullptr, 0));
+  } catch (const std::logic_error&) {
+    return std::nullopt;
+  }
+}
 
 #endif  // __SMI_SYSFS_H__

@@ -88,7 +88,8 @@ static SmiSysfsReader::SysfsStatus read_all_impl(const std::string& filepath,
       } catch (const std::invalid_argument&) {
         return SmiSysfsReader::SysfsStatus::ParseError;
       } catch (const std::out_of_range&) {
-        return SmiSysfsReader::SysfsStatus::ParseError;
+        // Above INT_MAX: keep the text; parse_sysfs_uint reads it back as 64 bits.
+        content.emplace_back(token);
       }
     }
   }
@@ -131,6 +132,10 @@ static SmiSysfsReader::SysfsStatus read_line_impl(const std::string& filepath,
         } else {
           content = token;
         }
+        return SmiSysfsReader::SysfsStatus::Success;
+      } catch (const std::out_of_range&) {
+        // Above INT_MAX: keep the text; parse_sysfs_uint reads it back as 64 bits.
+        content = token;
         return SmiSysfsReader::SysfsStatus::Success;
       } catch (...) {
         return SmiSysfsReader::SysfsStatus::ParseError;

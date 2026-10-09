@@ -38,6 +38,7 @@
 #include "amd_smi/impl/amd_smi_cper.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
+#include "amd_smi/impl/amd_smi_nic_stats.h"
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "amd_smi/impl/amd_smi_rdma_port.h"
 #include "amd_smi/impl/amd_smi_socket.h"
@@ -1018,9 +1019,6 @@ amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor
   if (num_stats == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  if ((stats == nullptr) && (*num_stats > 0)) {
-    return AMDSMI_STATUS_INVAL;
-  }
 
   amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
   amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
@@ -1049,13 +1047,7 @@ amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor
     return amd::smi::ainic_to_amdsmi_status(nic_status);
   }
 
-  const uint32_t n = std::min(info->count, *num_stats);
-  for (uint32_t i = 0; i < n; ++i) {
-    std::snprintf(stats[i].name, sizeof(stats[i].name), "%s", info->stats[i].name);
-    stats[i].value = info->stats[i].value;
-  }
-  *num_stats = n;
-  return AMDSMI_STATUS_SUCCESS;
+  return amd::smi::copy_nic_stats(*info, num_stats, stats);
 }
 
 amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle processor_handle,
@@ -1065,7 +1057,8 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
   if (num_stats == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  if ((stats == nullptr) && (*num_stats > 0)) {
+  smi_nic_stat_scope_t nic_scope = SMI_NIC_STAT_SCOPE_DEFAULT;
+  if (!amd::smi::was_nic_stat_scope_resolved(scope, &nic_scope)) {
     return AMDSMI_STATUS_INVAL;
   }
 
@@ -1075,9 +1068,6 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
     return status;
   }
 
-  const smi_nic_stat_scope_t nic_scope = (scope == AMDSMI_NIC_STAT_SCOPE_EXTENDED)
-                                             ? SMI_NIC_STAT_SCOPE_EXTENDED
-                                             : SMI_NIC_STAT_SCOPE_DEFAULT;
   smi_nic_ctx_t ctx = amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx();
   const uint64_t device = ainic_info.bus.bdf.as_uint;
 
@@ -1099,13 +1089,7 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
     return amd::smi::ainic_to_amdsmi_status(nic_status);
   }
 
-  const uint32_t n = std::min(info->count, *num_stats);
-  for (uint32_t i = 0; i < n; ++i) {
-    std::snprintf(stats[i].name, sizeof(stats[i].name), "%s", info->stats[i].name);
-    stats[i].value = info->stats[i].value;
-  }
-  *num_stats = n;
-  return AMDSMI_STATUS_SUCCESS;
+  return amd::smi::copy_nic_stats(*info, num_stats, stats);
 }
 
 amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle processor_handle,
@@ -1113,9 +1097,6 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
                                                     amdsmi_nic_stat_t* stats) {
   AMDSMI_CHECK_INIT();
   if (num_stats == nullptr) {
-    return AMDSMI_STATUS_INVAL;
-  }
-  if ((stats == nullptr) && (*num_stats > 0)) {
     return AMDSMI_STATUS_INVAL;
   }
 
@@ -1158,13 +1139,7 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
     return amd::smi::ainic_to_amdsmi_status(nic_status);
   }
 
-  const uint32_t n = std::min(info->count, *num_stats);
-  for (uint32_t i = 0; i < n; ++i) {
-    std::snprintf(stats[i].name, sizeof(stats[i].name), "%s", info->stats[i].name);
-    stats[i].value = info->stats[i].value;
-  }
-  *num_stats = n;
-  return AMDSMI_STATUS_SUCCESS;
+  return amd::smi::copy_nic_stats(*info, num_stats, stats);
 }
 
 amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle,

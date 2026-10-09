@@ -2531,15 +2531,16 @@ def amdsmi_get_ainic_info_summary(nic_info):
     return {
         "bdf": _format_bdf(nic_info.bus.bdf),
         "Type": _nic_type_label(
-            _nic_type_from_value(nic_info.asic.type), nic_info.asic.vendor_name.decode("utf-8")
+            _nic_type_from_value(nic_info.asic.type),
+            nic_info.asic.vendor_name.decode("utf-8", errors="replace"),
         ),
-        "UUID": nic_info.asic.permanent_address.decode("utf-8"),
-        "Permanent Address": nic_info.asic.permanent_address.decode("utf-8"),
+        "UUID": nic_info.asic.permanent_address.decode("utf-8", errors="replace"),
+        "Permanent Address": nic_info.asic.permanent_address.decode("utf-8", errors="replace"),
         # "Device Name": nic_info.asic.product_name.decode('utf-8'),
-        "Product Name": nic_info.asic.product_name.decode("utf-8"),
-        "Part Number": nic_info.asic.part_number.decode("utf-8"),
-        "Serial Number": nic_info.asic.serial_number.decode("utf-8"),
-        "Vendor Name": nic_info.asic.vendor_name.decode("utf-8"),
+        "Product Name": nic_info.asic.product_name.decode("utf-8", errors="replace"),
+        "Part Number": nic_info.asic.part_number.decode("utf-8", errors="replace"),
+        "Serial Number": nic_info.asic.serial_number.decode("utf-8", errors="replace"),
+        "Vendor Name": nic_info.asic.vendor_name.decode("utf-8", errors="replace"),
         "Capability": _decode_nic_capabilities(nic_info.asic.capability),
         # "Firmware_Version": nic_info.versions.running.fw.decode('utf-8'),
     }
@@ -2583,7 +2584,6 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
         "RDMA_DEVICES": {},
     }
     port_num = 0
-    total_rdma_dev_num = 0
     for port_info in ainic_info_struct.port.ports:
         if port_num == ainic_info_struct.port.num_ports:
             break
@@ -2603,44 +2603,41 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
             "PAUSE_RX": port_info.pause_rx.decode("utf-8"),
             "PAUSE_TX": port_info.pause_tx.decode("utf-8"),
         }
-        rdma_dev_num = 0
-        for dev in ainic_info_struct.rdma_dev.rdma_dev_info:
-            if rdma_dev_num == ainic_info_struct.rdma_dev.num_rdma_dev:
-                break
-            ainic_info["RDMA_DEVICES"][f"RDMA_DEVICE_{total_rdma_dev_num}"] = {
-                "NAME": dev.rdma_dev.decode("utf-8"),
-                "NODE_GUID": dev.node_guid.decode("utf-8"),
-                "NODE_TYPE": dev.node_type.decode("utf-8"),
-                "SYS_IMAGE_GUID": dev.sys_image_guid.decode("utf-8"),
-                "FW_VER": dev.fw_ver.decode("utf-8"),
-            }
-            rdma_port_num = 0
-            for rdma_port in dev.rdma_port_info:
-                if (
-                    rdma_port_num
-                    == ainic_info_struct.rdma_dev.rdma_dev_info[rdma_dev_num].num_rdma_ports
-                ):
-                    break
-                max_mtu = rdma_port.max_mtu
-                max_uint16_t = (1 << 16) - 1
-                if max_mtu == max_uint16_t:
-                    max_mtu = "N/A"
-                active_mtu = rdma_port.active_mtu
-                if active_mtu == max_uint16_t:
-                    active_mtu = "N/A"
-                ainic_info["RDMA_DEVICES"][f"RDMA_DEVICE_{total_rdma_dev_num}"][
-                    f"PORT_{rdma_port_num}"
-                ] = {
-                    "NETDEV": rdma_port.netdev.decode("utf-8"),
-                    "PORT_NUM": rdma_port.rdma_port,
-                    "STATE": rdma_port.state.decode("utf-8"),
-                    "MAX_MTU": max_mtu,
-                    "ACTIVE_MTU": active_mtu,
-                }
-                rdma_port_num = rdma_port_num + 1
-            rdma_dev_num = rdma_dev_num + 1
-            total_rdma_dev_num = total_rdma_dev_num + 1
         port_num = port_num + 1
+    rdma_dev_num = 0
+    for dev in ainic_info_struct.rdma_dev.rdma_dev_info:
+        if rdma_dev_num == ainic_info_struct.rdma_dev.num_rdma_dev:
+            break
+        ainic_info["RDMA_DEVICES"][f"RDMA_DEVICE_{rdma_dev_num}"] = {
+            "NAME": dev.rdma_dev.decode("utf-8"),
+            "NODE_GUID": dev.node_guid.decode("utf-8"),
+            "NODE_TYPE": dev.node_type.decode("utf-8"),
+            "SYS_IMAGE_GUID": dev.sys_image_guid.decode("utf-8"),
+            "FW_VER": dev.fw_ver.decode("utf-8"),
+        }
+        rdma_port_num = 0
+        for rdma_port in dev.rdma_port_info:
+            if (
+                rdma_port_num
+                == ainic_info_struct.rdma_dev.rdma_dev_info[rdma_dev_num].num_rdma_ports
+            ):
+                break
+            max_mtu = rdma_port.max_mtu
+            max_uint16_t = (1 << 16) - 1
+            if max_mtu == max_uint16_t:
+                max_mtu = "N/A"
+            active_mtu = rdma_port.active_mtu
+            if active_mtu == max_uint16_t:
+                active_mtu = "N/A"
+            ainic_info["RDMA_DEVICES"][f"RDMA_DEVICE_{rdma_dev_num}"][f"PORT_{rdma_port_num}"] = {
+                "NETDEV": rdma_port.netdev.decode("utf-8"),
+                "PORT_NUM": rdma_port.rdma_port,
+                "STATE": rdma_port.state.decode("utf-8"),
+                "MAX_MTU": max_mtu,
+                "ACTIVE_MTU": active_mtu,
+            }
+            rdma_port_num = rdma_port_num + 1
+        rdma_dev_num = rdma_dev_num + 1
     return ainic_info
 
 
