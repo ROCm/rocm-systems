@@ -3487,3 +3487,57 @@ fn the_budget_flag_reaches_a_supplied_config_and_leaves_the_file_alone() {
     assert_eq!(config["vm"]["gpu"]["num_gpus"], 1);
     assert_eq!(std::fs::read_to_string(&supplied).unwrap(), before);
 }
+
+#[test]
+fn wait_checking_and_budget_flags_reach_both_config_paths_in_both_run_modes() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("wait-overrides");
+    let show_config = r#"cat "$(cat "$ROCJITSU_RUNTIME_DIR/config_path")""#;
+    let original = env.ok(&[
+        "run",
+        "--profile",
+        "wait-overrides",
+        "--in-process",
+        "-o",
+        "cpu_thread_budget=32",
+        "-o",
+        "wait_checking=all",
+        "--",
+        "sh",
+        "-c",
+        show_config,
+    ]);
+    let supplied = env.root().join("supplied.json");
+    std::fs::write(&supplied, &original).unwrap();
+    for explicit_config in [false, true] {
+        for run_mode in ["--in-process", "--daemon"] {
+            for mode in ["on", "off", "all"] {
+                for budget_first in [false, true] {
+                    let mut args = vec!["run", "--profile", "wait-overrides", run_mode];
+                    if explicit_config {
+                        args.extend(["--config", supplied.to_str().unwrap()]);
+                    } else {
+                        // Dedicated flags must beat the generic options too.
+                        args.extend(["-o", "cpu_thread_budget=32", "-o", "wait_checking=all"]);
+                    }
+                    let wait_equals = format!("--wait-checking={mode}");
+                    if budget_first {
+                        args.extend(["--cpu-thread-budget=4", "--wait-checking", mode]);
+                    } else {
+                        args.extend([wait_equals.as_str(), "--cpu-thread-budget", "4"]);
+                    }
+                    args.extend(["--", "sh", "-c", show_config]);
+                    let out = env.ok(&args);
+                    let config: serde_json::Value = serde_json::from_str(&out).unwrap();
+                    assert_eq!(config["wait_checking"], mode);
+                    assert_eq!(config["cpu_thread_budget"], 4);
+                    assert_eq!(config["vm"]["gpu"]["num_gpus"], 1);
+                    assert_eq!(std::fs::read_to_string(&supplied).unwrap(), original);
+                }
+            }
+        }
+    }
+}

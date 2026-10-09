@@ -438,6 +438,16 @@ rj_add_gtest_tests(rj_decode_fuzz_test)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(
+    NAME RocjitsuWaitCheckingCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -E env RJ_ROCJITSU=$<TARGET_FILE:rocjitsu_bin>
+        RJ_SIM_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx1250_mi455x.json
+        RJ_DBT_CONFIG=${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_simulated_gfx942.json
+        ${Python3_EXECUTABLE} -B
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_wait_checking_cli.py -v
+)
+set_tests_properties(RocjitsuWaitCheckingCliTest PROPERTIES TIMEOUT 120)
+add_test(
     NAME DecodeDifferentialUnitTest
     COMMAND
         ${Python3_EXECUTABLE}
@@ -1437,6 +1447,7 @@ rj_add_test(
         ${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3.json
         --cpu-thread-budget
         4
+        --wait-checking=off
         --
         $<TARGET_FILE:rocjitsu_tests>
         --gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff
@@ -1448,6 +1459,7 @@ rj_add_test(
         "\${RJ_INSTALLED_CONFIG_DIR}/gfx942_cdna3.json"
         "--cpu-thread-budget"
         "4"
+        "--wait-checking=off"
         "--"
         "bin/rocjitsu_tests"
         "--gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
