@@ -124,7 +124,7 @@ annotate operators, which is what makes attribution possible. That is the only
 place ROCTx is involved.
 
 rocprof-compute does not support ROCTx-range-based profiling control, such as
-starting, stopping, or resuming collection at a user-authored ROCTx range, and
-does not attribute results to ranges a user added to their own application. If
-that is what the user wants, say so plainly and offer kernel filtering with
+starting, stopping, or resuming collection at a user-authored ROCTx range.
+User-defined ranges in the marker CSV are labeled `user`. If the user wants
+ROCTx start/stop control, say so plainly and offer kernel filtering with
 `-k` or dispatch filtering with `-d` instead.
