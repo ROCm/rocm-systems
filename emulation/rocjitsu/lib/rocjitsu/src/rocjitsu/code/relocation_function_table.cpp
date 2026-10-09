@@ -207,7 +207,7 @@ void transfer_instruction(PairState &state, const Instruction &inst,
     const auto base = state.find(*src0_pair);
     if (base != state.end()) {
       if (base->second.kind == PairValueKind::Address && inst.num_src_operands() >= 2 &&
-          inst.src_operand(1) != nullptr && inst.src_operand(1)->encoding_value() == 0) {
+          inst.src_operand(1) != nullptr && inst.src_operand(1)->const_value() == 0) {
         if (const auto table = table_for_got_slot(tables, base->second.value)) {
           result = PairValue{.kind = PairValueKind::TableBase,
                              .value = table->first,
