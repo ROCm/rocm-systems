@@ -321,14 +321,15 @@ jobs:
           cmake -B build -DENABLE_ESMI_LIB=OFF
           make -C build -j $(nproc)
           cd build
+          # Smoke test: a crash fails the step. Any other non-zero exit is only logged,
+          # since the examples return their first failing amdsmi_status_t and some
+          # calls are unsupported on a given ASIC.
           example_status=0
           for example in amd_smi_drm_ex amd_smi_nodrm_ex; do
             rc=0
             "./$example" > "$RESULTS_DIR/$example.log" 2>&1 || rc=$?
-            # 129-192 are fatal signals (139 = SIGSEGV); those are always a defect.
-            # Higher codes (e.g. 254/255) are AMDSMI_STATUS_* error values truncated
-            # to 8 bits, not crashes. Ordinary non-zero codes can be an unsupported
-            # query on this ASIC.
+            # 129-192 is 128 + signal (139 = SIGSEGV). 254/255 are AMDSMI_STATUS_*
+            # values truncated to 8 bits, not crashes.
             if [ "$rc" -gt 128 ] && [ "$rc" -le 192 ]; then
               echo "$example crashed with signal $((rc - 128)) (exit $rc)"
               example_status=1
