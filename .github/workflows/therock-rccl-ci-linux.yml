@@ -237,6 +237,7 @@ jobs:
       matrix:
         workload:
           - llama-3.1-70b-training
+          - gpt-oss-120b-training
     uses: ./.github/workflows/therock-rccl-test-madengine.yml
     secrets: inherit
     with:
