@@ -44,73 +44,10 @@ COUNTER_COLLECTION_COLUMNS = {
 }
 # Caps for test_torch_trace_overhead. --torch-trace cost is host-side
 # RecordFunction/ROCTX. Wall-clock of the profile job is a wide sanity
-# check, not a measurement. GPU idle gaps stay gated. Mean kernel duration
-# is not a gate. Max kernel duration is not a gate (simple_net kernels are
-# a few microseconds; a 5% cap was timer noise). A real overhead number
-# needs a larger workload with repeats, not this sample.
+# check, not a measurement. GPU idle and kernel duration are not gated:
+# they read deprecated results_*.csv.gz. A real overhead number needs a
+# larger workload with repeats, not this sample.
 _TORCH_TRACE_WALL_CLOCK_OVERHEAD_PCT = 50.0
-_TORCH_TRACE_GPU_IDLE_OVERHEAD_PCT = 5.0
-
-
-def kernel_intervals_from_results(workload_dir):
-    """Return kernel ``(start, end)`` pairs from ``results_*.csv.gz``."""
-    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
-    df = pd.concat([pd.read_csv(path) for path in results_files], ignore_index=True)
-    return _kernel_intervals(df)
-
-
-def _kernel_intervals(df):
-    """Return ``(start, end)`` pairs with ``end > start`` from results rows."""
-    starts = df["Start_Timestamp"].astype(float)
-    ends = df["End_Timestamp"].astype(float)
-    return [
-        (float(start), float(end)) for start, end in zip(starts, ends) if end > start
-    ]
-
-
-def _merged_busy_and_span(intervals):
-    """Return ``(union_busy, span)`` for ``intervals``.
-
-    ``union_busy`` is time covered by at least one interval (overlaps are not
-    double-counted). ``span`` is last end minus first start.
-    """
-    if not intervals:
-        return 0.0, 0.0
-    ordered = sorted(intervals, key=lambda pair: pair[0])
-    span = max(end for _, end in ordered) - ordered[0][0]
-
-    busy = 0.0
-    merged_start, merged_end = ordered[0]
-    for start, end in ordered[1:]:
-        if start <= merged_end:
-            if end > merged_end:
-                merged_end = end
-            continue
-        busy += merged_end - merged_start
-        merged_start, merged_end = start, end
-    busy += merged_end - merged_start
-    return busy, span
-
-
-def _gpu_idle_ns(intervals):
-    """Return timeline gaps inside the kernel phase: ``span - union_busy``."""
-    busy, span = _merged_busy_and_span(intervals)
-    idle = span - busy
-    return idle if idle > 0.0 else 0.0
-
-
-def _mean_kernel_duration_ns(intervals):
-    """Return the mean of ``(end - start)`` over ``intervals``."""
-    if not intervals:
-        return 0.0
-    return sum(end - start for start, end in intervals) / float(len(intervals))
-
-
-def _max_kernel_duration_ns(intervals):
-    """Return the max of ``(end - start)`` over ``intervals``."""
-    if not intervals:
-        return 0.0
-    return max(end - start for start, end in intervals)
 
 
 def _percent_overhead(with_flag, baseline, label):
@@ -120,14 +57,9 @@ def _percent_overhead(with_flag, baseline, label):
     return ((with_flag - baseline) / baseline) * 100.0
 
 
-def _format_duration(seconds=None, nanoseconds=None):
-    """Format a duration for overhead-test logs (s / ms / us / ns)."""
-    if seconds is not None:
-        ns = float(seconds) * 1e9
-    elif nanoseconds is not None:
-        ns = float(nanoseconds)
-    else:
-        raise ValueError("pass seconds= or nanoseconds=")
+def _format_duration(seconds):
+    """Format a duration in seconds for overhead-test logs (s / ms / us / ns)."""
+    ns = float(seconds) * 1e9
     abs_ns = abs(ns)
     if abs_ns >= 1e9:
         return f"{ns / 1e9:.3f} s"
@@ -138,38 +70,21 @@ def _format_duration(seconds=None, nanoseconds=None):
     return f"{ns:.0f} ns"
 
 
-def _print_torch_trace_overhead_report(
-    wall_clock,
-    gpu_idle,
-    mean_kernel,
-    max_kernel,
-):
-    """Print without/with/overhead table for ``test_torch_trace_overhead``.
+def _print_torch_trace_overhead_report(wall_clock):
+    """Print without/with/overhead for ``test_torch_trace_overhead``.
 
-    Each argument is ``(without, with_flag, overhead_pct)``. ``wall_clock``
-    values are seconds; the others are nanoseconds.
+    ``wall_clock`` is ``(without, with_flag, overhead_pct)`` in seconds.
     """
-    rows = [
-        ("wall-clock", wall_clock, True),
-        ("GPU idle (gaps)", gpu_idle, False),
-        ("mean kernel duration", mean_kernel, False),
-        ("max kernel duration", max_kernel, False),
-    ]
+    without, with_flag, overhead_pct = wall_clock
     print(f"\n{'=' * 72}")
     print("--torch-trace overhead")
     print(f"  {'metric':<22} {'without':>12}  {'with':>16}  {'overhead':>10}")
     print(f"  {'-' * 22} {'-' * 12}  {'-' * 16}  {'-' * 10}")
-    for label, (without, with_flag, overhead_pct), as_seconds in rows:
-        if as_seconds:
-            without_text = _format_duration(seconds=without)
-            with_text = _format_duration(seconds=with_flag)
-        else:
-            without_text = _format_duration(nanoseconds=without)
-            with_text = _format_duration(nanoseconds=with_flag)
-        print(
-            f"  {label:<22} {without_text:>12}  {with_text:>16}"
-            f"  {f'{overhead_pct:+.1f}%':>10}"
-        )
+    print(
+        f"  {'wall-clock':<22} {_format_duration(without):>12}  "
+        f"{_format_duration(with_flag):>16}"
+        f"  {f'{overhead_pct:+.1f}%':>10}"
+    )
     print(f"{'=' * 72}\n")
 
 
@@ -294,12 +209,11 @@ def test_torch_trace_profile_csvs(torch_trace_profiled_workload):
 
 
 def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
-    """Compare host and GPU timeline overhead with and without --torch-trace.
+    """Compare host wall-clock with and without --torch-trace.
 
-    Torch-trace adds host-side RecordFunction/ROCTX work, not slower GPU
-    kernels. Asserts a wide wall-clock sanity cap and GPU idle gaps.
-    Mean/max kernel duration are printed only; they are not CI gates on
-    this sample.
+    Torch-trace adds host-side RecordFunction/ROCTX work. Asserts a wide
+    wall-clock sanity cap. GPU idle and kernel duration are not gated:
+    they depended on deprecated results_*.csv.gz.
     """
     require_torch(gpu=True)
     profile_config = dict(config)
@@ -320,12 +234,6 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     )
     baseline_time = time.time() - start_baseline
     assert returncode_baseline == 0, "Baseline profiling failed"
-
-    baseline_intervals = kernel_intervals_from_results(workload_dir_baseline)
-    baseline_idle = _gpu_idle_ns(baseline_intervals)
-    _, baseline_span = _merged_busy_and_span(baseline_intervals)
-    baseline_mean_kernel = _mean_kernel_duration_ns(baseline_intervals)
-    baseline_max_kernel = _max_kernel_duration_ns(baseline_intervals)
     common.clean_output_dir(config["cleanup"], workload_dir_baseline)
 
     # Run WITH --torch-trace (requires --experimental)
@@ -341,43 +249,16 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     )
     with_flag_time = time.time() - start_with_flag
     assert returncode_with_flag == 0, "Profiling with torch-trace failed"
-
-    with_flag_intervals = kernel_intervals_from_results(workload_dir_with_flag)
-    with_flag_idle = _gpu_idle_ns(with_flag_intervals)
-    with_flag_mean_kernel = _mean_kernel_duration_ns(with_flag_intervals)
-    with_flag_max_kernel = _max_kernel_duration_ns(with_flag_intervals)
+    common.clean_output_dir(config["cleanup"], workload_dir_with_flag)
 
     wall_clock_overhead = _percent_overhead(with_flag_time, baseline_time, "wall-clock")
-    if baseline_idle > 0.0:
-        idle_overhead = _percent_overhead(with_flag_idle, baseline_idle, "GPU idle")
-    else:
-        idle_growth = with_flag_idle - baseline_idle
-        idle_overhead = (
-            (idle_growth / baseline_span) * 100.0 if baseline_span > 0.0 else 0.0
-        )
-    mean_kernel_overhead = _percent_overhead(
-        with_flag_mean_kernel, baseline_mean_kernel, "mean kernel duration"
-    )
-    max_kernel_overhead = _percent_overhead(
-        with_flag_max_kernel, baseline_max_kernel, "max kernel duration"
-    )
-
     _print_torch_trace_overhead_report(
         wall_clock=(baseline_time, with_flag_time, wall_clock_overhead),
-        gpu_idle=(baseline_idle, with_flag_idle, idle_overhead),
-        mean_kernel=(baseline_mean_kernel, with_flag_mean_kernel, mean_kernel_overhead),
-        max_kernel=(baseline_max_kernel, with_flag_max_kernel, max_kernel_overhead),
     )
-
-    common.clean_output_dir(config["cleanup"], workload_dir_with_flag)
 
     assert wall_clock_overhead < _TORCH_TRACE_WALL_CLOCK_OVERHEAD_PCT, (
         f"Wall-clock overhead too high: {wall_clock_overhead:.1f}% "
         f"(limit {_TORCH_TRACE_WALL_CLOCK_OVERHEAD_PCT}%)"
-    )
-    assert idle_overhead < _TORCH_TRACE_GPU_IDLE_OVERHEAD_PCT, (
-        f"GPU idle (gap) overhead too high: {idle_overhead:.1f}% "
-        f"(limit {_TORCH_TRACE_GPU_IDLE_OVERHEAD_PCT}%)"
     )
 
 
