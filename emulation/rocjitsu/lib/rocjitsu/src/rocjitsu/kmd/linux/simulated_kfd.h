@@ -467,8 +467,8 @@ public:
   /// process_mutex_ (find_process, released at once), then alloc_mutex_; the two are
   /// never nested. fd_mutex_ < process_mutex_ and fd_mutex_ < alloc_mutex_ are
   /// recorded here, not in the global ordering below; no reverse edge exists.
-  [[nodiscard]] std::shared_ptr<void> retain_bo_state(const struct stat &st,
-                                                      std::shared_ptr<void> state);
+  [[nodiscard]] std::shared_ptr<GemObject> retain_bo_state(const struct stat &st,
+                                                           std::shared_ptr<GemObject> state);
 
   /// @brief Look up a KfdProcess by ID. Returns nullptr if not found.
   std::shared_ptr<KfdProcess> find_process(uint32_t process_id) const;

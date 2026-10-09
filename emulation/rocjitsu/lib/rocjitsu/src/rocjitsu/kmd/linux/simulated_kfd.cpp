@@ -720,8 +720,8 @@ std::shared_ptr<KfdProcess> SimulatedKfd::find_process(uint32_t process_id) cons
   return (it != processes_.end()) ? it->second : nullptr;
 }
 
-std::shared_ptr<void> SimulatedKfd::retain_bo_state(const struct stat &st,
-                                                    std::shared_ptr<void> state) {
+std::shared_ptr<GemObject> SimulatedKfd::retain_bo_state(const struct stat &st,
+                                                         std::shared_ptr<GemObject> state) {
   auto proc = find_process(local_process_id_);
   if (!proc)
     return state;

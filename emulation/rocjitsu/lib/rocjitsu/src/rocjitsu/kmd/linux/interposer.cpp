@@ -102,6 +102,30 @@ using rocjitsu::RemoteDriver;
 using rocjitsu::SimulatedKfd;
 using rocjitsu::Sysfs;
 
+namespace rocjitsu {
+
+/// @brief BO state every handle to one backing file shares.
+/// @details The kernel returns the same BO for every import of its dmabuf, so
+/// create info, placement, and UMD metadata set through one handle are what
+/// every other handle reads.
+struct GemObject {
+  dev_t device = 0; ///< Backing file identity; zero when fstat failed.
+  ino_t inode = 0;
+  // GET_GEM_CREATE_INFO returns this record: the allocated size and the
+  // GEM_CREATE alignment, domains, and flags. SET_PLACEMENT updates domains.
+  drm_amdgpu_gem_create_in create_info{};
+  // Userspace (libdrm amdgpu_bo_query_info / amdgpu_bo_set_metadata) reads and
+  // writes this on every VMM import. An empty record is a valid buffer.
+  uint64_t metadata_flags = 0;
+  uint64_t tiling_info = 0;
+  uint32_t metadata_size = 0;
+  uint32_t metadata[64] = {};
+};
+
+} // namespace rocjitsu
+
+using rocjitsu::GemObject;
+
 namespace {
 
 static_assert(std::atomic<bool>::is_always_lock_free,
@@ -2399,24 +2423,6 @@ public:
     }
   };
 
-  /// @brief BO state every handle to one backing file shares.
-  /// @details The kernel returns the same BO for every import of its dmabuf, so
-  /// create info, placement, and UMD metadata set through one handle are what
-  /// every other handle reads.
-  struct GemObject {
-    dev_t device = 0; ///< Backing file identity; zero when fstat failed.
-    ino_t inode = 0;
-    // GET_GEM_CREATE_INFO returns this record: the allocated size and the
-    // GEM_CREATE alignment, domains, and flags. SET_PLACEMENT updates domains.
-    drm_amdgpu_gem_create_in create_info{};
-    // Userspace (libdrm amdgpu_bo_query_info / amdgpu_bo_set_metadata) reads and
-    // writes this on every VMM import. An empty record is a valid buffer.
-    uint64_t metadata_flags = 0;
-    uint64_t tiling_info = 0;
-    uint32_t metadata_size = 0;
-    uint32_t metadata[64] = {};
-  };
-
   struct GemEntry {
     std::shared_ptr<PrivateDrmFd>
         dmabuf_fd;            ///< Backing retained through lazy mmap and submissions.
@@ -3007,7 +3013,7 @@ public:
     // ROCr's IPC export sets metadata through a handle it closes at once, with
     // its dmabuf fd, and the importer checks that metadata later.
     if (auto *drv = identified ? drm_file_simulated(drm_file) : nullptr)
-      gem.object = std::static_pointer_cast<GemObject>(drv->retain_bo_state(st, gem.object));
+      gem.object = drv->retain_bo_state(st, gem.object);
     // hsaKmtMemoryGetCpuAddr follows a prime import with GEM_MMAP. A zero offset
     // is "no mapping" and that call fails the VMM handle create.
     const uint64_t map_bytes = (size + 4095) & ~uint64_t{4095};
