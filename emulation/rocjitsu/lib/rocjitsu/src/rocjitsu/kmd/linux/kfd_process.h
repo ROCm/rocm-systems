@@ -38,6 +38,10 @@
 
 namespace rocjitsu {
 
+/// @brief DRM BO state (create info, placement, UMD metadata); defined by the interposer.
+/// @details The KFD code only stores and copies pointers to it.
+struct GemObject;
+
 /// @brief Per-process KFD state.
 ///
 /// @details Mirrors the kernel's kfd_process + kfd_process_device for a
@@ -114,7 +118,7 @@ public:
     bool host_ptr_owned = false;
     // DRM BO state (create info, placement, UMD metadata) for this backing. The
     // kernel BO keeps it after every GEM handle and dmabuf fd closes.
-    std::shared_ptr<void> bo_state;
+    std::shared_ptr<GemObject> bo_state;
   };
 
   /// @brief Memory policy descriptor.
