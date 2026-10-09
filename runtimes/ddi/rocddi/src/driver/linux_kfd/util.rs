@@ -30,10 +30,10 @@ fn invalid_data(_detail: impl std::fmt::Display) -> io::Error {
 }
 
 pub(super) fn check_process(process: u32) -> io::Result<()> {
-    super::process_identity::check_process(process)
+    crate::driver::process_identity::check_process(process)
 }
 
-pub(super) fn page_size() -> io::Result<usize> {
+pub(in crate::driver) fn page_size() -> io::Result<usize> {
     // SAFETY: getpagesize has no pointer arguments or mutable process state.
     let size = unsafe { getpagesize() };
     let size = usize::try_from(size).map_err(invalid_data)?;
@@ -127,7 +127,7 @@ pub(super) fn dma_buf_file_info(file: &File) -> io::Result<DmaBufFileInfo> {
     Ok(DmaBufFileInfo { size, physical_id })
 }
 
-pub(super) fn host_cache_line_size() -> io::Result<u32> {
+pub(in crate::driver) fn host_cache_line_size() -> io::Result<u32> {
     #[cfg(target_arch = "x86_64")]
     {
         // SAFETY: CPUID leaf one exists on every x86-64 processor and does not
@@ -147,7 +147,7 @@ pub(super) fn host_cache_line_size() -> io::Result<u32> {
     Err(io::Error::from(io::ErrorKind::Unsupported))
 }
 
-pub(super) unsafe fn host_cache_control(
+pub(in crate::driver) unsafe fn host_cache_control(
     pointer: usize,
     length: u64,
     line_size: u32,

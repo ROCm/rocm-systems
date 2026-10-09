@@ -7,7 +7,7 @@
 //! the native submission context and its bounded progress state; packet
 //! encoding, public handles, and submission policy belong to the frontend.
 
-use crate::driver::{self, KernelQueueDriver};
+use crate::driver::{self, Driver, GpuDriver, KernelQueueResource};
 use crate::gpu::GpuDevice;
 use crate::host_storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
@@ -50,10 +50,102 @@ pub enum KernelQueueWait {
     TimedOut,
 }
 
+/// Retains a concrete driver and its kernel queue until native retirement.
+struct DriverKernelQueue<D: Driver, Q: KernelQueueResource> {
+    inner: Owned<Q>,
+    _driver: Shared<D>,
+}
+
+impl<D: Driver, Q: KernelQueueResource> DriverKernelQueue<D, Q> {
+    fn new(driver: Shared<D>, inner: Owned<Q>) -> Self {
+        Self {
+            inner,
+            _driver: driver,
+        }
+    }
+
+    /// # Safety
+    /// Command storage remains reachable until native retirement is proved.
+    #[allow(unsafe_code)]
+    unsafe fn submit(&self, command: KernelCommand) -> Result<u64, Error> {
+        // SAFETY: The caller retains the command through retirement.
+        unsafe { self.inner.submit(command) }
+    }
+
+    fn status(&self) -> KernelQueueStatus {
+        self.inner.status()
+    }
+
+    fn refresh_status(&self) -> Result<KernelQueueStatus, Error> {
+        self.inner.refresh_status()
+    }
+
+    fn wait(
+        &self,
+        submission: u64,
+        timeout_nanoseconds: u64,
+        poll_duration_nanoseconds: u64,
+    ) -> Result<KernelQueueWait, Error> {
+        self.inner
+            .wait(submission, timeout_nanoseconds, poll_duration_nanoseconds)
+    }
+
+    fn destroy(&mut self) -> Result<(), Error> {
+        self.inner.destroy()
+    }
+}
+
+/// Selects the concrete kernel queue owner behind the public resource.
+enum KernelQueueState {
+    LinuxKfd(DriverKernelQueue<driver::KfdDriver, driver::KfdKernelQueue>),
+}
+
+impl KernelQueueState {
+    /// # Safety
+    /// Command storage remains reachable until native retirement is proved.
+    #[allow(unsafe_code)]
+    unsafe fn submit(&self, command: KernelCommand) -> Result<u64, Error> {
+        match self {
+            // SAFETY: The caller preserves the command backing.
+            Self::LinuxKfd(queue) => unsafe { queue.submit(command) },
+        }
+    }
+
+    fn status(&self) -> KernelQueueStatus {
+        match self {
+            Self::LinuxKfd(queue) => queue.status(),
+        }
+    }
+
+    fn refresh_status(&self) -> Result<KernelQueueStatus, Error> {
+        match self {
+            Self::LinuxKfd(queue) => queue.refresh_status(),
+        }
+    }
+
+    fn wait(
+        &self,
+        submission: u64,
+        timeout_nanoseconds: u64,
+        poll_duration_nanoseconds: u64,
+    ) -> Result<KernelQueueWait, Error> {
+        match self {
+            Self::LinuxKfd(queue) => {
+                queue.wait(submission, timeout_nanoseconds, poll_duration_nanoseconds)
+            }
+        }
+    }
+
+    fn destroy(&mut self) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(queue) => queue.destroy(),
+        }
+    }
+}
+
 /// Owns one native submission context and its retryable teardown state.
 pub struct KernelQueue {
-    inner: Owned<driver::KfdKernelQueue>,
-    _driver: Shared<driver::KfdDriver>,
+    inner: KernelQueueState,
     format: KernelQueueFormat,
 }
 
@@ -85,13 +177,13 @@ impl KernelQueue {
     pub unsafe fn submit(&self, command: KernelCommand) -> Result<u64, Error> {
         // SAFETY: The public caller retains and synchronizes the command range
         // until the native retirement frontier advances.
-        unsafe { driver::KfdDriver::submit_kernel_queue(&self.inner, command) }
+        unsafe { self.inner.submit(command) }
     }
 
     /// Reads cached retirement and terminal state without entering the driver.
     #[must_use]
     pub fn status(&self) -> KernelQueueStatus {
-        driver::KfdDriver::kernel_queue_status(&self.inner)
+        self.inner.status()
     }
 
     /// Checks native completion once without waiting and returns the checked
@@ -101,7 +193,7 @@ impl KernelQueue {
     /// Reports a native observation failure. Earlier checked retirement remains
     /// available through [`Self::status`].
     pub fn refresh_status(&self) -> Result<KernelQueueStatus, Error> {
-        driver::KfdDriver::refresh_kernel_queue(&self.inner)
+        self.inner.refresh_status()
     }
 
     /// Waits through the queue's private submission context under one
@@ -115,12 +207,8 @@ impl KernelQueue {
         timeout_nanoseconds: u64,
         poll_duration_nanoseconds: u64,
     ) -> Result<KernelQueueWait, Error> {
-        driver::KfdDriver::wait_kernel_queue(
-            &self.inner,
-            submission,
-            timeout_nanoseconds,
-            poll_duration_nanoseconds,
-        )
+        self.inner
+            .wait(submission, timeout_nanoseconds, poll_duration_nanoseconds)
     }
 
     /// Releases the queue's private submission context after all submissions
@@ -132,7 +220,7 @@ impl KernelQueue {
     /// Returns `Busy` while command storage may still be in use, or a native
     /// teardown error while retaining every unreleased dependency.
     pub fn destroy(&mut self) -> Result<(), Error> {
-        driver::KfdDriver::destroy_kernel_queue(&mut self.inner)
+        self.inner.destroy()
     }
 }
 
@@ -143,7 +231,7 @@ impl GpuDevice<'_> {
     /// # Errors
     /// Reports an unqualified target or a native ring-query failure.
     pub fn available_sdma_rings(&self) -> Result<u32, Error> {
-        self.driver.available_sdma_rings(self.state)
+        self.device.driver_state.available_sdma_rings()
     }
 
     /// Creates a kernel-mediated queue with all bounded resources ready.
@@ -152,11 +240,22 @@ impl GpuDevice<'_> {
     /// Rejects an unqualified format, failure to create a submission context,
     /// or resource exhaustion.
     pub fn create_kernel_queue(&self, format: KernelQueueFormat) -> Result<KernelQueue, Error> {
-        let inner = self.driver.create_kernel_queue(self.state, format)?;
-        Ok(KernelQueue {
-            inner,
-            _driver: self.driver.clone(),
-            format,
-        })
+        match &self.device.driver_state {
+            driver::DeviceDriverState::LinuxKfd { driver, state } => {
+                let inner = driver.create_kernel_queue(state, format)?;
+                Ok(KernelQueue {
+                    inner: KernelQueueState::LinuxKfd(DriverKernelQueue::new(
+                        driver.clone(),
+                        inner,
+                    )),
+                    format,
+                })
+            }
+            #[cfg(test)]
+            driver::DeviceDriverState::Test { .. } => Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "activated driver has no GPU kernel queue capability",
+            }),
+        }
     }
 }

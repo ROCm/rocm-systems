@@ -7,7 +7,6 @@
 //! registration state remains privately owned by the selected platform driver.
 
 use crate::Error;
-use crate::driver::GpuProfilingDriver;
 use crate::gpu::GpuDevice;
 
 /// Correlated device and system clocks returned by the native driver.
@@ -30,7 +29,7 @@ impl GpuDevice<'_> {
     /// Returns one driver-correlated device, host, and system clock sample.
     #[doc(hidden)]
     pub fn clock_counters(&self) -> Result<ClockCounters, Error> {
-        self.driver.clock_counters(self.state)
+        self.device.driver_state.clock_counters()
     }
 
     /// Replaces this device's process-level second-stage trap handler.
@@ -53,21 +52,22 @@ impl GpuDevice<'_> {
         // SAFETY: The public caller retains the handler code and argument
         // storage until successful removal or conclusive device teardown.
         unsafe {
-            self.driver
-                .set_trap_handler(self.state, handler_address, memory_address)
+            self.device
+                .driver_state
+                .set_trap_handler(handler_address, memory_address)
         }
     }
 
     /// Acquires this device's stream performance monitor.
     #[doc(hidden)]
     pub fn spm_acquire(&self) -> Result<(), Error> {
-        self.driver.spm_acquire(self.state)
+        self.device.driver_state.spm_acquire()
     }
 
     /// Releases this device's stream performance monitor.
     #[doc(hidden)]
     pub fn spm_release(&self) -> Result<(), Error> {
-        self.driver.spm_release(self.state)
+        self.device.driver_state.spm_release()
     }
 
     /// Replaces the stream performance monitor destination buffer.
@@ -95,8 +95,7 @@ impl GpuDevice<'_> {
         // SAFETY: The public caller retains both potentially reachable
         // destinations until a successful unset or conclusive teardown.
         unsafe {
-            self.driver.spm_set_destination(
-                self.state,
+            self.device.driver_state.spm_set_destination(
                 size,
                 timeout,
                 bytes_copied,

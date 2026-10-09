@@ -10,11 +10,10 @@
 //! Device, memory, and queue owners live in their respective modules.
 
 use crate::device::Device;
-use crate::driver::{self, DriverInstance, HostMemoryDriver, VirtualMemoryDriver};
+use crate::driver::{self, AddressSpaceInfo, DriverInstance, VirtualMemoryOperations};
 use crate::host_storage::{Allocator, Buffer, Shared};
 use crate::memory::{
-    DeviceIntervals, DriverHostAllocation, DriverVirtualAddress, HostAllocation, HostIntervals,
-    VirtualAddress,
+    DeviceIntervals, DriverVirtualAddress, HostAllocation, HostIntervals, VirtualAddress,
 };
 use crate::topology::{Endpoint, GpuPresentation};
 use crate::{Error, ErrorKind};
@@ -66,6 +65,7 @@ struct DriverEntry {
 struct DriverRegistry {
     entries: Buffer<DriverEntry>,
     lifetime: DriverContextLifetime,
+    process_id: u32,
     closing: bool,
 }
 
@@ -77,6 +77,63 @@ impl Clone for Session {
             drivers: self.drivers.clone(),
         }
     }
+}
+
+/// Reserves a common address range for devices belonging to one concrete
+/// driver instance. The generic owner retains the selected driver and the
+/// interval records needed for retryable mapping cleanup.
+fn reserve_virtual_address_for<D, F>(
+    driver: &Shared<D>,
+    devices: &[&Device],
+    size: u64,
+    alignment: u64,
+    address: u64,
+    device_state: F,
+) -> Result<DriverVirtualAddress<D>, Error>
+where
+    D: VirtualMemoryOperations,
+    D::DeviceState: AddressSpaceInfo,
+    F: for<'a> Fn(&'a Device) -> Option<(&'a Shared<D>, &'a D::DeviceState)>,
+{
+    let mut bounds: Option<(u64, u64)> = None;
+    for device in devices {
+        let (device_driver, state) = device_state(device).ok_or(Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "virtual-address devices require one driver implementation",
+        })?;
+        if !Shared::ptr_eq(driver, device_driver) {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "virtual-address devices must belong to one session",
+            });
+        }
+        let range = state.address_range();
+        bounds = Some(bounds.map_or(range, |bounds| {
+            (bounds.0.max(range.0), bounds.1.min(range.1))
+        }));
+    }
+    let bounds = bounds.ok_or(Error::Operation {
+        kind: ErrorKind::InvalidArgument,
+        detail: "virtual-address reservation requires an activated device",
+    })?;
+    if bounds.0 > bounds.1 {
+        return Err(Error::Operation {
+            kind: ErrorKind::Unsupported,
+            detail: "activated devices have no common virtual-address aperture",
+        });
+    }
+    // Allocate all metadata before the driver reserves native address space.
+    let allocator = driver::Driver::allocator(&**driver);
+    let owner = Shared::try_new_uninit(allocator)?;
+    let intervals = Shared::new(HostIntervals::new(allocator), allocator)?;
+    let device_intervals = Shared::new(DeviceIntervals::new(allocator), allocator)?;
+    let inner = driver.reserve_virtual_address(bounds, size, alignment, address)?;
+    Ok(DriverVirtualAddress::new(
+        driver.clone(),
+        owner.write(inner),
+        intervals,
+        device_intervals,
+    ))
 }
 
 impl Session {
@@ -113,6 +170,7 @@ impl Session {
 
     /// Rejects new session operations after driver cleanup has started.
     fn ensure_open(&self) -> Result<(), Error> {
+        self.ensure_process()?;
         if self.drivers.closing {
             Err(Error::Operation {
                 kind: ErrorKind::Unsupported,
@@ -120,6 +178,19 @@ impl Session {
             })
         } else {
             Ok(())
+        }
+    }
+
+    /// Rejects a session inherited through fork before touching driver state
+    /// or caller-owned allocator callbacks in the child process.
+    fn ensure_process(&self) -> Result<(), Error> {
+        if self.drivers.process_id == std::process::id() {
+            Ok(())
+        } else {
+            Err(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "session belongs to another process",
+            })
         }
     }
 
@@ -133,6 +204,7 @@ impl Session {
             .iter()
             .find_map(|entry| match &entry.driver {
                 DriverInstance::LinuxKfd(driver) => Some(driver),
+
                 #[cfg(test)]
                 DriverInstance::Test(_) => None,
             })
@@ -213,6 +285,7 @@ impl Session {
                 DriverRegistry {
                     entries,
                     lifetime,
+                    process_id: std::process::id(),
                     closing: false,
                 },
                 allocator,
@@ -234,6 +307,7 @@ impl Session {
     /// session may then be used only for another destroy attempt. A driver that
     /// already shut down successfully is never shut down again on retry.
     pub fn destroy(&mut self) -> Result<(), Error> {
+        self.ensure_process()?;
         let registry = Shared::get_mut(&mut self.drivers).ok_or(Error::Operation {
             kind: ErrorKind::Busy,
             detail: "another owner still borrows this session",
@@ -259,22 +333,27 @@ impl Session {
     }
 
     /// Allocates host-only storage under either driver context lifetime policy.
-    /// The current Linux host allocator is supplied by the KFD driver, and a
-    /// session without KFD reports `Unsupported`.
+    /// Linux host storage is independent of device activation and driver
+    /// selection. The session supplies its metadata allocator and process scope.
     /// `size` is a nonzero multiple of
     /// [`host_page_size`](crate::memory::host_page_size); `alignment` is a power
-    /// of two at least that large. The driver may reserve a larger backing
+    /// of two at least that large. The host service may reserve a larger backing
     /// extent while preserving the requested logical range. This owner needs no
     /// activated device and retains only its storage and allocator.
     ///
     /// # Errors
-    /// Rejects invalid extents or a driver whose teardown has begun. Metadata
-    /// exhaustion and driver allocation failure leave no published owner; driver
-    /// errors retain their original cause.
+    /// Rejects invalid extents, an inherited session, or a session whose
+    /// teardown has begun. Metadata exhaustion and host mapping failure leave
+    /// no published owner; native errors retain their original cause.
     pub fn allocate_host(&self, size: u64, alignment: u64) -> Result<HostAllocation, Error> {
-        Ok(HostAllocation {
-            inner: DriverHostAllocation::new(self.linux_kfd()?.allocate_host(size, alignment)?),
-        })
+        self.ensure_open()?;
+        let inner = driver::LinuxHostAllocation::create(
+            size,
+            alignment,
+            self.drivers.allocator(),
+            self.drivers.process_id,
+        )?;
+        Ok(HostAllocation::new(inner))
     }
 
     /// Visits passive endpoint records from every installed driver. Each
@@ -352,12 +431,12 @@ impl Session {
 
     /// Reserves one process virtual-address range common to every supplied
     /// activated device. A nonzero requested address is a hint and may fall
-    /// back to another address in the common aperture. The current reservation
-    /// implementation requires KFD devices in this session.
+    /// back to another address in the common aperture. The selected driver's
+    /// virtual-memory capability owns the reservation.
     ///
     /// # Errors
     /// Rejects an empty or cross-session device set, incompatible apertures,
-    /// invalid page-aligned extents, a non-KFD device, or address-space
+    /// invalid page-aligned extents, unsupported virtual memory, or address-space
     /// exhaustion.
     pub fn reserve_virtual_address(
         &self,
@@ -366,50 +445,41 @@ impl Session {
         alignment: u64,
         address: u64,
     ) -> Result<VirtualAddress, Error> {
-        // Every device must come from this exact driver instance. Intersect their
-        // address apertures so the reservation can use one device virtual
-        // address on all of them; an empty set cannot define a usable aperture.
         self.ensure_open()?;
-        let driver = self.linux_kfd()?;
-        let mut bounds: Option<(u64, u64)> = None;
-        for device in devices {
-            let (device_driver, _) = device.linux_kfd()?;
-            if !Shared::ptr_eq(driver, device_driver) {
-                return Err(Error::Operation {
-                    kind: ErrorKind::InvalidArgument,
-                    detail: "virtual-address devices must belong to one session",
-                });
-            }
-            let device_bounds = device.address_range();
-            bounds = Some(bounds.map_or(device_bounds, |bounds| {
-                (bounds.0.max(device_bounds.0), bounds.1.min(device_bounds.1))
-            }));
-        }
-        let bounds = bounds.ok_or(Error::Operation {
+        let first = devices.first().ok_or(Error::Operation {
             kind: ErrorKind::InvalidArgument,
             detail: "virtual-address reservation requires an activated device",
         })?;
-        if bounds.0 > bounds.1 {
+        if self.owns_endpoint(&first.endpoint).is_none() {
             return Err(Error::Operation {
-                kind: ErrorKind::Unsupported,
-                detail: "activated devices have no common virtual-address aperture",
+                kind: ErrorKind::InvalidArgument,
+                detail: "virtual-address device belongs to another session",
             });
         }
-        // Prepare every callback-backed owner before reserving driver-managed
-        // address space. Allocation failure then cannot strand a reservation.
-        let owner = Shared::try_new_uninit(driver.allocator())?;
-        let intervals = Shared::new(HostIntervals::new(driver.allocator()), driver.allocator())?;
-        let device_intervals =
-            Shared::new(DeviceIntervals::new(driver.allocator()), driver.allocator())?;
-        let inner = driver.reserve_virtual_address(bounds, size, alignment, address)?;
-        Ok(VirtualAddress {
-            inner: DriverVirtualAddress::new(
-                driver.clone(),
-                owner.write(inner),
-                intervals,
-                device_intervals,
-            ),
-        })
+        match &first.driver_state {
+            driver::DeviceDriverState::LinuxKfd { driver, .. } => {
+                let inner = reserve_virtual_address_for(
+                    driver,
+                    devices,
+                    size,
+                    alignment,
+                    address,
+                    |device| match &device.driver_state {
+                        driver::DeviceDriverState::LinuxKfd { driver, state } => {
+                            Some((driver, state))
+                        }
+                        #[cfg(test)]
+                        driver::DeviceDriverState::Test { .. } => None,
+                    },
+                )?;
+                Ok(VirtualAddress::from_linux_kfd(inner))
+            }
+            #[cfg(test)]
+            driver::DeviceDriverState::Test { .. } => Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "device driver has no virtual-memory capability",
+            }),
+        }
     }
 
     /// Revalidates a passive endpoint with its owning driver and acquires or
@@ -429,7 +499,7 @@ impl Session {
             kind: ErrorKind::InvalidArgument,
             detail: "endpoint belongs to another driver instance",
         })?;
-        let activation = entry.driver.activate(endpoint)?;
+        let driver_state = entry.driver.activate(endpoint)?;
         let endpoint = endpoint.clone();
         // Only GPU devices need the shared copy-resource pool. Build it before
         // publishing Device so allocation failure leaves no partial handle.
@@ -438,12 +508,12 @@ impl Session {
             .map(|_| {
                 Shared::new(
                     crate::gpu::CopyResourcePool::default(),
-                    activation.allocator(),
+                    driver_state.allocator(),
                 )
             })
             .transpose()?;
         Ok(Device {
-            activation,
+            driver_state,
             endpoint,
             copy_pool,
         })
@@ -499,15 +569,13 @@ mod tests {
             .reserve_virtual_address((0x1_0000, isize::MAX as u64), 4096, 4096, 0)
             .unwrap();
         let info = driver::CachedInfo::cached_info(&*inner);
-        let mut address = VirtualAddress {
-            inner: DriverVirtualAddress::new(
-                driver.clone(),
-                Shared::new(inner, driver.allocator()).unwrap(),
-                Shared::new(HostIntervals::new(driver.allocator()), driver.allocator()).unwrap(),
-                Shared::new(DeviceIntervals::new(driver.allocator()), driver.allocator()).unwrap(),
-            ),
-        };
-        let mapping_lease = address.inner.inner.clone();
+        let mut address = VirtualAddress::from_linux_kfd(DriverVirtualAddress::new(
+            driver.clone(),
+            Shared::new(inner, driver.allocator()).unwrap(),
+            Shared::new(HostIntervals::new(driver.allocator()), driver.allocator()).unwrap(),
+            Shared::new(DeviceIntervals::new(driver.allocator()), driver.allocator()).unwrap(),
+        ));
+        let mapping_lease = address.linux_kfd().inner.clone();
         assert_eq!(session.destroy().unwrap_err().kind(), ErrorKind::Busy);
         assert_eq!(address.free().unwrap_err().kind(), ErrorKind::Busy);
         assert_eq!(address.info(), info);
@@ -604,6 +672,19 @@ mod tests {
         session.destroy().unwrap();
         assert_eq!(probes[0].shutdowns.load(Ordering::Relaxed), 1);
         assert_eq!(probes[1].shutdowns.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn host_storage_is_available_without_a_gpu_driver() {
+        let (mut session, _) = test_session(&[[0x44; 16]]);
+        let page = crate::memory::host_page_size().unwrap();
+        let mut allocation = session.allocate_host(page, page).unwrap();
+        let info = allocation.info();
+        assert_ne!(info.host_address, 0);
+        assert_eq!(info.size, page);
+        allocation.free().unwrap();
+        drop(allocation);
+        session.destroy().unwrap();
     }
 
     #[test]

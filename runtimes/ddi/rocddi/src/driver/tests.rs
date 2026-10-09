@@ -7,19 +7,17 @@ use super::*;
 use crate::Error;
 use crate::host_storage::{Allocator, Owned, Shared};
 use crate::memory::{
-    AllocationInfo, DeviceAccess, DriverAllocation, DriverHostAllocation, HostAllocationInfo,
-    HostCacheability, MemoryKind, OwnedMemoryKind,
+    AllocationInfo, DeviceAccess, DriverAllocation, HostCacheability, MemoryKind, OwnedMemoryKind,
 };
 use crate::session::DriverContextLifetime;
 use crate::topology::{Endpoint, EndpointKind, TopologyKey};
 use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const ID: [u8; 16] = [0x42; 16];
 
 struct FakeDriver {
     instance: u64,
-    host_drops: Arc<AtomicUsize>,
     allocation_drops: Arc<AtomicUsize>,
     fail_activation: bool,
     fail_allocation: bool,
@@ -29,18 +27,6 @@ struct FakeDriver {
 #[derive(Clone)]
 struct FakeDevice {
     id: [u8; 16],
-}
-
-struct FakeHost {
-    drops: Arc<AtomicUsize>,
-    fail_free: bool,
-    released: bool,
-}
-
-impl Drop for FakeHost {
-    fn drop(&mut self) {
-        self.drops.fetch_add(1, Ordering::Relaxed);
-    }
 }
 
 struct FakeAllocation {
@@ -64,7 +50,6 @@ impl FakeDriver {
     fn new() -> Self {
         Self {
             instance: new_driver_instance(),
-            host_drops: Arc::new(AtomicUsize::new(0)),
             allocation_drops: Arc::new(AtomicUsize::new(0)),
             fail_activation: false,
             fail_allocation: false,
@@ -100,16 +85,6 @@ impl FakeDriver {
     }
 }
 
-impl CachedInfo for FakeHost {
-    type Info = HostAllocationInfo;
-    fn cached_info(&self) -> HostAllocationInfo {
-        HostAllocationInfo {
-            host_address: 0,
-            size: if self.released { 0 } else { 4096 },
-        }
-    }
-}
-
 impl CachedInfo for FakeAllocation {
     type Info = AllocationInfo;
     fn cached_info(&self) -> AllocationInfo {
@@ -123,11 +98,13 @@ impl CachedInfo for FakeAllocation {
     }
 }
 
-impl DeviceStateType for FakeDriver {
-    type DeviceState = FakeDevice;
-}
-
 impl Driver for FakeDriver {
+    type DeviceState = FakeDevice;
+
+    fn allocator(&self) -> Allocator {
+        Allocator::system()
+    }
+
     fn driver_instance(&self) -> u64 {
         self.instance
     }
@@ -185,56 +162,7 @@ impl Driver for FakeDriver {
     }
 }
 
-impl HostMemoryDriver for FakeDriver {
-    type HostAllocation = FakeHost;
-
-    fn allocate_host(&self, size: u64, alignment: u64) -> Result<Owned<FakeHost>, Error> {
-        if size != 4096 || alignment != 4096 {
-            return Err(failure(
-                crate::ErrorKind::InvalidArgument,
-                "fake host extent",
-            ));
-        }
-        Ok(Owned::new(
-            FakeHost {
-                drops: self.host_drops.clone(),
-                fail_free: true,
-                released: false,
-            },
-            Allocator::system(),
-        )?)
-    }
-
-    fn free_host(allocation: &mut FakeHost) -> Result<(), Error> {
-        if allocation.fail_free {
-            allocation.fail_free = false;
-            return Err(failure(
-                crate::ErrorKind::Driver,
-                "injected host free failure",
-            ));
-        }
-        allocation.released = true;
-        Ok(())
-    }
-
-    fn host_page_size() -> Result<u64, Error> {
-        Ok(4096)
-    }
-
-    fn host_cache_line_size() -> Result<u32, Error> {
-        Ok(64)
-    }
-
-    #[allow(unsafe_code)]
-    unsafe fn host_cache_control(_: usize, _: u64, _: u32) -> Result<(), Error> {
-        Err(failure(
-            crate::ErrorKind::Unsupported,
-            "no fake cache control",
-        ))
-    }
-}
-
-impl AllocationDriver for FakeDriver {
+impl AllocationOperations for FakeDriver {
     type Allocation = FakeAllocation;
 
     fn supports_host_registration(&self, _: &Endpoint) -> bool {
@@ -324,19 +252,11 @@ impl AllocationDriver for FakeDriver {
 }
 
 #[test]
-fn non_gpu_resource_owners_preserve_cleanup_retry() -> Result<(), Error> {
+fn non_gpu_allocation_owner_preserves_cleanup_retry() -> Result<(), Error> {
     let fake = FakeDriver::new();
-    let host_drops = fake.host_drops.clone();
     let allocation_drops = fake.allocation_drops.clone();
     let driver = Shared::new(fake, Allocator::system())?;
     let device_state = driver.activate(&driver.endpoint())?;
-    let mut host = DriverHostAllocation::<FakeDriver>::new(driver.allocate_host(4096, 4096)?);
-    assert_eq!(host.info().size, 4096);
-    assert!(host.free().is_err());
-    assert_eq!(host_drops.load(Ordering::Relaxed), 0);
-    host.free()?;
-    drop(host);
-    assert_eq!(host_drops.load(Ordering::Relaxed), 1);
 
     let mut allocation = DriverAllocation::<FakeDriver>::new(driver.allocate_owned(
         &device_state,
@@ -379,14 +299,6 @@ fn non_gpu_driver_contract_covers_discovery_activation_and_failed_cleanup() -> R
     driver.fail_activation = false;
     let device = driver.activate(&endpoint)?;
     assert_eq!(device.id, ID);
-
-    let mut host = driver.allocate_host(4096, 4096)?;
-    assert_eq!(host.cached_info().size, 4096);
-    assert!(FakeDriver::free_host(&mut host).is_err());
-    assert_eq!(driver.host_drops.load(Ordering::Relaxed), 0);
-    FakeDriver::free_host(&mut host)?;
-    drop(host);
-    assert_eq!(driver.host_drops.load(Ordering::Relaxed), 1);
 
     driver.fail_allocation = true;
     assert!(

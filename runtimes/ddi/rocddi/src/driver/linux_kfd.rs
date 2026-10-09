@@ -6,25 +6,22 @@
 mod allocation;
 mod drm;
 mod event;
-mod host;
 mod imported_system;
 pub(crate) mod interop;
 mod kernel_queue;
-mod memory;
+pub(super) mod memory;
 mod operations;
-mod process_identity;
 mod queue;
 mod registered_host;
-mod sys;
+pub(super) mod sys;
 mod sysfs;
 mod uapi;
-mod util;
+pub(super) mod util;
 mod vmem;
 
 use crate::driver::{
-    AddressSpaceInfo, AllocationDriver, CachedInfo, DeviceStateType, Driver, EndpointSelector,
-    GpuDriver, GpuProfilingDriver, GpuQueueResourceDriver, HostMemoryDriver, KernelQueueDriver,
-    UserQueueDriver, VirtualMemoryDriver,
+    AddressSpaceInfo, AllocationOperations, CachedInfo, Driver, EndpointSelector, GpuDriver,
+    KernelQueueResource, UserQueueResource, VirtualMemoryOperations,
 };
 use crate::host_storage::{Allocator, Owned, Shared};
 use crate::kernel_queue::{KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait};
@@ -43,7 +40,6 @@ use crate::topology::{Endpoint, GpuPresentation};
 use crate::{Error, ErrorKind};
 pub(crate) use allocation::LinuxAllocation;
 pub(crate) use event::KfdSignalEvent;
-pub(crate) use host::HostAllocation as LinuxHostAllocation;
 pub(crate) use kernel_queue::KfdKernelQueue;
 pub(crate) use memory::KfdEventSubscription;
 use memory::{error, native_error};
@@ -144,13 +140,6 @@ impl AddressSpaceInfo for DeviceState {
     }
 }
 
-impl CachedInfo for LinuxHostAllocation {
-    type Info = crate::memory::HostAllocationInfo;
-    fn cached_info(&self) -> crate::memory::HostAllocationInfo {
-        LinuxHostAllocation::cached_info(self)
-    }
-}
-
 impl CachedInfo for LinuxAllocation {
     type Info = crate::memory::AllocationInfo;
     fn cached_info(&self) -> crate::memory::AllocationInfo {
@@ -181,10 +170,6 @@ impl CachedInfo for KfdQueue {
     fn cached_info(&self) -> QueueTransport {
         KfdQueue::cached_info(self)
     }
-}
-
-impl DeviceStateType for LinuxKfdDriver {
-    type DeviceState = DeviceState;
 }
 
 /// Lightweight session device reference retaining its activated VM.
@@ -490,6 +475,12 @@ impl LinuxKfdDriver {
 }
 
 impl Driver for LinuxKfdDriver {
+    type DeviceState = DeviceState;
+
+    fn allocator(&self) -> Allocator {
+        self.allocator
+    }
+
     fn driver_instance(&self) -> u64 {
         self.driver_instance
     }
@@ -664,10 +655,6 @@ mod tests {
     fn inherited_instance_rejects_work_before_mutating_state() {
         let mut native = LinuxKfdDriver::new(Allocator::default());
         native.process = std::process::id().wrapping_add(1);
-        assert_eq!(
-            native.allocate_host(1, 1).err().unwrap().kind(),
-            ErrorKind::Unsupported
-        );
         let mut visited = false;
         assert_eq!(
             native

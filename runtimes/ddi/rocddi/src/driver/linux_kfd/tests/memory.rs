@@ -8,7 +8,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use super::*;
-use crate::driver::AllocationDriver;
+use crate::driver::AllocationOperations;
 use crate::host_storage::Allocator;
 use crate::memory::{HostCachePolicy, MemoryKind};
 use std::os::fd::{AsRawFd, IntoRawFd};

@@ -4,8 +4,10 @@
 //! Driver-independent virtual-memory ownership and interval tests.
 
 use super::*;
-use crate::driver::{CachedInfo, DeviceStateType};
+use crate::driver::{CachedInfo, Driver};
 use crate::host_storage::Allocator;
+use crate::session::DriverContextLifetime;
+use crate::topology::Endpoint;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
@@ -71,11 +73,48 @@ struct Mapping {
     fail_once: bool,
 }
 
-impl DeviceStateType for FakeDriver {
+impl Driver for FakeDriver {
     type DeviceState = State;
+
+    fn allocator(&self) -> Allocator {
+        Allocator::system()
+    }
+
+    fn driver_instance(&self) -> u64 {
+        1
+    }
+
+    fn context_lifetime(&self) -> DriverContextLifetime {
+        DriverContextLifetime::Session
+    }
+
+    fn shutdown(&mut self) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn enumerate(
+        &self,
+        _visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn open_endpoint(&self, _id: [u8; 16]) -> Result<Endpoint, Error> {
+        Err(Error::Operation {
+            kind: ErrorKind::Unsupported,
+            detail: "virtual-memory test has no endpoints",
+        })
+    }
+
+    fn activate(&self, _endpoint: &Endpoint) -> Result<State, Error> {
+        Err(Error::Operation {
+            kind: ErrorKind::Unsupported,
+            detail: "virtual-memory test has no activated endpoints",
+        })
+    }
 }
 
-impl VirtualMemoryDriver for FakeDriver {
+impl VirtualMemoryOperations for FakeDriver {
     type VirtualAddress = Address;
     type VirtualDeviceMapping = Mapping;
     type VirtualHostMapping = Mapping;

@@ -222,7 +222,7 @@ pub fn ais_transfer(
     operation: AisFileOperation,
 ) -> Result<AisFileResult, Error> {
     crate::driver::KfdDriver::ais_transfer(
-        allocation.inner.driver_state(),
+        allocation.linux_kfd().driver_state(),
         descriptor,
         allocation_offset,
         size,
@@ -355,9 +355,9 @@ pub fn import_virtual_memory(
     let driver = session.linux_kfd()?;
     let owner = crate::host_storage::Shared::try_new_uninit(driver.allocator())?;
     let inner = driver.import_virtual_memory(descriptor)?;
-    Ok(VirtualMemory {
-        inner: crate::memory::DriverVirtualMemory::new(driver.clone(), owner.write(inner)),
-    })
+    Ok(VirtualMemory::from_linux_kfd(
+        crate::memory::DriverVirtualMemory::new(driver.clone(), owner.write(inner)),
+    ))
 }
 
 /// Exports detached virtual-memory backing as an independently owned DMA-BUF.
@@ -365,7 +365,7 @@ pub fn import_virtual_memory(
 /// # Errors
 /// Reports descriptor duplication or backing-validation failures.
 pub fn export_virtual_memory(memory: &VirtualMemory) -> Result<DmaBuf, Error> {
-    crate::driver::KfdDriver::export_virtual_memory(memory.inner.driver_state())
+    crate::driver::KfdDriver::export_virtual_memory(memory.linux_kfd().driver_state())
 }
 
 /// Imports one same-driver system allocation from a borrowed DMA-BUF.
@@ -395,7 +395,7 @@ pub fn import_dma_buf(
         alignment,
         permissions,
     )?;
-    Ok(Allocation::from_native(
+    Ok(Allocation::from_linux_kfd(
         inner,
         device.endpoint.driver_instance,
     ))
@@ -456,7 +456,7 @@ pub fn import_system_dma_buf(
         alignment,
         permissions,
     )?;
-    Ok(Allocation::from_native(inner, driver.driver_instance()))
+    Ok(Allocation::from_linux_kfd(inner, driver.driver_instance()))
 }
 
 /// Imports a Linux graphics DMA-BUF into the common address range of `devices`.
@@ -494,7 +494,7 @@ pub fn import_graphics_dma_buf(
         states.try_push(state)?;
     }
     let inner = driver.import_graphics_dma_buf(states.as_slice(), descriptor, size_hint)?;
-    Ok(Allocation::from_native(inner, driver.driver_instance()))
+    Ok(Allocation::from_linux_kfd(inner, driver.driver_instance()))
 }
 
 /// Exports a live allocation as an independently owned DMA-BUF.
@@ -503,7 +503,7 @@ pub fn import_graphics_dma_buf(
 /// Returns a native error if Linux cannot export the allocation, or a driver
 /// contract error if the resulting file does not describe the same backing.
 pub fn export_dma_buf(allocation: &Allocation) -> Result<DmaBuf, Error> {
-    crate::driver::KfdDriver::export_dma_buf(allocation.inner.driver_state())
+    crate::driver::KfdDriver::export_dma_buf(allocation.linux_kfd().driver_state())
 }
 
 /// Imports one KFD IPC allocation and maps it to the requested GPU devices.
@@ -549,7 +549,7 @@ pub fn import_kfd_ipc_memory(
     }
     let inner =
         driver.import_kfd_ipc_memory(states.as_slice(), mapping_states.as_slice(), handle, size)?;
-    Ok(Allocation::from_native(inner, driver.driver_instance()))
+    Ok(Allocation::from_linux_kfd(inner, driver.driver_instance()))
 }
 
 /// Exports a live native allocation as a process-independent KFD IPC handle.
@@ -559,7 +559,7 @@ pub fn import_kfd_ipc_memory(
 /// Rejects unsupported backing or an unavailable allocation and reports the
 /// native export failure without changing ownership.
 pub fn export_kfd_ipc_memory(allocation: &Allocation) -> Result<KfdIpcMemoryHandle, Error> {
-    crate::driver::KfdDriver::export_kfd_ipc_memory(allocation.inner.driver_state())
+    crate::driver::KfdDriver::export_kfd_ipc_memory(allocation.linux_kfd().driver_state())
 }
 
 /// Applies Linux KFD SVM attributes to a process virtual-address range.

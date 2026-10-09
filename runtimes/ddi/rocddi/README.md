@@ -16,14 +16,19 @@ and promises no stable Rust ABI.
 The only platform implementation is the Linux KFD/DRM GPU driver on x86-64
 and AArch64. Public topology and memory records keep Linux and GPU fields in
 kind- or platform-specific modules. The private `Driver` trait covers
-discovery, activation, device checks, context policy, and shutdown.
-`DeviceStateType` gives its capability traits one activated-device type.
-Separate capabilities cover GPU presentation, memory and cache queries, host
-and device allocation, virtual memory, user and kernel queues, GPU queue
-resources, and profiling. Each resource type belongs to the trait that
-creates and releases it; `CachedInfo` exposes snapshots held by resource
-owners. The concrete `LinuxKfdDriver` implements the capabilities used by
-this build.
+discovery, activation, context policy, metadata allocation, and shutdown. Its
+associated device-state type retains each activated endpoint's dependencies.
+`GpuDriver` is the complete GPU backend interface. It requires allocation and
+virtual-memory operations, creates both direct and kernel-mediated queues, and
+provides GPU presentation, cache control, timing, traps, and stream monitoring.
+`AllocationOperations` and `VirtualMemoryOperations` describe mechanisms that
+can also be implemented by a non-GPU driver. A created queue implements either
+`UserQueueResource` or `KernelQueueResource`; these resource contracts define
+distinct progress and teardown rules but do not represent additional drivers.
+`AddressSpaceInfo` and `CachedInfo` expose the immutable values needed by
+generic resource owners.
+Host-only storage and cache maintenance are Linux platform services and do not
+acquire a GPU driver context.
 
 A public `Session` is the caller's logical scope for endpoint identity,
 activation, driver context lifetime, and shutdown. It can discover and activate
@@ -41,9 +46,10 @@ and retained VM bindings. `DriverContextLifetime::Session` requires
 the driver to release its context and bindings at session shutdown.
 
 The private `DriverInstance` enum stores shared references to concrete driver
-implementations. `DriverActivation` pairs one of those references with the
-state acquired for an endpoint. `Endpoint::driver_instance` carries the numeric
-identity that routes a passive snapshot to its owning driver instance.
+implementations. `DeviceDriverState` pairs one such reference with the state
+acquired for a single activated endpoint. One driver instance can activate
+several devices. `Endpoint::driver_instance` carries the numeric identity that
+routes a passive snapshot to its owning driver instance.
 
 The driver registry routes endpoint activation by the instance identity in
 each passive record. With multiple drivers, enumeration stages their records
@@ -54,27 +60,26 @@ driver instance for live owners before closing any driver; a failed close can be
 retried without repeating drivers that already closed successfully. Activated
 devices from different drivers never share an address domain.
 
-The driver capabilities and generic allocation owners are exercised with a
-fake CPU driver in tests. Those tests cover discovery, activation, foreign
-endpoints, allocation, and failed cleanup without KFD, DRM, or PCI. The
+The common driver and generic allocation owners are exercised with a fake CPU
+driver in tests. Those tests cover discovery, activation, foreign endpoints,
+allocation, and failed cleanup without KFD, DRM, or PCI. Linux host-storage
+tests cover both context lifetime policies and retryable unmapping. The
 concrete `Session` tests check routing across two non-GPU drivers, endpoint ID
-collisions, and coordinated shutdown retry. Fake GPU queue
-and detached virtual-memory drivers check foreign-session rejection, mapping
+collisions, and coordinated shutdown retry. A fake direct-queue resource and a
+detached virtual-memory driver check foreign-session rejection, mapping
 occupancy, cleanup retry, and the order in which native owners and drivers are
 dropped.
 
-The common `Driver` trait does not require GPU memory, queues, or profiling.
-Adding a driver family adds variants to `DriverInstance` and
-`DriverActivation` in `driver.rs`, then installs the concrete driver in the
-session constructor. Each driver implements only the resource capability
-traits it supports. Generic resource owners preserve each capability's
-concrete cleanup state. Linux KFD
-memory interop requires a KFD device and checks that ownership before using
-KFD or DRM. Both C frontends route Linux interop through platform modules.
-The public allocation, virtual-memory, and queue wrappers currently contain
-KFD resource owners. A driver that exposes one of those services adds a
-corresponding concrete wrapper variant; the generic resource-owner mechanism
-and its cleanup rules stay in rocddi.
+The common `Driver` trait imposes no GPU operations on non-GPU drivers. A new
+implementation adds a `DriverInstance` and `DeviceDriverState` variant and is
+installed by the session constructor. A GPU implementation satisfies
+`GpuDriver`; another device family implements only the shared resource
+contracts whose semantics it provides. Generic resource owners retain their
+concrete driver and cleanup state. Public allocation, virtual-memory, and
+queue types contain private concrete-owner variants, so their Rust signatures
+do not contain KFD types. Linux descriptor, IPC, SVM, and event-page interop
+requires a KFD resource and checks that ownership before using KFD or DRM.
+Both C frontends route Linux interop through platform modules.
 
 ## Architecture
 
@@ -119,14 +124,14 @@ The core source is organized by ownership domain:
   mapping owners. `memory::interop::linux` contains DMA-BUF, KFD IPC, KFD
   SVM, and AIS file-transfer contracts used with Linux APIs and other
   processes;
-- `driver.rs` defines concrete driver and activated-state variants and
-  reexports the private capability contracts from `driver/interface.rs`. The
-  Linux KFD and DRM implementation
-  lives in `driver/linux_kfd.rs` and `driver/linux_kfd/`. Its `operations.rs`
-  implements portable capabilities; `interop.rs` provides Linux descriptor
-  helpers and KFD sharing operations. Native resource
-  owners and low-level KFD and DRM calls remain in their corresponding Linux
-  modules.
+- `driver.rs` defines the private driver and resource interfaces;
+  `driver/instance.rs` owns installed-driver and activated-device routing. Linux
+  host allocation and process identity are in `driver/linux_host.rs` and
+  `driver/process_identity.rs`; `driver/linux.rs` shares Linux error mapping.
+  The Linux KFD and DRM implementation lives in
+  `driver/linux_kfd.rs` and `driver/linux_kfd/`. Its `operations.rs` implements
+  the shared driver contracts; `interop.rs` provides Linux descriptor and KFD
+  sharing operations. Native KFD and DRM owners remain in the Linux modules.
 
 Each activated KFD process connection owns one hardware-exception event and
 one memory-exception event. Device checks and `device::event` subscriptions use a

@@ -10,7 +10,7 @@
 mod types;
 pub use types::*;
 
-use crate::driver::{self, CachedInfo, UserQueueDriver};
+use crate::driver::{self, Driver, GpuDriver, UserQueueResource};
 use crate::gpu::GpuDevice;
 use crate::host_storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
@@ -43,15 +43,91 @@ pub unsafe fn ring_doorbell(address: usize, value: u64) {
 
 /// Driver-owned queue transport and cleanup state, independent of the
 /// selected GPU driver's queue representation.
-pub(crate) struct DriverQueue<D: UserQueueDriver> {
+struct DriverQueue<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> {
     // Drop the queue resource before its shared driver instance.
-    inner: Owned<D::Queue>,
+    inner: Owned<Q>,
     driver: Shared<D>,
     info: QueueTransport,
 }
 
-impl<D: UserQueueDriver> DriverQueue<D> {
-    pub(crate) fn new(driver: Shared<D>, inner: Owned<D::Queue>) -> Self {
+/// Selects the concrete GPU queue owner without exposing its driver in `Queue`.
+enum QueueState {
+    LinuxKfd(DriverQueue<driver::KfdDriver, driver::KfdQueue>),
+}
+
+impl QueueState {
+    fn info(&self) -> QueueTransport {
+        match self {
+            Self::LinuxKfd(queue) => queue.info(),
+        }
+    }
+
+    fn map_device(&self, device: &crate::device::Device) -> Result<QueueTransport, Error> {
+        match (self, &device.driver_state) {
+            (Self::LinuxKfd(queue), driver::DeviceDriverState::LinuxKfd { driver, state }) => {
+                queue.map_device(driver, state)
+            }
+            #[cfg(test)]
+            _ => Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "device driver cannot map this GPU queue",
+            }),
+        }
+    }
+
+    fn progress(&self) -> Result<(u64, u64), Error> {
+        match self {
+            Self::LinuxKfd(queue) => queue.progress(),
+        }
+    }
+
+    fn inactivate(&mut self) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(queue) => queue.inactivate(),
+        }
+    }
+
+    fn set_priority(&mut self, priority: QueuePriority) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(queue) => queue.set_priority(priority),
+        }
+    }
+
+    fn set_cu_mask(&mut self, mask: &[u32]) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(queue) => queue.set_cu_mask(mask),
+        }
+    }
+
+    /// # Safety
+    /// Firmware has stopped the queue and the caller retains scratch backing.
+    #[allow(unsafe_code)]
+    unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
+        match self {
+            // SAFETY: The caller preserves the stopped queue and backing.
+            Self::LinuxKfd(queue) => unsafe { queue.set_scratch(scratch) },
+        }
+    }
+
+    fn check(&self) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(queue) => queue.check(),
+        }
+    }
+
+    /// # Safety
+    /// The caller has retired producers and transport mappings.
+    #[allow(unsafe_code)]
+    unsafe fn destroy(&mut self) -> Result<(), Error> {
+        match self {
+            // SAFETY: The caller has retired all queue reachability.
+            Self::LinuxKfd(queue) => unsafe { queue.destroy() },
+        }
+    }
+}
+
+impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<D, Q> {
+    fn new(driver: Shared<D>, inner: Owned<Q>) -> Self {
         let info = inner.cached_info();
         Self {
             inner,
@@ -60,11 +136,11 @@ impl<D: UserQueueDriver> DriverQueue<D> {
         }
     }
 
-    pub(crate) fn info(&self) -> QueueTransport {
+    fn info(&self) -> QueueTransport {
         self.info
     }
 
-    pub(crate) fn map_device(
+    fn map_device(
         &self,
         device_driver: &Shared<D>,
         state: &D::DeviceState,
@@ -75,23 +151,23 @@ impl<D: UserQueueDriver> DriverQueue<D> {
                 detail: "queue producer must belong to one session",
             });
         }
-        D::map_queue(&self.inner, state)
+        self.inner.map_device(state)
     }
 
-    pub(crate) fn progress(&self) -> Result<(u64, u64), Error> {
-        D::queue_progress(&self.inner)
+    fn progress(&self) -> Result<(u64, u64), Error> {
+        self.inner.progress()
     }
 
-    pub(crate) fn inactivate(&mut self) -> Result<(), Error> {
-        D::inactivate_queue(&mut self.inner)
+    fn inactivate(&mut self) -> Result<(), Error> {
+        self.inner.inactivate()
     }
 
-    pub(crate) fn set_priority(&mut self, priority: QueuePriority) -> Result<(), Error> {
-        D::set_queue_priority(&mut self.inner, priority)
+    fn set_priority(&mut self, priority: QueuePriority) -> Result<(), Error> {
+        self.inner.set_priority(priority)
     }
 
-    pub(crate) fn set_cu_mask(&mut self, mask: &[u32]) -> Result<(), Error> {
-        D::set_queue_cu_mask(&mut self.inner, mask)
+    fn set_cu_mask(&mut self, mask: &[u32]) -> Result<(), Error> {
+        self.inner.set_cu_mask(mask)
     }
 
     /// # Safety
@@ -99,22 +175,22 @@ impl<D: UserQueueDriver> DriverQueue<D> {
     /// scratch backing and synchronizes its inactive signal until replacement
     /// or conclusive queue teardown.
     #[allow(unsafe_code)]
-    pub(crate) unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
+    unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
         // SAFETY: The caller keeps the stopped-queue and backing obligations.
-        unsafe { D::set_queue_scratch(&mut self.inner, scratch) }
+        unsafe { self.inner.set_scratch(scratch) }
     }
 
-    pub(crate) fn check(&self) -> Result<(), Error> {
-        D::check_queue(&self.inner)
+    fn check(&self) -> Result<(), Error> {
+        self.inner.check()
     }
 
     /// # Safety
     /// Producers and public transport mappings must be retired before native
     /// destruction can release queue backing.
     #[allow(unsafe_code)]
-    pub(crate) unsafe fn destroy(&mut self) -> Result<(), Error> {
+    unsafe fn destroy(&mut self) -> Result<(), Error> {
         // SAFETY: The caller retired every producer and transport mapping.
-        unsafe { D::destroy_queue(&mut self.inner) }
+        unsafe { self.inner.destroy() }
     }
 }
 
@@ -124,7 +200,7 @@ impl<D: UserQueueDriver> DriverQueue<D> {
 /// Dropping a live queue without explicit destruction retains its native
 /// backing through process teardown because producers may still publish.
 pub struct Queue {
-    inner: DriverQueue<driver::KfdDriver>,
+    inner: QueueState,
 }
 
 /// Keep externally supplied backing alive if native queue creation may have
@@ -185,7 +261,7 @@ impl Queue {
     /// aperture cannot contain the queue. Native peer attachment can report an
     /// unsupported route, allocation failure, device loss, or ambiguous state.
     pub fn map_device(&self, device: GpuDevice<'_>) -> Result<QueueTransport, Error> {
-        self.inner.map_device(device.driver, device.state)
+        self.inner.map_device(device.device)
     }
     /// Observes native loss, then acquire-loads the consumed and producer indices
     /// from the queue's control mapping. The pair uses PM4 dword counts, AQL
@@ -324,10 +400,19 @@ impl GpuDevice<'_> {
     pub unsafe fn create_queue(&self, desc: QueueRequest) -> Result<Queue, Error> {
         // SAFETY: The caller retains every raw address in the request, even
         // when native creation has an ambiguous result.
-        let inner = unsafe { self.driver.create_queue(self.state, desc) }?;
-        Ok(Queue {
-            inner: DriverQueue::new(self.driver.clone(), inner),
-        })
+        match &self.device.driver_state {
+            driver::DeviceDriverState::LinuxKfd { driver, state } => {
+                let inner = unsafe { driver.create_user_queue(state, desc) }?;
+                Ok(Queue {
+                    inner: QueueState::LinuxKfd(DriverQueue::new(driver.clone(), inner)),
+                })
+            }
+            #[cfg(test)]
+            driver::DeviceDriverState::Test { .. } => Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "activated driver has no GPU queue capability",
+            }),
+        }
     }
 
     /// Creates a queue while carrying every frontend-owned signal and scratch
@@ -359,22 +444,24 @@ impl GpuDevice<'_> {
 
 #[cfg(test)]
 #[allow(unsafe_code)]
-mod driver_contract_tests {
+mod queue_resource_tests {
     use super::*;
-    use crate::driver::{CachedInfo, DeviceStateType};
+    use crate::driver::{CachedInfo, Driver};
     use crate::host_storage::Allocator;
+    use crate::session::DriverContextLifetime;
+    use crate::topology::Endpoint;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     #[derive(Clone)]
     struct FakeDevice;
 
-    struct FakeGpu {
+    struct FakeDriver {
         dropped: Arc<AtomicBool>,
         queue_drops: Arc<AtomicUsize>,
     }
 
-    impl Drop for FakeGpu {
+    impl Drop for FakeDriver {
         fn drop(&mut self) {
             self.dropped.store(true, Ordering::Relaxed);
         }
@@ -402,8 +489,39 @@ mod driver_contract_tests {
         }
     }
 
-    impl DeviceStateType for FakeGpu {
+    impl Driver for FakeDriver {
         type DeviceState = FakeDevice;
+
+        fn allocator(&self) -> Allocator {
+            Allocator::system()
+        }
+
+        fn driver_instance(&self) -> u64 {
+            1
+        }
+
+        fn context_lifetime(&self) -> DriverContextLifetime {
+            DriverContextLifetime::Session
+        }
+
+        fn shutdown(&mut self) -> Result<(), Error> {
+            Ok(())
+        }
+
+        fn enumerate(
+            &self,
+            _visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
+        ) -> Result<(), Error> {
+            Ok(())
+        }
+
+        fn open_endpoint(&self, _id: [u8; 16]) -> Result<Endpoint, Error> {
+            Err(failure("queue test has no endpoints"))
+        }
+
+        fn activate(&self, _endpoint: &Endpoint) -> Result<FakeDevice, Error> {
+            Err(failure("queue test has no activated endpoints"))
+        }
     }
 
     fn transport() -> QueueTransport {
@@ -433,75 +551,50 @@ mod driver_contract_tests {
         }
     }
 
-    impl UserQueueDriver for FakeGpu {
-        type Queue = FakeQueue;
+    impl UserQueueResource for FakeQueue {
+        type DeviceState = FakeDevice;
 
-        fn supports_expert_scheduling(&self, _: &FakeDevice) -> Result<bool, Error> {
-            Ok(false)
-        }
-
-        fn check_queue(queue: &FakeQueue) -> Result<(), Error> {
-            if queue.released {
+        fn check(&self) -> Result<(), Error> {
+            if self.released {
                 Err(failure("fake queue released"))
             } else {
                 Ok(())
             }
         }
 
-        fn queue_progress(queue: &FakeQueue) -> Result<(u64, u64), Error> {
-            Self::check_queue(queue)?;
+        fn progress(&self) -> Result<(u64, u64), Error> {
+            self.check()?;
             Ok((0, 0))
         }
 
-        fn inactivate_queue(queue: &mut FakeQueue) -> Result<(), Error> {
-            Self::check_queue(queue)
+        fn inactivate(&mut self) -> Result<(), Error> {
+            self.check()
         }
 
-        fn set_queue_priority(queue: &mut FakeQueue, _: QueuePriority) -> Result<(), Error> {
-            Self::check_queue(queue)
+        fn set_priority(&mut self, _: QueuePriority) -> Result<(), Error> {
+            self.check()
         }
 
-        fn set_queue_cu_mask(queue: &mut FakeQueue, _: &[u32]) -> Result<(), Error> {
-            Self::check_queue(queue)
+        fn set_cu_mask(&mut self, _: &[u32]) -> Result<(), Error> {
+            self.check()
         }
 
-        unsafe fn set_queue_scratch(_: &mut FakeQueue, _: QueueScratch) -> Result<(), Error> {
+        unsafe fn set_scratch(&mut self, _: QueueScratch) -> Result<(), Error> {
             Err(failure("fake queue has no scratch"))
         }
 
-        unsafe fn destroy_queue(queue: &mut FakeQueue) -> Result<(), Error> {
-            if queue.fail_destroy {
-                queue.fail_destroy = false;
+        unsafe fn destroy(&mut self) -> Result<(), Error> {
+            if self.fail_destroy {
+                self.fail_destroy = false;
                 return Err(failure("injected queue destruction failure"));
             }
-            queue.released = true;
+            self.released = true;
             Ok(())
         }
 
-        unsafe fn create_queue(
-            &self,
-            _: &FakeDevice,
-            request: QueueRequest,
-        ) -> Result<Owned<FakeQueue>, Error> {
-            if request.parameters != QueueParameters::Pm4 {
-                return Err(failure("unsupported fake format"));
-            }
-            Owned::new(
-                FakeQueue {
-                    info: transport(),
-                    driver_dropped: self.dropped.clone(),
-                    queue_drops: self.queue_drops.clone(),
-                    fail_destroy: true,
-                    released: false,
-                },
-                Allocator::system(),
-            )
-            .map_err(Into::into)
-        }
-
-        fn map_queue(queue: &FakeQueue, _: &FakeDevice) -> Result<QueueTransport, Error> {
-            Self::check_queue(queue)?;
-            Ok(queue.info)
+        fn map_device(&self, _: &FakeDevice) -> Result<QueueTransport, Error> {
+            self.check()?;
+            Ok(self.info)
         }
     }
 
@@ -510,25 +603,27 @@ mod driver_contract_tests {
         let driver_dropped = Arc::new(AtomicBool::new(false));
         let queue_drops = Arc::new(AtomicUsize::new(0));
         let driver = Shared::new(
-            FakeGpu {
+            FakeDriver {
                 dropped: driver_dropped.clone(),
                 queue_drops: queue_drops.clone(),
             },
             Allocator::system(),
         )?;
         let state = FakeDevice;
-        let request = QueueRequest {
-            ring_size_bytes: 4096,
-            parameters: QueueParameters::Pm4,
-            priority: QueuePriority::Normal,
-            device_producer: false,
-        };
-        // SAFETY: This PM4 request contains no raw external GPU addresses.
-        let driver_queue = unsafe { driver.create_queue(&state, request) }?;
+        let driver_queue = Owned::new(
+            FakeQueue {
+                info: transport(),
+                driver_dropped: driver.dropped.clone(),
+                queue_drops: driver.queue_drops.clone(),
+                fail_destroy: true,
+                released: false,
+            },
+            Allocator::system(),
+        )?;
         let mut queue = DriverQueue::new(driver.clone(), driver_queue);
         assert_eq!(queue.info(), transport());
         let foreign = Shared::new(
-            FakeGpu {
+            FakeDriver {
                 dropped: Arc::new(AtomicBool::new(false)),
                 queue_drops: Arc::new(AtomicUsize::new(0)),
             },

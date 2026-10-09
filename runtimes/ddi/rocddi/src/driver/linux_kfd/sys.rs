@@ -1006,7 +1006,7 @@ pub(super) fn invalid_data(_detail: impl std::fmt::Display) -> io::Error {
 /// Owns the entire reservation, including alignment padding. Keeping padding
 /// avoids fallible partial unmaps during construction and leaves one range to
 /// release after the kernel no longer has a GPU mapping of its usable extent.
-pub(super) struct Reservation {
+pub(in crate::driver) struct Reservation {
     base: usize,
     length: usize,
     address: usize,
@@ -1030,7 +1030,7 @@ impl Reservation {
 
     /// Use a session process ID already checked by `ensure_open` before host
     /// allocation. The retained owner still checks its process on release.
-    pub(super) fn new_host_in_process(
+    pub(in crate::driver) fn new_host_in_process(
         size: usize,
         alignment: usize,
         bounds: (u64, u64),
@@ -1252,11 +1252,11 @@ impl Reservation {
         }
     }
 
-    pub(super) fn usable_size(&self) -> usize {
+    pub(in crate::driver) fn usable_size(&self) -> usize {
         self.size
     }
 
-    pub(super) fn address(&self) -> usize {
+    pub(in crate::driver) fn address(&self) -> usize {
         self.address
     }
 
@@ -1457,7 +1457,7 @@ impl Reservation {
         Ok(())
     }
 
-    pub(super) fn release(&mut self) -> io::Result<()> {
+    pub(in crate::driver) fn release(&mut self) -> io::Result<()> {
         check_process(self.process)?;
         if self.length == 0 {
             return Ok(());
@@ -1496,7 +1496,7 @@ impl Reservation {
     }
 
     #[cfg(test)]
-    pub(super) fn fail_release_once(&mut self, errno: i32) {
+    pub(in crate::driver) fn fail_release_once(&mut self, errno: i32) {
         self.release_error = Some(errno);
     }
 }
