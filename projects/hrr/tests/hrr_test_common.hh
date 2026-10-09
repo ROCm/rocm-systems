@@ -329,11 +329,13 @@ inline std::string hrr_test_exe() {
 // ---------------------------------------------------------------------------
 inline std::string hrr_spawn_direct(const std::string& direct_case,
                                     const fs::path& cap_path,
-                                    const char* what = "Capture") {
+                                    const char* what = "Capture",
+                                    const std::vector<std::pair<std::string, std::string>>& env = {}) {
   hrr_skip_without_gpu();
   hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true,
                             /*capture_stderr=*/true);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
+  for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
   // Prepend ROCm bin to PATH so the subprocess finds amdhip64_7.dll.
   // SpawnProc replaces PATH entirely, so we reconstruct the full value.
   set_proc_search_path(proc);
@@ -387,6 +389,7 @@ inline void hrr_run_roundtrip(const std::string& direct_case,
 //
 // hrr_capture_direct: spawn a hidden _Direct workload with HIP_HRR_CAPTURE_OUTPUT
 //   set, REQUIRE a clean capture, and assert the archive has >= min_events.
+//   Pairs in env are set in the workload's environment as well.
 //
 // hrr_playback_env: run hrr-playback with arbitrary extra environment pairs
 //   (e.g. HIP_HRR_REPLAY_ZERO_INIT / HIP_HRR_REPLAY_DIVERGENCE_ABORT) and return
@@ -398,8 +401,9 @@ inline void hrr_run_roundtrip(const std::string& direct_case,
 // ---------------------------------------------------------------------------
 inline void hrr_capture_direct(const std::string& direct_case,
                                const fs::path& cap_path,
-                               size_t min_events = 5) {
-  hrr_spawn_direct(direct_case, cap_path);
+                               size_t min_events = 5,
+                               const std::vector<std::pair<std::string, std::string>>& env = {}) {
+  hrr_spawn_direct(direct_case, cap_path, "Capture", env);
   fs::path archive_path = hrr_single_process_archive(cap_path);
   REQUIRE(fs::exists(archive_path / "events.bin"));
   REQUIRE(fs::exists(archive_path / "blobs"));
@@ -410,6 +414,12 @@ inline void hrr_capture_direct(const std::string& direct_case,
   REQUIRE(arc.events.size() >= min_events);
 }
 #endif  // HRR_TEST_EXE
+
+// How many children Unit_HRR_ForkWhileRecording_Direct forks. Every other
+// child records a call before it exits, starting with the first, and the
+// roundtrip expects one archive for each of those besides the parent's.
+inline constexpr int kHrrForkWhileRecordingForks = 200;
+inline constexpr int kHrrForkWhileRecordingArchives = 1 + (kHrrForkWhileRecordingForks + 1) / 2;
 
 inline std::pair<int, std::string> hrr_playback_env(
     const fs::path& cap_path,

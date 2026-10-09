@@ -1654,6 +1654,10 @@ int main(int argc, char** argv) {
          ctx.d2h_pass.load() - ctx.d2h_pass_tol.load(), ctx.d2h_pass_tol.load(),
          ctx.d2h_fail.load(),
          ctx.d2h_attempted.load() - ctx.d2h_pass.load() - ctx.d2h_fail.load());
+  if (ctx.host_snapshots_restored + ctx.host_snapshots_refused + ctx.host_snapshots_skipped)
+    printf("[HRR]   Pinned host snapshots: %zu restored, %zu refused, %zu skipped "
+           "(graph capture)\n", ctx.host_snapshots_restored.load(),
+           ctx.host_snapshots_refused.load(), ctx.host_snapshots_skipped.load());
 
   bool ok = (ctx.d2h_fail == 0);
 

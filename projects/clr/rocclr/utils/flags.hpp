@@ -278,13 +278,18 @@ release(cstring, HIP_HRR_CAPTURE_OUTPUT, "",                                  \
 release(bool, HIP_HRR_DEBUG_ARGS, false,                                      \
         "Enable HRR capture argument-provenance tracing (per-arg dumps and "  \
         "H2D destination logging) at LOG_INFO level")                         \
+release(bool, HIP_HRR_HOST_SNAPSHOTS, true,                                   \
+        "HRR capture: record the pinned host memory a kernel reads, before "  \
+        "each launch")                                                        \
+release(uint, HIP_HRR_HOST_SNAPSHOT_MAX_MB, 64,                               \
+        "HRR capture: largest pinned host allocation snapshotted, in MiB")    \
 release(uint, DEBUG_CLR_DOORBELL_SKIP, 16,                                    \
         "Number of consecutive dispatches that may skip the doorbell flush.") \
 release(bool, DEBUG_CLR_DISABLE_FALLBACK, false,                              \
         "Disables certain fallback paths")                                    \
 release(bool, DEBUG_CLR_DIRECT_DOORBELL, false,                               \
         "Write the hardware doorbell directly from CLR")                      \
-release(uint, DEBUG_CLR_AQL_DEV_QUEUE, 0,                                     \
+release(uint, DEBUG_CLR_AQL_DEV_QUEUE, 1,                                     \
         "Device-memory AQL ring buffer for supported asics "                  \
         "(1=enabled, 0=force system mem (default))")                          \
 release(uint, DEBUG_CLR_USE_MOVDIR64B, 1,                                     \

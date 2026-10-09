@@ -18,8 +18,7 @@ Wavefront::Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t default_wf_si
     : cu_(cu), cu_view_(cu, *this), wf_id_(wf_id), wf_size_(default_wf_size),
       default_wf_size_(default_wf_size), max_wf_size_(max_wf_size), max_sgprs_(max_sgprs),
       max_vgprs_(max_vgprs), mode_has_gpr_idx_en_(mode_has_gpr_idx_en),
-      memory_wait_checks_enabled_(cu.config().memory_wait_diagnostics !=
-                                  MemoryWaitDiagnostics::Off) {}
+      memory_wait_checks_enabled_(cu.config().memory_wait_checks_enabled()) {}
 
 void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
   if (!activity_tracked_)
@@ -121,7 +120,6 @@ bool Wavefront::fail_pm4_submission() {
 
 void Wavefront::halt(CpCompletionNotice notice) {
   // Observer snapshots are not instruction-side register consumers.
-  SuspendedMemoryWaitCheck disable_wait_check;
   // s_endpgm terminates the wave, frees its resources, and notifies the CP as one
   // action, mirroring hardware. Order matters:
   //   (1) fire the halt hook while registers are still live so observers snapshot

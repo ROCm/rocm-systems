@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! HSA runtime ABI frontend backed directly by `rocddi`.
@@ -60,6 +61,7 @@ fn complete_deferred_shutdown(runtime: Runtime, generation: u64) {
 }
 
 const HSA_RUNTIME_VERSION_MINOR: u16 = 21;
+const AMD_AGENT_PRELOAD_SKIP_BLITS: u64 = 1 << 1;
 
 unsafe fn write_value<T: Copy>(output: *mut c_void, value: T) -> Status {
     if output.is_null() {
@@ -105,7 +107,7 @@ fn wavefront_handle(isa: HsaIsa) -> HsaWavefront {
 }
 
 const KERNEL_CLUSTER_MAX_DIM: HsaAmdDim3 = HsaAmdDim3 {
-    x: u32::MAX as u64,
+    x: i32::MAX as u64,
     y: 65_535,
     z: 65_535,
 };
@@ -145,6 +147,8 @@ fn cpu_rejects_amd_agent_info(attribute: u32) -> bool {
             | AMD_AGENT_INFO_CLUSTER_MAX_DIM
             | AMD_AGENT_INFO_CLUSTER_MAX_SIZE
             | AMD_AGENT_INFO_KERNEL_WG_MAX_DIM
+            | AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE
+            | AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE
     )
 }
 
@@ -205,6 +209,9 @@ pub extern "C" fn hsa_init() -> Status {
 #[unsafe(no_mangle)]
 pub extern "C" fn hsa_shut_down() -> Status {
     boundary(|| {
+        if runtime::LogWriteScope::active() {
+            return INVALID_RUNTIME_STATE;
+        }
         let (runtime, generation) = {
             let mut guard = match lock() {
                 Ok(guard) => guard,
@@ -302,7 +309,7 @@ pub unsafe extern "C" fn hsa_system_get_info(attribute: u32, value: *mut c_void)
                 AMD_SYSTEM_INFO_MWAITX_ENABLED => write_value(value, false),
                 AMD_SYSTEM_INFO_DMABUF_SUPPORTED => write_value(value, true),
                 AMD_SYSTEM_INFO_EXT_VERSION_MAJOR => write_value(value, 1_u16),
-                AMD_SYSTEM_INFO_EXT_VERSION_MINOR => write_value(value, 32_u16),
+                AMD_SYSTEM_INFO_EXT_VERSION_MINOR => write_value(value, 33_u16),
                 AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED => write_value(value, true),
                 AMD_SYSTEM_INFO_XNACK_ENABLED | AMD_SYSTEM_INFO_FABRIC_HANDLES_SUPPORTED => {
                     write_value(value, false)
@@ -331,9 +338,7 @@ fn extension_name(extension: u16) -> Option<&'static [u8]> {
 
 fn extension_mask() -> [u8; 128] {
     let mut extensions = [0_u8; 128];
-    for extension in [EXTENSION_AMD_PROFILER, EXTENSION_AMD_LOADER] {
-        extensions[usize::from(extension / 8)] |= 1 << (extension % 8);
-    }
+    extensions[usize::from(EXTENSION_AMD_LOADER / 8)] |= 1 << (EXTENSION_AMD_LOADER % 8);
     extensions
 }
 
@@ -342,9 +347,7 @@ fn supported_extension_minor(extension: u16, version_major: u16) -> Option<u16> 
 }
 
 fn legacy_extension_supported(extension: u16, version_major: u16, version_minor: u16) -> bool {
-    matches!(version_major, 0 | 1)
-        && version_minor == 0
-        && matches!(extension, EXTENSION_AMD_PROFILER | EXTENSION_AMD_LOADER)
+    matches!(version_major, 0 | 1) && version_minor == 0 && extension == EXTENSION_AMD_LOADER
 }
 
 fn legacy_agent_extension_supported(
@@ -549,6 +552,8 @@ pub unsafe extern "C" fn hsa_agent_get_info(
             cache_sizes,
             asic_family_id,
             hdp_flush,
+            persisting_l2_cache_size,
+            timestamp_frequency_hz,
         ) = {
             let guard = match lock() {
                 Ok(guard) => guard,
@@ -569,11 +574,15 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                     runtime.agent_cache_sizes(agent),
                     0,
                     [0; 2],
+                    None,
+                    1_000_000_000,
                 )
             } else if let Some(index) = runtime.gpu_index(agent) {
                 let native_device = if matches!(
                     attribute,
-                    AMD_AGENT_INFO_CLOCK_COUNTERS | AMD_AGENT_INFO_MEMORY_AVAIL
+                    AMD_AGENT_INFO_CLOCK_COUNTERS
+                        | AMD_AGENT_INFO_MEMORY_AVAIL
+                        | AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE
                 ) {
                     let Some(token) = runtime.inflight.enter() else {
                         return OUT_OF_RESOURCES;
@@ -593,6 +602,8 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                     runtime.agent_cache_sizes(agent),
                     runtime.gpus[index].asic_family_id,
                     runtime.gpus[index].hdp_flush,
+                    Some(runtime.gpus[index].persisting_l2_cache_size.clone()),
+                    runtime.gpus[index].timestamp_frequency_hz,
                 )
             } else {
                 return INVALID_AGENT;
@@ -609,6 +620,15 @@ pub unsafe extern "C" fn hsa_agent_get_info(
             native_device
                 .as_ref()
                 .map(|(device, _)| device.available_memory())
+        } else {
+            None
+        };
+        let expert_scheduling = if attribute == AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE {
+            native_device.as_ref().map(|(device, _)| {
+                device
+                    .gpu()
+                    .and_then(|gpu| gpu.supports_expert_scheduling())
+            })
         } else {
             None
         };
@@ -694,9 +714,16 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 }
                 AGENT_INFO_VERSION_MAJOR | AGENT_INFO_VERSION_MINOR => write_value(value, 1_u16),
                 AMD_AGENT_INFO_CHIP_ID => write_value(value, pci.map_or(0, |info| info.device_id)),
-                AMD_AGENT_INFO_CACHELINE_SIZE => {
-                    write_value(value, if gpu_only { 256_u32 } else { 64 })
-                }
+                AMD_AGENT_INFO_CACHELINE_SIZE => write_value(
+                    value,
+                    endpoint.as_ref().map_or(64, |endpoint| {
+                        endpoint
+                            .caches()
+                            .iter()
+                            .find(|cache| cache.level() == 2 && cache.line_size_bytes() != 0)
+                            .map_or(256, rocddi::topology::CacheInfo::line_size_bytes)
+                    }),
+                ),
                 AMD_AGENT_INFO_COMPUTE_UNIT_COUNT
                 | AMD_AGENT_INFO_COOPERATIVE_COMPUTE_UNIT_COUNT => write_value(
                     value,
@@ -713,10 +740,10 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 ),
                 AMD_AGENT_INFO_BDFID => write_value(value, bdf),
                 AMD_AGENT_INFO_MEMORY_WIDTH => {
-                    write_value(value, if gpu_only { 256_u32 } else { 0 })
+                    write_value(value, gpu.map_or(0, |info| info.memory_bus_width_bits))
                 }
                 AMD_AGENT_INFO_MEMORY_MAX_FREQUENCY => {
-                    write_value(value, if gpu_only { 1258_u32 } else { 0 })
+                    write_value(value, gpu.map_or(0, |info| info.maximum_memory_clock_mhz))
                 }
                 AMD_AGENT_INFO_PRODUCT_NAME => write_bytes(value, product_name.as_bytes(), 64),
                 AMD_AGENT_INFO_MAX_WAVES_PER_CU => write_value(
@@ -757,14 +784,7 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                     Some(Ok(bytes)) => write_value(value, bytes),
                     Some(Err(_)) | None => INVALID_ARGUMENT,
                 },
-                AMD_AGENT_INFO_TIMESTAMP_FREQUENCY => write_value(
-                    value,
-                    if gpu_only {
-                        100_000_000_u64
-                    } else {
-                        1_000_000_000
-                    },
-                ),
+                AMD_AGENT_INFO_TIMESTAMP_FREQUENCY => write_value(value, timestamp_frequency_hz),
                 AMD_AGENT_INFO_ASIC_FAMILY_ID => write_value(value, asic_family_id),
                 AMD_AGENT_INFO_UCODE_VERSION => write_value(
                     value,
@@ -794,11 +814,7 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 }
                 AMD_AGENT_INFO_SCRATCH_LIMIT_MAX => write_value(
                     value,
-                    if gpu_only {
-                        8_u64 * 1024 * 1024 * 1024
-                    } else {
-                        0
-                    },
+                    gpu.map_or(0, rocddi::topology::GpuInfo::maximum_scratch_aperture_bytes),
                 ),
                 AMD_AGENT_INFO_SCRATCH_LIMIT_CURRENT => write_value(value, 0_u64),
                 AMD_AGENT_INFO_CLOCK_COUNTERS => {
@@ -833,7 +849,25 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 AMD_AGENT_INFO_PM4_EMULATION => write_value(value, false),
                 AMD_AGENT_INFO_LUID if gpu_only => write_value(value, HsaLuid::default()),
                 AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED => write_value(value, host_alloc_dmabuf),
-                AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE => write_value(value, gpu_only),
+                AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE => {
+                    let Some(state) = persisting_l2_cache_size else {
+                        return INVALID_ARGUMENT;
+                    };
+                    let requested = match state.lock() {
+                        Ok(requested) => *requested,
+                        Err(_) => return ERROR,
+                    };
+                    write_value(value, requested)
+                }
+                AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE => write_value(
+                    value,
+                    gpu.map_or(0, |info| info.persisting_l2_cache_size_max as usize),
+                ),
+                AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE => match expert_scheduling {
+                    Some(Ok(supported)) => write_value(value, supported),
+                    Some(Err(error)) => map_error(error),
+                    None => INVALID_ARGUMENT,
+                },
                 AMD_AGENT_INFO_CUID => write_value(value, [0_u8; 16]),
                 AMD_AGENT_INFO_KERNEL_CLUSTER_MAX_DIM | AMD_AGENT_INFO_KERNEL_WG_MAX_DIM
                     if gpu_only =>
@@ -866,6 +900,71 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 _ => INVALID_ARGUMENT,
             }
         }
+    })
+}
+
+/// # Safety
+/// A non-null `value` must point to readable, aligned `size_t` storage.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hsa_amd_agent_set_attribute(
+    agent: HsaAgent,
+    attribute: u32,
+    value: *mut c_void,
+) -> Status {
+    boundary(|| {
+        let (device, maximum, state, _inflight) = {
+            let guard = match lock() {
+                Ok(guard) => guard,
+                Err(status) => return status,
+            };
+            let Some(runtime) = guard.as_ref() else {
+                return NOT_INITIALIZED;
+            };
+            if value.is_null() {
+                return INVALID_ARGUMENT;
+            }
+            let Some(index) = runtime.gpu_index(agent) else {
+                return INVALID_AGENT;
+            };
+            if attribute != AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE {
+                return INVALID_ARGUMENT;
+            }
+            let Some(token) = runtime.inflight.enter() else {
+                return OUT_OF_RESOURCES;
+            };
+            let gpu = &runtime.gpus[index];
+            (
+                gpu.device.clone(),
+                gpu.info.persisting_l2_cache_size_max,
+                gpu.persisting_l2_cache_size.clone(),
+                token,
+            )
+        };
+        // SAFETY: The HSA caller supplies aligned, readable size_t storage.
+        let requested = unsafe { value.cast::<usize>().read() };
+        let Ok(native_size) = u32::try_from(requested) else {
+            return INVALID_ARGUMENT;
+        };
+        if native_size > maximum {
+            return INVALID_ARGUMENT;
+        }
+        let mut current = match state.lock() {
+            Ok(current) => current,
+            Err(_) => return ERROR,
+        };
+        let gpu = match device.gpu() {
+            Ok(gpu) => gpu,
+            Err(error) => return map_error(error),
+        };
+        if let Err(error) = gpu.set_persisting_l2_cache_size(native_size) {
+            return if error.kind() == rocddi::ErrorKind::Unsupported {
+                NOT_SUPPORTED
+            } else {
+                map_error(error)
+            };
+        }
+        *current = requested;
+        SUCCESS
     })
 }
 
@@ -1342,7 +1441,13 @@ pub unsafe extern "C" fn hsa_system_get_major_extension_table(
         if guard.as_ref().is_none() {
             return NOT_INITIALIZED;
         }
-        if matches!(extension, EXTENSION_IMAGES | EXTENSION_AMD_PC_SAMPLING) {
+        if matches!(
+            extension,
+            EXTENSION_IMAGES
+                | EXTENSION_AMD_PROFILER
+                | EXTENSION_AMD_AQLPROFILE
+                | EXTENSION_AMD_PC_SAMPLING
+        ) {
             return NOT_SUPPORTED;
         }
         match (extension, version_major) {
@@ -1434,16 +1539,19 @@ pub unsafe extern "C" fn hsa_status_string(status: Status, output: *mut *const c
 
 /// # Safety
 /// `flags` must address eight readable bytes for the duration of this call.
-/// A non-null `file` is unsupported because this frontend does not call C
-/// stdio; null selects Rust's stderr output.
+/// A non-null `file` must be an open C `FILE*` kept live while its logging
+/// flags are enabled. Replacing the stream, disabling logging, or final HSA
+/// shutdown waits for writes already using it to finish. A nonfinal
+/// `hsa_shut_down` does not release the stream. Calls made recursively from a
+/// custom stream callback are rejected. Null selects stderr.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hsa_amd_enable_logging(flags: *mut u8, file: *mut c_void) -> Status {
     boundary(|| {
+        if runtime::LogWriteScope::active() {
+            return INVALID_RUNTIME_STATE;
+        }
         if flags.is_null() {
             return INVALID_ARGUMENT;
-        }
-        if !file.is_null() {
-            return NOT_SUPPORTED;
         }
         // SAFETY: The public ABI requires eight readable bytes for this call.
         let mut copied_flags = [0_u8; 8];
@@ -1461,7 +1569,7 @@ pub unsafe extern "C" fn hsa_amd_enable_logging(flags: *mut u8, file: *mut c_voi
         };
         let logging = runtime.logging.clone();
         drop(guard);
-        logging.set(copied_flags)
+        logging.set(copied_flags, file)
     })
 }
 
@@ -1551,16 +1659,33 @@ pub extern "C" fn hsa_amd_coherency_set_type(agent: HsaAgent, kind: u32) -> Stat
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn hsa_amd_agent_preload(agent: HsaAgent, _flags: u64) -> Status {
+pub extern "C" fn hsa_amd_agent_preload(agent: HsaAgent, flags: u64) -> Status {
     boundary(|| {
-        let guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
+        let (device, _call) = {
+            let guard = match lock() {
+                Ok(guard) => guard,
+                Err(status) => return status,
+            };
+            let Some(runtime) = guard.as_ref() else {
+                return NOT_INITIALIZED;
+            };
+            let Some(index) = runtime.gpu_index(agent) else {
+                return INVALID_AGENT;
+            };
+            if flags & AMD_AGENT_PRELOAD_SKIP_BLITS != 0 {
+                return SUCCESS;
+            }
+            let Some(token) = runtime.inflight.enter() else {
+                return OUT_OF_RESOURCES;
+            };
+            (runtime.gpus[index].device.clone(), token)
         };
-        match guard.as_ref() {
-            Some(runtime) if runtime.gpu_index(agent).is_some() => SUCCESS,
-            Some(_) => INVALID_AGENT,
-            None => NOT_INITIALIZED,
+        match device
+            .gpu()
+            .and_then(|gpu| gpu.preload_linear_copy().map_err(|failure| failure.error))
+        {
+            Ok(()) => SUCCESS,
+            Err(error) => map_error(error),
         }
     })
 }
@@ -1587,15 +1712,21 @@ pub extern "C" fn hsa_amd_agent_set_async_scratch_limit(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn hsa_amd_profiling_async_copy_enable(_enable: bool) -> Status {
+pub extern "C" fn hsa_amd_profiling_async_copy_enable(enable: bool) -> Status {
     boundary(|| {
-        lock().map_or(ERROR, |runtime| {
-            if runtime.is_some() {
-                NOT_SUPPORTED
-            } else {
-                NOT_INITIALIZED
-            }
-        })
+        let mut guard = match lock() {
+            Ok(guard) => guard,
+            Err(status) => return status,
+        };
+        let Some(runtime) = guard.as_mut() else {
+            return NOT_INITIALIZED;
+        };
+        runtime.async_copy_profiling = if enable {
+            runtime::AsyncCopyProfiling::Enabled
+        } else {
+            runtime::AsyncCopyProfiling::Disabled
+        };
+        SUCCESS
     })
 }
 
@@ -1850,14 +1981,13 @@ mod tests {
         for extension in [
             EXTENSION_IMAGES,
             EXTENSION_FINALIZER,
+            EXTENSION_AMD_PROFILER,
             EXTENSION_AMD_AQLPROFILE,
             EXTENSION_AMD_PC_SAMPLING,
         ] {
             assert_eq!(supported_extension_minor(extension, 1), None);
             assert!(!legacy_extension_supported(extension, 1, 0));
         }
-        assert!(legacy_extension_supported(EXTENSION_AMD_PROFILER, 0, 0));
-        assert!(!legacy_extension_supported(EXTENSION_AMD_PROFILER, 1, 1));
         assert!(legacy_agent_extension_supported(
             EXTENSION_AMD_LOADER,
             true,
@@ -1888,8 +2018,13 @@ mod tests {
 
         let mask = extension_mask();
         assert_eq!(mask[0], 0);
-        assert_eq!(mask[64], 0b0011);
-        for extension in [EXTENSION_IMAGES, EXTENSION_AMD_PC_SAMPLING] {
+        assert_eq!(mask[64], 0b0010);
+        for extension in [
+            EXTENSION_IMAGES,
+            EXTENSION_AMD_PROFILER,
+            EXTENSION_AMD_AQLPROFILE,
+            EXTENSION_AMD_PC_SAMPLING,
+        ] {
             assert_eq!(mask[usize::from(extension / 8)] & (1 << (extension % 8)), 0);
         }
     }
@@ -2043,7 +2178,7 @@ mod tests {
         assert_eq!(AMD_AGENT_INFO_CLUSTER_MAX_DIM, 0xa120);
         assert_eq!(AMD_AGENT_INFO_CLUSTER_MAX_SIZE, 0xa121);
         assert_eq!(AMD_AGENT_INFO_KERNEL_WG_MAX_DIM, 0xa122);
-        assert_eq!(KERNEL_CLUSTER_MAX_DIM.x, u64::from(u32::MAX));
+        assert_eq!(KERNEL_CLUSTER_MAX_DIM.x, i32::MAX as u64);
         assert_eq!(KERNEL_CLUSTER_MAX_DIM.y, u64::from(u16::MAX));
         assert_eq!(KERNEL_CLUSTER_MAX_DIM.z, u64::from(u16::MAX));
         assert_eq!(CLUSTER_MAX_DIM, HsaAmdDim3 { x: 1, y: 1, z: 1 });
@@ -2089,6 +2224,8 @@ mod tests {
         assert_eq!(nearest_cpu_agent(true).handle, CPU_AGENT);
         let _: unsafe extern "C" fn(*mut u8, *mut c_void) -> Status = hsa_amd_enable_logging;
         let _: unsafe extern "C" fn(HsaAgent, *mut u32) -> Status = hsa_amd_coherency_get_type;
+        let _: unsafe extern "C" fn(HsaAgent, u32, *mut c_void) -> Status =
+            hsa_amd_agent_set_attribute;
         let _: unsafe extern "C" fn(HsaAgent, u32) -> Status = hsa_amd_coherency_set_type;
         let _: extern "C" fn(HsaAgent, u64) -> Status = hsa_amd_agent_preload;
         let _: extern "C" fn(HsaAgent, usize) -> Status = hsa_amd_agent_set_async_scratch_limit;
@@ -2104,17 +2241,6 @@ mod tests {
             *mut c_void,
             *mut bool,
         ) -> Status = hsa_amd_spm_set_dest_buffer;
-    }
-
-    #[test]
-    fn logging_rejects_c_stream_without_dereferencing_it() {
-        let mut flags = [0_u8; 8];
-        // SAFETY: The valid flags array is readable; a non-null stream is
-        // rejected before inspection, even without an initialized runtime.
-        assert_eq!(
-            unsafe { hsa_amd_enable_logging(flags.as_mut_ptr(), (&raw mut flags).cast()) },
-            NOT_SUPPORTED
-        );
     }
 
     #[test]

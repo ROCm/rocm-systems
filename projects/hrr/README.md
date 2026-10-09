@@ -92,6 +92,9 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 |----------|---------|---------|
 | `HIP_HRR_CAPTURE_OUTPUT` | *(unset)* | Enable capture; path to the `.hrr` archive directory. An empty or blank value leaves capture off. Ignored, with one line on stderr, when Linux starts the program in secure-execution mode (set-user-ID, set-group-ID, file capabilities or an LSM transition) |
 | `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance) |
+| `HIP_HRR_HOST_SNAPSHOTS` | on | Record the pinned host memory each kernel reads before the launch, so replay can write it back. `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (default `64`) caps the allocation size. The archive then holds that host memory (see DESIGN.md, Pinned Host Snapshots) |
+
+On Linux the archive is readable only by the user who captured it (directories 0700, files 0600). If the archive cannot be set up, capture is disabled with a `[HRR capture] Capture disabled` message on stderr and the application runs normally.
 
 ### `hrr-playback` CLI options
 
