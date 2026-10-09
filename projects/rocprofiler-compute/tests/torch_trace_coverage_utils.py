@@ -1588,7 +1588,7 @@ def _register_bulk_binary_tensor_elementwise_builders() -> None:
 def _register_high_impact_individual_builders() -> None:
     """Register individual builders for high-impact operators."""
     individual = {
-        # (input, value, value) — fused multiply-add variants
+        # (input, value, value) - fused multiply-add variants
         "addcmul": OpSpec(
             build=lambda d: (
                 [float_tensor(d, 4, 4), float_tensor(d, 4, 4), float_tensor(d, 4, 4)],
@@ -1620,14 +1620,14 @@ def _register_high_impact_individual_builders() -> None:
                 {},
             ),
         ),
-        # softmax / log_softmax forward — (input, dim, half_to_float=False)
+        # softmax / log_softmax forward - (input, dim, half_to_float=False)
         "_softmax": OpSpec(
             build=lambda d: ([float_tensor(d, 4, 8), -1, False], {}),
         ),
         "_log_softmax": OpSpec(
             build=lambda d: ([float_tensor(d, 4, 8), -1, False], {}),
         ),
-        # dim-reduction helpers — (input, dim, keepdim?)
+        # dim-reduction helpers - (input, dim, keepdim?)
         "all.dim": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), -1], {})),
         "any.dim": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), -1], {})),
         "max.dim": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), -1], {})),
@@ -1667,7 +1667,7 @@ def _register_high_impact_individual_builders() -> None:
         "histc": OpSpec(
             build=lambda d: ([float_tensor(d, 64), 10, -3.0, 3.0], {}),
         ),
-        # native_dropout: (input, p, train) → (Tensor, Bool mask)
+        # native_dropout: (input, p, train) -> (Tensor, Bool mask)
         "native_dropout": OpSpec(
             build=lambda d: ([float_tensor(d, 4, 4), 0.5, True], {}),
         ),
@@ -1747,7 +1747,7 @@ def _register_high_impact_individual_builders() -> None:
         "topk": OpSpec(build=lambda d: ([float_tensor(d, 16), 4], {})),
         # sort: (input, dim?, descending?)
         "sort": OpSpec(build=lambda d: ([float_tensor(d, 16)], {})),
-        # nonzero: (input,) → indices
+        # nonzero: (input,) -> indices
         "nonzero": OpSpec(build=lambda d: ([float_tensor(d, 4, 4)], {})),
         # unique_consecutive / unique_dim
         "unique_consecutive": OpSpec(
@@ -2772,7 +2772,7 @@ def builder_autograd_grad(safe_var: str) -> Tuple[List[str], str, str]:
 
 
 def builder_autograd_backward(safe_var: str) -> Tuple[List[str], str, str]:
-    """torch.autograd.backward([loss]) — functional form of .backward()."""
+    """torch.autograd.backward([loss]) - functional form of .backward()."""
     return (
         [
             "import torch.nn as nn",
@@ -3536,7 +3536,7 @@ def describe_missing_or_errored_op(
 SKIP_CATEGORY_LABELS: Dict[str, str] = {
     "argument_builder_gap": (
         "argument-builder coverage gap "
-        "(no OpSpec.build registered for this op in OP_SPECS — "
+        "(no OpSpec.build registered for this op in OP_SPECS - "
         "register a per-operator builder to enable coverage)"
     ),
     "workload_runtime_error": (
@@ -3555,7 +3555,7 @@ SKIP_CATEGORY_LABELS: Dict[str, str] = {
         "(backward op needs state / output from a matched forward run)"
     ),
     "external_library_required": (
-        "external library required (e.g. MAGMA) — not present in this build"
+        "external library required (e.g. MAGMA) - not present in this build"
     ),
     "incomplete_op_spec": (
         "OpSpec pending (builder declared but shape / argument contract TBD)"
@@ -3649,7 +3649,7 @@ _MISSING_BUILDER_FAMILY_HINTS: Dict[str, str] = {
         "wrap inputs in [t1, t2, t3] lists; lengths must match across args"
     ),
     "special functions (Bessel / Chebyshev / Hermite / ...)": (
-        "single Tensor → Tensor; randn(d, N) works for most "
+        "single Tensor -> Tensor; randn(d, N) works for most "
         "(some need x ∈ [-1, 1] or x > 0)"
     ),
     "linear algebra (linalg_*)": (
@@ -3680,14 +3680,14 @@ _MISSING_BUILDER_FAMILY_HINTS: Dict[str, str] = {
     ),
     "cumulative reduction": ("input tensor + dim; dtype kwarg optional"),
     "reduction along dim": ("input tensor + dim (int or list-of-int) + keepdim kwarg"),
-    "elementwise — Tensor overload": ("two same-shape tensors"),
-    "elementwise — Scalar overload": ("tensor + python scalar"),
-    "elementwise — unary float Tensor → Tensor": (
-        "single template: lambda d: ([float_tensor(d, N, N)], {}) — most accept any "
+    "elementwise - Tensor overload": ("two same-shape tensors"),
+    "elementwise - Scalar overload": ("tensor + python scalar"),
+    "elementwise - unary float Tensor -> Tensor": (
+        "single template: lambda d: ([float_tensor(d, N, N)], {}) - most accept any "
         "float tensor (a few need x ∈ [-1, 1] or x > 0)"
     ),
     "reduction (whole-tensor)": (
-        "single template: lambda d: ([float_tensor(d, N, N)], {}) — operates over "
+        "single template: lambda d: ([float_tensor(d, N, N)], {}) - operates over "
         "all elements (some have .dim variants which fall in the "
         "'reduction along dim' bucket)"
     ),
@@ -3783,12 +3783,12 @@ def missing_builder_family(op_name: str) -> str:
         return "reduction along dim"
 
     if suffix in ("Tensor", "Tensor_Tensor"):
-        return "elementwise — Tensor overload"
+        return "elementwise - Tensor overload"
     if suffix in ("Scalar", "Tensor_Scalar", "Scalar_Tensor"):
-        return "elementwise — Scalar overload"
+        return "elementwise - Scalar overload"
 
     if short in _KNOWN_UNARY_FLOAT_ELEMENTWISE:
-        return "elementwise — unary float Tensor → Tensor"
+        return "elementwise - unary float Tensor -> Tensor"
     if short in _KNOWN_WHOLE_TENSOR_REDUCTIONS:
         return "reduction (whole-tensor)"
     return "other / uncategorized"
@@ -3919,7 +3919,7 @@ def format_missing_arg_builder_report(
     width = max(len(str(len(ops))) for _, ops in rows)
     sub_indent = f"{indent}{' ' * width}  "
 
-    lines = [f"  argument-builder gap — by family ({len(op_names)} ops):"]
+    lines = [f"  argument-builder gap - by family ({len(op_names)} ops):"]
     for family, names in rows:
         sample = sorted(names)[:max_examples]
         suffix = (
@@ -4108,7 +4108,7 @@ def compare_single_op(
 
     if not matched_nodes:
         if op.category == "structural":
-            skip_msg = "no matching analyze node — inject_roctx instrumentation gap"
+            skip_msg = "no matching analyze node - inject_roctx instrumentation gap"
             return OpCompareOutcome(
                 "skip",
                 skip_msg,
@@ -4117,7 +4117,7 @@ def compare_single_op(
         short_name = aten_op_short_name(op.name)
         if short_name and short_name in KNOWN_KERNEL_FREE_ATEN_OPS:
             skip_msg = (
-                "no matching analyze node — kernel-free ATen op has no ROCTX marker"
+                "no matching analyze node - kernel-free ATen op has no ROCTX marker"
             )
             return OpCompareOutcome(
                 "skip",
