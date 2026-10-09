@@ -357,7 +357,7 @@ TEST(ConfigLoaderTest, LoadFourGpuMi455xKmdConfig) {
   ASSERT_EQ(loaded.devices.size(), 4u);
   ASSERT_EQ(loaded.extra_gpu_builds.size(), 3u);
 
-  EXPECT_EQ(standalone.device.num_cp_queues, 24u);
+  EXPECT_EQ(standalone.device.num_cp_queues, 32u);
   EXPECT_EQ(loaded.device.revision_id, standalone.device.revision_id);
   EXPECT_EQ(loaded.device.simd_count, standalone.device.simd_count);
   EXPECT_EQ(loaded.device.num_shader_engines, standalone.device.num_shader_engines);

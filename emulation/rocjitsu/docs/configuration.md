@@ -23,6 +23,23 @@ Pre-built simulator configs are in `configs/`:
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
 | `gfx1201_r9700.json` | Single RDNA4 GPU (standalone simulation) |
 
+### KFD queue capacity
+
+`vm.gpu.device.num_cp_queues` is the CP queue count available to KFD after
+kernel reservations. It depends on the target and driver configuration. The
+schema and C++ default of 128 is a fallback for unspecified capacity, not a
+measured product value; `gfx1251_synthetic.json`, for example, inherits it.
+
+Both MI455X presets model the upstream Linux default at commit
+[`6c377d19d4a5`](https://github.com/torvalds/linux/blob/6c377d19d4a5/drivers/gpu/drm/amd/amdgpu/gfx_v12_1.c#L3251):
+GC 12.1.0 has four pipes of eight queues, and `amdgpu.user_queue=-1` disables
+kernel compute queues. The
+[KFD queue bitmap](https://github.com/torvalds/linux/blob/6c377d19d4a5/drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd.c#L197)
+therefore exposes 32 queues. With explicit `amdgpu.user_queue=0`, the default
+[eight kernel compute queues](https://github.com/torvalds/linux/blob/6c377d19d4a5/drivers/gpu/drm/amd/amdgpu/amdgpu_gfx.c#L1468)
+leave 24 available instead. The presets' 32 is derived from that driver source;
+it has not been validated against a physical MI455X topology capture.
+
 ### PCI/VFIO guest compatibility
 
 The gfx1250 PCI profile intentionally advertises no UVD, VCN, or JPEG hardware.

@@ -548,8 +548,8 @@ TEST(SysfsTopologyGeometryTest, Mi350xMatchesCapturedPhysicalAndActiveCuCounts) 
 // TODO(hanchung): Pin the physical CU geometry, active-CU mask, memory-bank
 // size, clocks, GPU/unique IDs, SDMA engine/queue counts, CP queue count, family
 // ID, and ASIC/PCI revisions after capturing a physical MI455X KFD topology.
-// Until then, this test covers only the checked-in physical device identity and
-// must not be treated as exact rocminfo parity.
+// Until then, this test covers the checked-in physical device identity and
+// source-derived driver queue default; it is not exact rocminfo parity.
 TEST(SysfsTopologyIdentityTest, Mi455xUsesPublishedPhysicalDeviceId) {
   const std::string config_dir = CONFIG_DIR;
   auto loaded = config::load_config(config_dir + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
@@ -566,6 +566,10 @@ TEST(SysfsTopologyIdentityTest, Mi455xUsesPublishedPhysicalDeviceId) {
   ASSERT_TRUE(props.count("device_id"));
   EXPECT_EQ(props["vendor_id"], 4098u);
   EXPECT_EQ(props["device_id"], 30145u);
+  // Linux 6c377d19d4a5, GC 12.1.0 with default amdgpu.user_queue=-1.
+  // See docs/configuration.md for the driver-derived capacity.
+  ASSERT_TRUE(props.count("num_cp_queues"));
+  EXPECT_EQ(props["num_cp_queues"], 32u);
 }
 
 // Every shipped config must describe the machine it actually simulates.
