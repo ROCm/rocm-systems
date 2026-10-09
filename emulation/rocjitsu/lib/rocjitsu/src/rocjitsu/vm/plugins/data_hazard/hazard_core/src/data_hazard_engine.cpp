@@ -544,6 +544,7 @@ void DataHazardEngine::on_workgroup_begin(EntityId dispatch_id, EntityId cluster
   if (workgroup) {
     std::lock_guard<util::Spinlock> lock(workgroup->mutex);
     workgroup->lds_epoch.clear();
+    workgroup->note_epoch_change();
   }
 }
 
@@ -567,6 +568,8 @@ void DataHazardEngine::on_wave_begin(const ExecutionKey &wave_key) {
   if (!wave)
     return;
 
+  if (workgroup)
+    workgroup->note_epoch_change();
   std::lock_guard<util::Spinlock> lock(wave->mutex);
   wave->workgroup = workgroup;
   wave->core.reset();
@@ -637,6 +640,8 @@ void DataHazardEngine::on_instruction(EngineWaveState &wave_state,
         reject_event("on_instruction: wait counter has no pending queue to drain");
     }
     prune_retired_instructions(*wave);
+    if (wave->workgroup)
+      wave->workgroup->note_epoch_change();
 
     if (action.is_workgroup_barrier && wave->workgroup) {
       std::lock_guard<util::Spinlock> wg_lock(wave->workgroup->mutex);
@@ -647,7 +652,7 @@ void DataHazardEngine::on_instruction(EngineWaveState &wave_state,
   }
 
   if (!epoch_to_check.empty())
-    close_lds_epoch(epoch_key, std::move(epoch_to_check));
+    close_lds_epoch(epoch_key, epoch_to_check);
 }
 
 void DataHazardEngine::on_resource_access(const ResourceAccessEvent &event) {
@@ -719,6 +724,8 @@ void DataHazardEngine::on_barrier(const BarrierEvent &barrier) {
       std::lock_guard<util::Spinlock> lock(wave->mutex);
       hazard_core::clear_pending_ops(&wave->core, WaitCntType::LDS, 0);
       prune_retired_instructions(*wave);
+      if (wave->workgroup)
+        wave->workgroup->note_epoch_change();
     }
   } else if (barrier.kind == BarrierKind::Workgroup) {
     for (const auto &key : workgroup_keys_for_barrier(barrier))
@@ -945,6 +952,10 @@ void DataHazardEngine::reset_dispatch(EntityId dispatch_id, bool flush_epochs) {
 
 void DataHazardEngine::erase_wave(const ExecutionKey &key, const EngineWaveKey &partial) {
   std::lock_guard<std::shared_mutex> lock(state_.mutex);
+  // The wave's outstanding LDS accesses are no longer carried once it is gone.
+  if (auto it = state_.waves.find(key);
+      it != state_.waves.end() && it->second && it->second->workgroup)
+    it->second->workgroup->note_epoch_change();
   state_.waves.erase(key);
   state_.wave_index.erase(partial);
   if (partial.dispatch_id != 0) {
@@ -1445,6 +1456,7 @@ void DataHazardEngine::handle_lds_access(EngineWaveState &wave, const EngineInst
     record.raw_isa = ctx.raw_isa;
     std::lock_guard<util::Spinlock> lock(wave.workgroup->mutex);
     wave.workgroup->lds_epoch.push_back(record);
+    wave.workgroup->note_epoch_change();
   }
 }
 
@@ -1567,13 +1579,23 @@ void DataHazardEngine::flush_workgroup_epoch(const EngineWorkgroupKey &key) {
     return;
 
   std::vector<EngineLdsAccessRecord> epoch;
+  uint64_t changes = 0;
   {
     std::lock_guard<util::Spinlock> lock(workgroup->mutex);
+    changes = workgroup->epoch_changes.load(std::memory_order_relaxed);
+    if (changes == workgroup->closed_at_change)
+      return;
     epoch = std::move(workgroup->lds_epoch);
+    workgroup->lds_epoch = std::move(workgroup->spare_epoch);
     workgroup->lds_epoch.clear();
   }
   if (!epoch.empty())
-    close_lds_epoch(key, std::move(epoch));
+    close_lds_epoch(key, epoch);
+
+  epoch.clear();
+  std::lock_guard<util::Spinlock> lock(workgroup->mutex);
+  workgroup->spare_epoch = std::move(epoch);
+  workgroup->closed_at_change = changes;
 }
 
 // A barrier orders the waves' issue, not the completion of what each already has
@@ -1581,11 +1603,11 @@ void DataHazardEngine::flush_workgroup_epoch(const EngineWorkgroupKey &key) {
 // after another wave's access past it. Such accesses are carried into the next
 // epoch and compared there, until a barrier finds them drained.
 void DataHazardEngine::close_lds_epoch(const EngineWorkgroupKey &key,
-                                       std::vector<EngineLdsAccessRecord> epoch) {
-  // A resolved barrier closes the epoch once per wave. After the first close
-  // the epoch holds only what it carried, and two carried records are never
-  // compared, so the check has nothing to do until a new access arrives. The
-  // carry below still runs: a wave can have drained a carried access since.
+                                       std::vector<EngineLdsAccessRecord> &epoch) {
+  // After a close the epoch holds only what it carried, and two carried
+  // records are never compared, so the check has nothing to do until a new
+  // access arrives. The carry below still runs: a wave can have drained a
+  // carried access since.
   const bool has_new_access =
       std::any_of(epoch.begin(), epoch.end(), [](const EngineLdsAccessRecord &record) {
         return record.pending_at_barrier == WaitCntType::NONE;
@@ -1593,11 +1615,26 @@ void DataHazardEngine::close_lds_epoch(const EngineWorkgroupKey &key,
   if (has_new_access)
     check_lds_epoch_for_races(key, epoch);
 
+  // The LDS operations each wave in the epoch still has outstanding. An epoch
+  // spans a workgroup's few waves, and a wave's records arrive together, one
+  // per lane, so a flat list searched from the last hit is cheaper than a map.
+  using PendingOps = std::unordered_map<EntityId, WaitCntType>;
+  std::vector<std::pair<EntityId, PendingOps>> pending_by_wave;
+  const auto pending_of = [&pending_by_wave](EntityId wave_id) -> PendingOps * {
+    for (auto &[id, pending] : pending_by_wave) {
+      if (id == wave_id)
+        return &pending;
+    }
+    return nullptr;
+  };
+  for (const auto &record : epoch) {
+    if (!pending_by_wave.empty() && pending_by_wave.back().first == record.wave_id)
+      continue;
+    if (!pending_of(record.wave_id))
+      pending_by_wave.emplace_back(record.wave_id, PendingOps{});
+  }
   // Each wave's lock is taken on its own, never under the workgroup's:
   // on_instruction takes them in the opposite order.
-  std::unordered_map<EntityId, std::unordered_map<EntityId, WaitCntType>> pending_by_wave;
-  for (const auto &record : epoch)
-    pending_by_wave.try_emplace(record.wave_id);
   for (auto &[wave_id, pending] : pending_by_wave) {
     auto wave = get_wave(EngineWaveKey{key.dispatch_id, key.cluster_id, key.workgroup_id, wave_id});
     if (!wave)
@@ -1606,16 +1643,29 @@ void DataHazardEngine::close_lds_epoch(const EngineWorkgroupKey &key,
     hazard_core::collect_pending_lds_ops(wave->core, pending);
   }
 
-  std::vector<EngineLdsAccessRecord> carried;
+  // Records are kept in place: the carried ones are compacted to the front.
+  size_t carried = 0;
+  EntityId last_wave = 0;
+  EntityId last_instruction = 0;
+  const PendingOps *pending = nullptr;
+  std::optional<WaitCntType> last_result;
   for (auto &record : epoch) {
-    const auto &pending = pending_by_wave[record.wave_id];
-    const auto it = pending.find(record.instruction_id);
-    if (it == pending.end())
+    if (!pending || record.wave_id != last_wave) {
+      pending = pending_of(record.wave_id);
+      last_wave = record.wave_id;
+      last_result.reset();
+    }
+    if (!last_result || record.instruction_id != last_instruction) {
+      const auto it = pending->find(record.instruction_id);
+      last_result = it == pending->end() ? WaitCntType::NONE : it->second;
+      last_instruction = record.instruction_id;
+    }
+    if (*last_result == WaitCntType::NONE)
       continue;
-    record.pending_at_barrier = it->second;
-    carried.push_back(record);
+    record.pending_at_barrier = *last_result;
+    epoch[carried++] = record;
   }
-  if (carried.empty())
+  if (carried == 0)
     return;
 
   std::shared_ptr<EngineWorkgroupState> workgroup;
@@ -1628,7 +1678,8 @@ void DataHazardEngine::close_lds_epoch(const EngineWorkgroupKey &key,
   if (!workgroup)
     return;
   std::lock_guard<util::Spinlock> lock(workgroup->mutex);
-  workgroup->lds_epoch.insert(workgroup->lds_epoch.end(), carried.begin(), carried.end());
+  workgroup->lds_epoch.insert(workgroup->lds_epoch.end(), epoch.begin(),
+                              epoch.begin() + static_cast<std::ptrdiff_t>(carried));
 }
 
 void DataHazardEngine::check_lds_epoch_for_races(const EngineWorkgroupKey &key,
@@ -1641,7 +1692,9 @@ void DataHazardEngine::check_lds_epoch_for_races(const EngineWorkgroupKey &key,
     return;
   const bool fold = fold_repeated_lds_races();
 
-  std::vector<size_t> indices(epoch.size());
+  // Reused across epochs: a barrier-heavy kernel closes one per iteration.
+  static thread_local std::vector<size_t> indices;
+  indices.resize(epoch.size());
   std::iota(indices.begin(), indices.end(), 0);
   std::sort(indices.begin(), indices.end(), [&](size_t lhs, size_t rhs) {
     const auto &left = epoch[lhs];

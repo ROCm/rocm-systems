@@ -116,7 +116,7 @@ private:
   void check_global_access_for_races(const EngineInstructionContext &ctx,
                                      const ResourceAccessEvent &event);
   void flush_workgroup_epoch(const EngineWorkgroupKey &key);
-  void close_lds_epoch(const EngineWorkgroupKey &key, std::vector<EngineLdsAccessRecord> epoch);
+  void close_lds_epoch(const EngineWorkgroupKey &key, std::vector<EngineLdsAccessRecord> &epoch);
   void check_lds_epoch_for_races(const EngineWorkgroupKey &key,
                                  const std::vector<EngineLdsAccessRecord> &epoch);
   void emit_warning(const EngineWarning &warning);

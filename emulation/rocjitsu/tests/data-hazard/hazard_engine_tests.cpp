@@ -4122,6 +4122,166 @@ TEST(GenericDataHazardEngineTest, CrossWaveReadAfterBarrierDoesNotRaceADrainedWr
   EXPECT_TRUE(engine.warning_snapshot().empty());
 }
 
+// A write outstanding at one barrier and drained before the next stops being
+// carried there, even when that next epoch saw no new LDS access: a read past
+// the second barrier does not race it. Barrier closes that nothing has changed
+// since are skipped, so this checks the drain counts as a change.
+TEST(GenericDataHazardEngineTest, WriteDrainedBetweenBarriersIsNotCarriedPastTheSecond) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  const ExecutionKey writer_wave{1, 0, 0, 0};
+  const ExecutionKey reader_wave{1, 0, 0, 1};
+  engine.on_wave_begin(writer_wave);
+  engine.on_wave_begin(reader_wave);
+
+  ds_access(engine, 1, 0x300, writer_wave, /*is_write=*/true);
+  resolve_workgroup_barrier(engine, {writer_wave, reader_wave});
+  drain_dscnt(engine, 2, 0x304, writer_wave);
+  resolve_workgroup_barrier(engine, {writer_wave, reader_wave});
+  ds_access(engine, 3, 0x340, reader_wave, /*is_write=*/false);
+  engine.on_workgroup_end(1, 0, 0);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+// The same, with the write's wave ending between the barriers instead of
+// draining: a wave that is gone has nothing outstanding to carry.
+TEST(GenericDataHazardEngineTest, WriteOfAnEndedWaveIsNotCarriedPastTheNextBarrier) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  const ExecutionKey writer_wave{1, 0, 0, 0};
+  const ExecutionKey reader_wave{1, 0, 0, 1};
+  engine.on_wave_begin(writer_wave);
+  engine.on_wave_begin(reader_wave);
+
+  ds_access(engine, 1, 0x300, writer_wave, /*is_write=*/true);
+  resolve_workgroup_barrier(engine, {writer_wave, reader_wave});
+  engine.on_wave_end(writer_wave);
+  resolve_workgroup_barrier(engine, {reader_wave});
+  ds_access(engine, 2, 0x340, reader_wave, /*is_write=*/false);
+  engine.on_workgroup_end(1, 0, 0);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+// And with an LDS-atomic barrier draining the writer's DScnt between them.
+TEST(GenericDataHazardEngineTest, WriteDrainedByAnLdsAtomicBarrierIsNotCarried) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  const ExecutionKey writer_wave{1, 0, 0, 0};
+  const ExecutionKey reader_wave{1, 0, 0, 1};
+  engine.on_wave_begin(writer_wave);
+  engine.on_wave_begin(reader_wave);
+
+  ds_access(engine, 1, 0x300, writer_wave, /*is_write=*/true);
+  resolve_workgroup_barrier(engine, {writer_wave, reader_wave});
+  BarrierEvent lds_atomic;
+  lds_atomic.wave = writer_wave;
+  lds_atomic.kind = BarrierKind::LocalMemoryAtomic;
+  engine.on_barrier(lds_atomic);
+  resolve_workgroup_barrier(engine, {writer_wave, reader_wave});
+  ds_access(engine, 2, 0x340, reader_wave, /*is_write=*/false);
+  engine.on_workgroup_end(1, 0, 0);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+// A barrier resolved for many waves closes the epoch once per wave; the closes
+// after the first change nothing, and must not report a race twice.
+TEST(GenericDataHazardEngineTest, ClosingAnEpochOncePerWaveReportsEachRaceOnce) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  std::vector<ExecutionKey> waves;
+  for (EntityId wave_id = 0; wave_id < 8; ++wave_id) {
+    waves.push_back(ExecutionKey{1, 0, 0, wave_id});
+    engine.on_wave_begin(waves.back());
+  }
+
+  ds_access(engine, 1, 0x300, waves[0], /*is_write=*/true);
+  ds_access(engine, 2, 0x340, waves[1], /*is_write=*/false);
+  for (const auto &wave : waves)
+    close_lds_epoch(engine, wave);
+  engine.on_workgroup_end(1, 0, 0);
+
+  expect_one_lds_race_between(engine.warning_snapshot(), 1, 2);
+}
+
+namespace {
+
+/// A DS access of 4 bytes at @p address.
+void ds_access_at(DataHazardEngine &engine, EntityId id, uint64_t pc, const ExecutionKey &wave,
+                  bool is_write, uint32_t address) {
+  InstructionEvent instruction;
+  instruction.instruction = make_instruction(id, pc);
+  instruction.instruction.execution = wave;
+  if (is_write)
+    instruction.hazards.local_write_wait = WaitCntType::LDS;
+  else
+    instruction.hazards.vector_write_wait = WaitCntType::LDS;
+  engine.on_instruction(instruction);
+
+  ResourceAccessEvent event;
+  event.instruction = instruction.instruction;
+  event.resource_kind = ResourceKind::LocalMemory;
+  event.address = address;
+  event.size_bytes = 4;
+  event.is_read = !is_write;
+  event.is_write = is_write;
+  engine.on_resource_access(event);
+}
+
+} // namespace
+
+// Closing the epoch decides, record by record, which accesses are still
+// outstanding. Records of different waves and instructions interleave, and each
+// must be judged by its own wave's queue: here wave 0's first write has drained
+// and its second has not, while wave 1's write is still pending.
+TEST(GenericDataHazardEngineTest, CarryJudgesInterleavedRecordsByTheirOwnWave) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  const ExecutionKey wave0{1, 0, 0, 0};
+  const ExecutionKey wave1{1, 0, 0, 1};
+  const ExecutionKey reader{1, 0, 0, 2};
+  engine.on_wave_begin(wave0);
+  engine.on_wave_begin(wave1);
+  engine.on_wave_begin(reader);
+
+  ds_access_at(engine, 1, 0x300, wave0, /*is_write=*/true, 0x80);
+  ds_access_at(engine, 2, 0x300, wave1, /*is_write=*/true, 0x100);
+  ds_access_at(engine, 3, 0x304, wave0, /*is_write=*/true, 0x180);
+  // s_wait_dscnt 1 on wave 0: its older write retires, the newer one stays.
+  InstructionEvent wait;
+  wait.instruction = make_instruction(4, 0x308);
+  wait.instruction.execution = wave0;
+  wait.wait_action.is_wait_instruction = true;
+  wait.wait_action.counters.push_back({WaitCntType::LDS, 1});
+  engine.on_instruction(wait);
+
+  resolve_workgroup_barrier(engine, {wave0, wave1, reader});
+  ds_access_at(engine, 5, 0x340, reader, /*is_write=*/false, 0x80);
+  ds_access_at(engine, 6, 0x344, reader, /*is_write=*/false, 0x100);
+  ds_access_at(engine, 7, 0x348, reader, /*is_write=*/false, 0x180);
+  engine.on_workgroup_end(1, 0, 0);
+
+  std::set<std::pair<EntityId, EntityId>> races;
+  for (const auto &warning : engine.warning_snapshot()) {
+    ASSERT_EQ(warning.finding.kind, HazardKind::LocalMemoryRace);
+    races.insert({warning.finding.source_instruction.instruction_id,
+                  warning.finding.instruction.instruction_id});
+  }
+  EXPECT_EQ(races, (std::set<std::pair<EntityId, EntityId>>{{2, 6}, {3, 7}}));
+}
+
 // A VGPR holds one value per lane, and an instruction touches only the lanes
 // active in EXEC when it runs. A pending load and a later access to the same
 // VGPR conflict only on lanes both have active: in an if/else that reuses a

@@ -97,6 +97,18 @@ struct EngineInstructionContext {
 struct EngineWorkgroupState {
   util::Spinlock mutex;
   std::vector<EngineLdsAccessRecord> lds_epoch;
+  /// A cleared buffer the next epoch takes over, so each epoch does not regrow
+  /// its records from empty.
+  std::vector<EngineLdsAccessRecord> spare_epoch;
+  /// Bumped by everything that can change what closing the epoch does: a new
+  /// LDS access, a wait that may retire an outstanding one, a wave starting or
+  /// ending. Closing an epoch nothing has changed since the last close would
+  /// only repeat it, and a resolved barrier closes it once per wave.
+  std::atomic<uint64_t> epoch_changes{0};
+  /// epoch_changes as the last close found it; guarded by mutex.
+  uint64_t closed_at_change = ~uint64_t{0};
+
+  void note_epoch_change() { epoch_changes.fetch_add(1, std::memory_order_relaxed); }
 };
 
 struct EngineWaveState {
