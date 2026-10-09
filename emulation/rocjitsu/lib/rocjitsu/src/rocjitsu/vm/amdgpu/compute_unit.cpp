@@ -1902,7 +1902,7 @@ template <bool EnableAsync>
     drain_async_window();
     // Preserve debugger-first handling of illegal instructions. PM4 failures
     // remain exclusive to their submission and are handled below.
-    if (!active->has_pm4_submission() && illegal_inst_handler_ && illegal_inst_handler_(*active))
+    if (!active->fail_pm4_submission() && illegal_inst_handler_ && illegal_inst_handler_(*active))
       return;
     active->report_instruction_execution_error(InstructionExecutionError::DecodeFailure);
     const std::string failure = std::format(
