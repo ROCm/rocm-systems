@@ -726,10 +726,11 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
       *algoName = "CE-Scratch";
       break;
     // Fabric variants all report "DDA"; the protocol column distinguishes
-    // LL / LL128 / Simple, so the name needn't repeat it.
+    // LL / LL128 / Simple / NaN, so the name needn't repeat it.
     case rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL:
     case rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128:
     case rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM:
+    case rcclAddonAlgos_t::RCCL_DDA_FABRIC_NAN:
       *algoName = "DDA";
       break;
     case rcclAddonAlgos_t::RCCL_DDA_IPC:
@@ -1019,17 +1020,21 @@ inline size_t rcclDdaVmmThresholdCtxTab(const rcclArchThresholds* table, ncclFun
 // send/recv NaN paths past the copy-based kernels' caps (MI300X, graph mode):
 // AllGather and ReduceScatter up to their 16 MiB scratch, AlltoAll up to 8 MiB.
 // AllReduce keeps its cap. RCCL_DDA_THRESHOLD, when set, still wins.
-// The NaN kernels are IPC only, so the gfx1250 fabric tiers keep their caps.
+// On gfx1250 only the entry gate lifts, and only when the fabric NaN kernels are
+// set up -- to their 32 MiB scratch -- since every fabric tier re-checks its own
+// cap behind it.
 // With RCCL_DDA_NAN_REG_MIN set, a registered recv buffer lifts AllGather's and
 // AlltoAll's scratch cap: their registered kernels push straight into it.
 static size_t rcclDdaNanCap(ncclComm* comm, ncclFunc_t func, size_t cap, bool nanForced,
-                            const void* recvbuff = nullptr, size_t recvBytes = 0) {
+                            const void* recvbuff = nullptr, size_t recvBytes = 0, bool entry = false) {
   size_t env;
-  if (!nanForced || IsArchMatch(comm->archName, "gfx1250") || ddaThresholdFromEnv(rcclParamDdaThreshold(), &env))
+  const bool fabric = IsArchMatch(comm->archName, "gfx1250");
+  if (!nanForced || (fabric && (!entry || comm->ddaNanFabricMemHandler == nullptr)) ||
+      ddaThresholdFromEnv(rcclParamDdaThreshold(), &env))
     return cap;
   size_t nanMax = 0;
-  if (func == ncclFuncAllGather || func == ncclFuncReduceScatter) nanMax = (size_t)16 << 20;
-  if (func == ncclFuncAlltoAll) nanMax = (size_t)8 << 20;
+  if (func == ncclFuncAllGather || func == ncclFuncReduceScatter) nanMax = (size_t)(fabric ? 32 : 16) << 20;
+  if (func == ncclFuncAlltoAll) nanMax = (size_t)(fabric ? 32 : 8) << 20;
   struct ncclReg* reg = nullptr;
   bool regValid = false;
   if (rcclDdaNanRegMin() > 0 && recvbuff != nullptr && ncclRegFind(comm, recvbuff, recvBytes, &reg) == ncclSuccess &&
@@ -1470,6 +1475,12 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
       if (ddaFabricArch1250) {
         const size_t arDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncAllReduce);
         const size_t arDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncAllReduce);
+        if (nanForced && ncclAllReduceDdaNanEligible(comm, count, datatype, op)) {
+          decision->algo = RCCL_DDA_FABRIC_NAN;
+          decision->protocol = NCCL_PROTO_NAN;
+          decision->nMaxChannels = ncclAllReduceDdaNanBlocks(comm, count, datatype);
+          return ncclSuccess;
+        }
         // Small-message fast lane: LL protocol (no GPU barrier).
         if (rcclParamDdaLL() && msgBytes <= arDdaLLMax &&
             ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
@@ -1632,12 +1643,18 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
                     recvbuff, totalBytes);
     const size_t agDdaEntryMax = rcclDdaNanCap(comm, ncclFuncAllGather,
                                                rcclDdaEntryThresholdTab(archTable, ncclFuncAllGather), nanForced,
-                                               recvbuff, totalBytes);
+                                               recvbuff, totalBytes, /*entry=*/true);
     if (!symEligible && rcclDdaEnabled(comm, totalBytes, agDdaEntryMax, query, "AG")) {
       const bool agFabricArch   = IsArchMatch(comm->archName, "gfx1250");
       if (agFabricArch) {
         const size_t agDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncAllGather);
         const size_t agDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncAllGather);
+        if (nanForced && ncclAllGatherDdaNanEligible(comm, recvbuff, sendcount, datatype)) {
+          decision->algo = RCCL_DDA_FABRIC_NAN;
+          decision->protocol = NCCL_PROTO_NAN;
+          decision->nMaxChannels = ncclAllGatherDdaNanBlocks(comm, sendcount, datatype);
+          return ncclSuccess;
+        }
         if (rcclParamDdaLL() && msgSize <= agDdaLLMax &&
             ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
           decision->algo = RCCL_DDA_FABRIC_LL;
@@ -1858,12 +1875,19 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
       comm, ncclFuncReduceScatter,
       rcclDdaVmmThresholdCtxTab(archTable, ncclFuncReduceScatter, rsWinRegType, /*graphMode=*/false), nanForced);
     const size_t rsDdaEntryMax =
-      rcclDdaNanCap(comm, ncclFuncReduceScatter, rcclDdaEntryThresholdTab(archTable, ncclFuncReduceScatter), nanForced);
+      rcclDdaNanCap(comm, ncclFuncReduceScatter, rcclDdaEntryThresholdTab(archTable, ncclFuncReduceScatter), nanForced,
+                    nullptr, 0, /*entry=*/true);
     if (!symEligible && rcclDdaEnabled(comm, totalBytes, rsDdaEntryMax, query, "RS")) {
       const bool ddaFabricArch   = IsArchMatch(comm->archName, "gfx1250");
       if (ddaFabricArch) {
         const size_t rsDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncReduceScatter);
         const size_t rsDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncReduceScatter);
+        if (nanForced && ncclReduceScatterDdaNanEligible(comm, recvcount, datatype, op)) {
+          decision->algo = RCCL_DDA_FABRIC_NAN;
+          decision->protocol = NCCL_PROTO_NAN;
+          decision->nMaxChannels = ncclReduceScatterDdaNanBlocks(comm, recvcount, datatype);
+          return ncclSuccess;
+        }
         if (rcclParamDdaLL() && totalBytes <= rsDdaLLMax &&
             ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
           decision->algo = RCCL_DDA_FABRIC_LL;
@@ -2033,12 +2057,19 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   const size_t a2aDdaMax = rcclDdaNanCap(comm, ncclFuncAlltoAll, rcclDdaVmmThresholdTab(archTable, ncclFuncAlltoAll),
                                          nanForced, recvbuff, totalBytes);
   const size_t a2aDdaEntryMax = rcclDdaNanCap(
-    comm, ncclFuncAlltoAll, rcclDdaEntryThresholdTab(archTable, ncclFuncAlltoAll), nanForced, recvbuff, totalBytes);
+    comm, ncclFuncAlltoAll, rcclDdaEntryThresholdTab(archTable, ncclFuncAlltoAll), nanForced, recvbuff, totalBytes,
+    /*entry=*/true);
   if (!a2aSymEligible && rcclDdaEnabled(comm, totalBytes, a2aDdaEntryMax, query, "A2A")) {
     const bool a2aFabricArch  = IsArchMatch(comm->archName, "gfx1250");
     if (a2aFabricArch) {
       const size_t llThresh    = rcclDdaLLThresholdTab(archTable, ncclFuncAlltoAll);
       const size_t ll128Thresh = rcclDdaLL128ThresholdTab(archTable, ncclFuncAlltoAll);
+      if (nanForced && ncclAllToAllDdaNanEligible(comm, sendbuff, recvbuff, count, datatype)) {
+        decision->algo = RCCL_DDA_FABRIC_NAN;
+        decision->protocol = NCCL_PROTO_NAN;
+        decision->nMaxChannels = ncclAllToAllDdaNanBlocks(comm, count, datatype);
+        return ncclSuccess;
+      }
       if (rcclParamDdaLL() && llThresh > 0 && totalBytes <= llThresh &&
           ncclAllToAllDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL;

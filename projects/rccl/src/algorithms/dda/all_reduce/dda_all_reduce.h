@@ -21,6 +21,13 @@ bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
 ncclResult_t ncclAllReduceDdaIpc(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                  ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
+// NaN-flag path (NCCL_PROTO=NaN, 8 ranks): needs only the NaN-flag scratch, so
+// it runs on whichever of the IPC and fabric inits allocated it.
+bool ncclAllReduceDdaNanEligible(ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op);
+uint32_t ncclAllReduceDdaNanBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
+ncclResult_t ncclAllReduceDdaNan(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                 ncclComm* comm, cudaStream_t stream);
+
 // Fabric path (runtime nRanks up to kDdaMaxNranks, single- or multi-node).
 bool ncclAllReduceDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                     ncclDataType_t datatype, ncclRedOp_t op);

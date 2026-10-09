@@ -97,7 +97,7 @@ using ddan::kRanks;
 constexpr int    kSelf  = 0;
 constexpr size_t kUnits = 1000; // 16B units per source, not a multiple of the block
 constexpr size_t kDw    = kUnits * 4;
-constexpr int    kIters = 2; // one call on each bank
+constexpr int    kIters = ddan::kBanks + 1; // a call on each bank, then one on a restored bank
 
 // Rank kSelf's scratch with peer p's scratch placed p strides above it, so the
 // slot (or mailbox) kSelf writes in peer p is kSelf's own slot p. The scratch
@@ -105,7 +105,7 @@ constexpr int    kIters = 2; // one call on each bank
 struct DdaLoopback {
   explicit DdaLoopback(size_t strideUnits)
     : scratch(ddan::kScratchBytes / sizeof(v4u) + kRanks * strideUnits),
-      epoch(ddan::kEpochCells),
+      epoch(ddan::kEpochWords),
       stride(strideUnits) {
     HIP_EXPECT(hipMemset(scratch.ptr, 0xFF, scratch.count * sizeof(v4u)));
     HIP_EXPECT(hipMemset(epoch.ptr, 0, epoch.count * sizeof(uint32_t)));
@@ -121,12 +121,16 @@ struct DdaLoopback {
 };
 
 const auto kDdaGeom = ddan::geometry(kUnits, 4, 256);
+// Two blocks a row, so each thread takes several units.
+const auto kDdaPeerGeom = ddan::peerGeometry(kUnits, 2 * kRanks, 128);
 
-template <bool kAllToAll, bool kReg>
+// kPeer: even calls take the per-peer kernel, odd ones the all-peer kernel, so
+// each restores what the other deferred.
+template <bool kAllToAll, bool kReg, bool kPeer = false>
 void runDdaCopy() {
   ASSERT_EQ(hipSetDevice(0), hipSuccess);
   const size_t           sendDw = (kAllToAll ? kRanks : 1) * kDw;
-  DdaLoopback            lb(kReg ? ddan::kEpochCells : kUnits);
+  DdaLoopback            lb(kReg ? ddan::kEpochCells : ddan::slotStride(kUnits));
   DeviceBuffer<uint32_t> send(sendDw), recv(kRanks * kDw);
   const v4u*             s = reinterpret_cast<const v4u*>(send.ptr);
   v4u*                   r = reinterpret_cast<v4u*>(recv.ptr);
@@ -144,6 +148,14 @@ void runDdaCopy() {
       } else {
         hipLaunchKernelGGL(ddan::ddaNanAllGatherReg<uint32_t>, kDdaGeom.first, kDdaGeom.second, 0, 0,
                            lb.peers(), lb.epoch.ptr, s, r, mine, kUnits, kSelf);
+      }
+    } else if (kPeer && iter % 2 == 0) {
+      if constexpr (kAllToAll) {
+        hipLaunchKernelGGL(ddan::ddaNanAllToAllPeer<uint32_t>, kDdaPeerGeom.first, kDdaPeerGeom.second, 0, 0,
+                           lb.peers(), lb.epoch.ptr, s, r, kUnits, kSelf);
+      } else {
+        hipLaunchKernelGGL(ddan::ddaNanAllGatherPeer<uint32_t>, kDdaPeerGeom.first, kDdaPeerGeom.second, 0, 0,
+                           lb.peers(), lb.epoch.ptr, s, r, kUnits, kSelf);
       }
     } else if constexpr (kAllToAll) {
       hipLaunchKernelGGL(ddan::ddaNanAllToAll<uint32_t>, kDdaGeom.first, kDdaGeom.second, 0, 0, lb.peers(),
@@ -206,7 +218,7 @@ std::string where(int iter, size_t j, int slice = -1) {
 // the output is the sum of the eight blocks of its own input.
 void runDdaReduceScatter() {
   ASSERT_EQ(hipSetDevice(0), hipSuccess);
-  DdaLoopback            lb(kUnits);
+  DdaLoopback            lb(ddan::slotStride(kUnits));
   DeviceBuffer<uint32_t> send(kRanks * kDw), recv(kDw);
   send.copyFrom(reduceBlocks());
   for (int iter = 0; iter < kIters; iter++) {
@@ -223,7 +235,7 @@ void runDdaReduceScatter() {
 // Loopback one-shot AllReduce: all eight sources are this rank's input.
 void runDdaAllReduceOneShot() {
   ASSERT_EQ(hipSetDevice(0), hipSuccess);
-  DdaLoopback            lb(kUnits);
+  DdaLoopback            lb(ddan::slotStride(kUnits));
   DeviceBuffer<uint32_t> send(kDw), recv(kDw);
   std::vector<uint32_t>  in(kDw);
   for (size_t j = 0; j < kDw; j++) in[j] = reduceDword(0, j);
@@ -255,7 +267,7 @@ void runDdaAllReduceOneShot() {
 // stage 1 only completes if it is escaped.
 void runDdaAllReduceTwoShot() {
   ASSERT_EQ(hipSetDevice(0), hipSuccess);
-  DdaLoopback            lb(kUnits);
+  DdaLoopback            lb(ddan::slotStride(kUnits));
   DeviceBuffer<uint32_t> send(kRanks * kDw), recv(kRanks * kDw);
   send.copyFrom(reduceBlocks());
   for (int iter = 0; iter < kIters; iter++) {
@@ -641,6 +653,16 @@ TEST(DdaNanSentinelEscape, AllGather)
 TEST(DdaNanSentinelEscape, AllToAll)
 {
   RUN_ISOLATED_TESTS(ddaConfig("DdaNanSentinelEscape.AllToAll", runDdaCopy<true, false>));
+}
+
+TEST(DdaNanSentinelEscape, AllGatherPeer)
+{
+  RUN_ISOLATED_TESTS(ddaConfig("DdaNanSentinelEscape.AllGatherPeer", runDdaCopy<false, false, true>));
+}
+
+TEST(DdaNanSentinelEscape, AllToAllPeer)
+{
+  RUN_ISOLATED_TESTS(ddaConfig("DdaNanSentinelEscape.AllToAllPeer", runDdaCopy<true, false, true>));
 }
 
 TEST(DdaNanSentinelEscape, AllGatherReg)

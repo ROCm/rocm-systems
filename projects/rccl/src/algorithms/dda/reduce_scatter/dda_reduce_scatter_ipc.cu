@@ -67,10 +67,10 @@ static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* rec
 }
 
 template <typename T>
-static ncclResult_t ncclReduceScatterDdaNan(const void* sendbuff, void* recvbuff, size_t recvcount, ncclComm* comm,
-                                            cudaStream_t stream) {
+static ncclResult_t ncclReduceScatterDdaNanTyped(const void* sendbuff, void* recvbuff, size_t recvcount,
+                                                 ncclComm* comm, cudaStream_t stream) {
   const size_t units = recvcount * sizeof(T) / 16;
-  const auto gridBlock = rcclDdaNanGeometry(units);
+  const auto gridBlock = rcclDdaNanGeometry(comm, units);
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   hipExtLaunchKernelGGL((dda::nan::ddaNanReduceScatter<T>), gridBlock.first, gridBlock.second, 0, stream,
                         /*startEvent=*/nullptr, stopEvent, /*flags=*/0, rcclDdaNanPeers(comm), comm->ddaNanEpochDev,
@@ -80,6 +80,35 @@ static ncclResult_t ncclReduceScatterDdaNan(const void* sendbuff, void* recvbuff
 }
 
 } // namespace
+
+bool ncclReduceScatterDdaNanEligible(ncclComm* comm, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op) {
+  if (comm == nullptr || recvcount == 0 || op != ncclSum) {
+    return false;
+  }
+  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+    return false;
+  }
+  return rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype) &&
+         rcclDdaNanFits(comm, recvcount * ncclTypeSize(datatype));
+}
+
+uint32_t ncclReduceScatterDdaNanBlocks(ncclComm* comm, size_t recvcount, ncclDataType_t datatype) {
+  return rcclDdaNanGeometry(comm, recvcount * ncclTypeSize(datatype) / 16).first.x;
+}
+
+ncclResult_t ncclReduceScatterDdaNan(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
+                                     ncclComm* comm, cudaStream_t stream) {
+  switch (datatype) {
+  case ncclFloat32:
+    return ncclReduceScatterDdaNanTyped<float>(sendbuff, recvbuff, recvcount, comm, stream);
+  case ncclFloat16:
+    return ncclReduceScatterDdaNanTyped<half>(sendbuff, recvbuff, recvcount, comm, stream);
+  case ncclBfloat16:
+    return ncclReduceScatterDdaNanTyped<bf16>(sendbuff, recvbuff, recvcount, comm, stream);
+  default:
+    return ncclInvalidArgument;
+  }
+}
 
 bool ncclReduceScatterDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                      ncclDataType_t datatype, ncclRedOp_t op) {
@@ -106,7 +135,7 @@ bool ncclReduceScatterDdaIpcEligible(ncclComm* comm, const void* sendbuff, void*
     return false;
   }
   if (rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype)) {
-    return rcclDdaNanFits(comm, recvcount * ncclTypeSize(datatype));
+    return ncclReduceScatterDdaNanEligible(comm, recvcount, datatype, op);
   }
 
   size_t totalCount = recvcount * comm->nRanks;
@@ -132,16 +161,7 @@ ncclResult_t ncclReduceScatterDdaIpc(const void* sendbuff, void* recvbuff, size_
                                      ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   (void)op;
   if (rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype)) {
-    switch (datatype) {
-    case ncclFloat32:
-      return ncclReduceScatterDdaNan<float>(sendbuff, recvbuff, recvcount, comm, stream);
-    case ncclFloat16:
-      return ncclReduceScatterDdaNan<half>(sendbuff, recvbuff, recvcount, comm, stream);
-    case ncclBfloat16:
-      return ncclReduceScatterDdaNan<bf16>(sendbuff, recvbuff, recvcount, comm, stream);
-    default:
-      return ncclInvalidArgument;
-    }
+    return ncclReduceScatterDdaNan(sendbuff, recvbuff, recvcount, datatype, comm, stream);
   }
   switch (datatype) {
   case ncclFloat32:

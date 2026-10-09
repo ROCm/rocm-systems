@@ -59,8 +59,8 @@ static void ddaNanIpcInit(ncclComm* comm) {
     return;
   }
   if (hipMemset(comm->ddaNanScratch, 0xFF, bytes) != hipSuccess ||
-      hipMalloc(&comm->ddaNanEpochDev, dda::nan::kEpochCells * sizeof(uint32_t)) != hipSuccess ||
-      hipMemset(comm->ddaNanEpochDev, 0, dda::nan::kEpochCells * sizeof(uint32_t)) != hipSuccess ||
+      hipMalloc(&comm->ddaNanEpochDev, dda::nan::kEpochWords * sizeof(uint32_t)) != hipSuccess ||
+      hipMemset(comm->ddaNanEpochDev, 0, dda::nan::kEpochWords * sizeof(uint32_t)) != hipSuccess ||
       hipDeviceSynchronize() != hipSuccess) {
     (void)hipGetLastError();
     WARN("ncclDdaIpcCommInit: cannot initialize the NaN-flag scratch");

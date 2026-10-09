@@ -12,7 +12,8 @@
 //
 // The receiver polls its own FIFO with nontemporal loads, so a stale cached line
 // cannot satisfy a poll. FIFO stores, including the sentinel restore, are plain,
-// as LL128's are on gfx9.
+// as LL128's are on gfx9. On gfx1250 neither is coherent with a peer's access to
+// a cacheable FIFO (see RCCL_LL_FIFO_SYS_SCOPE), so both are system-scope there.
 //
 // Two consequences follow from dropping the flag.
 //
@@ -61,9 +62,14 @@ struct ncclNanBits<hip_bfloat16> {
 //
 // The receiver's poll must be a nontemporal load (or be followed by an acquire
 // fence): a plain load can be served from a stale L1 line and spin on old data.
-// The store is a plain one, as LL128's FIFO store is on gfx9.
+// The store is a plain one, as LL128's FIFO store is on gfx9. On gfx1250 both
+// are system-scope b128, as LL128's are there.
 inline __device__ v4u loadNanPack(v4u_gptr ptr) {
+#if RCCL_LL_FIFO_SYS_SCOPE
+  return __builtin_amdgcn_global_load_b128(ptr, RCCL_SYSTEM_SYNCSCOPE);
+#else
   return __builtin_nontemporal_load(ptr);
+#endif
 }
 
 template <typename P>
@@ -72,7 +78,11 @@ inline __device__ v4u nanUserLoad(P ptr) {
 }
 
 inline __device__ void storeNanPack(v4u_gptr ptr, v4u v) {
+#if RCCL_LL_FIFO_SYS_SCOPE
+  __builtin_amdgcn_global_store_b128(ptr, v, RCCL_SYSTEM_SYNCSCOPE);
+#else
   *ptr = v;
+#endif
 }
 
 // 16-byte user-buffer vector that promises only the element's alignment, so a
@@ -211,8 +221,13 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
   inline __device__ void postRecv() {
     if (recvConnHeadPtr) {
       // The FIFO accesses are system-scope, so ordering the sentinel restore
-      // ahead of the credit needs only a compiler barrier here.
+      // ahead of the credit needs only a compiler barrier here. On gfx1250 the
+      // restore must also be acknowledged first: barrier() waits on storecnt,
+      // but a single-warp group skips it.
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
+#if RCCL_LL_FIFO_SYS_SCOPE
+      __asm__ volatile("s_wait_storecnt 0x0" ::: "memory");
+#endif
       STORE(recvConnHeadPtr, recvConnHead += 1);
     }
   }

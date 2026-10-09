@@ -164,6 +164,7 @@ typedef enum {
   // Appended rather than grouped with the other Direct entries so existing
   // values stay stable.
   RCCL_DIRECT_ALLTOALL, // AlltoAll as per-peer Send/Recv (no collective kernel)
+  RCCL_DDA_FABRIC_NAN,  // DDA fabric, NaN-flag protocol (NCCL_PROTO=NaN)
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 

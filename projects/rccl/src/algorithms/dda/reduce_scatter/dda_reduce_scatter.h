@@ -24,6 +24,13 @@ bool ncclReduceScatterDdaIpcEligible(ncclComm* comm, const void* sendbuff, void*
 ncclResult_t ncclReduceScatterDdaIpc(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
                                      ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
+// NaN-flag path (NCCL_PROTO=NaN, 8 ranks): needs only the NaN-flag scratch, so
+// it runs on whichever of the IPC and fabric inits allocated it.
+bool ncclReduceScatterDdaNanEligible(ncclComm* comm, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op);
+uint32_t ncclReduceScatterDdaNanBlocks(ncclComm* comm, size_t recvcount, ncclDataType_t datatype);
+ncclResult_t ncclReduceScatterDdaNan(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
+                                     ncclComm* comm, cudaStream_t stream);
+
 /**
  * Check if DDA reduce-scatter is eligible for the fabric/VMM path (runtime
  * nRanks up to kDdaMaxNranks, single- or multi-node within an MNNVL clique).

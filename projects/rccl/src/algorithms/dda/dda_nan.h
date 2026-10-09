@@ -17,14 +17,16 @@
 
 #include <cstdlib>
 
-// RCCL_DDA_NAN_MAX_BLOCKS caps the grid; it cannot exceed the epoch cells.
-static inline int rcclDdaNanMaxBlocks() {
-  static const int maxBlocks = [] {
+// RCCL_DDA_NAN_MAX_BLOCKS caps the grid; it cannot exceed the epoch cells. The
+// default is per path: on gfx1250 fabric the large calls scale with the grid up
+// to about 256 blocks; the IPC path was tuned at 64.
+static inline int rcclDdaNanMaxBlocks(const ncclComm* comm) {
+  static const int env = [] {
     const char* s = ncclGetEnv("RCCL_DDA_NAN_MAX_BLOCKS");
-    const int v = s ? atoi(s) : dda::nan::kEpochCells;
-    return v < 1 ? 1 : (v > dda::nan::kEpochCells ? dda::nan::kEpochCells : v);
+    return s ? atoi(s) : 0;
   }();
-  return maxBlocks;
+  const int v = env > 0 ? env : (comm->ddaNanFabricMemHandler != nullptr ? 256 : 64);
+  return v > dda::nan::kEpochCells ? dda::nan::kEpochCells : v;
 }
 
 // Block size: RCCL_DDA_NAN_THREADS (rounded down to a multiple of 64) when set,
@@ -40,8 +42,26 @@ static inline uint32_t rcclDdaNanThreads(uint32_t dflt) {
 
 // Small blocks spread a call over more CUs, which shortens its latency: AllReduce
 // is fastest at 128 threads, the copy collectives and ReduceScatter at 256.
-static inline std::pair<dim3, dim3> rcclDdaNanGeometry(size_t units, uint32_t defaultThreads = 256) {
-  return dda::nan::geometry(units, rcclDdaNanMaxBlocks(), rcclDdaNanThreads(defaultThreads));
+static inline std::pair<dim3, dim3> rcclDdaNanGeometry(const ncclComm* comm, size_t units,
+                                                       uint32_t defaultThreads = 256) {
+  return dda::nan::geometry(units, rcclDdaNanMaxBlocks(comm), rcclDdaNanThreads(defaultThreads));
+}
+
+// AllGather and AlltoAll through scratch take the per-peer kernels when the
+// per-peer block is at most RCCL_DDA_NAN_PEER_MAX bytes (default 128 KiB; 0
+// disables them), the all-peer kernels above that.
+static inline bool rcclDdaNanPerPeer(size_t slotBytes) {
+  static const size_t max = [] {
+    const char* s = ncclGetEnv("RCCL_DDA_NAN_PEER_MAX");
+    return s ? (size_t)strtoull(s, nullptr, 0) : (size_t)128 << 10;
+  }();
+  return slotBytes <= max;
+}
+
+// The copies' grid; units per peer.
+static inline std::pair<dim3, dim3> rcclDdaNanCopyGeometry(const ncclComm* comm, size_t units, bool perPeer) {
+  return perPeer ? dda::nan::peerGeometry(units, rcclDdaNanMaxBlocks(comm), rcclDdaNanThreads(256))
+                 : rcclDdaNanGeometry(comm, units);
 }
 
 static inline dda::nan::Peers rcclDdaNanPeers(const ncclComm* comm) {

@@ -487,6 +487,10 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
     return rcclAddonLaunch(comm, stream, [&] {
       return ncclAllGatherDdaFabric(sendbuff, recvbuff, sendcount, datatype, comm, stream);
     });
+  case RCCL_DDA_FABRIC_NAN:
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclAllGatherDdaNan(sendbuff, recvbuff, sendcount, datatype, comm, stream);
+    });
   case RCCL_DDA_IPC:
     return rcclAddonLaunch(comm, stream, [&] {
       return ncclAllGatherDdaIpc(sendbuff, recvbuff, sendcount, datatype, comm, stream);
@@ -583,6 +587,10 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
     case RCCL_DDA_FABRIC_VMM:
       return rcclAddonLaunch(comm, stream, [&] {
         return ncclAllToAllDdaFabric(sendbuff, recvbuff, count, datatype, comm, stream);
+      });
+    case RCCL_DDA_FABRIC_NAN:
+      return rcclAddonLaunch(comm, stream, [&] {
+        return ncclAllToAllDdaNan(sendbuff, recvbuff, count, datatype, comm, stream);
       });
     case RCCL_DDA_IPC:
       return rcclAddonLaunch(comm, stream, [&] {
@@ -840,6 +848,10 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
          comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
     return rcclAddonLaunch(comm, stream, [&] {
       return ncclAllReduceDdaFabric(sendbuff, recvbuff, count, datatype, op, comm, stream);
+    });
+  case RCCL_DDA_FABRIC_NAN:
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclAllReduceDdaNan(sendbuff, recvbuff, count, datatype, comm, stream);
     });
   case RCCL_DDA_IPC:
     return rcclAddonLaunch(comm, stream, [&] {
@@ -1228,6 +1240,10 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
          comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
     return rcclAddonLaunch(comm, stream, [&] {
       return ncclReduceScatterDdaFabric(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+    });
+  case RCCL_DDA_FABRIC_NAN:
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclReduceScatterDdaNan(sendbuff, recvbuff, recvcount, datatype, comm, stream);
     });
   case RCCL_DDA_IPC:
     return rcclAddonLaunch(comm, stream, [&] {
