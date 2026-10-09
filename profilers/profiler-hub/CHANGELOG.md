@@ -25,8 +25,7 @@ downstream consumer of the library.
 - New public C ABI (`c/profiler_hub.h`, `c/profiler_hub_types.h`):
   `ph_ctx_create`/`ph_ctx_free`, `ph_get_library_version`, `ph_get_schema_version`,
   `ph_get_track_list`, `ph_get_node`, `ph_get_track_events`, `ph_get_track_samples`,
-  and stub declarations for a planned async task API (`ph_future_get`/`ph_future_wait`/
-  `ph_future_cancel`/`ph_future_free`, not yet implemented).
+  and the asynchronous operation handle `ph_future_t`.
 - `reader_types.hpp`: `track_info_t` now carries `id`, `event_count`, and `agent_id`.
 - `reader_types.hpp`: new `track_kind_t` enum, and `track_info_t` gains
   `category`, `queue_id`, `stream_id` fields. `reader_t::get_all_tracks()`
@@ -52,6 +51,10 @@ downstream consumer of the library.
 - `track_info_t::value_range` and `ph_track_t::value_range` (`ph_value_range_t { min, max, is_valid }`)
   expose the smallest and largest sample value of PMC counter tracks. Other
   tracks, and counters with no non-NULL sample, have `value_range.is_valid == 0`.
+- `ph_future_create`/`ph_future_wait`/`ph_future_cancel`/`ph_future_result`/
+  `ph_future_free`: a future carries `on_progress` and `on_finished` callbacks and lets
+  the caller wait for or cancel an asynchronous operation. New `ph_future_status_t`,
+  `ph_progress_fn`, `ph_finished_fn` and `PH_RESULT_CANCELLED`.
 - `ph_event_t` gains `id`, `type` (new `ph_event_type_t`) and `nesting_depth`. `id` is only
   unique together with `type`. `nesting_depth` is the number of events of the track, itself
   included, that are active when the event starts, relative to the whole track. A

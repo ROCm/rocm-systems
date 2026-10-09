@@ -27,6 +27,8 @@ extern "C"
                                                  servicing the call. */
         PH_RESULT_FUTURE_ALLOCATION_FAILED,  /**< An async task could not be submitted
                                                  (out of memory). */
+        PH_RESULT_CANCELLED,                 /**< The operation was cancelled through its
+                                                 future before it finished. */
     } ph_result_t;
 
     struct ph_ctx;
@@ -36,7 +38,8 @@ extern "C"
      *         released by ph_ctx_free(). */
     typedef struct ph_ctx*   ph_ctx_t;
     typedef struct ph_trace* ph_trace_t;
-    /** @brief Opaque handle to an in-flight asynchronous task. */
+    /** @brief Opaque handle to an asynchronous operation. Created by
+     *         ph_future_create(), released by ph_future_free(). */
     typedef struct ph_future* ph_future_t;
 
     /** @brief Semantic version triple (major.minor.patch). */
@@ -238,8 +241,21 @@ extern "C"
     typedef ph_version_t ph_library_version_t;
     typedef ph_version_t ph_schema_version_t;
 
-    /** @brief Callback signature for ph_future_get(). */
-    typedef void (*ph_task_fn)(void* user_data);
+    /** @brief How an asynchronous operation ended. */
+    typedef enum
+    {
+        PH_FUTURE_FINISHED,  /**< The operation ran to its end; see the ph_result_t. */
+        PH_FUTURE_CANCELLED, /**< The operation was cancelled before it finished. */
+        PH_FUTURE_ERROR,     /**< The operation failed; see the ph_result_t. */
+    } ph_future_status_t;
+
+    /** @brief Progress callback of a future, @p value is in [0.0, 1.0]. */
+    typedef void (*ph_progress_fn)(ph_future_t future, double value);
+
+    /** @brief Completion callback of a future, called exactly once. */
+    typedef void (*ph_finished_fn)(ph_future_t        future,
+                                   ph_future_status_t status,
+                                   ph_result_t        result);
 
     // NOLINTEND
 

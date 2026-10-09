@@ -1,59 +1,49 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "ph_future.hpp"
 #include "profiler-hub/c/profiler_hub.h"
-#include "trace_fixtures.hpp"
 
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <cstdlib>
-#include <filesystem>
-#include <future>
-#include <string>
 #include <thread>
 #include <vector>
 
 namespace
 {
 
-using namespace profiler_hub;
 using namespace std::chrono_literals;
 
-struct task_state
+struct callback_log
 {
-    std::atomic<bool> started{ false };
-    std::atomic<bool> finished{ false };
-    std::atomic<bool> release{ false };
+    std::atomic<int>                progress_calls{ 0 };
+    std::atomic<double>             last_progress{ -1.0 };
+    std::atomic<int>                finished_calls{ 0 };
+    std::atomic<ph_future_status_t> status{ PH_FUTURE_ERROR };
+    std::atomic<ph_result_t>        result{ PH_RESULT_INTERNAL_ERROR };
+    std::atomic<ph_future_t>        finished_future{ nullptr };
+    std::atomic<ph_future_t>        progress_future{ nullptr };
 };
 
+callback_log g_log;
+
 void
-quick_task(void* data)
+on_progress(ph_future_t future, double value)
 {
-    static_cast<task_state*>(data)->finished = true;
+    g_log.progress_future = future;
+    g_log.last_progress   = value;
+    ++g_log.progress_calls;
 }
 
 void
-blocking_task(void* data)
+on_finished(ph_future_t future, ph_future_status_t status, ph_result_t result)
 {
-    auto* state    = static_cast<task_state*>(data);
-    state->started = true;
-    while(!state->release)
-    {
-        std::this_thread::sleep_for(1ms);
-    }
-    state->finished = true;
-}
-
-void
-wait_until(const std::atomic<bool>& flag)
-{
-    while(!flag)
-    {
-        std::this_thread::sleep_for(1ms);
-    }
+    g_log.finished_future = future;
+    g_log.status          = status;
+    g_log.result          = result;
+    ++g_log.finished_calls;
 }
 
 class c_api_future_test : public ::testing::Test
@@ -61,141 +51,201 @@ class c_api_future_test : public ::testing::Test
 protected:
     void SetUp() override
     {
-        m_db_path = test::temp_trace_path("c_api_future_test");
-        test::write_node_only(m_db_path);
+        g_log.progress_calls  = 0;
+        g_log.last_progress   = -1.0;
+        g_log.finished_calls  = 0;
+        g_log.status          = PH_FUTURE_ERROR;
+        g_log.result          = PH_RESULT_INTERNAL_ERROR;
+        g_log.finished_future = nullptr;
+        g_log.progress_future = nullptr;
     }
 
     void TearDown() override
     {
-        if(m_ctx != nullptr) ph_ctx_free(m_ctx);
-        std::filesystem::remove(m_db_path);
+        if(m_future != nullptr) std::ignore = ph_future_free(m_future);
     }
 
-    void create_context()
+    void create(ph_progress_fn progress = on_progress,
+                ph_finished_fn finished = on_finished)
     {
-        ASSERT_EQ(ph_ctx_create(&m_ctx, m_db_path.c_str()), PH_RESULT_SUCCESS);
+        ASSERT_EQ(ph_future_create(progress, finished, &m_future), PH_RESULT_SUCCESS);
     }
 
-    // The context pool has max(1, hardware threads / 2) workers; keeping every one of
-    // them busy makes the next submitted task wait in the queue.
-    void occupy_all_workers()
-    {
-        const size_t workers =
-            std::max<size_t>(1, std::thread::hardware_concurrency() / 2);
-        m_blockers.reserve(workers);
-        for(size_t i = 0; i < workers; ++i)
-        {
-            auto&       state  = *m_blockers.emplace_back(std::make_unique<task_state>());
-            ph_future_t future = nullptr;
-            ASSERT_EQ(ph_future_get(m_ctx, &future, blocking_task, &state),
-                      PH_RESULT_SUCCESS);
-            m_blocker_futures.push_back(future);
-        }
-        for(const auto& state : m_blockers)
-        {
-            wait_until(state->started);
-        }
-    }
-
-    void release_blockers()
-    {
-        for(const auto& state : m_blockers)
-        {
-            state->release = true;
-        }
-    }
-
-    [[nodiscard]] bool blockers_finished() const
-    {
-        return std::all_of(m_blockers.begin(), m_blockers.end(), [](const auto& state) {
-            return state->finished.load();
-        });
-    }
-
-    std::vector<std::unique_ptr<task_state>> m_blockers;
-    std::vector<ph_future_t>                 m_blocker_futures;
-
-    std::string m_db_path;
-    ph_ctx_t    m_ctx{ nullptr };
+    ph_future_t m_future{ nullptr };
 };
 
-TEST_F(c_api_future_test, a_submitted_task_runs_and_the_wait_returns)
+TEST_F(c_api_future_test, a_created_future_is_a_handle_the_caller_owns)
 {
-    create_context();
-    task_state  state;
-    ph_future_t future = nullptr;
+    create();
 
-    ASSERT_EQ(ph_future_get(m_ctx, &future, quick_task, &state), PH_RESULT_SUCCESS);
-    ASSERT_NE(future, nullptr);
-    EXPECT_EQ(ph_future_wait(m_ctx, future), PH_RESULT_SUCCESS);
-
-    EXPECT_TRUE(state.finished);
-    EXPECT_EQ(ph_future_free(m_ctx, future), PH_RESULT_SUCCESS);
+    EXPECT_NE(m_future, nullptr);
 }
 
-TEST_F(c_api_future_test, a_null_task_clears_the_future_and_is_rejected)
+TEST_F(c_api_future_test, a_null_out_parameter_is_an_invalid_argument)
 {
-    create_context();
-    ph_future_t future = reinterpret_cast<ph_future_t>(0x1);
-
-    EXPECT_EQ(ph_future_get(m_ctx, &future, nullptr, nullptr),
+    EXPECT_EQ(ph_future_create(on_progress, on_finished, nullptr),
               PH_RESULT_INVALID_ARGUMENT);
-
-    EXPECT_EQ(future, nullptr);
 }
 
-TEST_F(c_api_future_test, the_arguments_of_the_future_functions_are_checked)
+TEST_F(c_api_future_test, a_future_may_have_no_callbacks)
 {
-    create_context();
-    task_state  state;
-    ph_future_t future = nullptr;
+    create(nullptr, nullptr);
+    ASSERT_TRUE(m_future->try_attach());
 
-    EXPECT_EQ(ph_future_get(nullptr, &future, quick_task, &state),
-              PH_RESULT_INVALID_CONTEXT);
-    EXPECT_EQ(ph_future_get(m_ctx, nullptr, quick_task, &state),
-              PH_RESULT_INVALID_ARGUMENT);
-    EXPECT_EQ(ph_future_wait(nullptr, future), PH_RESULT_INVALID_CONTEXT);
-    EXPECT_EQ(ph_future_wait(m_ctx, nullptr), PH_RESULT_INVALID_ARGUMENT);
-    EXPECT_EQ(ph_future_cancel(m_ctx, nullptr), PH_RESULT_INVALID_ARGUMENT);
-    EXPECT_EQ(ph_future_free(m_ctx, nullptr), PH_RESULT_INVALID_ARGUMENT);
+    m_future->report_progress(0.5);
+    m_future->finish(PH_FUTURE_FINISHED, PH_RESULT_SUCCESS);
+
+    EXPECT_EQ(ph_future_wait(m_future), PH_RESULT_SUCCESS);
 }
 
-TEST_F(c_api_future_test, a_handle_the_context_never_issued_is_rejected)
+TEST_F(c_api_future_test, a_future_serves_only_one_operation)
 {
-    create_context();
-    const auto foreign = reinterpret_cast<ph_future_t>(0x10);
+    create();
 
-    EXPECT_EQ(ph_future_wait(m_ctx, foreign), PH_RESULT_INVALID_ARGUMENT);
-    EXPECT_EQ(ph_future_cancel(m_ctx, foreign), PH_RESULT_INVALID_ARGUMENT);
-    EXPECT_EQ(ph_future_free(m_ctx, foreign), PH_RESULT_INVALID_ARGUMENT);
+    EXPECT_TRUE(m_future->try_attach());
+    EXPECT_FALSE(m_future->try_attach());
 }
 
-TEST_F(c_api_future_test, freeing_a_future_twice_reports_the_second_call)
+TEST_F(c_api_future_test, wait_and_cancel_need_an_operation)
 {
-    create_context();
-    task_state  state;
-    ph_future_t future = nullptr;
-    ASSERT_EQ(ph_future_get(m_ctx, &future, quick_task, &state), PH_RESULT_SUCCESS);
-    ASSERT_EQ(ph_future_wait(m_ctx, future), PH_RESULT_SUCCESS);
+    create();
 
-    EXPECT_EQ(ph_future_free(m_ctx, future), PH_RESULT_SUCCESS);
-    EXPECT_EQ(ph_future_free(m_ctx, future), PH_RESULT_INVALID_ARGUMENT);
+    EXPECT_EQ(ph_future_wait(m_future), PH_RESULT_INVALID_ARGUMENT);
+    EXPECT_EQ(ph_future_cancel(m_future), PH_RESULT_INVALID_ARGUMENT);
 }
 
-TEST_F(c_api_future_test, concurrent_frees_of_one_future_succeed_exactly_once)
+TEST_F(c_api_future_test, the_functions_reject_a_null_future)
 {
-    create_context();
-    task_state  state;
-    ph_future_t future = nullptr;
-    ASSERT_EQ(ph_future_get(m_ctx, &future, quick_task, &state), PH_RESULT_SUCCESS);
-    ASSERT_EQ(ph_future_wait(m_ctx, future), PH_RESULT_SUCCESS);
+    ph_result_t result{};
 
-    std::atomic<int>         successes{ 0 };
+    EXPECT_EQ(ph_future_wait(nullptr), PH_RESULT_INVALID_ARGUMENT);
+    EXPECT_EQ(ph_future_cancel(nullptr), PH_RESULT_INVALID_ARGUMENT);
+    EXPECT_EQ(ph_future_result(nullptr, &result), PH_RESULT_INVALID_ARGUMENT);
+    EXPECT_EQ(ph_future_free(nullptr), PH_RESULT_INVALID_ARGUMENT);
+}
+
+TEST_F(c_api_future_test, finishing_calls_on_finished_once_with_the_outcome)
+{
+    create();
+    ASSERT_TRUE(m_future->try_attach());
+
+    m_future->finish(PH_FUTURE_ERROR, PH_RESULT_INTERNAL_ERROR);
+    m_future->finish(PH_FUTURE_FINISHED, PH_RESULT_SUCCESS);
+
+    EXPECT_EQ(g_log.finished_calls, 1);
+    EXPECT_EQ(g_log.status, PH_FUTURE_ERROR);
+    EXPECT_EQ(g_log.result, PH_RESULT_INTERNAL_ERROR);
+    EXPECT_EQ(g_log.finished_future, m_future);
+}
+
+TEST_F(c_api_future_test, the_result_is_available_once_the_operation_ended)
+{
+    create();
+    ASSERT_TRUE(m_future->try_attach());
+    ph_result_t result = PH_RESULT_SUCCESS;
+
+    EXPECT_EQ(ph_future_result(m_future, &result), PH_RESULT_INVALID_ARGUMENT);
+    EXPECT_EQ(ph_future_result(m_future, nullptr), PH_RESULT_INVALID_ARGUMENT);
+
+    m_future->finish(PH_FUTURE_FINISHED, PH_RESULT_INTERNAL_ERROR);
+
+    ASSERT_EQ(ph_future_result(m_future, &result), PH_RESULT_SUCCESS);
+    EXPECT_EQ(result, PH_RESULT_INTERNAL_ERROR);
+}
+
+TEST_F(c_api_future_test, progress_is_reported_clamped_until_the_operation_ends)
+{
+    create();
+    ASSERT_TRUE(m_future->try_attach());
+
+    m_future->report_progress(0.25);
+    EXPECT_DOUBLE_EQ(g_log.last_progress, 0.25);
+    m_future->report_progress(7.0);
+    EXPECT_DOUBLE_EQ(g_log.last_progress, 1.0);
+    m_future->report_progress(-3.0);
+    EXPECT_DOUBLE_EQ(g_log.last_progress, 0.0);
+    EXPECT_EQ(g_log.progress_future, m_future);
+
+    m_future->finish(PH_FUTURE_FINISHED, PH_RESULT_SUCCESS);
+    m_future->report_progress(0.5);
+
+    EXPECT_EQ(g_log.progress_calls, 3);
+}
+
+TEST_F(c_api_future_test, wait_returns_after_the_finished_callback_has_returned)
+{
+    create();
+    ASSERT_TRUE(m_future->try_attach());
+
+    std::thread worker{ [future = m_future] {
+        std::this_thread::sleep_for(20ms);
+        future->finish(PH_FUTURE_FINISHED, PH_RESULT_SUCCESS);
+    } };
+
+    EXPECT_EQ(ph_future_wait(m_future), PH_RESULT_SUCCESS);
+    EXPECT_EQ(g_log.finished_calls, 1);
+    worker.join();
+}
+
+TEST_F(c_api_future_test, cancel_requests_a_stop_the_operation_can_observe)
+{
+    create();
+    ASSERT_TRUE(m_future->try_attach());
+    const auto token = m_future->stop_token();
+    ASSERT_FALSE(token.stop_requested());
+
+    EXPECT_EQ(ph_future_cancel(m_future), PH_RESULT_SUCCESS);
+
+    EXPECT_TRUE(token.stop_requested());
+}
+
+TEST_F(c_api_future_test, cancelling_a_finished_operation_is_harmless)
+{
+    create();
+    ASSERT_TRUE(m_future->try_attach());
+    m_future->finish(PH_FUTURE_FINISHED, PH_RESULT_SUCCESS);
+
+    EXPECT_EQ(ph_future_cancel(m_future), PH_RESULT_SUCCESS);
+    EXPECT_EQ(g_log.status, PH_FUTURE_FINISHED);
+}
+
+TEST_F(c_api_future_test, freeing_twice_reports_the_second_call)
+{
+    create();
+    const auto keep_alive = m_future->shared_from_this();
+
+    EXPECT_EQ(ph_future_free(m_future), PH_RESULT_SUCCESS);
+    EXPECT_EQ(ph_future_free(m_future), PH_RESULT_INVALID_ARGUMENT);
+
+    m_future = nullptr;
+}
+
+TEST_F(c_api_future_test, an_operation_keeps_the_future_alive_after_it_was_freed)
+{
+    create();
+    ASSERT_TRUE(m_future->try_attach());
+    const auto operation_reference = m_future->shared_from_this();
+
+    ASSERT_EQ(ph_future_free(m_future), PH_RESULT_SUCCESS);
+    const auto future = m_future;
+    m_future          = nullptr;
+
+    operation_reference->finish(PH_FUTURE_FINISHED, PH_RESULT_SUCCESS);
+
+    EXPECT_EQ(g_log.finished_future, future);
+    EXPECT_EQ(g_log.finished_calls, 1);
+}
+
+TEST_F(c_api_future_test, concurrent_finishes_call_on_finished_exactly_once)
+{
+    create();
+    ASSERT_TRUE(m_future->try_attach());
+
     std::vector<std::thread> threads;
-    for(int i = 0; i < 6; ++i)
+    for(int i = 0; i < 8; ++i)
     {
-        threads.emplace_back([&] {
-            if(ph_future_free(m_ctx, future) == PH_RESULT_SUCCESS) ++successes;
+        threads.emplace_back([future = m_future] {
+            future->finish(PH_FUTURE_FINISHED, PH_RESULT_SUCCESS);
         });
     }
     for(auto& thread : threads)
@@ -203,93 +253,7 @@ TEST_F(c_api_future_test, concurrent_frees_of_one_future_succeed_exactly_once)
         thread.join();
     }
 
-    EXPECT_EQ(successes, 1);
-}
-
-TEST_F(c_api_future_test, cancelling_a_pending_task_prevents_it_from_running)
-{
-    create_context();
-    occupy_all_workers();
-    task_state  skipped;
-    ph_future_t pending = nullptr;
-    ASSERT_EQ(ph_future_get(m_ctx, &pending, quick_task, &skipped), PH_RESULT_SUCCESS);
-
-    EXPECT_EQ(ph_future_cancel(m_ctx, pending), PH_RESULT_SUCCESS);
-    release_blockers();
-    for(const auto future : m_blocker_futures)
-    {
-        EXPECT_EQ(ph_future_wait(m_ctx, future), PH_RESULT_SUCCESS);
-    }
-    EXPECT_EQ(ph_future_wait(m_ctx, pending), PH_RESULT_SUCCESS);
-
-    EXPECT_FALSE(skipped.finished);
-}
-
-TEST_F(c_api_future_test,
-       freeing_the_context_waits_for_running_tasks_and_drops_pending_ones)
-{
-    create_context();
-    occupy_all_workers();
-    task_state  skipped;
-    ph_future_t pending = nullptr;
-    ASSERT_EQ(ph_future_get(m_ctx, &pending, quick_task, &skipped), PH_RESULT_SUCCESS);
-
-    std::thread releaser{ [&] {
-        std::this_thread::sleep_for(100ms);
-        release_blockers();
-    } };
-    EXPECT_EQ(ph_ctx_free(m_ctx), PH_RESULT_SUCCESS);
-    m_ctx = nullptr;
-    releaser.join();
-
-    EXPECT_TRUE(blockers_finished());
-    EXPECT_FALSE(skipped.finished);
-}
-
-TEST_F(c_api_future_test, freeing_the_context_with_unfreed_futures_succeeds)
-{
-    create_context();
-    task_state  state;
-    ph_future_t future = nullptr;
-    ASSERT_EQ(ph_future_get(m_ctx, &future, quick_task, &state), PH_RESULT_SUCCESS);
-
-    EXPECT_EQ(ph_ctx_free(m_ctx), PH_RESULT_SUCCESS);
-    m_ctx = nullptr;
-}
-
-TEST_F(c_api_future_test,
-       a_task_that_uses_the_context_while_it_is_freed_does_not_deadlock)
-{
-    create_context();
-    struct reentrant
-    {
-        ph_ctx_t          ctx;
-        std::atomic<bool> started{ false };
-        std::atomic<int>  result{ -1 };
-    } state{ m_ctx };
-
-    ph_future_t future = nullptr;
-    ASSERT_EQ(ph_future_get(
-                  m_ctx,
-                  &future,
-                  [](void* data) {
-                      auto* self    = static_cast<reentrant*>(data);
-                      self->started = true;
-                      std::this_thread::sleep_for(100ms);
-                      ph_future_t inner = nullptr;
-                      self->result      = static_cast<int>(
-                          ph_future_get(self->ctx, &inner, [](void*) {}, nullptr));
-                  },
-                  &state),
-              PH_RESULT_SUCCESS);
-    wait_until(state.started);
-
-    auto freed = std::async(std::launch::async, [&] { return ph_ctx_free(m_ctx); });
-    ASSERT_EQ(freed.wait_for(5s), std::future_status::ready);
-    m_ctx = nullptr;
-
-    EXPECT_EQ(freed.get(), PH_RESULT_SUCCESS);
-    EXPECT_EQ(state.result, static_cast<int>(PH_RESULT_INVALID_CONTEXT));
+    EXPECT_EQ(g_log.finished_calls, 1);
 }
 
 }  // namespace

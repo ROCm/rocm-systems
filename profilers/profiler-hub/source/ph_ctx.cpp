@@ -1,6 +1,5 @@
 #include "ph_ctx.hpp"
 #include "debug.hpp"
-#include "ph_future.hpp"
 #include "populate_reader_catalog.hpp"
 #include "profiler-hub/cpp/storage.hpp"
 #include "reader_catalog.hpp"
@@ -79,49 +78,6 @@ ph_ctx::ph_ctx(std::string_view trace_path)
     initialize_node_agents();
     initialize_node_processes();
     initialize_node_info();
-}
-
-ph_ctx::~ph_ctx()
-{
-    std::unordered_set<ph_future*> live;
-    {
-        std::scoped_lock lock{ m_futures_mutex };
-        m_closing = true;
-        live.swap(m_live_futures);
-    }
-
-    for(auto* future : live)
-    {
-        std::ignore = future->m_handle.cancel();
-    }
-    for(auto* future : live)
-    {
-        future->m_handle.wait();
-        delete future;
-    }
-}
-
-bool
-ph_ctx::register_future(ph_future* future)
-{
-    std::scoped_lock lock{ m_futures_mutex };
-    if(m_closing) return false;
-    m_live_futures.insert(future);
-    return true;
-}
-
-bool
-ph_ctx::unregister_future(ph_future* future)
-{
-    std::scoped_lock lock{ m_futures_mutex };
-    return m_live_futures.erase(future) != 0;
-}
-
-bool
-ph_ctx::owns_future(ph_future* future) const
-{
-    std::scoped_lock lock{ m_futures_mutex };
-    return m_live_futures.contains(future);
 }
 
 ph_schema_version_t

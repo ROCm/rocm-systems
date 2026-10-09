@@ -352,130 +352,6 @@ demo_track_samples(ph_ctx_t ctx, uint32_t track_id)
     print_samples(&slice, PRINT_LIMIT);
 }
 
-typedef struct
-{
-    ph_ctx_t        ctx;
-    uint32_t        track_id;
-    ph_event_list_t result;
-    ph_result_t     status;
-} track_events_job_t;
-
-static void
-read_track_events_task(void* user_data)
-{
-    track_events_job_t* job = (track_events_job_t*) user_data;
-    job->status = ph_get_track_events(job->ctx, job->track_id, 0, 0, &job->result);
-}
-
-static void
-demo_async_track_events(ph_ctx_t ctx, uint32_t track_id)
-{
-    track_events_job_t job = { .ctx = ctx, .track_id = track_id };
-
-    ph_future_t future;
-    TIME_CALL("ph_future_get", ph_future_get(ctx, &future, read_track_events_task, &job));
-
-    TIME_CALL("ph_future_wait", ph_future_wait(ctx, future));
-
-    if(job.status == PH_RESULT_SUCCESS)
-    {
-        printf("\n=== Async events for track %d (%d, showing first %d) ===\n",
-               track_id,
-               job.result.list_size,
-               PRINT_LIMIT);
-        print_events(&job.result, PRINT_LIMIT);
-    }
-
-    ph_future_free(ctx, future);
-}
-
-typedef struct
-{
-    ph_ctx_t         ctx;
-    uint32_t         track_id;
-    ph_sample_list_t result;
-    ph_result_t      status;
-} track_samples_job_t;
-
-static void
-read_track_samples_task(void* user_data)
-{
-    track_samples_job_t* job = (track_samples_job_t*) user_data;
-    job->status = ph_get_track_samples(job->ctx, job->track_id, 0, 0, &job->result);
-}
-
-static void
-read_all_tracks_async(ph_ctx_t               ctx,
-                      const ph_track_list_t* tracks,
-                      const char*            run_name,
-                      const char*            bench_label)
-{
-    const uint32_t       n            = tracks->list_size;
-    ph_future_t*         futures      = malloc(sizeof(ph_future_t) * n);
-    track_events_job_t*  events_jobs  = calloc(n, sizeof(track_events_job_t));
-    track_samples_job_t* samples_jobs = calloc(n, sizeof(track_samples_job_t));
-
-    const double t0 = monotonic_ms();
-
-    for(uint32_t i = 0; i < n; ++i)
-    {
-        const ph_track_t* track = &tracks->tracks[i];
-        if(track->agent_id == 0)
-        {
-            events_jobs[i] = (track_events_job_t){ .ctx = ctx, .track_id = track->id };
-            ph_future_get(ctx, &futures[i], read_track_events_task, &events_jobs[i]);
-        }
-        else
-        {
-            samples_jobs[i] = (track_samples_job_t){ .ctx = ctx, .track_id = track->id };
-            ph_future_get(ctx, &futures[i], read_track_samples_task, &samples_jobs[i]);
-        }
-    }
-
-    unsigned long total_rows      = 0;
-    unsigned long duration_tracks = 0;
-    unsigned long counter_tracks  = 0;
-    for(uint32_t i = 0; i < n; ++i)
-    {
-        ph_future_wait(ctx, futures[i]);
-        ph_future_free(ctx, futures[i]);
-
-        const ph_track_t* track = &tracks->tracks[i];
-        if(track->agent_id == 0)
-        {
-            total_rows += events_jobs[i].status == PH_RESULT_SUCCESS
-                              ? events_jobs[i].result.list_size
-                              : 0;
-            duration_tracks++;
-        }
-        else
-        {
-            total_rows += samples_jobs[i].status == PH_RESULT_SUCCESS
-                              ? samples_jobs[i].result.list_size
-                              : 0;
-            counter_tracks++;
-        }
-    }
-    const double read_ms = monotonic_ms() - t0;
-    record_bench(bench_label, read_ms);
-
-    printf("\n=== Read all tracks (async), all data: %s ===\n", run_name);
-    printf("tracks:          %d (%lu duration, %lu counter)\n",
-           n,
-           duration_tracks,
-           counter_tracks);
-    printf("total rows read: %lu\n", total_rows);
-    printf("total time:      %.3f ms\n", read_ms);
-    if(total_rows > 0)
-    {
-        printf("avg per row:     %.6f ms\n", read_ms / (double) total_rows);
-    }
-
-    free(futures);
-    free(events_jobs);
-    free(samples_jobs);
-}
-
 int
 main(int argc, char** argv)
 {
@@ -500,16 +376,11 @@ main(int argc, char** argv)
     if(duration_track_id != 0)
     {
         demo_track_events(ctx, duration_track_id);
-        demo_async_track_events(ctx, duration_track_id);
     }
     if(counter_track_id != 0)
     {
         demo_track_samples(ctx, counter_track_id);
     }
-
-    read_all_tracks_async(
-        ctx, &node.track_list, "1st run (cold)", "read all tracks 1st (cold)");
-    read_all_tracks_async(ctx, &node.track_list, "2nd run", "read all tracks 2nd run");
 
     TIME_CALL("ph_ctx_free", ph_ctx_free(ctx));
 

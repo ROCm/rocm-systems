@@ -3,7 +3,6 @@
 #include "profiler-hub/c/profiler_hub.h"
 
 #include <memory>
-#include <optional>
 #include <tuple>
 #include <utility>
 
@@ -203,134 +202,71 @@ ph_get_track_samples(ph_ctx_t          ctx,
     });
 }
 
-namespace
-{
-void
-abandon_task(profiler_hub::common::thread_pool::task_handle& handle)
-{
-    std::ignore = handle.cancel();
-    handle.wait();
-}
-
 ph_result_t
-submit_and_wrap_future(ph_ctx_t                                   ctx,
-                       ph_future_t*                               future,
-                       profiler_hub::common::thread_pool::task_fn task)
+ph_future_create(ph_progress_fn on_progress,
+                 ph_finished_fn on_finished,
+                 ph_future_t*   future)
 {
-    std::optional<profiler_hub::common::thread_pool::task_handle> handle;
-    try
-    {
-        handle.emplace(ctx->get_thread_pool().submit(std::move(task)));
-    } catch(...)
-    {
-        return PH_RESULT_FUTURE_ALLOCATION_FAILED;
-    }
-
-    std::unique_ptr<ph_future> wrapper;
-    bool                       registered = false;
-    try
-    {
-        wrapper    = std::make_unique<ph_future>(*handle);
-        registered = ctx->register_future(wrapper.get());
-    } catch(...)
-    {
-        abandon_task(*handle);
-        return PH_RESULT_FUTURE_ALLOCATION_FAILED;
-    }
-
-    if(!registered)
-    {
-        abandon_task(*handle);
-        return PH_RESULT_INVALID_CONTEXT;
-    }
-
-    *future = wrapper.release();
-    return PH_RESULT_SUCCESS;
-}
-}  // namespace
-
-ph_result_t
-ph_future_get(ph_ctx_t ctx, ph_future_t* future, ph_task_fn task_fn, void* user_data)
-{
-    if(ctx == nullptr)
-    {
-        return PH_RESULT_INVALID_CONTEXT;
-    }
-
     if(future == nullptr)
     {
         return PH_RESULT_INVALID_ARGUMENT;
     }
 
     *future = nullptr;
-    if(task_fn == nullptr)
+    try
     {
-        return PH_RESULT_INVALID_ARGUMENT;
+        *future = ph_future::create(on_progress, on_finished).get();
+    } catch(...)
+    {
+        return PH_RESULT_FUTURE_ALLOCATION_FAILED;
     }
 
-    return submit_and_wrap_future(
-        ctx, future, [task_fn, user_data](const std::stop_token&) {
-            task_fn(user_data);
-        });
+    return PH_RESULT_SUCCESS;
 }
 
 ph_result_t
-ph_future_wait(ph_ctx_t ctx, ph_future_t future)
+ph_future_wait(ph_future_t future)
 {
-    if(ctx == nullptr)
-    {
-        return PH_RESULT_INVALID_CONTEXT;
-    }
-
-    if(future == nullptr || !ctx->owns_future(future))
-    {
-        return PH_RESULT_INVALID_ARGUMENT;
-    }
-
-    return guard_call([future]() {
-        future->m_handle.wait();
-        return PH_RESULT_SUCCESS;
-    });
-}
-
-ph_result_t
-ph_future_cancel(ph_ctx_t ctx, ph_future_t future)
-{
-    if(ctx == nullptr)
-    {
-        return PH_RESULT_INVALID_CONTEXT;
-    }
-
-    if(future == nullptr || !ctx->owns_future(future))
-    {
-        return PH_RESULT_INVALID_ARGUMENT;
-    }
-
-    return guard_call([future]() {
-        std::ignore = future->m_handle.cancel();
-        return PH_RESULT_SUCCESS;
-    });
-}
-
-ph_result_t
-ph_future_free(ph_ctx_t ctx, ph_future_t future)
-{
-    if(ctx == nullptr)
-    {
-        return PH_RESULT_INVALID_CONTEXT;
-    }
-
     if(future == nullptr)
     {
         return PH_RESULT_INVALID_ARGUMENT;
     }
 
-    return guard_call([ctx, future]() {
-        if(!ctx->unregister_future(future))
-        {
-            return PH_RESULT_INVALID_ARGUMENT;
-        }
-        delete future;
-        return PH_RESULT_SUCCESS;
+    return guard_call([future]() { return future->wait(); });
+}
+
+ph_result_t
+ph_future_cancel(ph_future_t future)
+{
+    if(future == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_call([future]() { return future->cancel(); });
+}
+
+ph_result_t
+ph_future_result(ph_future_t future, ph_result_t* result)
+{
+    if(future == nullptr || result == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_call([future, result]() { return future->result(*result); });
+}
+
+ph_result_t
+ph_future_free(ph_future_t future)
+{
+    if(future == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_call([future]() {
+        return future->release_user_reference() ? PH_RESULT_SUCCESS
+                                                : PH_RESULT_INVALID_ARGUMENT;
     });
 }

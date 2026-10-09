@@ -110,7 +110,7 @@ extern "C"
      *       Unlike ph_get_track_list()/ph_get_node(), a later call to this
      *       function does NOT invalidate an earlier one's result, and the
      *       arrays are safe to read concurrently from multiple calls
-     *       (including calls made via ph_future_get()).
+     *       (including calls made through a future).
      * @note A request for a whole track (@p start_ts and @p end_ts both 0)
      *       is answered from memory after the first call: repeated calls for
      *       the same track return the same storage, so the arrays must be
@@ -148,7 +148,7 @@ extern "C"
      *       ph_get_track_list()/ph_get_node(), a later call to this
      *       function does NOT invalidate an earlier one's result -- each
      *       call gets its own private storage, safe to read concurrently
-     *       from multiple calls (including calls made via ph_future_get()).
+     *       from multiple calls (including calls made through a future).
      * @note A request for a whole track (@p start_ts and @p end_ts both 0)
      *       is answered from memory after the first call: repeated calls for
      *       the same track return the same storage, so the array must be
@@ -163,66 +163,62 @@ extern "C"
                                      ph_sample_list_t* samples);
 
     /**
-     * @brief Submits @p task_fn for asynchronous execution on @p ctx's
-     *        internal thread pool.
-     * @param ctx Context to submit the task to. Owns the returned future;
-     *        it is cancelled and waited on if still live when @p ctx is
-     *        freed.
-     * @param future Out parameter receiving the new future handle. Must
-     *        not be null.
-     * @param task_fn Callback invoked with @p user_data on a worker
-     *        thread. Must write any result/error into memory owned by
-     *        @p user_data; this API has no return-value/error channel.
-     * @param user_data Passed through to @p task_fn unchanged.
-     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
-     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p future or
-     *         @p task_fn is null, PH_RESULT_FUTURE_ALLOCATION_FAILED if
-     *         the future could not be allocated.
-     * @note Caller owns @p *future and must release it with
-     *       ph_future_free().
+     * @brief Creates a future that can be passed to an API call to run it
+     *        asynchronously.
+     * @param on_progress Called with the progress of the operation, may be null.
+     * @param on_finished Called once when the operation ends, may be null.
+     * @param future Out parameter receiving the new future. Must not be null.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if
+     *         @p future is null, PH_RESULT_FUTURE_ALLOCATION_FAILED if it could
+     *         not be allocated.
+     * @note The caller owns @p *future and must release it with
+     *       ph_future_free(). A future serves exactly one operation.
+     * @warning The callbacks run on a worker thread. They must not call
+     *          ph_future_wait() on their own future or free the context.
      */
-    ph_result_t ph_future_get(ph_ctx_t     ctx,
-                              ph_future_t* future,
-                              ph_task_fn   task_fn,
-                              void*        user_data);
+    ph_result_t ph_future_create(ph_progress_fn on_progress,
+                                 ph_finished_fn on_finished,
+                                 ph_future_t*   future);
 
     /**
-     * @brief Blocks until @p future's task finishes running or is
-     *        cancelled.
-     * @param ctx Context @p future was created through.
+     * @brief Blocks until the operation of @p future has ended and its
+     *        on_finished callback has returned.
      * @param future Future to wait on.
-     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
-     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p future is
-     *         null or was not issued by @p ctx.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if
+     *         @p future is null or was not passed to an operation yet.
      */
-    ph_result_t ph_future_wait(ph_ctx_t ctx, ph_future_t future);
+    ph_result_t ph_future_wait(ph_future_t future);
 
     /**
-     * @brief Cancels @p future's task.
-     * @param ctx Context @p future was created through.
+     * @brief Requests cancellation of the operation of @p future.
      * @param future Future to cancel.
-     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
-     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p future is
-     *         null or was not issued by @p ctx.
-     * @note If the task has not started running yet, it is skipped
-     *       entirely. If it is already running, cancellation is a no-op:
-     *       @p task_fn's void(*)(void*) signature gives it no way to
-     *       observe a stop request, so it always runs to completion once
-     *       started.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if
+     *         @p future is null or was not passed to an operation yet.
+     * @note Cancellation is cooperative: an operation that has not started is
+     *       skipped, a running one stops at its next check. The operation ends
+     *       with PH_FUTURE_CANCELLED. Cancelling an operation that already
+     *       ended has no effect.
      */
-    ph_result_t ph_future_cancel(ph_ctx_t ctx, ph_future_t future);
+    ph_result_t ph_future_cancel(ph_future_t future);
+
+    /**
+     * @brief Reads the ph_result_t the operation of @p future ended with.
+     * @param future Future to query.
+     * @param result Out parameter receiving the result.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if
+     *         @p future or @p result is null, or the operation has not ended.
+     */
+    ph_result_t ph_future_result(ph_future_t future, ph_result_t* result);
 
     /**
      * @brief Releases @p future.
-     * @param ctx Context @p future was created through.
      * @param future Future to release.
-     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
-     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p future is
-     *         null or was not issued by @p ctx.
-     * @warning Does not wait for the task to finish; call
-     *          ph_future_wait() first if that is required.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if
+     *         @p future is null or was already released.
+     * @note Does not wait for the operation. A running operation keeps the
+     *       future alive until its on_finished callback has returned.
      */
-    ph_result_t ph_future_free(ph_ctx_t ctx, ph_future_t future);
+    ph_result_t ph_future_free(ph_future_t future);
 
 #ifdef __cplusplus
 }

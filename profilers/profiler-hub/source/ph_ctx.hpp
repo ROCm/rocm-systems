@@ -12,15 +12,11 @@
 #include <mutex>
 #include <string_view>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
-
-struct ph_future;
 
 struct ph_ctx
 {
     explicit ph_ctx(std::string_view trace_path);
-    ~ph_ctx();
 
     ph_ctx(const ph_ctx&)            = delete;
     ph_ctx& operator=(const ph_ctx&) = delete;
@@ -39,21 +35,6 @@ struct ph_ctx
                                                      uint64_t end_ts);
 
     profiler_hub::common::thread_pool& get_thread_pool() { return m_thread_pool; }
-
-    /**
-     * @brief Registers a future issued through this ctx, for cleanup on ~ph_ctx().
-     * @return false if the ctx is already shutting down and the future was not
-     *         registered.
-     */
-    [[nodiscard]] bool register_future(ph_future* future);
-    /**
-     * @brief Unregisters a future previously passed to register_future().
-     * @return false if the future was not registered (never issued, already
-     *         freed, or taken over by ~ph_ctx()).
-     */
-    [[nodiscard]] bool unregister_future(ph_future* future);
-    /** @brief Checks a future was issued through this ctx (owned by it). */
-    [[nodiscard]] bool owns_future(ph_future* future) const;
 
 private:
     void initialize_track_list();
@@ -87,10 +68,6 @@ private:
 
     std::vector<std::shared_ptr<profiler_hub::reader_types::node_info_t>> m_nodes;
     std::shared_ptr<ph_node_t>                                            m_c_node;
-
-    mutable std::mutex             m_futures_mutex;
-    std::unordered_set<ph_future*> m_live_futures;
-    bool                           m_closing{ false };
 
     profiler_hub::common::thread_pool m_thread_pool{ default_thread_pool_size() };
     profiler_hub::cached_track_reader m_track_reader{ m_connection_source,
