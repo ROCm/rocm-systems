@@ -336,13 +336,11 @@ class NullDevice : public amd::Device {
   void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const override {};
   void ReleaseGlobalSignal(void* signal) const override {}
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const {
     ShouldNotReachHere();
     return nullptr;
   }
-#endif
 #endif
 
  private:
@@ -867,10 +865,8 @@ class Device : public NullDevice {
     return (engine_type == HwQueueEngine::SdmaD2H) ? maxSdmaReadMask_ : maxSdmaWriteMask_;
   }
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const;
-#endif
 #endif
 };  // class roc::Device
 
