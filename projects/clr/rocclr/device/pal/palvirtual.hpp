@@ -183,6 +183,9 @@ class VirtualGPU : public device::VirtualDevice {
 
     bool isDone(uint id);
 
+    //! Checks if the device reported a fault or reset, and records it as a GPU error
+    bool checkExecutionState();
+
     Pal::ICmdBuffer* iCmd() const { return iCmdBuffs_[cmdBufIdSlot_]; }
 
     uint cmdBufId() const { return cmdBufIdCurrent_; }
