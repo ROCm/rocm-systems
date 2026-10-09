@@ -295,7 +295,10 @@ inline void hrr_run_roundtrip(const std::string& direct_case,
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
     { set_proc_search_path(proc); }
     int ret = proc.run("\"" + direct_case + "\"");
-    INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
+    INFO("Capture exit: " << ret);
+    // 4 is Catch2's "every selected test skipped".
+    if (ret == 4) HRR_SKIP(direct_case << " skipped");
+    REQUIRE(ret == 0); }
   fs::path archive_path = hrr_single_process_archive(cap_path);
   REQUIRE(fs::exists(archive_path / "events.bin"));
   REQUIRE(fs::exists(archive_path / "blobs"));
@@ -337,7 +340,9 @@ inline void hrr_capture_direct(const std::string& direct_case,
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
     { set_proc_search_path(proc); }
     int ret = proc.run("\"" + direct_case + "\"");
-    INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
+    INFO("Capture exit: " << ret);
+    if (ret == 4) HRR_SKIP(direct_case << " skipped");
+    REQUIRE(ret == 0); }
   fs::path archive_path = hrr_single_process_archive(cap_path);
   REQUIRE(fs::exists(archive_path / "events.bin"));
   REQUIRE(fs::exists(archive_path / "blobs"));

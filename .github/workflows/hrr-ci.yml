@@ -250,7 +250,7 @@ jobs:
   # neither a GPU nor the capture library and can run on any platform.
   # ---------------------------------------------------------------------------
   unit:
-    name: ${{ github.event.inputs.gpu_only == 'true' && 'Unit (dispatch)' || format('Unit ({0})', matrix.os) }}
+    name: "Unit (${{ matrix.os }})"
     needs: [gate]
     if: ${{ github.event.inputs.gpu_only != 'true' && needs.gate.outputs.run == 'true' }}
     runs-on: ${{ matrix.os }}
@@ -607,7 +607,7 @@ jobs:
   # still fails the job.
   # ---------------------------------------------------------------------------
   integration:
-    name: ${{ github.event.inputs.gpu_only == 'true' && 'Integration (dispatch)' || format('Integration ({0})', matrix.family) }}
+    name: "Integration (${{ matrix.family }})"
     needs: [gate, ci_config, build]
     if: ${{ github.event.inputs.gpu_only != 'true' && needs.gate.outputs.run == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
     runs-on: ubuntu-24.04
@@ -829,9 +829,9 @@ jobs:
   # workflow_dispatch, so its queue can be cancelled without cancelling the PR.
   # ---------------------------------------------------------------------------
   integration_gpu:
-    # inputs is empty on pull_request, so a name that uses it stays literal.
-    # The parent run is not a dispatch: keep a fixed name there.
-    name: ${{ github.event.inputs.gpu_only == 'true' && format('Integration GPU ({0})', github.event.inputs.family) || 'Integration GPU' }}
+    # A skipped job does not evaluate its name, so an expression here is shown
+    # as text on the pull request. The run name carries the family.
+    name: Integration GPU
     if: ${{ github.event.inputs.gpu_only == 'true' }}
     # A pull request does not define this input. Keep a real label here so the
     # skipped job still parses; gpu_only replaces it with the family runner.
@@ -1041,7 +1041,7 @@ jobs:
   # runners.
   # ---------------------------------------------------------------------------
   report:
-    name: ${{ github.event.inputs.gpu_only == 'true' && 'Test results (dispatch)' || 'Test results' }}
+    name: "Test results"
     needs: [gate, unit, integration]
     if: ${{ always() && github.event.inputs.gpu_only != 'true' && needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-24.04
@@ -1096,7 +1096,7 @@ jobs:
   # on purpose, so those skips are accepted there.
   # ---------------------------------------------------------------------------
   hrr_ci_summary:
-    name: ${{ github.event.inputs.gpu_only == 'true' && 'HRR CI Summary (dispatch)' || 'HRR CI Summary' }}
+    name: "HRR CI Summary"
     if: ${{ always() && github.event.inputs.gpu_only != 'true' }}
     needs: [gate, codegen, unit, ci_config, build, integration, report]
     runs-on: ubuntu-24.04

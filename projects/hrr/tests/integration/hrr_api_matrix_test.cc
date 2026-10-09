@@ -198,9 +198,11 @@ void observe_workload(const std::string& direct_case, TierObservation& obs) {
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     const int ret = proc.run("\"" + direct_case + "\"");
-    // The workloads gate unsupported hardware features internally and still
-    // exit clean, so a non-zero exit is a genuine failure. Reporting it as a
-    // warning would let the tier quietly degrade to zero coverage.
+    // Catch2 exits 4 when the selected case skipped. HRR_SKIP uses SKIP(), so
+    // a workload that gated itself off (no VMM, no cooperative launch) is not
+    // a failure and contributes no coverage. Any other non-zero exit is.
+    if (ret == 4)
+      return;
     if (ret != 0) {
       FAIL_CHECK("workload " << direct_case << " exited " << ret);
       return;
