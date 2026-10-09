@@ -834,8 +834,7 @@ Display all PyTorch operators captured during profiling:
    Sorted by total GPU kernel duration.
    ================================================================================
 
-   main.py:60 (dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
-   └─ nn.Module.Net.forward (calls: 10, dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
+   nn.Module.Net.forward main.py:60 (calls: 10, dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
       ├─ aten::convolution (calls: 20)
       |  └─ conv2d_fwd (dispatches: 40, total: 27.08 ms)
       ├─ aten::addmm (calls: 20)
