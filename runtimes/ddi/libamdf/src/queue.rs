@@ -386,7 +386,7 @@ fn rollback_creation(
     status: u64,
 ) -> u64 {
     // SAFETY: No public queue was issued. The scratch child borrow retains
-    // any external address firmware could still reach after failed cleanup.
+    // any external address a GPU engine could still reach after failed cleanup.
     let result = unsafe { queue.abandon_unpublished_with_dependencies(scratch_borrow) };
     unregister(&device.queues);
     result

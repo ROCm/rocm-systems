@@ -234,7 +234,7 @@ impl Fixture {
                     }
                     (sys::Call::Allocate(args), Reply::Allocate(handle, errno)) => {
                         assert_eq!(args.va % 65536, 0);
-                        let page = util::page_size().unwrap() as u64;
+                        let page = os_memory::page_size().unwrap() as u64;
                         let expected_size = if expected_flags & uapi::USERPTR != 0 && !owned_userptr
                         {
                             (65536 + (0x12345 & (page - 1))).div_ceil(page) * page
@@ -269,7 +269,7 @@ impl Fixture {
                                 expected_metadata,
                                 errno,
                             ));
-                            return Err(io::Error::from_raw_os_error(22));
+                            return Err(io::Error::from_raw_os_error(errno::EINVAL));
                         }
                         assert_eq!(metadata.len(), expected_metadata.len());
                         metadata.copy_from_slice(expected_metadata);
@@ -562,10 +562,10 @@ fn ais_uses_the_mapped_vram_handle_and_preserves_native_failure() {
             },
             uapi::AisOutput {
                 size_copied: 64,
-                status: -5,
+                status: -errno::EIO,
                 pad: 0,
             },
-            Some(5),
+            Some(errno::EIO),
         ),
         Reply::Unmap(0, 1, None),
         Reply::Free(None),
@@ -597,7 +597,7 @@ fn ais_uses_the_mapped_vram_handle_and_preserves_native_failure() {
     let failure = allocation
         .ais_transfer(4, 256, 512, 16384, uapi::AIS_WRITE)
         .unwrap_err();
-    assert_eq!(failure.native_error_code(), Some(5));
+    assert_eq!(failure.native_error_code(), Some(errno::EIO));
     allocation.free().unwrap();
     drop(allocation);
     fixture.exhausted();
@@ -1138,7 +1138,7 @@ fn failed_peer_map_keeps_old_access_and_retries_its_completed_prefix() {
         [
             Reply::Allocate(17, None),
             Reply::Map(0, 1, None),
-            Reply::MapDevices(&[53], 0, 1, Some(4)),
+            Reply::MapDevices(&[53], 0, 1, Some(errno::EINTR)),
             Reply::MapDevices(&[53], 1, 1, None),
             Reply::UnmapDevices(&[42], 0, 1, None),
             Reply::UnmapDevices(&[53], 0, 1, None),
@@ -1177,7 +1177,7 @@ fn failed_peer_unmap_is_not_reported_as_available_until_retry() {
             Reply::Allocate(17, None),
             Reply::Map(0, 1, None),
             Reply::MapDevices(&[53], 0, 1, None),
-            Reply::UnmapDevices(&[42], 0, 1, Some(4)),
+            Reply::UnmapDevices(&[42], 0, 1, Some(errno::EINTR)),
             Reply::UnmapDevices(&[42], 1, 1, None),
             Reply::UnmapDevices(&[53], 0, 1, None),
             Reply::Free(None),
@@ -1244,7 +1244,7 @@ fn free_completes_a_pending_peer_map_before_releasing_backing() {
         [
             Reply::Allocate(17, None),
             Reply::Map(0, 1, None),
-            Reply::MapDevices(&[53], 0, 1, Some(4)),
+            Reply::MapDevices(&[53], 0, 1, Some(errno::EINTR)),
             Reply::MapDevices(&[53], 1, 1, None),
             Reply::UnmapDevices(&[42, 53], 0, 2, None),
             Reply::Free(None),
@@ -1316,7 +1316,7 @@ fn multi_vm_mapping_and_unmapping_resume_from_the_reported_prefix() {
     let fixture = Fixture::with_devices(
         [
             Reply::Allocate(17, None),
-            Reply::Map(0, 1, Some(4)),
+            Reply::Map(0, 1, Some(errno::EINTR)),
             Reply::Map(1, 2, None),
             Reply::Unmap(0, 2, None),
             Reply::Free(None),
@@ -1347,7 +1347,7 @@ fn multi_vm_mapping_and_unmapping_resume_from_the_reported_prefix() {
         [
             Reply::Allocate(17, None),
             Reply::Map(0, 2, None),
-            Reply::Unmap(0, 1, Some(4)),
+            Reply::Unmap(0, 1, Some(errno::EINTR)),
             Reply::Unmap(1, 2, None),
             Reply::Free(None),
         ],
@@ -1375,7 +1375,10 @@ fn multi_vm_mapping_and_unmapping_resume_from_the_reported_prefix() {
 #[test]
 fn ambiguous_multi_vm_mapping_retains_every_vm_dependency() {
     let fixture = Fixture::with_devices(
-        [Reply::Allocate(17, None), Reply::Map(0, 1, Some(14))],
+        [
+            Reply::Allocate(17, None),
+            Reply::Map(0, 1, Some(errno::EFAULT)),
+        ],
         uapi::GTT | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE | uapi::WRITABLE,
         &[42, 53],
         backing_file(desc().size),
@@ -1474,9 +1477,12 @@ fn allocation_permissions_reach_kfd_without_widening_access() {
             // Verify exact flags before an injected allocation failure, without
             // needing a real render device for these CPU-visible placements.
             let fixture = if matches!(kind, MemoryKind::OwnedHost { .. }) {
-                Fixture::with_owned_userptr([Reply::Allocate(0, Some(12))], placement | flags)
+                Fixture::with_owned_userptr(
+                    [Reply::Allocate(0, Some(errno::ENOMEM))],
+                    placement | flags,
+                )
             } else {
-                Fixture::with_flags([Reply::Allocate(0, Some(12))], placement | flags)
+                Fixture::with_flags([Reply::Allocate(0, Some(errno::ENOMEM))], placement | flags)
             };
             assert_eq!(
                 fixture.allocate(kind, permissions).err().unwrap().kind(),
@@ -1491,8 +1497,8 @@ fn allocation_permissions_reach_kfd_without_widening_access() {
 #[test]
 fn dma_buf_import_maps_the_full_backing_and_exposes_the_logical_subrange() {
     let file = backing_file(2 * 65536);
-    let identity = util::dma_buf_file_info(&file).unwrap().physical_id;
-    let exported = util::duplicate_file(file.as_raw_fd())
+    let identity = os_file::dma_buf_file_info(&file).unwrap().physical_id;
+    let exported = os_file::duplicate_file(file.as_raw_fd())
         .unwrap()
         .into_raw_fd();
     let fixture = Fixture::new([
@@ -1545,7 +1551,7 @@ fn dma_buf_import_maps_the_full_backing_and_exposes_the_logical_subrange() {
 
 #[test]
 fn dma_buf_import_validates_permissions_origin_placement_and_range() {
-    let page = util::page_size().unwrap() as u64;
+    let page = os_memory::page_size().unwrap() as u64;
     let file = backing_file(2 * 65536);
     let descriptor = file.as_raw_fd();
     let fixture = Fixture::new([]);
@@ -1687,7 +1693,7 @@ fn failed_dma_buf_import_owns_returned_handles_without_consuming_the_input() {
     let descriptor = file.as_raw_fd();
     let fixture = Fixture::new([
         Reply::DmaBufInfo(65536, 42, uapi::GTT, &[], None),
-        Reply::ImportDmaBuf(17, 42, Some(12)),
+        Reply::ImportDmaBuf(17, 42, Some(errno::ENOMEM)),
         Reply::Free(None),
     ]);
     assert_eq!(
@@ -1710,7 +1716,7 @@ fn failed_dma_buf_import_owns_returned_handles_without_consuming_the_input() {
 
     let fixture = Fixture::new([
         Reply::DmaBufInfo(65536, 42, uapi::GTT, &[], None),
-        Reply::ImportDmaBuf(17, 42, Some(14)),
+        Reply::ImportDmaBuf(17, 42, Some(errno::EFAULT)),
     ]);
     assert!(
         fixture
@@ -1750,7 +1756,7 @@ fn registered_host_pages_keep_the_caller_address_and_an_independent_gpu_va() {
     let reservation = allocation.reservation.as_ref().unwrap().address();
     let info = allocation.cached_info();
     assert_eq!(info.host_address, Some(0x12345));
-    let page = util::page_size().unwrap() as u64;
+    let page = os_memory::page_size().unwrap() as u64;
     assert_eq!(
         info.device_address,
         reservation as u64 + (0x12345 & (page - 1))
@@ -1890,7 +1896,7 @@ fn failed_creation_finishes_mapping_before_unmapping_even_with_a_full_prefix() {
     for prefix in [0, 1] {
         let fixture = Fixture::new([
             Reply::Allocate(17, None),
-            Reply::Map(0, prefix, Some(4)),
+            Reply::Map(0, prefix, Some(errno::EINTR)),
             Reply::Map(prefix, 1, None),
             Reply::Unmap(0, 1, None),
             Reply::Free(None),
@@ -1912,9 +1918,9 @@ fn failed_free_retries_completion_then_only_the_remaining_native_work() {
         let fixture = Fixture::new([
             Reply::Allocate(17, None),
             Reply::Map(0, 1, None),
-            Reply::Unmap(0, prefix, Some(4)),
+            Reply::Unmap(0, prefix, Some(errno::EINTR)),
             Reply::Unmap(prefix, 1, None),
-            Reply::Free(Some(16)),
+            Reply::Free(Some(errno::EBUSY)),
             Reply::Free(None),
         ]);
         let mut allocation = fixture.create().unwrap();
@@ -1932,7 +1938,7 @@ fn failed_free_retries_completion_then_only_the_remaining_native_work() {
             .reservation
             .as_mut()
             .unwrap()
-            .fail_release_once(12);
+            .fail_release_once(errno::ENOMEM);
         assert_eq!(
             allocation.free().unwrap_err().kind(),
             ErrorKind::ResourceExhausted
@@ -1950,7 +1956,7 @@ fn failed_free_retries_completion_then_only_the_remaining_native_work() {
 
 #[test]
 fn failed_creation_owns_returned_handles_and_uncertain_native_results() {
-    let fixture = Fixture::new([Reply::Allocate(17, Some(12)), Reply::Free(None)]);
+    let fixture = Fixture::new([Reply::Allocate(17, Some(errno::ENOMEM)), Reply::Free(None)]);
     assert_eq!(
         fixture.create().err().unwrap().kind(),
         ErrorKind::ResourceExhausted
@@ -1958,14 +1964,14 @@ fn failed_creation_owns_returned_handles_and_uncertain_native_results() {
     fixture.exhausted();
     assert_eq!(Shared::strong_count(&fixture.vm), 1);
 
-    let fixture = Fixture::new([Reply::Allocate(0, Some(12))]);
+    let fixture = Fixture::new([Reply::Allocate(0, Some(errno::ENOMEM))]);
     assert!(fixture.create().is_err());
     fixture.exhausted();
     assert_eq!(Shared::strong_count(&fixture.vm), 1);
 
     // No FREE is safe when copyout concealed the handle, or when a successful
     // allocation returned an invalid handle. Retain dependencies until exit.
-    for errno in [Some(14), None] {
+    for errno in [Some(errno::EFAULT), None] {
         let fixture = Fixture::new([Reply::Allocate(0, errno)]);
         assert!(fixture.create().is_err());
         fixture.exhausted();
@@ -1973,8 +1979,8 @@ fn failed_creation_owns_returned_handles_and_uncertain_native_results() {
     }
     let fixture = Fixture::new([
         Reply::Allocate(17, None),
-        Reply::Map(0, 1, Some(5)),
-        Reply::Map(1, 1, Some(5)),
+        Reply::Map(0, 1, Some(errno::EIO)),
+        Reply::Map(1, 1, Some(errno::EIO)),
     ]);
     assert!(fixture.create().is_err());
     fixture.exhausted();
@@ -1987,7 +1993,7 @@ fn failed_creation_owns_returned_handles_and_uncertain_native_results() {
 
 #[test]
 fn malformed_or_copy_fault_mapping_outputs_are_not_replayed() {
-    for (prefix, errno) in [(2, Some(5)), (0, None), (1, Some(14))] {
+    for (prefix, errno) in [(2, Some(errno::EIO)), (0, None), (1, Some(errno::EFAULT))] {
         let fixture = Fixture::new([Reply::Allocate(17, None), Reply::Map(0, prefix, errno)]);
         assert!(fixture.create().is_err());
         fixture.exhausted();
@@ -2010,7 +2016,7 @@ fn local_allocation_properties_reach_kfd_exactly() {
         ),
     ] {
         let fixture = Fixture::with_flags(
-            [Reply::Allocate(0, Some(12))],
+            [Reply::Allocate(0, Some(errno::ENOMEM))],
             uapi::VRAM | uapi::NO_SUBSTITUTE | uapi::PUBLIC | uapi::WRITABLE | expected,
         );
         let result = fixture.allocate(
@@ -2346,7 +2352,9 @@ fn late_identity_registration_resolves_an_already_observed_source() {
 fn terminal_hardware_loss_survives_a_second_event_poll_error() {
     let fixture = Fixture::new([]);
     fixture.hardware.store(2, Ordering::Release);
-    fixture.memory_wait_errno.store(5, Ordering::Release);
+    fixture
+        .memory_wait_errno
+        .store(errno::EIO as u32, Ordering::Release);
     assert_eq!(
         fixture.vm.check().unwrap_err().kind(),
         ErrorKind::DeviceLost
@@ -2358,7 +2366,7 @@ fn terminal_hardware_loss_survives_a_second_event_poll_error() {
     assert!(exception.memory_lost);
     assert_eq!(
         subscription.poll().unwrap_err().native_error_code(),
-        Some(5)
+        Some(errno::EIO)
     );
     fixture.memory_wait_errno.store(0, Ordering::Release);
     assert_eq!(subscription.poll().unwrap(), None);
@@ -2377,7 +2385,7 @@ fn failed_memory_event_creation_reclaims_every_returned_event_id() {
             }
             sys::Call::CreateEvent(args) if args.event_type == uapi::MEMORY_EXCEPTION => {
                 args.event_id = 20;
-                Err(io::Error::from_raw_os_error(5))
+                Err(io::Error::from_raw_os_error(errno::EIO))
             }
             sys::Call::DestroyEvent(args) => {
                 observed.lock().unwrap().push(args.event_id);
@@ -2387,14 +2395,14 @@ fn failed_memory_event_creation_reclaims_every_returned_event_id() {
         }),
     ));
     let error = LossEvent::create(kfd).err().unwrap();
-    assert_eq!(error.native_error_code(), Some(5));
+    assert_eq!(error.native_error_code(), Some(errno::EIO));
     assert_eq!(*destroyed.lock().unwrap(), [20, 19]);
 }
 
 #[test]
 fn native_errors_keep_operation_and_errno_without_inventing_device_loss() {
-    for errno in [5, 19, 22] {
-        let error = native_error("native test", io::Error::from_raw_os_error(errno));
+    for code in [errno::EIO, errno::ENODEV, errno::EINVAL] {
+        let error = native_error("native test", io::Error::from_raw_os_error(code));
         assert_eq!(error.kind(), ErrorKind::Driver);
         let Error::NativeOperation {
             operation, source, ..
@@ -2403,7 +2411,7 @@ fn native_errors_keep_operation_and_errno_without_inventing_device_loss() {
             panic!("lost native cause")
         };
         assert_eq!(operation, "native test");
-        assert_eq!(source.raw_os_error(), Some(errno));
+        assert_eq!(source.raw_os_error(), Some(code));
     }
 }
 
@@ -2457,7 +2465,7 @@ fn initialization_endpoint(acquisitions: Arc<AtomicUsize>, busy: bool) -> Shared
                     assert!(matches!(args.gpu_id, 42 | 43));
                     acquisitions.fetch_add(1, Ordering::Relaxed);
                     if busy {
-                        return Err(io::Error::from_raw_os_error(16));
+                        return Err(io::Error::from_raw_os_error(errno::EBUSY));
                     }
                 }
                 sys::Call::RuntimeEnable(args) => {
@@ -2599,7 +2607,7 @@ fn instance_shutdown_quarantines_ambiguous_event_destroy_without_replaying_id() 
             if let sys::Call::DestroyEvent(_) = call {
                 let attempt = observed.fetch_add(1, Ordering::Relaxed);
                 if attempt == 0 {
-                    Err(io::Error::from_raw_os_error(5))
+                    Err(io::Error::from_raw_os_error(errno::EIO))
                 } else {
                     Ok(())
                 }
@@ -2620,7 +2628,7 @@ fn instance_shutdown_quarantines_ambiguous_event_destroy_without_replaying_id() 
     }));
     assert_eq!(
         bindings.shutdown().unwrap_err().native_error_code(),
-        Some(5)
+        Some(errno::EIO)
     );
     assert!(bindings.bindings.get_mut().unwrap().loss.is_some());
     let loss = bindings.bindings.get_mut().unwrap().loss.as_ref().unwrap();

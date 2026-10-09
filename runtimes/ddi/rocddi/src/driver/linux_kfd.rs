@@ -16,13 +16,16 @@ mod registered_host;
 pub(super) mod sys;
 mod sysfs;
 mod uapi;
-pub(super) mod util;
+use crate::os::linux::{
+    errno, file as os_file, memory as os_memory, process_identity as os_process,
+};
 mod vmem;
 
 use crate::driver::{
     AddressSpaceInfo, AllocationOperations, CachedInfo, Driver, EndpointSelector, GpuDriver,
     KernelQueueResource, UserQueueResource, VirtualMemoryOperations,
 };
+use crate::error::error;
 use crate::host_storage::{Allocator, Owned, Shared};
 use crate::kernel_queue::{KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait};
 use crate::memory::interop::linux::{
@@ -33,6 +36,7 @@ use crate::memory::{
     AllocationDesc, AllocationLimits, DeviceAccess, HostCachePolicy, HostRegistration, MemoryKind,
     OwnedMemoryKind, VirtualAddressInfo, VirtualMemoryInfo,
 };
+use crate::os::native_error;
 use crate::profiling::ClockCounters;
 use crate::queue::{QueuePriority, QueueRequest, QueueScratch, QueueTransport};
 use crate::session::DriverContextLifetime;
@@ -42,11 +46,9 @@ pub(crate) use allocation::LinuxAllocation;
 pub(crate) use event::KfdSignalEvent;
 pub(crate) use kernel_queue::KfdKernelQueue;
 pub(crate) use memory::KfdEventSubscription;
-use memory::{error, native_error};
 pub(crate) use queue::KfdQueue;
 use std::fs::OpenOptions;
-use std::io;
-use std::os::fd::{AsRawFd, BorrowedFd, OwnedFd, RawFd};
+use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Mutex, OnceLock};
 pub(crate) use sysfs::KfdNode as LinuxSelector;
@@ -275,7 +277,8 @@ impl LinuxKfdDriver {
     fn ensure_open(&self) -> Result<(), Error> {
         // Reject inherited instances before touching allocator callbacks,
         // filesystem state, or a mutex that may have been held across fork.
-        util::check_process(self.process).map_err(|e| native_error("session process check", e))?;
+        os_process::check_process(self.process)
+            .map_err(|e| native_error("session process check", e))?;
         if self.closing {
             Err(error(
                 ErrorKind::InvalidArgument,
@@ -488,7 +491,7 @@ impl Driver for LinuxKfdDriver {
         self.lifetime
     }
     fn shutdown(&mut self) -> Result<(), Error> {
-        util::check_process(self.process)
+        os_process::check_process(self.process)
             .map_err(|e| native_error("session shutdown process check", e))?;
         self.closing = true;
         if self.lifetime == DriverContextLifetime::Session {
@@ -558,7 +561,7 @@ impl Driver for LinuxKfdDriver {
                 "endpoint metadata changed before activation",
             ));
         }
-        let page = util::page_size().map_err(|e| native_error("native page size", e))?;
+        let page = os_memory::page_size().map_err(|e| native_error("native page size", e))?;
         if page < 4096 {
             return Err(error(
                 ErrorKind::Unsupported,

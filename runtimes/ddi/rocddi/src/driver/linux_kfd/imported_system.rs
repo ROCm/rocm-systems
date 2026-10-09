@@ -12,13 +12,14 @@
 use std::os::fd::AsRawFd;
 
 use super::drm;
-use super::memory::{DeviceVm, error, native_error};
+use super::memory::DeviceVm;
 use super::sysfs;
 use super::uapi;
-use super::util;
 use super::vmem::{
     KfdVirtualAddress, KfdVirtualDeviceMapping, KfdVirtualHostMapping, KfdVirtualMemory,
 };
+use super::{error, native_error};
+use super::{os_file, os_memory};
 use crate::host_storage::{Buffer, Owned, Shared};
 use crate::memory::interop::linux::DmaBuf;
 use crate::memory::{AllocationInfo, DeviceAccess};
@@ -60,7 +61,7 @@ fn local_gem(
 
 fn validate_backing(vm: &DeviceVm, memory: &KfdVirtualMemory) -> Result<(), Error> {
     let dma_buf = memory.dma_buf()?;
-    let file_info = util::dma_buf_file_info(dma_buf)
+    let file_info = os_file::dma_buf_file_info(dma_buf)
         .map_err(|source| native_error("DMA-BUF backing information", source))?;
     let details = vm
         .kfd()
@@ -140,7 +141,7 @@ impl DrmImportedSystem {
                 "DRM system import is unavailable",
             ));
         }
-        let page = util::page_size()
+        let page = os_memory::page_size()
             .map_err(|source| native_error("system import page size", source))?
             as u64;
         if byte_length == 0

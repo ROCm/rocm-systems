@@ -18,12 +18,14 @@ pub mod interop;
 mod types;
 pub(crate) use types::{AllocationDesc, AllocationLimits};
 
+use crate::cpu_cache;
 use crate::device::Device;
 use crate::driver::{
     self, AddressSpaceInfo, AllocationOperations, CachedInfo, GpuDriver, VirtualMemoryOperations,
 };
 use crate::gpu::GpuDevice;
 use crate::host_storage::{Buffer, Owned, Shared};
+use crate::os;
 use crate::{Error, ErrorKind};
 use std::sync::Mutex;
 
@@ -292,6 +294,30 @@ impl<D: VirtualMemoryOperations> DriverVirtualAddress<D>
 where
     D::DeviceState: AddressSpaceInfo,
 {
+    /// Constructs one reservation and its mapping bookkeeping after the
+    /// caller has checked the devices' common address aperture.
+    fn reserve(
+        driver: &Shared<D>,
+        bounds: (u64, u64),
+        size: u64,
+        alignment: u64,
+        address: u64,
+    ) -> Result<Self, Error> {
+        // Allocate metadata before reserving native address space so an
+        // allocator failure cannot strand a successful driver reservation.
+        let allocator = driver::Driver::allocator(&**driver);
+        let owner = Shared::try_new_uninit(allocator)?;
+        let host_intervals = Shared::new(HostIntervals::new(allocator), allocator)?;
+        let device_intervals = Shared::new(DeviceIntervals::new(allocator), allocator)?;
+        let inner = driver.reserve_virtual_address(bounds, size, alignment, address)?;
+        Ok(Self::new(
+            driver.clone(),
+            owner.write(inner),
+            host_intervals,
+            device_intervals,
+        ))
+    }
+
     pub(crate) fn new(
         driver: Shared<D>,
         inner: Shared<Owned<D::VirtualAddress>>,
@@ -346,6 +372,53 @@ impl VirtualAddressState {
 }
 
 impl VirtualAddress {
+    /// Verifies one exact driver owner and a common aperture for the device
+    /// set, then routes to that driver's virtual-memory capability. The
+    /// device-set checks apply to every driver implementation.
+    pub(crate) fn reserve_for_devices(
+        selected_driver: &driver::DriverInstance,
+        devices: &[&Device],
+        size: u64,
+        alignment: u64,
+        address: u64,
+    ) -> Result<Self, Error> {
+        let mut bounds: Option<(u64, u64)> = None;
+        for device in devices {
+            if !device.driver_state.belongs_to(selected_driver) {
+                return Err(Error::Operation {
+                    kind: ErrorKind::InvalidArgument,
+                    detail: "virtual-address devices must belong to one session driver",
+                });
+            }
+            let range = device.driver_state.address_range();
+            bounds = Some(bounds.map_or(range, |bounds| {
+                (bounds.0.max(range.0), bounds.1.min(range.1))
+            }));
+        }
+        let bounds = bounds.ok_or(Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "virtual-address reservation requires an activated device",
+        })?;
+        if bounds.0 > bounds.1 {
+            return Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "activated devices have no common virtual-address aperture",
+            });
+        }
+        match selected_driver {
+            driver::DriverInstance::LinuxKfd(driver) => {
+                let owner =
+                    DriverVirtualAddress::reserve(driver, bounds, size, alignment, address)?;
+                Ok(Self::from_linux_kfd(owner))
+            }
+            #[cfg(test)]
+            driver::DriverInstance::Test(_) => Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "device driver has no virtual-memory capability",
+            }),
+        }
+    }
+
     pub(crate) fn from_linux_kfd(inner: DriverVirtualAddress<driver::KfdDriver>) -> Self {
         Self {
             inner: VirtualAddressState::LinuxKfd(inner),
@@ -1105,13 +1178,14 @@ pub struct HostAllocationInfo {
 /// must outlive this owner. Host cleanup is the same under both driver context
 /// lifetime policies.
 pub struct HostAllocation {
-    inner: Owned<driver::LinuxHostAllocation>,
+    inner: Owned<os::HostAllocation>,
     info: HostAllocationInfo,
 }
 
 impl HostAllocation {
-    pub(crate) fn new(inner: Owned<driver::LinuxHostAllocation>) -> Self {
-        let info = inner.cached_info();
+    pub(crate) fn new(inner: Owned<os::HostAllocation>) -> Self {
+        let (host_address, size) = inner.extent();
+        let info = HostAllocationInfo { host_address, size };
         Self { inner, info }
     }
 
@@ -1141,7 +1215,7 @@ impl HostAllocation {
 /// # Errors
 /// Returns a native error if the platform does not report a valid page size.
 pub fn host_page_size() -> Result<u64, Error> {
-    driver::host_page_size()
+    os::host_page_size()
 }
 
 /// Qualifies explicit host-cache maintenance and returns its line granularity.
@@ -1154,7 +1228,7 @@ pub fn host_page_size() -> Result<u64, Error> {
 /// required instruction and valid line size. Callers must not advertise a cache
 /// operation using an unqualified nominal hardware line size.
 pub fn host_cache_line_size() -> Result<u32, Error> {
-    driver::host_cache_line_size()
+    cpu_cache::cache_line_size()
 }
 /// Executes the qualified host-cache maintenance recipe over a nonempty host
 /// range. The backend provides the writeback, invalidation, and ordering
@@ -1177,7 +1251,7 @@ pub fn host_cache_line_size() -> Result<u32, Error> {
 pub unsafe fn host_cache_control(pointer: usize, length: u64, line_size: u32) -> Result<(), Error> {
     // SAFETY: The public caller provides the live mapped range required by the
     // private native boundary; the backend validates the numeric extent.
-    unsafe { driver::host_cache_control(pointer, length, line_size) }
+    unsafe { cpu_cache::cache_control(pointer, length, line_size) }
 }
 
 impl Device {

@@ -10,14 +10,11 @@
 //! the queue resources returned by the GPU driver, not to additional drivers.
 
 mod instance;
-mod linux;
-mod linux_host;
 #[cfg(all(
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 mod linux_kfd;
-mod process_identity;
 #[cfg(test)]
 pub(crate) mod test_driver;
 #[cfg(test)]
@@ -27,15 +24,7 @@ pub(crate) use instance::{
     DeviceDriverState, DriverInstance, EndpointSelector, EventSubscription, KfdAllocation,
     KfdDeviceState, new_driver_instance,
 };
-pub(crate) use linux_host::{
-    HostAllocation as LinuxHostAllocation, host_cache_control, host_cache_line_size, host_page_size,
-};
 pub(crate) use linux_kfd::KfdEventSubscription;
-#[cfg(all(
-    target_os = "linux",
-    any(target_arch = "x86_64", target_arch = "aarch64")
-))]
-pub(crate) use linux_kfd::interop as linux_fd;
 #[cfg(all(
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")
@@ -222,8 +211,9 @@ pub(crate) trait UserQueueResource: CachedInfo<Info = QueueTransport> {
     fn set_priority(&mut self, priority: crate::queue::QueuePriority) -> Result<(), Error>;
     fn set_cu_mask(&mut self, mask: &[u32]) -> Result<(), Error>;
     /// # Safety
-    /// Firmware has stopped the queue, and the caller retains the new scratch
-    /// backing until a later successful replacement or driver destruction.
+    /// The command processor has stopped the queue. The caller retains the new
+    /// scratch backing until a later successful replacement or driver
+    /// destruction.
     #[allow(unsafe_code)]
     unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error>;
     /// # Safety
@@ -270,7 +260,7 @@ pub(crate) trait GpuDriver: Driver + AllocationOperations + VirtualMemoryOperati
     fn supports_expert_scheduling(&self, device: &Self::DeviceState) -> Result<bool, Error>;
     fn available_sdma_rings(&self, device: &Self::DeviceState) -> Result<u32, Error>;
     /// # Safety
-    /// The caller retains all raw signal and scratch addresses that firmware
+    /// The caller retains all raw signal and scratch addresses that the GPU
     /// may reach, including after an ambiguous driver creation result.
     #[allow(unsafe_code)]
     unsafe fn create_user_queue(

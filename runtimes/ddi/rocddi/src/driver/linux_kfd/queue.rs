@@ -7,12 +7,13 @@
 //! and context-save storage; the process/device VM retains its doorbell slice.
 
 use crate::host_storage::{Buffer, Owned, Shared};
+use std::io;
 use std::mem::{offset_of, size_of};
 use std::sync::Mutex;
 use std::sync::atomic::{Ordering, fence};
 
-use super::memory::{BufferKind, DeviceVm, KfdAllocation, error, native_error};
-use super::{sys, sysfs, uapi, util};
+use super::memory::{BufferKind, DeviceVm, KfdAllocation};
+use super::{errno, error, native_error, os_memory, sys, sysfs, uapi};
 use crate::memory::AllocationDesc;
 use crate::memory::DeviceAccess;
 use crate::queue::{
@@ -33,6 +34,31 @@ const SCRATCH_ALIGNMENT: u64 = 256;
 const MAX_PRIVATE_SEGMENT_BYTES: u32 = 262_128;
 const GFX1201_SCRATCH_RESOURCE_WORD3: u32 =
     4 | (5 << 3) | (6 << 6) | (7 << 9) | (0x14 << 12) | (1 << 23) | (2 << 28);
+/// A progress query cannot wait indefinitely for a busy producer to pause.
+/// Destruction calls this only after producers stop, so exhaustion is retryable.
+const MAX_WRAPPING_INDEX_SAMPLES: usize = 64;
+
+/// Expand a ring-relative native read index into one stable producer window.
+/// Sampling the write index on both sides of the read rejects a concurrent
+/// wrap that would otherwise choose the wrong lap.
+fn sample_wrapping_indices(
+    read_mask: u64,
+    mut load_write: impl FnMut() -> u64,
+    mut load_read: impl FnMut() -> u64,
+) -> io::Result<(u64, u64)> {
+    for _ in 0..MAX_WRAPPING_INDEX_SAMPLES {
+        let first_write = load_write();
+        let native_read = load_read();
+        let second_write = load_write();
+        if first_write == second_write {
+            let consumed =
+                first_write.wrapping_sub(first_write.wrapping_sub(native_read) & read_mask);
+            return Ok((consumed, first_write));
+        }
+        std::hint::spin_loop();
+    }
+    Err(io::Error::from(io::ErrorKind::WouldBlock))
+}
 
 #[allow(dead_code)]
 #[repr(C)]
@@ -98,7 +124,7 @@ pub(super) struct Doorbells {
 }
 
 struct DoorbellMapping {
-    storage: Option<sys::Reservation>,
+    storage: Option<os_memory::Reservation>,
     offset: u64,
     gpu_id: u32,
     handle: Option<u64>,
@@ -130,7 +156,10 @@ struct DoorbellAddresses {
 }
 
 fn doorbell_error(operation: &'static str, source: std::io::Error) -> Error {
-    if matches!(source.raw_os_error(), Some(22 | 25 | 95)) {
+    if matches!(
+        source.raw_os_error(),
+        Some(errno::EINVAL | errno::ENOTTY | errno::EOPNOTSUPP)
+    ) {
         Error::NativeOperation {
             kind: ErrorKind::Unsupported,
             operation,
@@ -156,7 +185,8 @@ impl DoorbellPeer {
             .kfd()
             .transfer(handle, &[self.vm.gpu_id()], completed, map);
         if result.as_ref().err().is_some_and(|source| {
-            source.kind() == std::io::ErrorKind::InvalidData || source.raw_os_error() == Some(14)
+            source.kind() == std::io::ErrorKind::InvalidData
+                || source.raw_os_error() == Some(errno::EFAULT)
         }) {
             self.uncertain = true;
         }
@@ -228,7 +258,7 @@ impl DoorbellMapping {
     fn address(&self) -> Result<usize, Error> {
         self.storage
             .as_ref()
-            .map(sys::Reservation::address)
+            .map(os_memory::Reservation::address)
             .ok_or_else(|| error(ErrorKind::Internal, "doorbell mapping has no storage"))
     }
 
@@ -246,7 +276,8 @@ impl DoorbellMapping {
         };
         let result = kfd.transfer(handle, &[self.gpu_id], completed, map);
         if result.as_ref().err().is_some_and(|source| {
-            source.kind() == std::io::ErrorKind::InvalidData || source.raw_os_error() == Some(14)
+            source.kind() == std::io::ErrorKind::InvalidData
+                || source.raw_os_error() == Some(errno::EFAULT)
         }) {
             self.uncertain = true;
         }
@@ -330,7 +361,7 @@ impl DoorbellMapping {
         self.uncertain = result
             .as_ref()
             .err()
-            .is_some_and(|source| source.raw_os_error() == Some(14));
+            .is_some_and(|source| source.raw_os_error() == Some(errno::EFAULT));
         if let Err(source) = result {
             let failure = doorbell_error("KFD doorbell BO allocation", source);
             if !self.uncertain {
@@ -643,7 +674,8 @@ impl QueuePeerMapping {
                 .kfd()
                 .transfer(self.handles[index], &[self.vm.gpu_id()], completed, map);
         if result.as_ref().err().is_some_and(|source| {
-            source.kind() == std::io::ErrorKind::InvalidData || source.raw_os_error() == Some(14)
+            source.kind() == std::io::ErrorKind::InvalidData
+                || source.raw_os_error() == Some(errno::EFAULT)
         }) {
             self.uncertain = true;
         }
@@ -653,7 +685,10 @@ impl QueuePeerMapping {
             } else {
                 "AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU for a queue producer"
             };
-            if matches!(source.raw_os_error(), Some(22 | 25 | 95)) {
+            if matches!(
+                source.raw_os_error(),
+                Some(errno::EINVAL | errno::ENOTTY | errno::EOPNOTSUPP)
+            ) {
                 Error::NativeOperation {
                     kind: ErrorKind::Unsupported,
                     operation,
@@ -877,8 +912,8 @@ impl Request {
                 "KFD queue backing is supported on GFX10.1 through GFX12.0",
             ));
         }
-        let page =
-            util::page_size().map_err(|source| native_error("queue page size", source))? as u64;
+        let page = os_memory::page_size()
+            .map_err(|source| native_error("queue page size", source))? as u64;
         if page < 4096 {
             return Err(error(
                 ErrorKind::Unsupported,
@@ -1227,7 +1262,8 @@ fn compute_storage(properties: sysfs::KfdQueueProperties) -> Result<ComputeStora
     let total_size = (u64::from(context_size) + u64::from(debug_size))
         .checked_mul(u64::from(xcc_count))
         .ok_or_else(|| error(ErrorKind::Unsupported, "KFD context-save extent overflows"))?;
-    let page = util::page_size().map_err(|source| native_error("queue page size", source))? as u64;
+    let page =
+        os_memory::page_size().map_err(|source| native_error("queue page size", source))? as u64;
     let total_size = total_size
         .div_ceil(page)
         .checked_mul(page)
@@ -1258,11 +1294,11 @@ fn pm4_control(native: &sysfs::KfdNode) -> Option<Pm4Control> {
         || properties.xcc_count != 1
         || properties.maximum_wave_count_per_compute_unit == 0
         || compute_storage(properties).is_err()
-        || util::page_size().ok()? != 4096
+        || os_memory::page_size().ok()? != 4096
     {
         return None;
     }
-    let cache_line = usize::try_from(util::host_cache_line_size().ok()?).ok()?;
+    let cache_line = usize::try_from(crate::cpu_cache::cache_line_size().ok()?).ok()?;
     if cache_line < size_of::<u64>() || !cache_line.is_power_of_two() || cache_line > 4096 / 3 {
         return None;
     }
@@ -1298,7 +1334,7 @@ pub(super) fn create(
 
 /// Queue context backing, either registered SVM or an owned native allocation.
 enum QueueContext {
-    Svm(sys::Reservation),
+    Svm(os_memory::Reservation),
     Native(Owned<KfdAllocation>),
 }
 
@@ -1463,8 +1499,8 @@ impl KfdQueue {
             SdmaEngineSelection::Any => vm.next_sdma_engine_id(target.count),
             SdmaEngineSelection::Id(id) => id,
         });
-        let page =
-            util::page_size().map_err(|source| native_error("queue page size", source))? as u64;
+        let page = os_memory::page_size()
+            .map_err(|source| native_error("queue page size", source))? as u64;
         let allocate = |size: u64, kind, permissions| {
             KfdAllocation::create(
                 vm.clone(),
@@ -1540,7 +1576,7 @@ impl KfdQueue {
                     "queue context size exceeds the host address width",
                 )
             })?;
-            let mut storage = match sys::Reservation::new_aligned_host(
+            let mut storage = match os_memory::Reservation::new_aligned_host(
                 context_size,
                 CWSR_ALIGNMENT,
                 (0, isize::MAX as u64),
@@ -1649,7 +1685,7 @@ impl KfdQueue {
             queue.uncertain = result
                 .as_ref()
                 .err()
-                .is_some_and(|source| source.raw_os_error() == Some(14));
+                .is_some_and(|source| source.raw_os_error() == Some(errno::EFAULT));
         }
         if let Err(source) = result {
             return Err(if queue.uncertain {
@@ -1720,10 +1756,16 @@ impl KfdQueue {
         let pointers = self.backing[1]
             .as_ref()
             .ok_or_else(|| error(ErrorKind::Internal, "queue pointer backing is missing"))?;
+        let (read, write) = pointers.queue_indices(self.read_offset, self.write_offset)?;
         if let Some(mask) = self.read_index_mask {
-            pointers.read_wrapping_indices(self.read_offset, self.write_offset, mask)
+            sample_wrapping_indices(
+                mask,
+                || write.load(Ordering::Acquire),
+                || read.load(Ordering::Acquire),
+            )
+            .map_err(|e| native_error("queue index read", e))
         } else {
-            pointers.read_indices(self.read_offset, self.write_offset)
+            Ok((read.load(Ordering::Acquire), write.load(Ordering::Acquire)))
         }
     }
 
@@ -1961,7 +2003,10 @@ impl KfdQueue {
                 // KFD can return ETIME/EIO after removing the queue and making
                 // its ID reusable. Replay only errors whose paths retain it.
                 // Unknown errors are conservative: keep backing, never replay.
-                self.uncertain = !matches!(source.raw_os_error(), Some(4 | 16 | 512));
+                // The syscall boundary restarts an internal ERESTARTSYS or
+                // reports EINTR, so ERESTARTSYS cannot appear in io::Error.
+                self.uncertain =
+                    !matches!(source.raw_os_error(), Some(errno::EINTR | errno::EBUSY));
                 return Err(native_error("AMDKFD_IOC_DESTROY_QUEUE", source));
             }
             // Backing cleanup may fail. Clear the released ID first so that a

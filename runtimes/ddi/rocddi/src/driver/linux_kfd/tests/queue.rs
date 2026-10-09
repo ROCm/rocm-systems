@@ -24,6 +24,28 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 static FILE_ID: AtomicUsize = AtomicUsize::new(0);
 
+#[test]
+fn wrapping_index_snapshot_returns_a_stable_window() {
+    let mut writes = [7_u64, 8, 8, 8].into_iter();
+    let progress = sample_wrapping_indices(7, || writes.next().unwrap(), || 0).unwrap();
+    assert_eq!(progress, (8, 8));
+}
+
+#[test]
+fn wrapping_index_snapshot_stops_when_producer_never_pauses() {
+    let mut write = 0_u64;
+    let result = sample_wrapping_indices(
+        7,
+        || {
+            write += 1;
+            write
+        },
+        || 0,
+    );
+    assert_eq!(result.unwrap_err().kind(), io::ErrorKind::WouldBlock);
+    assert_eq!(write, (MAX_WRAPPING_INDEX_SAMPLES * 2) as u64);
+}
+
 fn backing_file() -> File {
     let path = std::env::temp_dir().join(format!(
         "rocddi-queue-test-{}-{}",
@@ -203,13 +225,13 @@ impl Fixture {
                         }
                     }
                     sys::Call::Allocate(args) => {
-                        let page = util::page_size().unwrap() as u64;
+                        let page = os_memory::page_size().unwrap() as u64;
                         if state.reject_userptr && args.flags & uapi::USERPTR != 0 {
-                            return Err(io::Error::from_raw_os_error(95));
+                            return Err(io::Error::from_raw_os_error(errno::EOPNOTSUPP));
                         }
                         state.next_handle += 1;
                         if state.fail_allocation == Some(state.next_handle) {
-                            return Err(io::Error::from_raw_os_error(12));
+                            return Err(io::Error::from_raw_os_error(errno::ENOMEM));
                         }
                         args.handle = state.next_handle;
                         args.mmap_offset = state.next_offset;
@@ -273,7 +295,7 @@ impl Fixture {
                         assert!(state.buffers.remove(&args.handle).is_some());
                     }
                     sys::Call::Svm(args, attributes) => {
-                        let page = util::page_size().unwrap() as u64;
+                        let page = os_memory::page_size().unwrap() as u64;
                         let flags = uapi::SVM_FLAG_HOST_ACCESS
                             | uapi::SVM_FLAG_GPU_EXECUTE
                             | uapi::SVM_FLAG_GPU_ALWAYS_MAPPED;
@@ -317,7 +339,7 @@ impl Fixture {
                         state.svm_context = Some((args.start_address, args.size));
                     }
                     sys::Call::CreateQueue(args) => {
-                        let page = util::page_size().unwrap() as u64;
+                        let page = os_memory::page_size().unwrap() as u64;
                         state.creates += 1;
                         let expected_scratch = state.expected_scratch;
                         assert_eq!(args.gpu_id, 42);
@@ -560,7 +582,8 @@ impl Fixture {
                             }
                             assert_eq!(header, expected);
                         } else if args.queue_type == 0 {
-                            let cache_line = u64::from(util::host_cache_line_size().unwrap());
+                            let cache_line =
+                                u64::from(crate::cpu_cache::cache_line_size().unwrap());
                             assert_eq!(args.read_pointer, pointers.va + PM4_READ_OFFSET as u64);
                             assert_eq!(args.write_pointer, pointers.va + cache_line);
                             let mut read = [1; 8];
@@ -802,7 +825,7 @@ fn concurrent_queue_creation_enables_runtime_once_before_acquisition() {
             }
             sys::Call::Allocate(_) => {
                 observed_allocations.fetch_add(1, Ordering::Relaxed);
-                Err(io::Error::from_raw_os_error(12))
+                Err(io::Error::from_raw_os_error(errno::ENOMEM))
             }
             sys::Call::DestroyEvent(_) => Ok(()),
             _ => panic!("unexpected queue admission call"),
@@ -848,7 +871,7 @@ fn runtime_enable_failure_prevents_queue_backing_acquisition() {
         File::open("/dev/null").unwrap(),
         Arc::new(move |call| match call {
             sys::Call::RuntimeEnable(args) if args.mode_mask == 1 => {
-                Err(io::Error::from_raw_os_error(5))
+                Err(io::Error::from_raw_os_error(errno::EIO))
             }
             sys::Call::RuntimeEnable(args) if args.mode_mask == 0 => Ok(()),
             sys::Call::Allocate(_) => {
@@ -870,7 +893,7 @@ fn runtime_enable_failure_prevents_queue_backing_acquisition() {
         .err()
         .unwrap()
         .native_error_code(),
-        Some(5)
+        Some(errno::EIO)
     );
     assert_eq!(allocations.load(Ordering::Relaxed), 0);
     drop(vm);
@@ -1042,7 +1065,7 @@ fn targeted_sdma_queues_retain_backing_after_ambiguous_native_calls() {
     {
         let mut state = fixture.state.lock().unwrap();
         state.expected_sdma_engine_id = Some(1);
-        state.create_errno = Some(14);
+        state.create_errno = Some(errno::EFAULT);
     }
     assert_eq!(
         fixture.create(desc).err().unwrap().kind(),
@@ -1058,7 +1081,12 @@ fn targeted_sdma_queues_retain_backing_after_ambiguous_native_calls() {
     let fixture = Fixture::new(true);
     fixture.state.lock().unwrap().expected_sdma_engine_id = Some(1);
     let mut queue = fixture.create(desc).unwrap();
-    fixture.state.lock().unwrap().destroy_errno.push_back(5);
+    fixture
+        .state
+        .lock()
+        .unwrap()
+        .destroy_errno
+        .push_back(errno::EIO);
     assert!(queue.destroy().is_err());
     assert_eq!(
         queue.destroy().unwrap_err().kind(),
@@ -1140,7 +1168,7 @@ fn host_visible_local_aql_ring_requires_sufficient_public_vram() {
         Request::validate(&native, desc).err().unwrap().kind(),
         ErrorKind::Unsupported
     );
-    native.public_memory_bytes = util::page_size().unwrap() as u64;
+    native.public_memory_bytes = os_memory::page_size().unwrap() as u64;
     assert!(Request::validate(&native, desc).is_ok());
     native.queues.gfx_target = 120_000;
     assert_eq!(
@@ -1269,7 +1297,7 @@ fn failed_gws_allocation_destroys_the_unpublished_queue() {
         Request::validate(&unsupported, desc),
         Err(error) if error.kind() == ErrorKind::Unsupported
     ));
-    fixture.state.lock().unwrap().gws_errno = Some(16);
+    fixture.state.lock().unwrap().gws_errno = Some(errno::EBUSY);
     assert!(fixture.create(desc).is_err());
     assert_eq!(fixture.state.lock().unwrap().gws_allocations, 1);
     fixture.assert_released();
@@ -1280,8 +1308,8 @@ fn failed_gws_rollback_retains_native_backing() {
     let fixture = Fixture::new(true);
     {
         let mut state = fixture.state.lock().unwrap();
-        state.gws_errno = Some(16);
-        state.destroy_errno.push_back(16);
+        state.gws_errno = Some(errno::EBUSY);
+        state.destroy_errno.push_back(errno::EBUSY);
     }
     let desc = descriptor(gws_aql());
     assert!(matches!(
@@ -1471,7 +1499,7 @@ fn backing_and_create_failures_release_only_resources_that_were_acquired() {
     let fixture = Fixture::new(true);
     {
         let mut state = fixture.state.lock().unwrap();
-        state.svm_errno = Some(95);
+        state.svm_errno = Some(errno::EOPNOTSUPP);
         state.fail_allocation = Some(4);
     }
     assert!(fixture.create(desc).is_err());
@@ -1479,13 +1507,13 @@ fn backing_and_create_failures_release_only_resources_that_were_acquired() {
     assert_eq!(fixture.state.lock().unwrap().creates, 0);
 
     let fixture = Fixture::new(true);
-    fixture.state.lock().unwrap().create_errno = Some(12);
+    fixture.state.lock().unwrap().create_errno = Some(errno::ENOMEM);
     assert!(fixture.create(desc).is_err());
     fixture.assert_released();
     assert_eq!(fixture.state.lock().unwrap().destroys, 0);
 
     let fixture = Fixture::new(true);
-    fixture.state.lock().unwrap().create_errno = Some(14);
+    fixture.state.lock().unwrap().create_errno = Some(errno::EFAULT);
     assert_eq!(
         fixture.create(desc).err().unwrap().kind(),
         ErrorKind::DriverContract
@@ -1548,7 +1576,7 @@ fn pre_create_scratch_failure_releases_new_external_backing() {
         }
     }
     let fixture = Fixture::new(true);
-    fixture.state.lock().unwrap().scratch_base_errno = Some(14);
+    fixture.state.lock().unwrap().scratch_base_errno = Some(errno::EFAULT);
     let drops = Arc::new(AtomicUsize::new(0));
     let desc = descriptor(aql(QueueProducerMode::Single));
     for _ in 0..2 {
@@ -1601,7 +1629,12 @@ fn unpublished_native_rollback_retains_external_backing_on_failure() {
         let fixture = Fixture::new(true);
         let queue = fixture.create(desc).unwrap();
         if destroy_fails {
-            fixture.state.lock().unwrap().destroy_errno.push_back(5);
+            fixture
+                .state
+                .lock()
+                .unwrap()
+                .destroy_errno
+                .push_back(errno::EIO);
         }
         let drops = Arc::new(AtomicUsize::new(0));
         let result =
@@ -1648,7 +1681,7 @@ fn unpublished_rollback_retains_both_owners_if_cleanup_unwinds() {
 #[test]
 fn compute_queue_falls_back_to_gtt_when_svm_registration_fails() {
     let fixture = Fixture::new(true);
-    fixture.state.lock().unwrap().svm_errno = Some(95);
+    fixture.state.lock().unwrap().svm_errno = Some(errno::EOPNOTSUPP);
     let mut queue = fixture
         .create(descriptor(aql(QueueProducerMode::Single)))
         .unwrap();
@@ -1663,7 +1696,7 @@ fn compute_queue_falls_back_to_gtt_when_svm_registration_fails() {
 
 #[test]
 fn doorbell_mapping_failure_destroys_known_queue_before_releasing_backing() {
-    for destroy_errno in [None, Some(16)] {
+    for destroy_errno in [None, Some(errno::EBUSY)] {
         let fixture = Fixture::new(false);
         fixture
             .state
@@ -1694,11 +1727,21 @@ fn cleanup_resumes_without_replaying_a_released_native_id() {
     let mut queue = fixture
         .create(descriptor(aql(QueueProducerMode::Single)))
         .unwrap();
-    fixture.state.lock().unwrap().destroy_errno.push_back(16);
+    fixture
+        .state
+        .lock()
+        .unwrap()
+        .destroy_errno
+        .push_back(errno::EBUSY);
     assert_eq!(queue.destroy().unwrap_err().kind(), ErrorKind::Busy);
     assert!(queue.info().is_err());
     assert_eq!(fixture.state.lock().unwrap().frees, 0);
-    fixture.state.lock().unwrap().free_errno.push_back(16);
+    fixture
+        .state
+        .lock()
+        .unwrap()
+        .free_errno
+        .push_back(errno::EBUSY);
     assert_eq!(queue.destroy().unwrap_err().kind(), ErrorKind::Busy);
     assert_eq!(fixture.state.lock().unwrap().destroys, 2);
     queue.destroy().unwrap();
@@ -1956,7 +1999,7 @@ fn unsupported_peer_doorbell_rolls_back_queue_backing_before_retry() {
     desc.device_producer = true;
     let mut queue = fixture.create(desc).unwrap();
     let mut peer = fixture.peer();
-    fixture.state.lock().unwrap().doorbell_map_errno = Some(95);
+    fixture.state.lock().unwrap().doorbell_map_errno = Some(errno::EOPNOTSUPP);
     assert_eq!(
         queue.map_device(peer.clone()).unwrap_err().kind(),
         ErrorKind::Unsupported
@@ -1997,7 +2040,12 @@ fn peer_queue_cleanup_retries_only_the_unfinished_unmap() {
     let mut queue = fixture.create(desc).unwrap();
     let mut peer = fixture.peer();
     queue.map_device(peer.clone()).unwrap();
-    fixture.state.lock().unwrap().peer_unmap_errno.push_back(16);
+    fixture
+        .state
+        .lock()
+        .unwrap()
+        .peer_unmap_errno
+        .push_back(errno::EBUSY);
     assert_eq!(queue.destroy().unwrap_err().kind(), ErrorKind::Busy);
     let first_unmaps = fixture
         .state
@@ -2031,7 +2079,12 @@ fn ambiguous_peer_mapping_retains_queue_backing_and_the_peer_vm() {
     desc.device_producer = true;
     let mut queue = fixture.create(desc).unwrap();
     let peer = fixture.peer();
-    fixture.state.lock().unwrap().peer_map_errno.push_back(14);
+    fixture
+        .state
+        .lock()
+        .unwrap()
+        .peer_map_errno
+        .push_back(errno::EFAULT);
     assert_eq!(
         queue.map_device(peer.clone()).unwrap_err().kind(),
         ErrorKind::Driver
@@ -2051,7 +2104,7 @@ fn ambiguous_peer_mapping_retains_queue_backing_and_the_peer_vm() {
 #[test]
 fn failed_device_doorbell_mapping_rolls_back_before_queue_cleanup() {
     let fixture = Fixture::new(true);
-    fixture.state.lock().unwrap().doorbell_map_errno = Some(95);
+    fixture.state.lock().unwrap().doorbell_map_errno = Some(errno::EOPNOTSUPP);
     let mut desc = descriptor(QueueParameters::Sdma);
     desc.device_producer = true;
     assert_eq!(
@@ -2074,7 +2127,12 @@ fn doorbell_cleanup_retries_only_the_unfinished_native_step() {
     queue.destroy().unwrap();
     drop(queue);
     let frees = fixture.state.lock().unwrap().frees;
-    fixture.state.lock().unwrap().free_errno.push_back(16);
+    fixture
+        .state
+        .lock()
+        .unwrap()
+        .free_errno
+        .push_back(errno::EBUSY);
     let vm = Shared::get_mut(&mut fixture.vm).unwrap();
     assert_eq!(vm.close().unwrap_err().kind(), ErrorKind::Busy);
     {

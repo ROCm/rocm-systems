@@ -6,7 +6,7 @@
 //! A primary-process VM may survive session destruction in the kernel. The
 //! Linux process connection retains its exact render files through exit for
 //! later activation; secondary bindings are released with their session.
-use super::{drm, sys, sysfs, uapi, util};
+use super::{drm, errno, error, native_error, os_file, os_memory, sys, sysfs, uapi};
 use crate::event::{DeviceEvent, GpuHardwareException, GpuMemoryFault};
 use crate::host_storage::{Allocator, Buffer, Owned, Shared};
 use crate::memory::interop::linux::{DmaBuf, DmaBufInfo, KfdIpcMemoryHandle};
@@ -57,7 +57,7 @@ struct ScratchRange {
 /// outcome; reusing that virtual range could otherwise alias live GPU state.
 struct ScratchPool {
     capacity: u64,
-    reservation: Option<sys::Reservation>,
+    reservation: Option<os_memory::Reservation>,
     ranges: Buffer<ScratchRange>,
     uncertain: bool,
 }
@@ -95,7 +95,7 @@ impl ScratchPool {
             ));
         }
         self.ranges.try_reserve_exact(1)?;
-        let reservation = sys::Reservation::new(
+        let reservation = os_memory::Reservation::new(
             usize::try_from(self.capacity).map_err(|_| {
                 error(
                     ErrorKind::ResourceExhausted,
@@ -498,7 +498,7 @@ impl DeviceVm {
             .map_err(|_| error(ErrorKind::Internal, "virtual-memory mapping lock poisoned"))?
             .close(render)?;
         self.doorbells.close(&self.loss.kfd)?;
-        util::close_file(&mut self.render).map_err(|e| native_error("render endpoint close", e))
+        os_file::close_file(&mut self.render).map_err(|e| native_error("render endpoint close", e))
     }
 
     pub(super) fn check(&self) -> Result<(), Error> {
@@ -1076,7 +1076,7 @@ pub(crate) struct KfdAllocation {
     vm: Shared<DeviceVm>,
     peers: Buffer<PeerVm>,
     gpu_ids: Buffer<u32>,
-    reservation: Option<sys::Reservation>,
+    reservation: Option<os_memory::Reservation>,
     handle: Option<u64>,
     host_address: Option<usize>,
     device_byte_offset: usize,
@@ -1097,8 +1097,8 @@ fn allocation_source(kind: BufferKind, size: usize) -> Result<(Option<usize>, us
         return Ok((None, 0, 0));
     };
     let address = pages.address;
-    let page =
-        util::page_size().map_err(|source| native_error("registered host page size", source))?;
+    let page = os_memory::page_size()
+        .map_err(|source| native_error("registered host page size", source))?;
     let offset = address & (page - 1);
     let page_base = address - offset;
     if address == 0 || page_base.checked_add(size).is_none() {
@@ -1202,7 +1202,8 @@ impl KfdAllocation {
                 "allocation size exceeds host width",
             )
         })?;
-        let page = util::page_size().map_err(|source| native_error("native page size", source))?;
+        let page =
+            os_memory::page_size().map_err(|source| native_error("native page size", source))?;
         if size == 0 {
             return Err(error(ErrorKind::InvalidArgument, "allocation size is zero"));
         }
@@ -1234,9 +1235,9 @@ impl KfdAllocation {
         vm.check()?;
         let owned_userptr = matches!(kind, BufferKind::OwnedUserptr { .. });
         let reservation = if owned_userptr {
-            sys::Reservation::new_shared_host(native_size, alignment, bounds)
+            os_memory::Reservation::new_shared_host(native_size, alignment, bounds)
         } else {
-            sys::Reservation::new(native_size, alignment, bounds, false)
+            os_memory::Reservation::new(native_size, alignment, bounds, false)
         }
         .map_err(|source| native_error("GPU address reservation", source))?;
         if owned_userptr {
@@ -1315,7 +1316,7 @@ impl KfdAllocation {
         allocation.uncertain = result
             .as_ref()
             .err()
-            .is_some_and(|source| source.raw_os_error() == Some(14));
+            .is_some_and(|source| source.raw_os_error() == Some(errno::EFAULT));
         result.map_err(|source| native_error("AMDKFD_IOC_ALLOC_MEMORY_OF_GPU", source))?;
         if allocation.handle.is_none() {
             allocation.uncertain = true;
@@ -1361,7 +1362,8 @@ impl KfdAllocation {
     }
 
     pub(super) fn create_mmio(vm: &Shared<DeviceVm>) -> Result<Owned<Self>, Error> {
-        let page = util::page_size().map_err(|source| native_error("native page size", source))?;
+        let page =
+            os_memory::page_size().map_err(|source| native_error("native page size", source))?;
         Self::create(
             vm.clone(),
             AllocationDesc {
@@ -1383,7 +1385,8 @@ impl KfdAllocation {
                 "scratch size exceeds the host address width",
             )
         })?;
-        let page = util::page_size().map_err(|source| native_error("scratch page size", source))?;
+        let page =
+            os_memory::page_size().map_err(|source| native_error("scratch page size", source))?;
         if desc.alignment > page as u64 || size == 0 || size % page != 0 {
             return Err(error(
                 ErrorKind::InvalidArgument,
@@ -1406,7 +1409,7 @@ impl KfdAllocation {
                 "scratch address exceeds the host address width",
             ));
         };
-        let reservation = sys::Reservation::view(address_usize, size);
+        let reservation = os_memory::Reservation::view(address_usize, size);
         let mut allocation = owner.write(Self {
             vm: vm.clone(),
             peers,
@@ -1439,7 +1442,7 @@ impl KfdAllocation {
         allocation.uncertain = result
             .as_ref()
             .err()
-            .is_some_and(|source| source.raw_os_error() == Some(14));
+            .is_some_and(|source| source.raw_os_error() == Some(errno::EFAULT));
         result.map_err(|source| native_error("AMDKFD_IOC_ALLOC_MEMORY_OF_GPU", source))?;
         if allocation.handle.is_none() {
             allocation.uncertain = true;
@@ -1480,7 +1483,8 @@ impl KfdAllocation {
                 "DMA-BUF import requires read/write/execute GPU access",
             ));
         }
-        let page = util::page_size().map_err(|source| native_error("native page size", source))?;
+        let page =
+            os_memory::page_size().map_err(|source| native_error("native page size", source))?;
         let alignment = usize::try_from(alignment)
             .map_err(|_| error(ErrorKind::InvalidArgument, "alignment exceeds host width"))?;
         if byte_length == 0
@@ -1493,9 +1497,9 @@ impl KfdAllocation {
                 "invalid DMA-BUF logical extent or alignment",
             ));
         }
-        let dma_buf = util::duplicate_file(descriptor)
+        let dma_buf = os_file::duplicate_file(descriptor)
             .map_err(|source| native_error("DMA-BUF descriptor duplication", source))?;
-        let file_info = util::dma_buf_file_info(&dma_buf)
+        let file_info = os_file::dma_buf_file_info(&dma_buf)
             .map_err(|source| native_error("DMA-BUF file information", source))?;
         vm.check()?;
         let details = vm
@@ -1545,8 +1549,9 @@ impl KfdAllocation {
                 "DMA-BUF source offset exceeds host address width",
             )
         })?;
-        let reservation = sys::Reservation::new(native_size, alignment, (vm.base, vm.limit), false)
-            .map_err(|source| native_error("DMA-BUF GPU address reservation", source))?;
+        let reservation =
+            os_memory::Reservation::new(native_size, alignment, (vm.base, vm.limit), false)
+                .map_err(|source| native_error("DMA-BUF GPU address reservation", source))?;
         let allocator = vm.allocator();
         let peers = Buffer::new(allocator);
         let mut gpu_ids = Buffer::try_with_capacity(1, allocator)?;
@@ -1589,7 +1594,7 @@ impl KfdAllocation {
         allocation.uncertain = result
             .as_ref()
             .err()
-            .is_some_and(|source| source.raw_os_error() == Some(14));
+            .is_some_and(|source| source.raw_os_error() == Some(errno::EFAULT));
         result.map_err(|source| native_error("AMDKFD_IOC_IMPORT_DMABUF", source))?;
         if allocation.handle.is_none() {
             allocation.uncertain = true;
@@ -1625,7 +1630,8 @@ impl KfdAllocation {
         descriptor: i32,
         _size_hint: u64,
     ) -> Result<Owned<Self>, Error> {
-        let page = util::page_size().map_err(|source| native_error("native page size", source))?;
+        let page =
+            os_memory::page_size().map_err(|source| native_error("native page size", source))?;
         let peer_count = peers.len();
         let allocator = vm.allocator();
         let mut peer_vms: Buffer<PeerVm> = Buffer::try_with_capacity(peer_count, allocator)?;
@@ -1672,9 +1678,9 @@ impl KfdAllocation {
             peer_vms.try_push(PeerVm { vm: peer })?;
         }
 
-        let dma_buf = util::duplicate_file(descriptor)
+        let dma_buf = os_file::duplicate_file(descriptor)
             .map_err(|source| native_error("DMA-BUF descriptor duplication", source))?;
-        let file_info = util::dma_buf_file_info(&dma_buf)
+        let file_info = os_file::dma_buf_file_info(&dma_buf)
             .map_err(|source| native_error("DMA-BUF file information", source))?;
         let details = vm
             .loss
@@ -1708,9 +1714,10 @@ impl KfdAllocation {
             ));
         }
         let reservation =
-            sys::Reservation::new(native_size, GRAPHICS_IMPORT_ALIGNMENT, bounds, false).map_err(
-                |source| native_error("graphics DMA-BUF GPU address reservation", source),
-            )?;
+            os_memory::Reservation::new(native_size, GRAPHICS_IMPORT_ALIGNMENT, bounds, false)
+                .map_err(|source| {
+                    native_error("graphics DMA-BUF GPU address reservation", source)
+                })?;
         let mut allocation = Owned::new(
             Self {
                 vm,
@@ -1749,7 +1756,7 @@ impl KfdAllocation {
         allocation.uncertain = result
             .as_ref()
             .err()
-            .is_some_and(|source| source.raw_os_error() == Some(14));
+            .is_some_and(|source| source.raw_os_error() == Some(errno::EFAULT));
         result.map_err(|source| native_error("AMDKFD_IOC_IMPORT_DMABUF", source))?;
         if allocation.handle.is_none() {
             allocation.uncertain = true;
@@ -1854,9 +1861,9 @@ impl KfdAllocation {
             }
         }
 
-        let page = util::page_size()
+        let page = os_memory::page_size()
             .map_err(|source| native_error("IPC memory host page size", source))?;
-        let reservation = sys::Reservation::new(native_size_usize, page, bounds, false)
+        let reservation = os_memory::Reservation::new(native_size_usize, page, bounds, false)
             .map_err(|source| native_error("IPC memory address reservation", source))?;
         let mut allocation = Owned::new(
             Self {
@@ -1892,7 +1899,7 @@ impl KfdAllocation {
         allocation.uncertain = result
             .as_ref()
             .err()
-            .is_some_and(|source| source.raw_os_error() == Some(14));
+            .is_some_and(|source| source.raw_os_error() == Some(errno::EFAULT));
         result.map_err(|source| native_error("AMDKFD_IOC_IPC_IMPORT_HANDLE", source))?;
         if allocation.handle.is_none() {
             allocation.uncertain = true;
@@ -2004,29 +2011,24 @@ impl KfdAllocation {
         Ok(())
     }
 
-    pub(super) fn read_indices(
+    /// Returns the queue's mapped index words while this allocation stays live.
+    /// The queue selects the loads and sampling needed by its transport.
+    pub(super) fn queue_indices(
         &self,
         read_offset: usize,
         write_offset: usize,
-    ) -> Result<(u64, u64), Error> {
-        self.reservation
+    ) -> Result<(&AtomicU64, &AtomicU64), Error> {
+        let reservation = self
+            .reservation
             .as_ref()
-            .ok_or_else(|| error(ErrorKind::Internal, "queue pointer mapping is missing"))?
-            .read_indices(read_offset, write_offset)
-            .map_err(|e| native_error("queue index read", e))
-    }
-
-    pub(super) fn read_wrapping_indices(
-        &self,
-        read_offset: usize,
-        write_offset: usize,
-        read_mask: u64,
-    ) -> Result<(u64, u64), Error> {
-        self.reservation
-            .as_ref()
-            .ok_or_else(|| error(ErrorKind::Internal, "queue pointer mapping is missing"))?
-            .read_wrapping_indices(read_offset, write_offset, read_mask)
-            .map_err(|e| native_error("queue index read", e))
+            .ok_or_else(|| error(ErrorKind::Internal, "queue pointer mapping is missing"))?;
+        let read = reservation
+            .atomic_u64_at(read_offset)
+            .map_err(|e| native_error("queue index read", e))?;
+        let write = reservation
+            .atomic_u64_at(write_offset)
+            .map_err(|e| native_error("queue index read", e))?;
+        Ok((read, write))
     }
 
     /// Queue construction initializes only owned CPU-visible backing, before
@@ -2061,7 +2063,7 @@ impl KfdAllocation {
     fn address(&self) -> Result<usize, Error> {
         self.reservation
             .as_ref()
-            .map(sys::Reservation::address)
+            .map(os_memory::Reservation::address)
             .ok_or_else(|| {
                 error(
                     ErrorKind::InvalidArgument,
@@ -2087,7 +2089,8 @@ impl KfdAllocation {
             change.map,
         );
         if result.as_ref().err().is_some_and(|source| {
-            source.kind() == io::ErrorKind::InvalidData || source.raw_os_error() == Some(14)
+            source.kind() == io::ErrorKind::InvalidData
+                || source.raw_os_error() == Some(errno::EFAULT)
         }) {
             self.uncertain = true;
         }
@@ -2228,7 +2231,8 @@ impl KfdAllocation {
             .kfd
             .transfer(handle, self.gpu_ids.as_slice(), progress, map);
         if result.as_ref().err().is_some_and(|source| {
-            source.kind() == io::ErrorKind::InvalidData || source.raw_os_error() == Some(14)
+            source.kind() == io::ErrorKind::InvalidData
+                || source.raw_os_error() == Some(errno::EFAULT)
         }) {
             self.uncertain = true;
         }
@@ -2423,7 +2427,7 @@ impl KfdAllocation {
             .kfd
             .export_dma_buf(handle)
             .map_err(|source| native_error("AMDKFD_IOC_EXPORT_DMABUF", source))?;
-        let file_info = util::dma_buf_file_info(&file)
+        let file_info = os_file::dma_buf_file_info(&file)
             .map_err(|source| native_error("exported DMA-BUF file information", source))?;
         let expected_size = self
             .reservation
@@ -2575,8 +2579,6 @@ impl Drop for KfdAllocation {
         }
     }
 }
-
-pub(super) use crate::driver::linux::{error, native_error};
 
 #[cfg(test)]
 #[path = "tests/memory.rs"]

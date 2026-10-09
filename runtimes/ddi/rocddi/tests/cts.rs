@@ -1318,7 +1318,7 @@ fn gfx1201_aql_barrier(
     // SAFETY: The queue owns a writable AQL ring and 64-bit index and doorbell
     // words. The release header publishes the initialized packet, the release
     // write index publishes slot 0, and the doorbell drains CPU stores before
-    // notifying firmware.
+    // notifying the command processor.
     unsafe {
         std::ptr::copy_nonoverlapping(
             packet.as_ptr(),

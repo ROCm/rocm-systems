@@ -8,8 +8,7 @@
 //! interrupted destroy has an unknowable native outcome, so the owner records
 //! that uncertainty and refuses to replay the event ID.
 
-use super::memory::{error, native_error};
-use super::{sys, uapi};
+use super::{errno, error, native_error, sys, uapi};
 use crate::event::SignalEventInfo;
 use crate::host_storage::{Allocator, Owned, Shared};
 use crate::{Error, ErrorKind};
@@ -82,7 +81,7 @@ impl KfdSignalEvent {
                 Ok(())
             }
             Err(source) => {
-                self.uncertain = source.raw_os_error() == Some(4);
+                self.uncertain = source.raw_os_error() == Some(errno::EINTR);
                 Err(signal_event_error("KFD signal event destruction", source))
             }
         }
@@ -99,17 +98,17 @@ impl Drop for KfdSignalEvent {
 
 fn signal_event_error(operation: &'static str, source: std::io::Error) -> Error {
     match source.raw_os_error() {
-        Some(22) => Error::NativeOperation {
+        Some(errno::EINVAL) => Error::NativeOperation {
             kind: ErrorKind::InvalidArgument,
             operation,
             source,
         },
-        Some(11 | 16) => Error::NativeOperation {
+        Some(errno::EAGAIN | errno::EBUSY) => Error::NativeOperation {
             kind: ErrorKind::Busy,
             operation,
             source,
         },
-        Some(12 | 28) => Error::NativeOperation {
+        Some(errno::ENOMEM | errno::ENOSPC) => Error::NativeOperation {
             kind: ErrorKind::ResourceExhausted,
             operation,
             source,
@@ -182,7 +181,7 @@ mod tests {
             Call::CreateEvent(args) => {
                 assert_eq!(args.page_offset, 0x1234);
                 *observed.lock().unwrap() += 1;
-                Err(std::io::Error::from_raw_os_error(12))
+                Err(std::io::Error::from_raw_os_error(errno::ENOMEM))
             }
             _ => panic!("unexpected event call"),
         }));
@@ -255,7 +254,7 @@ mod tests {
             }
             Call::DestroyEvent(_) => {
                 *observed.lock().unwrap() += 1;
-                Err(std::io::Error::from_raw_os_error(4))
+                Err(std::io::Error::from_raw_os_error(errno::EINTR))
             }
             _ => panic!("unexpected event call"),
         }));

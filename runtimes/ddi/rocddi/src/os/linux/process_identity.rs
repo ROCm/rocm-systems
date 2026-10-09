@@ -11,28 +11,10 @@
 
 #![allow(unsafe_code)]
 
-use std::ffi::{c_int, c_void};
+use super::memory::ForkMarkerPage;
 use std::io;
-use std::ptr;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
-unsafe extern "C" {
-    fn mmap(
-        address: *mut c_void,
-        length: usize,
-        protection: c_int,
-        flags: c_int,
-        fd: c_int,
-        offset: i64,
-    ) -> *mut c_void;
-    fn madvise(address: *mut c_void, length: usize, advice: c_int) -> c_int;
-    fn munmap(address: *mut c_void, length: usize) -> c_int;
-}
-
-const PROT_READ_WRITE: c_int = 3;
-const MAP_PRIVATE: c_int = 2;
-const MAP_ANONYMOUS: c_int = 0x20;
-const MADV_WIPEONFORK: c_int = 18;
 const FALLBACK_TO_GETPID: usize = 1;
 
 // Zero means uninitialized. The one-page mapping remains until process exit,
@@ -40,61 +22,35 @@ const FALLBACK_TO_GETPID: usize = 1;
 // One means the kernel lacks the wipe-on-fork contract and checks use getpid.
 static MARKER: AtomicUsize = AtomicUsize::new(0);
 
+/// Publishes the getpid fallback unless another thread already chose a marker.
 fn install_fallback() -> usize {
     MARKER
         .compare_exchange(0, FALLBACK_TO_GETPID, Ordering::AcqRel, Ordering::Acquire)
         .unwrap_or_else(|winner| winner)
 }
 
+/// Returns the published marker page or fallback state, creating one on first
+/// use. A losing thread releases only its own unpublished mapping.
 fn marker_state() -> usize {
     let state = MARKER.load(Ordering::Acquire);
     if state != 0 {
         return state;
     }
-    let Ok(page) = super::linux_kfd::util::page_size() else {
+    let Ok(mapping) = ForkMarkerPage::new() else {
         return install_fallback();
     };
-    if page < size_of::<AtomicU32>() {
-        return install_fallback();
-    }
-    // SAFETY: The private anonymous page is owned by this call until the
-    // publish CAS succeeds; it is never unmapped after publication.
-    let mapping = unsafe {
-        mmap(
-            ptr::null_mut(),
-            page,
-            PROT_READ_WRITE,
-            MAP_PRIVATE | MAP_ANONYMOUS,
-            -1,
-            0,
-        )
-    };
-    if mapping as isize == -1 {
-        return install_fallback();
-    }
-    // SAFETY: mmap returned a writable page-aligned mapping of this length.
-    let advised = unsafe { madvise(mapping, page, MADV_WIPEONFORK) };
-    if advised != 0 {
-        // SAFETY: The mapping has not been published to another thread.
-        let _ = unsafe { munmap(mapping, page) };
-        return install_fallback();
-    }
     // The marker stays zero until allocation passes the session's existing
     // process check. A concurrent owner check uses getpid while it is zero.
-    match MARKER.compare_exchange(0, mapping as usize, Ordering::AcqRel, Ordering::Acquire) {
-        Ok(_) => mapping as usize,
-        Err(winner) => {
-            // SAFETY: Only the winning mapping is visible to other threads.
-            let _ = unsafe { munmap(mapping, page) };
-            winner
-        }
+    match MARKER.compare_exchange(0, mapping.address(), Ordering::AcqRel, Ordering::Acquire) {
+        Ok(_) => mapping.retain_until_exit(),
+        Err(winner) => winner,
     }
 }
 
 /// Enables cheap checks after an allocation passed its session process check.
 /// This preserves inert instance creation and the getpid fallback before the
 /// first host allocation or after a fork.
-pub(in crate::driver) fn prepare_for_hot_checks() {
+pub(crate) fn prepare_for_hot_checks() {
     let state = marker_state();
     if state == FALLBACK_TO_GETPID {
         return;
@@ -115,7 +71,7 @@ pub(in crate::driver) fn prepare_for_hot_checks() {
 }
 
 /// Rejects inherited native ownership without a syscall on supported Linux.
-pub(in crate::driver) fn check_process(process: u32) -> io::Result<()> {
+pub(crate) fn check_process(process: u32) -> io::Result<()> {
     let state = MARKER.load(Ordering::Acquire);
     let current = if state <= FALLBACK_TO_GETPID {
         // Directly constructed low-level owners may precede any session.
@@ -141,7 +97,7 @@ pub(in crate::driver) fn check_process(process: u32) -> io::Result<()> {
 #[allow(unsafe_code)]
 mod tests {
     use super::*;
-    use std::ffi::c_long;
+    use std::ffi::{c_int, c_long};
 
     unsafe extern "C" {
         fn syscall(number: c_long, ...) -> c_long;

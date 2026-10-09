@@ -8,8 +8,8 @@
 //! Native fences, rather than elapsed time or a terminal error, prove when the
 //! caller may reuse an indirect buffer.
 
-use super::memory::{DeviceVm, error, native_error};
-use super::{drm, util};
+use super::memory::DeviceVm;
+use super::{drm, errno, error, native_error, os_process};
 use crate::host_storage::{Owned, Shared};
 use crate::kernel_queue::{KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait};
 use crate::{Error, ErrorKind};
@@ -134,7 +134,7 @@ impl KfdKernelQueue {
         queue.completion_syncobj = Some(match drm::create_syncobj(render) {
             Ok(handle) => handle,
             Err(source) => {
-                if source.raw_os_error() == Some(14) {
+                if source.raw_os_error() == Some(errno::EFAULT) {
                     // The handle may exist without a trustworthy returned ID.
                     std::mem::forget(queue.vm.clone());
                 }
@@ -144,7 +144,7 @@ impl KfdKernelQueue {
         let context_id = match drm::create_context(render) {
             Ok(context_id) => context_id,
             Err(source) => {
-                if source.raw_os_error() == Some(14) {
+                if source.raw_os_error() == Some(errno::EFAULT) {
                     std::mem::forget(queue.vm.clone());
                 }
                 let failure = native_error("DRM command context creation", source);
@@ -194,7 +194,7 @@ impl KfdKernelQueue {
     }
 
     fn check_process(&self) -> Result<(), Error> {
-        util::check_process(self.process)
+        os_process::check_process(self.process)
             .map_err(|source| native_error("DRM command context process check", source))
     }
 
@@ -291,7 +291,7 @@ impl KfdKernelQueue {
                 self.accepted.store(submission, Ordering::Release);
                 Ok(submission)
             }
-            Err(source) if source.raw_os_error() == Some(14) => {
+            Err(source) if source.raw_os_error() == Some(errno::EFAULT) => {
                 self.observe_terminal(ErrorKind::DriverContract);
                 self.ambiguous_submission.store(true, Ordering::Release);
                 self.slot.store(submission, Ordering::Release);
@@ -299,7 +299,7 @@ impl KfdKernelQueue {
                 Ok(submission)
             }
             Err(source) => {
-                if source.raw_os_error() == Some(19) {
+                if source.raw_os_error() == Some(errno::ENODEV) {
                     self.observe_terminal(ErrorKind::DeviceLost);
                 }
                 self.slot.store(IDLE, Ordering::Release);
@@ -389,7 +389,7 @@ impl KfdKernelQueue {
             }
             Ok(false) => Ok(KernelQueueWait::TimedOut),
             Err(source) => {
-                if source.raw_os_error() == Some(22)
+                if source.raw_os_error() == Some(errno::EINVAL)
                     && self.ambiguous_submission.load(Ordering::Acquire)
                 {
                     // A private, primed context cannot allocate a future
@@ -407,9 +407,9 @@ impl KfdKernelQueue {
                         self.retire(submission);
                     }
                 }
-                if source.raw_os_error() == Some(19) || self.vm.has_latched_loss() {
+                if source.raw_os_error() == Some(errno::ENODEV) || self.vm.has_latched_loss() {
                     self.observe_terminal(ErrorKind::DeviceLost);
-                } else if matches!(source.raw_os_error(), Some(5 | 22)) {
+                } else if matches!(source.raw_os_error(), Some(errno::EIO | errno::EINVAL)) {
                     self.observe_terminal(ErrorKind::Driver);
                 }
                 Err(native_error("DRM command completion wait", source))
@@ -438,14 +438,14 @@ impl KfdKernelQueue {
         let render = self.vm.render()?;
         if let Some(context_id) = self.context_id {
             if let Err(source) = drm::destroy_context(render, context_id) {
-                self.context_free_ambiguous = source.raw_os_error() == Some(14);
+                self.context_free_ambiguous = source.raw_os_error() == Some(errno::EFAULT);
                 return Err(native_error("DRM command context release", source));
             }
             self.context_id = None;
         }
         if let Some(syncobj) = self.completion_syncobj {
             if let Err(source) = drm::destroy_syncobj(render, syncobj) {
-                self.syncobj_destroy_ambiguous = source.raw_os_error() == Some(14);
+                self.syncobj_destroy_ambiguous = source.raw_os_error() == Some(errno::EFAULT);
                 return Err(native_error("DRM completion object release", source));
             }
             self.completion_syncobj = None;
@@ -595,8 +595,8 @@ mod tests {
                 drm::TestCall::CreateContext(5),
                 drm::TestCall::WaitSubmission(Ok(true)),
                 drm::TestCall::Submit(Ok(1)),
-                drm::TestCall::WaitSubmission(Err(5)),
-                drm::TestCall::WaitTimeline(Err(110)),
+                drm::TestCall::WaitSubmission(Err(errno::EIO)),
+                drm::TestCall::WaitTimeline(Err(errno::ETIMEDOUT)),
                 drm::TestCall::WaitSubmission(Ok(true)),
                 drm::TestCall::DestroyContext,
                 drm::TestCall::DestroySyncobj,
@@ -611,7 +611,7 @@ mod tests {
                     .unwrap();
                 assert_eq!(
                     queue.refresh_status().unwrap_err().native_error_code(),
-                    Some(5)
+                    Some(errno::EIO)
                 );
                 assert_eq!(queue.status().retired_submission, 0);
                 assert_eq!(queue.status().terminal, Some(ErrorKind::Driver));
@@ -669,8 +669,8 @@ mod tests {
                 drm::TestCall::CreateContext(5),
                 drm::TestCall::WaitSubmission(Ok(true)),
                 drm::TestCall::Submit(Ok(42)),
-                drm::TestCall::WaitTimeline(Err(110)),
-                drm::TestCall::WaitTimeline(Err(110)),
+                drm::TestCall::WaitTimeline(Err(errno::ETIMEDOUT)),
+                drm::TestCall::WaitTimeline(Err(errno::ETIMEDOUT)),
                 drm::TestCall::WaitTimeline(Ok(true)),
                 drm::TestCall::DestroyContext,
                 drm::TestCall::DestroySyncobj,
@@ -745,15 +745,15 @@ mod tests {
                 let error = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::Pm4)
                     .err()
                     .unwrap();
-                assert_eq!(error.native_error_code(), Some(14));
+                assert_eq!(error.native_error_code(), Some(errno::EFAULT));
             },
         );
         drm::with_script(
             [
                 drm::TestCall::CreateSyncobj(7),
                 drm::TestCall::CreateContext(5),
-                drm::TestCall::WaitSubmission(Err(22)),
-                drm::TestCall::FailDestroyContext(16),
+                drm::TestCall::WaitSubmission(Err(errno::EINVAL)),
+                drm::TestCall::FailDestroyContext(errno::EBUSY),
                 drm::TestCall::DestroyContext,
                 drm::TestCall::DestroySyncobj,
             ],
@@ -761,7 +761,7 @@ mod tests {
                 let error = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::Pm4)
                     .err()
                     .unwrap();
-                assert_eq!(error.native_error_code(), Some(16));
+                assert_eq!(error.native_error_code(), Some(errno::EBUSY));
                 // Drop retries the ordinary EBUSY rollback through the owner.
             },
         );
