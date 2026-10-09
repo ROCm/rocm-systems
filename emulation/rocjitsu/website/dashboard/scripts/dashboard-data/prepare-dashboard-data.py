@@ -24,6 +24,7 @@ from pathlib import Path
 import re
 import statistics
 import tempfile
+from urllib.parse import urlsplit
 
 
 def canonical(value):
@@ -262,7 +263,17 @@ def validate_consistency(inputs):
             )
 
 
-def normalize_runs(raw_runs, *, run_id, branch, commit_message, machine_id, trigger):
+def normalize_runs(
+    raw_runs,
+    *,
+    run_id,
+    branch,
+    commit_message,
+    machine_id,
+    trigger,
+    source_base=None,
+    pull_request=None,
+):
     """Build one run and its catalog, independent of file I/O or CLI parsing."""
     tests = {}
     groups = {}
@@ -321,6 +332,8 @@ def normalize_runs(raw_runs, *, run_id, branch, commit_message, machine_id, trig
             'committedAt': source['rocjitsu_commit_timestamp'],
             'branch': branch,
             'message': commit_message,
+            **({'base': source_base} if source_base else {}),
+            **({'pullRequest': pull_request} if pull_request else {}),
         },
         'execution': {
             'completedAt': completed_at,
@@ -413,6 +426,10 @@ def prepare(
     branch,
     commit_message,
     trigger,
+    base_branch=None,
+    base_sha=None,
+    pull_request_number=None,
+    pull_request_url=None,
 ):
     """Load raw ST/MT runs and write one built run. Does not write index or metadata."""
     require(
@@ -425,6 +442,56 @@ def prepare(
         ('machine_id', machine_id),
     ):
         require(text(value), f'{name} must be nonempty text')
+    require(
+        bool(base_branch) == bool(base_sha),
+        'Source base requires both --base-branch and --base-sha',
+    )
+    source_base = None
+    if base_branch:
+        require(text(base_branch), 'Source base branch must be nonempty text')
+        require(
+            base_branch != branch, 'Source base branch must differ from source branch'
+        )
+        base_sha_text = base_sha if isinstance(base_sha, str) else ''
+        require(
+            bool(re.fullmatch(r'[a-fA-F0-9]{40}', base_sha_text)),
+            'Source base SHA must be a full 40-hex SHA',
+        )
+        source_base = {'branch': base_branch, 'commit': base_sha_text.lower()}
+    require(
+        pull_request_number is None
+        or (type(pull_request_number) is int and pull_request_number > 0),
+        'Pull request number must be a positive integer',
+    )
+    require(
+        pull_request_url is None or pull_request_number is not None,
+        'Pull request URL requires a pull request number',
+    )
+    require(
+        pull_request_number is None or source_base is not None,
+        'Pull request metadata requires a source base',
+    )
+    pull_request = None
+    if pull_request_number is not None:
+        pull_request = {'number': pull_request_number}
+        if pull_request_url is not None:
+            try:
+                url = urlsplit(pull_request_url)
+                # urlsplit defers port syntax/range validation to this property.
+                _ = url.port
+            except ValueError as error:
+                raise ValueError('Pull request URL has an invalid authority') from error
+            require(
+                url.scheme == 'https'
+                and url.hostname == 'github.com'
+                and url.username is None
+                and url.password is None
+                and not url.query
+                and not url.fragment
+                and url.path.endswith(f'/pull/{pull_request_number}'),
+                'Pull request URL must be a safe HTTPS URL matching its number',
+            )
+            pull_request['url'] = pull_request_url
     raw_runs = [read_json(Path(path)) for path in raw_run]
     require(raw_runs, 'Supply at least one raw run')
     for raw in raw_runs:
@@ -442,6 +509,8 @@ def prepare(
         commit_message=commit_message,
         machine_id=machine_id,
         trigger=trigger,
+        source_base=source_base,
+        pull_request=pull_request,
     )
     write_built_run(Path(os.path.abspath(data_dir)), run, catalog)
     return run
@@ -461,6 +530,10 @@ def main():
     ):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--trigger', choices=('auto', 'manual'), required=True)
+    parser.add_argument('--base-branch')
+    parser.add_argument('--base-sha')
+    parser.add_argument('--pull-request-number', type=int)
+    parser.add_argument('--pull-request-url')
     args = parser.parse_args()
     try:
         run = prepare(**vars(args))

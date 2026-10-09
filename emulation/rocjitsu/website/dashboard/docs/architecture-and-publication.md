@@ -71,7 +71,7 @@ Unindexed files are not scanned. Compatibility, exclusions, and raw-export behav
 
 ## Preparing and publishing measurements
 
-The benchmark workflow runs on relevant develop pushes or manual dispatch; its “nightly” name is not a scheduled trigger.
+The benchmark workflow runs on relevant develop pushes or manual dispatch; its “nightly” name is not a scheduled trigger. Before a side-branch benchmark starts, a lightweight job snapshots `develop` and records the dispatched commit's merge-base with that immutable revision. The optional `pull_request_number` input also records an open same-repository PR when its head branch and SHA match the selected workflow branch; without that input, the run keeps its base but has no PR metadata. Develop runs reject the PR input and omit both fields.
 
 ```text
 Run ST and MT benchmarks

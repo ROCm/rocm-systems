@@ -8,6 +8,11 @@ on:
       - "emulation/rocjitsu/**"
       - ".github/workflows/rocjitsu-benchmarks.yml"
   workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: "Optional open PR number for the selected side branch"
+        required: false
+        type: string
 
 # Each job grants only the access it needs.
 permissions: {}
@@ -27,8 +32,84 @@ env:
   RESULTS_DOWNLOAD_DIR: ${{ github.workspace }}/benchmark-results
 
 jobs:
+  source-metadata:
+    name: Resolve benchmark source metadata
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      base_branch: ${{ steps.resolve.outputs.base_branch }}
+      base_sha: ${{ steps.resolve.outputs.base_sha }}
+      pull_request_number: ${{ steps.resolve.outputs.pull_request_number }}
+      pull_request_url: ${{ steps.resolve.outputs.pull_request_url }}
+    env:
+      BENCHMARK_BRANCH: ${{ github.ref_name }}
+      BENCHMARK_SHA: ${{ github.sha }}
+    steps:
+      - name: Resolve source metadata before benchmarking
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_PULL_REQUEST: ${{ inputs.pull_request_number || '' }}
+        run: |
+          if [[ "${BENCHMARK_BRANCH}" == "develop" ]]; then
+            if [[ -n "${REQUESTED_PULL_REQUEST}" ]]; then
+              echo "::error::A pull request number is only valid for a side-branch run."
+              exit 1
+            fi
+            exit 0
+          fi
+
+          BASE_BRANCH=develop
+          BASE_BRANCH_SHA="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_BRANCH}" \
+            --jq '.object.sha')"
+          if [[ ! "${BASE_BRANCH_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Could not resolve an immutable ${BASE_BRANCH} revision."
+            exit 1
+          fi
+          BASE_SHA="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/compare/${BASE_BRANCH_SHA}...${BENCHMARK_SHA}" \
+            --jq '.merge_base_commit.sha')"
+          if [[ ! "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Could not resolve a canonical develop merge-base for ${BENCHMARK_SHA}."
+            exit 1
+          fi
+          printf 'base_branch=%s\nbase_sha=%s\n' \
+            "${BASE_BRANCH}" "${BASE_SHA}" >> "${GITHUB_OUTPUT}"
+
+          if [[ -z "${REQUESTED_PULL_REQUEST}" ]]; then
+            exit 0
+          fi
+          if [[ ! "${REQUESTED_PULL_REQUEST}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::pull_request_number must be a positive integer."
+            exit 1
+          fi
+
+          PR_JSON="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/pulls/${REQUESTED_PULL_REQUEST}")"
+          PR_STATE="$(jq -r '.state' <<< "${PR_JSON}")"
+          PR_BASE="$(jq -r '.base.ref' <<< "${PR_JSON}")"
+          PR_HEAD_REPOSITORY="$(jq -r '.head.repo.full_name // ""' <<< "${PR_JSON}")"
+          PR_HEAD_BRANCH="$(jq -r '.head.ref' <<< "${PR_JSON}")"
+          PR_HEAD_SHA="$(jq -r '.head.sha' <<< "${PR_JSON}")"
+          PR_URL="$(jq -r '.html_url' <<< "${PR_JSON}")"
+          if [[ "${PR_STATE}" != open \
+                || "${PR_BASE}" != "${BASE_BRANCH}" \
+                || "${PR_HEAD_REPOSITORY}" != "${GITHUB_REPOSITORY}" \
+                || "${PR_HEAD_BRANCH}" != "${BENCHMARK_BRANCH}" \
+                || "${PR_HEAD_SHA}" != "${BENCHMARK_SHA}" \
+                || "${PR_URL}" != "https://github.com/${GITHUB_REPOSITORY}/pull/${REQUESTED_PULL_REQUEST}" ]]; then
+            echo "::error::PR #${REQUESTED_PULL_REQUEST} must be an open ${GITHUB_REPOSITORY}:${BENCHMARK_BRANCH} PR to develop at ${BENCHMARK_SHA}."
+            exit 1
+          fi
+          printf 'pull_request_number=%s\npull_request_url=%s\n' \
+            "${REQUESTED_PULL_REQUEST}" "${PR_URL}" >> "${GITHUB_OUTPUT}"
+
   benchmark:
     name: Run nightly benchmark
+    needs: source-metadata
     runs-on: rocjitsu-benchmark
     timeout-minutes: 210
     permissions:
@@ -167,7 +248,7 @@ jobs:
 
   publish:
     name: Publish dashboard data
-    needs: benchmark
+    needs: [source-metadata, benchmark]
     if: ${{ !cancelled() && needs.benchmark.outputs.ran == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -178,6 +259,10 @@ jobs:
       BENCHMARK_BRANCH: ${{ github.ref_name }}
       BENCHMARK_SHA: ${{ github.sha }}
       BENCHMARK_COMMIT_MESSAGE: ${{ needs.benchmark.outputs.source_commit_message }}
+      SOURCE_BASE_BRANCH: ${{ needs.source-metadata.outputs.base_branch }}
+      SOURCE_BASE_SHA: ${{ needs.source-metadata.outputs.base_sha }}
+      SOURCE_PULL_REQUEST_NUMBER: ${{ needs.source-metadata.outputs.pull_request_number }}
+      SOURCE_PULL_REQUEST_URL: ${{ needs.source-metadata.outputs.pull_request_url }}
 
     steps:
       - name: Download benchmark diagnostics
@@ -234,17 +319,32 @@ jobs:
           # Build the run and catalog once. Retries only republish that build
           # onto the latest results branch.
           BUILD_DIR="${RUNNER_TEMP}/dashboard-built"
+          PREPARE_ARGS=(
+            --raw-run "${RESULTS_DOWNLOAD_DIR}/${SINGLE_THREAD_MODE}/run.json"
+            --raw-run "${RESULTS_DOWNLOAD_DIR}/${MULTI_THREAD_MODE}/run.json"
+            --data-dir "${BUILD_DIR}"
+            --run-id "${RUN_ID}"
+            --expected-sha "${BENCHMARK_SHA}"
+            --expected-corpus-sha "${CORPUS_SHA}"
+            --machine-id "${BENCHMARK_MACHINE}"
+            --trigger "${TRIGGER}"
+            --branch "${BENCHMARK_BRANCH}"
+            --commit-message "${BENCHMARK_COMMIT_MESSAGE}"
+          )
+          if [[ -n "${SOURCE_BASE_SHA}" ]]; then
+            PREPARE_ARGS+=(
+              --base-branch "${SOURCE_BASE_BRANCH}"
+              --base-sha "${SOURCE_BASE_SHA}"
+            )
+          fi
+          if [[ -n "${SOURCE_PULL_REQUEST_NUMBER}" ]]; then
+            PREPARE_ARGS+=(
+              --pull-request-number "${SOURCE_PULL_REQUEST_NUMBER}"
+              --pull-request-url "${SOURCE_PULL_REQUEST_URL}"
+            )
+          fi
           python "${GITHUB_WORKSPACE}/dashboard/emulation/rocjitsu/website/dashboard/scripts/dashboard-data/prepare-dashboard-data.py" \
-              --raw-run "${RESULTS_DOWNLOAD_DIR}/${SINGLE_THREAD_MODE}/run.json" \
-              --raw-run "${RESULTS_DOWNLOAD_DIR}/${MULTI_THREAD_MODE}/run.json" \
-              --data-dir "${BUILD_DIR}" \
-              --run-id "${RUN_ID}" \
-              --expected-sha "${BENCHMARK_SHA}" \
-              --expected-corpus-sha "${CORPUS_SHA}" \
-              --machine-id "${BENCHMARK_MACHINE}" \
-              --trigger "${TRIGGER}" \
-              --branch "${BENCHMARK_BRANCH}" \
-              --commit-message "${BENCHMARK_COMMIT_MESSAGE}"
+            "${PREPARE_ARGS[@]}"
 
           MAX_ATTEMPTS=20
           for ATTEMPT in $(seq 1 "${MAX_ATTEMPTS}"); do

@@ -663,6 +663,146 @@ class PrepareTests(unittest.TestCase):
         self.assertIn('completed by publication', result.stderr)
         self.assertFalse(self.data.exists())
 
+    def test_side_branch_source_base_and_pull_request_are_published(self):
+        input_base_sha = 'Dd' * 20
+        expected_base_sha = input_base_sha.lower()
+        self.assert_ok(
+            self.invoke(
+                extra=(
+                    '--branch',
+                    'feature/example',
+                    '--trigger',
+                    'manual',
+                    '--base-branch',
+                    'develop',
+                    '--base-sha',
+                    input_base_sha,
+                    '--pull-request-number',
+                    '13059',
+                    '--pull-request-url',
+                    'https://github.com/ROCm/rocm-systems/pull/13059',
+                )
+            )
+        )
+        run = self.read('runs/side-branches/attempt-1.json')
+        self.assertEqual(
+            run['source']['base'],
+            {'branch': 'develop', 'commit': expected_base_sha},
+        )
+        self.assertEqual(
+            run['source']['pullRequest'],
+            {
+                'number': 13059,
+                'url': 'https://github.com/ROCm/rocm-systems/pull/13059',
+            },
+        )
+
+    def test_pull_request_url_host_matches_consumer_contract(self):
+        arguments = (
+            '--branch',
+            'feature/example',
+            '--trigger',
+            'manual',
+            '--base-branch',
+            'develop',
+            '--base-sha',
+            'd' * 40,
+            '--pull-request-number',
+            '1',
+            '--pull-request-url',
+        )
+        for host in (
+            'example.com',
+            'github.com.example.com',
+            'github.com:bad',
+            'github.com:99999',
+        ):
+            with self.subTest(host=host):
+                destination = self.root / host
+                result = self.invoke(
+                    extra=arguments
+                    + (
+                        f'https://{host}/ROCm/rocm-systems/pull/1',
+                        '--data-dir',
+                        str(destination),
+                    )
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('Pull request URL', result.stderr)
+                self.assertFalse(destination.exists())
+        self.assert_ok(
+            self.invoke(
+                extra=arguments + ('https://github.com/ROCm/rocm-systems/pull/1',)
+            )
+        )
+        self.assert_ok(
+            subprocess.run(
+                [
+                    'node',
+                    str(HERE.parent.parent / 'validate-dashboard-data.mjs'),
+                    str(self.data),
+                ],
+                capture_output=True,
+                text=True,
+            )
+        )
+
+    def test_side_branch_source_base_without_pull_request_is_published(self):
+        self.assert_ok(
+            self.invoke(
+                extra=(
+                    '--branch',
+                    'feature/example',
+                    '--trigger',
+                    'manual',
+                    '--base-branch',
+                    'develop',
+                    '--base-sha',
+                    'd' * 40,
+                )
+            )
+        )
+        source = self.read('runs/side-branches/attempt-1.json')['source']
+        self.assertEqual(source['base'], {'branch': 'develop', 'commit': 'd' * 40})
+        self.assertNotIn('pullRequest', source)
+
+    def test_source_base_and_pull_request_arguments_are_consistent(self):
+        cases = (
+            (('--base-branch', 'develop'), 'base'),
+            (('--base-sha', 'd' * 40), 'base'),
+            (
+                (
+                    '--branch',
+                    'feature/example',
+                    '--base-branch',
+                    'develop',
+                    '--base-sha',
+                    'short',
+                ),
+                'SHA',
+            ),
+            (('--pull-request-number', '0'), 'pull request'),
+            (
+                ('--pull-request-url', 'https://github.com/ROCm/rocm-systems/pull/1'),
+                'pull request',
+            ),
+            (
+                (
+                    '--pull-request-number',
+                    '1',
+                    '--pull-request-url',
+                    'https://github.com/ROCm/rocm-systems/pull/2',
+                ),
+                'pull request',
+            ),
+        )
+        for extra, message in cases:
+            with self.subTest(extra=extra):
+                result = self.invoke(extra=extra)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message.lower(), result.stderr.lower())
+                self.assertFalse(self.data.exists())
+
     def test_content_addressed_catalog_and_target_independent_workloads(self):
         import hashlib
 
