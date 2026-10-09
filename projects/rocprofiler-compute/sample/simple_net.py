@@ -32,7 +32,7 @@ class SimpleNet(nn.Module):
 
     def forward(self, x):
         if self.same_line_linear:
-            # fmt: off
+            # fmt: off  # two Linear.forward calls on one source line
             x = self.fc1(x); x = self.fc2(x)  # noqa: E702
             # fmt: on
             return x
