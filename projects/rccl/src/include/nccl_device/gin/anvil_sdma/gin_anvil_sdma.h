@@ -28,9 +28,13 @@ static constexpr int kSdmaDirtyBitWidth = NCCL_GIN_ANVIL_SDMA_DIRTY_BITS;
 struct ncclGinAnvilSdmaRequest {
   int peer;
   uint32_t channelMask;
+  uint64_t target;
 };
 static_assert(sizeof(ncclGinAnvilSdmaRequest) <= sizeof(ncclGinRequest_t),
               "ncclGinAnvilSdmaRequest must fit in ncclGinRequest_t");
+
+// The request has room for one queue target, so a request spanning several channels waits on their live targets.
+static constexpr uint64_t kSdmaLiveTarget = ~0ULL;
 
 NCCL_DEVICE_INLINE bool anvilCtxValid(ncclGinAnvilSdmaGPUContext* rsCtx) {
   return rsCtx != nullptr && loadConst(&rsCtx->layoutMagic) == NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC;
@@ -165,27 +169,37 @@ NCCL_DEVICE_INLINE uint32_t dirtyChannelMask(uint64_t dirty, int peer, int numCh
   return mask;
 }
 
+NCCL_DEVICE_INLINE ::sdma_anvil::SdmaQueueDeviceHandle* channelHandle(ncclGinAnvilSdmaGPUContext* rsCtx, int peer,
+                                                                      int ch) {
+  auto** handles = (::sdma_anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
+  if (handles == nullptr) return nullptr;
+  return loadConst(handles + peer * loadConst(&rsCtx->numChannels) + ch);
+}
+
+// Polls instead of calling quiet() so untimed callers still return on abort.
+template <bool HasTimeout>
+NCCL_DEVICE_INLINE ncclResult_t waitFlushed(::sdma_anvil::SdmaQueueDeviceHandle* handle, uint64_t target,
+                                            uint32_t* abortFlag, uint64_t startCycle, uint64_t timeoutCycles) {
+  using nccl::utility::testAbort;
+  uint32_t steps = 0;
+  while (!::sdma_anvil::isFlushed(*handle, target)) {
+    if (HasTimeout && clock64() - startCycle >= timeoutCycles) return ncclTimeout;
+    if (testAbort(abortFlag, steps)) return ncclSuccess;
+  }
+  return ncclSuccess;
+}
+
 template <bool HasTimeout>
 NCCL_DEVICE_INLINE ncclResult_t drainChannels(ncclGinAnvilSdmaGPUContext* rsCtx, int peer, uint32_t channelMask,
                                               uint32_t* abortFlag, uint64_t startCycle, uint64_t timeoutCycles) {
-  using nccl::utility::testAbort;
-  auto** handles = (::sdma_anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
-  if (handles == nullptr) return ncclSuccess;
   int numCh = loadConst(&rsCtx->numChannels);
   for (int ch = 0; ch < numCh; ++ch) {
     if ((channelMask & (1u << ch)) == 0) continue;
-    auto* handle = loadConst(handles + peer * numCh + ch);
+    auto* handle = channelHandle(rsCtx, peer, ch);
     if (handle == nullptr) continue;
-    if NCCL_IF_CONSTEXPR (HasTimeout) {
-      uint64_t target = ::sdma_anvil::quietTarget(*handle);
-      uint32_t steps = 0;
-      while (!::sdma_anvil::isFlushed(*handle, target)) {
-        if (clock64() - startCycle >= timeoutCycles) return ncclTimeout;
-        if (testAbort(abortFlag, steps)) return ncclSuccess;
-      }
-    } else {
-      ::sdma_anvil::quiet(*handle);
-    }
+    ncclResult_t ret =
+      waitFlushed<HasTimeout>(handle, ::sdma_anvil::quietTarget(*handle), abortFlag, startCycle, timeoutCycles);
+    if (ret != ncclSuccess) return ret;
   }
   return ncclSuccess;
 }
@@ -195,14 +209,17 @@ NCCL_DEVICE_INLINE ncclResult_t waitRequest(ncclGinCtx ctx, ncclGinRequest_t& re
                                             uint64_t timeoutCycles) {
   auto& req = reinterpret_cast<ncclGinAnvilSdmaRequest&>(request);
   ncclGinAnvilSdmaGPUContext* rsCtx = (ncclGinAnvilSdmaGPUContext*)ctx.handle;
+  ncclResult_t ret = ncclSuccess;
   if (req.channelMask != 0 && anvilCtxValid(rsCtx)) {
     uint64_t startCycle = HasTimeout ? clock64() : 0;
-    ncclResult_t ret =
-      drainChannels<HasTimeout>(rsCtx, req.peer, req.channelMask, abortFlag, startCycle, timeoutCycles);
-    if (ret != ncclSuccess) return ret;
+    if (req.target == kSdmaLiveTarget) {
+      ret = drainChannels<HasTimeout>(rsCtx, req.peer, req.channelMask, abortFlag, startCycle, timeoutCycles);
+    } else if (auto* handle = channelHandle(rsCtx, req.peer, __builtin_ctz(req.channelMask))) {
+      ret = waitFlushed<HasTimeout>(handle, req.target, abortFlag, startCycle, timeoutCycles);
+    }
   }
   NCCL_GIN_THREADFENCE_SYSTEM();
-  return ncclSuccess;
+  return ret;
 }
 
 }  // namespace detail
@@ -517,6 +534,7 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     using nccl::utility::loadConst;
     ncclGinAnvilSdmaGPUContext* rsCtx = (ncclGinAnvilSdmaGPUContext*)ctx.handle;
     uint64_t* sdmaDirty = anvilCtxValid(rsCtx) ? loadConst(&rsCtx->sdmaDirty) : nullptr;
+    ncclResult_t ret = ncclSuccess;
     if (sdmaDirty != nullptr) {
       uint64_t startCycle = clock64();
       uint64_t dirty = __scoped_atomic_load_n(sdmaDirty, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
@@ -526,15 +544,15 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
       for (int p = coop.thread_rank(); dirty != 0 && p < ctx.nRanks; p += coop.size()) {
         uint32_t mask = dirtyChannelMask(dirty, p, numCh);
         if (mask == 0) continue;
-        ncclResult_t ret = drainChannels</*HasTimeout=*/true>(rsCtx, p, mask, abortFlag, startCycle, timeoutCycles);
-        if (ret != ncclSuccess) return ret;
+        ret = drainChannels</*HasTimeout=*/true>(rsCtx, p, mask, abortFlag, startCycle, timeoutCycles);
+        if (ret != ncclSuccess) break;
         drained |= uint64_t(mask) << (p * numCh);
       }
-      // A thread can return early on timeout, so each one clears only the bits it drained.
+      // A thread can stop early on timeout, so each one clears only the bits it drained.
       if (drained != 0) __scoped_atomic_fetch_and(sdmaDirty, ~drained, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     }
     __threadfence_system();
-    return ncclSuccess;
+    return ret;
   }
 };
 
@@ -598,10 +616,13 @@ struct ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     (void)hasDescriptor;
     (void)descriptor;
     (void)optFlags;
+    using nccl::gin::anvil::detail::channelHandle;
+    using nccl::gin::anvil::detail::kSdmaLiveTarget;
     using nccl::utility::loadConst;
     auto* request = reinterpret_cast<nccl::gin::anvil::detail::ncclGinAnvilSdmaRequest*>(outRequest);
     request->peer = peer;
     request->channelMask = 0;
+    request->target = 0;
 
     ncclGinAnvilSdmaGPUContext* rsCtx = (ncclGinAnvilSdmaGPUContext*)ctx.handle;
     if (nccl::gin::anvil::detail::anvilCtxValid(rsCtx)) {
@@ -609,8 +630,14 @@ struct ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
       uint64_t dirty =
         dirtyPtr == nullptr ? 0
                             : __scoped_atomic_load_n(dirtyPtr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
-      request->channelMask =
-        nccl::gin::anvil::detail::dirtyChannelMask(dirty, peer, loadConst(&rsCtx->numChannels));
+      uint32_t mask = nccl::gin::anvil::detail::dirtyChannelMask(dirty, peer, loadConst(&rsCtx->numChannels));
+      request->channelMask = mask;
+      if (__builtin_popcount(mask) > 1) {
+        request->target = kSdmaLiveTarget;
+      } else if (mask != 0) {
+        auto* handle = channelHandle(rsCtx, peer, __builtin_ctz(mask));
+        if (handle != nullptr) request->target = ::sdma_anvil::quietTarget(*handle);
+      }
     }
   }
 };
