@@ -88,6 +88,7 @@ struct RocrEntryPoints {
   decltype(hsa_amd_agent_iterate_memory_pools)* hsa_amd_agent_iterate_memory_pools_;
   decltype(hsa_amd_memory_pool_allocate)* hsa_amd_memory_pool_allocate_;
   decltype(hsa_amd_memory_pool_free)* hsa_amd_memory_pool_free_;
+  decltype(hsa_amd_memory_fill)* hsa_amd_memory_fill_;
   decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_;
   decltype(hsa_amd_memory_async_copy_on_engine)* hsa_amd_memory_async_copy_on_engine_;
   decltype(hsa_amd_memory_async_batch_copy)* hsa_amd_memory_async_batch_copy_;
@@ -364,6 +365,9 @@ class Hsa : public amd::AllStatic {
   }
   static hsa_status_t memory_pool_free(void* ptr) {
     return ROCR_DYN(hsa_amd_memory_pool_free)(ptr);
+  }
+  static hsa_status_t memory_fill(void* ptr, uint32_t value, size_t count) {
+    return ROCR_DYN(hsa_amd_memory_fill)(ptr, value, count);
   }
   static hsa_status_t memory_async_copy(void* dst, hsa_agent_t dst_agent, const void* src,
                                         hsa_agent_t src_agent, size_t size,
