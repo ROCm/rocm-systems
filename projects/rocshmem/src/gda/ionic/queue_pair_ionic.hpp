@@ -37,11 +37,13 @@ template <> struct QueuePairTraits<QueuePairIONIC> {
   static_assert(InlineMax == 32, "ionic can send up to 32 bytes inline in a WQE");
 
   /*
-   * @brief ionic preferred inlining threshold. Although the hardware can inline
-   * up to InlineMax (32B), inlining more than 8B was found harmful to latency,
-   * so restrict the preferred threshold to a single 8B store.
+   * @brief ionic preferred inlining threshold matches the hardware maximum.
+   * Inlining up to InlineMax (32B) avoids a second NIC DMA for the payload.
+   * The earlier byte-by-byte inline copy made larger inlines costly; with the
+   * constant-width copy_inline_payload (one or two wide VMEM ops, no byte loop)
+   * latency is flat across 1..32B, so there is no reason to cap below InlineMax.
    */
-  static constexpr size_t InlineThreshold = 8;
+  static constexpr size_t InlineThreshold = InlineMax;
   static_assert(InlineThreshold <= InlineMax);
 };
 
