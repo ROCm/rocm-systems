@@ -22,20 +22,16 @@ namespace {
 using namespace amdgpu;
 using namespace plugins::race_detector;
 
-// A contract shared by both dynamic detectors. Keep expected counter families
-// explicit instead of using the production conversion as the test oracle.
-// Sample/BVH have no race-plugin memory-pipeline representation.
+// Keep expected mappings independent of the production conversion.
 struct CounterDomain {
   WaitCounterKind core;
+  // Absent when the race plugin has no corresponding counter.
   std::optional<WaitCounterType> race;
 };
 
 constexpr CounterDomain kLoad{WaitCounterKind::Load, WaitCounterType::LOADCNT};
 constexpr CounterDomain kDs{WaitCounterKind::Ds, WaitCounterType::DSCNT};
 
-// Decode once per wait and give each adapter the actual ISA instruction.
-// Event seeding below intentionally bypasses producer classification, so these
-// tests isolate the wait/readiness contract from instruction execution coverage.
 template <typename Consume> void with_wait(rj_code_arch_t arch, uint32_t word, Consume consume) {
   auto decoder = Decoder::create(arch);
   ASSERT_NE(decoder, nullptr);
@@ -156,6 +152,8 @@ private:
   StringSink *sink_ = nullptr;
 };
 
+// Seed pending events directly to test wait retirement independently of
+// producer classification.
 template <typename Backend> class WaitHazardTest : public ::testing::Test {};
 using WaitBackends = ::testing::Types<CoreWaitBackend, RaceWaitBackend>;
 TYPED_TEST_SUITE(WaitHazardTest, WaitBackends);
@@ -271,10 +269,10 @@ TYPED_TEST(WaitHazardTest, PartialWaitCountsOperationsWithoutRegisterResults) {
 TYPED_TEST(WaitHazardTest, UnrelatedWaitDoesNotReuseAnEarlierThreshold) {
   TypeParam backend(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(backend.ready());
-  backend.wait(0xbfc00000u); // The wave's stored LOADCNT target is now zero.
+  backend.wait(0xbfc00000u); // s_wait_loadcnt 0.
   backend.load(kLoad, 5);
   backend.load(kDs, 6);
-  backend.wait(0xbfc60000u); // s_wait_dscnt 0 must not apply the old LOADCNT target.
+  backend.wait(0xbfc60000u); // s_wait_dscnt 0.
   EXPECT_TRUE(backend.reports(5));
   EXPECT_FALSE(backend.reports(6));
 }
