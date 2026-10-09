@@ -11,6 +11,9 @@ ARG ROCM_SYSTEMS_REF=develop
 ## AMD GPU Targets
 ARG GPU_TARGETS=gfx942
 
+## extra RCCL install.sh flags, e.g. --rocshmem or --rocshmem-gin (empty by default)
+ARG RCCL_BUILD_ARGS=""
+
 ## creating scratch space
 ENV WORKDIR /workspace
 RUN mkdir -p ${WORKDIR}
@@ -96,20 +99,20 @@ RUN wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.g
     && rm -rf ompi4 openmpi-4.1.6.tar.gz
 
 
-## fetching RCCL and RCCL-Tests sources (shallow, blobless, sparse checkout of the monorepo)
+## fetching RCCL, RCCL-Tests and rocSHMEM sources (shallow, blobless, sparse checkout of the monorepo)
 ENV ROCM_SYSTEMS_DIR=${WORKDIR}/rocm-systems
 RUN git init "${ROCM_SYSTEMS_DIR}" \
     && cd "${ROCM_SYSTEMS_DIR}" \
     && git remote add origin "${ROCM_SYSTEMS_REPO}" \
     && git sparse-checkout init --cone \
-    && git sparse-checkout set projects/rccl projects/rccl-tests \
+    && git sparse-checkout set projects/rccl projects/rccl-tests projects/rocshmem \
     && git fetch --depth 1 --filter=blob:none origin "${ROCM_SYSTEMS_REF}" \
     && git checkout FETCH_HEAD
 
 ## building RCCL
 ENV RCCL_INSTALL_PREFIX=${WORKDIR}/rccl/install
 RUN cd "${ROCM_SYSTEMS_DIR}/projects/rccl" \
-    && ./install.sh --amdgpu_targets=${GPU_TARGETS} --prefix=${RCCL_INSTALL_PREFIX}
+    && ./install.sh --amdgpu_targets=${GPU_TARGETS} --prefix=${RCCL_INSTALL_PREFIX} ${RCCL_BUILD_ARGS}
 
 ## building RCCL-Tests (symlinked to ${WORKDIR}/rccl-tests so the binaries stay at ${WORKDIR}/rccl-tests/build)
 ## RCCL_DIR is required: rccl-tests prepends ROCM_PATH to CMAKE_PREFIX_PATH, which would pick the base image RCCL

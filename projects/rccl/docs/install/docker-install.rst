@@ -36,6 +36,13 @@ To build the Docker image and run the container, follow these steps.
 
       docker build -t rccl-tests -f docker/Dockerfile.ubuntu --build-arg="ROCM_IMAGE_NAME=rocm/dev-ubuntu-24.04" --build-arg="ROCM_IMAGE_TAG=6.4.2" --build-arg="GPU_TARGETS=gfx942" --pull .
 
+   Extra RCCL ``install.sh`` flags can be passed with ``RCCL_BUILD_ARGS``, which is empty by default.
+   For example, to build RCCL with rocSHMEM, use this command:
+
+   .. code-block:: shell
+
+      docker build -t rccl-tests -f docker/Dockerfile.ubuntu --build-arg="RCCL_BUILD_ARGS=--rocshmem" --pull .
+
 #. Launch an interactive Docker container on a system with AMD GPUs:
 
    .. code-block:: shell

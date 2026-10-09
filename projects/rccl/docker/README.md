@@ -16,6 +16,11 @@ The base docker image, rocm-systems repo (`ROCM_SYSTEMS_REPO`), branch/tag/commi
 $ docker build -t rccl-tests -f Dockerfile.ubuntu --build-arg="ROCM_IMAGE_NAME=rocm/dev-ubuntu-20.04" --build-arg="ROCM_IMAGE_TAG=6.2" --build-arg="GPU_TARGETS=gfx90a" --pull .
 ```
 
+Extra RCCL `install.sh` flags can be passed with `RCCL_BUILD_ARGS` (empty by default). E.g., to build RCCL with rocSHMEM:
+```shell
+$ docker build -t rccl-tests -f Dockerfile.ubuntu --build-arg="RCCL_BUILD_ARGS=--rocshmem" --pull .
+```
+
 ### To start an interactive docker container on a system with AMD GPUs :
 
 ```shell
