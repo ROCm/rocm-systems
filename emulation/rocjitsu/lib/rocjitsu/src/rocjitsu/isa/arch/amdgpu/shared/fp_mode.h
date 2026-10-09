@@ -917,7 +917,8 @@ inline double ldexp_f16(float value, int32_t adjustment) {
 
 /// @brief Round an F16 arithmetic destination and apply output-denormal policy.
 /// @details Migrated VOP3 callers leave omod=0 and modify the rounded bits
-/// afterward. SDWA supplies omod here to retain its pre-round scaling contract.
+/// afterward. SDWA supplies omod here to retain legacy pre-round scaling, which
+/// has no SDWA hardware validation. Its migration requires separate captures.
 inline uint16_t finish_arithmetic_f16(double value, uint32_t round_mode, uint32_t denorm_mode,
                                       bool fp16_ovfl, uint32_t omod = 0) {
   detail::ScopedFenv environment(0);

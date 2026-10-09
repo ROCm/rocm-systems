@@ -21,7 +21,11 @@
 ///   - Specialized generators using vop3_dst_mod: F32 intermediate modifiers,
 ///     including the current pre-narrowing F16 DIV_FIXUP implementation.
 ///   - SDWA F16 (dpp_sdwa_ops.h): separate arithmetic and rounded-TRANS
-///     helpers; no captures.
+///     helpers; no SDWA captures. Arithmetic retains unvalidated legacy scaling
+///     before narrowing. For RDNA1/2 MUL_F16 with inputs 0x3e00 and 0x7bff,
+///     div:2, MODE=0 and IEEE=0, the emulator returns 0x79ff through SDWA versus
+///     0x7c00 through VOP3. Only the VOP3 result is capture-backed; migrating
+///     SDWA requires separate hardware validation.
 /// - Intentional exception:
 ///   - Pseudo-scalar F32 transcendentals: scale the exact value before one F32
 ///     rounding; match gfx1201 captures.
