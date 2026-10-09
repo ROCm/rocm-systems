@@ -805,6 +805,20 @@ hsaKmtUnmapMemoryToGPU(
     void*           MemoryAddress       //IN (page-aligned)
     );
 
+/**
+  Copies memory from src to dst, translating GPU virtual addresses to CPU
+  virtual addresses when needed (Windows/WDDM).  On Linux/KFD where GPU VA
+  == CPU VA this is a plain memcpy wrapper.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtDtifMemoryCopy(
+    void*           dst,        //IN
+    const void*     src,        //IN
+    HSAuint64       size        //IN
+    );
+
 
 /**
   Notifies the kernel driver that a process wants to use GPU debugging facilities

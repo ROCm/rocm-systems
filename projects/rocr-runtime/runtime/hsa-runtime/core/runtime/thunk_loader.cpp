@@ -261,6 +261,10 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       HSAKMT_PFN(hsaKmtUnmapMemoryToGPU) = (HSAKMT_DEF(hsaKmtUnmapMemoryToGPU)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtUnmapMemoryToGPU");
       if (HSAKMT_PFN(hsaKmtUnmapMemoryToGPU) == nullptr) goto LOAD_ERROR;
 
+      // Optional: older thunk libraries may not export this symbol.
+      // Call sites guard on enable_dtif_fast_copy() && pfn != nullptr.
+      HSAKMT_PFN(hsaKmtDtifMemoryCopy) = (HSAKMT_DEF(hsaKmtDtifMemoryCopy)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtDtifMemoryCopy");
+
       HSAKMT_PFN(hsaKmtDbgRegister) = (HSAKMT_DEF(hsaKmtDbgRegister)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtDbgRegister");
       if (HSAKMT_PFN(hsaKmtDbgRegister) == nullptr) goto LOAD_ERROR;
 
@@ -552,6 +556,7 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtMapMemoryToGPU) = (HSAKMT_DEF(hsaKmtMapMemoryToGPU)*)(&hsaKmtMapMemoryToGPU);
       HSAKMT_PFN(hsaKmtMapMemoryToGPUNodes) = (HSAKMT_DEF(hsaKmtMapMemoryToGPUNodes)*)(&hsaKmtMapMemoryToGPUNodes);
       HSAKMT_PFN(hsaKmtUnmapMemoryToGPU) = (HSAKMT_DEF(hsaKmtUnmapMemoryToGPU)*)(&hsaKmtUnmapMemoryToGPU);
+      HSAKMT_PFN(hsaKmtDtifMemoryCopy) = (HSAKMT_DEF(hsaKmtDtifMemoryCopy)*)(&hsaKmtDtifMemoryCopy);
       HSAKMT_PFN(hsaKmtDbgRegister) = (HSAKMT_DEF(hsaKmtDbgRegister)*)(&hsaKmtDbgRegister);
       HSAKMT_PFN(hsaKmtDbgUnregister) = (HSAKMT_DEF(hsaKmtDbgUnregister)*)(&hsaKmtDbgUnregister);
       HSAKMT_PFN(hsaKmtDbgWavefrontControl) = (HSAKMT_DEF(hsaKmtDbgWavefrontControl)*)(&hsaKmtDbgWavefrontControl);
