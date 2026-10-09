@@ -397,7 +397,7 @@ int GetUnregisterEventPrivDataSize();
 /// @brief Unregister a previously registered user-mode event
 void FillinUnregisterEventPrivData(void* priv_data,  ///< Pointer to event unregistration private data structure
                                    uint64_t handle, ///< Event handle to unregister
-                                   uint32_t event_id); ///< Event identifier
+                                   uint32_t event_id = 0); ///< Event identifier
 
 // ============================================================================
 // Interop Interfaces (Windows only)
