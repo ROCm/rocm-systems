@@ -2147,6 +2147,7 @@ rj_add_interposer_test_suite(
     ExportOfAUserptrBufferFailsAndLeavesTheCallersMemoryAlone
     GemMetadataRoundTripsOnABuffer
     GemOpReportsTheCreateSize
+    DupRacingTheCloseOfAPrimeExportKeepsTheBoState
     GemOpSetPlacementChangesTheReportedDomain
     IpcImportSharesThePagesOfTheExportedAllocation
     KfdBufferKeepsItsMetadataAfterEveryHandleCloses
