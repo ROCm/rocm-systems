@@ -400,7 +400,9 @@ SELECT
     K.end,
     (K.end - K.start) AS duration,
     PMC_I.name AS counter_name,
-    PMC_E.value AS counter_value
+    PMC_E.value AS counter_value,
+    -- Kernel-replay pass that collected the value. Rows without the tag are pass 0.
+    COALESCE(json_extract(PMC_E.extdata, '$.replay_pass'), 0) AS replay_pass
 FROM
     `rocpd_pmc_event` PMC_E
     INNER JOIN `rocpd_info_pmc` PMC_I ON PMC_I.id = PMC_E.pmc_id

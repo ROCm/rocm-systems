@@ -38,10 +38,12 @@
 #      replay_pass index advances), and dispatch_id increments sequentially across dispatches -- one
 #      id minted per logical dispatch, reused by every pass (never one id per pass).
 #   6. With --rocpd-input, the rocpd counters_collection view reports each (dispatch, counter) as
-#      the mean of the passes that collected it, so the common counters are not multiplied by N.
+#      the mean of the passes that collected it, so the common counters are not multiplied by N,
+#      and every raw rocpd row carries the replay pass that pmc_events reports.
 # (The app verifies its own results in the generate step, guarding the restored data itself.)
 
 import collections
+import json
 import sys
 
 # Python 3.6 compatibility: dataclasses added in 3.7
@@ -424,6 +426,44 @@ def test_rocpd_counters_collection_averages_passes(json_data, rocpd_db):
             f"{actual[(dispatch_id, counter)]}, but its replay passes in JSON are {values} "
             f"(mean {mean})"
         )
+
+
+def test_rocpd_rows_carry_replay_pass(json_data, rocpd_db):
+    # The averaging above depends on the writer tagging every row: a pass after the first
+    # carries exactly {"replay_pass":N} in extdata and pass 0 keeps "{}". Each (dispatch, pass)
+    # must hold one row per instance value in that pass's JSON record, and pmc_events must
+    # report the same pass for each row.
+    want = collections.Counter()
+    for rec in _counter_records(_sdk(json_data)):
+        want[(_dispatch_id(rec), _pass_index(rec))] += len(rec.get("records", []))
+
+    got = collections.Counter()
+    for dispatch_id, extdata, rows in rocpd_db.execute(
+        "SELECT K.dispatch_id, E.extdata, COUNT(*) FROM rocpd_pmc_event E "
+        "INNER JOIN rocpd_kernel_dispatch K ON K.event_id = E.event_id AND K.guid = E.guid "
+        "WHERE E.sample_id IS NULL GROUP BY K.dispatch_id, E.extdata"
+    ):
+        pass_index = json.loads(extdata).get("replay_pass", 0)
+        tag = "{}" if pass_index == 0 else f'{{"replay_pass":{pass_index}}}'
+        assert (
+            extdata == tag
+        ), f"dispatch {dispatch_id}: rocpd_pmc_event extdata {extdata!r}, expected {tag!r}"
+        got[(int(dispatch_id), pass_index)] += rows
+    assert got == want, (
+        "rocpd_pmc_event rows per (dispatch, replay pass) do not match the JSON instance "
+        f"records: rocpd {sorted(got.items())}, JSON {sorted(want.items())}"
+    )
+
+    by_view = collections.Counter()
+    for dispatch_id, pass_index, rows in rocpd_db.execute(
+        "SELECT dispatch_id, replay_pass, COUNT(*) FROM pmc_events "
+        "GROUP BY dispatch_id, replay_pass"
+    ):
+        by_view[(int(dispatch_id), int(pass_index))] += rows
+    assert by_view == want, (
+        "pmc_events rows per (dispatch, replay_pass) do not match the JSON instance records: "
+        f"rocpd {sorted(by_view.items())}, JSON {sorted(want.items())}"
+    )
 
 
 def test_each_pass_collects_distinct_batch(json_data, expected_passes, common_counters):

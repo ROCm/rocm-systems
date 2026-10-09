@@ -75,6 +75,7 @@ _EVT_HIP_EVENT_1 = 9
 _PMC_NO_SPM_ID = 1
 _PMC_SPM_ID = 2
 _PMC_GRBM_COUNT_ID = 3
+_PMC_SQ_INSTS_SALU_ID = 4
 _TRACK_SPM_ID = 1
 _SAMPLE_SPM_ID = 1
 
@@ -546,34 +547,56 @@ def insert_minimal_data(
         )
 
         # Kernel-replay dispatch counters. Dispatch 1 is replayed three times: SQ_WAVES has two
-        # instances in every pass, with per-pass sums 16, 18 and 20, and GRBM_COUNT is collected
-        # by pass 0 only. Passes after the first carry replay_pass in extdata, as rocprofv3
-        # writes them. Dispatch 2 has untagged SQ_WAVES rows, like a run without kernel replay.
-        conn.execute(
+        # instances in every pass, with per-pass sums 16, 18 and 20; GRBM_COUNT is collected by
+        # pass 0 only; SQ_INSTS_SALU by passes 1 and 2 only, with per-pass sums 5 and 6. Passes
+        # after the first carry replay_pass in extdata, as rocprofv3 writes them. Dispatch 2 has
+        # untagged SQ_WAVES rows, like a run without kernel replay.
+        conn.executemany(
             f"INSERT INTO {tbl('rocpd_info_pmc')} "
             "(id, guid, nid, pid, agent_id, target_arch, name, symbol, description, "
             "component, value_type, block, expression, is_constant, is_derived, "
             "spm_support, extdata) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                _PMC_GRBM_COUNT_ID,
-                guid,
-                _NID,
-                _PID,
-                _AGENT_ID,
-                "GPU",
-                "GRBM_COUNT",
-                "GRBM_COUNT",
-                "Tie High - Count Number of Clocks",
-                "rocm",
-                "ABS",
-                "GRBM",
-                "",
-                0,
-                0,
-                None,
-                "{}",
-            ),
+            [
+                (
+                    _PMC_GRBM_COUNT_ID,
+                    guid,
+                    _NID,
+                    _PID,
+                    _AGENT_ID,
+                    "GPU",
+                    "GRBM_COUNT",
+                    "GRBM_COUNT",
+                    "Tie High - Count Number of Clocks",
+                    "rocm",
+                    "ABS",
+                    "GRBM",
+                    "",
+                    0,
+                    0,
+                    None,
+                    "{}",
+                ),
+                (
+                    _PMC_SQ_INSTS_SALU_ID,
+                    guid,
+                    _NID,
+                    _PID,
+                    _AGENT_ID,
+                    "GPU",
+                    "SQ_INSTS_SALU",
+                    "SQ_INSTS_SALU",
+                    "Number of SALU instructions issued",
+                    "rocm",
+                    "ABS",
+                    "SQ",
+                    "",
+                    0,
+                    0,
+                    None,
+                    "{}",
+                ),
+            ],
         )
 
         def replay_pass(index):
@@ -592,6 +615,10 @@ def insert_minimal_data(
                 (9, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 10.0, replay_pass(2)),
                 (10, guid, _EVT_KERNEL_2, _PMC_NO_SPM_ID, 4.0, "{}"),
                 (11, guid, _EVT_KERNEL_2, _PMC_NO_SPM_ID, 4.0, "{}"),
+                (12, guid, _EVT_KERNEL_1, _PMC_SQ_INSTS_SALU_ID, 2.0, replay_pass(1)),
+                (13, guid, _EVT_KERNEL_1, _PMC_SQ_INSTS_SALU_ID, 3.0, replay_pass(1)),
+                (14, guid, _EVT_KERNEL_1, _PMC_SQ_INSTS_SALU_ID, 3.0, replay_pass(2)),
+                (15, guid, _EVT_KERNEL_1, _PMC_SQ_INSTS_SALU_ID, 3.0, replay_pass(2)),
             ],
         )
 
