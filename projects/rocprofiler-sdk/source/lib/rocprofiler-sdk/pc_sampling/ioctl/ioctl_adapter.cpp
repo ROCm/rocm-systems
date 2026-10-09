@@ -110,6 +110,7 @@ kfd_open()
 
     return fd;
 }
+}  // namespace
 
 /** Call ioctl, restarting if it is interrupted
  * Taken from libhsakmt.c
@@ -117,6 +118,12 @@ kfd_open()
 int
 ioctl(int fd, unsigned long request, void* arg)
 {
+    if(fd < 0)
+    {
+        errno = EBADF;
+        return -EBADF;
+    }
+
     int ret;
 
     do
@@ -135,6 +142,8 @@ ioctl(int fd, unsigned long request, void* arg)
     return ret * errno;
 }
 
+namespace
+{
 // More or less taken from the HsaKmt
 
 /**
@@ -473,8 +482,15 @@ is_pc_sampling_method_supported(rocprofiler_ioctl_pc_sampling_method_kind_t ioct
 int
 get_kfd_fd()
 {
-    // WSL2/DXG exposes /dev/dxg instead of /dev/kfd, so KFD is absent by design there
-    static auto _v = platform::wsl::is_available() ? -1 : kfd_open();
+    static auto _v = []() {
+        if(platform::wsl::is_available())
+        {
+            ROCP_INFO << "WSL2/DXG detected: /dev/kfd is absent by design; PC sampling and KFD "
+                         "profiler ioctls are unavailable";
+            return -1;
+        }
+        return kfd_open();
+    }();
     return _v;
 }
 

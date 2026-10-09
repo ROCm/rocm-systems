@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
 #include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
 
@@ -29,9 +30,26 @@
 
 #include <gtest/gtest.h>
 
+#include <cerrno>
 #include <string>
 
 using namespace rocprofiler;
+
+// An unavailable KFD descriptor must be rejected before ::ioctl is reached, so the wrapper's
+// "Invalid KFD descriptor" message for a real EBADF is not printed.
+TEST(pc_sampling_kfd_unavailable, ioctl_rejects_invalid_fd)
+{
+    kfd_ioctl_get_version_args args = {};
+
+    ::testing::internal::CaptureStdout();
+    errno    = 0;
+    auto ret = pc_sampling::ioctl::ioctl(-1, AMDKFD_IOC_GET_VERSION, &args);
+    auto err = errno;
+
+    EXPECT_EQ(ret, -EBADF);
+    EXPECT_EQ(err, EBADF);
+    EXPECT_EQ(::testing::internal::GetCapturedStdout(), std::string{});
+}
 
 // Outside WSL2/DXG a /dev/kfd that cannot be opened is reported through ROCP_CI_LOG, which is
 // fatal in CI builds, so only WSL2/DXG and hosts with a usable /dev/kfd are checked here.

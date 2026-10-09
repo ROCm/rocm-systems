@@ -47,7 +47,8 @@ get_profiler_ioctl_request()
 {
     static auto request = []() {
         kfd_ioctl_get_version_args args = {};
-        if(ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_GET_VERSION, &args) != 0)
+        if(pc_sampling::ioctl::ioctl(
+               pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_GET_VERSION, &args) != 0)
         {
             auto err      = errno;
             auto fallback = static_cast<unsigned long>(AMDKFD_IOC_PROFILER);
@@ -69,6 +70,18 @@ get_profiler_ioctl_request()
 
     return request;
 }
+
+// Device lock and PTL control are KFD profiler ioctls. Without /dev/kfd (e.g. WSL2/DXG) the shared
+// wrapper rejects the descriptor with -EBADF, reported here as NOT_AVAILABLE so counters are
+// collected without them. On ROCPROFILER_STATUS_ERROR, errno holds the ioctl failure.
+rocprofiler_status_t
+profiler_ioctl(kfd_ioctl_profiler_args& args)
+{
+    auto ret = pc_sampling::ioctl::ioctl(
+        pc_sampling::ioctl::get_kfd_fd(), get_profiler_ioctl_request(), &args);
+    if(ret == 0) return ROCPROFILER_STATUS_SUCCESS;
+    return (ret == -EBADF) ? ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE : ROCPROFILER_STATUS_ERROR;
+}
 }  // namespace
 
 unsigned long
@@ -85,36 +98,23 @@ get_profiler_ioctl_request_for_version(uint32_t major_version, uint32_t minor_ve
 bool
 counter_collection_has_device_lock()
 {
-    // Device lock and PTL control are KFD profiler ioctls: without /dev/kfd (e.g. WSL2/DXG)
-    // they are unsupported and counters are collected without them.
-    auto fd = pc_sampling::ioctl::get_kfd_fd();
-    if(fd < 0) return false;
-
     kfd_ioctl_profiler_args args = {};
     args.op                      = KFD_IOC_PROFILER_VERSION;
-    int ret                      = ioctl(fd, get_profiler_ioctl_request(), &args);
-    if(ret == 0)
-    {
-        return true;
-    }
-    return false;
+    return profiler_ioctl(args) == ROCPROFILER_STATUS_SUCCESS;
 }
 
 rocprofiler_status_t
 counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues)
 {
     CHECK(agent);
-    auto fd = pc_sampling::ioctl::get_kfd_fd();
-    if(fd < 0) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
-
     kfd_ioctl_profiler_args args = {};
     args.op                      = KFD_IOC_PROFILER_PMC;
     args.pmc.gpu_id              = agent->gpu_id;
     args.pmc.lock                = 1;
     args.pmc.perfcount_enable    = all_queues ? 1 : 0;
 
-    int ret = ioctl(fd, get_profiler_ioctl_request(), &args);
-    if(ret != 0)
+    auto status = profiler_ioctl(args);
+    if(status == ROCPROFILER_STATUS_ERROR)
     {
         auto err = errno;
         switch(err)
@@ -148,45 +148,37 @@ counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues
         }
     }
 
-    return ROCPROFILER_STATUS_SUCCESS;
+    return status;
 }
 
 rocprofiler_status_t
 counter_collection_device_unlock(const rocprofiler_agent_t* agent)
 {
     CHECK(agent);
-    auto fd = pc_sampling::ioctl::get_kfd_fd();
-    if(fd < 0) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
-
     kfd_ioctl_profiler_args args = {};
     args.op                      = KFD_IOC_PROFILER_PMC;
     args.pmc.gpu_id              = agent->gpu_id;
     args.pmc.lock                = 0;
     args.pmc.perfcount_enable    = 0;
 
-    int ret = ioctl(fd, get_profiler_ioctl_request(), &args);
-    if(ret != 0)
+    auto status = profiler_ioctl(args);
+    if(status == ROCPROFILER_STATUS_ERROR)
     {
         auto err = errno;
         ROCP_WARNING << fmt::format("Failed to unlock device {} (error: {}). Continuing anyway.",
                                     agent->id.handle,
                                     strerror(err));
-        return ROCPROFILER_STATUS_ERROR;
     }
 
-    return ROCPROFILER_STATUS_SUCCESS;
+    return status;
 }
 
 bool
 ptl_control_supported()
 {
-    auto fd = pc_sampling::ioctl::get_kfd_fd();
-    if(fd < 0) return false;
-
     kfd_ioctl_profiler_args args = {};
     args.op                      = KFD_IOC_PROFILER_VERSION;
-    int ret                      = ioctl(fd, get_profiler_ioctl_request(), &args);
-    return (ret == 0);
+    return profiler_ioctl(args) == ROCPROFILER_STATUS_SUCCESS;
 }
 
 bool
@@ -200,52 +192,44 @@ rocprofiler_status_t
 counter_collection_ptl_disable(const rocprofiler_agent_t* agent)
 {
     CHECK(agent);
-    auto fd = pc_sampling::ioctl::get_kfd_fd();
-    if(fd < 0) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
-
     kfd_ioctl_profiler_args args = {};
     args.op                      = KFD_IOC_PROFILER_PTL_CONTROL;
     args.ptl.gpu_id              = agent->gpu_id;
     args.ptl.enable              = 0;
 
-    int ret = ioctl(fd, get_profiler_ioctl_request(), &args);
-    if(ret != 0)
+    auto status = profiler_ioctl(args);
+    if(status == ROCPROFILER_STATUS_ERROR)
     {
         auto err = errno;
         ROCP_INFO << fmt::format(
             "Failed to disable PTL on device {} (error: {}). Continuing anyway.",
             agent->id.handle,
             strerror(err));
-        return ROCPROFILER_STATUS_ERROR;
     }
 
-    return ROCPROFILER_STATUS_SUCCESS;
+    return status;
 }
 
 rocprofiler_status_t
 counter_collection_ptl_enable(const rocprofiler_agent_t* agent)
 {
     CHECK(agent);
-    auto fd = pc_sampling::ioctl::get_kfd_fd();
-    if(fd < 0) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
-
     kfd_ioctl_profiler_args args = {};
     args.op                      = KFD_IOC_PROFILER_PTL_CONTROL;
     args.ptl.gpu_id              = agent->gpu_id;
     args.ptl.enable              = 1;
 
-    int ret = ioctl(fd, get_profiler_ioctl_request(), &args);
-    if(ret != 0)
+    auto status = profiler_ioctl(args);
+    if(status == ROCPROFILER_STATUS_ERROR)
     {
         auto err = errno;
         ROCP_INFO << fmt::format(
             "Failed to enable PTL on device {} (error: {}). Continuing anyway.",
             agent->id.handle,
             strerror(err));
-        return ROCPROFILER_STATUS_ERROR;
     }
 
-    return ROCPROFILER_STATUS_SUCCESS;
+    return status;
 }
 }  // namespace counters
 }  // namespace rocprofiler

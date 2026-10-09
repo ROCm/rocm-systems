@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
 #include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
@@ -948,6 +949,7 @@ TEST(profiler_ioctl_request, no_kfd_device_lock_and_ptl_unavailable)
     rocprofiler_agent_t agent{};
     agent.gpu_id = 1;
 
+    EXPECT_EQ(pc_sampling::ioctl::get_kfd_fd(), -1);
     EXPECT_FALSE(counters::counter_collection_has_device_lock());
     EXPECT_FALSE(counters::ptl_control_supported());
     EXPECT_EQ(counters::counter_collection_device_lock(&agent, true),
