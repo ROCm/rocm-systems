@@ -1621,17 +1621,25 @@ void close() {
     // past a failed close, so the trailer is cut off the file that holds it,
     // never off whatever the path names by then.
     const int keep = trailer_at >= 0 ? HRR_DUP(g_events_fd) : -1;
+    // Without one, a failed close would leave the trailer for good, so it is
+    // taken back before the close, and the archive is incomplete.
+    const bool undup = trailer_at >= 0 && keep < 0;
+    if (undup) {
+      cut = drop_trailer_locked(g_events_fd, trailer_at);
+      mark_incomplete("events.bin could not be kept open past its close, so its trailer "
+                      "was taken back");
+    }
     if (HRR_CLOSE(g_events_fd) != 0)
       g_events_io_failed.store(true, std::memory_order_relaxed);
     g_events_fd = -1;
     const bool failed = note_events_io_locked();
     if (failed && keep >= 0) cut = drop_trailer_locked(keep, trailer_at);
     if (keep >= 0) HRR_CLOSE(keep);
-    if (!failed || trailer_at < 0) return;
+    if (!(failed || undup) || trailer_at < 0) return;
     out_dir = g_output_dir;
   }
   // flush() already wrote the trailer and a manifest saying complete, before
-  // the file failed. Take both back.
+  // the file failed or could not be kept open. Take both back.
   if (out_dir.empty()) return;
   if (!cut)
     LogPrintfError("[HRR capture] Cannot take the clean-shutdown trailer back out of "
