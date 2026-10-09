@@ -140,7 +140,9 @@ incomplete, since events from the earlier run may name the bytes it lost.
 A write, `fsync` or close of `events.bin` that fails marks the archive incomplete
 as well: the clean-shutdown trailer is omitted and `manifest.complete` is false.
 If closing the file fails after `flush()` wrote the trailer, `close()` cuts the
-trailer off again and rewrites the manifest.
+trailer off again and rewrites the manifest. Where a trailer that claims nothing
+cannot be cut off, its magic is overwritten, so the reader does not take the
+file for a whole capture.
 
 **Playback note:** `hrr-playback --info <base>` prints the root process summary.
 Point `hrr-playback` at a specific `<base>/pid-<pid>/` for detailed event info or

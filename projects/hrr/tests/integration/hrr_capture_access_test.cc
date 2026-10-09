@@ -59,9 +59,9 @@
  *
  *   Unit_HRR_CaptureEventsWriteFails:
  *     a failed write, fsync or close of events.bin leaves the archive without
- *     the clean-shutdown trailer and marked incomplete, and a link planted at
- *     events.bin before the failed close is not truncated through (Linux,
- *     with seccomp).
+ *     the clean-shutdown trailer and marked incomplete, also where the trailer
+ *     cannot be cut off again, and a link planted at events.bin before the
+ *     failed close is not truncated through (Linux, with seccomp).
  *
  *   Unit_HRR_CaptureForkAfterEventsFail:
  *     a child forked after events.bin failed in its parent leaves a complete
@@ -456,8 +456,10 @@ TEST_CASE("Unit_HRR_CaptureTrimFails_Direct", "[.][hrr-direct]") {
 // Unit_HRR_CaptureForkAfterEventsFail: once the capture has opened its
 // archive, it finds the descriptor of events.bin and installs a seccomp filter
 // that fails, with EIO, every write to it, every fsync of it, or closing it,
-// as HRR_TEST_FAIL_EVENTS says. Then it records a few events and exits
-// normally, so the writer meets the failure while it finishes the archive.
+// as HRR_TEST_FAIL_EVENTS says; with ftruncate, the filter goes in only at
+// the fsync after flush() wrote the trailer, and fails that fsync and every
+// ftruncate. Then it records a few events and exits normally, so the writer
+// meets the failure while it finishes the archive.
 // With close-link it first moves events.bin aside to events.bin.written and
 // plants a link to HRR_TEST_DECOY in its place, so a writer that cut the
 // trailer off by path would cut the decoy instead. With fork it fails writes,
@@ -466,6 +468,9 @@ TEST_CASE("Unit_HRR_CaptureTrimFails_Direct", "[.][hrr-direct]") {
 // so.
 // ---------------------------------------------------------------------------
 #ifdef HRR_TEST_HAVE_SECCOMP
+// Defined in hrr_workload_test.cc and run by the fsync() of this binary.
+extern std::atomic<void (*)(int)> g_hrr_fsync_hook;
+
 namespace {
 // The capture writer registers its atexit shutdown on the first HIP call, so
 // a handler registered before that runs right after it. In the fork case's
@@ -475,6 +480,54 @@ namespace {
 bool g_events_fail_child = false;
 void events_fail_child_exit() {
   if (g_events_fail_child) ::_exit(0);
+}
+
+// Fails nr_a and nr_b on fd with EIO, in the calling thread from now on. False,
+// with errno set, where the filter cannot be installed.
+bool fail_on_fd(int fd, std::uint32_t nr_a, std::uint32_t nr_b) {
+#if defined(__x86_64__)
+  constexpr std::uint32_t kArch = AUDIT_ARCH_X86_64;
+#else
+  constexpr std::uint32_t kArch = AUDIT_ARCH_AARCH64;
+#endif
+  struct sock_filter code[] = {
+      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)),
+      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, kArch, 0, 6),
+      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
+      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, nr_a, 1, 0),
+      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, nr_b, 0, 3),
+      // The descriptor is an int, so the low half of args[0] is all of it.
+      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[0])),
+      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, static_cast<std::uint32_t>(fd), 0, 1),
+      BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EIO & SECCOMP_RET_DATA)),
+      BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+  };
+  struct sock_fprog prog{static_cast<unsigned short>(sizeof(code) / sizeof(code[0])), code};
+  return ::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0 &&
+         ::prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) == 0;
+}
+
+// events.bin's descriptor, for fail_after_trailer.
+int g_trailer_events_fd = -1;
+
+// fsync hook for the ftruncate case. The first fsync of events.bin that finds
+// the file ending in a whole trailer is the one flush() makes after writing
+// it. From that one on, fsync and ftruncate of events.bin fail, so the writer
+// can neither sync the trailer nor cut it off again.
+void fail_after_trailer(int fd) {
+  if (fd != g_trailer_events_fd) return;
+  struct stat st{};
+  hrr_eof_record rec{};
+  if (::fstat(fd, &st) != 0 || st.st_size < static_cast<off_t>(sizeof(rec)) ||
+      ::pread(fd, &rec, sizeof(rec), st.st_size - static_cast<off_t>(sizeof(rec))) !=
+          static_cast<ssize_t>(sizeof(rec)) ||
+      rec.hdr.event_type != HRR_EOF_MARKER || rec.eof_magic != HRR_EOF_MAGIC)
+    return;
+  g_hrr_fsync_hook = nullptr;
+  if (!fail_on_fd(fd, __NR_fsync, __NR_ftruncate)) {
+    std::printf("%s%s\n", kNoSeccomp, std::strerror(errno));
+    std::fflush(stdout);
+  }
 }
 }  // namespace
 #endif
@@ -487,7 +540,7 @@ TEST_CASE("Unit_HRR_CaptureEventsFail_Direct", "[.][hrr-direct]") {
   if (mode == nullptr) HRR_SKIP("HRR_TEST_FAIL_EVENTS is not set");
   const std::string fail(mode);
   REQUIRE((fail == "write" || fail == "fsync" || fail == "close" || fail == "close-link" ||
-           fail == "fork"));
+           fail == "fork" || fail == "ftruncate"));
 
   if (fail == "fork") REQUIRE(std::atexit(events_fail_child_exit) == 0);
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -514,28 +567,13 @@ TEST_CASE("Unit_HRR_CaptureEventsFail_Direct", "[.][hrr-direct]") {
   }
   REQUIRE(events_fd >= 0);
 
-#if defined(__x86_64__)
-  constexpr std::uint32_t kArch = AUDIT_ARCH_X86_64;
-#else
-  constexpr std::uint32_t kArch = AUDIT_ARCH_AARCH64;
-#endif
   const std::uint32_t nr = fail == "write" || fail == "fork" ? __NR_write
                            : fail == "fsync"                  ? __NR_fsync
                                                               : __NR_close;
-  struct sock_filter code[] = {
-      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)),
-      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, kArch, 0, 5),
-      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
-      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, nr, 0, 3),
-      // The descriptor is an int, so the low half of args[0] is all of it.
-      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[0])),
-      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, static_cast<std::uint32_t>(events_fd), 0, 1),
-      BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EIO & SECCOMP_RET_DATA)),
-      BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
-  };
-  struct sock_fprog prog{static_cast<unsigned short>(sizeof(code) / sizeof(code[0])), code};
-  if (::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 ||
-      ::prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) != 0) {
+  if (fail == "ftruncate") {
+    g_trailer_events_fd = events_fd;
+    g_hrr_fsync_hook = fail_after_trailer;
+  } else if (!fail_on_fd(events_fd, nr, nr)) {
     std::printf("%s%s\n", kNoSeccomp, std::strerror(errno));
     HRR_HIP_CHECK(hipFree(d));
     return;
@@ -1107,15 +1145,18 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeChecksBlobBytes) {
 /**
  * Test Description
  * ----------------
- *   - Runs Unit_HRR_CaptureEventsFail_Direct four times: once with every
+ *   - Runs Unit_HRR_CaptureEventsFail_Direct five times: once with every
  *     write to events.bin failing once the archive is open, once with every
- *     fsync of it failing, once with closing events.bin failing after the
- *     archive is finished, and once more like that with events.bin moved
- *     aside and a link to a decoy file planted in its place before the close.
+ *     fsync of it failing, once with the fsync after the trailer failing and
+ *     no ftruncate able to cut the trailer off, once with closing events.bin
+ *     failing after the archive is finished, and once more like that with
+ *     events.bin moved aside and a link to a decoy file planted in its place
+ *     before the close.
  *   - Each time the file the writer wrote ends without a clean-shutdown
- *     trailer and the manifest says the archive is incomplete, so neither the
- *     reader nor the root index takes it for a whole capture. The decoy is
- *     left as it was. Skipped where the workload cannot install its filter.
+ *     trailer, the reader does not load it as complete, and the manifest says
+ *     the archive is incomplete, so neither the reader nor the root index
+ *     takes it for a whole capture. The decoy is left as it was. Skipped
+ *     where the workload cannot install its filter.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureEventsWriteFails) {
 #ifdef _WIN32
@@ -1123,7 +1164,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureEventsWriteFails) {
 #else
   ScopedDir work{fs::temp_directory_path() / "hrr_access_events_fail"};
   constexpr const char* kDecoyText = "not part of the archive\n";
-  for (const char* fail : {"write", "fsync", "close", "close-link"}) {
+  for (const char* fail : {"write", "fsync", "ftruncate", "close", "close-link"}) {
     DYNAMIC_SECTION("failing " << fail) {
       const std::string mode(fail);
       const fs::path base = work.path / mode;
@@ -1145,6 +1186,9 @@ HRR_TEST_CASE(Unit_HRR_CaptureEventsWriteFails) {
       CHECK(file_holds(decoy, kDecoyText));
       CHECK_FALSE(ends_in_trailer(
           archives.front() / (mode == "close-link" ? "events.bin.written" : "events.bin")));
+      // The reader goes by the trailer alone.
+      hrr::Archive arc;
+      if (hrr::load_archive(archives.front().string(), arc)) CHECK_FALSE(arc.complete);
     }
   }
 #endif

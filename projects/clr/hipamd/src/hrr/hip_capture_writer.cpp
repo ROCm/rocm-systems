@@ -41,6 +41,7 @@
 #include "utils/debug.hpp"     // LogPrintfError, LogPrintfWarning, LogPrintfInfo
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -82,6 +83,12 @@ static std::int64_t hrr_seek_end(int fd) {
   return static_cast<std::int64_t>(_lseeki64(fd, 0, SEEK_END));
 }
 
+// Write all of buf at offset off. Moves the file position, unlike pwrite.
+static bool hrr_pwrite_fd(int fd, const void* buf, size_t len, std::int64_t off) {
+  return _lseeki64(fd, off, SEEK_SET) == off &&
+         _write(fd, buf, static_cast<unsigned>(len)) == static_cast<int>(len);
+}
+
 static inline uint64_t current_thread_id() {
   static thread_local uint64_t cached = static_cast<uint64_t>(GetCurrentThreadId());
   return cached;
@@ -113,6 +120,15 @@ static int hrr_ftruncate_fd(int fd, std::int64_t len) {
 
 static std::int64_t hrr_seek_end(int fd) {
   return static_cast<std::int64_t>(lseek(fd, 0, SEEK_END));
+}
+
+// Write all of buf at offset off.
+static bool hrr_pwrite_fd(int fd, const void* buf, size_t len, std::int64_t off) {
+  ssize_t n;
+  do {
+    n = ::pwrite(fd, buf, len, static_cast<off_t>(off));
+  } while (n < 0 && errno == EINTR);
+  return n == static_cast<ssize_t>(len);
 }
 
 static inline uint64_t current_thread_id() {
@@ -326,6 +342,25 @@ static void sync_events_locked() {
 static bool note_events_io_locked() {
   if (!g_events_io_failed.load(std::memory_order_relaxed)) return false;
   mark_incomplete("a write, fsync or close of events.bin failed, so records may be missing");
+  return true;
+}
+
+// Take back the trailer that starts at trailer_at in events.bin, once a failure
+// means it claims nothing: the reader takes a file that ends in a trailer for
+// a whole capture, whatever the manifest says. Cut it off, or if that fails,
+// overwrite its magic so it no longer reads as a trailer. False if neither
+// worked. Caller holds g_file_mu.
+static bool drop_trailer_locked(int fd, std::int64_t trailer_at) {
+  int rc;
+  do {
+    rc = hrr_ftruncate_fd(fd, trailer_at);
+  } while (rc != 0 && errno == EINTR);
+  if (rc == 0) return true;
+  const uint32_t no_magic = 0;
+  if (!hrr_pwrite_fd(fd, &no_magic, sizeof(no_magic),
+                     trailer_at + static_cast<std::int64_t>(offsetof(hrr_eof_record, eof_magic))))
+    return false;
+  (void)HRR_FSYNC(fd);
   return true;
 }
 
@@ -1545,9 +1580,11 @@ void flush(const char* /*output_dir*/) {
       flush_buffer_locked();
       sync_events_locked();
       if (note_events_io_locked()) {
-        // A trailer that may not have reached the disk claims nothing: cut it
-        // off, so a reader finds no trailer, or at worst a torn one.
-        if (trailer_at >= 0) (void)hrr_ftruncate_fd(g_events_fd, trailer_at);
+        // A trailer that may not have reached the disk claims nothing.
+        if (trailer_at < 0 || !drop_trailer_locked(g_events_fd, trailer_at))
+          LogPrintfError("[HRR capture] Cannot take the clean-shutdown trailer back out of "
+                         "%s/events.bin, so only its manifest says the archive is incomplete",
+                         out_dir.c_str());
         incomplete = true;
       } else {
         g_trailer_at = trailer_at;
@@ -1588,7 +1625,7 @@ void close() {
       g_events_io_failed.store(true, std::memory_order_relaxed);
     g_events_fd = -1;
     const bool failed = note_events_io_locked();
-    if (failed && keep >= 0) cut = hrr_ftruncate_fd(keep, trailer_at) == 0;
+    if (failed && keep >= 0) cut = drop_trailer_locked(keep, trailer_at);
     if (keep >= 0) HRR_CLOSE(keep);
     if (!failed || trailer_at < 0) return;
     out_dir = g_output_dir;
@@ -1597,8 +1634,9 @@ void close() {
   // the file failed. Take both back.
   if (out_dir.empty()) return;
   if (!cut)
-    LogPrintfError("[HRR capture] Cannot cut the clean-shutdown trailer off %s/events.bin, so "
-                   "only its manifest says the archive is incomplete", out_dir.c_str());
+    LogPrintfError("[HRR capture] Cannot take the clean-shutdown trailer back out of "
+                   "%s/events.bin, so only its manifest says the archive is incomplete",
+                   out_dir.c_str());
   write_manifest_stdio(out_dir.c_str(), /*complete=*/false);
   update_root_manifest();
 }
