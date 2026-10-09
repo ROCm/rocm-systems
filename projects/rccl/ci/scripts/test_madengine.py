@@ -66,9 +66,9 @@ OVERLAY_CTX = "overlay_ctx"
 OVERLAY_DOCKERFILE = "Dockerfile.rccl-overlay"
 
 MADENGINE_REPO = "https://github.com/ROCm/madengine.git"
-MADENGINE_REF = "98217cd7ba721f5a5f2a8fb4729120cce1d57eac"  # v2.2.0, 2026-09-08
+MADENGINE_REF = "c1cac5134e26b2ce04522f45bd5072217cdcd7f8"  # v2.2.1, 2026-09-24
 MAD_REPO = "https://github.com/ROCm/MAD.git"
-MAD_REF = "b4b296310e52ba5cd67d898825165b06b60cf9bf"  # mad-rccl, 2026-09-08
+MAD_REF = "07ecef61cecde466dd957974f6170269fceeff22"  # mad-rccl, 2026-10-08
 MAD_BRANCH = "mad-rccl"
 
 WORKLOAD_CONFIGS = {
