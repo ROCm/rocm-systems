@@ -124,9 +124,34 @@ namespace core {
 bool g_use_interrupt_wait;
 bool g_use_mwaitx;
 Runtime* Runtime::runtime_singleton_ = NULL;
+bool Runtime::load_failed_ = false;
 
 hsa_status_t Runtime::Acquire() {
   std::lock_guard<std::mutex> boot(bootstrap_lock());
+
+  // An initialization that did not finish is fatal for this process. It can
+  // leave the singleton half built - drivers opened and registered, agents
+  // published, the thunk held open - and Unload() never runs, because the
+  // reference count never stayed at one. Starting over on top of that would
+  // re-open and re-register, so the failure is permanent and the caller must
+  // terminate.
+  if (load_failed_) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  // Whether this call is the one that builds the runtime up, rather than one
+  // taking a reference on a runtime that is already up. A non-null singleton
+  // here belongs to a call that got all the way through: the only other
+  // writer is Release(), which nulls it on the same transition that deletes
+  // it, and the one state that outlives a failed attempt is refused above.
+  const bool initializing = (runtime_singleton_ == NULL);
+
+  // Armed for every way out below that is not success, exceptions included -
+  // a std::bad_alloc from the allocation, a throw out of the constructor, an
+  // error return or a throw out of Load(). A call that is only taking another
+  // reference latches nothing: HSA_STATUS_ERROR_REFCOUNT_OVERFLOW says the
+  // caller has counted too far, not that the runtime is unusable.
+  MAKE_NAMED_SCOPE_GUARD(failureLatch, [initializing]() {
+    if (initializing) load_failed_ = true;
+  });
 
   if (runtime_singleton_ == NULL) {
     memset(log_flags, 0, sizeof(log_flags));
@@ -149,6 +174,7 @@ hsa_status_t Runtime::Acquire() {
   }
 
   refGuard.Dismiss();
+  failureLatch.Dismiss();
   return HSA_STATUS_SUCCESS;
 }
 
@@ -269,6 +295,11 @@ void Runtime::RegisterDriver(std::unique_ptr<Driver> driver) {
 
 void Runtime::DestroyAgents() {
   agents_by_node_.clear();
+
+  // Holds the same pointers agents_by_node_ does, so it goes with them rather
+  // than outliving them as a map of agents this function is about to delete.
+  agents_by_gpuid_.clear();
+
   std::for_each(gpu_agents_.begin(), gpu_agents_.end(), DeleteObject());
   gpu_agents_.clear();
 
@@ -2770,8 +2801,15 @@ hsa_status_t Runtime::Load() {
 
   flag_.Refresh();
 
-  thunkLoader_ = new ThunkLoader();
-  thunkLoader_->LoadThunkApiTable();
+  thunkLoader_.reset(new ThunkLoader());
+
+  // A thunk that is missing an entry point leaves the rest of the table null,
+  // and the first call through one of those nulls is a fault rather than an
+  // error - the runtime has no way to notice by then. This is a real
+  // configuration: an installed thunk older than the runtime loading it.
+  if (!thunkLoader_->LoadThunkApiTable()) {
+    return HSA_STATUS_ERROR_NOT_INITIALIZED;
+  }
 
   if (!thunkLoader_->CreateThunkInstance()) {
     return HSA_STATUS_ERROR_NOT_INITIALIZED;
@@ -2927,8 +2965,7 @@ void Runtime::Unload() {
 
   if (thunkLoader_ != nullptr) {
     thunkLoader_->DestroyThunkInstance();
-    delete thunkLoader_;
-    thunkLoader_ = nullptr;
+    thunkLoader_.reset();
   }
 }
 

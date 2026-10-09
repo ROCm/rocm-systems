@@ -557,10 +557,37 @@ void hsakmtRuntime::HandleApertureFree(gpusize gpu_addr) {
     handle_aperture_mgr_->Free(gpu_addr);
 }
 
+/* hsaKmtOpenKFD() references a forked child inherited rather than took. Every
+ * component that opened before the fork still holds one in the child's copy of
+ * its own state and may close it there - ROCr's KfdDriver does from
+ * hsa_shut_down() and from its destructor at exit - but none of them can say
+ * which reference it is closing. hsaKmtCloseKFD() therefore gives these back
+ * before it touches dxg_open_count, which from then on counts only opens made
+ * in this process.
+ *
+ * Lives outside hsakmtRuntime because clear_after_fork() replaces that object.
+ * Accumulates, so a fork from a child that has reopened adds that child's own
+ * opens to whatever it still owed its parent.
+ */
+static unsigned long inherited_open_count = 0;
+
+/* Move the counts this process inherited out of the live ones. Called from
+ * child_fork_handler(), so plain stores and a relaxed exchange on a lock-free
+ * atomic only: no allocation and no locking.
+ */
+static void disown_inherited_refs(void) {
+  inherited_open_count += dxg_runtime->dxg_open_count;
+  dxg_runtime->dxg_open_count = 0;
+  topology_disown_snapshot_refs();
+}
+
 /* is_forked_child detects when the process has forked since the last
  * time this function was called. We cannot rely on pthread_atfork
  * because the process can fork without calling the fork function in
  * libc (using clone or calling the system call directly).
+ *
+ * The first call to notice such a fork also disowns the inherited counts, as
+ * child_fork_handler() would have done had it run.
  */
 bool is_forked_child(void) {
   if (dxg_runtime->is_forked)
@@ -570,28 +597,41 @@ bool is_forked_child(void) {
   if (dxg_runtime->parent_pid != cur_pid) {
     dxg_runtime->is_forked = true;
     dxg_runtime->parent_pid = cur_pid;
+    disown_inherited_refs();
     return true;
   }
 
   return false;
 }
 
+/* Serializes the fork check and clear_after_fork() in hsaKmtOpenKFD(). That
+ * pair cannot run under hsakmt_mutex, which clear_after_fork() destroys along
+ * with the rest of *dxg_runtime, and without a lock of its own two threads
+ * making their first open in a child would both rebuild: the second deletes
+ * the runtime the first is about to lock.
+ */
+static std::mutex fork_recovery_mutex;
+
 /* Callbacks from pthread_atfork */
-static void prepare_fork_handler(void) { dxg_runtime->hsakmt_mutex.lock(); }
-static void parent_fork_handler(void) { dxg_runtime->hsakmt_mutex.unlock(); }
+static void prepare_fork_handler(void) {
+  fork_recovery_mutex.lock();
+  dxg_runtime->hsakmt_mutex.lock();
+}
+static void parent_fork_handler(void) {
+  dxg_runtime->hsakmt_mutex.unlock();
+  fork_recovery_mutex.unlock();
+}
 static void child_fork_handler(void) {
   dxg_runtime->is_forked = true;
 
   /* Sever the references the child inherited but never took, before any public
    * entry point can act on them. CHECK_DXG_OPEN() already rejects calls while
-   * is_forked is set, but zeroing the counts means that even a path that
-   * bypasses it cannot decrement the parent's bookkeeping. The inherited open
-   * count is cleared with a plain store and the snapshot count with a relaxed
-   * store on a lock-free atomic, so neither allocates nor takes a lock; heavier
-   * snapshot and object teardown waits for clear_after_fork().
+   * is_forked is set, but moving the counts aside means that even a path that
+   * bypasses it cannot decrement the parent's bookkeeping, and that the close
+   * or release a component later issues for one of them is recognized as such.
+   * Heavier snapshot and object teardown waits for clear_after_fork().
    */
-  dxg_runtime->dxg_open_count = 0;
-  topology_clear_snapshot_refs();
+  disown_inherited_refs();
 
   /* prepare_fork_handler() locked hsakmt_mutex right before fork() so that
    * no other thread would be mid-operation during the fork snapshot. In the
@@ -605,6 +645,8 @@ static void child_fork_handler(void) {
    */
   dxg_runtime->hsakmt_mutex.~recursive_mutex();
   new (&dxg_runtime->hsakmt_mutex) std::recursive_mutex();
+  fork_recovery_mutex.~mutex();
+  new (&fork_recovery_mutex) std::mutex();
 }
 
 /* Call this from the child process after fork. This will clear all
@@ -739,15 +781,17 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
    * it's connection to DXG. Any references tracked by dxg_open_count
    * belong to the parent.
    *
-   * This runs before the lock is taken, and must: clear_after_fork() replaces
-   * *dxg_runtime, so a lock_guard constructed on the old object would unlock
-   * freed memory when it went out of scope. Only the forking thread survives
-   * into the child and child_fork_handler() has already reinitialized the
-   * mutex, so there is nothing here to exclude. is_forked is only ever written
-   * in a single-threaded child, so reading it unlocked races with nothing.
+   * This runs before hsakmt_mutex is taken, and must: clear_after_fork()
+   * replaces *dxg_runtime, so a lock_guard constructed on the old object would
+   * unlock freed memory when it went out of scope. fork_recovery_mutex orders
+   * it against another thread's first open instead. It does not order it
+   * against other entry points, so a child must not call into the thunk from
+   * another thread while its first open is in progress.
    */
-  if (is_forked_child())
-    clear_after_fork();
+  {
+    std::lock_guard<std::mutex> recovery(fork_recovery_mutex);
+    if (is_forked_child()) clear_after_fork();
+  }
 
   std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
 
@@ -787,8 +831,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
     dxg_runtime->dxg_open_count++;
 
     /* Only the 0->1 transition owns the suballocator. A later open comes from
-     * a second in-process consumer (on WSL, rocprofiler-sdk reading the KMT
-     * topology alongside the HSA runtime) and the first one's allocations are
+     * a second in-process consumer (on WSL, amdsmi's opt-in WSL backend reads
+     * the KMT topology alongside the HSA runtime today; the profiler's WSL
+     * topology reader will do the same) and the first one's allocations are
      * still live - resetting the fragment allocator here would throw away the
      * bookkeeping that tracks them. clear_after_fork() above resets it on the
      * one path where the inherited bookkeeping really is meaningless.
@@ -814,9 +859,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
 
   return result;
 dxcore_loader_failed:
+  /* Only an fd this call opened is ours to give back, and the cached copy goes
+   * with it: left behind, the next open would skip opening and adopt a closed
+   * descriptor number that may by then belong to an unrelated file.
+   */
+  if (fd >= 0) {
 #if defined(__linux__)
-  close(fd);
+    close(fd);
 #endif
+    dxg_runtime->dxg_fd = -1;
+  }
 open_failed:
 
   return result;
@@ -826,8 +878,28 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void) {
   HSAKMT_STATUS result;
   std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
 
+  /* A close is matched to an inherited open before a live one. Closes carry no
+   * identity, so this is what keeps a component that opened before a fork from
+   * closing, in the child, an open another component made there: teardown
+   * needs one close per inherited open plus one per live open, and while any
+   * caller still holds a live open fewer closes than that have arrived. An
+   * inherited reference never owns anything here, so giving one back tears
+   * nothing down.
+   */
+  is_forked_child();
+  if (inherited_open_count > 0) {
+    --inherited_open_count;
+    return HSAKMT_STATUS_SUCCESS;
+  }
+
   if (dxg_runtime->dxg_open_count > 0) {
-    if (--dxg_runtime->dxg_open_count == 0) {
+    /* Recognize the last reference without consuming it yet. The teardown below
+     * releases GPU memory through hsaKmtFreeMemoryInternal(), whose
+     * CHECK_DXG_OPEN() rejects every call once the count reads zero. Decrementing
+     * first would therefore make each of those frees fail and leak the very
+     * allocations the teardown runs to release, so the decrement follows it.
+     */
+    if (dxg_runtime->dxg_open_count == 1) {
       /* Before DXCore goes, and so before the WDDMDevice objects a snapshot
        * names become pointers into a dead session.
        */
@@ -841,6 +913,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void) {
       wsl::thunk::dxcore::DxcoreLoader::Instance().Shutdown();
     }
 
+    --dxg_runtime->dxg_open_count;
     result = HSAKMT_STATUS_SUCCESS;
   } else
     result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;

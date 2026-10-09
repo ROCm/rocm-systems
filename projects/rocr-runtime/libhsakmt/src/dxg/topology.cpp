@@ -383,23 +383,6 @@ bool topology_snapshot_is_live(void) {
  * so say so: it is not fatal, but it is the caller getting the order wrong.
  */
 void topology_drop_snapshot_at_last_close(void) {
-  /* A forked child can arrive here without ever having opened anything:
-   * dxg_open_count is inherited, so the decrement in hsaKmtCloseKFD() reaches
-   * zero on the child's first close. hsa_shut_down() in the child, or ROCr's
-   * destructor at child exit, is enough. What it would drop is the parent's
-   * snapshot, naming the parent's WDDMDevice objects, and the teardown below
-   * deletes them - running ~WDDMDevice() and so issuing D3DKMT calls against
-   * another process's handles.
-   *
-   * So disown here exactly as the open path does, and for the same reason. The
-   * child keeps nothing either way; the difference is only whether the parent's
-   * objects are destroyed on the way out.
-   */
-  if (is_forked_child()) {
-    topology_abandon_after_fork();
-    return;
-  }
-
   if (!topology_snapshot_is_live()) return;
 
   pr_warn(
@@ -442,12 +425,17 @@ HSAKMT_STATUS HSAKMTAPI
 hsaKmtAcquireSystemProperties(HsaSystemProperties *SystemProperties) {
   HSAKMT_STATUS err = HSAKMT_STATUS_SUCCESS;
 
+  std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
+
+  /* A child that has not reopened must not take a reference on the parent's
+   * snapshot. CHECK_DXG_OPEN() refuses it only once the fork has been noticed,
+   * and without pthread_atfork nothing else notices it first.
+   */
+  is_forked_child();
   CHECK_DXG_OPEN();
 
   if (!SystemProperties)
     return HSAKMT_STATUS_INVALID_PARAMETER;
-
-  std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
 
   /* We already have a valid snapshot. Avoid double initialization that
    * would leak memory. Still take a reference: the snapshot outlives this
@@ -499,14 +487,22 @@ out:
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtReleaseSystemProperties(void) {
-  /* Mirrors hsaKmtAcquireSystemProperties(). Without this a fork child could
-   * release a reference it never took - the snapshot and its refcount are
-   * inherited across fork() - and tear down WDDMDevice objects that belong to
-   * the parent process.
-   */
-  CHECK_DXG_OPEN();
-
   std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
+
+  /* The snapshot and its count are inherited across fork(), so a release in a
+   * child may be for a reference taken in the parent. Match it to an inherited
+   * reference first, for the reason hsaKmtCloseKFD() does the same with opens:
+   * it then never tears down a snapshot the child built for itself while one of
+   * the child's own acquirers still holds it, and never runs ~WDDMDevice() over
+   * the parent's handles.
+   */
+  is_forked_child();
+  if (dxg_topology->inherited_snapshot_refs_ > 0) {
+    --dxg_topology->inherited_snapshot_refs_;
+    return HSAKMT_STATUS_SUCCESS;
+  }
+
+  CHECK_DXG_OPEN();
 
   /* Reject an unmatched release the way hsaKmtCloseKFD() rejects an unmatched
    * close, rather than tearing down a snapshot another component still owns.
@@ -530,13 +526,15 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtReleaseSystemProperties(void) {
 }
 
 /* Called from the pthread_atfork child handler, so it must stay
- * async-signal-safe: a single relaxed store, no allocation and no locking -
- * only the forking thread survives into the child, so there is nothing left to
- * race with. It only severs the child's claim on the inherited references; the
- * objects behind them are dealt with later by topology_abandon_after_fork().
+ * async-signal-safe: a relaxed exchange on a lock-free atomic and a plain add,
+ * no allocation and no locking - only the forking thread survives into the
+ * child, so there is nothing left to race with. It only moves the inherited
+ * references aside for hsaKmtReleaseSystemProperties() to match; the objects
+ * behind them are dealt with later by topology_abandon_after_fork().
  */
-void topology_clear_snapshot_refs(void) {
-  dxg_topology->snapshot_refs_.store(0, std::memory_order_relaxed);
+void topology_disown_snapshot_refs(void) {
+  dxg_topology->inherited_snapshot_refs_ +=
+      dxg_topology->snapshot_refs_.exchange(0, std::memory_order_relaxed);
 }
 
 /* Called from the fork child once it is back in normal context.

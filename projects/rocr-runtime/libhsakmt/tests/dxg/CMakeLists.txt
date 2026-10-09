@@ -1,8 +1,10 @@
 # Tests for the DXG (WSL) thunk.
 #
-# The export check needs neither a GPU nor an open thunk, so it runs anywhere
-# the library can be built. Tests that need a live adapter live in rocrtst,
-# which already has the WSL detection to gate them (rocrtstFunc.Heap_Reservation).
+# The export check needs no GPU, DXCore adapter or open thunk, so it runs
+# anywhere the library can be built. The lifecycle test needs all three and
+# skips without them. Runtime-level tests that need a live adapter live in
+# rocrtst, which already has the WSL detection to gate them
+# (rocrtstFunc.Heap_Reservation).
 
 # What the built artifact's dynamic symbol table actually offers. A symbol can
 # be lost to mangling or to local visibility while the header and the version
@@ -29,5 +31,42 @@ else()
         STATUS
         "librocdxg tests: no nm found, skipping the dynamic-export test. "
         "Set CMAKE_NM to run it."
+    )
+endif()
+
+# The open and snapshot reference counts behind that contract, driven through
+# the built library. Unlike the check above this opens the thunk, so it needs
+# /dev/dxg and libdxcore and reports itself skipped anywhere without them. It
+# forks, so it is POSIX only.
+if(UNIX)
+    add_executable(dxg_lifecycle_test lifecycle_test.cpp)
+    find_package(Threads REQUIRED)
+    target_link_libraries(
+        dxg_lifecycle_test
+        PRIVATE ${ROCDXG_TARGET} Threads::Threads
+    )
+    target_compile_features(dxg_lifecycle_test PRIVATE cxx_std_17)
+    add_test(NAME dxg-lifecycle COMMAND dxg_lifecycle_test)
+    set_tests_properties(dxg-lifecycle PROPERTIES SKIP_RETURN_CODE 77)
+
+    # A libdxcore.so the loader finds first and then rejects, for the open that
+    # fails after it has opened /dev/dxg.
+    add_library(dxg_lifecycle_dxcore_stub SHARED dxcore_stub.c)
+    set_target_properties(
+        dxg_lifecycle_dxcore_stub
+        PROPERTIES
+            OUTPUT_NAME dxcore
+            LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/dxcore_stub
+    )
+    add_test(
+        NAME dxg-lifecycle-partial-open
+        COMMAND dxg_lifecycle_test partial-open
+    )
+    set_tests_properties(
+        dxg-lifecycle-partial-open
+        PROPERTIES
+            SKIP_RETURN_CODE 77
+            ENVIRONMENT
+                "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:dxg_lifecycle_dxcore_stub>"
     )
 endif()
