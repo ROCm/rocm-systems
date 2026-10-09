@@ -62,9 +62,15 @@ class TestSet(TestCliBase):
                     self.assertLessEqual(fan_max, 255, f"GPU {index}: max fan speed must be <= 255")
 
             # reset --fans (works for both legacy hwmon and gpu_od interfaces)
+            # A readable fan speed does not imply the fan can be controlled.
             fan_speed = self.metric_data["gpu_data"][index]["fan"]["speed"]
             if fan_speed != "N/A":
-                cmds.append((f"amd-smi reset --fans --gpu {index}", self.PASS))
+                cmds.append(
+                    (
+                        f"amd-smi reset --fans --gpu {index}",
+                        [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED],
+                    )
+                )
 
             # set --profile defaults
             if power_profile[index]:
@@ -126,13 +132,13 @@ class TestSet(TestCliBase):
             # set --soc-pstate defaults
             soc_pstate = self.static_data["gpu_data"][index]["soc_pstate"]
             if soc_pstate != "N/A":
-                current = int(soc_pstate["current"])
+                current = int(soc_pstate["current_id"])
                 cmds.append((f"amd-smi set --soc-pstate {current} --gpu {index}", self.PASS))
 
             # set --xgmi-plpd defaults
             xgmi_plpd = self.static_data["gpu_data"][index]["xgmi_plpd"]
             if xgmi_plpd != "N/A":
-                current = int(xgmi_plpd["current"])
+                current = int(xgmi_plpd["current_id"])
                 cmds.append((f"amd-smi set --xgmi-plpd {current} --gpu {index}", self.PASS))
 
             # set --ptl-status defaults
