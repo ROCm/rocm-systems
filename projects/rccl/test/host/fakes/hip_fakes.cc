@@ -897,14 +897,6 @@ hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
     return g_hipStreamBatchMemOp(stream, count, params, flags);
 }
 
-#ifdef CE_BATCH_ASYNC_SUPPORTED
-hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t count, hipMemcpyAttributes* attrs,
-                               size_t* attrsIdxs, size_t numAttrs, size_t* failIdx, hipStream_t stream)
-{
-    return g_hipMemcpyBatchAsync(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs, failIdx, stream);
-}
-#endif
-
 hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags)
 {
     return g_hipStreamCreateWithFlags(stream, flags);
@@ -949,6 +941,14 @@ hipError_t hipStreamWriteValue32(hipStream_t, void*, std::uint32_t, unsigned int
 {
     FailLoudUnfaked("hip_fakes", "hipStreamWriteValue32");
 }
+
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t count, hipMemcpyAttributes* attrs,
+                               size_t* attrsIdxs, size_t numAttrs, size_t* failIdx, hipStream_t stream)
+{
+    return g_hipMemcpyBatchAsync(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs, failIdx, stream);
+}
+#endif
 
 hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode)
 {

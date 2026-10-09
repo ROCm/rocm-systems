@@ -220,6 +220,19 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroCe: REAL src/ce_coll.cc; 4 targets link fakes/ce_fakes.cc, Init needs nccl_stubs.cc's ncclCeFinalize.
+  set(TEST_MICRO_CE_SOURCE_FILES
+    ce-coll-test.cc
+    fakes/nccl_stubs.cc
+    fakes/nccl_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/comm_fakes.cc
+    fakes/dev_runtime_fakes.cc
+    fakes/devcomm_fakes.cc               # ncclTeamLsa
+    fakes/env_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroSymKernels -- REAL src/sym_kernels.cc + generated host TU.
   set(TEST_MICRO_SYM_KERNELS_SOURCE_FILES
     sym-kernels-test.cc
@@ -309,18 +322,6 @@ function(rccl_define_micro_source_lists)
     fakes/nccl_fakes.cc
     fakes/topo_stubs.cc
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroCeColl: REAL src/ce_coll.cc; 4 targets link fakes/ce_fakes.cc, Init needs nccl_stubs.cc's ncclCeFinalize.
-  set(TEST_MICRO_CE_COLL_SOURCE_FILES
-    ce-coll-test.cc
-    fakes/dev_runtime_fakes.cc
-    fakes/devcomm_fakes.cc
-    fakes/env_fakes.cc
-    fakes/hip_fakes.cc
-    fakes/nccl_fakes.cc
-    fakes/nccl_stubs.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 endfunction()
@@ -900,6 +901,32 @@ if(_ENQ_BUILD_DEVLINKER)
 endif()
 
 # ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroCe
+# ---------------------------------------------------------------------------
+# In-build, CE_BATCH_ASYNC_SUPPORTED arrives with rccl's own compile definitions when CE_ENABLED.
+set(_MICRO_CE_BATCH_DEF "")
+if(NOT BUILD_TESTS)
+  include(CheckCXXSymbolExists)
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+  set(CMAKE_REQUIRED_DEFINITIONS -D__HIP_PLATFORM_AMD__)
+  check_cxx_symbol_exists(hipMemcpyBatchAsync "hip/hip_runtime_api.h" _MICRO_HIP_MEMCPY_BATCH_ASYNC)
+  unset(CMAKE_REQUIRED_DEFINITIONS)
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
+  if(_MICRO_HIP_MEMCPY_BATCH_ASYNC)
+    set(_MICRO_CE_BATCH_DEF CE_BATCH_ASYNC_SUPPORTED)
+  endif()
+endif()
+rccl_add_micro_binary(rccl-UnitTestsMicroCe
+  SOURCES ${TEST_MICRO_CE_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ${_MICRO_AMDSMI_DEF}
+    ${_MICRO_CE_BATCH_DEF}
+    RCCL_STUBS_OMIT_ncclCeFinalize       # ce_coll.cc defines it
+    CE_COLL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ce_coll.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
 # ---------------------------------------------------------------------------
 if(_MICRO_BUILD_SYM_KERNELS)
@@ -963,32 +990,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDiagnostics
     ${_MICRO_MODE_DEFS}
     DIAG_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/p2p.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_diagnostics.yaml")
-
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroCeColl: host-only microtests for src/ce_coll.cc.
-# ---------------------------------------------------------------------------
-
-# In-build, CE_BATCH_ASYNC_SUPPORTED arrives with rccl's own compile definitions when CE_ENABLED.
-set(_MICRO_CE_BATCH_DEF "")
-if(NOT BUILD_TESTS)
-  include(CheckCXXSymbolExists)
-  set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
-  set(CMAKE_REQUIRED_DEFINITIONS -D__HIP_PLATFORM_AMD__)
-  check_cxx_symbol_exists(hipMemcpyBatchAsync "hip/hip_runtime_api.h" _MICRO_HIP_MEMCPY_BATCH_ASYNC)
-  unset(CMAKE_REQUIRED_DEFINITIONS)
-  set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
-  if(_MICRO_HIP_MEMCPY_BATCH_ASYNC)
-    set(_MICRO_CE_BATCH_DEF CE_BATCH_ASYNC_SUPPORTED)
-  endif()
-endif()
-rccl_add_micro_binary(rccl-UnitTestsMicroCeColl
-  SOURCES ${TEST_MICRO_CE_COLL_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    ${_MICRO_CE_BATCH_DEF}
-    RCCL_STUBS_OMIT_ncclCeFinalize
-    CE_COLL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ce_coll.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_cecoll.yaml")
 
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.

@@ -160,6 +160,13 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   entries are omitted for this target via `RCCL_STUBS_OMIT_<symbol>` macros
   because `enqueue.cc` defines them itself. See
   `test_categories_micro_enqueue.yaml`.
+- **`rccl-UnitTestsMicroCe`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suite
+  `LaunchPaths/CeAlltoAllvSyncMicrotest.*`. Its own binary because
+  `rccl-UnitTestsMicro`, `-WarpSpeed`, `-Enqueue` and `-TaskPrep` link
+  `fakes/ce_fakes.cc`, which fakes the symbols this file defines, and the
+  `rccl-UnitTestsMicroInit` cleanup-order oracle needs the fake `ncclCeFinalize`
+  in `fakes/nccl_stubs.cc`, which this target drops via
+  `RCCL_STUBS_OMIT_ncclCeFinalize`.
 - **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
   `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
   GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
@@ -226,14 +233,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`). Its own binary: it fakes the
   `transport/p2p.cc` shareable-buffer entry points that `rccl-UnitTestsMicro`
   compiles for real. See `test_categories_micro_diagnostics.yaml`.
-
-- **`rccl-UnitTestsMicroCeColl`** covers `src/ce_coll.cc` (via `CE_COLL_CC_PATH`,
-  suite `LaunchPaths/CeAlltoAllvSyncMicrotest.*`). It is its own binary because
-  `rccl-UnitTestsMicro`, `-WarpSpeed`, `-Enqueue` and `-TaskPrep` link
-  `fakes/ce_fakes.cc`, which defines the symbols this unit defines, and the
-  `rccl-UnitTestsMicroInit` cleanup-order oracle needs the fake `ncclCeFinalize`
-  in `fakes/nccl_stubs.cc`, which this target drops via
-  `RCCL_STUBS_OMIT_ncclCeFinalize`. See `test_categories_micro_cecoll.yaml`.
 
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
@@ -739,7 +738,7 @@ above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
-`rcl-UnitTestsMicroGinHost, `rccl-UnitTestsMicroCeColl`, `rccl-UnitTestsMicroDiagnostics`,
+`rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
 `rccl-UnitTestsMicroSymKernels` and `rccl-UnitTestsMicroTaskPrep` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
@@ -780,7 +779,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
-./build/rccl-UnitTestsMicroCeColl             # ce_coll.cc tests
+./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-HostUnitTests
 ```
 

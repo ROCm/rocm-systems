@@ -131,16 +131,6 @@ uint8_t ncclProfilerDeviceMode(int eActivationMask) {
   return mode;
 }
 bool ncclProfilerProxyDiagEnabled(void) { return false; }
-// src/plugin/profiler.cc CE events: with no plugin loaded production returns success and leaves the handle untouched.
-ncclResult_t ncclProfilerStartCeSyncEvent(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t, void**) {
-  return ncclSuccess;
-}
-ncclResult_t ncclProfilerStopCeSyncEvent(struct ncclComm*, void*, hipStream_t) { return ncclSuccess; }
-ncclResult_t ncclProfilerStartCeBatchEvent(struct ncclComm*, struct ncclCeCollArgs*, struct ncclCeBatchOpsParams*,
-                                           hipStream_t, void**) {
-  return ncclSuccess;
-}
-ncclResult_t ncclProfilerStopCeBatchEvent(struct ncclComm*, void*, hipStream_t) { return ncclSuccess; }
 void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { }
 ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRunRasDiagnostics(struct ncclComm* comm) { return ncclSuccess; }

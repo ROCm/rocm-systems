@@ -86,6 +86,8 @@ test_categories:
       - "WrapMicrotestIsolated.*"
       # misc/gdr_probe.cc
       - "GdrProbeTest.*"
+      # ce_coll.cc (rccl-UnitTestsMicroCe)
+      - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
       # dev_runtime.cc
       - "Alloc*"
       - "Comm*"
