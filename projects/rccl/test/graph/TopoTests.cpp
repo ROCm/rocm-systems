@@ -1105,7 +1105,9 @@ TEST_F(TopoTest, ComputePaths_SizesLinkListsToHopCount) {
   forEachPath(built, [&](struct ncclTopoLinkList* path, struct ncclTopoNode* source,
                          struct ncclTopoNode* target) {
     EXPECT_LE(path->count, path->capacity);
-    EXPECT_LT(path->capacity, NCCL_TOPO_MAX_HOPS);
+    // This topology has no cycles, so a list is reserved once when the search reaches its node and
+    // grows at most once more, when a diversion rewrites it.
+    EXPECT_LE(path->capacity, 2 * path->count + 2);
     if (path->count == 0) return;
     nonEmpty++;
     expectPathReaches(path, source, target);
@@ -1122,7 +1124,19 @@ TEST_F(TopoTest, ComputePaths_GrowsDivertedPathBeyondInitialReserve) {
   struct ncclXmlNode* cpu = addSystemCpu(host);
   struct ncclXmlNode* pciSwitch = addPciBridge(addPciBridge(cpu, "0000:0a:00.0"), "0000:0b:00.0");
   addGpuPci(addPciBridge(pciSwitch, "0000:0b:01.0"), "0000:0c:00.0", "gfx942", /*rank=*/0, /*dev=*/0);
-  addNic(addPciBridge(pciSwitch, "0000:0b:02.0"), "0000:0d:00.0", /*dev=*/0, /*gdr=*/0);
+  struct ncclXmlNode* nicPci = addNic(addPciBridge(pciSwitch, "0000:0b:02.0"), "0000:0d:00.0", /*dev=*/0);
+
+  // With GDR the path stays direct, so its list keeps the size the search reserved.
+  struct ncclTopoSystem* direct = buildSystemWithPaths(host);
+  ASSERT_NE(direct, nullptr);
+  ASSERT_EQ(direct->nodes[GPU].count, 1);
+  ASSERT_EQ(direct->nodes[NET].count, 1);
+  ASSERT_LT(direct->nodes[GPU].nodes->paths[NET][0].type, PATH_PHB)
+      << "precondition: with GDR the path stays below the CPU";
+  const int reserved = direct->nodes[GPU].nodes->paths[NET][0].capacity;
+  ncclTopoFree(direct);
+
+  ASSERT_EQ(xmlSetAttrInt(nicPci->subs[0]->subs[0], "gdr", 0), ncclSuccess);
   struct ncclTopoSystem* built = buildSystemWithPaths(host);
   ASSERT_NE(built, nullptr);
   ASSERT_EQ(built->nodes[GPU].count, 1);
@@ -1139,9 +1153,7 @@ TEST_F(TopoTest, ComputePaths_GrowsDivertedPathBeyondInitialReserve) {
   ASSERT_EQ(path->type, PATH_PHB) << "precondition: without GDR the path goes through the CPU";
   EXPECT_EQ(path->count, gpu->paths[CPU][localCpu].count +
                              built->nodes[CPU].nodes[localCpu].paths[NET][0].count);
-  // The search first reserved the GPU's list for one hop more than its DEV parent's.
-  EXPECT_GT(path->count, gpu->gpu.parent->paths[NET][0].capacity + 1)
-      << "the diverted path must not fit in the entries the search reserved";
+  EXPECT_GT(path->count, reserved) << "the diverted path must not fit in the list the search reserved";
   EXPECT_LE(path->count, path->capacity);
   expectPathReaches(path, gpu, net);
 
@@ -1156,7 +1168,7 @@ TEST_F(TopoTest, RemoveNode_RefusedWhilePathsComputed) {
   ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
   ASSERT_EQ(built->nodes[NET].count, 1);
 
-  EXPECT_EQ(ncclTopoRemoveNode(built, NET, 0), ncclInternalError);
+  ASSERT_EQ(ncclTopoRemoveNode(built, NET, 0), ncclInternalError);
   EXPECT_EQ(built->nodes[NET].count, 1);
 
   ncclTopoRemovePaths(built);
@@ -1186,6 +1198,7 @@ TEST_F(TopoTest, ComputePaths_RecomputeKeepsPaths) {
 
   struct PathEntry {
     int count;
+    int capacity;
     int type;
     float bw;
     std::vector<struct ncclTopoLink*> hops;
@@ -1193,7 +1206,7 @@ TEST_F(TopoTest, ComputePaths_RecomputeKeepsPaths) {
   auto snapshot = [&]() {
     std::vector<PathEntry> entries;
     forEachPath(built, [&](struct ncclTopoLinkList* path, struct ncclTopoNode*, struct ncclTopoNode*) {
-      entries.push_back({path->count, path->type, path->bw,
+      entries.push_back({path->count, path->capacity, path->type, path->bw,
                          std::vector<struct ncclTopoLink*>(path->list, path->list + path->count)});
     });
     return entries;
@@ -1208,6 +1221,7 @@ TEST_F(TopoTest, ComputePaths_RecomputeKeepsPaths) {
     ASSERT_EQ(again.size(), first.size());
     for (size_t i = 0; i < first.size(); i++) {
       EXPECT_EQ(again[i].count, first[i].count) << "entry " << i;
+      EXPECT_EQ(again[i].capacity, first[i].capacity) << "entry " << i;
       EXPECT_EQ(again[i].type, first[i].type) << "entry " << i;
       EXPECT_FLOAT_EQ(again[i].bw, first[i].bw) << "entry " << i;
       EXPECT_EQ(again[i].hops, first[i].hops) << "entry " << i;
