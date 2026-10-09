@@ -1488,6 +1488,77 @@ TEST(InterposerDrmTest, PrimeImportRejectsADescriptorThatIsNotADmabuf) {
   EXPECT_EQ(close(kfd), 0);
 }
 
+namespace {
+
+// The domain the interposer reports for @p handle, which follows the allocation
+// flags the import received.
+uint64_t gem_domains(int drm, uint32_t handle) {
+  drm_amdgpu_gem_create_in info{};
+  drm_amdgpu_gem_op op{};
+  op.handle = handle;
+  op.op = AMDGPU_GEM_OP_GET_GEM_CREATE_INFO;
+  op.value = reinterpret_cast<uint64_t>(&info);
+  if (ioctl(drm, DRM_IOCTL_AMDGPU_GEM_OP, &op) != 0)
+    return ~uint64_t{0};
+  return info.domains;
+}
+
+// Runs @p duplicate on a public-VRAM KFD export and imports the result. The import
+// must see the export's flags whichever descriptor reaches PRIME first.
+template <typename Duplicate>
+void check_kfd_export_flags_survive_duplication(Duplicate duplicate, bool close_original) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  KfdExport buffer;
+  ASSERT_TRUE(buffer.create(kfd, kPublicVram));
+  const int copy = duplicate(buffer.dmabuf);
+  ASSERT_GE(copy, 0);
+  if (close_original && copy != buffer.dmabuf) {
+    ASSERT_EQ(close(buffer.dmabuf), 0);
+  }
+
+  uint32_t from_copy = 0;
+  ASSERT_TRUE(prime_import(drm, copy, &from_copy));
+  EXPECT_EQ(gem_domains(drm, from_copy), static_cast<uint64_t>(AMDGPU_GEM_DOMAIN_VRAM));
+  if (!close_original && copy != buffer.dmabuf) {
+    uint32_t from_original = 0;
+    ASSERT_TRUE(prime_import(drm, buffer.dmabuf, &from_original));
+    EXPECT_EQ(gem_domains(drm, from_original), static_cast<uint64_t>(AMDGPU_GEM_DOMAIN_VRAM));
+    EXPECT_EQ(gem_domains(drm, from_copy), static_cast<uint64_t>(AMDGPU_GEM_DOMAIN_VRAM));
+    EXPECT_EQ(gem_close(drm, from_original), 0);
+    EXPECT_EQ(close(buffer.dmabuf), 0);
+  }
+  EXPECT_EQ(gem_close(drm, from_copy), 0);
+  EXPECT_EQ(close(copy), 0);
+  buffer.release();
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+} // namespace
+
+TEST(InterposerDrmTest, KfdExportFlagsSurviveDuplicationBeforeThePrimeImport) {
+  const struct {
+    const char *name;
+    int (*duplicate)(int);
+  } cases[] = {
+      {"original fd", [](int fd) { return fd; }},
+      {"dup", [](int fd) { return dup(fd); }},
+      {"dup2", [](int fd) { return dup2(fd, 900); }},
+      {"dup3", [](int fd) { return dup3(fd, 901, O_CLOEXEC); }},
+      {"F_DUPFD_CLOEXEC", [](int fd) { return fcntl(fd, F_DUPFD_CLOEXEC, 903); }},
+  };
+  for (const auto &test_case : cases) {
+    for (const bool close_original : {true, false}) {
+      SCOPED_TRACE(std::string(test_case.name) +
+                   (close_original ? ", original closed" : ", original open"));
+      check_kfd_export_flags_survive_duplication(test_case.duplicate, close_original);
+    }
+  }
+}
+
 TEST(InterposerDrmTest, KfdExportKeepsItsMetadataAfterTheAllocationIsFreed) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);

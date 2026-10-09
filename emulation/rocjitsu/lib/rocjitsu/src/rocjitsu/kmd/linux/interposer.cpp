@@ -2981,9 +2981,16 @@ public:
   /// that same open file under another number. Called after a successful dup,
   /// dup2, dup3 or fcntl(F_DUPFD*), in the lock_drm_fd_lifecycle() scope of that call so
   /// a racing close of @p source cannot drop the record between the kernel dup and
-  /// this copy; a no-op when @p source is not a PRIME export.
+  /// this copy; a no-op when @p source is neither a PRIME export nor a KFD export awaiting its
+  /// import.
   void duplicate_gem_export(int source, int target) {
     std::lock_guard lock(fd_mutex_);
+    // A KFD export has only its pending flags until the first PRIME import, and the
+    // duplicate must import with them whichever descriptor reaches PRIME first.
+    if (const auto flags = pending_gem_flags_.find(source); flags != pending_gem_flags_.end()) {
+      const uint32_t alloc_flags = flags->second;
+      pending_gem_flags_[target] = alloc_flags;
+    }
     const auto it = exported_gem_objects_.find(source);
     if (it == exported_gem_objects_.end())
       return;

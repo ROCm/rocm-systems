@@ -2152,6 +2152,7 @@ rj_add_interposer_test_suite(
     GemOpSetPlacementChangesTheReportedDomain
     IpcImportSharesThePagesOfTheExportedAllocation
     KfdBufferKeepsItsMetadataAfterEveryHandleCloses
+    KfdExportFlagsSurviveDuplicationBeforeThePrimeImport
     KfdExportKeepsItsMetadataAfterTheAllocationIsFreed
     OpensWithinCurrentDescriptorLimit
     PrimeHandleToFdReturnsTheBuffer
