@@ -1107,7 +1107,10 @@ addresses, so that pointer is right again; `--no-placement` turns this off.
   cannot take them. A range something else already occupies is not held.
 - Each replayed allocation drops the placeholder over the VMM granules holding it
   (a `hipMallocAsync` pointer need not start on one), then `hipMemAddressReserve`
-  there, `hipMemCreate` on the current device, `hipMemMap` and `hipMemSetAccess`.
+  there, `hipMemCreate` on the current device, `hipMemMap` and `hipMemSetAccess`
+  for that device and every device `hipDeviceCanAccessPeer` says can reach it:
+  `hipDeviceEnablePeerAccess` does not cover VMM memory, so without this a peer
+  copy into a placed buffer faults.
   If any step misses (granules not held, or shared with a live placed allocation,
   runtime answers with another address, no VMM support), that allocation falls
   back to the normal allocator, named under `--verbose`. The summary prints
@@ -1125,8 +1128,7 @@ addresses, so that pointer is right again; `--no-placement` turns this off.
 - Not placed, as before: `hipMallocAsync` inside a graph capture (a graph
   allocation node), allocations exported with `hipIpcGetMemHandle` and any other
   recorded over the same pages (IPC refuses VMM memory), every other allocation
-  API, and everything under `--guard-segments` or on Windows. A placed
-  allocation is accessible from its own device only.
+  API, and everything under `--guard-segments` or on Windows.
 - Between the `--kernel-filter` warm-up and the timed pass, placed allocations are
   released so the timed pass can place them again.
 

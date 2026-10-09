@@ -2355,10 +2355,13 @@ static size_t hrr_vmm_granularity(int device) {
 
 // Reserve `mapped + gran` of VA, back only the first `mapped` bytes, and leave
 // the tail span unmapped. Any access past the mapped region traps. A `hint`
-// must be met exactly: the runtime reserves elsewhere when it cannot.
+// must be met exactly: the runtime reserves elsewhere when it cannot. With
+// `peers`, every device that can reach `device` as a peer gets access too:
+// hipDeviceEnablePeerAccess does not cover VMM memory.
 static hipError_t hrr_guard_map(size_t mapped, size_t gran, int device, void* hint,
                                 void** out_va, size_t* out_reserved,
-                                hipMemGenericAllocationHandle_t* out_handle) {
+                                hipMemGenericAllocationHandle_t* out_handle,
+                                bool peers = false) {
     const size_t reserved = mapped + gran;
     hipMemAllocationProp prop{};
     prop.type          = hipMemAllocationTypePinned;
@@ -2381,11 +2384,20 @@ static hipError_t hrr_guard_map(size_t mapped, size_t gran, int device, void* hi
         return r;
     }
 
-    hipMemAccessDesc desc{};
-    desc.location.type = hipMemLocationTypeDevice;
-    desc.location.id   = device;
-    desc.flags         = hipMemAccessFlagsProtReadWrite;
-    r = hipMemSetAccess(va, mapped, &desc, 1);
+    int ndev = 1;
+    if (!peers || hipGetDeviceCount(&ndev) != hipSuccess) ndev = 1;
+    std::vector<hipMemAccessDesc> desc(1);
+    desc[0].location.id = device;
+    for (int d = 0; d < ndev; ++d) {
+        int can = 0;
+        if (d != device && hipDeviceCanAccessPeer(&can, d, device) == hipSuccess && can)
+            desc.emplace_back().location.id = d;
+    }
+    for (auto& a : desc) {
+        a.location.type = hipMemLocationTypeDevice;
+        a.flags         = hipMemAccessFlagsProtReadWrite;
+    }
+    r = hipMemSetAccess(va, mapped, desc.data(), desc.size());
     if (r != hipSuccess) {
         (void)hipMemUnmap(va, mapped);
         (void)hipMemRelease(handle);
@@ -2454,7 +2466,7 @@ static bool hrr_place_alloc(PlaybackContext& ctx, uint64_t rec, size_t size, voi
     size_t reserved = 0;
     hipMemGenericAllocationHandle_t handle{};
     if (held && hrr_guard_map(len, 0, dev, reinterpret_cast<void*>(base), &va, &reserved,
-                              &handle) == hipSuccess) {
+                              &handle, /*peers=*/true) == hipSuccess) {
         {
             std::unique_lock lk(ctx.map_mutex);
             ctx.guard_allocs[reinterpret_cast<void*>(rec)] = {va, reserved, len, handle,
