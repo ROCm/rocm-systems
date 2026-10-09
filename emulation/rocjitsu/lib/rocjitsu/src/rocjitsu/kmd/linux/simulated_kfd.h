@@ -463,6 +463,10 @@ public:
   /// and dmabuf fd to it. The first state offered is shared by every allocation of
   /// that file and freed with the last of them.
   /// @returns The state those allocations keep, or @p state when no allocation uses the file.
+  /// @note Called by the interposer's prime_import with its fd_mutex_ held. This takes
+  /// process_mutex_ (find_process, released at once), then alloc_mutex_; the two are
+  /// never nested. fd_mutex_ < process_mutex_ and fd_mutex_ < alloc_mutex_ are
+  /// recorded here, not in the global ordering below; no reverse edge exists.
   [[nodiscard]] std::shared_ptr<void> retain_bo_state(const struct stat &st,
                                                       std::shared_ptr<void> state);
 
