@@ -260,7 +260,7 @@ TypedRMATester<T>::TypedRMATester(TesterArguments args) : Tester(args) {
       break;
   }
 
-  T init_val = static_cast<T>(3.14f);
+  T init_val = static_cast<T>(3.5f);
   for (size_t i = 0; i < elem_count; i++) source[i] = init_val;
 }
 
@@ -345,7 +345,7 @@ void TypedRMATester<T>::verifyResults(size_t size) {
   int start_slot   = (batch_size - (args.skip % batch_size)) % batch_size;
   int verify_iters = std::min(batch_size, num_loops + args.skip);
   size_t concurrency = args.wg_size * args.num_wgs;
-  T expected = static_cast<T>(3.14f);
+  T expected = static_cast<T>(3.5f);
 
   for (size_t b = 0; b < concurrency; b++) {
     for (int iter = 0; iter < verify_iters; iter++) {
