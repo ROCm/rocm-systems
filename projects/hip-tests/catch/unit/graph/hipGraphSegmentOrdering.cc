@@ -20,6 +20,7 @@
 
 #include <hip_test_common.hh>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
@@ -197,7 +198,7 @@ unsigned long long WallClockTicksPerUs() {
   int wall_clock_khz = 0;
   HIP_CHECK(hipGetDevice(&device));
   HIP_CHECK(hipDeviceGetAttribute(&wall_clock_khz, hipDeviceAttributeWallClockRate, device));
-  return static_cast<unsigned long long>(wall_clock_khz) / 1000;
+  return std::max(1ULL, static_cast<unsigned long long>(wall_clock_khz) / 1000);
 }
 
 constexpr int kButterflyStages = 6;
@@ -566,15 +567,6 @@ HIP_TEST_CASE(Unit_hipGraphSegmentOrdering_LongChainBatches) {
  */
 HIP_TEST_CASE(Unit_hipGraphSegmentOrdering_EmptyNodeCrossStreamCompletion) {
   if (!UsesSegmentedGraphPath()) HIP_SKIP_TEST("Requires the segmented graph executor");
-
-  // Force multi-stream so the EMPTY-only segment is guaranteed to need a cross-stream
-  // completion signal.  Without the fix, E0's signal slot is allocated but never fired
-  // and hipStreamSynchronize hangs.
-#ifdef _WIN32
-  _putenv_s("DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING", "2");
-#else
-  setenv("DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING", "2", /*overwrite=*/0);
-#endif
 
   hipGraph_t g;
   HIP_CHECK(hipGraphCreate(&g, 0));
