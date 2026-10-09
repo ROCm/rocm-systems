@@ -44,9 +44,8 @@ set(OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/multiprocessing-forkserver)
 
 # The app has no device work, so a profiler that leaves the forkserver alone produces an
 # empty trace and exits cleanly. A profiler that installs signal handlers before the
-# interpreter starts leaves the forkserver unable to restore its saved dispositions: the
-# pool then dies, and the app's internal timeout bounds the failure so a regression
-# reports rather than hanging to the ctest TIMEOUT.
+# interpreter starts leaves the forkserver unable to restore its saved dispositions, and
+# the worker start then fails on the socket to it.
 rocprofiler_add_integration_cleanup_test(
     multiprocessing-forkserver
     DIRECTORIES ${OUT_DIR}
@@ -61,5 +60,5 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 120
     LABELS "integration-tests;multiprocessing-forkserver"
     PRELOAD "${PRELOAD_ENV}"
-    PASS_REGULAR_EXPRESSION "forkserver pool completed"
+    PASS_REGULAR_EXPRESSION "forkserver worker completed"
     FIXTURES_REQUIRED multiprocessing-forkserver-clean)

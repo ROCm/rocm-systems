@@ -23,18 +23,22 @@
 # SOFTWARE.
 
 """
-Exercises multiprocessing's forkserver start method under the profiler.
+Starts a worker process through multiprocessing's forkserver under the profiler.
 
 The forkserver saves every signal disposition with signal.signal() and restores
 it in each forked child. A disposition the interpreter did not install itself is
 recorded as None, and None cannot be restored -- so a profiler holding a C
 handler when the interpreter starts breaks the forkserver, and with it every
-worker pool built on it. PyTorch's DataLoader with num_workers > 0 is the common
-case, and forkserver is the default start method on Linux from Python 3.14.
+worker process launched through it. PyTorch's DataLoader with num_workers > 0 is
+the common case, and forkserver is the default start method on Linux from Python
+3.14.
 
-The dispositions are printed before the pool runs: under a profiler that
-installs too early they read None, which identifies the mechanism when the pool
-itself fails.
+A single Process start mirrors how DataLoader launches a worker: the socket to
+the dead forkserver breaks on the first write, so the failure arrives promptly
+rather than through a pool's respawn loop.
+
+The dispositions are reported first. Under a profiler that installs too early
+they read None, which names the mechanism before the start is attempted.
 
 No device work -- the processes under test are the forkserver and its children,
 which never touch a GPU.
@@ -45,28 +49,44 @@ import signal
 import sys
 
 WATCHED = ("SIGINT", "SIGQUIT", "SIGABRT", "SIGTERM")
-POOL_TIMEOUT_SEC = 60
-INPUTS = [1, 2, 3, 4]
-EXPECTED = [1, 4, 9, 16]
+JOIN_TIMEOUT_SEC = 30
+SENTINEL = "worker-ran"
 
 
-def square(value):
-    return value * value
+def worker_body(queue):
+    queue.put(SENTINEL)
 
 
 def main():
+    unrestorable = []
     for name in WATCHED:
-        print(f"{name} disposition: {signal.getsignal(getattr(signal, name))!r}")
+        disposition = signal.getsignal(getattr(signal, name))
+        print(f"{name} disposition: {disposition!r}")
+        if disposition is None:
+            unrestorable.append(name)
+
+    # The forkserver round-trips SIGINT; the rest are reported for diagnosis only.
+    if "SIGINT" in unrestorable:
+        print("SIGINT disposition is None, which the forkserver cannot restore")
 
     context = multiprocessing.get_context("forkserver")
-    with context.Pool(2) as pool:
-        result = pool.map_async(square, INPUTS).get(timeout=POOL_TIMEOUT_SEC)
+    queue = context.Queue()
+    worker = context.Process(target=worker_body, args=(queue,))
+    worker.start()
+    worker.join(JOIN_TIMEOUT_SEC)
 
-    if result != EXPECTED:
-        print(f"forkserver pool returned {result}, expected {EXPECTED}")
+    if worker.is_alive():
+        worker.terminate()
+        print(f"forkserver worker still alive after {JOIN_TIMEOUT_SEC}s")
+        return 1
+    if worker.exitcode != 0:
+        print(f"forkserver worker exited {worker.exitcode}")
+        return 1
+    if queue.get(timeout=JOIN_TIMEOUT_SEC) != SENTINEL:
+        print("forkserver worker produced no result")
         return 1
 
-    print("forkserver pool completed")
+    print("forkserver worker completed")
     return 0
 
 
@@ -74,5 +94,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as exc:  # noqa: BLE001 - any failure here is a test failure
-        print(f"forkserver pool failed: {type(exc).__name__}: {exc}")
+        print(f"forkserver worker failed: {type(exc).__name__}: {exc}")
         sys.exit(1)
