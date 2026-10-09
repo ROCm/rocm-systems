@@ -1945,7 +1945,7 @@ void GinMPIDeviceTests::runBarrierFenceVisibility(
   constexpr size_t kBytes = 4096;
   BarrierFenceBuffers bufs{comm};
   setupBarrierFenceBuffers(kBytes, &bufs);
-  if (HasFatalFailure()) return;
+  if (HasFatalFailure() || IsSkipped()) return;
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.worldGinBarrierCount = 1;
@@ -2031,7 +2031,7 @@ TEST_F(GinMPIDeviceTests, BarrierFence_IpcSignalIncMakesPutVisible_SingleNode) {
   constexpr size_t kBytes = 64;
   BarrierFenceBuffers bufs{comm};
   setupBarrierFenceBuffers(kBytes, &bufs);
-  if (HasFatalFailure()) return;
+  if (HasFatalFailure() || IsSkipped()) return;
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.worldGinBarrierCount = 1;
