@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! AMDF storage scopes, explicit access and host-view lifetimes.
@@ -1083,7 +1084,7 @@ pub(crate) unsafe extern "C" fn create(
                     device.native.register_host_with_peers(
                         peer_devices.as_slice(),
                         address,
-                        false,
+                        memory::HostCachePolicy::Fine,
                         native_length,
                         alignment.max(page),
                         permissions,
@@ -1921,7 +1922,8 @@ fn device_site(
         || (family.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA
             && family.format_version == AMDF_GPU_SDMA_QUEUE_FORMAT_VERSION_1
             && family.format_features
-                == AMDF_GPU_SDMA_FORMAT_FEATURE_GCR | AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM)
+                == AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR
+                    | AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM)
         || (family.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
             && family.format_version == 1
             && family.format_features == 0);

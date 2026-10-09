@@ -27,6 +27,20 @@
 namespace rocjitsu {
 namespace config {
 
+/// @brief Launch override: disable checks, enable ordinary checks, or also enable XCNT.
+enum class WaitChecking { Off, On, All };
+
+/// @brief Parse the on/off/all launch modes, distinct from per-CU warn/off policies.
+inline std::optional<WaitChecking> parse_wait_checking(std::string_view value) {
+  if (value == "off")
+    return WaitChecking::Off;
+  if (value == "on")
+    return WaitChecking::On;
+  if (value == "all")
+    return WaitChecking::All;
+  return std::nullopt;
+}
+
 /// @brief Parse a complete unsigned 32-bit decimal value.
 inline std::optional<uint32_t> parse_uint32(std::string_view text) {
   uint32_t value = 0;

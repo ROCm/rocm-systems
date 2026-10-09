@@ -7220,6 +7220,92 @@ TEST(Gfx1250CvtScaleTest, WideRegionsRejectBoundariesBeforeCallbacksOrWrites) {
     wf->halt();
 }
 
+TEST(DsSwizzleExecutionTest, InactiveSourcesAreZeroAndInactiveDestinationsArePreserved) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4,
+                    ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(::testing::Message() << "arch=" << arch);
+    amdgpu::GpuMemory gpu_mem("ds_swizzle_exec_mem");
+    amdgpu::L2Cache l2("ds_swizzle_exec_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 32;
+    cfg.lds_size_kb = 64;
+    cfg.memory_wait_diagnostics = amdgpu::MemoryWaitDiagnostics::Off;
+    ASSERT_FALSE(cfg.memory_wait_checks_enabled());
+
+    auto cu = amdgpu::ComputeUnitCore::create("ds_swizzle_exec", cfg, &gpu_mem, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    const uint32_t vb = wf->vgpr_alloc().base;
+    const uint64_t full_exec = ~uint64_t{0} >> (64 - wf->wf_size());
+    constexpr uint32_t kSentinel = 0xDEADBEEFu;
+
+    // Quad broadcast from lane 1 and adjacent-lane swaps. Check numerical results
+    // directly, without using the shared footprint/lane-selection helpers.
+    for (uint16_t offset : {0x8055, 0x80b1}) {
+      SCOPED_TRACE(::testing::Message() << "offset=" << offset);
+      for (uint8_t destination : {0, 4}) {
+        SCOPED_TRACE(::testing::Message() << "destination=" << unsigned(destination));
+        std::array<uint32_t, 2> words;
+        if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+          words =
+              cdna4::build_ds(cdna4::kDsSwizzleB32Ds, {.offset0 = static_cast<uint8_t>(offset),
+                                                       .offset1 = static_cast<uint8_t>(offset >> 8),
+                                                       .addr = 0,
+                                                       .vdst = destination});
+        else if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+          words =
+              rdna3::build_ds(rdna3::kDsSwizzleB32Ds, {.offset0 = static_cast<uint8_t>(offset),
+                                                       .offset1 = static_cast<uint8_t>(offset >> 8),
+                                                       .addr = 0,
+                                                       .vdst = destination});
+        else if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+          words = rdna4::build_vds(rdna4::kDsSwizzleB32Vds,
+                                   {.offset0 = static_cast<uint8_t>(offset),
+                                    .offset1 = static_cast<uint8_t>(offset >> 8),
+                                    .addr = 0,
+                                    .vdst = destination});
+        else
+          words = cdna5::build_vds(cdna5::kDsSwizzleB32Vds,
+                                   {.offset0 = static_cast<uint8_t>(offset),
+                                    .offset1 = static_cast<uint8_t>(offset >> 8),
+                                    .addr = 0,
+                                    .vdst = destination});
+        auto decoded = decoder->decode(words.data());
+        ASSERT_TRUE(decoded.succeeded());
+        std::unique_ptr<Instruction> inst = std::move(decoded).value();
+        ASSERT_NE(inst, nullptr);
+        ASSERT_EQ(std::string_view(inst->mnemonic()), "ds_swizzle_b32");
+
+        for (uint64_t exec : {uint64_t{0}, uint64_t{1}, uint64_t{3},
+                              full_exec & uint64_t{0x5555555555555555}, full_exec}) {
+          SCOPED_TRACE(::testing::Message() << "exec=" << exec);
+          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+            cu->write_vgpr(vb, lane, lane + 1);
+            cu->write_vgpr(vb + 4, lane, kSentinel);
+          }
+          wf->set_exec(exec);
+          ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+            const uint32_t source = offset == 0x8055 ? (lane & ~3u) + 1 : lane ^ 1u;
+            uint32_t expected = destination == 0 ? lane + 1 : kSentinel;
+            if (exec & (uint64_t{1} << lane))
+              expected = (exec & (uint64_t{1} << source)) ? source + 1 : 0;
+            EXPECT_EQ(cu->read_vgpr(vb + destination, lane), expected) << "lane=" << lane;
+          }
+        }
+      }
+    }
+    if (!wf->is_halted())
+      wf->halt();
+  }
+}
+
 TEST(Gfx1250DsSwizzleTest, VdsBroadcastReadsAddrSource) {
   amdgpu::GpuMemory gpu_mem("gfx1250_ds_swizzle_vds_mem");
   amdgpu::L2Cache l2("gfx1250_ds_swizzle_vds_l2");

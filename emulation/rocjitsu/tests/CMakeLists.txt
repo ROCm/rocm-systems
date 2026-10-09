@@ -2,7 +2,21 @@
 # SPDX-License-Identifier: MIT
 
 include(rj_configure_target)
-include(rj_find_amdcxx)
+include(rj_configure_device_tests)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+        NAME cmake.hip_toolchain_failure
+        COMMAND
+            ${CMAKE_COMMAND} "-DRJ_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+            "-DRJ_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/hip_toolchain_failure"
+            "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
+            "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+            "-DGOOGLETEST_SOURCE_DIR=${googletest_SOURCE_DIR}"
+            "-DFLATBUFFERS_SOURCE_DIR=${flatbuffers_SOURCE_DIR}" -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_hip_toolchain_failure.cmake
+    )
+endif()
 
 # Device kernels (compiled from HIP sources for simulator testing).
 add_subdirectory(kernels)
@@ -21,6 +35,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_plugin_logging
     rocjitsu_plugin_race_detector
     rocjitsu_plugin_throughput
+    rocjitsu_plugin_instruction_mix
     rocjitsu_plugin_loader
     rocjitsu_vm_risc_v
     rocjitsu_config
@@ -422,6 +437,16 @@ add_dependencies(rj_decode_fuzz_test rj_decode_fuzz)
 rj_add_gtest_tests(rj_decode_fuzz_test)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(
+    NAME RocjitsuWaitCheckingCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -E env RJ_ROCJITSU=$<TARGET_FILE:rocjitsu_bin>
+        RJ_SIM_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx1250_mi455x.json
+        RJ_DBT_CONFIG=${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_simulated_gfx942.json
+        ${Python3_EXECUTABLE} -B
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_wait_checking_cli.py -v
+)
+set_tests_properties(RocjitsuWaitCheckingCliTest PROPERTIES TIMEOUT 120)
 add_test(
     NAME DecodeDifferentialUnitTest
     COMMAND
@@ -1422,6 +1447,7 @@ rj_add_test(
         ${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3.json
         --cpu-thread-budget
         4
+        --wait-checking=off
         --
         $<TARGET_FILE:rocjitsu_tests>
         --gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff
@@ -1433,6 +1459,7 @@ rj_add_test(
         "\${RJ_INSTALLED_CONFIG_DIR}/gfx942_cdna3.json"
         "--cpu-thread-budget"
         "4"
+        "--wait-checking=off"
         "--"
         "bin/rocjitsu_tests"
         "--gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
@@ -3468,7 +3495,6 @@ endif()
 
 # --- HIP tests (requires amdclang++ + CLI launcher) ---
 
-rj_find_amdcxx(AMDCXX)
 set(RJ_ENABLE_HIP_TESTS ON)
 find_library(HIP_RUNTIME64 amdhip64 PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
 set(RJ_HIP_RUNTIME_SUPPORTS_TEST_ARCH FALSE)
@@ -3493,6 +3519,9 @@ endfunction()
 if(NOT AMDCXX)
     set(RJ_ENABLE_HIP_TESTS OFF)
     message(STATUS "HIP tests disabled (amdclang++ not found)")
+elseif(NOT RJ_HAS_HIP_KERNEL_TOOLCHAIN)
+    set(RJ_ENABLE_HIP_TESTS OFF)
+    message(STATUS "HIP tests disabled (HIP compilation probe failed)")
 elseif(NOT HSA_RUNTIME64)
     set(RJ_ENABLE_HIP_TESTS OFF)
     message(STATUS "HIP tests disabled (libhsa-runtime64 not found)")

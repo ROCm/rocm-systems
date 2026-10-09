@@ -56,6 +56,7 @@ test_categories:
       - test_mem_chart_gfx11
       - test_mem_chart_gfx1250
       - test_membw_engine
+      - test_membw_summary
       - test_membw_guidance
       - test_membw_metric_extract
       - test_membw_pipeline
@@ -149,6 +150,7 @@ test_categories:
       - test_mem_chart_gfx11
       - test_mem_chart_gfx1250
       - test_membw_engine
+      - test_membw_summary
       - test_membw_guidance
       - test_membw_metric_extract
       - test_membw_pipeline
@@ -246,6 +248,7 @@ test_categories:
       - test_mem_chart_gfx11
       - test_mem_chart_gfx1250
       - test_membw_engine
+      - test_membw_summary
       - test_membw_guidance
       - test_membw_metric_extract
       - test_membw_pipeline
@@ -343,6 +346,7 @@ test_categories:
       - test_mem_chart_gfx11
       - test_mem_chart_gfx1250
       - test_membw_engine
+      - test_membw_summary
       - test_membw_guidance
       - test_membw_metric_extract
       - test_membw_pipeline

@@ -33,7 +33,8 @@
  * - RMA: put/get/p/g + variants (wave, wg, nbi)
  * - AMO: standard, extended, bitwise
  * - Sync: wait_until variants, test
- * - Signal: put_signal and standalone operations
+ * - Collectives: alltoall (typed wg)
+ * - Signal: put_signal variants
  *
  * Intentionally excluded (internal use only):
  * - Context methods
@@ -819,6 +820,43 @@ ROCSHMEM_DEVICE_API int rocshmem_tile_broadcast_wg(
   return rocshmem::rocshmem_tile_broadcast_wg_internal(
       team, dst_data, src_data, dst_strides, src_strides,
       start_coord, boundary, ndim, element_size, pe_root, flags);
+}
+
+// Collective - Alltoall (typed wg)
+#define ROCSHMEM_ALLTOALL_WG_WRAPPER(TNAME, T)                              \
+ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_alltoall_wg(                    \
+    rocshmem_team_t team, T *dest, const T *source, int nelems) {           \
+  rocshmem_ctx_##TNAME##_alltoall_wg(                                       \
+      rocshmem::ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems);  \
+}
+
+ROCSHMEM_ALLTOALL_WG_WRAPPER(float,     float)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(double,    double)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(char,      char)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(schar,     signed char)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(short,     short)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(int,       int)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(long,      long)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(longlong,  long long)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(uchar,     unsigned char)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(ushort,    unsigned short)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(uint,      unsigned int)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(ulong,     unsigned long)
+ROCSHMEM_ALLTOALL_WG_WRAPPER(ulonglong, unsigned long long)
+#undef ROCSHMEM_ALLTOALL_WG_WRAPPER
+
+// Collective - Alltoall (ctx untyped mem wg)
+ROCSHMEM_DEVICE_API void rocshmem_ctx_alltoallmem_wg(
+    rocshmem_ctx_t ctx, rocshmem_team_t team,
+    void *dest, const void *source, int nelems) {
+  rocshmem::rocshmem_ctx_alltoallmem_wg(ctx, team, dest, source, nelems);
+}
+
+// Collective - Broadcast (ctx untyped mem wg)
+ROCSHMEM_DEVICE_API void rocshmem_ctx_broadcastmem_wg(
+    rocshmem_ctx_t ctx, rocshmem_team_t team,
+    void *dest, const void *source, int nelems, int PE_root) {
+  rocshmem::rocshmem_ctx_broadcastmem_wg(ctx, team, dest, source, nelems, PE_root);
 }
 
 // Collective - SUM Reduce

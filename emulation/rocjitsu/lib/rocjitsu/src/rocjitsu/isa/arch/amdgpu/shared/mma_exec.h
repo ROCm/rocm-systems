@@ -367,8 +367,11 @@ inline InputLoc wmma_f8f6f4_mixed_subbyte_input_loc(uint32_t dim, uint32_t K, ui
                                                     uint32_t k, uint32_t data_bits) {
   if (dim == 16 && K == 128 && data_bits < 8) {
     const uint32_t lane = i + 16u * ((k >> 5) & 1u);
-    const uint32_t slot = 32u * ((k >> 6) & 1u) + 16u * ((k >> 2) & 1u) + 8u * ((k >> 4) & 1u) +
-                          4u * ((k >> 3) & 1u) + 2u * ((k >> 1) & 1u) + (k & 1u);
+    // Use the same logical K order as the 8-bit operand in wmma_input_loc:
+    // contiguous groups of 16 there pair with groups of 32 here. The old
+    // sub-byte permutation assumed an 8-bit layout split every four elements,
+    // so it paired different K values when only one operand was sub-byte.
+    const uint32_t slot = 32u * (k >> 6) + (k & 31u);
     return wmma_packed_input_loc(lane, slot, data_bits);
   }
   return wmma_f8f6f4_ab_input_loc(dim, K, i, k, data_bits);
@@ -399,7 +402,7 @@ inline InputLoc wmma_b_input_loc(uint32_t N, uint32_t K, uint32_t col, uint32_t 
   return wmma_f8f6f4_input_loc(N, K, col, k, b_bits, b_bits < 8 && a_bits == 8);
 }
 
-/// Compute the CDNA5 block-scaled WMMA input layout. Unlike the ordinary
+/// Compute the CDNA5 block-scaled WMMA input layout. Unlike the same-format ordinary
 /// F8F6F4 WMMA layout, each operand format stores contiguous K ranges in each
 /// lane group: 16 values for 8-bit inputs and 32 values for 4/6-bit inputs.
 inline InputLoc wmma_block_scaled_input_loc(uint32_t dim, uint32_t K, uint32_t index, uint32_t k,

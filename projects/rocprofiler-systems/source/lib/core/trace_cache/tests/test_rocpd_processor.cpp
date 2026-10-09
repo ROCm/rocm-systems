@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/agent.hpp"
+#include "core/agent_info.hpp"
 #include "core/agent_manager.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
@@ -20,9 +21,11 @@
 #include "library/pmc/collectors/nic/types.hpp"
 #include "library/thread_info.hpp"
 
+#include <nlohmann/json_fwd.hpp>
 #include <profiler-hub/reader.hpp>
 #include <profiler-hub/reader_types.hpp>
 #include <profiler-hub/storage.hpp>
+#include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/version.h>
@@ -341,6 +344,14 @@ struct agent_pmc_spec
     const char* target_arch;
     const char* description = nullptr;
 };
+
+constexpr std::size_t k_max_json_length = 128;
+void
+expect_stored_json_matches(const std::string& stored, const std::string& expected)
+{
+    ASSERT_TRUE(nlohmann::json::accept(stored)) << stored.substr(0, k_max_json_length);
+    EXPECT_EQ(nlohmann::json::parse(stored), nlohmann::json::parse(expected));
+}
 }  // namespace
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1539,6 +1550,52 @@ TEST_F(rocpd_write_read_test_interface, metadata_round_trip)
     expect_metadata_process();
     expect_metadata_thread();
     expect_metadata_queues_and_streams();
+}
+
+// ---------------------------------------------------------------------------
+// Info extdata: JSON produced by rocprofiler-systems must be stored verbatim
+// and remain valid JSON after a write/read round trip
+// ---------------------------------------------------------------------------
+
+TEST_F(rocpd_write_read_test_interface, info_extdata_is_valid_json)
+{
+    // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
+    const auto process_extdata = nlohmann::json{
+        { "ROCPROFSYS_TRACE", "true" },
+        { "ROCPROFSYS_OUTPUT_PREFIX", "run \"a\"" },
+        { "nested", { { "k", "v" }, { "values", { 1, 2, 3 } } } }
+    }.dump();
+    const auto process_environment =
+        nlohmann::json{ { "MPI_COMM_WORLD_SIZE", 2 } }.dump();
+
+    rocprofiler_agent_v0_t agent_data{};
+    agent_data.type         = ROCPROFILER_AGENT_TYPE_GPU;
+    agent_data.name         = "gfx90a";
+    agent_data.vendor_name  = "AMD";
+    agent_data.product_name = "Instinct MI210";
+    agent_data.model_name   = "MI210";
+
+    auto gpu       = managed_gpu_agent();
+    gpu.agent_info = rocprofsys::agent_info::to_json_string(agent_data);
+
+    run_processor_and_open_reader(
+        { gpu }, [&](const std::shared_ptr<metadata_registry>& metadata) {
+            auto proc        = metadata->get_process_info();
+            proc.extdata     = process_extdata;
+            proc.environment = process_environment;
+            metadata->set_process(proc);
+        });
+
+    // Validate: profiler_hub::reader_t read-back matches inserted values.
+    const auto processes = m_reader->get_all_processes();
+    ASSERT_EQ(processes.size(), 1U);
+    expect_stored_json_matches(processes[0]->extdata, process_extdata);
+    expect_stored_json_matches(processes[0]->environment, process_environment);
+
+    const auto agents = m_reader->get_all_agents();
+    ASSERT_EQ(agents.size(), 1U);
+    expect_stored_json_matches(agents[0]->extdata, gpu.agent_info);
+    expect_gpu_agent_mi210();
 }
 
 // ---------------------------------------------------------------------------
