@@ -29,7 +29,7 @@ int main(int argc, char* argv[]) {
   size_t N = 1000000;
   size_t Nbytes = N * sizeof(uint32_t);
 
-#ifdef __HIP_ENABLE_PCH
+#if __HIP_HAS_GET_PCH
   // Verify hip_pch.o
   const char* pch = nullptr;
   unsigned int size = 0;

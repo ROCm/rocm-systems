@@ -1,19 +1,19 @@
 ---
 callback:
-  Unit_hipApiName_Positive_Basic: *level_2
-  Unit_hipApiName_Negative_ReservedIds: *level_2
-  Unit_hipGetStreamDeviceId_Positive_Threaded_Basic: *level_2
+  Unit_hipApiName_Positive_Basic: *level_default
+  Unit_hipApiName_Negative_ReservedIds: *level_default
+  Unit_hipGetStreamDeviceId_Positive_Threaded_Basic: *level_default
   Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic:
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [asan]
       reason: "AIRUNTIME-2744 - does not play well with ASAN. Needs re-triage."
     tags: [P0]
-  Unit_hipGetStreamDeviceId_Negative_Parameters: *level_2
+  Unit_hipGetStreamDeviceId_Negative_Parameters: *level_default
   Unit_hipKernelNameRef_Positive_Basic:
-    <<: *level_2
+    <<: *level_default
   Unit_hipKernelNameRef_Negative_Parameters:
-    <<: *level_2
-  Unit_hipKernelNameRefByPtr_Positive_Basic: *level_2
-  Unit_hipKernelNameRefByPtr_Positive_StreamNullptr: *level_2
-  Unit_hipKernelNameRefByPtr_Negative_KernelNullptr: *level_2
+    <<: *level_default
+  Unit_hipKernelNameRefByPtr_Positive_Basic: *level_default
+  Unit_hipKernelNameRefByPtr_Positive_StreamNullptr: *level_default
+  Unit_hipKernelNameRefByPtr_Negative_KernelNullptr: *level_default

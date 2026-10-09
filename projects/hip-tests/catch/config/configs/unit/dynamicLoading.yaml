@@ -1,32 +1,32 @@
 ---
 dynamicLoading:
   Unit_dynamic_loading_device_kernels_from_library:
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [amd_linux, amd_wsl]
       reason: "AIRUNTIME-2892 - needs to be further investigated. Loading device kernels from a library fails. gfx1030 (amd_linux) FAIL 3/3: REQUIRE(testResult == true). gfx1201 (amd_wsl) FAIL: testResult == true -> false == true."
     tags: [module]
   Unit_hipApiDynamicLoad_hipGetProcAddress:
-    <<: *level_2
+    <<: *level_default
     tags: [module]
   Unit_hipApiDynamicLoad:
-    <<: *level_2
+    <<: *level_default
     tags: [module]
   Unit_hipGetProcAddress_Positive:
-    <<: *level_2
+    <<: *level_default
     tags: [module]
   Unit_hipGetProcAddress_Negative:
-    <<: *level_2
+    <<: *level_default
     tags: [module]
   Unit_hipGetProcAddress_spt_Positive:
-    <<: *level_2
+    <<: *level_default
     tags: [module]
   Unit_hipGetProcAddress_spt_Negative:
-    <<: *level_2
+    <<: *level_default
     tags: [module]
   Unit_hipGetProcAddress_hipGetProcAddress_spt_CheckAddress:
-    <<: *level_2
+    <<: *level_default
     tags: [module]
   Unit_hipGetProcAddress_With_spt_CompilerOption:
-    <<: *level_2
+    <<: *level_default
     tags: [module]

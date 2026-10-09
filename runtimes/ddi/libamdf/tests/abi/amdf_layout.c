@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 // Snapshot generated from the pinned AMDF headers. Do not edit by hand.
 // Compile and compare its layout values with the Rust bindings.
 #include <inttypes.h>
@@ -72,6 +75,8 @@ int main(void) {
   printf("type amdf_user_queue_status_t %zu %zu\n", sizeof(amdf_user_queue_status_t), _Alignof(amdf_user_queue_status_t));
   printf("type amdf_kernel_queue_info_t %zu %zu\n", sizeof(amdf_kernel_queue_info_t), _Alignof(amdf_kernel_queue_info_t));
   printf("type amdf_kernel_queue_status_t %zu %zu\n", sizeof(amdf_kernel_queue_status_t), _Alignof(amdf_kernel_queue_status_t));
+  printf("type amdf_native_event_payload_t %zu %zu\n", sizeof(amdf_native_event_payload_t), _Alignof(amdf_native_event_payload_t));
+  printf("type amdf_native_event_t %zu %zu\n", sizeof(amdf_native_event_t), _Alignof(amdf_native_event_t));
   printf("type amdf_api_t %zu %zu\n", sizeof(amdf_api_t), _Alignof(amdf_api_t));
   printf("type amdf_gpu_endpoint_info_t__gfx_ip %zu %zu\n", sizeof(amdf_gpu_endpoint_info_t__gfx_ip), _Alignof(amdf_gpu_endpoint_info_t__gfx_ip));
   printf("type amdf_gpu_endpoint_info_t__compute %zu %zu\n", sizeof(amdf_gpu_endpoint_info_t__compute), _Alignof(amdf_gpu_endpoint_info_t__compute));
@@ -537,6 +542,7 @@ int main(void) {
   printf("field amdf_kernel_queue_info_t.command_type %zu %zu %zu\n", offsetof(amdf_kernel_queue_info_t, command_type), sizeof(((amdf_kernel_queue_info_t *)0)->command_type), __alignof__(((amdf_kernel_queue_info_t *)0)->command_type));
   printf("field amdf_kernel_queue_info_t.maximum_pending_submission_count %zu %zu %zu\n", offsetof(amdf_kernel_queue_info_t, maximum_pending_submission_count), sizeof(((amdf_kernel_queue_info_t *)0)->maximum_pending_submission_count), __alignof__(((amdf_kernel_queue_info_t *)0)->maximum_pending_submission_count));
   printf("field amdf_kernel_queue_info_t.maximum_command_count %zu %zu %zu\n", offsetof(amdf_kernel_queue_info_t, maximum_command_count), sizeof(((amdf_kernel_queue_info_t *)0)->maximum_command_count), __alignof__(((amdf_kernel_queue_info_t *)0)->maximum_command_count));
+  printf("field amdf_kernel_queue_info_t.notification_types %zu %zu %zu\n", offsetof(amdf_kernel_queue_info_t, notification_types), sizeof(((amdf_kernel_queue_info_t *)0)->notification_types), __alignof__(((amdf_kernel_queue_info_t *)0)->notification_types));
   printf("field amdf_kernel_queue_status_t.type %zu %zu %zu\n", offsetof(amdf_kernel_queue_status_t, type), sizeof(((amdf_kernel_queue_status_t *)0)->type), __alignof__(((amdf_kernel_queue_status_t *)0)->type));
   printf("field amdf_kernel_queue_status_t.structure_size %zu %zu %zu\n", offsetof(amdf_kernel_queue_status_t, structure_size), sizeof(((amdf_kernel_queue_status_t *)0)->structure_size), __alignof__(((amdf_kernel_queue_status_t *)0)->structure_size));
   printf("field amdf_kernel_queue_status_t.next %zu %zu %zu\n", offsetof(amdf_kernel_queue_status_t, next), sizeof(((amdf_kernel_queue_status_t *)0)->next), __alignof__(((amdf_kernel_queue_status_t *)0)->next));
@@ -544,6 +550,11 @@ int main(void) {
   printf("field amdf_kernel_queue_status_t.state %zu %zu %zu\n", offsetof(amdf_kernel_queue_status_t, state), sizeof(((amdf_kernel_queue_status_t *)0)->state), __alignof__(((amdf_kernel_queue_status_t *)0)->state));
   printf("field amdf_kernel_queue_status_t.reserved %zu %zu %zu\n", offsetof(amdf_kernel_queue_status_t, reserved), sizeof(((amdf_kernel_queue_status_t *)0)->reserved), __alignof__(((amdf_kernel_queue_status_t *)0)->reserved));
   printf("field amdf_kernel_queue_status_t.terminal_status %zu %zu %zu\n", offsetof(amdf_kernel_queue_status_t, terminal_status), sizeof(((amdf_kernel_queue_status_t *)0)->terminal_status), __alignof__(((amdf_kernel_queue_status_t *)0)->terminal_status));
+  printf("field amdf_native_event_payload_t.file_descriptor %zu %zu %zu\n", offsetof(amdf_native_event_payload_t, file_descriptor), sizeof(((amdf_native_event_payload_t *)0)->file_descriptor), __alignof__(((amdf_native_event_payload_t *)0)->file_descriptor));
+  printf("field amdf_native_event_payload_t.native_handle %zu %zu %zu\n", offsetof(amdf_native_event_payload_t, native_handle), sizeof(((amdf_native_event_payload_t *)0)->native_handle), __alignof__(((amdf_native_event_payload_t *)0)->native_handle));
+  printf("field amdf_native_event_t.type %zu %zu %zu\n", offsetof(amdf_native_event_t, type), sizeof(((amdf_native_event_t *)0)->type), __alignof__(((amdf_native_event_t *)0)->type));
+  printf("field amdf_native_event_t.reserved %zu %zu %zu\n", offsetof(amdf_native_event_t, reserved), sizeof(((amdf_native_event_t *)0)->reserved), __alignof__(((amdf_native_event_t *)0)->reserved));
+  printf("field amdf_native_event_t.payload %zu %zu %zu\n", offsetof(amdf_native_event_t, payload), sizeof(((amdf_native_event_t *)0)->payload), __alignof__(((amdf_native_event_t *)0)->payload));
   printf("field amdf_api_t.structure_size %zu %zu %zu\n", offsetof(amdf_api_t, structure_size), sizeof(((amdf_api_t *)0)->structure_size), __alignof__(((amdf_api_t *)0)->structure_size));
   printf("field amdf_api_t.abi_version %zu %zu %zu\n", offsetof(amdf_api_t, abi_version), sizeof(((amdf_api_t *)0)->abi_version), __alignof__(((amdf_api_t *)0)->abi_version));
   printf("field amdf_api_t.instance_create %zu %zu %zu\n", offsetof(amdf_api_t, instance_create), sizeof(((amdf_api_t *)0)->instance_create), __alignof__(((amdf_api_t *)0)->instance_create));
@@ -584,6 +595,8 @@ int main(void) {
   printf("field amdf_api_t.user_queue_destroy %zu %zu %zu\n", offsetof(amdf_api_t, user_queue_destroy), sizeof(((amdf_api_t *)0)->user_queue_destroy), __alignof__(((amdf_api_t *)0)->user_queue_destroy));
   printf("field amdf_api_t.memory_query_address %zu %zu %zu\n", offsetof(amdf_api_t, memory_query_address), sizeof(((amdf_api_t *)0)->memory_query_address), __alignof__(((amdf_api_t *)0)->memory_query_address));
   printf("field amdf_api_t.memory_scope_query_pair_info %zu %zu %zu\n", offsetof(amdf_api_t, memory_scope_query_pair_info), sizeof(((amdf_api_t *)0)->memory_scope_query_pair_info), __alignof__(((amdf_api_t *)0)->memory_scope_query_pair_info));
+  printf("field amdf_api_t.kernel_queue_refresh_status %zu %zu %zu\n", offsetof(amdf_api_t, kernel_queue_refresh_status), sizeof(((amdf_api_t *)0)->kernel_queue_refresh_status), __alignof__(((amdf_api_t *)0)->kernel_queue_refresh_status));
+  printf("field amdf_api_t.kernel_queue_request_notification %zu %zu %zu\n", offsetof(amdf_api_t, kernel_queue_request_notification), sizeof(((amdf_api_t *)0)->kernel_queue_request_notification), __alignof__(((amdf_api_t *)0)->kernel_queue_request_notification));
   printf("field amdf_gpu_endpoint_info_t__gfx_ip.major %zu %zu %zu\n", offsetof(amdf_gpu_endpoint_info_t__gfx_ip, major), sizeof(((amdf_gpu_endpoint_info_t__gfx_ip *)0)->major), __alignof__(((amdf_gpu_endpoint_info_t__gfx_ip *)0)->major));
   printf("field amdf_gpu_endpoint_info_t__gfx_ip.minor %zu %zu %zu\n", offsetof(amdf_gpu_endpoint_info_t__gfx_ip, minor), sizeof(((amdf_gpu_endpoint_info_t__gfx_ip *)0)->minor), __alignof__(((amdf_gpu_endpoint_info_t__gfx_ip *)0)->minor));
   printf("field amdf_gpu_endpoint_info_t__gfx_ip.stepping %zu %zu %zu\n", offsetof(amdf_gpu_endpoint_info_t__gfx_ip, stepping), sizeof(((amdf_gpu_endpoint_info_t__gfx_ip *)0)->stepping), __alignof__(((amdf_gpu_endpoint_info_t__gfx_ip *)0)->stepping));
@@ -637,7 +650,7 @@ int main(void) {
   printf("field amdf_gpu_kernel_queue_create_info_t.structure_size %zu %zu %zu\n", offsetof(amdf_gpu_kernel_queue_create_info_t, structure_size), sizeof(((amdf_gpu_kernel_queue_create_info_t *)0)->structure_size), __alignof__(((amdf_gpu_kernel_queue_create_info_t *)0)->structure_size));
   printf("field amdf_gpu_kernel_queue_create_info_t.next %zu %zu %zu\n", offsetof(amdf_gpu_kernel_queue_create_info_t, next), sizeof(((amdf_gpu_kernel_queue_create_info_t *)0)->next), __alignof__(((amdf_gpu_kernel_queue_create_info_t *)0)->next));
   printf("field amdf_gpu_kernel_queue_create_info_t.queue_family_ordinal %zu %zu %zu\n", offsetof(amdf_gpu_kernel_queue_create_info_t, queue_family_ordinal), sizeof(((amdf_gpu_kernel_queue_create_info_t *)0)->queue_family_ordinal), __alignof__(((amdf_gpu_kernel_queue_create_info_t *)0)->queue_family_ordinal));
-  printf("field amdf_gpu_kernel_queue_create_info_t.reserved %zu %zu %zu\n", offsetof(amdf_gpu_kernel_queue_create_info_t, reserved), sizeof(((amdf_gpu_kernel_queue_create_info_t *)0)->reserved), __alignof__(((amdf_gpu_kernel_queue_create_info_t *)0)->reserved));
+  printf("field amdf_gpu_kernel_queue_create_info_t.maximum_pending_submission_count %zu %zu %zu\n", offsetof(amdf_gpu_kernel_queue_create_info_t, maximum_pending_submission_count), sizeof(((amdf_gpu_kernel_queue_create_info_t *)0)->maximum_pending_submission_count), __alignof__(((amdf_gpu_kernel_queue_create_info_t *)0)->maximum_pending_submission_count));
   printf("field amdf_gpu_kernel_queue_submission_info_t.type %zu %zu %zu\n", offsetof(amdf_gpu_kernel_queue_submission_info_t, type), sizeof(((amdf_gpu_kernel_queue_submission_info_t *)0)->type), __alignof__(((amdf_gpu_kernel_queue_submission_info_t *)0)->type));
   printf("field amdf_gpu_kernel_queue_submission_info_t.structure_size %zu %zu %zu\n", offsetof(amdf_gpu_kernel_queue_submission_info_t, structure_size), sizeof(((amdf_gpu_kernel_queue_submission_info_t *)0)->structure_size), __alignof__(((amdf_gpu_kernel_queue_submission_info_t *)0)->structure_size));
   printf("field amdf_gpu_kernel_queue_submission_info_t.next %zu %zu %zu\n", offsetof(amdf_gpu_kernel_queue_submission_info_t, next), sizeof(((amdf_gpu_kernel_queue_submission_info_t *)0)->next), __alignof__(((amdf_gpu_kernel_queue_submission_info_t *)0)->next));
@@ -708,7 +721,7 @@ int main(void) {
   printf("field amdf_xdna_kernel_queue_create_info_t.structure_size %zu %zu %zu\n", offsetof(amdf_xdna_kernel_queue_create_info_t, structure_size), sizeof(((amdf_xdna_kernel_queue_create_info_t *)0)->structure_size), __alignof__(((amdf_xdna_kernel_queue_create_info_t *)0)->structure_size));
   printf("field amdf_xdna_kernel_queue_create_info_t.next %zu %zu %zu\n", offsetof(amdf_xdna_kernel_queue_create_info_t, next), sizeof(((amdf_xdna_kernel_queue_create_info_t *)0)->next), __alignof__(((amdf_xdna_kernel_queue_create_info_t *)0)->next));
   printf("field amdf_xdna_kernel_queue_create_info_t.queue_family_ordinal %zu %zu %zu\n", offsetof(amdf_xdna_kernel_queue_create_info_t, queue_family_ordinal), sizeof(((amdf_xdna_kernel_queue_create_info_t *)0)->queue_family_ordinal), __alignof__(((amdf_xdna_kernel_queue_create_info_t *)0)->queue_family_ordinal));
-  printf("field amdf_xdna_kernel_queue_create_info_t.reserved %zu %zu %zu\n", offsetof(amdf_xdna_kernel_queue_create_info_t, reserved), sizeof(((amdf_xdna_kernel_queue_create_info_t *)0)->reserved), __alignof__(((amdf_xdna_kernel_queue_create_info_t *)0)->reserved));
+  printf("field amdf_xdna_kernel_queue_create_info_t.maximum_pending_submission_count %zu %zu %zu\n", offsetof(amdf_xdna_kernel_queue_create_info_t, maximum_pending_submission_count), sizeof(((amdf_xdna_kernel_queue_create_info_t *)0)->maximum_pending_submission_count), __alignof__(((amdf_xdna_kernel_queue_create_info_t *)0)->maximum_pending_submission_count));
   printf("field amdf_xdna_kernel_command_t.memory %zu %zu %zu\n", offsetof(amdf_xdna_kernel_command_t, memory), sizeof(((amdf_xdna_kernel_command_t *)0)->memory), __alignof__(((amdf_xdna_kernel_command_t *)0)->memory));
   printf("field amdf_xdna_kernel_command_t.access_ordinal %zu %zu %zu\n", offsetof(amdf_xdna_kernel_command_t, access_ordinal), sizeof(((amdf_xdna_kernel_command_t *)0)->access_ordinal), __alignof__(((amdf_xdna_kernel_command_t *)0)->access_ordinal));
   printf("field amdf_xdna_kernel_command_t.reserved %zu %zu %zu\n", offsetof(amdf_xdna_kernel_command_t, reserved), sizeof(((amdf_xdna_kernel_command_t *)0)->reserved), __alignof__(((amdf_xdna_kernel_command_t *)0)->reserved));
@@ -907,14 +920,24 @@ int main(void) {
   printf("constant AMDF_QUEUE_STATE_ACTIVE %" PRIu64 "\n", (uint64_t)AMDF_QUEUE_STATE_ACTIVE);
   printf("constant AMDF_QUEUE_STATE_FAILED %" PRIu64 "\n", (uint64_t)AMDF_QUEUE_STATE_FAILED);
   printf("constant AMDF_QUEUE_STATE_DEVICE_LOST %" PRIu64 "\n", (uint64_t)AMDF_QUEUE_STATE_DEVICE_LOST);
+  printf("constant AMDF_NATIVE_EVENT_TYPE_NONE %" PRIu64 "\n", (uint64_t)AMDF_NATIVE_EVENT_TYPE_NONE);
+  printf("constant AMDF_NATIVE_EVENT_TYPE_EVENTFD %" PRIu64 "\n", (uint64_t)AMDF_NATIVE_EVENT_TYPE_EVENTFD);
+  printf("constant AMDF_NATIVE_EVENT_TYPE_WIN32_EVENT %" PRIu64 "\n", (uint64_t)AMDF_NATIVE_EVENT_TYPE_WIN32_EVENT);
+  printf("constant AMDF_NATIVE_EVENT_TYPE_BIT_EVENTFD %" PRIu64 "\n", (uint64_t)AMDF_NATIVE_EVENT_TYPE_BIT_EVENTFD);
+  printf("constant AMDF_NATIVE_EVENT_TYPE_BIT_WIN32_EVENT %" PRIu64 "\n", (uint64_t)AMDF_NATIVE_EVENT_TYPE_BIT_WIN32_EVENT);
   printf("constant AMDF_GPU_DEVICE_FEATURE_HOST_REGISTRATION %" PRIu64 "\n", (uint64_t)AMDF_GPU_DEVICE_FEATURE_HOST_REGISTRATION);
   printf("constant AMDF_GPU_DEVICE_FEATURE_DEVICE_RECREATION %" PRIu64 "\n", (uint64_t)AMDF_GPU_DEVICE_FEATURE_DEVICE_RECREATION);
   printf("constant AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY %" PRIu64 "\n", (uint64_t)AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY);
   printf("constant AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY %" PRIu64 "\n", (uint64_t)AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY);
   printf("constant AMDF_GPU_PM4_FORMAT_FEATURE_ACQUIRE_MEM_GCR %" PRIu64 "\n", (uint64_t)AMDF_GPU_PM4_FORMAT_FEATURE_ACQUIRE_MEM_GCR);
-  printf("constant AMDF_GPU_SDMA_FORMAT_FEATURE_GCR %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_FORMAT_FEATURE_GCR);
+  printf("constant AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR);
   printf("constant AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM);
   printf("constant AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE);
+  printf("constant AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_MEMORY_TYPE %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_MEMORY_TYPE);
+  printf("constant AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT);
+  printf("constant AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_EXTENDED_Z %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_EXTENDED_Z);
+  printf("constant AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_WIDE %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_WIDE);
+  printf("constant AMDF_GPU_AQL_FORMAT_FEATURE_BARRIER_VALUE %" PRIu64 "\n", (uint64_t)AMDF_GPU_AQL_FORMAT_FEATURE_BARRIER_VALUE);
   printf("constant AMDF_XDNA_ARCHITECTURE_UNKNOWN %" PRIu64 "\n", (uint64_t)AMDF_XDNA_ARCHITECTURE_UNKNOWN);
   printf("constant AMDF_XDNA_ARCHITECTURE_AIE2 %" PRIu64 "\n", (uint64_t)AMDF_XDNA_ARCHITECTURE_AIE2);
   printf("constant AMDF_XDNA_ARCHITECTURE_AIE2P %" PRIu64 "\n", (uint64_t)AMDF_XDNA_ARCHITECTURE_AIE2P);
@@ -928,6 +951,8 @@ int main(void) {
   printf("constant AMDF_ABI_VERSION_1 %" PRIu64 "\n", (uint64_t)AMDF_ABI_VERSION_1);
   printf("constant AMDF_ABI_VERSION_2 %" PRIu64 "\n", (uint64_t)AMDF_ABI_VERSION_2);
   printf("constant AMDF_ABI_VERSION_3 %" PRIu64 "\n", (uint64_t)AMDF_ABI_VERSION_3);
+  printf("constant AMDF_ABI_VERSION_4 %" PRIu64 "\n", (uint64_t)AMDF_ABI_VERSION_4);
+  printf("constant AMDF_ABI_VERSION_5 %" PRIu64 "\n", (uint64_t)AMDF_ABI_VERSION_5);
   printf("constant AMDF_ABI_VERSION_LATEST %" PRIu64 "\n", (uint64_t)AMDF_ABI_VERSION_LATEST);
   printf("constant AMDF_ADDRESS_DOMAIN_ORDINAL_NONE %" PRIu64 "\n", (uint64_t)AMDF_ADDRESS_DOMAIN_ORDINAL_NONE);
   printf("constant AMDF_ENABLE_ASSERTS %" PRIu64 "\n", (uint64_t)AMDF_ENABLE_ASSERTS);
@@ -937,6 +962,8 @@ int main(void) {
   printf("constant AMDF_GPU_EXTENSION_VERSION_LATEST %" PRIu64 "\n", (uint64_t)AMDF_GPU_EXTENSION_VERSION_LATEST);
   printf("constant AMDF_GPU_PM4_QUEUE_FORMAT_VERSION_1 %" PRIu64 "\n", (uint64_t)AMDF_GPU_PM4_QUEUE_FORMAT_VERSION_1);
   printf("constant AMDF_GPU_SDMA_QUEUE_FORMAT_VERSION_1 %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_QUEUE_FORMAT_VERSION_1);
+  printf("constant AMDF_GPU_AQL_QUEUE_FORMAT_VERSION_1 %" PRIu64 "\n", (uint64_t)AMDF_GPU_AQL_QUEUE_FORMAT_VERSION_1);
+  printf("constant AMDF_GPU_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT %" PRIu64 "\n", (uint64_t)AMDF_GPU_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT);
   printf("constant AMDF_MEMORY_PROFILE_EXTERNAL_SUPPORT_CAPACITY %" PRIu64 "\n", (uint64_t)AMDF_MEMORY_PROFILE_EXTERNAL_SUPPORT_CAPACITY);
   printf("constant AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN %" PRIu64 "\n", (uint64_t)AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
   printf("constant AMDF_STATUS_OK %" PRIu64 "\n", (uint64_t)AMDF_STATUS_OK);
@@ -959,6 +986,7 @@ int main(void) {
   printf("constant AMDF_XDNA_EXTENSION_VERSION_LATEST %" PRIu64 "\n", (uint64_t)AMDF_XDNA_EXTENSION_VERSION_LATEST);
   printf("constant AMDF_XDNA_PHYSICAL_COLUMN_ORIGIN_ANY %" PRIu64 "\n", (uint64_t)AMDF_XDNA_PHYSICAL_COLUMN_ORIGIN_ANY);
   printf("constant AMDF_XDNA_QUEUE_FORMAT_VERSION_1 %" PRIu64 "\n", (uint64_t)AMDF_XDNA_QUEUE_FORMAT_VERSION_1);
+  printf("constant AMDF_XDNA_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT %" PRIu64 "\n", (uint64_t)AMDF_XDNA_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT);
   printf("constant AMDF_XDNA_TARGET_ID_CAPACITY %" PRIu64 "\n", (uint64_t)AMDF_XDNA_TARGET_ID_CAPACITY);
   printf("constant AMDF_XDNA_TRANSACTION_FORMAT_VERSION_0_1 %" PRIu64 "\n", (uint64_t)AMDF_XDNA_TRANSACTION_FORMAT_VERSION_0_1);
   printf("string AMDF_QUERY_API_SYMBOL %s\n", AMDF_QUERY_API_SYMBOL);

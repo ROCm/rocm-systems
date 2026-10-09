@@ -45,6 +45,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suites
     `GroupEndInternalTest.*`, `ReclaimPlannerStateTest.*`, `AsyncLaunchTest.*`,
     `GroupJobAbortTest.*`, `GroupApiWrapperTest.*`, `ArgsGlobalCheckTest.*`.
+
   - `devcomm/devcomm_v22902.cc` + `devcomm/devcomm_v22907.cc`
     (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
     `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
@@ -91,6 +92,30 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `RasDiagnosticsCommonMicrotest.*`. Covers communicator snapshots and
     filtering, aligned local-record collection, allocation and callback
     failures, rank ordering and formatting, and reporter output.
+  - `ras/collectives.cc` (`COLLECTIVES_CC_PATH`, from
+    `ras-collectives-test.cc`); suite `RasCollectivesMicrotest.*`. Covers
+    request initialization, collective forwarding and responses, completion,
+    timeout handling, history, connection cleanup, diagnostics-init failure
+    absorption, and dependency-error propagation.
+    `DISABLED_NetSendCollReq_CommsPayloadAllocationFailureKeepsRequestForwardable`
+    tracks [AICOMRCCL-2740](https://amd-hub.atlassian.net/browse/AICOMRCCL-2740).
+    This deferred production regression currently crashes when communicator-data
+    allocation fails after request rewriting. Enable it with the production fix;
+    it is excluded from normal host-test runs. To reproduce explicitly, run
+    `rccl-UnitTestsMicro --gtest_also_run_disabled_tests --gtest_filter=RasCollectivesMicrotest.DISABLED_NetSendCollReq_CommsPayloadAllocationFailureKeepsRequestForwardable`.
+  - `ras/diagnostics.cc` (`RAS_DIAGNOSTICS_CC_PATH`, from
+    `ras-diagnostics-test.cc`); suite `RasDiagnosticsMicrotest.*`. Covers
+    context initialization, request lifecycle, local-data collection,
+    peer-payload aggregation, summaries, timeout propagation, and reporter
+    errors. `DISABLED_Resume_UnknownWireCheckIdReturnsError` tracks
+    AICOMRCCL-2741: production reads an out-of-range peer check ID as an enum
+    before validation. Its raw-byte fixture reproduces the enum UBSan failure;
+    enable it after the production fix. The defined `RAS_DIAG_CHECK_COUNT`
+    sentinel remains covered by enabled dispatch and peer-payload tests.
+  - `ras/diagnostics_env.cc` (`RAS_DIAGNOSTICS_ENV_CC_PATH`, from
+    `ras-diagnostics-env-test.cc`); suite `RasDiagnosticsEnvMicrotest.*`.
+    Covers NCCL environment collection, filtering, truncation, aggregation,
+    mismatch reporting, and reporter errors.
   - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
     `RasClientMicrotest.*`. With
     `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this
@@ -100,6 +125,13 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     every header declaring a renamed name must precede it and the undef half
     must immediately follow the unit -- see `fakes/libc_seam.h:9-19`) instead
     of the shared `fakes/nccl_fakes.cc` the other units in this binary use.
+  - `ras/ras_param.cc` (`RAS_PARAM_CC_PATH`, from `ras-param-test.cc`); suite
+    `RasParamMicrotest.*`. Covers environment parsing, invalid-value fallback,
+    cached parameter reads, and nanosecond/second scaling. The test includes the
+    production file under renamed `ncclParamRasTimeoutFactor`,
+    `rasTimeoutFactorNs`, and `rasTimeoutFactorSec` symbols so it can link beside
+    `fakes/ras_param_fakes.cc` and the `ras-test.cc` timeout fake in the shared
+    microtest binary.
   - `tuning/tuning_general.cc` (`TUNING_GENERAL_CC_PATH`, from
     `tuning-general-test.cc`); suite `TuningGeneralMicrotest.*`. Covers the
     shared step-count, hardware-index, time-estimation, thread-threshold,
@@ -189,6 +221,15 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   scene, vocabulary and fake-reset fixture live in `TaskPrepScene.h`.
   `ENABLE_WARP_SPEED` is deliberately absent: all eleven files are free of it.
   See `test_categories_micro_taskprep.yaml`.
+- **`rccl-UnitTestsMicroGinHost`** — `gin/gin_host.cc` (`GIN_HOST_CC_PATH`, from
+  `gin-host-test.cc`); suite `GinHostTest.*`. NVIDIA/nccl#2279
+  `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment. Its own binary, not
+  sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
+  `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
+- **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
+  `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`). Its own binary: it fakes the
+  `transport/p2p.cc` shareable-buffer entry points that `rccl-UnitTestsMicro`
+  compiles for real. See `test_categories_micro_diagnostics.yaml`.
 
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
@@ -312,6 +353,7 @@ symbol.
 | `src/ce_coll.cc` | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
 | `src/dev_runtime.cc` (targets that do not compile the real file) | `fakes/dev_runtime_fakes.cc` |
+| `src/diagnostics/device/p2p.cu` (`ncclDiagP2p*` kernel launchers) | `fakes/diagnostics_p2p_device_fakes.cc` |
 | `src/graph/*.cc` (topo, paths, search, connect, rome consensus) | `fakes/topo_stubs.cc` |
 | `src/graph/tuning.cc`, `src/graph/connect.cc` params | `fakes/tuning_fakes.cc` |
 | `src/group.cc` | `fakes/group_fakes.cc` |
@@ -331,9 +373,9 @@ symbol.
 | `src/misc/utils.cc` | `fakes/utils_fakes.cc` |
 | `src/os/linux.cc` | `fakes/os_fakes.cc` |
 | `src/plugin/env.cc` | `fakes/env_plugin_fakes.cc` |
-| `src/plugin/gin.cc`, `src/gin/gin_host.cc` | `fakes/gin_fakes.cc` |
+| `src/plugin/gin.cc`, `src/gin/gin_host.cc` (targets that do not compile the real file) | `fakes/gin_fakes.cc` |
 | `src/proxy.cc` | `fakes/proxy_fakes.cc` |
-| `src/ras/ras_param.cc` | `fakes/ras_param_fakes.cc` |
+| `src/ras/ras_param.cc` | `fakes/ras_param_fakes.cc` (the direct `ras-param-test.cc` inclusion uses renamed symbols) |
 | `src/rccl_wrap.cc`'s own public entry points (targets that don't compile the real file, e.g. `rccl-UnitTestsMicroEnqueue`) | `fakes/rccl_wrap_fakes.cc` |
 | `src/rccl_wrap.cc`'s dependencies (`rccl-UnitTestsMicro`, which compiles the real file and tests it directly) | `fakes/wrap_fakes.cc` |
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |
@@ -341,6 +383,7 @@ symbol.
 | `src/rma/*.cc` | `fakes/rma_fakes.cc` |
 | `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
+| `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`) | `fakes/transport_p2p_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`) | `fakes/libc_interposers.cc` |
 | `src/ras/client.cc`'s libc surface (sockets/stdio/exit; see `fakes/libc_seam.h`) | `fakes/libc_fakes.cc` |
@@ -692,6 +735,7 @@ above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
+`rccl-UnitTestsMicroGinHost, `rccl-UnitTestsMicroDiagnostics`,
 `rccl-UnitTestsMicroSymKernels` and `rccl-UnitTestsMicroTaskPrep` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
@@ -730,8 +774,33 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
+./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
+./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-HostUnitTests
 ```
 
 Disable coverage instrumentation for the standalone host-only test binaries
 with `-DHOST_TEST_COVERAGE=OFF`.
+
+### Shared RAS diagnostic fixtures
+
+`fakes/ras_registry_test_support.h` owns test installation/reset of the
+`ras.cc` communicator registry. Both operations hold `ncclCommsMutex` and
+clear `ncclCommsSorted`; installation validates allocation before replacing
+the old registry and preserves explicit vacant slots. The RAS and diagnostics
+suites use the same helper. `fakes/ras_diagnostics_test_support.h` shares the
+owned communicator and recording reporter used by the diagnostic suites.
+
+`SetMicroEnviron` in `fakes/env_fakes.{h,cc}` replaces the scripted environment
+for enumeration tests, preserving input order and malformed entries while
+making valid entries visible through `micro_getenv` and `getenv`. While that
+override is active, `SetMicroEnv` and `SetMicroEnvAbsent` also update `environ`.
+`ClearMicroEnv`/`ResetEnvFakes` restore the original process environment and
+clear the lookup map. Map-only tests retain the existing fallback behavior
+unless they opt into the enumeration override.
+
+`DISABLED_Summarize_HashCollisionsReportFullCommIdentity` tracks AICOMRCCL-2743.
+The environment reporters currently omit host and process hashes, so distinct
+communicators can appear identical. The disabled regression specifies the full
+identity for consistent, mismatch, and mismatch-summary reports. Enable it
+with the separate production fix; enabled tests still pin correct grouping.

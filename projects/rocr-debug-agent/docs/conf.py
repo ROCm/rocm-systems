@@ -8,7 +8,14 @@ import re
 
 
 html_theme = "rocm_docs_theme"
-html_theme_options = {"flavor": "rocm"}
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-systems",
+    "path_to_docs": "projects/rocr-debug-agent/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+}
 
 extensions = ["rocm_docs"]
 external_toc_path = "./sphinx/_toc.yml"

@@ -87,6 +87,8 @@
         {"name": "Recorder.ParseBinary", "description": "Recorder parse binary tests", "test_filter": "Recorder.ParseBinary", "timeout": 60},
         {"name": "Recorder.ParseJson", "description": "Recorder parse JSON tests", "test_filter": "Recorder.ParseJson", "timeout": 60},
         {"name": "Recorder.VerifyMultithread", "description": "Recorder multithread verification tests", "test_filter": "Recorder.VerifyMultithread", "timeout": 60},
+        {"name": "Recorder.RedOpRecordJson", "description": "Recorder RedOp record JSON output", "test_filter": "Recorder.RedOpRecordJson", "timeout": 60},
+        {"name": "Recorder.RedOpRecordBinary", "description": "Recorder RedOp record binary output", "test_filter": "Recorder.RedOpRecordBinary", "timeout": 60},
         {"name": "ProxyTraceTestFixture.nonEmptySingleton", "description": "ProxyTrace non-empty singleton test", "test_filter": "ProxyTraceTestFixture.nonEmptySingleton", "timeout": 60},
         {"name": "ProxyTraceTestFixture.addTraceOp", "description": "ProxyTrace add trace operation test", "test_filter": "ProxyTraceTestFixture.addTraceOp", "timeout": 60},
         {"name": "ProxyTraceTestFixture.getMapSizeMB", "description": "ProxyTrace get map size test", "test_filter": "ProxyTraceTestFixture.getMapSizeMB", "timeout": 60},
@@ -131,7 +133,7 @@
         "NCCL_DEBUG": "INFO"
       },
       "tests": [
-        {"name": "BitOps", "description": "Bit operation utility tests (macros and typed fixtures)", "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash:BitOpsTemplate*"},
+        {"name": "BitOps", "description": "Bit operation utility tests (macros and typed fixtures)", "test_filter": "ALIGN_*:DIVUP.*:ROUNDUP.*:u32fp*:getHash.*:eatHash.*:BitOpsTemplate*:Add4G.*"},
         {"name": "EnqueueCountTests", "description": "Enqueue send/recv count helpers", "test_filter": "EnqueueCountTests.*"},
         {"name": "MiscTests.Sorter", "description": "Task coll sorter unit test", "test_filter": "MiscTests.Sorter"},
         {"name": "VersionInfoTests", "description": "HIP/ROCm version string formatting tests", "test_filter": "VersionInfoTests.*"},
@@ -215,6 +217,17 @@
       "tests": [
         {"name": "SymKernelsMicrotests", "description": "Host-only sym_kernels.cc/sym_kernels_host.cc microtests (no GPU, no HIP/RCCL runtime); contributes sym_kernels coverage", "test_filter": "*"}
       ]
+    },
+    "unit_tests_micro_gin_host": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroGinHost",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "GinHostMicrotests", "description": "Host-only gin_host.cc GIN_PROXY_NTHREADS microtests (no GPU, no HIP/RCCL runtime); NVIDIA/nccl#2279 / AICOMRCCL-2017", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -270,6 +283,12 @@
       "name": "RCCL Microtests - sym_kernels.cc",
       "description": "rccl-UnitTestsMicroSymKernels (host-only sym_kernels.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_symkernels",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - gin_host.cc",
+      "description": "rccl-UnitTestsMicroGinHost (host-only gin_host.cc GIN_PROXY_NTHREADS microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_gin_host",
       "enabled": true
     }
   ]

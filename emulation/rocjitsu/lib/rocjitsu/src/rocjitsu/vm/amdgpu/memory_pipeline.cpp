@@ -47,7 +47,14 @@ MemoryPipeline::~MemoryPipeline() {
 
 MemoryPipeline::WaitCounterTokens MemoryPipeline::issue_counters(const Instruction &inst) const {
   WaitCounterTokens counters;
-  if (const auto *issue = inst.amdgpu_memory_issue_info()) {
+  const DynamicInstState *state = inst.data();
+  const auto *issue = inst.amdgpu_memory_issue_info();
+  if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM)) {
+    const auto &routed = inst.data_as<VectorMemState>()->routed_issue_info;
+    if (routed)
+      issue = &*routed;
+  }
+  if (issue) {
     for (const auto obligation : issue->counter_obligations()) {
       for (uint8_t token = 0; token < obligation.counter_increment(); ++token)
         counters.types[counters.size++] = obligation.wait_counter_type();
@@ -56,7 +63,6 @@ MemoryPipeline::WaitCounterTokens MemoryPipeline::issue_counters(const Instructi
   }
 
   WaitCounterType counter = counter_type_;
-  const DynamicInstState *state = inst.data();
   if (state != nullptr) {
     switch (state->tag()) {
     case SCALAR_MEM:
@@ -450,25 +456,31 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
       // Descriptor bounds suppress memory access while preserving zero writeback.
     } else if (d.elem_size < 4) {
       uint8_t bytes[4] = {};
-      const VmAccessOutcome outcome = l1_->load_bytes(d.addr, d.elem_size, bytes, wf.process_id());
+      const VmAccessOutcome outcome =
+          l1_->load_bytes(d.addr, d.elem_size, bytes, wf.process_id(), d.mtype);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
       d.response_data[0] = extend_scalar_load(bytes, d.elem_size, d.sign_extend);
     } else if (d.load_dword_mask != 0xffff) {
       for (uint32_t i = 0; i < d.num_dwords; ++i)
         if (d.load_dword_mask & (1u << i)) {
-          const auto outcome = l1_->load(d.addr + i * 4, 1, &d.response_data[i], wf.process_id());
+          const auto outcome = l1_->load(d.addr + i * 4, 1, &d.response_data[i], wf.process_id(),
+                                         /*allow_private_batch=*/false, d.mtype);
           if (outcome != VmAccessOutcome::Complete)
             return outcome;
         }
     } else {
-      const VmAccessOutcome outcome =
-          l1_->load(d.addr, d.num_dwords, d.response_data, wf.process_id());
+      auto &cu = wf.raw_cu();
+      const bool allow_private_batch =
+          GpuVmAccessBatchGuard::active() && !cu.debug_active() && cu.plugin_group().empty();
+      const VmAccessOutcome outcome = l1_->load(d.addr, d.num_dwords, d.response_data,
+                                                wf.process_id(), allow_private_batch, d.mtype);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }
   } else {
-    const VmAccessOutcome outcome = l1_->store(d.addr, d.num_dwords, d.store_data, wf.process_id());
+    const VmAccessOutcome outcome =
+        l1_->store(d.addr, d.num_dwords, d.store_data, wf.process_id(), d.mtype);
     if (outcome != VmAccessOutcome::Complete)
       return outcome;
   }
@@ -1037,7 +1049,9 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
       const VmAccessOutcome outcome =
           l1_->store(d.per_lane_addr.data(), swizzled_lanes, d.elem_size, d.num_elems,
                      d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(),
-                     stride, base_offset, d.element_lane_masks.view(), d.scratch_swizzle_unit);
+                     stride, base_offset, d.element_lane_masks.view(), d.scratch_swizzle_unit,
+                     GpuVmAccessBatchGuard::active() && !wf.raw_cu().debug_active() &&
+                         wf.raw_cu().plugin_group().empty());
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }

@@ -787,6 +787,74 @@ TEST_F(RmaProxyDescriptorTest, PutOp_NoSignalCopiesTheDataOperationOnly) {
   EXPECT_EQ(0u, op.signal.op);
 }
 
+// Account for each window's offset within a shared backing allocation.
+TEST_F(RmaProxyDescriptorTest, Put_TwoWindowsCarvedFromOneAllocationDoNotAlias) {
+  void* allocation = reinterpret_cast<void*>(0x100000);
+  constexpr size_t kHeadCarve = 0;
+  constexpr size_t kTailCarve = 0x1000;
+  constexpr size_t kCallerOff = 64;
+
+  ncclDevrMemory headMemory{};
+  ncclDevrMemory tailMemory{};
+  headMemory.primaryAddr = allocation;
+  tailMemory.primaryAddr = allocation;
+  headMemory.bigOffset = 0x8000;
+  tailMemory.bigOffset = 0xC000;
+  headMemory.rmaHostWins[kContext] = reinterpret_cast<void*>(0xA110);
+  tailMemory.rmaHostWins[kContext] = reinterpret_cast<void*>(0xA220);
+
+  ncclDevrWindow head{};
+  ncclDevrWindow tail{};
+  head.memory = &headMemory;
+  tail.memory = &tailMemory;
+  head.userPtr = static_cast<char*>(allocation) + kHeadCarve;
+  tail.userPtr = static_cast<char*>(allocation) + kTailCarve;
+  head.bigOffset = headMemory.bigOffset + kHeadCarve;
+  tail.bigOffset = tailMemory.bigOffset + kTailCarve;
+  // Handles stored on the window itself must not win while backing memory is set.
+  head.rmaHostWins[kContext] = reinterpret_cast<void*>(0x1111);
+  tail.rmaHostWins[kContext] = reinterpret_cast<void*>(0x2222);
+
+  ncclRmaPutSignalOp op{};
+  ASSERT_EQ(ncclSuccess,
+            ncclRmaProxyPutBuildOp(comm_.get(), ctx_.get(), kContext, false,
+                                   &head, kCallerOff, &tail, kCallerOff, 128,
+                                   kPeer, 0, NCCL_SIGNAL_NONE, &op));
+
+  EXPECT_EQ(kHeadCarve + kCallerOff, op.srcOff);
+  EXPECT_EQ(kTailCarve + kCallerOff, op.dstOff);
+  EXPECT_NE(op.srcOff, op.dstOff);
+  EXPECT_EQ(headMemory.rmaHostWins[kContext], op.srcHandle);
+  EXPECT_EQ(tailMemory.rmaHostWins[kContext], op.dstHandle);
+  EXPECT_NE(op.srcHandle, op.dstHandle);
+  EXPECT_NE(head.rmaHostWins[kContext], op.srcHandle);
+  EXPECT_NE(tail.rmaHostWins[kContext], op.dstHandle);
+
+  ncclTaskRma task{};
+  task.srcWinHost = &tail;
+  task.srcWinOffset = 0;
+  task.peerWinHost = &head;
+  task.peerWinOffset = 32;
+  task.count = 16;
+  task.datatype = ncclInt8;
+  task.peer = kPeer;
+  task.ctx = kContext;
+  task.signalIdx = 0;
+  task.signalMode = NCCL_SIGNAL_NONE;
+  ncclRmaProxyDesc desc{};
+
+  ASSERT_EQ(ncclSuccess,
+            ncclRmaProxyPutDescFromTask(comm_.get(), ctx_.get(), plan_.get(),
+                                        &task, &desc));
+
+  EXPECT_EQ(kTailCarve, desc.putSignal.srcOff);
+  EXPECT_EQ(kHeadCarve + 32, desc.putSignal.dstOff);
+  EXPECT_EQ(16u, desc.putSignal.size);
+  EXPECT_EQ(tailMemory.rmaHostWins[kContext], desc.putSignal.srcHandle);
+  EXPECT_EQ(headMemory.rmaHostWins[kContext], desc.putSignal.dstHandle);
+  EXPECT_NE(desc.putSignal.srcHandle, desc.putSignal.dstHandle);
+}
+
 TEST_F(RmaProxyDescriptorTest, PutOp_NonPersistentSignalUsesTheOrdinarySignalHandle) {
   ncclRmaPutSignalOp op{};
 
@@ -2256,19 +2324,33 @@ TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) 
   bool resumeObserved = false;
   std::mutex coordinationMutex;
   std::condition_variable coordinationCondition;
+  // Set under coordinationMutex: an unlocked store+notify can land after a waiter's predicate check.
+  auto publish = [&](std::atomic<bool>& flag) {
+    {
+      std::lock_guard<std::mutex> lock(coordinationMutex);
+      flag.store(true, std::memory_order_release);
+    }
+    coordinationCondition.notify_all();
+  };
+  // The proxy loop also reads reclaimFinished under state->mutex, so cycle that lock before notifying state->cond.
+  auto publishToProxy = [&](std::atomic<bool>& flag) {
+    publish(flag);
+    {
+      std::lock_guard<std::mutex> lock(state->mutex);
+    }
+    state->cond.notify_all();
+  };
 
   ScopedHook freeObserver(g_rmaProxyFreeObserver, [&](void* allocation) {
     if (allocation != reclaimed) return;
     if (!pauseAcknowledged.load(std::memory_order_acquire)) {
-      freedBeforePauseAcknowledgment.store(true, std::memory_order_release);
+      publish(freedBeforePauseAcknowledgment);
     }
-    coordinationCondition.notify_one();
   });
 
   std::thread proxy([&] {
     std::unique_lock<std::mutex> lock(state->mutex);
-    proxyReady.store(true, std::memory_order_release);
-    coordinationCondition.notify_one();
+    publish(proxyReady);
     while (state->rmaProgress != 2 &&
            !reclaimFinished.load(std::memory_order_acquire)) {
       if (state->cond.wait_for(lock, kCoordinationTimeout) ==
@@ -2283,8 +2365,7 @@ TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) 
     }
     if (state->rmaProgress != 2) return;
 
-    pauseObserved.store(true, std::memory_order_release);
-    coordinationCondition.notify_one();
+    publish(pauseObserved);
     {
       std::unique_lock<std::mutex> coordinationLock(coordinationMutex);
       acknowledgmentWaitTimedOut = !coordinationCondition.wait_for(
@@ -2316,11 +2397,9 @@ TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) 
     });
   }
   if (!proxyStarted) {
-    abortCoordination.store(true, std::memory_order_release);
-    reclaimFinished.store(true, std::memory_order_release);
-    allowPauseAcknowledgment.store(true, std::memory_order_release);
-    coordinationCondition.notify_one();
-    state->cond.notify_one();
+    publish(abortCoordination);
+    publish(allowPauseAcknowledgment);
+    publishToProxy(reclaimFinished);
     proxy.join();
     FAIL() << "proxy helper did not start before the coordination deadline";
   }
@@ -2330,7 +2409,7 @@ TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) 
     {
       std::unique_lock<std::mutex> lock(coordinationMutex);
       reclaimWorkerReady.store(true, std::memory_order_release);
-      coordinationCondition.notify_one();
+      coordinationCondition.notify_all();
       reclaimStartWaitTimedOut = !coordinationCondition.wait_for(
           lock, kCoordinationTimeout, [&] {
             return startReclaim.load(std::memory_order_acquire) ||
@@ -2339,14 +2418,11 @@ TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) 
     }
     if (reclaimStartWaitTimedOut ||
         abortCoordination.load(std::memory_order_acquire)) {
-      reclaimFinished.store(true, std::memory_order_release);
-      coordinationCondition.notify_one();
-      state->cond.notify_one();
+      publishToProxy(reclaimFinished);
       return;
     }
     result = ncclRmaProxyReclaimPlanUut(comm_.get(), targetPlan_.get());
-    reclaimFinished.store(true, std::memory_order_release);
-    coordinationCondition.notify_one();
+    publishToProxy(reclaimFinished);
   });
 
   bool reclaimWorkerStarted = false;
@@ -2358,12 +2434,11 @@ TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) 
         });
     startReclaim.store(true, std::memory_order_release);
   }
-  coordinationCondition.notify_one();
+  coordinationCondition.notify_all();
   if (!reclaimWorkerStarted) {
-    abortCoordination.store(true, std::memory_order_release);
-    allowPauseAcknowledgment.store(true, std::memory_order_release);
-    coordinationCondition.notify_all();
-    state->cond.notify_one();
+    // The reclaim worker publishes reclaimFinished on both exits; doing it here strands it inside the UUT.
+    publish(abortCoordination);
+    publish(allowPauseAcknowledgment);
     reclaim.join();
     proxy.join();
     FAIL() << "reclaim worker did not start before the coordination deadline";
@@ -2388,14 +2463,14 @@ TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) 
     }
     allowPauseAcknowledgment.store(true, std::memory_order_release);
   }
-  coordinationCondition.notify_one();
+  coordinationCondition.notify_all();
   if (!coordinationSettled) {
-    abortCoordination.store(true, std::memory_order_release);
+    publish(abortCoordination);
     {
       std::lock_guard<std::mutex> lock(state->mutex);
       state->rmaProgress = 0;
     }
-    state->cond.notify_one();
+    state->cond.notify_all();
   }
 
   reclaim.join();

@@ -1,80 +1,80 @@
 ---
 syncthreads:
   Unit___syncthreads_Positive_Basic:
-    <<: *level_2
+    <<: *level_default
     unsupported:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - Linux-only test: unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX), so it is never built or run on native Windows."
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_count_Positive_Basic:
-    <<: *level_2
+    <<: *level_default
     unsupported:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - Linux-only test: unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX), so it is never built or run on native Windows."
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_count_Positive_Predicate_Zero:
-    <<: *level_2
+    <<: *level_default
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_count_Positive_Predicate_One:
-    <<: *level_2
+    <<: *level_default
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_count_Positive_Predicate_OddEven:
-    <<: *level_2
+    <<: *level_default
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_count_Positive_Predicate_Negative:
-    <<: *level_2
+    <<: *level_default
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_count_Positive_Predicate_Id:
-    <<: *level_2
+    <<: *level_default
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_count_Negative_Parameters_RTC:
-    <<: *level_2
+    <<: *level_default
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_and_Positive_Basic:
-    <<: *level_2
+    <<: *level_default
     unsupported:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - Linux-only test: unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX), so it is never built or run on native Windows."
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_and_Positive_Predicate_Zero:
-    <<: *level_2
+    <<: *level_default
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_and_Positive_Predicate_One:
-    <<: *level_2
+    <<: *level_default
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_and_Positive_Predicate_OddEven:
-    <<: *level_2
+    <<: *level_default
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_and_Positive_Predicate_Negative:
-    <<: *level_2
+    <<: *level_default
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_and_Positive_Predicate_Id:
-    <<: *level_2
+    <<: *level_default
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_and_Negative_Parameters_RTC:
-    <<: *level_2
+    <<: *level_default
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_or_Positive_Basic:
-    <<: *level_2
+    <<: *level_default
     unsupported:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - Linux-only test: unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX), so it is never built or run on native Windows."
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_or_Positive_Predicate_Zero:
-    <<: *level_2
+    <<: *level_default
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_or_Positive_Predicate_One:
-    <<: *level_2
+    <<: *level_default
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_or_Positive_Predicate_OddEven:
-    <<: *level_2
+    <<: *level_default
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_or_Positive_Predicate_Negative:
-    <<: *level_2
+    <<: *level_default
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_or_Positive_Predicate_Id:
-    <<: *level_2
+    <<: *level_default
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_or_Negative_Parameters_RTC:
-    <<: *level_2
+    <<: *level_default
     tags: [block, deviceLib, synchronization]

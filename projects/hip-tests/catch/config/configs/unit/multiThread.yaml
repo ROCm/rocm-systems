@@ -1,32 +1,32 @@
 ---
 multiThread:
   Unit_hipMemsetAsync_QueueJobsMultithreaded:
-    <<: *level_2
+    <<: *level_default
     tags: [memory, P1]
   Unit_hipMultiThreadDevice_Streams:
-    <<: *level_2
+    <<: *level_default
     tags: [device_mgmt, P0]
   Unit_hipMultiThreadDevice_SerialPyramid:
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [amd_linux]
       reason: "AIRUNTIME-2744 - in the Rock_Linux_Failures_on_gfx94X set. Needs re-triage on amd_linux."
     tags: [device_mgmt, P1]
   Unit_hipMultiThreadDevice_ParallelPyramid:
-    <<: *level_2
+    <<: *level_default
     tags: [device_mgmt, P1]
   Unit_hipMultiThreadDevice_NearZero:
-    <<: *level_2
+    <<: *level_default
     tags: [device_mgmt, P1]
   Unit_hipMultiThreadStreams1_AsyncSync:
-    <<: *level_2
+    <<: *level_default
     tags: [stream, P0]
   Unit_hipMultiThreadStreams1_AsyncAsync:
-    <<: *level_2
+    <<: *level_default
     tags: [stream, P0]
   Unit_hipMultiThreadStreams1_AsyncSame:
-    <<: *level_2
+    <<: *level_default
     tags: [stream, P0]
   Unit_hipMultiThreadStreams2:
-    <<: *level_2
+    <<: *level_default
     tags: [stream, P0]

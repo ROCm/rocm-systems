@@ -1,116 +1,116 @@
 ---
 stream:
   Unit_hipStreamCreate_default:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, smoke, P0]
   Unit_hipStreamCreate_Negative:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamGetFlags_Basic:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P0]
   Unit_hipStreamGetFlags_Negative:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P1]
   Unit_hipStreamGetFlags_StreamsCreatedWithCUMask:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P1]
   Unit_hipStreamGetPriority_happy:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P0]
   Unit_hipStreamGetPriority_nullptr_nullptr:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P1]
   Unit_hipStreamGetPriority_stream_nullptr:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P1]
   Unit_hipStreamGetPriority_nullptr_priority:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P1]
   Unit_hipStreamGetPriority_stream_priority:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P1]
   Unit_hipStreamGetPriority_StreamsWithCUMask:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P1]
   Unit_hipMultiStream_sameDevice:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P0]
   Unit_hipMultiStream_SharedHwQueuePacketOrdering:
     # Uses wall_clock64(), so the test is only compiled on AMD.
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [nvidia_linux, nvidia_windows]
       reason: "AIRUNTIME-2744 - uses wall_clock64(), so only compiled on AMD; needs to be re-triaged on nvidia_linux, nvidia_windows"
     tags: [synchronization]
   Unit_hipMultiStream_multimeDevice:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamAddCallback_ParamTst_Positive:
-    <<: *level_2
+    <<: *level_default
     tags: [callback, P0]
   Unit_hipStreamAddCallback_ParamTst_Negative:
-    <<: *level_2
+    <<: *level_default
     tags: [callback, P1]
   Unit_hipStreamAddCallback_WithDefaultStream:
-    <<: *level_2
+    <<: *level_default
     tags: [callback, P1]
   Unit_hipStreamAddCallback_WithCreatedStream:
-    <<: *level_2
+    <<: *level_default
     tags: [callback, P0]
   Unit_hipStreamAttachMemAsync_Negative:
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [asan]
       reason: "AIRUNTIME-2744 - asan test disabled temporarily until PR #5287 is merged; needs to be re-triaged"
     tags: [memory]
   Unit_hipStreamAttachMemAsync_UseCase:
-    <<: *level_2
-    tags: [memory, P0]
+    <<: *level_default
     disabled:
       targets: [amd_wsl]
       reason: "AIRUNTIME-2744 - disabled due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111; gfx1201 (amd_wsl) self-skips because the GPU does not support managed memory; needs to be re-triaged"
+    tags: [memory, P0]
   Unit_hipStreamCreateWithFlags_Negative_NullStream:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamCreateWithFlags_Negative_InvalidFlag:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamCreateWithFlags_Default:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P0]
   Unit_hipStreamCreateWithFlags_DefaultStreamInteraction:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamCreateWithPriority_FunctionalForAllPriorities:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P0]
   Unit_hipStreamCreateWithPriority_MulthreadDefaultflag:
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [asan]
       reason: "AIRUNTIME-2744 - SWDEV-398981: fails in stress test and does not play well with asan; needs to be re-triaged on asan"
     tags: [lifecycle, P1]
   Unit_hipStreamCreateWithPriority_MulthreadNonblockingflag:
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [asan]
       reason: "AIRUNTIME-2744 - SWDEV-394199: does not play well with asan; needs to be re-triaged on asan"
     tags: [lifecycle, P1]
   Unit_hipStreamCreateWithPriority_NegTst:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamCreateWithPriority_CheckPriorityVal:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamCreateWithPriority_VerifyKernelResults:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle]
   Unit_hipStreamCreateWithPriority_TestMultipleStreamWithPriority:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamPriorityAqlLog_ChildWorkload:
-    <<: *level_2
+    <<: *level_default
     unsupported:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - Linux-only test (unit/stream/hipStreamPriorityAqlLog.cc is wrapped in #if HT_AMD && HT_LINUX); never built or run on native Windows"
@@ -119,7 +119,7 @@ stream:
       reason: "AIRUNTIME-2744 - internal helper, only invoked by the parent test via re-exec (by exact name, which still runs hidden [.] cases); enabled on amd_linux where it runs as a harmless standalone no-op, disabled on other platforms; needs to be re-triaged on nvidia_linux, nvidia_windows"
     tags: [lifecycle]
   Unit_hipStreamPriorityAqlLog_TraceReportsPriority:
-    <<: *level_2
+    <<: *level_default
     unsupported:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - Linux-only test (unit/stream/hipStreamPriorityAqlLog.cc is wrapped in #if HT_AMD && HT_LINUX); never built or run on native Windows"
@@ -128,7 +128,7 @@ stream:
       reason: "AIRUNTIME-2744 - verifies AQL packet trace reports stream priority next to HWq; relies on AMD_LOG AQL output, so AMD/Linux only; needs to be re-triaged on nvidia_linux, nvidia_windows"
     tags: [lifecycle]
   Unit_hipStreamAqlBarrierBit_ChildWorkload:
-    <<: *level_2
+    <<: *level_default
     unsupported:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - Linux-only test (unit/stream/hipStreamPriorityAqlLog.cc is wrapped in #if HT_AMD && HT_LINUX); never built or run on native Windows"
@@ -137,7 +137,7 @@ stream:
       reason: "AIRUNTIME-2744 - internal helper invoked by the parent test via re-exec; needs to be re-triaged on amd_linux, nvidia_linux, nvidia_windows"
     tags: [synchronization]
   Unit_hipStreamAqlBarrierBit_Scenarios:
-    <<: *level_2
+    <<: *level_default
     unsupported:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - Linux-only test (unit/stream/hipStreamPriorityAqlLog.cc is wrapped in #if HT_AMD && HT_LINUX); never built or run on native Windows"
@@ -146,365 +146,365 @@ stream:
       reason: "AIRUNTIME-2744 - parses AMD AQL logs and requires fork/exec; needs to be re-triaged on nvidia_linux, nvidia_windows"
     tags: [synchronization]
   Unit_hipStreamDestroy_Default:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, smoke, P0]
   Unit_hipStreamDestroy_Negative_NullStream:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamDestroy_WithFinishedWork:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P0]
   Unit_hipStreamDestroy_WithPendingWork:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P0]
   Unit_hipMemcpyAsync_hipStreamLegacy_H2H_H2D_D2H_H2PinMem:
-    <<: *level_2
+    <<: *level_default
     tags: [memory]
   Unit_hipStreamGetCaptureInfo_hipStreamLegacy_CaptureInfo:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P1]
   Unit_hipMemPrefetchAsync_Basic:
-    <<: *level_2
+    <<: *level_default
     tags: [memory, P1]
   Unit_hipMemPoolApi_hipStreamLegacy_Basic:
-    <<: *level_2
+    <<: *level_default
     tags: [memory]
   Unit_hipStreamValue_Write:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, P1]
   Unit_hipStreamValue_Negative_InvalidMemory:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, P1]
   Unit_hipStreamWriteValue_Default:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, P0]
   Unit_hipStreamWaitValue_Default:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, P0]
   Unit_hipStreamSynchronize_EmptyStream:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, P0]
   Unit_hipStreamSynchronize_FinishWork:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, smoke, P0]
   Unit_hipStreamSynchronize_NullStreamSynchronization:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, P0]
   Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, P0]
   Unit_hipStreamSynchronize_NullStreamAndStreamPerThread:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, P1]
   Unit_hipStreamKilledWorkerThread:
-    <<: *level_2
+    <<: *level_default
     unsupported:
       targets: [amd_linux]
       reason: "AIRUNTIME-2744 - Windows-only test (unit/stream/CMakeLists.txt if(WIN32)); never built or run on Linux"
     tags: [synchronization]
   Unit_hipStreamQuery_WithNoWork:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, P0]
   Unit_hipStreamQuery_WithFinishedWork:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, smoke, P0]
   Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, P1]
   Unit_hipStreamQuery_NullStreamQuery:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, P1]
   Unit_hipStreamQuery_WithPendingWork:
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [amd_linux]
       reason: "AIRUNTIME-2744 - amd_linux Rock Linux failures on gfx94X; needs to be re-triaged on amd_linux"
     tags: [synchronization, P0]
   Unit_hipDeviceGetStreamPriorityRange_Default:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P1]
   Unit_hipStreamAddCallback_StrmSyncTiming:
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [amd_wsl]
       reason: "AIRUNTIME-2892 - amd_wsl disabled due to defect EXSWHTEC-203; gfx1201 (amd_wsl) flaky, passed then failed within 10 runs; needs to be re-triaged"
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_basic:
-    <<: *level_2
+    <<: *level_default
     tags: [callback, P0]
   Unit_hipLaunchHostFunc_Negative:
-    <<: *level_2
+    <<: *level_default
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_streams:
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [amd_linux]
       reason: "AIRUNTIME-2744 - Rock Linux failures on gfx94X; needs to be re-triaged on amd_linux"
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_multistreams:
-    <<: *level_2
+    <<: *level_default
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_KernelHost:
-    <<: *level_2
+    <<: *level_default
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_multidevice:
-    <<: *level_2
+    <<: *level_default
     tags: [callback, multigpu, P1]
   Unit_hipLaunchHostFunc_Samepriority:
-    <<: *level_2
+    <<: *level_default
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_Diffpriority:
-    <<: *level_2
+    <<: *level_default
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_Graph:
-    <<: *level_2
+    <<: *level_default
     tags: [callback, P1]
   Unit_hipStreamGetDevice_Negative:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P1]
   Unit_hipStreamGetDevice_Usecase:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P0]
   Unit_hipStreamGetDevice_MThread:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P1]
   Unit_hipStreamGetDevice_SetDiffDevice:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, multigpu, P1]
   Unit_hipStreamGetDevice_NullStream:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P1]
   Unit_hipStreamLegacy_WithBlockingStream:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P0]
   Unit_hipStreamLegacy_MultipleThreads:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamLegacy_NegetiveCase:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamLegacy_WithNonBlockingStream:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamLegacy_WithStreamPerThread:
-    <<: *level_2
+    <<: *level_default
     tags: [streamperthread, P1]
   Unit_hipStreamLegacy_MultiDevice:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, multigpu, P1]
   Unit_hipStreamLegacy_H2H_H2D_D2D_D2H_Default:
-    <<: *level_2
+    <<: *level_default
     tags: [memory, P1]
   Unit_hipStreamLegacy_MultiDeviceMultiOperation:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, multigpu, P1]
   Unit_hipStreamLegacy_TwoThreadsEachOneDiffOperation:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamLegacy_TwoDevicesEachOneDiffOperation:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, multigpu, P1]
   Unit_hipStreamLegacy_TwoThreadsInTwoDevicesEachOneDiffOperation:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, multigpu, P1]
   Unit_hipStreamLegacy_InChildProcess:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P1]
   Unit_hipStreamLegacy_WithKernel:
-    <<: *level_2
+    <<: *level_default
     tags: [lifecycle, P0]
   Unit_hipStreamLegacy_hipStreamSynchronize:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, P1]
   Unit_hipStreamLegacy_WithSptCompilerOption:
-    <<: *level_2
+    <<: *level_default
     tags: [streamperthread, P1]
   Unit_hipStreamLegacy_TwoThreadsDiffOperationWithSptCompOption:
-    <<: *level_2
+    <<: *level_default
     tags: [streamperthread, P1]
   Unit_hipStreamGetId_Negative:
-    <<: *level_2
+    <<: *level_default
     tags: [properties]
   Unit_hipStreamGetId_Basic:
-    <<: *level_2
+    <<: *level_default
     tags: [properties]
   Unit_hipStreamGetId_WithDifferentStreamCreateAPIs:
-    <<: *level_2
+    <<: *level_default
     tags: [properties]
   Unit_hipStreamGetId_MultipleThreads:
-    <<: *level_2
+    <<: *level_default
     tags: [properties]
   Unit_hipStreamGetId_MultiDevice:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, multigpu]
   Unit_hipStreamGetId_MultiProcess:
-    <<: *level_2
+    <<: *level_default
     tags: [properties]
   Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P1]
   Unit_hipExtStreamGetCUMask_Negative:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P1]
   Unit_hipExtStreamCreateWithCUMask_ValidateCallbackFunc:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P1]
   Unit_hipExtStreamCreateWithCUMask_Functionality:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P1]
   Unit_hipExtStreamCreateWithCUMask_AllCUsMasked:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, P1]
   Unit_hipExtStreamCreateWithCUMask_NegTst:
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [amd_linux]
       reason: "AIRUNTIME-2744 - Rock Linux failures on gfx94X; needs to be re-triaged on amd_linux"
     tags: [properties, P1]
   Unit_hipStreamAddCallback_MultipleThreads:
-    <<: *level_2
+    <<: *level_default
     tags: [callback, P1]
   Unit_hipStreamWaitEvent_Negative:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, P1]
   Unit_hipStreamWaitEvent_Default:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, smoke, P0]
   Unit_hipStreamWaitEvent_DifferentStreams:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, P1]
   Unit_hipStreamGetFlags_spt_Basic:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, streamperthread, P1]
   Unit_hipStreamGetFlags_spt_Negative:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, streamperthread, P1]
   Unit_hipStreamGetFlags_spt_StreamsCreatedWithCUMask:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, streamperthread, P1]
   Unit_hipStreamGetPriority_spt_BasicTst:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, streamperthread, P1]
   Unit_hipStreamGetPriority_spt_NegativeCases:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, streamperthread, P1]
   Unit_hipStreamGetPriority_spt_StreamsWithCUMask:
-    <<: *level_2
+    <<: *level_default
     tags: [properties, streamperthread, P1]
   Unit_hipStreamQuery_spt_WithNoWork:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamQuery_spt_WithFinishedWork:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamQuery_spt_NegativeCases:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamQuery_spt_WithPendingWork:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamSynchronize_spt_EmptyStream:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamSynchronize_spt_FinishWork:
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - flaky on gfx110X (amd_windows): hangs past the 600s ctest timeout on the Windows ROCR hip-tests shard 3 lane as part of a stream/event timeout cascade; passes locally. Disabled on amd_windows pending re-triage."
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamSynchronize_spt_SynchronizeStreamAndQueryNullStream:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamBatchMemOp_Negative_Tests:
-    <<: *level_2
+    <<: *level_default
     tags: [memory]
   Unit_hipStreamBatchMemOp_SequentialOrdering:
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [amd_wsl, nvidia]
       reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips because the variant is skipped; needs to be re-triaged on nvidia"
     tags: [synchronization, memory]
   Unit_hipStreamBatchMemOp_SequentialOrdering_MultiGPU:
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [amd_windows, amd_wsl, nvidia]
       reason: "AIRUNTIME-2744 - gfx1201 (amd_windows) and gfx1201 (amd_wsl) self-skip because the test requires at least 2 GPUs; needs to be re-triaged on nvidia"
     tags: [synchronization, memory, multigpu]
   Unit_hipStreamWaitWriteValue32_Capture:
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [amd_windows, nvidia]
       reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: result == 0x42 -> 0 == 66; needs to be re-triaged on nvidia"
     tags: [synchronization]
   Unit_hipStreamWaitWriteValue64_Capture:
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [amd_windows, nvidia]
       reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: result == 0xCAFEBABECAFEBABEULL -> 0 == 14627333968358193854 (0xcafebabecafebabe); needs to be re-triaged on nvidia"
     tags: [synchronization]
   Unit_hipStreamBatchMemOp_Capture:
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [amd_windows, nvidia]
       reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: result == 0x1234 -> 0 == 4660 (0x1234); needs to be re-triaged on nvidia"
     tags: [synchronization, memory]
   Unit_hipStreamSetAttribute_hipStreamGetAttribute_Basic:
-    <<: *level_2
+    <<: *level_default
     tags: [properties]
   Unit_hipStreamGetAttribute_Negative:
-    <<: *level_2
+    <<: *level_default
     tags: [properties]
   Unit_hipStreamSetAttribute_Negative:
-    <<: *level_2
+    <<: *level_default
     tags: [properties]
   Unit_hipStreamCopyAttributes_Basic:
-    <<: *level_2
+    <<: *level_default
     tags: [properties]
   Unit_hipStreamCopyAttributes_Negative:
-    <<: *level_2
+    <<: *level_default
     tags: [properties]
   Unit_hipStreamCopyAttributes_WithAllSyncPolicyValues:
-    <<: *level_2
+    <<: *level_default
     tags: [properties]
   Unit_hipStreamValue_Negative_StreamAndFlag:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, P1]
   Unit_hipStreamValue_Wait_Blocking:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, P1]
   Unit_hipStreamWriteValue_Decrement_Default:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization]
   Unit_hipStreamWriteValue_Decrement_MultiStream_MultiDevice:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, multigpu]
   Unit_hipStreamWriteValue_Increment_Default:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization]
   Unit_hipStreamWriteValue_Increment_MultiStream_MultiDevice:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, multigpu]
   Unit_hipSharedQueueAnyOrderOverlap_Independence:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, overlap]
   Unit_hipSharedQueueAnyOrderOverlap_EventDependencyHonored:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, overlap]
   Unit_hipSharedQueueAnyOrderOverlap_IntraStreamOrderAcrossActivation:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, overlap]
   Unit_hipSharedQueueAnyOrderOverlap_InternalPredecessorOrdering:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, overlap]
   Unit_hipSharedQueueAnyOrderOverlap_NullStreamOrdering:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, overlap]
   Unit_hipSharedQueueAnyOrderOverlap_GraphUnaffected:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization, overlap]
   Unit_hipSharedQueueAnyOrderOverlap_StreamWaitValueDependencyHonored:
-    <<: *level_2
-    tags: [synchronization, overlap]
+    <<: *level_default
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - pre-existing PAL limitation (unrelated to the barrier-bit opt): spin-wait blit stream wait-value deadlocks on HW rings; gfx1201 (amd_windows) hangs (>300s timeout); needs to be re-triaged"
+    tags: [synchronization, overlap]

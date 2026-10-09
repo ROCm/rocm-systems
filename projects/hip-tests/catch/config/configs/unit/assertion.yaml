@@ -1,17 +1,17 @@
 ---
 assertion:
   Unit_StaticAssert_Positive_Basic_RTC:
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - needs to be further investigated. Fails in external CI for hip-tests PR 210. gfx1201 (amd_windows) FAIL: error_count == expected_error_count -> 3 == 2."
     tags: [deviceLib]
   Unit_StaticAssert_Negative_Basic_RTC:
-    <<: *level_2
+    <<: *level_default
     tags: [deviceLib]
-  Unit_Assert_Positive_Basic_KernelPass: *level_2
+  Unit_Assert_Positive_Basic_KernelPass: *level_default
   Unit_Assert_Positive_Basic_KernelFail:
-    <<: *level_2
+    <<: *level_default
     disabled:
       targets: [amd_windows, amd_wsl, asan]
       reason: "AIRUNTIME-2744 - fails in external CI for hip-tests PR 210. Disabled for asan because this test intentionally enters a failed state, which prevents freeing resources. gfx1201 (amd_windows) self-skips: assertions are disabled in this build. gfx1201 (amd_wsl) self-skips: assertions are disabled in this build. Needs re-triage on asan."
