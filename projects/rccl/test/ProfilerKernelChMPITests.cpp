@@ -343,7 +343,10 @@ protected:
             }
             if(r.type != ncclProfileKernelCh) continue;
             ++s.kernelCh;
+            // Start, stop state and stop all count: each must come from a profiler thread.
             s.kernelChTids.insert(r.startTid);
+            if(r.stopTid) s.kernelChTids.insert(r.stopTid);
+            if(r.stateTid) s.kernelChTids.insert(r.stateTid);
             EXPECT_GE(r.parentIndex, 0) << what << ": KernelCh on channel " << r.channelId
                                         << " has no Coll/P2p parent";
             if(r.parentIndex >= 0)
@@ -418,12 +421,17 @@ protected:
         EXPECT_EQ(0u, violations) << what << ": KernelCh timestamps out of order on a channel";
     }
 
-    void allocBuffers(size_t count)
+    // Agreed across ranks like communicator creation: every caller goes straight
+    // into collective work, so one rank leaving alone would strand the rest.
+    std::string allocBuffers(size_t count)
     {
         count_ = count;
-        ASSERT_EQ(hipSuccess, hipMalloc(&send_, count * sizeof(float)));
-        ASSERT_EQ(hipSuccess, hipMalloc(&recv_, count * sizeof(float)));
-        ASSERT_EQ(hipSuccess, hipMemset(send_, 0, count * sizeof(float)));
+        bool failed = hipMalloc(&send_, count * sizeof(float)) != hipSuccess ||
+                      hipMalloc(&recv_, count * sizeof(float)) != hipSuccess ||
+                      hipMemset(send_, 0, count * sizeof(float)) != hipSuccess;
+        if(!onAnyRank(failed)) return {};
+        ADD_FAILURE() << (failed ? "buffer allocation failed" : "buffer allocation failed on another rank");
+        return "no buffers";
     }
 
     void freeBuffers()
@@ -480,7 +488,7 @@ TEST_F(ProfilerKernelChMPITest, EagerAllReduceIsBalanced)
     ncclComm_t comm = nullptr;
     hipStream_t stream = nullptr;
     KCH_SKIP_IF_NEEDED(createCommWithRecorder(&comm, &stream));
-    ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 20));
+    KCH_SKIP_IF_NEEDED(allocBuffers(1 << 20));
 
     constexpr int kIters = 16;
     for(int i = 0; i < kIters; i++) EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
@@ -503,7 +511,7 @@ TEST_F(ProfilerKernelChMPITest, ProxyLessIntraNodeIsTimed)
     ncclComm_t comm = nullptr;
     hipStream_t stream = nullptr;
     KCH_SKIP_IF_NEEDED(createCommWithRecorder(&comm, &stream));
-    ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 20));
+    KCH_SKIP_IF_NEEDED(allocBuffers(1 << 20));
 
     constexpr int kIters = 8;
     for(int i = 0; i < kIters; i++) EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
@@ -533,7 +541,7 @@ TEST_F(ProfilerKernelChMPITest, ProxyPathKernelChOffProxyThread)
     ncclComm_t comm = nullptr;
     hipStream_t stream = nullptr;
     KCH_SKIP_IF_NEEDED(createCommWithRecorder(&comm, &stream));
-    ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 20));
+    KCH_SKIP_IF_NEEDED(allocBuffers(1 << 20));
 
     constexpr int kIters = 8;
     for(int i = 0; i < kIters; i++) EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
@@ -562,7 +570,7 @@ TEST_F(ProfilerKernelChMPITest, ShmTransportIsTimed)
     ncclComm_t comm = nullptr;
     hipStream_t stream = nullptr;
     KCH_SKIP_IF_NEEDED(createCommWithRecorder(&comm, &stream));
-    ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 20));
+    KCH_SKIP_IF_NEEDED(allocBuffers(1 << 20));
 
     constexpr int kIters = 8;
     for(int i = 0; i < kIters; i++) EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
@@ -597,7 +605,7 @@ TEST_F(ProfilerKernelChMPITest, SendRecvRingIsBalanced)
     ncclComm_t comm = nullptr;
     hipStream_t stream = nullptr;
     KCH_SKIP_IF_NEEDED(createCommWithRecorder(&comm, &stream));
-    ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 18));
+    KCH_SKIP_IF_NEEDED(allocBuffers(1 << 18));
     const int rank = MPIEnvironment::world_rank, n = MPIEnvironment::world_size;
 
     constexpr int kIters = 8;
@@ -625,7 +633,7 @@ TEST_F(ProfilerKernelChMPITest, GraphReplaysAreEachTimed)
     ncclComm_t comm = nullptr;
     hipStream_t stream = nullptr;
     KCH_SKIP_IF_NEEDED(createCommWithRecorder(&comm, &stream));
-    ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 20));
+    KCH_SKIP_IF_NEEDED(allocBuffers(1 << 20));
 
     constexpr int kPerGraph = 4, kReplays = 6;
     hipGraph_t graph = nullptr;
@@ -672,7 +680,7 @@ TEST_F(ProfilerKernelChMPITest, MixedEagerAndGraphPostInDeviceOrder)
 
     // Distinct sizes tell eager collectives and replayed ones apart in the record.
     constexpr size_t kEagerCount = 1 << 12, kGraphCount = 1 << 14;
-    ASSERT_NO_FATAL_FAILURE(allocBuffers(kGraphCount));
+    KCH_SKIP_IF_NEEDED(allocBuffers(kGraphCount));
     constexpr int kPerGraph = 2, kRounds = 8;
     hipGraph_t graph = nullptr;
     hipGraphExec_t exec = nullptr;
@@ -735,7 +743,7 @@ TEST_F(ProfilerKernelChMPITest, BurstPastSlotRingIsBalanced)
     ncclComm_t comm = nullptr;
     hipStream_t stream = nullptr;
     KCH_SKIP_IF_NEEDED(createCommWithRecorder(&comm, &stream));
-    ASSERT_NO_FATAL_FAILURE(allocBuffers(1024));
+    KCH_SKIP_IF_NEEDED(allocBuffers(1024));
 
     constexpr int kIters = 512;
     for(int i = 0; i < kIters; i++) EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
@@ -765,7 +773,7 @@ TEST_P(ProfilerKernelChSplitMPITest, SplitThreadOwnership)
     ncclComm_t parent = nullptr;
     hipStream_t stream = nullptr;
     KCH_SKIP_IF_NEEDED(createConfiguredCommWithRecorder(&parentConfig, &parent, &stream));
-    ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 18));
+    KCH_SKIP_IF_NEEDED(allocBuffers(1 << 18));
 
     ncclComm_t child = nullptr;
     ASSERT_EQ(ncclSuccess, ncclCommSplit(parent, 0, MPIEnvironment::world_rank, &child, nullptr));
@@ -829,7 +837,7 @@ TEST_F(ProfilerKernelChMPITest, AbortWithWorkInFlightReturns)
     ncclComm_t comm = nullptr;
     hipStream_t stream = nullptr;
     KCH_SKIP_IF_NEEDED(createConfiguredCommWithRecorder(&config, &comm, &stream));
-    ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 22));
+    KCH_SKIP_IF_NEEDED(allocBuffers(1 << 22));
 
     // Shows the communicator is timed at all, which the abort itself cannot.
     EXPECT_EQ(ncclSuccess, settle(comm, allReduce(comm, stream)));
@@ -870,7 +878,7 @@ TEST_F(ProfilerKernelChMPITest, TimersAreWallClockTicks)
     ncclComm_t comm = nullptr;
     hipStream_t stream = nullptr;
     KCH_SKIP_IF_NEEDED(createCommWithRecorder(&comm, &stream));
-    ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 22));
+    KCH_SKIP_IF_NEEDED(allocBuffers(1 << 22));
 
     int dev = 0, rateKHz = 0;
     ASSERT_EQ(hipSuccess, hipGetDevice(&dev));

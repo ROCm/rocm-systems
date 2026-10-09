@@ -165,6 +165,7 @@ ncclResult_t recorderStopEvent(void* eHandle) {
     return ncclSuccess;
   }
   ++r->view.stopEvents;
+  r->view.stopTid = (long)syscall(SYS_gettid);
   return ncclSuccess;
 }
 
@@ -179,6 +180,7 @@ ncclResult_t recorderRecordEventState(void* eHandle, ncclProfilerEventState_v7_t
     return ncclSuccess;
   }
   ++r->view.stopStates;
+  r->view.stateTid = (long)syscall(SYS_gettid);
   if (eStateArgs) r->view.stopTimer = eStateArgs->kernelCh.pTimer;
   return ncclSuccess;
 }

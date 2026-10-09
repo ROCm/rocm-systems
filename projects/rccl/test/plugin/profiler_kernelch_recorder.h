@@ -27,6 +27,8 @@ typedef struct {
   int64_t parentIndex;  // snapshot index of the parent record, or -1
   uint64_t order;       // global start order across every recorded event
   long startTid;        // thread that delivered startEvent
+  long stopTid;         // thread that delivered stopEvent, 0 before it
+  long stateTid;        // thread that delivered the KernelCh/KernelPhase stop state, 0 before it
   int stopEvents;       // stopEvent calls received for this handle
   int stopStates;       // KernelCh/KernelPhase stop states received
   // Coll / P2p
