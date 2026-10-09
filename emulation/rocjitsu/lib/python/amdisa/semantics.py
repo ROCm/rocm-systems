@@ -1798,11 +1798,18 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
         'S_ATC_PROBE_BUFFER',
     ):
         return InstructionSemantics(name, 'true_nop')
-    # Cache invalidation / writeback instructions.
+    # Cache management instructions.
     if upper in ('S_DCACHE_INV', 'S_DCACHE_INV_VOL'):
         return InstructionSemantics(name, 'dcache_inv')
     if upper in ('S_DCACHE_WB', 'S_DCACHE_WB_VOL'):
         return InstructionSemantics(name, 'dcache_wb')
+    # num_elems counts 64-byte cache lines here, not memory elements.
+    if upper in ('S_DCACHE_DISCARD', 'S_DCACHE_DISCARD_X2'):
+        return InstructionSemantics(
+            name,
+            'dcache_discard',
+            num_elems=2 if upper.endswith('_X2') else 1,
+        )
     if upper == 'S_GL1_INV':
         return InstructionSemantics(name, 'gl1_inv')
     if upper in ('S_MEMTIME', 'S_MEMREALTIME'):

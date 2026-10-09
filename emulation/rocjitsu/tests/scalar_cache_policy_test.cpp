@@ -146,6 +146,77 @@ TEST_F(ScalarCachePolicyTest, GlcStoresDoNotLeavePersistentScalarCopies) {
   }
 }
 
+constexpr uint32_t kSDcacheDiscard = 40;
+constexpr uint32_t kSDcacheDiscardX2 = 41;
+
+TEST(ScalarCacheDiscardTest, DropsOnlyTheAddressedLinesOnEveryCdna) {
+  constexpr uint64_t kDiscardLineBytes = 64;
+  // The six low address bits are ignored; the X2 form covers two consecutive lines.
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
+                              ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    amdgpu::GpuMemory memory{"discard_memory"};
+    amdgpu::L2Cache l2{"discard_l2"};
+    l2.set_backing_memory(&memory);
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 102;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("discard_cu", cfg, &memory, &l2);
+    ASSERT_NE(cu, nullptr);
+    amdgpu::Wavefront *wave = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wave, nullptr);
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+
+    for (uint32_t op : {kSDcacheDiscard, kSDcacheDiscardX2}) {
+      SCOPED_TRACE(op);
+      const uint32_t discarded_lines = op == kSDcacheDiscard ? 1 : 2;
+      const uint64_t base = 0x2000 + op * 0x1000;
+      const uint32_t stale = 1;
+      const uint32_t fresh = 2;
+      // An L2 line spans two K$ lines, so fill memory before warming either cache.
+      for (uint32_t line = 0; line < 4; ++line)
+        memory.write32(base + kDiscardLineBytes * line, stale);
+      for (uint32_t line = 0; line < 4; ++line) {
+        uint32_t word = 0;
+        ASSERT_EQ(
+            cu->l1_scalar().load(base + kDiscardLineBytes * line, 1, &word, wave->process_id()),
+            amdgpu::VmAccessOutcome::Complete);
+        ASSERT_EQ(word, stale);
+      }
+      for (uint32_t line = 0; line < 4; ++line) {
+        ASSERT_EQ(l2.write(base + kDiscardLineBytes * line,
+                           reinterpret_cast<const uint8_t *>(&fresh), sizeof(fresh),
+                           amdgpu::Mtype::RW, wave->process_id()),
+                  amdgpu::VmAccessOutcome::Complete);
+      }
+
+      const uint64_t address = base + kDiscardLineBytes + 20;
+      const auto sbase = wave->sgpr_alloc().base;
+      cu->write_sgpr(sbase, static_cast<uint32_t>(address));
+      cu->write_sgpr(sbase + 1, static_cast<uint32_t>(address >> 32));
+      const std::array<uint32_t, 2> words{0xc0000000u | (op << 18) | (1u << 17), 0};
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+
+      for (uint32_t line = 0; line < 4; ++line) {
+        SCOPED_TRACE(line);
+        uint32_t word = 0;
+        ASSERT_EQ(
+            cu->l1_scalar().load(base + kDiscardLineBytes * line, 1, &word, wave->process_id()),
+            amdgpu::VmAccessOutcome::Complete);
+        const bool discarded = line >= 1 && line < 1 + discarded_lines;
+        EXPECT_EQ(word, discarded ? fresh : stale);
+      }
+    }
+    wave->halt();
+  }
+}
+
 TEST(ScalarCacheMtypeTest, InstructionAndPageRestrictionsApplyAcrossPageBoundaries) {
   constexpr uint32_t vmid = 7;
   constexpr uint64_t address = 0x1ffe;

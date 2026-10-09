@@ -7784,6 +7784,18 @@ class CodeGenerator:
         if cls == 'dcache_wb':
             return '  wf.cu().l1_scalar().writeback_all(wf.process_id());'
 
+        if cls == 'dcache_discard':
+            unit = 'amdgpu::L1ScalarCache::DISCARD_LINE_BYTES'
+            discards = '  wf.cu().l1_scalar().discard_line(line, wf.process_id());'
+            if sem.num_elems == 2:
+                discards += f'\n  wf.cu().l1_scalar().discard_line(line + {unit}, wf.process_id());'
+            return (
+                '  auto address = smem_calculate_address(inst_, wf);\n'
+                '  if (!address) return;\n'
+                f'  const uint64_t line = *address & ~uint64_t{{{unit} - 1}};\n'
+                f'{discards}'
+            )
+
         if cls == 'gl1_inv':
             return (
                 '  wf.cu().l1_vector().invalidate_all();\n'
@@ -8408,6 +8420,17 @@ class CodeGenerator:
         if not exec_masked:
             args += ', false'
         return f'set_memory_issue_info({args});'
+
+    def _dcache_discard_issue_initializer(self, sem: InstructionSemantics) -> str:
+        """Emit LGKM issue metadata for a cache discard that executes synchronously."""
+        # Not a memory-pipeline class: it stays out of _MEMORY_ISSUE_KINDS so
+        # that it does not get MEMORY_OP.
+        obligation = self._memory_counter_obligation(
+            self._wait_counter_type('smem_load'),
+            'amdgpu::MemoryCompletionClass::UNORDERED',
+            sem.num_elems,
+        )
+        return f'set_counter_only_issue_info({{{obligation}}});'
 
     def _append_wait_counter_type(
         self,
@@ -9754,6 +9777,7 @@ class CodeGenerator:
             *_MEMORY_CLASSES,
             'dcache_inv',
             'dcache_wb',
+            'dcache_discard',
             'image_load',
             'image_store',
             'image_atomic',
@@ -12507,6 +12531,10 @@ class CodeGenerator:
                     if _mem_sem and _mem_sem.semantic_class in self._MEMORY_CLASSES:
                         ctor_body_parts.append(
                             self._memory_issue_initializer(_mem_sem, inst_field_names)
+                        )
+                    elif _mem_sem and _mem_sem.semantic_class == 'dcache_discard':
+                        ctor_body_parts.append(
+                            self._dcache_discard_issue_initializer(_mem_sem)
                         )
                     if _memory_wait_producer(inst.name):
                         ctor_body_parts.append('flags_ |= MEMORY_WAIT_PRODUCER;')

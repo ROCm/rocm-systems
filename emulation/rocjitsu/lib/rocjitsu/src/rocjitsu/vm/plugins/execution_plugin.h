@@ -125,8 +125,10 @@ public:
 
   /// Called before a synchronously executed AMDGPU instruction.
   /// Wavefront state reflects the state prior to the instruction's effects.
-  /// Memory instructions expose their decoded issue metadata through
-  /// Instruction::amdgpu_memory_issue_info() at this point.
+  /// Memory instructions, and synchronous counter-only producers such as
+  /// s_dcache_discard, expose their decoded issue metadata through
+  /// Instruction::amdgpu_memory_issue_info() at this point; only memory
+  /// instructions have is_memory_op() set.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,

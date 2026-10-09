@@ -32,6 +32,9 @@ public:
 
   using CacheStore = simdojo::Cache<LINE_SIZE_BITS, NUM_SETS, ASSOCIATIVITY>;
 
+  static constexpr uint32_t DISCARD_LINE_BYTES = 64; // s_dcache_discard line size from the ISA
+  static_assert(DISCARD_LINE_BYTES == CacheStore::LINE_SIZE);
+
   explicit L1ScalarCache(L2Cache *l2 = nullptr);
   ~L1ScalarCache();
 
@@ -74,6 +77,9 @@ public:
 
   /// @brief Invalidate all clean K$ lines (s_dcache_inv).
   void invalidate_all();
+
+  /// @brief Drop the K$ line holding @p addr without write-back (s_dcache_discard).
+  void discard_line(uint64_t addr, uint32_t vmid = 0);
 
 private:
   void cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid);

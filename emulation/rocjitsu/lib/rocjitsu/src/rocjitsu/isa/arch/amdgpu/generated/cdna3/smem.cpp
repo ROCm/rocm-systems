@@ -905,6 +905,8 @@ SDcacheDiscardSmem::SDcacheDiscardSmem(const MachineInst *inst)
   src_operands_[1] = &soffset;
   num_src_ = 2;
   num_dst_ = 0;
+  set_counter_only_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::LGKMCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -928,6 +930,8 @@ SDcacheDiscardX2Smem::SDcacheDiscardX2Smem(const MachineInst *inst)
   src_operands_[1] = &soffset;
   num_src_ = 2;
   num_dst_ = 0;
+  set_counter_only_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::LGKMCNT, amdgpu::MemoryCompletionClass::UNORDERED, 2}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 

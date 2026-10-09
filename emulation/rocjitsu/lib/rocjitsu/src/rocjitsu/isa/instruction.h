@@ -329,8 +329,11 @@ public:
   bool has_embedded_memory_wait() const { return flags_ & EMBEDDED_MEMORY_WAIT; }
 
   /// @brief Return decoded AMDGPU memory-issue metadata, when present.
-  /// @details AMDGPU generated memory-instruction constructors populate this
-  /// descriptor. Other architectures and non-memory instructions return nullptr.
+  /// @details AMDGPU generated constructors populate this descriptor for memory
+  /// instructions and for synchronous counter-only producers such as
+  /// s_dcache_discard, so its presence does not imply memory-pipeline routing;
+  /// check is_memory_op() for that. Other architectures and instructions
+  /// without decoded metadata, such as messages, return nullptr.
   [[nodiscard]] const amdgpu::MemoryIssueInfo *amdgpu_memory_issue_info() const {
     return memory_issue_info_.empty() ? nullptr : &memory_issue_info_;
   }
@@ -434,9 +437,29 @@ public:
 protected:
   friend class Decoder;
 
+  /// @brief Record the wait-counter obligations of a memory-pipeline instruction.
+  /// @details Also sets MEMORY_OP, so the instruction is routed through the memory pipeline.
+  /// @param counter_obligations Counters the instruction increments when it issues.
+  /// @param exec_masked Whether EXEC selects the lanes that issue (scalar memory ignores it).
   void
   set_memory_issue_info(std::initializer_list<amdgpu::MemoryCounterObligation> counter_obligations,
                         bool exec_masked = true) {
+    set_counter_obligations(counter_obligations, exec_masked);
+    flags_ |= MEMORY_OP;
+  }
+
+  /// @brief Record the wait-counter obligations of an instruction that executes synchronously.
+  /// @details The instruction is not a memory-pipeline operation, so MEMORY_OP stays unset and
+  /// EXEC does not mask the issue.
+  /// @param counter_obligations Counters the instruction increments when it issues.
+  void set_counter_only_issue_info(
+      std::initializer_list<amdgpu::MemoryCounterObligation> counter_obligations) {
+    set_counter_obligations(counter_obligations, false);
+  }
+
+  void set_counter_obligations(
+      std::initializer_list<amdgpu::MemoryCounterObligation> counter_obligations,
+      bool exec_masked) {
     memory_issue_info_ = {};
     memory_issue_info_.exec_masked = exec_masked;
     for (const auto obligation : counter_obligations) {
@@ -451,7 +474,6 @@ protected:
           obligation;
     }
     assert(!memory_issue_info_.empty());
-    flags_ |= MEMORY_OP;
   }
 
   /// @brief Size of the instruction's encoding in bytes.

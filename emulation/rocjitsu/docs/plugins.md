@@ -428,8 +428,10 @@ group divides hooks by frequency and synchronization cost:
   instruction exposes its decoded wait-counter obligations and completion-order
   metadata through `amdgpu_memory_issue_info()`, before address or store-data
   operands are read. This metadata describes operations
-  routed through the scalar, vector, and local memory pipelines; it is not a
-  complete inventory of non-memory events, such as messages and timestamp
+  routed through the scalar, vector, and local memory pipelines, plus
+  synchronous counter-only producers such as `s_dcache_discard`, which have
+  `is_memory_op()` false, so its presence does not imply pipeline routing. It
+  is not a complete inventory of other events, such as messages and timestamp
   queries, that hardware wait counters may also track.
 
 A plugin whose high-frequency callbacks reach shared mutable state may override

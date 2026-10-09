@@ -521,8 +521,8 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
         s->race_state->prepareForMemoryIssue(*info);
     }
 
-    // Messages share LGKMCNT on the capacity-modeled targets but are not memory
-    // instructions, so they intentionally remain outside memory issue metadata.
+    // Messages share LGKMCNT on the capacity-modeled targets but carry no issue
+    // metadata, so their increment is charged here by mnemonic.
     if (std::string_view(inst.mnemonic()).starts_with("s_sendmsg"))
       s->race_state->prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT);
   }
