@@ -365,6 +365,14 @@ void MemObjMap::RemoveMemObj(const void* k) {
   guarantee(rval == 1, "Memobj map does not have ptr: 0x%x", reinterpret_cast<uintptr_t>(k));
 }
 
+void MemObjMap::RemoveMemObj(const void* k, const amd::Memory* expected) {
+  std::unique_lock lock(AllocatedLock_);
+  auto it = MemObjMap_.find(reinterpret_cast<uintptr_t>(k));
+  if (it != MemObjMap_.end() && it->second == expected) {
+    MemObjMap_.erase(it);
+  }
+}
+
 MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev) {
   uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
 

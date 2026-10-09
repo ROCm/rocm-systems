@@ -1493,6 +1493,8 @@ class MemObjMap : public AllStatic {
 
   //!< Remove an entry of mem object from the container
   static void RemoveMemObj(const void* k);
+  //!< Remove only when the exact key is registered to the expected owner.
+  static void RemoveMemObj(const void* k, const amd::Memory* expected);
 
   //!< Find the mem object based on the input pointer, outputs the offset
   static amd::Memory* FindMemObj(const void* k, size_t* offset = nullptr, Device* dev = nullptr);
