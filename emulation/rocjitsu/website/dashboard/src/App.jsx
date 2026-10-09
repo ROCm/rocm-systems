@@ -49,7 +49,7 @@ function saveCacheGeneration(cacheGeneration) {
 function LoadingDataState({ progress }) {
   const determinate = progress.total > 0;
   return (
-    <Box component="main" sx={{ minHeight: 'calc(100vh - 76px)' }}>
+    <Box component="main">
       <Container maxWidth={false} sx={{ maxWidth: 1600, px: { xs: 1.5, sm: 2, xl: 3 }, pt: 2, pb: 4 }}>
         <Paper
           data-testid="dashboard-data-loading"
@@ -172,7 +172,7 @@ function Dashboard({ data, state, dataError = null, onRetry = null }) {
 
   return (
     <>
-      <Box component="main" sx={{ minHeight: 'calc(100vh - 140px)' }}>
+      <Box component="main">
         <Container maxWidth={false} sx={{ maxWidth: 1600, px: { xs: 1.5, sm: 2, xl: 3 }, pt: 2, pb: 4 }}>
 
           {dataError && (
@@ -339,10 +339,12 @@ export default function App() {
         />
       )}
       {dataState.data && <Dashboard data={dataState.data} state={state} />}
-      <Box component="footer" sx={{ borderTop: 1, borderColor: 'divider', mx: { xs: 2, md: 3 }, py: 2, color: 'text.secondary' }}>
-        <Typography variant="caption" component="p">Copyright © 2025–2026 Advanced Micro Devices, Inc.</Typography>
-        <Typography variant="caption" component="p">MIT License</Typography>
-      </Box>
+      <Container component="footer" maxWidth={false} sx={{ maxWidth: 1600, px: { xs: 1.5, sm: 2, xl: 3 } }}>
+        <Box sx={{ borderTop: 1, borderColor: 'divider', py: 2, color: 'text.secondary' }}>
+          <Typography variant="caption" component="p">Copyright © 2025–2026 Advanced Micro Devices, Inc.</Typography>
+          <Typography variant="caption" component="p">MIT License</Typography>
+        </Box>
+      </Container>
       </DashboardShell>
     </ThemeProvider>
   );

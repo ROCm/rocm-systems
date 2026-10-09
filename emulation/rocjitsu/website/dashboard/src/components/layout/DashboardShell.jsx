@@ -19,7 +19,7 @@ export default function DashboardShell({ data, state, loading = false, header, c
   const summary = `${targets.length} ${targets.length === 1 ? 'target' : 'targets'} / ${suites.length} ${suites.length === 1 ? 'suite' : 'suites'} / ${modes.length ? modes.join(' + ') : 'no modes'}`;
 
   return (
-    <Box data-testid="dashboard-shell" sx={{ display: { xs: 'block', md: 'grid' }, gridTemplateColumns: '228px minmax(0, 1fr)', minHeight: '100vh' }}>
+    <Box data-testid="dashboard-shell" sx={{ display: { xs: 'flex', md: 'grid' }, flexDirection: 'column', gridTemplateColumns: '228px minmax(0, 1fr)', minHeight: '100vh' }}>
       <Box component="aside" aria-label="Dashboard navigation and filters" sx={{
         bgcolor: 'action.hover', borderRight: { md: `2px solid ${theme.palette.divider}` }, borderBottom: { xs: `1px solid ${theme.palette.divider}`, md: 0 },
         px: { xs: 2, md: '14px' }, alignSelf: 'stretch', minWidth: 0,
@@ -64,7 +64,7 @@ export default function DashboardShell({ data, state, loading = false, header, c
           </Box>
         </>}
       </Box>
-      <Box sx={{ minWidth: 0, display: 'flex', flexDirection: 'column', '& > main': { flex: 1 } }}>
+      <Box sx={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', '& > main': { flex: 1 } }}>
         {header}
         {import.meta.env.MODE === 'fixtures' && <Box role="note" data-testid="fixture-data-warning" sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'dashboard.warningSurface', color: 'dashboard.warningText', px: { xs: 2, md: 3 }, py: 1, fontSize: 12, lineHeight: '18px' }}>
           <Box component="strong" sx={{ fontWeight: 600 }}>Test fixtures — fictional measurements</Box>{' · Not production data.'}
