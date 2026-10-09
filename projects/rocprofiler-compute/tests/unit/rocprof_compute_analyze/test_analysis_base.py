@@ -179,10 +179,49 @@ def test_membw_analysis_collected_without_config_attribute() -> None:
     assert inst.membw_analysis_collected() is False
 
 
-def test_sanitize_errors_when_list_torch_operators_without_trace(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "flag_kwargs, expected_trace",
+    [
+        pytest.param(
+            {
+                "list_torch_operators": True,
+                "list_triton_operators": False,
+                "torch_operator": None,
+                "triton_operator": None,
+            },
+            "--torch-trace",
+            id="list_torch",
+        ),
+        pytest.param(
+            {
+                "list_torch_operators": False,
+                "list_triton_operators": True,
+                "torch_operator": None,
+                "triton_operator": None,
+            },
+            "--triton-trace",
+            id="list_triton",
+        ),
+        pytest.param(
+            {
+                "list_torch_operators": False,
+                "list_triton_operators": False,
+                "torch_operator": None,
+                "triton_operator": ["*matmul*"],
+            },
+            "--triton-trace",
+            id="triton_operator",
+        ),
+    ],
+)
+def test_sanitize_errors_when_operator_flag_without_trace(
+    tmp_path, monkeypatch, flag_kwargs, expected_trace
+):
     workload = tmp_path / "app" / "MI300"
     workload.mkdir(parents=True)
-    (workload / "profiling_config.yaml").write_text("torch_trace: false\n")
+    (workload / "profiling_config.yaml").write_text(
+        "torch_trace: false\ntriton_trace: false\nml_api_trace: false\n"
+    )
     mock_error = Mock(side_effect=SystemExit(1))
     common.patch_console(monkeypatch, MODULE, "error", error=mock_error)
     with pytest.raises(SystemExit):
@@ -190,12 +229,9 @@ def test_sanitize_errors_when_list_torch_operators_without_trace(tmp_path, monke
             argparse.Namespace(
                 tui=False,
                 path=[[str(workload)]],
-                list_torch_operators=True,
-                list_triton_operators=False,
-                torch_operator=None,
-                triton_operator=None,
+                **flag_kwargs,
             ),
             {},
         ).sanitize()
     assert "was not profiled" in mock_error.call_args.args[1]
-    assert "--torch-trace" in mock_error.call_args.args[1]
+    assert expected_trace in mock_error.call_args.args[1]
