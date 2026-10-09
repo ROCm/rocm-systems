@@ -34,16 +34,71 @@ $HIP_HRR_CAPTURE_OUTPUT/pid-<pid>/regions/<producer-name>.hrrr
 Pick a name that identifies the producer, so several can run at once; the
 replayer merges every `*.hrrr` it finds and orders the records by timestamp.
 
-**Checking whether capture is active** reduces to checking that directory
-exists. There is no symbol to resolve and nothing to `dlopen`:
+On Linux that directory is 0700 and belongs to the user running the capture, so
+a producer has to run as that user, as it does inside the captured process.
+Create `regions/` with mode 0700 and the files in it with 0600 so the archive
+stays private.
+
+**Checking whether capture is active** reduces to checking that the archive's
+`active` file is there, is one the writer created, and names this process. The
+writer creates it as a regular file of this user with one name, reached through
+no link, as the last step of a successful open. It removes it at shutdown, or
+when capture stops early for lack of space. There is no symbol to resolve and
+nothing to `dlopen`.
+
+A process killed with `SIGKILL` cannot remove its marker, and a later process
+can get the same pid. So the marker holds one line that names the process
+instance, and a producer compares it with its own. On Linux the line is the boot
+id, a space, and the start time from `/proc/self/stat` (field 22, in clock ticks
+since boot). On Windows it is the creation time from `GetProcessTimes`, as a
+decimal FILETIME. The line is empty when the writer cannot read these, and then
+no producer should write.
 
 ```python
-active = "HIP_HRR_CAPTURE_OUTPUT" in os.environ and os.path.isdir(
-    os.path.join(os.environ["HIP_HRR_CAPTURE_OUTPUT"], f"pid-{os.getpid()}"))
+import os, stat
+
+def process_instance():
+    """This process as the writer names it, or None if /proc cannot say."""
+    try:
+        with open("/proc/sys/kernel/random/boot_id") as f:
+            boot = f.readline().strip()
+        with open("/proc/self/stat") as f:
+            line = f.readline()
+    except OSError:
+        return None
+    # The command name may hold spaces and ")"; field 22 is the 20th after it.
+    fields = line[line.rfind(")") + 1:].split()
+    if not boot or len(fields) < 20 or not fields[19].isdigit():
+        return None
+    return f"{boot} {fields[19]}"
+
+def capture_active():
+    root = os.environ.get("HIP_HRR_CAPTURE_OUTPUT")
+    instance = process_instance()
+    if not root or instance is None:
+        return False
+    d = os.path.join(root, f"pid-{os.getpid()}")
+    marker = os.path.join(d, "active")
+    try:
+        ds = os.lstat(d)
+        fs = os.lstat(marker)
+        fd = os.open(marker, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            line = os.read(fd, 256).decode("ascii", "replace").split("\n", 1)[0]
+        finally:
+            os.close(fd)
+    except OSError:
+        return False
+    return (stat.S_ISDIR(ds.st_mode) and ds.st_uid == os.geteuid()
+            and stat.S_ISREG(fs.st_mode) and fs.st_uid == os.geteuid()
+            and fs.st_nlink == 1 and line == instance)
 ```
 
-The runtime creates the directory when capture starts, which may be after your
-producer loads, so re-check rather than deciding once at import time.
+Neither the directory nor its `events.bin` is enough: both stay when the
+writer refuses an archive, or fails to resume one with the same pid, and
+capture is then off. The runtime creates the marker when capture starts, which
+may be after your producer loads, so re-check rather than deciding once at
+import time.
 
 ## What to write
 

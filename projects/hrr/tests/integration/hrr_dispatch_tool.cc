@@ -21,14 +21,16 @@
  * hip_capture_shutdown(), so the handler runs after the capture has shut down
  * and can inspect what shutdown left behind.
  *
- * Preloaded with LD_PRELOAD, it also stands in front of fopen(), so a workload
- * can act at the moment the capture opens a file, e.g. between the trailer and
- * the manifest. Without a hook it only forwards the call.
+ * Preloaded with LD_PRELOAD, it also stands in front of fopen() and open(), so a
+ * workload can act at the moment the capture opens a file, e.g. between the
+ * trailer and the manifest. Without a hook it only forwards the call.
  */
 
 #include <dlfcn.h>
+#include <fcntl.h>
 
 #include <atomic>
+#include <cstdarg>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -61,6 +63,29 @@ void* hooked_fopen(const char* name, std::atomic<FopenFn>& next, const char* pat
 
 std::atomic<FopenFn> g_next_fopen{nullptr};
 std::atomic<FopenFn> g_next_fopen64{nullptr};
+
+// As hooked_fopen(), for the files the capture opens with open() on POSIX, the
+// manifest among them.
+using OpenFn = int (*)(const char*, int, ...);
+int hooked_open(const char* name, std::atomic<OpenFn>& next, const char* path, int flags,
+                mode_t mode) {
+  if (void (*hook)(const char*) = g_fopen_hook.load(std::memory_order_acquire)) hook(path);
+  OpenFn fn = next.load(std::memory_order_acquire);
+  if (!fn) {
+    fn = reinterpret_cast<OpenFn>(dlsym(RTLD_NEXT, name));
+    next.store(fn, std::memory_order_release);
+  }
+  return fn ? fn(path, flags, mode) : -1;
+}
+
+// The mode argument is there only when the call can create a file.
+mode_t open_mode(int flags, va_list ap) {
+  const bool creates = (flags & O_CREAT) != 0 || (flags & O_TMPFILE) == O_TMPFILE;
+  return creates ? static_cast<mode_t>(va_arg(ap, int)) : 0;
+}
+
+std::atomic<OpenFn> g_next_open{nullptr};
+std::atomic<OpenFn> g_next_open64{nullptr};
 }  // namespace
 
 HRR_TOOL_EXPORT void* hrr_dispatch_tool_fopen(const char* path, const char* mode) __asm__("fopen");
@@ -73,6 +98,25 @@ void* hrr_dispatch_tool_fopen(const char* path, const char* mode) {
 
 void* hrr_dispatch_tool_fopen64(const char* path, const char* mode) {
   return hooked_fopen("fopen64", g_next_fopen64, path, mode);
+}
+
+HRR_TOOL_EXPORT int hrr_dispatch_tool_open(const char* path, int flags, ...) __asm__("open");
+HRR_TOOL_EXPORT int hrr_dispatch_tool_open64(const char* path, int flags, ...) __asm__("open64");
+
+int hrr_dispatch_tool_open(const char* path, int flags, ...) {
+  va_list ap;
+  va_start(ap, flags);
+  const mode_t mode = open_mode(flags, ap);
+  va_end(ap);
+  return hooked_open("open", g_next_open, path, flags, mode);
+}
+
+int hrr_dispatch_tool_open64(const char* path, int flags, ...) {
+  va_list ap;
+  va_start(ap, flags);
+  const mode_t mode = open_mode(flags, ap);
+  va_end(ap);
+  return hooked_open("open64", g_next_open64, path, flags, mode);
 }
 
 HRR_TOOL_EXPORT int rocprofiler_set_api_table(const char* name, uint64_t /*lib_version*/,
@@ -93,7 +137,8 @@ HRR_TOOL_EXPORT void hrr_dispatch_tool_set_late_hook(void (*hook)()) {
   g_late_hook.store(hook, std::memory_order_release);
 }
 
-// Runs `hook` with the path on every fopen() while the library is preloaded.
+// Runs `hook` with the path on every fopen() and open() while the library is
+// preloaded.
 HRR_TOOL_EXPORT void hrr_dispatch_tool_set_fopen_hook(void (*hook)(const char*)) {
   g_fopen_hook.store(hook, std::memory_order_release);
 }

@@ -88,6 +88,7 @@ std::atomic<bool>        g_installed{false};
 std::atomic<bool>        g_table_built{false};  // guard for hip_capture_build_table()
 
 HipCompilerDispatchTable g_real_compiler_table{};
+static HipCompilerDispatchTable g_cap_compiler_table{};  // the shims, kept for uninstall
 std::atomic<bool>        g_compiler_installed{false};  // guard for hip_capture_build_compiler_table()
 
 // TLS dims saved by __hipPushCallConfiguration — used only as a fallback by
@@ -2592,9 +2593,15 @@ void hip_capture_install() {
 void hip_capture_uninstall() {
   if (!g_installed.exchange(false)) return;
   uninstall_shims(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
+  // The compiler shims go as well, or a capture refused at init or in a forked
+  // child keeps running them with capture off. Shutdown leaves them.
+  if (g_compiler_installed.exchange(false))
+    uninstall_shims(hip::GetHipCompilerDispatchTable(), g_cap_compiler_table,
+                    g_real_compiler_table);
 }
 
 void hip_capture_install_compiler_table(const HipCompilerDispatchTable& shims) {
+  g_cap_compiler_table = shims;
   install_shims(hip::GetHipCompilerDispatchTable(), shims, g_real_compiler_table);
 }
 
@@ -2720,8 +2727,9 @@ void hip_capture_init() {
     }
 
     // Open the events writer now — Flag::init() has run so output_dir is valid.
-    // A refused open leaves capture off, so take the shims out of the dispatch
-    // table too rather than leave every call going through them for nothing.
+    // A refused open leaves capture off. Without a writer the shims would only
+    // cost time, and the D2H ones still synchronize streams, so take them out
+    // of the dispatch table again.
     if (!hrr_cap::writer::open(hip_capture_output_dir())) {
       hip_capture_uninstall();
       return;
@@ -2767,7 +2775,10 @@ void hip_capture_init() {
 }
 
 void hip_capture_shutdown() {
-  hip_capture_uninstall();
+  // Only the runtime shims: the compiler table keeps its shims, so a fat binary
+  // unregistered after this still goes through them, and the writer drops it.
+  if (g_installed.exchange(false))
+    uninstall_shims(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
   hrr_cap::writer::flush(hip_capture_output_dir());
   hrr_cap::writer::close();
 

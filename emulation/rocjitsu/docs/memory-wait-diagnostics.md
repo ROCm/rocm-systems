@@ -1,7 +1,8 @@
 # Memory wait diagnostics
 
-Functional execution computes memory results eagerly. A core, per-wave scoreboard
-separately tracks whether a register result is known complete.
+Memory-result diagnostics are enabled by default. Functional execution computes
+memory results eagerly; a core, per-wave scoreboard separately tracks whether a
+register result is known complete.
 Reading or overwriting an outstanding destination prints a `memory-wait` warning
 with the issuing PC, consuming PC, register, counter, and sufficient wait
 threshold. Execution continues with the eager value. The first conflicting access
@@ -19,15 +20,32 @@ hazard before the output limit is applied.
 Registers in diagnostics use the scoreboard's physical numbering. On targets
 with an accumulator bank, `v256+n` names `aN` (for example, `v288` is `a32`).
 
-Memory-result diagnostics default to `off`. To enable them, add this entry to each
+If warnings appear incorrect or checking slows a workload, disable both ordinary
+and XCNT checks for a launch without editing the config or rebuilding:
+
+```sh
+rocjitsu --config /path/to/config.json --wait-checking=off -- <command>
+```
+
+With Mirage, use `mirage run --wait-checking=off -- <command>`. The flag works
+with profiles or `--config` and composes with `--cpu-thread-budget`.
+
+Use `--wait-checking=on` for ordinary checks only, or `--wait-checking=all` to include
+gfx1250 XCNT. These modes override both per-CU settings on every GPU. Omitting the
+flag preserves JSON settings and defaults. See [configuration](configuration.md#memory-wait-diagnostics)
+for persistent global overrides and launch-mode restrictions.
+
+Without a global override, memory-result diagnostics default to
+`memory_wait_diagnostics=warn`. To disable them per CU, add this entry to each
 `compute_unit` node's `config` array:
 
 ```json
-{"key": "memory_wait_diagnostics", "value": "warn"}
+{"key": "memory_wait_diagnostics", "value": "off"}
 ```
 
-`warn` and `off` are the accepted values. Invalid values reject the configuration. This
-is a core simulator feature and requires no plugin.
+`warn` and `off` are the accepted values. Invalid values reject the configuration.
+This is a core simulator feature and requires no plugin. XCNT replay-source
+diagnostics remain independently disabled by default, as described below.
 
 ## XCNT replay-source diagnostics
 
@@ -38,9 +56,9 @@ address/data operands, including EXEC and dynamically selected VGPR banks. Readi
 a protected source again is allowed. `xcnt-wait` warnings have their own limit of
 16 per CU and do not consume the ordinary `memory-wait` warning budget.
 
-XCNT tracking and warnings default to `off`. Enable them independently of
-memory-result checks by adding this entry to each `compute_unit` node's `config`
-array:
+XCNT tracking and warnings default to `off`. Without a global `wait_checking`
+override, enable them independently of memory-result checks by adding this entry
+to each `compute_unit` node's `config` array:
 
 ```json
 {"key": "xcnt_diagnostics", "value": "warn"}
@@ -48,8 +66,9 @@ array:
 
 The accepted values are `warn` and `off`; invalid values reject the configuration.
 This setting has no effect on other architectures. It controls diagnostics, not
-hardware XNACK support. Setting `memory_wait_diagnostics=off` leaves an explicitly
-enabled XCNT check active; set both options to `off` to disable all wait checking.
+hardware XNACK support. A global `wait_checking` override takes precedence over
+both per-CU keys. Without one, setting `memory_wait_diagnostics=off` leaves an
+explicitly enabled XCNT check active. Use `--wait-checking=off` to disable both.
 
 VMEM coverage is qualified for `MODE.REPLAY_MODE=1` (bit 25), the multi-group mode
 selected by LLVM at kernel entry. VMEM replay sources in single-group mode are
@@ -123,9 +142,9 @@ unqualified completion classes remain conservative. The checker does not simulat
 hardware occupancy or select a latency at which memory becomes visible.
 
 These are known limits, not an exhaustive list. Investigate warnings against the
-target's ordering rules; `memory_wait_diagnostics=off` suppresses memory-result
-warnings and `xcnt_diagnostics=off` suppresses replay-source warnings when needed. Plugins may overlap with these checks and additionally
-validate hazards such as memory visibility and communication between waves.
+target's ordering rules; use `--wait-checking=off` to suppress both warning classes
+when needed. Plugins may overlap with these checks and additionally validate
+hazards such as memory visibility and communication between waves.
 
 ## Access planning and cost
 

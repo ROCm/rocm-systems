@@ -7232,6 +7232,7 @@ TEST(DsSwizzleExecutionTest, InactiveSourcesAreZeroAndInactiveDestinationsArePre
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 32;
     cfg.lds_size_kb = 64;
+    cfg.memory_wait_diagnostics = amdgpu::MemoryWaitDiagnostics::Off;
     ASSERT_FALSE(cfg.memory_wait_checks_enabled());
 
     auto cu = amdgpu::ComputeUnitCore::create("ds_swizzle_exec", cfg, &gpu_mem, &l2);

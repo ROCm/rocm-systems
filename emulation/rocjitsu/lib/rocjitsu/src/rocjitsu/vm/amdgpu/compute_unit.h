@@ -141,8 +141,8 @@ public:
     uint32_t functional_quantum = kFunctionalQuantum;
     /// Shared VM resources; null preserves direct-construction environment controls.
     std::shared_ptr<matrix_coexecution::ExecutionResources> async_resources = nullptr;
-    /// Opt in to premature memory-result access diagnostics.
-    MemoryWaitDiagnostics memory_wait_diagnostics = MemoryWaitDiagnostics::Off;
+    /// Report premature memory-result accesses by default.
+    MemoryWaitDiagnostics memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
     /// Opt in to gfx1250 replay-source overwrite diagnostics independently.
     MemoryWaitDiagnostics xcnt_diagnostics = MemoryWaitDiagnostics::Off;
 
@@ -252,6 +252,13 @@ public:
 
   /// @brief Restore the raw configured functional quantum (0 = unbounded).
   void set_functional_quantum(uint32_t quantum) { config_.functional_quantum = quantum; }
+
+  /// @brief Restore wait policies before populating checkpoint wavefront slots.
+  void restore_wait_diagnostics(MemoryWaitDiagnostics memory, MemoryWaitDiagnostics xcnt) {
+    assert(!has_active_wfs());
+    config_.memory_wait_diagnostics = memory;
+    config_.xcnt_diagnostics = xcnt;
+  }
 
   /// @brief Select whether the CP continuation event owns functional execution.
   void set_pool_driven(bool value) { pool_driven_ = value; }
