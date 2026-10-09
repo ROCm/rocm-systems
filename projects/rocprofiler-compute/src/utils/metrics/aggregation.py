@@ -10,6 +10,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from utils.logger import console_warning
+
 
 def calc_pct_of_peak(
     value: float | str | None,
@@ -166,3 +168,151 @@ def to_mod(
 
 def to_concat(a: Any, b: Any) -> str:  # noqa: ANN401
     return str(a) + str(b)
+
+
+def _sorted_dispatch_ids(series_list: list[pd.Series]) -> list[object]:
+    dispatch_ids: set[object] = set()
+    for series in series_list:
+        dispatch_ids.update(series.index)
+    return sorted(dispatch_ids, key=lambda item: (str(type(item)), str(item)))
+
+
+def _fragment_value(series: pd.Series, dispatch_id: object) -> float | None:
+    if dispatch_id not in series.index:
+        return None
+    value = series.loc[dispatch_id]
+    if pd.isna(value):
+        return None
+    return float(value)
+
+
+def _warn_skipped_dispatches(kind: str, used: int, total: int) -> None:
+    if total and used != total:
+        console_warning(
+            "metrics",
+            f"{kind}: used {used} of {total} dispatches; "
+            "skipped dispatches with a missing or NaN fragment",
+        )
+
+
+def merge_dispatch_weighted_avg(
+    ratio_series_list: list[pd.Series],
+    weight_series_list: list[pd.Series],
+) -> float:
+    """Pool (M0*C0 + M1*C1) / (C0 + C1) across dispatches.
+
+    Sum the weighted products and the weights, then divide once. A mean of
+    per-dispatch ratios changes the number when dispatches differ in size.
+    """
+    if not ratio_series_list or len(ratio_series_list) != len(weight_series_list):
+        return np.nan
+
+    dispatch_ids = _sorted_dispatch_ids(ratio_series_list + weight_series_list)
+    if not dispatch_ids:
+        return np.nan
+
+    weighted_total = 0.0
+    weight_total = 0.0
+    used = 0
+    for dispatch_id in dispatch_ids:
+        numerator = 0.0
+        denominator = 0.0
+        skip_dispatch = False
+        for ratio_series, weight_series in zip(ratio_series_list, weight_series_list):
+            weight = _fragment_value(weight_series, dispatch_id)
+            ratio = _fragment_value(ratio_series, dispatch_id)
+            if weight is None or ratio is None:
+                skip_dispatch = True
+                break
+            numerator += ratio * weight
+            denominator += weight
+        if skip_dispatch or denominator == 0.0:
+            continue
+        weighted_total += numerator
+        weight_total += denominator
+        used += 1
+
+    _warn_skipped_dispatches("WEIGHTED_AVG", used, len(dispatch_ids))
+    if used == 0 or weight_total == 0.0:
+        return np.nan
+    return weighted_total / weight_total
+
+
+def merge_dispatch_collect_sum(ratio_series_list: list[pd.Series]) -> float:
+    """Sum absolute fragment values across dispatches.
+
+    Do not average per-dispatch rates. Shared-denominator rates belong in
+    COLLECT_RATIO, which pools numerator and denominator totals.
+    """
+    if not ratio_series_list:
+        return np.nan
+
+    dispatch_ids = _sorted_dispatch_ids(ratio_series_list)
+    if not dispatch_ids:
+        return np.nan
+
+    total = 0.0
+    used = 0
+    for dispatch_id in dispatch_ids:
+        dispatch_total = 0.0
+        skip_dispatch = False
+        for ratio_series in ratio_series_list:
+            value = _fragment_value(ratio_series, dispatch_id)
+            if value is None:
+                skip_dispatch = True
+                break
+            dispatch_total += value
+        if skip_dispatch:
+            continue
+        total += dispatch_total
+        used += 1
+
+    _warn_skipped_dispatches("COLLECT_SUM", used, len(dispatch_ids))
+    if used == 0:
+        return np.nan
+    return total
+
+
+def merge_dispatch_collect_ratio(
+    numerator_series_list: list[pd.Series],
+    denominator_series_list: list[pd.Series],
+) -> float:
+    """Sum numerators and denominators across dispatches, then divide once."""
+    if not numerator_series_list or not denominator_series_list:
+        return np.nan
+
+    all_series = numerator_series_list + denominator_series_list
+    dispatch_ids = _sorted_dispatch_ids(all_series)
+    if not dispatch_ids:
+        return np.nan
+
+    numerator_total = 0.0
+    denominator_total = 0.0
+    used = 0
+    for dispatch_id in dispatch_ids:
+        numerator = 0.0
+        denominator = 0.0
+        skip_dispatch = False
+        for series in numerator_series_list:
+            value = _fragment_value(series, dispatch_id)
+            if value is None:
+                skip_dispatch = True
+                break
+            numerator += value
+        if not skip_dispatch:
+            for series in denominator_series_list:
+                value = _fragment_value(series, dispatch_id)
+                if value is None:
+                    skip_dispatch = True
+                    break
+                denominator += value
+        if skip_dispatch or denominator == 0.0:
+            continue
+        numerator_total += numerator
+        denominator_total += denominator
+        used += 1
+
+    _warn_skipped_dispatches("COLLECT_RATIO", used, len(dispatch_ids))
+    if used == 0 or denominator_total == 0.0:
+        return np.nan
+    return numerator_total / denominator_total

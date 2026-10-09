@@ -20,6 +20,7 @@ from rocprof_compute_soc.counter_file import (
 from rocprof_compute_soc.counter_file import (
     LimitedSet as LimitedSet,
 )
+from rocprof_compute_soc.counter_grouping_buckets import iter_metric_groups
 from rocprof_compute_soc.counter_grouping_single_pass import (
     single_pass_packable_enabled_from_env,
     try_allocate_single_pass_packable,
@@ -405,39 +406,8 @@ class OmniSoC_Base:
         remaining = set(work_set)
         files = list(output_files)
 
-        # -- Build priority keys from grouping policy YAML --
-        priority_keys: set[tuple[str, Any, int]] = set()
-        for token in self._same_bucket_priority_metric_ids():
-            tid = token.strip()
-            if not METRIC_ID_RE.match(tid):
-                continue
-            file_id, panel_id, metric_idx = convert_metric_id_to_panel_info(tid)
-            if metric_idx is None:
-                continue
-            priority_keys.add((file_id, panel_id, metric_idx))
-
-        # -- Scan arch YAML metrics and collect (sort_key, counters, label) rows --
-        rows: list[tuple[tuple, frozenset[str], str]] = []
-        for (
-            stem_id,
-            panel_id,
-            metric_idx,
-            metric_name,
-            metric_yaml,
-        ) in self._iter_arch_analysis_yaml_metrics():
-            formula_hw, _ = extract_counters_and_variables(
-                metric_yaml, self._mspec.gpu_series, include_supported_denom=False
-            )
-            hw = self._expand_tcc_template_counters(formula_hw)
-            counters = frozenset(hw & remaining)
-            if not counters:
-                continue
-            tier = 0 if (stem_id, panel_id, metric_idx) in priority_keys else 1
-            panel_s = str(panel_id) if panel_id is not None else ""
-            sort_key = (tier, -len(counters), stem_id, panel_s, metric_idx)
-            label = f"{stem_id}.{panel_s}.{metric_idx} ({metric_name})"
-            rows.append((sort_key, counters, label))
-        rows.sort(key=lambda r: r[0])
+        # Same groups as single-pass packing, including WEIGHTED_AVG weights.
+        rows = iter_metric_groups(self, remaining)
 
         # -- Place each metric group into an existing or new bucket --
         cfg = self.__perfmon_config

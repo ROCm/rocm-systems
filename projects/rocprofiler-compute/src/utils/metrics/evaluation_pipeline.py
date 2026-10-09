@@ -12,6 +12,12 @@ import pandas as pd
 
 from utils.logger import console_debug, console_error, console_warning, demarcate
 from utils.metrics.aggregation import calc_pct_of_peak
+from utils.metrics.collectable import (
+    _avg_column_name,
+    apply_composite_metrics,
+    build_metric_eval_graph,
+    cache_collectable_expressions,
+)
 from utils.metrics.common import ValuDualIssueDetector
 from utils.metrics.debug_row_tracker import DebugRowTracker, debug_row_tracker
 from utils.metrics.expression import build_eval_string
@@ -261,6 +267,127 @@ def _calc_pass_scoped_builtins(
     return results
 
 
+def _copy_metric_tables(
+    dfs: dict,
+    dfs_type: dict,
+) -> tuple[dict, dict]:
+    """Copy metric tables so composite eval does not overwrite source formulas."""
+    copies: dict = {}
+    types: dict = {}
+    for table_id, df in dfs.items():
+        if dfs_type.get(table_id) != "metric_table":
+            continue
+        copied = df.copy(deep=True)
+        copied.attrs = dict(df.attrs)
+        copies[table_id] = copied
+        types[table_id] = "metric_table"
+    return copies, types
+
+
+def evaluate_metric_composites(
+    dfs: dict,
+    dfs_type: dict,
+    raw_pmc_df: pd.DataFrame,
+    sys_info: pd.Series,
+    empirical_peaks_df: pd.DataFrame,
+    pass_layout: Optional[PassLayout] = None,
+) -> dict[tuple[object, str], object]:
+    """Evaluate composite parents on copies of the metric tables.
+
+    Returns (metric_id, column) -> value for each composite parent. Callers
+    on the analysis-db path overlay these onto exported expressions and the
+    roofline points. Source tables are left unchanged.
+    """
+    copies, copy_types = _copy_metric_tables(dfs, dfs_type)
+    if not copies:
+        return {}
+
+    sys_vars = create_sys_vars(sys_info)
+    empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
+    gpu_arch = str(sys_info.get("gpu_arch", ""))
+    used_passes: set[str] = set()
+    if (
+        pass_layout is not None
+        and pass_layout.has_duplicates
+        and gpu_arch
+        and not legacy_pass_merge_enabled()
+    ):
+        gpu_series = mi_gpu_specs.get_gpu_series(gpu_arch)
+        used_passes = bind_metric_tables_to_passes(
+            copies,
+            copy_types,
+            pass_layout,
+            gpu_series,
+            frozenset(SUPPORTED_FIELD),
+        )
+
+    cache_collectable_expressions(copies, copy_types)
+    expressions = [
+        built
+        for df in copies.values()
+        for built in df.attrs.get("collectable_expr_cache", {}).values()
+        if isinstance(built, str) and built
+    ]
+    if gpu_arch and expressions:
+        sys_vars.update(calc_builtin_vars(raw_pmc_df, sys_vars, gpu_arch, expressions))
+        if pass_layout is not None and used_passes:
+            sys_vars.update(
+                _calc_pass_scoped_builtins(
+                    raw_pmc_df,
+                    sys_vars,
+                    gpu_arch,
+                    pass_layout,
+                    used_passes,
+                    expressions,
+                )
+            )
+
+    apply_composite_metrics(
+        copies,
+        copy_types,
+        raw_pmc_df,
+        sys_vars,
+        empirical_peaks,
+        pass_layout=pass_layout,
+    )
+
+    results: dict[tuple[object, str], object] = {}
+    for df in copies.values():
+        graph = build_metric_eval_graph(df)
+        avg_col = _avg_column_name(df)
+        if avg_col is None:
+            continue
+        for composite in graph.composites:
+            if composite.metric_id not in df.index:
+                continue
+            cell = df.at[composite.metric_id, avg_col]
+            results[(composite.metric_id, avg_col)] = cell
+    return results
+
+
+def overlay_composite_expression_values(
+    expression_df: pd.DataFrame,
+    filled: dict[tuple[object, str], object],
+) -> None:
+    """Replace empty composite expression cells with evaluated parent values."""
+    if expression_df.empty or not filled:
+        return
+    has_metric_id = "metric_id" in expression_df.columns
+    has_value_name = "value_name" in expression_df.columns
+    if not has_metric_id or not has_value_name:
+        return
+    for idx, row in expression_df.iterrows():
+        value = filled.get((row.metric_id, row.value_name))
+        if value is None:
+            continue
+        if isinstance(value, str):
+            expression_df.at[idx, "value"] = "None" if value in {"", "N/A"} else value
+        elif pd.isna(value):
+            expression_df.at[idx, "value"] = "None"
+        else:
+            expression_df.at[idx, "value"] = repr(float(value))
+
+
 @demarcate
 def eval_metric(
     dfs: dict,
@@ -303,6 +430,9 @@ def eval_metric(
             gpu_series,
             frozenset(SUPPORTED_FIELD),
         )
+
+    # Cache collectable strings after binding so submetrics keep pass scope.
+    cache_collectable_expressions(dfs, dfs_type)
 
     builtin_vars = calc_builtin_vars(
         raw_pmc_df, sys_vars, sys_info["gpu_arch"], expressions
@@ -375,6 +505,15 @@ def eval_metric(
                 f"Variance corrected for metric: {row_id} {metric_name} {col}"
             )
         dfs[df_id].loc[row_id, col] = eval_result
+
+    apply_composite_metrics(
+        dfs,
+        dfs_type,
+        raw_pmc_df,
+        sys_vars,
+        empirical_peaks,
+        pass_layout=pass_layout,
+    )
 
     # Print aggregated summary of any noise clamping warnings
     print_noise_clamp_summary()
