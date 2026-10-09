@@ -596,8 +596,7 @@ bool VirtualGPU::Queue::isDone(uint id) {
     return false;
   }
   cmbBufIdRetired_ = id;
-  checkExecutionState();
-  return true;
+  return checkExecutionState();
 }
 
 // ================================================================================================
