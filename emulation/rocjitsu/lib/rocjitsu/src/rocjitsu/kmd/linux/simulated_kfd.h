@@ -532,6 +532,11 @@ private:
                   KfdProcess::HostExtentOwner owner = KfdProcess::HostExtentOwner::Application);
   void unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size);
 
+  /// @brief Give @p alloc memfd backing that every exporter and importer shares.
+  /// @details Keeps the allocation's CPU mapping on the shared backing and marks
+  /// its pages cache coherent. Caller holds proc.alloc_mutex_.
+  int share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAllocation &alloc, const char *name);
+
   void update_cp_doorbell_base(uint32_t gpu_ordinal, uint32_t process_id, void *base);
 
   int dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg,
@@ -566,10 +571,6 @@ private:
   int wait_events_ioctl(KfdProcess &proc, void *arg);
   int import_dmabuf_ioctl(KfdProcess &proc, void *arg);
   int export_dmabuf_ioctl(KfdProcess &proc, void *arg);
-  /// @brief Give @p alloc memfd backing that every exporter and importer shares.
-  /// @details Keeps the allocation's CPU mapping on the shared backing and marks
-  /// its pages cache coherent. Caller holds proc.alloc_mutex_.
-  int share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAllocation &alloc, const char *name);
   int get_dmabuf_info_ioctl(KfdProcess &proc, void *arg);
   int ipc_export_handle_ioctl(KfdProcess &proc, void *arg);
   int ipc_import_handle_ioctl(KfdProcess &proc, void *arg);
