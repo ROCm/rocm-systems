@@ -5,13 +5,13 @@ FROM "${ROCM_IMAGE_NAME}:${ROCM_IMAGE_TAG}"
 
 ## rocm-systems monorepo (RCCL and RCCL-Tests live in projects/rccl and projects/rccl-tests)
 ARG ROCM_SYSTEMS_REPO=https://github.com/ROCm/rocm-systems
-## branch, tag or commit SHA to build
+## branch, tag that contains projects/ (e.g. therock-*), or full commit SHA; short SHAs and rocm-7.2.x tags do not work
 ARG ROCM_SYSTEMS_REF=develop
 
 ## AMD GPU Targets
 ARG GPU_TARGETS=gfx942
 
-## extra RCCL install.sh flags, e.g. --rocshmem or --rocshmem-gin (empty by default)
+## extra RCCL install.sh flags, e.g. --rocshmem (empty by default)
 ARG RCCL_BUILD_ARGS=""
 
 ## creating scratch space
