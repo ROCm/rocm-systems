@@ -6679,8 +6679,9 @@ class CodeGenerator:
                         for i in range(3)
                     )
                     src_mods = ''.join(
-                        f'    src{i}_value = amdgpu::source_modifier::apply_to_float(src{i}_value, {i}, inst_.abs, inst_.neg);\n'
+                        line + '\n'
                         for i in range(3)
+                        for line in vop3_src_mod(f'src{i}_value', i, has_abs=True)
                     )
                     return (
                         '  uint64_t exec = wf.exec();\n'
@@ -6705,9 +6706,10 @@ class CodeGenerator:
                     src_mods = ''
                     finish = ''
                     if is_vop3:
-                        src_mods = (
-                            '    src0_value = amdgpu::source_modifier::apply_to_float(src0_value, 0, inst_.abs, inst_.neg);\n'
-                            '    src1_value = amdgpu::source_modifier::apply_to_float(src1_value, 1, inst_.abs, inst_.neg);\n'
+                        src_mods = ''.join(
+                            line + '\n'
+                            for i in range(2)
+                            for line in vop3_src_mod(f'src{i}_value', i, has_abs=True)
                         )
                         finish = (
                             '    uint32_t omod = amdgpu::fp_mode::effective_omod(\n'

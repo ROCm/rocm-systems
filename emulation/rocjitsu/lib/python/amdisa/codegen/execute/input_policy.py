@@ -10,13 +10,23 @@ format, so they declare the policy once per instruction under one name.
 # Floating formats with an input policy -> shared/fp_format.h layout.
 FORMATS: dict[str, str] = {'f16': 'F16', 'f32': 'F32', 'f64': 'F64'}
 
+# New formats need an explicit MODE choice, even if their layout is known.
+_MODE_FIELDS: dict[str, str] = {
+    'f16': 'f16_f64',
+    'f32': 'f32',
+    'f64': 'f16_f64',
+}
+
 # Name of the per-instruction policy declared before the body.
 NAME = 'input_policy'
 
 
 def policy_expr(dtype: str) -> str:
-    """Return the input policy for ``dtype`` from the wave's MODE."""
-    mode = 'f32' if dtype == 'f32' else 'f16_f64'
+    """Return the input policy from MODE, rejecting unsupported source types."""
+    try:
+        mode = _MODE_FIELDS[dtype]
+    except KeyError as error:
+        raise ValueError(f'Unsupported input-policy dtype: {dtype!r}') from error
     return f'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_{mode}())'
 
 

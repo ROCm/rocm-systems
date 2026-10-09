@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""SIMD specialization codegen for AMDGPU VOP2 execute kernels.
+"""SIMD specialization codegen for AMDGPU execute kernels.
 
 Emits an `<experimental/simd>`-based fast path on top of the generated
 scalar per-lane bodies. The scalar body is preserved verbatim as a
@@ -18,12 +18,11 @@ fallback that returns ``false``. On toolchains without
 ``<experimental/simd>``, overload resolution picks the fallback and the
 compiler inlines the probe to a dead branch.
 
-Eligible kernels are listed in :data:`SIMD_VOP2_BINARY` — only those
-whose host SIMD result is bit-identical to the scalar generated body
-(IEEE-754 single-rounded fp arithmetic, wrap-around integer arithmetic,
-elementwise bitwise ops). NaN-sensitive ops (min/max), VCC-writing ops
-(add_co), and modifier-bearing forms (VOP3 with abs/neg/clamp/omod) are
-excluded — those need their own helpers.
+Instruction tables select functors and helpers for each format and encoding.
+IEEE-2019 min/max uses float_minmax.simd_probe and shared raw-bit selection,
+including source/output modifiers on VOP3. VOP2 F16 *_NUM entries use the same
+selection through SIMD_VOP2_BINARY for register-half handling. Older host-float
+min/max functors remain separate, with their documented NaN/signed-zero limits.
 """
 
 from __future__ import annotations
@@ -237,7 +236,7 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         'util::stdx::fmin(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b))); }',
     ),
     # IEEE-2019 *_NUM forms use the same selection rules as the scalar path.
-    # float_minmax.simd_probe routes every other min/max form, VOP3 included.
+    # float_minmax.simd_probe routes the other IEEE-2019 forms, VOP3 included.
     'v_max_num_f16_vop2': ('uint32_t', float_minmax.simd_functor('f16', 'max_num')),
     'v_min_num_f16_vop2': ('uint32_t', float_minmax.simd_functor('f16', 'min_num')),
     # v_cvt_pkrtz_f16_f32 (both spellings): pack two f32 -> two f16 with
