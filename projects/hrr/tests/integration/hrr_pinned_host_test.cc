@@ -30,7 +30,16 @@ __global__ void hrr_pinned_triple(int* out, const int* in, int n) {
   if (i < n) out[i] = in[i] * 3 + 1;
 }
 
-static void hrr_pinned_workload(int* in) {
+// The same kernel with the pinned pointer inside a by-value struct.
+struct PinnedIn { const int* in; int n; };
+__global__ void hrr_pinned_triple_struct(int* out, PinnedIn s) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < s.n) out[i] = s.in[i] * 3 + 1;
+}
+
+__global__ void hrr_pinned_ignore(uint64_t) {}
+
+static void hrr_pinned_workload(int* in, bool by_struct = false) {
   int* dev_in = nullptr;
   HRR_HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&dev_in), in, 0));
   int* dout = nullptr;
@@ -38,8 +47,12 @@ static void hrr_pinned_workload(int* in) {
   std::vector<int> hout(kPinnedN);
   for (int it = 0; it < kPinnedIters; ++it) {
     for (int i = 0; i < kPinnedN; ++i) in[i] = pinned_value(it, i);  // uncaptured stores
-    hipLaunchKernelGGL(hrr_pinned_triple, dim3(1), dim3(kPinnedN), 0, nullptr,
-                       dout, dev_in, kPinnedN);
+    if (by_struct)
+      hipLaunchKernelGGL(hrr_pinned_triple_struct, dim3(1), dim3(kPinnedN), 0, nullptr,
+                         dout, PinnedIn{dev_in, kPinnedN});
+    else
+      hipLaunchKernelGGL(hrr_pinned_triple, dim3(1), dim3(kPinnedN), 0, nullptr,
+                         dout, dev_in, kPinnedN);
     HRR_HIP_CHECK(hipGetLastError());
     HRR_HIP_CHECK(hipMemcpy(hout.data(), dout, kPinnedN * sizeof(int), hipMemcpyDeviceToHost));
     for (int i = 0; i < kPinnedN; ++i) REQUIRE(hout[i] == pinned_value(it, i) * 3 + 1);
@@ -53,6 +66,27 @@ TEST_CASE("Unit_HRR_PinnedHostMalloc_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&in), kPinnedN * sizeof(int), 0));
   hrr_pinned_workload(in);
   HRR_HIP_CHECK(hipHostFree(in));
+}
+
+TEST_CASE("Unit_HRR_PinnedHostStruct_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* in = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&in), kPinnedN * sizeof(int), 0));
+  hrr_pinned_workload(in, true);
+  HRR_HIP_CHECK(hipHostFree(in));
+}
+
+// A freed allocation's address passed on as a plain number: capture must not
+// snapshot memory that is gone.
+TEST_CASE("Unit_HRR_PinnedHostFreed_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  void* p = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(&p, kPinnedN * sizeof(int), 0));
+  HRR_HIP_CHECK(hipHostFree(p));
+  hipLaunchKernelGGL(hrr_pinned_ignore, dim3(1), dim3(1), 0, nullptr,
+                     reinterpret_cast<uint64_t>(p));
+  HRR_HIP_CHECK(hipGetLastError());
+  HRR_HIP_CHECK(hipDeviceSynchronize());
 }
 
 TEST_CASE("Unit_HRR_PinnedHostRegister_Direct", "[.][hrr-direct]") {
@@ -69,8 +103,12 @@ TEST_CASE("Unit_HRR_PinnedHostRegister_Direct", "[.][hrr-direct]") {
 // is nothing to write back and the checks fail.
 HRR_TEST_CASE(Unit_HRR_PinnedHostRoundtrip) {
   for (const char* direct : {"Unit_HRR_PinnedHostMalloc_Direct",
-                             "Unit_HRR_PinnedHostRegister_Direct"}) {
+                             "Unit_HRR_PinnedHostRegister_Direct",
+                             "Unit_HRR_PinnedHostStruct_Direct"}) {
     for (const char* snapshots : {"1", "0"}) {
+      // Without snapshots the struct would carry a host address replay never mapped.
+      if (std::string(direct) == "Unit_HRR_PinnedHostStruct_Direct" && *snapshots == '0')
+        continue;
       INFO(direct << " HIP_HRR_HOST_SNAPSHOTS=" << snapshots);
       ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host"};
       hrr_capture_direct(direct, cap.path, 5, {{"HIP_HRR_HOST_SNAPSHOTS", snapshots}});
@@ -89,6 +127,17 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostRoundtrip) {
       }
     }
   }
+}
+
+// Capture stops tracking an allocation when it is freed: had it snapshotted the
+// stale address, replay would refuse the record for an allocation it freed.
+HRR_TEST_CASE(Unit_HRR_PinnedHostFreedRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_freed"};
+  hrr_capture_direct("Unit_HRR_PinnedHostFreed_Direct", cap.path, 3);
+  auto [ret, out] = hrr_playback_env(cap.path, {});
+  INFO("Playback exit " << ret << ", stdout:\n" << out);
+  CHECK(ret == 0);
+  CHECK(out.find("Pinned host snapshots") == std::string::npos);
 }
 #endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE
 

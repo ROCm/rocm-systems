@@ -531,9 +531,8 @@ Kept deliberately simple:
   stay in replay's buffer as they did at capture; a host store that puts back exactly the
   last recorded bytes after such a device write is missed.
 - Only the launch stream is synchronized before a restore; work on other streams reading
-  the buffer is not waited for. A launch that fails after its snapshot still counts as the
-  last record, and a `fork()` while another thread snapshots can leave the child's tracking
-  lock held.
+  the buffer is not waited for. A `fork()` while another thread snapshots can leave the
+  child's tracking lock held.
 
 **Threat model.** The snapshots put into the archive host memory the application never
 handed to a HIP call: for a serving stack, token IDs, sampling state and request metadata,
@@ -628,10 +627,9 @@ This detector is a value-based heuristic with three deliberate properties:
   previously caused occasional replay faults on ATen elementwise kernels.
   `HIP_HRR_PTR_RELAX=1` disables the replay-side guard for debugging.
 
-**Scope:** only `hipMemoryTypeDevice`/`Unified` words are flagged. A pinned/host
-(`hipMemoryTypeHost`) pointer embedded by value keeps its capture-time host VA at
-replay (invalid in the replay process); translating embedded host pointers is
-intentionally out of scope.
+**Scope:** `hipMemoryTypeDevice`/`Unified` words are flagged, and so are words
+pointing into a pinned allocation the launch snapshots (see Pinned Host Snapshots).
+Any other embedded host pointer keeps its capture-time VA at replay.
 
 A per-launch `co_hash` (the FNV-1a-128 hash of the owning code object) **is** recorded
 in kernel launch events. Playback resolves kernels by `(co_hash, name)`: it first looks

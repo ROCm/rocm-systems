@@ -228,7 +228,6 @@ static void pinned_scan_locked(const uint8_t* bytes, size_t sz) {
       s.hash = hrr_cap::writer::write_blob(reinterpret_cast<const void*>(s.base), s.size);
       PinnedAlloc& a = it->second;
       s.record = (s.hash.lo || s.hash.hi) && (s.hash.lo != a.last.lo || s.hash.hi != a.last.hi);
-      if (s.record) a.last = s.hash;
     }
     t_snaps.push_back(s);
   }
@@ -633,9 +632,17 @@ static void serialize_kernel_launch(
     hrr_cap::writer::mark_incomplete(reason);
     return;
   }
+  // A record becomes the allocation's last only once its event is written, in
+  // the same order as the events.
+  std::unique_lock<std::mutex> lk(g_pinned_mu, std::defer_lock);
+  if (!t_snaps.empty()) lk.lock();
   hrr_cap::writer::write_event_raw(api_id,
                                    reinterpret_cast<hrr_event_header*>(payload.data()),
                                    static_cast<uint32_t>(payload.size()));
+  for (const HostSnap& s : t_snaps) {
+    auto it = g_pinned.find(s.base);
+    if (s.record && it != g_pinned.end()) it->second.last = s.hash;
+  }
 }
 
 static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel);
