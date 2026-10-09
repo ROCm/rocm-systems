@@ -38,7 +38,7 @@ The analysis configs use a 2-level grouping structure:
 
 Within each analysis config, metrics are further grouped into sub-categories.
 
-Currently, rocprof-compute supports 7 architectures from 2 families across a total of 21 analysis config YAML files.
+Currently, rocprof-compute supports 8 architecture configurations (gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950, gfx115x and gfx1250) across a total of 141 analysis config YAML files (37 distinct file names).
 
 ```mermaid
 flowchart LR
@@ -151,15 +151,15 @@ All four types of information listed in System Context (metric specification, me
 - A change to how a metric is displayed requires opening the same file as a change to how it is calculated.
 - A change to any single concern carries risk of unintended impact on other concerns in the same location.
 
-For example, the current `VALU FLOPs` unit string has drifted between gfx940 (`"GFLOP/s"`) and gfx941 (`"GFLOPs"`) — the same metric with the same formula reports different units. This drift was not caught because the change was bundled with unrelated modifications in the same file.
+For example, the current `MFMA FLOPs (F8)` unit string in the System Speed-of-Light panel has drifted between gfx940 (`"GFLOP/s"`) and gfx941 (`"GFLOPs"`) — the same metric with the same formula reports different units. This drift was not caught because the change was bundled with unrelated modifications in the same file.
 
 ```yaml
 # gfx940
-VALU FLOPs:
+MFMA FLOPs (F8):
   unit: "GFLOP/s"
 
 # gfx941
-VALU FLOPs:
+MFMA FLOPs (F8):
   unit: "GFLOPs"    # same metric, same formula, different unit string
 ```
 
@@ -285,6 +285,7 @@ A file beginning with `!inherit <path>` loads the referenced base file first, th
 flowchart LR
     gfx908["gfx908 (CDNA base)"]
     gfx115x["gfx115x (RDNA base)"]
+    gfx1250["gfx1250 (own base)"]
 
     gfx908 --> gfx90a
     gfx90a --> gfx940
@@ -293,11 +294,11 @@ flowchart LR
     gfx942 --> gfx950
 ```
 
-The first architecture in each family serves as the base -- its files are the complete, standalone definitions. There is no abstract `_base/` directory. CDNA and RDNA share no content. Each arch inherits from its immediate predecessor in the hardware lineage, not from the family root. This minimizes the diff at each step: gfx90a overrides only what changed from gfx908, gfx940 overrides only what changed from gfx90a, etc. The same chain-based pattern applies to future families (gfx12xx).
+The first architecture in each family serves as the base -- its files are the complete, standalone definitions. There is no abstract `_base/` directory. CDNA and RDNA share no content. gfx1250 is a third standalone base: it shares no identical file with gfx115x. Each arch inherits from its immediate predecessor in the hardware lineage, not from the family root. This minimizes the diff at each step: gfx90a overrides only what changed from gfx908, gfx940 overrides only what changed from gfx90a, etc. The same chain-based pattern applies to future families (gfx12xx).
 
 Files identical to the parent arch do not exist in the child directory; they are inherited implicitly. Files that exist contain only `!inherit` plus additions, modifications, or removals.
 
-**Example:** gfx941 differs from gfx940 in exactly one file. With inheritance, that file becomes:
+**Example:** gfx941 differs from gfx940 in two files. With inheritance, the first of them becomes:
 
 ```yaml
 !inherit ../gfx940/0200_system_speed_of_light.yaml
@@ -495,7 +496,7 @@ flowchart LR
         s1["1. Layer 2 schema + inheritance loader\n───────────────────\nRequired: id, name, formula,\nunit, description\nOptional: peak, coll_level\nTyped variants: xfer, coherency,\nexpr (fabric stall tables)\nPyYAML loader for !inherit tag\nwith vendored deepmerge\n───────────────────\nDepends on: nothing\nResolves: FR2.1, FR2.4\nDeveloper gains: agreed field contract\nfor all metric files"]
         s2["2. Layer 2 parser\n───────────────────\nRead Layer 2 metric files\nResolve !inherit chains\n───────────────────\nDepends on: Stage 1\nResolves: FR2.2.1, FR2.3\nDeveloper gains: metric files\ncan be parsed and validated"]
         s3["3. Compatibility adapter\n───────────────────\nTranslate Layer 2 output into\nexisting pipeline structure\nExisting consumers unchanged\n───────────────────\nDepends on: Stage 2\nResolves: NFR1\nDeveloper gains: safe to merge\nLayer 2 files without breaking\nexisting pipeline"]
-        s4["4. Metric and set migration\n───────────────────\ngfx908 is CDNA base,\ngfx115x is RDNA base\nConvert one arch at a time\n(start with gfx90a — inherits gfx908)\nVerify output equivalence at each step\nParallelizable: compute,\nmemory, system, sets\n⚠️ 39 metrics need manual\nCase A/B classification\n⚠️ 43 metrics need canonical\nname selection\n───────────────────\nDepends on: Stages 1, 2\nResolves: FR2, FR2.2, FR3 (Layer 2), PS2\nDeveloper gains: formula fixes\npropagate in one edit; new arch\nadds only override files;\nsets reference metric ids"]
+        s4["4. Metric migration\n───────────────────\ngfx908 is CDNA base,\ngfx115x is RDNA base\nConvert one arch at a time\n(start with gfx90a — inherits gfx908)\nVerify output equivalence at each step\nParallelizable: compute,\nmemory, system, sets\n⚠️ 17 metric groups need manual\nCase A/B classification\n⚠️ 30 metric groups need canonical\nname selection\n───────────────────\nDepends on: Stages 1, 2\nResolves: FR2, FR2.2, FR3 (Layer 2), PS2\nDeveloper gains: formula fixes\npropagate in one edit; new arch\nadds only override files;\nsets reference metric ids"]
     end
 
     subgraph P2["Phase 2 — Display / View (Layer 3)"]

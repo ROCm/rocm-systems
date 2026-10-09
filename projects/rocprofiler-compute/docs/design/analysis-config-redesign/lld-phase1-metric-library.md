@@ -3,7 +3,10 @@
 Parent: [LLD index](lld-index.md)
 
 
-## Stage 1 -- Layer 1.5 collectables + Layer 2 schema + inheritance loader
+## Stage 1 -- Layer 2 schema + inheritance loader
+
+> Layer 1.5 collectables moved out of Phase A into a separate epic. The collectables
+> section below is kept as input to that epic.
 
 ### Layer 2 metric schema
 
@@ -21,9 +24,6 @@ definition file via dataclasses.
 | `description` | str | yes | Human-readable metric description |
 | `peak` | str (formula) | no | Performance ceiling expression. Required for speed-of-light metrics. |
 | `coll_level` | str | no | Accumulation level, e.g. `SQ_LEVEL_WAVES` |
-| `legacy_id` | str | no | Numeric positional ID for transition (see [Transition mechanism](lld-index.md#transition-mechanism-legacy_id)) |
-| `archs` | list[str] | no | If absent, inherited from file scope |
-| `implementations` | dict[str, str] | no | Per-family formula overrides (Case A metrics) |
 | `avg_mode` | str | no | Default `weighted` (`SUM(X)/SUM(Y)`). Set to `simple` for metrics that use `AVG()` instead. |
 
 **Aggregation is not a metric field.** The metric defines a single base formula
@@ -36,8 +36,20 @@ This eliminates the current duplication where ~98% of metrics repeat the same ba
 formula three times with different wrappers. The `simple_box` tables already prove
 this pattern works -- they auto-generate `MIN/Q1/MEDIAN/Q3/MAX` from a single `expr`.
 
-Percent-of-peak is not a schema field. It is computed automatically when a metric
-has a `peak` formula and `unit: Percent`.
+Percent-of-peak is not a schema field. In the target state it is computed automatically
+when a metric has a `peak` formula and `unit: Percent`. During the transition, the legacy
+mapping keeps today's explicit `pct_of_peak` per table row, so output does not change.
+
+A metric's numeric positional ID (`legacy_id`) is not a metric field either. The same
+metric appears in several tables, at a different position in each, so the positional IDs
+belong to the transition-only legacy mapping (see
+[Transition mechanism](lld-index.md#transition-mechanism-legacy_id)). One metric can
+appear in several tables of the mapping.
+
+A metric concept has one `id` on every architecture. Each family base (gfx908 for CDNA,
+gfx115x for RDNA, and gfx1250) defines the id with that family's formula, as the HLD's
+end-to-end example does for `mem.l2_hit_rate`. Within one architecture, every appearance
+of an id uses the same formula.
 
 ```yaml
 SALU Utilization:
@@ -45,7 +57,6 @@ SALU Utilization:
   name: "SALU Utilization"
   formula: "100 * SQ_ACTIVE_INST_SCA / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)"
   unit: Percent
-  legacy_id: "11.2.2"
   description: >-
     The percentage of time the SALU was busy executing instructions.
 
@@ -55,7 +66,6 @@ VALU FLOPs:
   formula: "64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + ...) / (End_Timestamp - Start_Timestamp)"
   unit: GFLOPs
   peak: "$max_sclk * $cu_per_gpu * 64 * 2 / 1000"
-  legacy_id: "11.1.0"
   description: >-
     The total number of vector ALU floating-point operations per second.
 ```
@@ -318,11 +328,9 @@ metric:
 **Cycle detection:** Maintain a set of resolved absolute paths during the recursive
 chain. If a path appears twice, raise `InheritanceCycleError` with the full chain.
 
-**Why env var for feature flag:** The transition flag (`ROCPROF_COMPUTE_LAYER2`)
-uses an environment variable rather than the project's `--experimental` argparse
-pattern because it is a temporary internal implementation switch (not a user feature)
-that must work in both profile and analyze code paths without threading through the
-argparse namespace.
+**No runtime switch in Phase A:** Production code does not switch between the old and
+new paths during Phase A -- no environment variable or hidden option. The Layer 2 path
+is exercised by tests only (Stage 3 validation) until the cutover.
 
 ### Tests
 
@@ -365,8 +373,10 @@ New module `src/utils/layer2_parser.py`.
        "gfx942": "gfx940",
        "gfx950": "gfx942",
        "gfx115x": None,        # RDNA base -- no parent
+       "gfx1250": None,        # own base -- shares no file with gfx115x
    }
    ```
+   gfx1150-gfx1153 map to the `gfx115x` directory through `canonical_config_arch()`.
 2. Load YAML files from `{metric_dir}/{arch}/`. Each file either stands alone (base
    arch) or begins with `!inherit` pointing to the parent arch's file.
 3. The `InheritLoader` (Stage 1) resolves the `!inherit` chain recursively and
@@ -376,10 +386,12 @@ New module `src/utils/layer2_parser.py`.
    keyed by string `id`. Raise on duplicate ids.
 6. Load `variables.yaml` from the base arch directory (walked via `ARCH_INHERITANCE`)
    into `MetricLibrary.variables: dict[str, VariableDefinition]`.
-7. Load `collectables.yaml` from the base arch directory into
-   `MetricLibrary.collectables: dict[str, CollectableDefinition]`.
-8. Load the sets file (`profile_configs/sets/{arch}_sets.yaml`) into
-   `MetricLibrary.sets: dict[str, SetDefinition]`.
+
+7. Load `sets.yaml` from the arch directory (inherited along `ARCH_INHERITANCE` like the
+   metric files) into `MetricLibrary.sets: dict[str, SetDefinition]`. Sets only reference
+   metric ids; see [Sets migration](#sets-migration).
+
+Collectables (Layer 1.5, separate epic) are not loaded in Phase A.
 
 `MetricLibrary` class:
 
@@ -387,7 +399,6 @@ New module `src/utils/layer2_parser.py`.
 class MetricLibrary:
     metrics: dict[str, MetricDefinition]
     variables: dict[str, VariableDefinition]
-    collectables: dict[str, CollectableDefinition]
     sets: dict[str, SetDefinition]
 
     def get_metric(self, id: str) -> MetricDefinition: ...
@@ -398,7 +409,7 @@ class MetricLibrary:
 
 `get_counters_for_metrics()` extracts HW counters from the requested metrics:
 
-1. **Pre-expand collectable references:** Replace `$collect.xxx` in formulas with the
+1. **Pre-expand collectable references** (once the collectables epic lands): Replace `$collect.xxx` in formulas with the
    collectable's own formula before passing to the regex extractor. This is necessary
    because `VARIABLE_RE` in `utils_counter_defs.py` stops at the dot -- `$collect.l2_hit_miss`
    would be parsed as variable `collect` + stray text `.l2_hit_miss`.
@@ -407,7 +418,10 @@ class MetricLibrary:
 3. **Include `coll_level` values** in the text passed to the extractor. The current
    `detect_counters()` scans raw YAML text which incidentally picks up
    `coll_level: SQ_LEVEL_WAVES` as a counter name. The MetricLibrary approach must
-   explicitly add `coll_level` values to maintain equivalence.
+   explicitly add `coll_level` values to maintain equivalence. The raw-text scan also
+   picks up counter names mentioned only in YAML comments or descriptions (on gfx115x
+   and gfx1250); the formula-based extraction does not, and the equivalence test lists
+   those names as known differences.
 4. **Delegate to `extract_counters_and_variables()`** in `utils_counter_defs.py` for
    regex-based HW counter extraction and transitive built-in variable resolution.
 
@@ -464,11 +478,14 @@ The output must match the exact dict shape that `_build_metric_table_df()` in
 }
 ```
 
-The adapter reconstructs this shape from `MetricLibrary` by:
+The adapter reconstructs this shape from `MetricLibrary` and the transition-only legacy
+mapping by:
 
-1. Grouping metrics by their `legacy_id` prefix. E.g., metrics with `legacy_id`
-   `"11.1.0"`, `"11.1.1"`, ... belong to panel 1100, table 1101. The `legacy_id`
-   field is the bridge between string ids and the numeric structure.
+1. Placing metrics into panels and tables from the legacy mapping. Each table row in
+   the mapping references a metric id and carries the row's `legacy_id` (e.g. `"11.1.0"`
+   is panel 1100, table 1101, row 0). The `legacy_id` is the bridge between string ids
+   and the numeric structure. A metric shown in several tables has one row per table,
+   and rows are ordered by `legacy_id`.
 2. Building the `header` dict from the table's column layout (determined by the
    view in the final design, or from a legacy mapping during transition).
 3. Building the `metric` OrderedDict with metric name as key and formula fields as
@@ -479,8 +496,8 @@ The adapter reconstructs this shape from `MetricLibrary` by:
    aggregation wrappers is a future optimization (the wrapping logic is more complex
    than a simple prefix/suffix -- it involves constant factoring, numerator/denominator
    decomposition, and handling of inner functions like NOISE_CLAMP).
-4. Computing percent-of-peak automatically for metrics with both `peak` and
-   `unit: Percent`.
+4. Taking `pct_of_peak` from the legacy mapping. Computing it automatically from `peak`
+   and `unit: Percent` is the target state, after the transition.
 5. Placing descriptions into `metrics_description`.
 
 `layer2_vars_to_builtin_vars(library: MetricLibrary) -> dict[str, str]`:
@@ -492,28 +509,33 @@ without changing its evaluation logic.
 
 ### Integration point
 
-`generate_configs()` in `analysis_base.py` is the single switching point. A feature
-flag (`ROCPROF_COMPUTE_LAYER2` environment variable) selects the path:
+In Phase A the adapter is not wired into production. `generate_configs()` in
+`analysis_base.py` keeps calling `load_panel_configs()`, and `detect_counters()` in
+`soc_base.py` keeps scanning the panel YAMLs. The equivalence tests call the Layer 2
+functions directly and compare them with the old path. The cutover replaces the
+`load_panel_configs()` call in one change:
 
 ```python
-# In generate_configs(), replacing line 176:
-if os.environ.get("ROCPROF_COMPUTE_LAYER2"):
-    library = load_metric_library(Path(config_dir), arch)
-    ac.panel_configs = layer2_to_panel_configs(library, arch)
-else:
-    ac.panel_configs = load_panel_configs(arch_panel_config)
+# In generate_configs(), at the cutover:
+library = load_metric_library(METRIC_LIBRARY_DIR, arch)
+ac.panel_configs = layer2_to_panel_configs(library, arch)
 ```
+
+The Layer 2 files live in a sibling tree, `src/rocprof_compute_soc/metric_library/`
+(`METRIC_LIBRARY_DIR`), not in `analysis_configs/{arch}/`. The old loader requires a
+`Panel Config` key in every `*.yaml` of an arch directory, so mixing the two formats there
+would break it. A user-supplied `--config-dir` keeps using the old loader.
 
 Everything downstream -- `build_dfs()`, `eval_metric()`, `show_all()` -- sees the
 same `ArchConfig` regardless of which path produced it.
 
 ```mermaid
 flowchart LR
-    subgraph old_path["Old path (default)"]
+    subgraph old_path["Production path (Phase A)"]
         LPC["load_panel_configs()"]
     end
 
-    subgraph new_path["New path (LAYER2=1)"]
+    subgraph new_path["Layer 2 path (tests in Phase A)"]
         LML["load_metric_library()"]
         ADAPT["layer2_to_panel_configs()"]
         LML --> ADAPT
@@ -529,18 +551,18 @@ flowchart LR
 
 ### Profile mode integration
 
-`detect_counters()` in `soc_base.py` -- add a feature-flagged branch:
+At the cutover, `detect_counters()` in `soc_base.py` takes its counters from the
+library. In Phase A the equivalence tests call the same code directly:
 
 ```python
-if os.environ.get("ROCPROF_COMPUTE_LAYER2"):
-    library = load_metric_library(Path(config_dir), arch)
-    if filter_blocks:
-        # Resolve filter tokens to metric ids
-        metric_ids = resolve_filter_to_metric_ids(filter_blocks, library)
-        counters = library.get_counters_for_metrics(metric_ids, gpu_series)
-    else:
-        all_ids = list(library.metrics.keys())
-        counters = library.get_counters_for_metrics(all_ids, gpu_series)
+library = load_metric_library(METRIC_LIBRARY_DIR, arch)
+if filter_blocks:
+    # Resolve filter tokens to metric ids
+    metric_ids = resolve_filter_to_metric_ids(filter_blocks, library)
+    counters = library.get_counters_for_metrics(metric_ids, gpu_series)
+else:
+    all_ids = list(library.metrics.keys())
+    counters = library.get_counters_for_metrics(all_ids, gpu_series)
 ```
 
 ### Validation
@@ -551,56 +573,62 @@ if os.environ.get("ROCPROF_COMPUTE_LAYER2"):
   set via both paths.
 - **End-to-end:** Full analyze pipeline (load -> build_dfs -> eval_metric -> show_all)
   with the Layer 2 path produces identical text output to the old path for a
-  reference workload.
+  reference workload. The test substitutes the Layer 2 path for `load_panel_configs()`
+  with pytest's `monkeypatch`, so production code needs no switch.
 
 ### Dependencies
 
 Stage 2.
 
 
-## Stage 4 -- Metric and set migration
+## Stage 4 -- Metric migration
 
-The largest stage. Parallelizable by hardware concept (compute, memory, system, sets)
-and by architecture. The deliverable is the actual Layer 2 YAML files and the migration
-of built-in variables and sets.
+The largest stage. Parallelizable by hardware concept (compute, memory, system) and by
+architecture. The deliverable is the actual Layer 2 YAML files and the migration of
+built-in variables and sets.
 
 ### New directory structure
 
 ```
-analysis_configs/
-  gfx908/              # CDNA base (first arch) -- complete standalone definitions
+metric_library/          # sibling of analysis_configs/ (see Stage 3)
+  gfx908/                # CDNA base (first arch) -- complete standalone definitions
     variables.yaml
-    collectables.yaml
+    sets.yaml
+    0000_top_stats.yaml
+    0100_system_info.yaml
     0200_system_speed_of_light.yaml
+    0300_memory_chart.yaml
     0400_roofline.yaml
-    0600_command_processor.yaml
+    0500_command_processor_cpc_cpf.yaml
+    0600_workgroup_manager_spi.yaml
     0700_wavefront.yaml
-    0800_shader_processor_input.yaml
-    1000_ta_td.yaml
+    1000_compute_units_instruction_mix.yaml
     1100_compute_units_compute_pipeline.yaml
     1200_local_data_share_lds.yaml
-    1400_l1_address_processing.yaml
-    1500_l1_data_cache.yaml
-    1600_l1_cache.yaml
+    1300_instruction_cache.yaml
+    1400_scalar_l1_data_cache.yaml
+    1500_address_processing_unit_and_data_return_path_ta_td.yaml
+    1600_vector_l1_data_cache.yaml
     1700_l2_cache.yaml
     1800_l2_cache_per_channel.yaml
-    1900_l2_fabric_interface.yaml
-    2100_fabric_stall.yaml
-    2200_fabric_stall_2.yaml
-  gfx90a/              # inherits gfx908, overrides only what differs
-  gfx940/              # inherits gfx90a
-  gfx941/              # inherits gfx940 (1 file diff)
-  gfx942/              # inherits gfx940
-  gfx950/              # inherits gfx942
-  gfx115x/             # RDNA base -- complete standalone definitions
+    2100_pc_sampling.yaml
+  gfx90a/                # inherits gfx908, overrides only what differs
+  gfx940/                # inherits gfx90a
+  gfx941/                # inherits gfx940 (2 files differ)
+  gfx942/                # inherits gfx940
+  gfx950/                # inherits gfx942, adds 3000_mem_bw.yaml
+  gfx115x/               # RDNA base -- complete standalone definitions
     variables.yaml
-    collectables.yaml
-    ... (RDNA panel files)
-  views/               # (Stage 7)
+    ... (13 RDNA panel files)
+  gfx1250/               # own base -- complete standalone definitions
+    variables.yaml
+    ... (19 panel files)
+  _legacy_layout/        # transition-only legacy mapping, one directory per arch
 ```
 
 No abstract `_base/` directories. The first architecture in each family (gfx908 for
-CDNA, gfx115x for RDNA) serves as the base -- its files are complete, standalone
+CDNA, gfx115x for RDNA, and gfx1250, which shares no file with gfx115x) serves as the
+base -- its files are complete, standalone
 definitions. Each subsequent arch inherits from its immediate predecessor in the
 hardware lineage, using additions, modifications, and removals (`!remove`) to
 express only what changed. This chain-based pattern applies to future families
@@ -614,10 +642,12 @@ express only what changed. This chain-based pattern applies to future families
 2. **gfx90a** -- inherits gfx908. Override files for metrics added or modified in MI200.
 3. **gfx940** -- inherits gfx90a. MI300 generation -- adds MFMA FLOPs variants,
    modifies formulas for new counter names.
-4. **gfx941** -- inherits gfx940. Differs in exactly 1 file (unit override). The
-   smallest possible override, ideal for validating the inheritance mechanism.
+4. **gfx941** -- inherits gfx940. Differs in 2 files (one unit override and three
+   roofline formulas). The smallest override, ideal for validating the inheritance
+   mechanism.
 5. **gfx942, gfx950** -- inherits gfx940/gfx942 respectively.
 6. **gfx115x** -- RDNA base. Separate standalone definitions, no inheritance from CDNA.
+7. **gfx1250** -- own base. Separate standalone definitions.
 
 Each step is validated: run the golden-file comparison (old path vs new path) for the
 migrated architecture before proceeding to the next.
@@ -631,78 +661,80 @@ word separation.
 |---|---|---|
 | `system` | Panel 0200 | `system.gpu_util`, `system.gpu_busy` |
 | `roofline` | Panel 0400 | `roofline.hbm_bw`, `roofline.l2_bw` |
-| `compute` | Panel 1100 | `compute.valu_flops`, `compute.salu_util`, `compute.ipc` |
+| `cp` | Panel 0500 | `cp.load_util`, `cp.stall` |
+| `spi` | Panel 0600 | `spi.shader_processor_util` |
 | `wavefront` | Panel 0700 | `wavefront.occupancy`, `wavefront.vgprs` |
+| `compute.inst_mix` | Panel 1000 | `compute.inst_mix_valu` |
+| `compute` | Panel 1100 | `compute.valu_flops`, `compute.salu_util`, `compute.ipc` |
 | `lds` | Panel 1200 | `lds.util`, `lds.bank_conflicts` |
-| `mem.l1i` | Panel 1600 | `mem.l1i_fetch_hit_rate` |
-| `mem.l1d` | Panel 1500 | `mem.l1d_cache_bw`, `mem.l1d_hit_rate` |
+| `mem.l1i` | Panel 1300 | `mem.l1i_hit_rate`, `mem.l1i_fetch_lat` |
+| `mem.sl1d` | Panel 1400 | `mem.sl1d_hit_rate` |
+| `ta` | Panel 1500 | `ta.global_insts` |
+| `mem.l1d` | Panel 1600 | `mem.l1d_cache_bw`, `mem.l1d_hit_rate` |
 | `mem.l2` | Panel 1700 | `mem.l2_hit_rate`, `mem.l2_cache_bw` |
-| `mem.fabric` | Panel 1900-2200 | `mem.fabric_rd_lat`, `mem.fabric_stall_rd` |
-| `cp` | Panel 0600 | `cp.load_util`, `cp.stall` |
-| `spi` | Panel 0800 | `spi.shader_processor_util` |
+| `mem.fabric` | Panel 1700 (L2-Fabric tables) | `mem.fabric_rd_lat`, `mem.fabric_stall_rd` |
+| `mem.l2_chan` | Panel 1800 | `mem.l2_chan_hit_rate` |
 
-The `legacy_id` field preserves the numeric mapping (e.g., `legacy_id: "11.2.2"`)
-for the compatibility adapter. It is removed in Stage 8.
+The numeric positional IDs (e.g. `"11.2.2"`) are kept in the legacy mapping for the
+compatibility adapter, one per table row. They are removed with the mapping in Stage 8.
 
-### OQ3 resolution -- 39 metrics with both description and formula drift
+### OQ3 resolution -- metrics with both description and formula drift
 
-These metrics cannot be automatically classified as Case A (same metric, different
-implementations) or Case B (separate metrics). Each requires manual review.
+The HLD analysis counted 39 such metrics by grouping on metric name alone. Grouping by
+(table title, metric name), so that generic names such as `Utilization` or `Req` do not
+merge unrelated metrics, gives 17 groups at `f8fac5575b`. Every one of them involves
+gfx115x or gfx1250.
 
-**Classification criteria:**
+**Resolution:** a metric concept has one `id` on every architecture, and each family base
+defines it with that family's formula (see Stage 1). The comparison criteria below are
+still useful for review: where a family's formula measures something noticeably
+different (for example, gfx115x `VALU FLOPs` counts lane-ops), the id stays shared and
+the difference is tracked as a formula issue, not as a separate id.
 
-- **Case A** -- the metric measures the same hardware concept across architectures,
-  but uses different counters or formulas because the hardware implementation changed.
-  The semantic intent is identical. Test: a domain expert would compare these values
-  across architectures in a baseline comparison and the comparison would be meaningful.
+**Within one architecture**, every appearance of an id uses the same formula. Where
+today's YAMLs differ between tables:
 
-- **Case B** -- the formula change reflects a fundamentally different measurement,
-  not just a hardware implementation difference. Test: comparing these values across
-  architectures would be misleading or meaningless.
+- **A different quantity under the same name** (e.g. `Wavefront Occupancy` as a count in
+  table 201 and as a percent in 301) gets separate ids.
+- **The same quantity at a different unit scale** (e.g. `L2-Fabric Read BW` in GB/s vs
+  Bytes/s) keeps one id. The scaled form stays in the legacy mapping until Phase 2.
+- **The same quantity with a different formula** (e.g. the gfx1250 cache hit rates,
+  HITS/REQ vs HITS/(HITS+MISSES)) is unified to one formula in both the old and the new
+  files. Each case is approved individually and listed in the CHANGELOG, because it
+  changes displayed values.
 
-**Decision workflow:**
+### OQ4 resolution -- same description under different names
 
-1. For each of the 39 metrics, produce a side-by-side table:
-
-   | Metric | Arch | Formula | Description |
-   |---|---|---|---|
-   | `VALU FLOPs` | gfx908 | `64 * SUM(SQ_INSTS_VALU_*) / ...` | *"Vector ALU ..."* |
-   | `VALU FLOPs` | gfx942 | `64 * SUM(SQ_INSTS_VALU_*) / ...` | *"Vector ALU ..."* |
-   | `VALU FLOPs` | gfx115x | `64 * SUM(SQ_INSTS_VALU_*) / ...` | *"Vector ALU ..."* |
-
-2. A domain expert marks each as A or B.
-3. **Case A:** one `id` (e.g., `compute.valu_flops`), with per-family formula overrides
-   in the `implementations:` block. The description is the canonical (most complete) one.
-4. **Case B:** separate `id`s (e.g., `compute.valu_flops_cdna`, `compute.valu_flops_rdna`).
-
-The 39 metrics are listed in
-[`hld-metric-analysis-2026-07-13.md`, Step 2](hld-metric-analysis-2026-07-13.md).
-Examples: `VALU FLOPs`, `MFMA FLOPs (BF16)`, `MFMA FLOPs (F16)`.
-
-### OQ4 resolution -- 43 same-description-different-name cases
-
-These are metrics where the same description appears under multiple display names
-across architectures.
+The HLD analysis counted 43 groups. Recounted at `f8fac5575b` with the grouping above, 30
+descriptions are shared by more than one name.
 
 **Resolution criteria:**
 
 1. Select the **most specific, unambiguous name** as the canonical `name` in Layer 2.
    Prefer names that self-document the metric's scope without being excessively verbose.
-2. All other names become view-level `label` overrides in Layer 3.
+2. All other names become view-level `label` overrides in Layer 3. Until then they are
+   per-row labels in the legacy mapping.
 
 | Description group | Current names | Canonical `name` |
 |---|---|---|
-| L2 cache hit ratio | `Cache Hit`, `Hit Rate`, `L2 Cache Hit Rate`, `L2 Hit` | `L2 Cache Hit Rate` |
-| Read latency | `Fabric Rd Lat`, `L2-Fabric Read Latency`, `Read Latency` | `L2-Fabric Read Latency` |
+| L2 cache hit ratio | `Cache Hit`, `Hit Rate`, `L2 Cache Hit Rate` | `L2 Cache Hit Rate` |
+| Read latency | `L2-Fabric Read Latency`, `Read Latency` | `L2-Fabric Read Latency` |
 | INT8 MFMA ops | `MFMA IOPs (INT8)`, `MFMA IOPs (Int8)` | `MFMA IOPs (INT8)` |
 
-The full list of 43 groups is in
-[`hld-metric-analysis-2026-07-13.md`, Step 3](hld-metric-analysis-2026-07-13.md).
+Two groups share a description only because of documentation errors: `L1I Hit Rate` and
+`L1I BW` have swapped descriptions on gfx908-gfx942, and `Dependency Wait Cycles` reuses
+the `Wave Cycles` description. These keep separate ids.
 
 ### Sets migration
 
-Convert `profile_configs/sets/{arch}_sets.yaml` from numeric positional IDs to string
-metric IDs:
+A set is a Layer 2 concept: its membership is constrained by hardware (the counters of
+its metrics must fit in a single pass), which is checked against the metric formulas.
+How a set's results are displayed is a Layer 3 concern (see
+[Set display](lld-phase2-display-view.md#set-display)).
+
+Sets move from `profile_configs/sets/{arch}_sets.yaml` to
+`metric_library/{arch}/sets.yaml` and switch from numeric positional IDs to string metric
+IDs:
 
 ```yaml
 # Before
@@ -720,26 +752,28 @@ sets:
   set_option: compute_thruput_util
   description: Placeholder
   metric:
-  - compute.salu_util: SALU Utilization
-  - compute.valu_util: VALU Utilization
+  - compute.salu_util
+  - compute.valu_util
 ```
 
-During transition, `parse_sets_yaml()` in `utils_common.py` accepts both numeric
-and string IDs. The validation pre-commit hook (`validate_sets_metric_ids.py`) resolves
-string IDs via `MetricLibrary` instead of positional index lookup.
+- **References only.** A set entry references a metric id and carries no metric fields,
+  so a metric is still defined exactly once per architecture. Every referenced id must
+  exist on that architecture.
+- **Inheritance.** `sets.yaml` follows the same `!inherit` chain as the metric files; for
+  example, gfx941 and gfx942 use gfx940's sets unchanged.
+- **Single-pass check.** Validation uses `get_counters_for_metrics()` to confirm that each
+  set's counters fit in one pass.
+- **Transition.** Production `--set` and `--list-sets` keep reading
+  `profile_configs/sets/` until the cutover. The equivalence tests prove that each
+  string-ID set yields the same counters as the numeric set it replaces.
 
 ### Built-in variable migration
 
-`get_build_in_vars()` in `utils_counter_defs.py` becomes a wrapper:
-
-```python
-def get_build_in_vars(gpu_series: str) -> dict[str, str]:
-    if os.environ.get("ROCPROF_COMPUTE_LAYER2"):
-        # Load from MetricLibrary (populated from base arch variables.yaml)
-        return _load_vars_from_layer2(gpu_series)
-    # Fall back to hardcoded dict (existing behavior)
-    ...
-```
+The built-in variables move into each base arch's `variables.yaml`. In Phase A,
+`get_build_in_vars()` in `utils_counter_defs.py` keeps its hardcoded dicts, and a test
+asserts that `layer2_vars_to_builtin_vars()` returns the same dict for every GPU series.
+At the cutover, `get_build_in_vars()` loads from `MetricLibrary.variables` and the
+hardcoded dicts are removed.
 
 The evaluation pipeline (`calc_builtin_vars()` in `evaluation_pipeline.py`) is
 unchanged -- it receives the same `dict[str, str]` regardless of source.
@@ -748,11 +782,11 @@ unchanged -- it receives the same `dict[str, str]` regardless of source.
 
 | Tool | What changes |
 |---|---|
-| `validate_sets_metric_ids.py` | Accept string metric IDs. Validate against `MetricLibrary` when Layer 2 active, positional index when not. |
+| `validate_sets_metric_ids.py` | Validate `metric_library/{arch}/sets.yaml`: references resolve through `MetricLibrary`, and each set fits one pass. The numeric files keep their positional check until the cutover. |
 | `format_yaml.py` | Recognize Layer 2 YAML structure (metric list with `id`, `name`, aggregation fields). Core equation formatting logic (factoring constants out of aggregation) is unchanged -- same equation keys (`value`, `avg`, `min`, `max`, `peak`). |
 | `hash_manager.py` | Include base arch directories in hash database. Path discovery expands to cover `gfx908/*.yaml` and `gfx115x/*.yaml` as base arch files. |
 | `verify_against_config_template.py` | Validate Layer 2 files against `layer2_schema.py` instead of the Panel Config template. During transition, both templates checked depending on file location. |
-| `metric_description_manager.py` | Read descriptions from Layer 2 definitions (co-located with `id`). Output format for docs YAMLs is unchanged. |
+| `metric_description_manager.py` | No change in Phase A: the old panel YAMLs stay the documentation source until the cutover (Stage 8), when it reads descriptions from Layer 2. Output format for docs YAMLs is unchanged. |
 
 ### Migration tooling
 
@@ -760,8 +794,10 @@ One-time script `tools/migrate_to_layer2.py`:
 
 1. Read each current panel config YAML for a given architecture.
 2. For each metric: generate the Layer 2 format with string `id`, canonical `name`,
-   `unit`, aggregation fields, `description`, and `legacy_id`.
-3. Flag metrics in the OQ3/OQ4 lists for manual review.
+   formula, `unit` and `description`, plus the legacy mapping rows (`legacy_id`,
+   display name, aggregation fields).
+3. Report every metric whose formula differs between tables of the same architecture,
+   for the review described under OQ3.
 4. Generate the family base files and arch override files.
 5. Validate round-trip: run `layer2_to_panel_configs()` on the generated files and
    compare output to the original `load_panel_configs()` result.
@@ -773,7 +809,6 @@ One-time script `tools/migrate_to_layer2.py`:
   the hardcoded `get_build_in_vars()`.
 - Counter extraction equivalence: `detect_counters()` via Layer 2 path returns the
   same counter set.
-- Pre-commit hook: `validate_sets_metric_ids.py` passes with new sets format.
 
 ### Dependencies
 
