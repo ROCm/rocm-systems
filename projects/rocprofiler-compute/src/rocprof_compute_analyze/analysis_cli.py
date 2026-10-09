@@ -109,16 +109,6 @@ def _assign_kernel_ids_from_top(
     return kernel_ids
 
 
-def _warn_ml_api_trace_errors(workload: schema.Workload) -> None:
-    """Print accumulated ML API trace errors after the call tree."""
-    errors = workload.ml_api_trace_errors
-    if not errors:
-        return
-    console_warning("analysis", f"{len(errors)} ML API trace error(s):")
-    for exc in errors:
-        console_warning("analysis", str(exc))
-
-
 class cli_analysis(OmniAnalyze_Base):
     # -----------------------
     # Required child methods
@@ -190,7 +180,6 @@ class cli_analysis(OmniAnalyze_Base):
                     self.list_operators(
                         path_info[0], kernel_top_df, active_operator_lists
                     )
-                    _warn_ml_api_trace_errors(workload)
                     continue
                 if active_operator_filters:
                     self.apply_operator_filter(
@@ -320,8 +309,6 @@ class cli_analysis(OmniAnalyze_Base):
                 self._profiling_config,
                 roof_plot=roof_plot,
             )
-        for path_info in args.path:
-            _warn_ml_api_trace_errors(self._runs[path_info[0]])
 
     def list_operators(
         self,
