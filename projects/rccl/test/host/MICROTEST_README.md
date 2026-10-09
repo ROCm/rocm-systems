@@ -249,10 +249,20 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `ENABLE_WARP_SPEED` is deliberately absent: all eleven files are free of it.
   See `test_categories_micro_taskprep.yaml`.
 - **`rccl-UnitTestsMicroGinHost`** — `gin/gin_host.cc` (`GIN_HOST_CC_PATH`, from
-  `gin-host-test.cc`); suite `GinHostTest.*`. NVIDIA/nccl#2279
-  `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment. Its own binary, not
+  `gin-host-test.cc`); suites `GinHost*` (one per entry point, listed in the
+  test file's header comment). Covers every function in the file: type
+  negotiation, signal-requirement validation, `ncclGinConnectOnce` (including
+  NVIDIA/nccl#2279 `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment and the
+  strided team a rail-only comm connects), devComm setup (per-backend version
+  tables, stride validation, failure cleanup) and free, finalize, window
+  registration, and last-error queries, plus the proxy-thread CPU affinity pin.
+  A scripted `ncclGin_t` in the test file stands in for the plugin, so every
+  failure arm is reachable by failing a chosen call. Its own binary, not
   sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
+  Every line and every source-level branch in `gin_host.cc` is covered; what
+  `llvm-cov` still reports as missed branches is inside `NCCLCHECK`/`WARN`
+  macro expansions at call sites whose failure arm no test drives.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the

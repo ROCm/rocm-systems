@@ -1,11 +1,11 @@
 # rccl-UnitTestsMicroGinHost — shared/ctest schema.
-# Host-only micro-tests for src/gin/gin_host.cc -- GIN_PROXY_NTHREADS and proxy-thread
-# CPU affinity (no GPU, no librccl).
+# Host-only micro-tests for src/gin/gin_host.cc -- every entry point in the file,
+# including GIN_PROXY_NTHREADS and proxy-thread CPU affinity (no GPU, no librccl).
 # RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
 
 test_categories:
   quick: &micro_gin_host_quick
-    description: "Smoke — host-only src/gin/gin_host.cc GIN_PROXY_NTHREADS and proxy-affinity micro-tests, sub-second."
+    description: "Smoke — host-only src/gin/gin_host.cc micro-tests (all entry points), sub-second."
     test_patterns:
       - "GinHost*"
     exclude_windows:
