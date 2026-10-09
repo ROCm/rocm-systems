@@ -5409,6 +5409,22 @@ constexpr int kCeRsRegisteredArmRanks = 4;
 constexpr size_t kCeRsPastCapRecvcount =
   kCeRsTwoShotCapBytes / (sizeof(float) * (size_t)kCeRsRegisteredArmRanks) + 1;
 
+// The host arch lookup returns nullptr, which disables the registered CE size
+// window. These tests explicitly enable that window while keeping symmetric
+// selection uncapped, so they reach the late CE arm they intend to exercise.
+ncclComm* MakeCeRsRegisteredComm() {
+  static const rcclArchThresholds thresholds = [] {
+    rcclArchThresholds table{};
+    table.ceRegMax[ncclFuncReduceScatter] = kThreshUnlimited;
+    table.symMaxR2[ncclFuncReduceScatter] = kThreshUnlimited;
+    return table;
+  }();
+  ncclComm* comm = MakeSelectComm();
+  comm->nRanks = kCeRsRegisteredArmRanks;
+  comm->archThresholds = &thresholds;
+  return comm;
+}
+
 // Capped, force off: the registered arm's `CTAPolicy & NCCL_CTA_POLICY_ZERO` disjunct.
 int64_t RegisteredArmCeReduceScatterParams(const char* env, int64_t deft) {
   if (std::strcmp(env, "RCCL_CE_AR_MAX_MSG_BYTES") == 0) return (int64_t)kCeRsTwoShotCapBytes;
@@ -5680,8 +5696,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredChosenWhenAvailableA
           EXPECT_EQ(kCeRsPastCapRecvcount, chunkElems);
           return 31;
         });
-        ncclComm* comm = MakeSelectComm();
-        comm->nRanks = kCeRsRegisteredArmRanks;
+        ncclComm* comm = MakeCeRsRegisteredComm();
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
@@ -5690,6 +5705,35 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredChosenWhenAvailableA
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
         EXPECT_EQ(31, decision.nMaxChannels);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The late arm must still obey its own table cap after 2-shot has declined.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredHonorsSizeWindow) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeRegisteredHonorsSizeWindow",
+      []() {
+        g_loadParam = RegisteredArmCeReduceScatterParams;
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeCeRsRegisteredComm();
+        rcclArchThresholds thresholds = *comm->archThresholds;
+        comm->archThresholds = &thresholds;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        const size_t totalBytes = kCeRsPastCapRecvcount * sizeof(float) * comm->nRanks;
+        for (size_t cap : {size_t(0), totalBytes - 1, totalBytes, kThreshUnlimited}) {
+          SCOPED_TRACE("cap=" + std::to_string(cap));
+          thresholds.ceRegMax[ncclFuncReduceScatter] = cap;
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, kCeRsPastCapRecvcount,
+                                                         ncclFloat32, ncclSum, /*query=*/false, &decision));
+          EXPECT_EQ(cap >= totalBytes ? (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED : NCCL_ALGO_RING,
+                    decision.algo);
+        }
         DeleteCommWithArch(comm);
       });
 }
@@ -5705,8 +5749,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_ForcedCeRegisteredBypassesCtaPol
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
-        ncclComm* comm = MakeSelectComm();
-        comm->nRanks = kCeRsRegisteredArmRanks;
+        ncclComm* comm = MakeCeRsRegisteredComm();
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
         rcclCollDecision decision{};
@@ -5755,8 +5798,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredChosenWithNonSumOps)
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         for (ncclRedOp_t op : {ncclProd, ncclMin, ncclMax}) {
           SCOPED_TRACE("op=" + std::to_string((int)op));
-          ncclComm* comm = MakeSelectComm();
-          comm->nRanks = kCeRsRegisteredArmRanks;
+          ncclComm* comm = MakeCeRsRegisteredComm();
           comm->symmetricSupport = 1;
           comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
           rcclCollDecision decision{};
@@ -5933,8 +5975,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredPreemptsSymmetri
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
-        ncclComm* comm = MakeSelectComm();
-        comm->nRanks = kCeRsRegisteredArmRanks;
+        ncclComm* comm = MakeCeRsRegisteredComm();
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
