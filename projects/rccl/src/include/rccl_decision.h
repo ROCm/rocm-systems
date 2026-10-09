@@ -80,15 +80,23 @@ struct rcclCandSearch {
 
 // Record one eligible candidate into the search state.  Called in priority
 // order; stops updating once both slots are filled.
+// inWindow: true when the candidate is within its tuning size window.
+//   - bestFallback is only set when inWindow=true (fallback must be a good default).
+//   - bestPreferred is set when the candidate matches the preferred mask AND either
+//     (a) preferred is explicit (not ALL, so a deliberate policy choice), or
+//     (b) the candidate is in its tuning window.
+//   Existing callers omit inWindow and get true by default (no behaviour change).
 static inline void rcclCandSearchRecord(rcclCandSearch& s,
                                         rcclBackendMask_t family,
-                                        const rcclCollDecision& cand) {
-  if (!s.bestFallbackFound) {
+                                        const rcclCollDecision& cand,
+                                        bool inWindow = true) {
+  if (inWindow && !s.bestFallbackFound) {
     s.bestFallback      = cand;
     s.bestFallbackFound = true;
   }
-  if (!s.bestPreferredFound &&
-      (s.preferred == RCCL_BACKEND_ALL || (s.preferred & family))) {
+  const bool qualifiesAsPreferred = (s.preferred & family) &&
+                                    (s.preferred != RCCL_BACKEND_ALL || inWindow);
+  if (!s.bestPreferredFound && qualifiesAsPreferred) {
     *s.decision          = cand;
     s.bestPreferredFound = true;
   }

@@ -1503,12 +1503,12 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
         const size_t arDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncAllReduce);
         const size_t arDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncAllReduce);
         // Small-message fast lane: LL protocol (no GPU barrier).
-        if (msgBytes <= arDdaLLMax &&
+        if (
             ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
           rcclCollDecision cand = *decision;
           cand.algo = RCCL_DDA_FABRIC_LL; cand.protocol = NCCL_PROTO_LL;
           cand.nMaxChannels = ncclAllReduceDdaFabricLLBlocks(comm, count, datatype);
-          rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand);
+          rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand, msgBytes <= arDdaLLMax);
         }
         // Mid-size fast lane: LL128 protocol (128B lines, no GPU barrier).
         if (!cs.bestPreferredFound && arDdaLL128Max > 0 && msgBytes <= arDdaLL128Max &&
@@ -1553,12 +1553,12 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // Independent of the 2-shot selector (ceNonRegMax/env, 0 = off) and ceARTmpBuf sizing.
   const size_t ceArRegMax = rcclCeRegMaxTab(archTable, ncclFuncAllReduce);
   const bool ceRegInWindow = ceArRegMax == kThreshUnlimited || msgBytes <= ceArRegMax;
-  if (!cs.bestPreferredFound && !symEligible && ceRegInWindow && ceAvailable && !hasSysmemSegment &&
+  if (!cs.bestPreferredFound && !symEligible && ceAvailable && !hasSysmemSegment &&
       ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
     rcclCollDecision cand = *decision;
     cand.algo = RCCL_CE_REGISTERED;
     cand.nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
-    rcclCandSearchRecord(cs, RCCL_BACKEND_CE, cand);
+    rcclCandSearchRecord(cs, RCCL_BACKEND_CE, cand, ceRegInWindow);
   }
   if (!query && !symEligible) INFO(NCCL_TUNING,
        "AR CE-registered disqualified: ceAvailable=%d(graphAllowed=%d bufOk=%d opOk=%d countDiv=%d archEnabled=%d)"
