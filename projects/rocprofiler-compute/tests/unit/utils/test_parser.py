@@ -1328,3 +1328,28 @@ class TestCorrectSysInfo:
 
         assert "not_a_spec" in str(error_calls[0])
         assert "--specs" in str(error_calls[0])
+
+
+@pytest.mark.misc
+def test_reconcile_sysinfo_l2_channels_cpx_die():
+    """Inflated SPX sysinfo with per-die SE → CPX / 16 L2 channels."""
+    import pandas as pd
+
+    from utils.parser import reconcile_sysinfo_l2_channels
+
+    df = pd.DataFrame([
+        {
+            "gpu_arch": "gfx942",
+            "gpu_model": "MI300X_A1",
+            "cu_per_gpu": 38,
+            "se_per_gpu": 4,
+            "num_xcd": 8,
+            "l2_banks": 16,
+            "total_l2_chan": 128,
+            "compute_partition": "SPX",
+        }
+    ])
+    out = reconcile_sysinfo_l2_channels(df)
+    assert int(out.iloc[0]["num_xcd"]) == 1
+    assert out.iloc[0]["compute_partition"] == "CPX"
+    assert int(out.iloc[0]["total_l2_chan"]) == 16
