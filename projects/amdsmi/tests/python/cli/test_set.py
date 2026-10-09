@@ -25,25 +25,17 @@ class TestSet(TestCliBase):
         msg = f"{self.tab}### amd-smi set"
         self.common.print(msg)
 
-        # Get current settings
-        power_profile = {}
-        for index, gpu in enumerate(self.common.processors):
-            try:
-                power_profile[index] = amdsmi.amdsmi_get_gpu_power_profile_presets(gpu, 0)
-            except amdsmi.AmdSmiLibraryException:
-                power_profile[index] = None
-
         cmds = self.CreateCmds(
             "set", "Set Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
         # Registered before the sweep: RunCmds raises on the first failure, and a
         # sweep that aborts partway is exactly when the GPU is left mid-change.
-        self.addCleanup(self._restore_starting_values, power_profile)
+        self.addCleanup(self._restore_starting_values)
         self.RunCmds(cmds)
 
         return
 
-    def _restore_starting_values(self, power_profile):
+    def _restore_starting_values(self):
         """Put the values the sweep changed back to what setUpClass recorded."""
         cmds = []
         for index, gpu in enumerate(self.common.processors):
@@ -73,9 +65,12 @@ class TestSet(TestCliBase):
                 )
 
             # set --profile defaults
-            if power_profile[index]:
-                profile = _strip_prefix(power_profile[index]["current"], "AMDSMI_PWR_PROF_PRST_")
-                cmds.append((f"amd-smi set --profile {profile} --gpu {index}", self.PASS))
+            # static names the active profile, or UNKNOWN when its mask maps to none.
+            profile = self.static_data["gpu_data"][index].get("profile")
+            if isinstance(profile, dict) and profile["current"] in self.profile_levels:
+                cmds.append(
+                    (f"amd-smi set --profile {profile['current']} --gpu {index}", self.PASS)
+                )
 
             # set --perf-determinism defaults
             clock_sys = self.static_data["gpu_data"][index]["clock"]["sys"]
