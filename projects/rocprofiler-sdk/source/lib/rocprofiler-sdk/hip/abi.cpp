@@ -713,7 +713,6 @@ ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLibraryGetModule_fn, 546);
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipDeviceGetExecAffinitySupport_fn, 547);
 #endif
 
-
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION == 0
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 442)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 1
