@@ -102,6 +102,8 @@ struct RankRun {
   size_t bytes = 0;
   size_t batchCopies = 0;
   size_t copyStreamCopies = 0;
+  size_t copyCalls = 0;
+  int syncCalls = 0;
   // Barriers already issued when the copy to each destination slot was enqueued; 0 for a slot with nothing to send.
   std::vector<uint32_t> slotEpochs;
 };
@@ -117,10 +119,13 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
       GTEST_SKIP() << "hip_runtime_api.h has no hipMemcpyBatchAsync, so ce_coll.cc builds without the batch path";
     }
 #endif
-    g_hipStreamBatchMemOp = [](hipStream_t, unsigned int, hipStreamBatchMemOpParams*, unsigned int) {
-      return hipSuccess;
+    g_hipStreamBatchMemOp = [this](hipStream_t, unsigned int, hipStreamBatchMemOpParams*, unsigned int) {
+      return ++current_.syncCalls == failSyncCall_ ? hipErrorInvalidValue : hipSuccess;
     };
     g_hipMemcpyAsync = [this](void* dst, const void*, size_t bytes, hipMemcpyKind, hipStream_t stream) {
+      if (++current_.copyCalls == failCopyCall_) {
+        return hipErrorInvalidValue;
+      }
       RecordCopy(dst, bytes);
       const uintptr_t s = reinterpret_cast<uintptr_t>(stream);
       if (s >= kCopyStreamBase && s < kCopyStreamBase + RCCL_CE_NUM_COPY_STREAMS) {
@@ -131,6 +136,9 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
 #ifdef CE_BATCH_ASYNC_SUPPORTED
     g_hipMemcpyBatchAsync = [this](void** dsts, void**, size_t* sizes, size_t count, hipMemcpyAttributes*,
                                    size_t*, size_t, size_t*, hipStream_t) {
+      if (++current_.copyCalls == failCopyCall_) {
+        return hipErrorInvalidValue;
+      }
       for (size_t i = 0; i < count; ++i) {
         RecordCopy(dsts[i], sizes[i]);
       }
@@ -180,7 +188,7 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
   }
 
   // Runs ncclCeAlltoAllv once per simulated rank; every rank sees the same gathered size matrix, as in production.
-  std::vector<RankRun> Run(const SizeMatrix& send, uint32_t freq) {
+  std::vector<RankRun> Run(const SizeMatrix& send, uint32_t freq, ncclResult_t expected = ncclSuccess) {
     const int nRanks = static_cast<int>(send.size());
     std::vector<size_t> gathered = GatherSizes(send);
     std::vector<int> lsaRankList(nRanks);
@@ -228,7 +236,7 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
       current_ = RankRun{};
       current_.slotEpochs.assign(nRanks, 0);
       activeComm_ = comm.get();
-      EXPECT_EQ(ncclCeAlltoAllv(comm.get(), &args, stream), ncclSuccess) << "rank " << rank;
+      EXPECT_EQ(ncclCeAlltoAllv(comm.get(), &args, stream), expected) << "rank " << rank;
       activeComm_ = nullptr;
       current_.barriers = comm->ceColl.ceSeqNum;
       runs.push_back(current_);
@@ -304,8 +312,13 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
     EXPECT_EQ(Barriers(runs), std::vector<uint32_t>(nRanks, expected));
   }
 
+  // hipStreamBatchMemOp calls per barrier: the wait batch, plus the flag write and the reset batch under graph capture.
+  int SyncCallsPerBarrier() const { return GetParam() == LaunchPath::kGraphCapture ? 3 : 1; }
+
   RankRun current_;
   ncclComm* activeComm_ = nullptr;
+  size_t failCopyCall_ = 0;  // 1-based copy API call on each rank that fails; 0 never fails
+  int failSyncCall_ = 0;     // 1-based hipStreamBatchMemOp call on each rank that fails; 0 never fails
 };
 
 TEST_P(CeAlltoAllvSyncMicrotest, Sparse16Ranks_EqualTotalsAt512MiB_EveryRankIssuesSameBarrierCount) {
@@ -406,6 +419,56 @@ TEST_P(CeAlltoAllvSyncMicrotest, SixteenRanks_EachSendsToExactlyFreqPeers_OnlyRe
   EXPECT_EQ(Barriers(runs), std::vector<uint32_t>(kNRanks, 2));
   ExpectRowsCopied(send, runs, kNRanks);
   ExpectLaunchPathTaken(runs);
+}
+
+TEST_P(CeAlltoAllvSyncMicrotest, SeventeenRanksFreq8_EvenRoundsPartialLastRound_EveryRankIssuesSameBarrierCount) {
+  const int kNRanks = 17;
+  const uint32_t kFreq = CE_COLL_INTRA_BATCH_SYNC_FREQ;
+  const SizeMatrix send = EqualTotalsMatrix(CyclingPeerCounts(kNRanks, 9, 9), CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD);
+
+  const std::vector<RankRun> runs = Run(send, kFreq);
+
+  ExpectRoundSyncBarriers(runs, kNRanks, kFreq);
+  ExpectRowsCopied(send, runs, kFreq);
+  ExpectLaunchPathTaken(runs);
+}
+
+TEST_P(CeAlltoAllvSyncMicrotest, OneRankSendsNothing_OthersCrossBothGates_SilentRankIssuesSameBarrierCount) {
+  const int kNRanks = 16;
+  const int kSilentRank = 5;
+  const uint32_t kFreq = CE_COLL_INTRA_BATCH_SYNC_FREQ;
+  SizeMatrix send = EqualTotalsMatrix(CyclingPeerCounts(kNRanks, 9, 5), CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD);
+  send[kSilentRank].assign(kNRanks, 0);
+
+  const std::vector<RankRun> runs = Run(send, kFreq);
+
+  ExpectRoundSyncBarriers(runs, kNRanks, kFreq);
+  ExpectRowsCopied(send, runs, kFreq);
+  ExpectLaunchPathTaken(runs);
+}
+
+TEST_P(CeAlltoAllvSyncMicrotest, FirstRoundCopyFails_ReturnsTheErrorBeforeTheRoundBarrier) {
+  const int kNRanks = 16;
+  const SizeMatrix send = EqualTotalsMatrix(CyclingPeerCounts(kNRanks, 9, 5), CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD);
+  failCopyCall_ = 1;
+
+  const std::vector<RankRun> runs = Run(send, CE_COLL_INTRA_BATCH_SYNC_FREQ, ncclUnhandledCudaError);
+
+  EXPECT_EQ(Barriers(runs), std::vector<uint32_t>(kNRanks, 1));
+}
+
+TEST_P(CeAlltoAllvSyncMicrotest, FirstRoundBarrierFails_ReturnsTheErrorWithoutLaunchingTheNextRound) {
+  const int kNRanks = 16;
+  const uint32_t kFreq = CE_COLL_INTRA_BATCH_SYNC_FREQ;
+  const SizeMatrix send = EqualTotalsMatrix(CyclingPeerCounts(kNRanks, 9, 5), CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD);
+  failSyncCall_ = SyncCallsPerBarrier() + 1;
+
+  const std::vector<RankRun> runs = Run(send, kFreq, ncclUnhandledCudaError);
+
+  EXPECT_EQ(Barriers(runs), std::vector<uint32_t>(kNRanks, 2));
+  for (int rank = 0; rank < kNRanks; ++rank) {
+    EXPECT_EQ(runs[rank].copies, kFreq) << "rank " << rank;
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(LaunchPaths, CeAlltoAllvSyncMicrotest,
