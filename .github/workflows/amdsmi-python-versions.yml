@@ -43,26 +43,30 @@ concurrency:
 jobs:
   python-version-tests:
     name: Python ${{matrix.python-version}}
-    runs-on: ubuntu-22.04
+    # Self-hosted runner: never auto-run untrusted fork-PR code on it.
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
     timeout-minutes: 15
-    # 3.6/3.7 run inside official python images because actions/setup-python no
-    # longer provides those EOL interpreters on a supported hosted runner. The
-    # checkout happens on the host and the image only runs the tests, so nothing
-    # is installed from the (EOL, archived) Debian mirrors. Newer minors run
-    # natively via setup-python. Empty matrix.container = host interpreter.
+    # Job container: other lstt-ci jobs leave root-owned files a host-side
+    # checkout can't clean. Official python images, mirrored to the runners'
+    # local registry; the full variants ship git for actions/checkout.
+    container:
+      image: localhost:5000/python:${{matrix.python-version}}-${{matrix.debian}}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { python-version: '3.6',  container: 'python:3.6-slim-bullseye' }
-          - { python-version: '3.7',  container: 'python:3.7-slim-bullseye' }
-          - { python-version: '3.8',  container: '' }
-          - { python-version: '3.9',  container: '' }
-          - { python-version: '3.10', container: '' }
-          - { python-version: '3.11', container: '' }
-          - { python-version: '3.12', container: '' }
-          - { python-version: '3.13', container: '' }
-          - { python-version: '3.14', container: '' }
+          - { python-version: '3.6',  debian: bullseye }
+          - { python-version: '3.7',  debian: bullseye }
+          - { python-version: '3.8',  debian: bookworm }
+          - { python-version: '3.9',  debian: bookworm }
+          - { python-version: '3.10', debian: bookworm }
+          - { python-version: '3.11', debian: bookworm }
+          - { python-version: '3.12', debian: bookworm }
+          - { python-version: '3.13', debian: bookworm }
+          - { python-version: '3.14', debian: bookworm }
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -72,22 +76,7 @@ jobs:
             projects/amdsmi
             .github/workflows
 
-      - name: Set up Python ${{matrix.python-version}}
-        # Container legs already ship the exact interpreter; only host runners
-        # need setup-python.
-        if: matrix.container == ''
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: ${{matrix.python-version}}
-
       - name: Run loader tests under this interpreter
-        if: matrix.container == ''
         run: |
-          python3 projects/amdsmi/tests/run_amdsmi_python_versions_test.py \
-            --interpreters "$(command -v python3)"
-
-      - name: Run loader tests under this interpreter (container)
-        if: matrix.container != ''
-        run: |
-          docker run --rm -v "$PWD:/src" -w /src ${{matrix.container}} \
-            sh -c 'python3 projects/amdsmi/tests/run_amdsmi_python_versions_test.py --interpreters "$(command -v python3)"'
+          python${{matrix.python-version}} projects/amdsmi/tests/run_amdsmi_python_versions_test.py \
+            --interpreters "$(command -v python${{matrix.python-version}})"
