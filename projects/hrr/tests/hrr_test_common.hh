@@ -257,6 +257,18 @@ inline void hrr_run_playback(const fs::path& cap_path,
   std::string out = proc.getOutput();
   INFO("Playback stdout:\n" << out);
   INFO("Playback exit code: " << ret);
+  // Cross-check only (do not merge): replay a run killed by a signal again with --verbose
+  // and stderr merged, so the report says why it failed.
+  std::string diag_out;
+  if (ret >= 128) {
+    hrr::test::SpawnProc diag(hrr_playback_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
+    set_proc_search_path(diag);
+    const int dret = diag.run(path_arg + " --verbose" + (extra_args.empty() ? "" : " " + extra_args));
+    diag_out = diag.getOutput();
+    if (diag_out.size() > 16000) diag_out = "..." + diag_out.substr(diag_out.size() - 16000);
+    diag_out = "exit " + std::to_string(dret) + "\n" + diag_out;
+  }
+  INFO("Diagnostic replay (--verbose, stderr merged): " << diag_out);
   // On Windows (gfx1151 consumer iGPU CI target) replay is not guaranteed to
   // reproduce device output bit-for-bit — kernel output buffers can read back
   // as zero even though capture and playback both launch successfully. Treat
