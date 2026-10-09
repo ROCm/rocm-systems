@@ -89,4 +89,5 @@ def test_build_dfs_and_eval_metric_weighted_avg_pilot():
     df = ac.dfs[table_id]
     parent_row = df[df["Metric"] == "hbm_combined_traffic"]
     assert not parent_row.empty
-    assert parent_row.iloc[0]["Avg"] == pytest.approx(83.3333333333, rel=1e-6)
+    # Pooled total across dispatches, not the mean of per-dispatch ratios.
+    assert parent_row.iloc[0]["Avg"] == pytest.approx(87.5, rel=1e-6)
