@@ -26,14 +26,23 @@ _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file
 PARSER_PATH = os.path.join(_CLI_DIR, "amdsmi_parser.py") if _CLI_DIR else None
 STATIC_PATH = os.path.join(_CLI_DIR, "subcommands", "static.py") if _CLI_DIR else None
 
+_STATUS_NOT_SUPPORTED = 2
+
 
 class _FakeLibraryException(Exception):
     def get_error_info(self):
         return str(self)
 
+    def get_error_code(self):
+        return _STATUS_NOT_SUPPORTED
+
 
 class _GuestHelpers:
     """Linux SR-IOV guest: virtual OS, neither baremetal nor passthrough."""
+
+    convert_clock_type = dict.fromkeys(
+        ["sys", "mem", "df", "soc", "dcef", "vclk0", "vclk1", "dclk0", "dclk1"], 0
+    )
 
     def is_linux(self):
         return True
@@ -159,11 +168,24 @@ class TestStaticNumaGuestOutput(unittest.TestCase):
         def _no_cpu_affinity(_handle, _scope):
             raise _FakeLibraryException("mock: no NUMA node in guest")
 
+        def _unsupported(name):
+            # Every other static section degrades to N/A instead of needing a stub.
+            if not name.startswith("amdsmi_"):
+                raise AttributeError(name)
+
+            def _raise(*_args):
+                raise _FakeLibraryException(f"mock: {name} not supported")
+
+            return _raise
+
         interface = fake_module(
             "amdsmi.amdsmi_interface",
+            __getattr__=_unsupported,
+            amdsmi_wrapper=types.SimpleNamespace(AMDSMI_STATUS_NOT_SUPPORTED=_STATUS_NOT_SUPPORTED),
             AmdSmiAffinityScope=types.SimpleNamespace(NUMA_SCOPE=0, SOCKET_SCOPE=1),
+            # No host NUMA topology: PCI numa_node is -1 and KFD falls back to
+            # CPU node 0, as on baremetal without firmware proximity info.
             amdsmi_topo_get_numa_node_number=lambda _handle: 0,
-            # Guest PCI numa_node is -1 when the host does not pass NUMA topology.
             amdsmi_get_gpu_topo_numa_affinity=lambda _handle: -1,
             amdsmi_get_cpu_affinity_with_scope=_no_cpu_affinity,
         )
@@ -186,7 +208,7 @@ class TestStaticNumaGuestOutput(unittest.TestCase):
         )
         cls.static_module = load_cli_module("static_numa_guest_under_test", STATIC_PATH)
 
-    def test_numa_reported_on_guest(self):
+    def _run_static(self, numa):
         commands = object.__new__(self.static_module.StaticCommands)
         commands.logger = _FakeLogger()
         commands.helpers = _GuestHelpers()
@@ -205,13 +227,23 @@ class TestStaticNumaGuestOutput(unittest.TestCase):
             clock=False,
             mem_carveout=False,
             partition=False,
-            numa=True,
+            numa=numa,
         )
 
         commands.static_gpu(args)
 
         static_dict = commands.logger.captured_values
         self.assertIsNotNone(static_dict, "static_gpu stored no values payload")
+        return static_dict
+
+    def test_numa_reported_on_guest(self):
+        static_dict = self._run_static(numa=True)
+
         self.assertIn("numa", static_dict)
         self.assertEqual(static_dict["numa"]["node"], 0)
         self.assertEqual(static_dict["numa"]["affinity"], "NONE")
+
+    def test_numa_in_default_output_on_guest(self):
+        static_dict = self._run_static(numa=False)
+
+        self.assertIn("numa", static_dict)
