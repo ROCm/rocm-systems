@@ -149,8 +149,7 @@ on_kfd_event_page_migrate(typename SdkBackend::kfd_event_page_migrate_record* re
 
     auto const track_name = fmt::format("KFD Event Page Migrate [{}->{}]",
                                         agent_label(src_agent), agent_label(dst_agent));
-    metadata_registry.ensure_track(
-        track_name, [&] { return typename Externals::track_t{ track_name, tid, "{}" }; });
+    metadata_registry.ensure_track(track_name, tid);
 
     constexpr auto k_empty_args = "";
 

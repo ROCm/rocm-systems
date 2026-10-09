@@ -112,8 +112,7 @@ on_kfd_page_fault(typename SdkBackend::kfd_page_fault_record* record,
     constexpr auto k_empty_event_metadata = "{}";
 
     auto const track_name = fmt::format("KFD Page Fault [{}]", agent_label(agent));
-    metadata_registry.ensure_track(
-        track_name, [&] { return typename Externals::track_t{ track_name, tid, "{}" }; });
+    metadata_registry.ensure_track(track_name, tid);
 
     const auto agent_node_id =
         agent ? std::to_string(agent->node_id) : std::string{ "null" };
