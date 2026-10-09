@@ -859,6 +859,7 @@ TEST_P(FastpathIoParam, IoThrowsAFallbackEligibleENOTTY)
     expect_io();
     EXPECT_CALL(mhip, hipGetLastError);
     EXPECT_CALL(mstats, error).Times(1);
+    EXPECT_CALL(mcfg, markAisUnsupported).Times(1);
 
     switch (GetParam()) {
         case IoType::Read:
@@ -889,6 +890,7 @@ TEST_P(FastpathIoParam, IoFallbackKeepsPendingHipError)
 
     expect_io(hipErrorInvalidValue);
     EXPECT_CALL(mstats, error).Times(1);
+    EXPECT_CALL(mcfg, markAisUnsupported).Times(1);
 
     switch (GetParam()) {
         case IoType::Read:
