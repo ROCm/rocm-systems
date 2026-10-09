@@ -62,6 +62,17 @@ RJ_DIAGNOSTIC_POP
 
 extern char **environ;
 
+// close_range(2) landed in Linux 5.9 and glibc 2.34. gcc-toolset-13 on the CI base
+// image builds against an older glibc with no wrapper, so issue the syscall directly.
+// 436 is the number on every architecture ROCm targets.
+#ifndef SYS_close_range
+#ifdef __NR_close_range
+#define SYS_close_range __NR_close_range
+#else
+#define SYS_close_range 436
+#endif
+#endif
+
 namespace {
 
 // Issue AMDKFD_IOC_GET_VERSION on fd. Returns true if the fd routed to a KFD
@@ -1462,7 +1473,9 @@ TEST(InterposerDrmTest, CloseRangeOfAKfdExportLeavesTheRecycledDescriptorOrdinar
   KfdExport buffer;
   ASSERT_TRUE(buffer.create(kfd, kPublicVram));
   const int number = buffer.dmabuf;
-  ASSERT_EQ(close_range(static_cast<unsigned>(number), static_cast<unsigned>(number), 0), 0);
+  ASSERT_EQ(
+      syscall(SYS_close_range, static_cast<unsigned>(number), static_cast<unsigned>(number), 0u),
+      0);
   const int render = open_drm_render();
   ASSERT_EQ(render, number);
   ASSERT_EQ(close(render), 0);
