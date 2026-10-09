@@ -53,11 +53,12 @@ public:
   static __device__ inline size_t rma_inline_count{0};
   static __device__ inline size_t amo_count{0};
   static __device__ inline size_t quiet_count{0};
-  // Polls that try_quiet_until_single() reports busy before it checks the target.
-  static __device__ inline size_t try_quiet_busy{0};
-  // Most recently posted WQEs that stay in flight.
-  static __device__ inline size_t pending_wqes{0};
 
+  // Per queue pair. try_quiet_until_single() reports busy for try_quiet_busy polls, then treats all but the
+  // newest pending_wqes of the posted WQEs as complete.
+  size_t posted{0};
+  size_t try_quiet_busy{0};
+  size_t pending_wqes{0};
   size_t polls{0};
 
 public:
@@ -173,6 +174,7 @@ __device__ __forceinline__ void QueuePairMock::post_wqe_rma(
   if (wf_info.is_pe_group_first) {
     __scoped_atomic_fetch_add(&rma_count, wf_info.num_pe_group_lanes,
                               __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    posted += wf_info.num_pe_group_lanes;
   }
 
   if (can_inline<Op>(size)) {
@@ -199,6 +201,7 @@ __device__ __forceinline__ void QueuePairMock::post_wqe_rma_single(
   }
 
   __scoped_atomic_fetch_add(&rma_count, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  ++posted;
 
   if (can_inline<Op>(size)) {
     __scoped_atomic_fetch_add(&rma_inline_count, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
@@ -228,6 +231,7 @@ __device__ __forceinline__ QueuePairMock::amo_ret_t<Fetch> QueuePairMock::post_w
   if (wf_info.is_pe_group_first) {
     __scoped_atomic_fetch_add(&amo_count, wf_info.num_pe_group_lanes,
                               __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    posted += wf_info.num_pe_group_lanes;
   }
 
   if constexpr (Op == OpCode::ATOMIC_CS) {
@@ -265,6 +269,7 @@ __device__ __forceinline__ QueuePairMock::amo_ret_t<Fetch> QueuePairMock::post_w
   }
 
   __scoped_atomic_fetch_add(&amo_count, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  ++posted;
 
   if constexpr (Op == OpCode::ATOMIC_CS) {
     // ATOMIC_CS: obj is raddr, expected is &compare, desired is swap_add
@@ -296,8 +301,7 @@ __device__ __forceinline__ void QueuePairMock::quiet_single() {
 }
 
 __device__ __forceinline__ uint64_t QueuePairMock::quiet_target_single() {
-  return __scoped_atomic_load_n(&rma_count, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE) +
-         __scoped_atomic_load_n(&amo_count, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  return posted;
 }
 
 __device__ __forceinline__ bool QueuePairMock::try_quiet_until_single(uint64_t target) {
@@ -307,7 +311,7 @@ __device__ __forceinline__ bool QueuePairMock::try_quiet_until_single(uint64_t t
     --try_quiet_busy;
     return false;
   }
-  return target + pending_wqes <= quiet_target_single();
+  return target + pending_wqes <= posted;
 }
 
 }  // namespace rocshmem

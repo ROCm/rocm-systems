@@ -49,15 +49,7 @@ __device__ unsigned long long g_gdaInlinePutsAtFence = 0;
 namespace RcclUnitTesting
 {
 
-class GinRocshmemGdaTemplateTest : public DeviceTestBase {
-protected:
-  // A test that leaves the mock queue busy would stall the tests after it.
-  void TearDown() override {
-    size_t zero = 0;
-    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::try_quiet_busy), &zero, sizeof(zero)));
-    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::pending_wqes), &zero, sizeof(zero)));
-  }
-};
+class GinRocshmemGdaTemplateTest : public DeviceTestBase {};
 
 struct GdaHarness {
   ncclGinRocshmemGdaGPUContext ctx;
@@ -571,12 +563,10 @@ constexpr uint64_t kShortBudget = 1000;
 constexpr uint64_t kLongBudget = 1ULL << 34;
 constexpr size_t kNeverDrains = ~size_t{0};
 
-static void setTryQuietBusy(size_t polls) {
-  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::try_quiet_busy), &polls, sizeof(polls)));
-}
-
-static void setPendingWqes(size_t wqes) {
-  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::pending_wqes), &wqes, sizeof(wqes)));
+static void setQueue(GdaEnv& env, int peer, size_t busyPolls, size_t pendingWqes) {
+  rocshmem::QueuePair* qp = env.qp.ptr + peer;
+  HIP_CHECK(hipMemcpy(&qp->try_quiet_busy, &busyPolls, sizeof(busyPolls), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(&qp->pending_wqes, &pendingWqes, sizeof(pendingWqes), hipMemcpyHostToDevice));
 }
 
 static size_t readPolls(const GdaEnv& env, int peer) {
@@ -612,8 +602,6 @@ TEST_F(GinRocshmemGdaTemplateTest, FlushAsync_RecordsQueueTargetWithoutQuiet) {
   env.build();
   DeviceBuffer<ncclGinRequest_t> d_req(1);
   d_req.zero();
-  resetPutNbiCount();
-  resetSignalCount();
   kernelPutData<<<1, 1>>>(env.dHarness.ptr, 1);
   syncAndCheck();
   resetQuietCount();
@@ -680,10 +668,11 @@ TEST_F(GinRocshmemGdaTemplateTest, FlushTimeout_BusyQueueTimesOut) {
   env.build();
   DeviceBuffer<ncclResult_t> d_result(1);
   d_result.upload(ncclInternalError);
-  setTryQuietBusy(kNeverDrains);
+  setQueue(env, GdaEnv::kPeer, kNeverDrains, /*pendingWqes=*/0);
   kernelFlushTimeout<<<1, 1>>>(env.dHarness.ptr, nullptr, kShortBudget, d_result.ptr);
   syncAndCheck();
   EXPECT_EQ(d_result.download(), ncclTimeout);
+  EXPECT_EQ(readPolls(env, 0), 1u);
 }
 
 TEST_F(GinRocshmemGdaTemplateTest, WaitTimeout_PollsUntilDrained) {
@@ -693,12 +682,12 @@ TEST_F(GinRocshmemGdaTemplateTest, WaitTimeout_PollsUntilDrained) {
   d_req.upload(makeRequest(GdaEnv::kPeer));
   DeviceBuffer<ncclResult_t> d_result(1);
   d_result.upload(ncclInternalError);
-  setTryQuietBusy(3);
-  resetQuietCount();
+  setQueue(env, GdaEnv::kPeer, /*busyPolls=*/3, /*pendingWqes=*/0);
   kernelWaitTimeout<<<1, 1>>>(env.dHarness.ptr, d_req.ptr, nullptr, kLongBudget, d_result.ptr);
   syncAndCheck();
   EXPECT_EQ(d_result.download(), ncclSuccess);
-  EXPECT_EQ(readQuietCount(), 4ULL);
+  EXPECT_EQ(readPolls(env, GdaEnv::kPeer), 4u);
+  EXPECT_EQ(readPolls(env, 0), 0u);
 }
 
 TEST_F(GinRocshmemGdaTemplateTest, WaitTimeout_BusyQueueTimesOut) {
@@ -708,7 +697,7 @@ TEST_F(GinRocshmemGdaTemplateTest, WaitTimeout_BusyQueueTimesOut) {
   d_req.upload(makeRequest(GdaEnv::kPeer));
   DeviceBuffer<ncclResult_t> d_result(1);
   d_result.upload(ncclInternalError);
-  setTryQuietBusy(kNeverDrains);
+  setQueue(env, GdaEnv::kPeer, kNeverDrains, /*pendingWqes=*/0);
   kernelWaitTimeout<<<1, 1>>>(env.dHarness.ptr, d_req.ptr, nullptr, kShortBudget, d_result.ptr);
   syncAndCheck();
   EXPECT_EQ(d_result.download(), ncclTimeout);
@@ -724,7 +713,7 @@ TEST_F(GinRocshmemGdaTemplateTest, WaitTimeout_AbortReturnsSuccess) {
   DeviceBuffer<uint32_t> d_abort(1);
   uint32_t aborted = 1;
   d_abort.copyFrom(&aborted, 1);
-  setTryQuietBusy(kNeverDrains);
+  setQueue(env, GdaEnv::kPeer, kNeverDrains, /*pendingWqes=*/0);
   kernelWaitTimeout<<<1, 1>>>(env.dHarness.ptr, d_req.ptr, d_abort.ptr, kLongBudget, d_result.ptr);
   syncAndCheck();
   EXPECT_EQ(d_result.download(), ncclSuccess);
@@ -758,13 +747,13 @@ TEST_F(GinRocshmemGdaTemplateTest, WaitTimeout_CoversOnlyWqesBeforeFlushAsync) {
   DeviceBuffer<ncclResult_t> d_result(1);
 
   d_result.upload(ncclInternalError);
-  setPendingWqes(1);
+  setQueue(env, GdaEnv::kPeer, /*busyPolls=*/0, /*pendingWqes=*/1);
   kernelPutFlushAsyncPutWait<<<1, 1>>>(env.dHarness.ptr, kShortBudget, d_result.ptr);
   syncAndCheck();
   EXPECT_EQ(d_result.download(), ncclSuccess);
 
   d_result.upload(ncclInternalError);
-  setPendingWqes(2);
+  setQueue(env, GdaEnv::kPeer, /*busyPolls=*/0, /*pendingWqes=*/2);
   kernelPutFlushAsyncPutWait<<<1, 1>>>(env.dHarness.ptr, kShortBudget, d_result.ptr);
   syncAndCheck();
   EXPECT_EQ(d_result.download(), ncclTimeout);
@@ -789,7 +778,8 @@ TEST_F(GinRocshmemGdaTemplateTest, Blocking_ReturnsOnAbort) {
   DeviceBuffer<uint32_t> d_abort(1);
   uint32_t aborted = 1;
   d_abort.copyFrom(&aborted, 1);
-  setTryQuietBusy(kNeverDrains);
+  setQueue(env, 0, kNeverDrains, /*pendingWqes=*/0);
+  setQueue(env, GdaEnv::kPeer, kNeverDrains, /*pendingWqes=*/0);
   kernelBlockingFlushWait<<<1, 1>>>(env.dHarness.ptr, d_req.ptr, d_abort.ptr);
   syncAndCheck();
   EXPECT_GT(readPolls(env, 0), 0u);
