@@ -228,6 +228,10 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-att -o out --
         $<TARGET_FILE:kernel-replay> 1048576 1)
 
+# RUN_SERIAL: the validate step compares SQ counters, which count every wave on the
+# device, across each dispatch's passes, so GPU work from concurrent tests makes it fail
+# intermittently. The rocprofiler_kernel_replay lock only serializes the replay tests with
+# each other.
 set_tests_properties(
     rocprofv3-test-kernel-replay-att-generate
     PROPERTIES TIMEOUT
@@ -238,6 +242,8 @@ set_tests_properties(
                "${rocprofv3-generate-env}"
                RESOURCE_LOCK
                rocprofiler_kernel_replay
+               RUN_SERIAL
+               ON
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_SETUP
