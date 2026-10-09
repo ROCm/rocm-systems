@@ -17,10 +17,12 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <sys/types.h>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -87,7 +89,10 @@ enum class PtracerGrantVerdict {
 class RemoteDriver : public Driver {
 public:
   /// @brief Construct from an already-connected Unix socket fd.
-  explicit RemoteDriver(int sock_fd);
+  /// @param on_disconnect Optional terminal-error handler, called on a monitor
+  /// thread if the peer disconnects after a successful open(). It must not throw,
+  /// reenter this driver, or destroy it. Graceful close() does not call it.
+  explicit RemoteDriver(int sock_fd, std::function<void()> on_disconnect = {});
 
   ~RemoteDriver() override;
 
@@ -190,6 +195,8 @@ public:
   int munmap(void *addr, size_t length) override;
 
 private:
+  void watch_disconnect(int socket);
+  void request_close();
   int send_ioctl(unsigned long request, void *arg);
   int send_mmap(void *addr, size_t length, int prot, int flags, off_t offset, int *memfd_out);
 
@@ -222,7 +229,10 @@ private:
   /// is set the connection is terminal and further ioctl/mmap/munmap calls fail
   /// with -EPROTO rather than returning bogus results from a poisoned stream.
   std::atomic<bool> protocol_failed_{false};
-  int shutdown_efd_ = -1;      ///< eventfd written by close() to wake WAIT_EVENTS pollers.
+  int shutdown_efd_ = -1; ///< eventfd written by close() to wake WAIT_EVENTS pollers.
+  const std::function<void()> on_disconnect_;
+  /// Joined before closing sock_ or shutdown_efd_; never consumes RPC bytes.
+  std::thread disconnect_monitor_;
   void *kfd_marker_ = nullptr; ///< Non-readable mapping identifying /dev/kfd in proc maps.
   size_t kfd_marker_size_ = 0;
 

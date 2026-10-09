@@ -5247,6 +5247,71 @@ void serve_one_handshake(int fd, int32_t result) {
 
 } // namespace
 
+TEST(RemoteDriverDisconnectTest, ReportsPeerExitWithoutAnotherRpc) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+  const util::UniqueHandle server_closer{sv[1]};
+  std::jthread server([fd = sv[1]] { serve_one_handshake(fd, 0); });
+  std::mutex mutex;
+  std::condition_variable cv;
+  unsigned notifications = 0;
+  rocjitsu::RemoteDriver driver(sv[0], [&] {
+    std::lock_guard lock(mutex);
+    ++notifications;
+    cv.notify_all();
+  });
+  const int kfd = driver.open();
+  ASSERT_GE(kfd, 0);
+  const util::UniqueHandle kfd_closer{kfd};
+  server.join();
+
+  ASSERT_EQ(shutdown(sv[1], SHUT_WR), 0);
+  {
+    std::unique_lock lock(mutex);
+    ASSERT_TRUE(cv.wait_for(lock, std::chrono::seconds(2), [&] { return notifications != 0; }));
+  }
+  kfd_ioctl_get_version_args version{};
+  EXPECT_EQ(driver.ioctl(AMDKFD_IOC_GET_VERSION, &version), -EPROTO);
+  EXPECT_EQ(driver.close(), 0);
+  EXPECT_EQ(notifications, 1u);
+}
+
+TEST(RemoteDriverDisconnectTest, GracefulCloseAndDestructionStopTheMonitor) {
+  for (bool explicit_close : {false, true}) {
+    SCOPED_TRACE(explicit_close);
+    int sv[2];
+    ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+    const util::UniqueHandle server_closer{sv[1]};
+    std::jthread server([fd = sv[1]] { serve_one_handshake(fd, 0); });
+    std::atomic<unsigned> notifications{0};
+    {
+      rocjitsu::RemoteDriver driver(sv[0], [&] { ++notifications; });
+      const int kfd = driver.open();
+      ASSERT_GE(kfd, 0);
+      const util::UniqueHandle kfd_closer{kfd};
+      server.join();
+      if (explicit_close)
+        EXPECT_EQ(driver.close(), 0);
+    }
+    EXPECT_EQ(notifications.load(), 0u);
+  }
+}
+
+TEST(RemoteDriverDisconnectTest, FailedHandshakeDoesNotStartTheMonitor) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+  std::jthread server([fd = sv[1]] {
+    serve_one_handshake(fd, -EPROTO);
+    close(fd);
+  });
+  std::atomic<unsigned> notifications{0};
+  {
+    rocjitsu::RemoteDriver driver(sv[0], [&] { ++notifications; });
+    EXPECT_LT(driver.open(), 0);
+  }
+  EXPECT_EQ(notifications.load(), 0u);
+}
+
 // Both ends of a socketpair belong to this process, so SO_PEERCRED reports this
 // PID -- which is what makes the launcher's PID the only variable here.
 TEST(RemoteDriverPtracerGrantTest, AuthorizesOnlyTheDaemonItsLauncherStarted) {

@@ -804,7 +804,12 @@ public:
     // out local-VM creation / a later remote retry. Only a fully-open driver is
     // ever visible to lock-free readers.
     if (!active_remote)
-      active_remote = std::make_shared<RemoteDriver>(sock);
+      active_remote = std::make_shared<RemoteDriver>(sock, [] {
+        // The daemon has stopped servicing GPU work. Native signal waits can
+        // otherwise spin forever without touching the disconnected RPC stream.
+        std::fprintf(stderr, "rocjitsu: daemon connection lost; exiting native process\n");
+        std::_Exit(EXIT_FAILURE);
+      });
     int fd = active_remote->open();
     if (fd < 0)
       return {};

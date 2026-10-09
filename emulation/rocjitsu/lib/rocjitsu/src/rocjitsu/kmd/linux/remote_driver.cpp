@@ -12,6 +12,7 @@
 #include "util/unique_handle.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cerrno>
 #include <charconv>
@@ -42,6 +43,7 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/un.h>
+#include <system_error>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -451,11 +453,15 @@ RemoteDriver::MemfdLookup RemoteDriver::find_memfd_for_addr(void *addr, size_t l
   return MemfdLookup::kNotFound;
 }
 
-RemoteDriver::RemoteDriver(int sock_fd) : sock_(sock_fd) {
+RemoteDriver::RemoteDriver(int sock_fd, std::function<void()> on_disconnect)
+    : sock_(sock_fd), on_disconnect_(std::move(on_disconnect)) {
   shutdown_efd_ = static_cast<int>(syscall(SYS_eventfd2, 0, EFD_CLOEXEC | EFD_NONBLOCK));
 }
 
 RemoteDriver::~RemoteDriver() {
+  request_close();
+  if (disconnect_monitor_.joinable())
+    disconnect_monitor_.join();
   for (auto &[handle, fd] : handle_memfds_) {
     if (fd >= 0)
       syscall(SYS_close, fd);
@@ -473,6 +479,26 @@ int RemoteDriver::poison_stream() {
   if (sock_ >= 0)
     syscall(SYS_shutdown, sock_, SHUT_RDWR);
   return -EPROTO;
+}
+
+void RemoteDriver::watch_disconnect(int socket) {
+  // Clients can spin on shared-memory signals without issuing another RPC.
+  // Observe hangup independently of those waits and of the serialized RPC path.
+  std::array<pollfd, 2> fds{{{socket, POLLRDHUP, 0}, {shutdown_efd_, POLLIN, 0}}};
+  for (;;) {
+    const long rc = syscall(SYS_ppoll, fds.data(), fds.size(), nullptr, nullptr, 0);
+    if (rc < 0 && errno == EINTR)
+      continue;
+    if (closing_.load(std::memory_order_acquire))
+      return;
+    if (rc < 0 || (fds[0].revents & (POLLRDHUP | POLLHUP | POLLERR | POLLNVAL))) {
+      protocol_failed_.store(true, std::memory_order_release);
+      bool expected = false;
+      if (closing_.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+        on_disconnect_();
+      return;
+    }
+  }
 }
 
 int RemoteDriver::open() {
@@ -564,7 +590,22 @@ int RemoteDriver::open() {
   // open() whose effect outlives the connection that prompted it.
   ptracer_verdict_ = authorize_daemon_address_space_access(sock_);
 
-  return reissue_synthetic_kfd_fd();
+  const int fd = reissue_synthetic_kfd_fd();
+  if (fd < 0 || !on_disconnect_)
+    return fd;
+  if (shutdown_efd_ < 0) {
+    syscall(SYS_close, fd);
+    errno = EMFILE;
+    return -1;
+  }
+  try {
+    disconnect_monitor_ = std::thread([this, socket = sock_] { watch_disconnect(socket); });
+  } catch (const std::system_error &error) {
+    syscall(SYS_close, fd);
+    errno = error.code().value();
+    return -1;
+  }
+  return fd;
 }
 
 int RemoteDriver::reissue_synthetic_kfd_fd() {
@@ -607,15 +648,20 @@ int RemoteDriver::reissue_synthetic_kfd_fd() {
   return fd;
 }
 
-int RemoteDriver::close() {
+void RemoteDriver::request_close() {
   closing_.store(true, std::memory_order_release);
   if (shutdown_efd_ >= 0) {
     uint64_t val = 1;
     syscall(SYS_write, shutdown_efd_, &val, sizeof(val));
   }
+}
 
+int RemoteDriver::close() {
+  request_close();
   {
     std::lock_guard<std::mutex> lock(rpc_mutex_);
+    if (disconnect_monitor_.joinable())
+      disconnect_monitor_.join();
     if (sock_ >= 0) {
       RpcHeader hdr{};
       hdr.opcode = RPC_CLOSE;

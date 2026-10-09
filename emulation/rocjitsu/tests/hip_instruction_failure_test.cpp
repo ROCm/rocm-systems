@@ -55,6 +55,20 @@ TEST(HipInstructionFailureTest, DecodeFailureExitsWithFailure) {
               "rocjitsu: local VM failed: .*could not decode.*pid=.*qid=.*dispatch=.*0xbfff0000");
 }
 
+// The outer DaemonTest fixture owns the daemon. Its diagnostics stay in that
+// process; the client reports loss of the connection after the failed run.
+TEST(HipDaemonInstructionFailureTest, UnsupportedInstructionExitsWithFailure) {
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  EXPECT_EXIT(wait_for_instruction_failure(FailureKind::Unsupported),
+              ::testing::ExitedWithCode(EXIT_FAILURE), "rocjitsu: daemon connection lost");
+}
+
+TEST(HipDaemonInstructionFailureTest, DecodeFailureExitsWithFailure) {
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  EXPECT_EXIT(wait_for_instruction_failure(FailureKind::Decode),
+              ::testing::ExitedWithCode(EXIT_FAILURE), "rocjitsu: daemon connection lost");
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
