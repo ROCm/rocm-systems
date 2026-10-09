@@ -33,15 +33,15 @@ NCCL_DEVICE_INLINE uint64_t quietTarget(ncclGinCtx ctx, int peer) {
   return peerQp(ctx, peer)->quiet_target_single();
 }
 
-// Polls instead of calling quiet() so untimed callers still return on abort.
+// Polls instead of calling quiet() so untimed callers still return on abort. Each lane polls its own
+// queue pair, since lanes with the same peer can hold different GIN contexts.
 template <bool HasTimeout>
 NCCL_DEVICE_INLINE ncclResult_t quietPeer(ncclGinCtx ctx, int peer, uint64_t target, uint32_t* abortFlag,
                                           uint64_t startCycle, uint64_t timeoutCycles) {
   using nccl::utility::testAbort;
   rocshmem::QueuePair* qp = peerQp(ctx, peer);
-  rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
   uint32_t steps = 0;
-  while (!qp->try_quiet_until(wf_info, target)) {
+  while (!qp->try_quiet_until_single(target)) {
     if (HasTimeout && clock64() - startCycle >= timeoutCycles) return ncclTimeout;
     if (testAbort(abortFlag, steps)) return ncclSuccess;
   }
@@ -255,15 +255,18 @@ struct ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 template <>
 struct ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, ncclGinRequest_t& request, bool, ncclGinDescriptorSmem*,
-                                      cuda::memory_order, uint32_t* abortFlag) {
+                                      cuda::memory_order ord, uint32_t* abortFlag) {
     auto& req = reinterpret_cast<nccl::gin::rocshmem_gda::ncclGinRocshmemGdaRequest&>(request);
     (void)nccl::gin::rocshmem_gda::quietPeer</*HasTimeout=*/false>(ctx, req.peer, req.target, abortFlag, 0, 0);
+    cuda::atomic_thread_fence(ord, cuda::thread_scope_system);
   }
   NCCL_DEVICE_INLINE static ncclResult_t call(ncclGinCtx ctx, ncclGinRequest_t& request, bool, ncclGinDescriptorSmem*,
-                                              cuda::memory_order, uint32_t* abortFlag, uint64_t timeoutCycles) {
+                                              cuda::memory_order ord, uint32_t* abortFlag, uint64_t timeoutCycles) {
     auto& req = reinterpret_cast<nccl::gin::rocshmem_gda::ncclGinRocshmemGdaRequest&>(request);
-    return nccl::gin::rocshmem_gda::quietPeer</*HasTimeout=*/true>(ctx, req.peer, req.target, abortFlag, clock64(),
-                                                                   timeoutCycles);
+    ncclResult_t ret = nccl::gin::rocshmem_gda::quietPeer</*HasTimeout=*/true>(ctx, req.peer, req.target, abortFlag,
+                                                                               clock64(), timeoutCycles);
+    cuda::atomic_thread_fence(ord, cuda::thread_scope_system);
+    return ret;
   }
 };
 

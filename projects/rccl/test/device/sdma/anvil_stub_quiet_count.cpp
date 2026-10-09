@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Single definitions of the stub globals declared in anvil_device.hpp.
+// Single definitions of the stub quiet counter and call log declared in anvil_device.hpp.
 // Keep this out of the header: IPC and Suite H both include gin_anvil_sdma.h.
 // rccl-UnitTestsFixtures device-links this TU under ENABLE_ROCSHMEM_GIN.
 
@@ -22,7 +22,4 @@ __device__ unsigned long long g_sdmaStubDirtyAtQuiet = 0;
 __device__ unsigned long long g_sdmaStubInQuiet = 0;
 __device__ int g_sdmaStubHoldQuiet = 0;
 __device__ int g_sdmaStubReleaseQuiet = 0;
-__device__ unsigned long long g_sdmaStubWriteIndex = 0;
-__device__ unsigned long long g_sdmaStubReadIndex = ~0ULL;
-__device__ unsigned long long g_sdmaStubBusyPolls = 0;
 }
