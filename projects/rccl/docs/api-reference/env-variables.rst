@@ -472,6 +472,17 @@ in the following table.
         | ``ncclConfig_t`` are rejected with ``ncclInvalidArgument`` at
         | communicator initialization.
 
+    * - | ``RCCL_P2P_DIRECT_FULL_CHANNELS``
+        | Gives direct ``ncclSend`` / ``ncclRecv`` / ``ncclSendRecv``
+        | operations access to the full P2P channel pool. P2P-backed
+        | collectives such as all-to-all, scatter, and gather keep the normal
+        | per-peer channel split. The actual channel count remains
+        | message-size tuned and is capped by the kernel-argument budget.
+        | This option is useful for large pairwise transfers on gfx1250 when
+        | the communicator contains more ranks than the operation uses.
+      - | ``0`` (default): use the communicator's per-peer channel count.
+        | ``1``: allow direct P2P operations to use the full channel pool.
+
     * - | ``NCCL_RINGS``
         | Defines custom ring topology.
       - | Ring topology specification string

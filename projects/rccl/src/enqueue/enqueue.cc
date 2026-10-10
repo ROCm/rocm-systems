@@ -1308,6 +1308,10 @@ NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 // batching; rcclEffectiveP2pBatchEnable separately controls the default policy.
 RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", -1);
 RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", 1 << 16); // 64k per-rank message size
+// Give direct Send/Recv/SendRecv operations the full P2P channel pool while
+// preserving the communicator-wide peer split for P2P-backed collectives.
+// Opt-in: explicit fan-out may oversubscribe channels across rounds.
+RCCL_PARAM(P2pDirectFullChannels, "P2P_DIRECT_FULL_CHANNELS", 0);
 
 int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
   auto userInput = rcclParamP2pBatchEnable();
@@ -1344,6 +1348,18 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
   return -1;
 }
 
+int rcclP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t collAPI, bool directFullChannels) {
+  bool directApi = collAPI == ncclFuncSend || collAPI == ncclFuncRecv || collAPI == ncclFuncSendRecv;
+  if (!directFullChannels || !directApi) return comm->p2pnChannelsPerPeer;
+  int argsLimit = pow2Down(ncclDevMaxChannelsForArgsBytes(comm->workArgsBytes));
+  return std::min(comm->p2pnChannels, argsLimit);
+}
+
+static int rcclP2pChannelStride(struct ncclComm* comm, const struct ncclTaskP2p* task) {
+  ncclFunc_t collAPI = task == nullptr ? ncclNumFuncs : task->collAPI;
+  return rcclP2pChannelStrideForApi(comm, collAPI, rcclParamP2pDirectFullChannels());
+}
+
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget
 // and sizeof(ncclDevWorkP2p) in work budget. "sendRank" and "recvRank" must
 // match the corresponding values for this round of the p2p schedule (no -1's).
@@ -1353,6 +1369,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
                                  void* recvAddr, ssize_t recvBytes, uint64_t sendOpCount, uint64_t recvOpCount,
                                  const int planTotalTasks[], struct ncclTaskP2p** p2pTasks) {
   ncclResult_t ret = ncclSuccess;
+  int channelStride;
   int connIndex[2] = {1, 1};
   bool selfSend = (sendRank == comm->rank);
   // recv: dir=0, send: dir=1
@@ -1682,6 +1699,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   }
 
   nChannelsMax = std::max(nChannels[0], nChannels[1]);
+  channelStride = std::max(comm->p2pnChannelsPerPeer, nChannelsMax);
   // Determine how many peers this plan will target concurrently. Make a
   // simplifying assumption that each task targets a different peer.
   // Each task is striped across 'nChannelsMax' of 'p2pnChannels' channels.
@@ -1696,8 +1714,8 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     if (p2pTasks[i]) p2pTasks[i]->p2pPairId = plan->p2pPairCounter;
   }
   for (int part = 0; part < nChannelsMax; part++) {
-    int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, comm->p2pnChannelsPerPeer, comm->nNodes,
-                                          comm->p2pChannelShiftSize);
+    int channelId =
+      ncclP2pChannelForPart(comm->p2pnChannels, base, part, channelStride, comm->nNodes, comm->p2pChannelShiftSize);
     plan->channelMask.masks[channelId / 64] |= uint64_t(1) << (channelId % 64);
     // Each direction uses its first nChannels[dir] parts; track per-direction
     // channels so the profiler emits KernelCh per direction (see profiler.cc).
@@ -1794,13 +1812,6 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
     plan->kernelSpecialized = ncclKerns[ncclGetKernelIndex(comm)].specialized;
   }
 
-  // Compute how much to split operations
-  // Try to use all channels
-  int nChannelsMax = comm->p2pnChannelsPerPeer;
-  int nChannelsMin = nChannelsMax;
-  // Try to use all channels, but one channel per operation.
-  while (nChannelsMin * nRanks > comm->p2pnChannels && nChannelsMin > 1) nChannelsMin /= 2;
-
   // Save the total count of send/recv tasks in the plan
   int planTotalTasks[2] = {comm->planner.nTasksP2pRecv, comm->planner.nTasksP2pSend};
   while (comm->planner.nTasksP2p != 0) {
@@ -1837,13 +1848,17 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
         comm->planner.nTasksP2pSend -= 1;
         comm->planner.nTasksP2pRecv -= 1;
       } else {
+        struct ncclTaskP2p* p2pTasks[2] = {recv, send};
+        int nChannelsMax = std::max(rcclP2pChannelStride(comm, recv), rcclP2pChannelStride(comm, send));
+        int nChannelsMin = nChannelsMax;
+        // Try to use all channels, but one channel per operation.
+        while (nChannelsMin * nRanks > comm->p2pnChannels && nChannelsMin > 1) nChannelsMin /= 2;
         // Ensure room for worst case of one new batch per channel. Mixed LL/LL128 rounds
         // split into two one-sided work items, so reserve twice the P2P work.
         if (!ncclTestBudget(budget, plan->nWorkBatches + 2 * nChannelsMax,
                             plan->workBytes + 2 * sizeof(struct ncclDevWorkP2p))) {
           return ncclSuccess;
         }
-        struct ncclTaskP2p* p2pTasks[2] = {recv, send};
         NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, *p2pRound, sendRank, sendBuff, sendBytes,
                                recvRank, recvBuff, recvBytes, send ? send->opCount : 0, recv ? recv->opCount : 0,
                                planTotalTasks, p2pTasks));
@@ -3855,47 +3870,48 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
         round += 1;
       }
       uint8_t base = ncclP2pChannelBaseForRound(comm, round, rcclEffectiveP2pBatchEnable(comm));
-      for (int c = 0; c < comm->p2pnChannelsPerPeer; c++) {
-          int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
-                                                comm->p2pChannelShiftSize);
-          if (isSendNotRecv) {
-            if (comm->channels[channelId].peers[peer]->send[1].hasSeen == 0) {
-              // P2P uses only 1 connector
-              // the send/recv connector is shared among split shared comms. We need to set hasSeen to
-              // 1 in order to avoid duplicate connection setup if user group sendrecv ops with split
-              // shared comms together.
-              comm->channels[channelId].peers[peer]->send[1].hasSeen = 1;
-              comm->channels[channelId].peers[peer]->send[1].p2pOnly = 1;
-              // comm->connectSend[peer] |= (1UL<<channelId);
-              comm->connectSend[peer].masks[channelId / 64] |= (1UL << (channelId % 64));
-              ncclGroupCommPreconnect(comm);
-            }
-            if (comm->p2pNet && comm->channels[channelId].peers[peer]->send[NCCL_CONN_IDX_P2P_NET].hasSeen == 0) {
-              comm->channels[channelId].peers[peer]->send[1].hasSeen = 1;
-              // comm->connectSend[peer+comm->nRanks*NCCL_CONN_IDX_P2P_NET] |= (1UL<<channelId);
-              comm->connectSend[peer + comm->nRanks * NCCL_CONN_IDX_P2P_NET].masks[channelId / 64] |=
-                (1UL << (channelId % 64));
-              ncclGroupCommPreconnect(comm);
-            }
-          } else {
-            if (comm->channels[channelId].peers[peer]->recv[1].hasSeen == 0) {
-              // P2P uses only 1 connector
-              comm->channels[channelId].peers[peer]->recv[1].hasSeen = 1;
-              comm->channels[channelId].peers[peer]->recv[1].p2pOnly = 1;
-              // comm->connectRecv[peer] |= (1UL<<channelId);
-              comm->connectRecv[peer].masks[channelId / 64] |= (1UL << (channelId % 64));
-              ncclGroupCommPreconnect(comm);
-            }
-            if (comm->p2pNet && comm->channels[channelId].peers[peer]->recv[NCCL_CONN_IDX_P2P_NET].hasSeen == 0) {
-              comm->channels[channelId].peers[peer]->recv[1].hasSeen = 1;
-              // comm->connectRecv[peer+comm->nRanks*NCCL_CONN_IDX_P2P_NET] |= (1UL<<channelId);
-              comm->connectRecv[peer + comm->nRanks * NCCL_CONN_IDX_P2P_NET].masks[channelId / 64] |=
-                (1UL << (channelId % 64));
-              ncclGroupCommPreconnect(comm);
-            }
+      int channelStride = rcclP2pChannelStride(comm, p2p);
+      for (int c = 0; c < channelStride; c++) {
+        int channelId =
+          ncclP2pChannelForPart(comm->p2pnChannels, base, c, channelStride, comm->nNodes, comm->p2pChannelShiftSize);
+        if (isSendNotRecv) {
+          if (comm->channels[channelId].peers[peer]->send[1].hasSeen == 0) {
+            // P2P uses only 1 connector
+            // the send/recv connector is shared among split shared comms. We need to set hasSeen to
+            // 1 in order to avoid duplicate connection setup if user group sendrecv ops with split
+            // shared comms together.
+            comm->channels[channelId].peers[peer]->send[1].hasSeen = 1;
+            comm->channels[channelId].peers[peer]->send[1].p2pOnly = 1;
+            // comm->connectSend[peer] |= (1UL<<channelId);
+            comm->connectSend[peer].masks[channelId / 64] |= (1UL << (channelId % 64));
+            ncclGroupCommPreconnect(comm);
+          }
+          if (comm->p2pNet && comm->channels[channelId].peers[peer]->send[NCCL_CONN_IDX_P2P_NET].hasSeen == 0) {
+            comm->channels[channelId].peers[peer]->send[1].hasSeen = 1;
+            // comm->connectSend[peer+comm->nRanks*NCCL_CONN_IDX_P2P_NET] |= (1UL<<channelId);
+            comm->connectSend[peer + comm->nRanks * NCCL_CONN_IDX_P2P_NET].masks[channelId / 64] |=
+              (1UL << (channelId % 64));
+            ncclGroupCommPreconnect(comm);
+          }
+        } else {
+          if (comm->channels[channelId].peers[peer]->recv[1].hasSeen == 0) {
+            // P2P uses only 1 connector
+            comm->channels[channelId].peers[peer]->recv[1].hasSeen = 1;
+            comm->channels[channelId].peers[peer]->recv[1].p2pOnly = 1;
+            // comm->connectRecv[peer] |= (1UL<<channelId);
+            comm->connectRecv[peer].masks[channelId / 64] |= (1UL << (channelId % 64));
+            ncclGroupCommPreconnect(comm);
+          }
+          if (comm->p2pNet && comm->channels[channelId].peers[peer]->recv[NCCL_CONN_IDX_P2P_NET].hasSeen == 0) {
+            comm->channels[channelId].peers[peer]->recv[1].hasSeen = 1;
+            // comm->connectRecv[peer+comm->nRanks*NCCL_CONN_IDX_P2P_NET] |= (1UL<<channelId);
+            comm->connectRecv[peer + comm->nRanks * NCCL_CONN_IDX_P2P_NET].masks[channelId / 64] |=
+              (1UL << (channelId % 64));
+            ncclGroupCommPreconnect(comm);
           }
         }
       }
+    }
   }
   ncclProfilerStopP2pApiEvent();
   return ncclSuccess;
