@@ -177,7 +177,8 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtProcessVMWrite(HSAuint32 Pid, HsaMemoryRange* Loc
                                               HsaMemoryRange* RemoteMemoryArray,
                                               HSAuint64 RemoteMemoryArrayCount,
                                               HSAuint64* SizeCopied);
-HSAKMT_STATUS HSAKMTAPI vhsaKmtVirtioMapHandleToVA(void* MemoryHandle, void* Va, HSAuint64 Size);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtVirtioMapHandleToVA(void* MemoryHandle, void* Va, HSAuint64 Size,
+                                                   int Prot);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtVirtioUnmapHandleFromVA(void* Va, HSAuint64 Size);
 
 int vamdgpu_query_gpu_info(amdgpu_device_handle dev, void* out);

@@ -23,6 +23,7 @@
 #include "hsakmt/hsakmt_virtio.h"
 #include "hsakmt_virtio_device.h"
 #include <stddef.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <xf86drm.h>
 
@@ -165,7 +166,8 @@ int vhsakmt_bo_cpu_map(vhsakmt_bo_handle bo, void** cpu, void* fixed_cpu) {
   pthread_mutex_lock(&bo->map_mutex);
 
   if (!bo->cpu_addr) {
-    r = virtio_gpu_map_handle(bo->dev->vgdev, bo->real.handle, bo->size, cpu, fixed_cpu);
+    r = virtio_gpu_map_handle(bo->dev->vgdev, bo->real.handle, bo->size, cpu, fixed_cpu,
+                              PROT_READ | PROT_WRITE);
     if (r) {
       pthread_mutex_unlock(&bo->map_mutex);
       return r;
@@ -252,9 +254,9 @@ static int vhsakmt_init_userptr_blob(vhsakmt_device_handle dev,
   int r;
   uint32_t blob_flags = p->use_svm ? VIRTGPU_BLOB_FLAG_USE_SVM
                                    : VIRTGPU_BLOB_FLAG_USE_USERPTR;
-  /* Pin read-only SVM registrations read-only in the guest kernel. */
-  if (p->use_svm && p->read_only)
-    blob_flags |= VIRTGPU_BLOB_FLAG_SVM_RDONLY;
+  if (p->read_only)
+    blob_flags |= p->use_svm ? VIRTGPU_BLOB_FLAG_SVM_RDONLY
+                              : VIRTGPU_BLOB_FLAG_USERPTR_RDONLY;
 
   struct drm_virtgpu_resource_create_blob args = {
       .blob_mem = VIRTGPU_BLOB_MEM_HOST3D_GUEST,
@@ -383,14 +385,15 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemory(HSAuint32 PreferredNode, HSAuint64 Si
 }
 
 /* Blob-map the physical handle (NoAddress allocation) at a reserved VA for VMM. */
-HSAKMT_STATUS HSAKMTAPI vhsaKmtVirtioMapHandleToVA(void* MemoryHandle, void* Va, HSAuint64 Size) {
+HSAKMT_STATUS HSAKMTAPI vhsaKmtVirtioMapHandleToVA(void* MemoryHandle, void* Va, HSAuint64 Size,
+                                                   int Prot) {
   CHECK_VIRTIO_KFD_OPEN();
 
   vhsakmt_bo_handle bo = (vhsakmt_bo_handle)MemoryHandle;
   if (!bo) return HSAKMT_STATUS_INVALID_HANDLE;
 
   void* cpu = Va;
-  int r = virtio_gpu_map_handle(bo->dev->vgdev, bo->real.handle, Size, &cpu, Va);
+  int r = virtio_gpu_map_handle(bo->dev->vgdev, bo->real.handle, Size, &cpu, Va, Prot);
   if (r || cpu != Va) {
     vhsa_err("%s: blob map failed va=%p size=%lx handle=%u r=%d cpu=%p\n", __FUNCTION__, Va, Size,
              bo->real.handle, r, cpu);
