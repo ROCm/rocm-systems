@@ -13,11 +13,22 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added the xGMI block to the gfx908, gfx90a, and gfx940–gfx942 Memory Charts, which previously showed it only on gfx950. The block is drawn without bandwidth counters on these architectures.
 
+* Added metrics to the gfx1250 Memory Chart:
+  * Instruction cache utilization, latency, and stall rate.
+  * Scalar data cache utilization, latency, stall rate, and bandwidth.
+  * GL1 request latency.
+
 ### Changed
 
 * Renamed the Memory Chart left-hand panel from "Kernel" to "Compute Units" on CDNA (gfx9) and to "WGPs" on gfx115x and gfx1250. The panel now shows resource allocation stats: Wave Occupancy as a percent of the maximum wavefronts per CU (gfx9) or per WGP (gfx115x, gfx1250), vGPRs, sGPRs, Scratch in KB per wave, LDS Allocation, and Workgroups per active CU (gfx9) or per WGP (gfx115x, gfx1250).
 
 * All Memory Chart bandwidth values now use uniform fixed-point GB/s formatting (3 decimal places) for easy cross-level comparison.
+
+* Memory Chart consistency improvements across architectures.
+  * Panel and arrow sizes now follow their content.
+  * The gfx115x SQC panel shows separate instruction and scalar data cache read bandwidth to GL1.
+  * The LDS instruction arrow uses the default color.
+  * Percent values, including stall rates, show a progress bar, and missing values show `N/A`, on every architecture.
 
 * Every CDNA (gfx9) Memory Chart metric now reports a unit, and the Memory Chart metric descriptions in the documentation link to the related hardware sections.
 
@@ -36,6 +47,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Resolved issues
 
 * Fixed measured zero HBM bandwidth rendering as `N/A` on the CDNA (gfx9) Memory Chart Data Fabric to MALL arrows. It now reports `0.000 GB/s`.
+
+* Fixed the Memory Chart tables printing without their titles or panel heading when analyzing more than one workload (baseline comparison).
 
 ### Upcoming changes
 

@@ -547,61 +547,48 @@ def extract_membw_metrics(
 
 ## Renderer Changes
 
-> **Dependency:** This section assumes the completion of [PR #8648: redesign gfx9 mem chart with rich layout](https://github.com/ROCm/rocm-systems/pull/8648).
+`src/memory_chart/mem_chart.py` draws the memory chart from a JSON layout in `src/memory_chart/layouts/`, one per architecture family. The layout lists the blocks, the metrics in each block, and the arrows between blocks. The renderer has no architecture-specific code. See `src/memory_chart/README.md` for the layout fields.
 
-The gfx9 memory chart renderer uses Rich composable panels and grids (10-column `Table.grid` layout) with shared builders from `mem_chart_common.py`.
+### Where bottleneck annotations go
 
-### Integration points for bottleneck annotations
-
-1. **Cache panel rows:** `build_cache_panel()` accepts a list of `(label, value, unit, color)` tuples. Adding a bottleneck indicator row:
-   ```python
-   # Example: GL1 TCP stall active at 22.4%
-   ("TCP stall", 22.4, "%", COLORS["stall"])
-   # Example: GL2 HBM BW bound active at 15.1%
-   ("HBM BW bound", 15.1, "%", COLORS["stall"])
+1. **Stall rows in blocks:** A block with a `stall_level` (`GL1`, `GL2`, or `EA`) lists the active leaf bottlenecks of that level, below its metrics. Each row shows the node label and the value of its first supporting metric, in the stall color:
+   ```text
+   [!] TCP<-UTCL1 18.7%
    ```
+   On gfx950, VL1D has `GL1`, L2 has `GL2`, and Data Fabric has `EA`. Adding stall rows to another architecture only needs `stall_level` in its layout.
 
-2. **Edge column markup:** Insert annotation lines into edge `Text.from_markup()` lists:
-   ```python
-   # Example: between GL1 and GL2 columns
-   "[red bold][!] TCP<-UTCL1 18.7%[/red bold]"
-   ```
+2. **Stall legend entry:** The legend shows the stall color when the layout has a `stall` metric or any block has a stall row.
 
-3. **Below-chart summary:** Insert after the main grid, before the legend:
-   ```python
-   def _print_bottleneck_summary(console: Console, membw: MemBwAnalysisResult) -> None:
-       # Prints active bottleneck labels and supporting metrics
-       ...
-   ```
+3. **Guidance below the chart:** `tty.py` adds the guidance panel under the chart (see [Guidance renderer](#guidance-renderer)).
 
-4. **BW color coding:** Existing `bw_color()` / `PeakBandwidths` provides utilization-based edge coloring.
+### `plot_mem_chart()` signature
 
-5. **Stall legend entry:** `build_legend(include_stall=True)` enables the stall color key.
+This is the point where block 30 derived data enters the block 3 renderer (see HLD Decision 4: Cross-block data flow for analysis overlay). The `membw` parameter carries a `MemBwAnalysisResult` -- a renderer-agnostic analytical object, not raw block 30 metrics. When it is `None`, the chart has no stall rows. This cross-block dependency is temporary; it disappears when block 30 metrics consolidate into block 3.
 
-### `plot_mem_chart()` signature change
-
-This is the point where block 30 derived data enters the block 3 renderer (see HLD Decision 4: Cross-block data flow for analysis overlay). The `membw` parameter carries a `MemBwAnalysisResult` -- a renderer-agnostic analytical object, not raw block 30 metrics. When `None`, the chart renders exactly as it does today. This cross-block dependency is temporary; it disappears when block 30 metrics consolidate into block 3.
-
-The existing `normal_unit` parameter feeds only the chart heading string (e.g. `"3. Memory Chart (Normalization: per_kernel)"`). It is not passed to the tree evaluator and does not affect bottleneck annotation values. Bottleneck indicator metrics use hardware cycle counter denominators and are independent of `--normal-unit` by construction (see HLD NFR5).
+`tty.py` builds `chart_title` from `--normal-unit` (e.g. `"3. Memory Chart (Normalization: per_kernel)"`) with `format_mem_chart_heading()`. The normalization is not passed to the tree evaluator and does not affect bottleneck annotation values. Bottleneck indicator metrics use hardware cycle counter denominators and are independent of `--normal-unit` by construction (see HLD NFR5).
 
 ```python
 def plot_mem_chart(
-    normal_unit: str,
-    metric_dict: dict[str, Any],
+    metric_dict: dict[str, Any],             # metric name -> value
     *,
-    chart_title: Optional[str] = None,
-    gpu_arch: Optional[str] = None,
-    peak_bw: Optional[PeakBandwidths] = None,
-    membw: MemBwAnalysisResult | None = None,   # NEW (HLD Decision 2)
+    chart_title: str,
+    gpu_arch: str,                           # selects the layout
+    units: dict[str, str],                   # metric name -> config unit
+    membw: Optional[MemBwAnalysisResult] = None,
 ) -> str:
 ```
 
 ### Guidance renderer
 
 ```python
-def render_membw_guidance(membw: MemBwAnalysisResult) -> str:
-    ...  # called by tty.py after plot_mem_chart; concatenated for stdout
+def _render_membw_guidance(
+    membw_result: MemBwAnalysisResult,
+    chart_width: int = 0,
+) -> str:
+    ...  # in tty.py; called after plot_mem_chart, and sized to the chart width
 ```
+
+When no bottleneck is active, it prints a single status line instead of the panel.
 
 > **Demo mockups only -- fake data, for visualization purposes only.** The screenshots below illustrate the rich layout capabilities of the memory chart with bottleneck annotations overlaid. They do not represent real profiling output.
 
@@ -816,8 +803,7 @@ Primary: `sample/membw_analysis_test_suite/` -- existing HIP microbenchmarks tar
 ## References
 
 - `src/rocprof_compute_soc/analysis_configs/gfx950/3000_mem_bw.yaml` -- metric definitions and formulas (tables 3001, 3012, 3018 are primary)
-- `src/utils/mem_chart_gfx9.py` -- memory chart renderer (Rich-based, post-refactor PR #8648)
-- `src/utils/mem_chart_common.py` -- shared chart builders (`build_cache_panel`, `build_bw_edge_column`, etc.)
+- `src/memory_chart/mem_chart.py` -- memory chart renderer, drawing the layouts in `src/memory_chart/layouts/`
 - `src/utils/tty.py` -- analyze output orchestration (memory chart branch)
 - `src/utils/parser.py` -- `build_dfs` (target for flag check cleanup)
 - `src/argparser.py` -- `ExperimentalAction` and `--membw-analysis` flag definitions

@@ -612,31 +612,24 @@ add_test(
 
 # Memory chart tests — no GPU required
 add_test(
-    NAME test_mem_chart_gfx11
+    NAME test_memory_chart_loader
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx11.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx11.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_memory_chart_loader.xml
+        ${COV_OPTION} tests/unit/memory_chart/test_loader.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
-    NAME test_mem_chart_common
+    NAME test_memory_chart_units
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_common.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_common.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_memory_chart_units.xml
+        ${COV_OPTION} tests/unit/memory_chart/test_units.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
-    NAME test_mem_chart_gfx9
+    NAME test_memory_chart_mem_chart
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx9.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx9.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_mem_chart_gfx1250
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx1250.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx1250.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_memory_chart_mem_chart.xml
+        ${COV_OPTION} tests/unit/memory_chart/test_mem_chart.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -1088,10 +1081,9 @@ if(${ENABLE_COVERAGE})
         test_analysis_cli
         test_pattern_matching
         test_list_metrics_cli
-        test_mem_chart_common
-        test_mem_chart_gfx9
-        test_mem_chart_gfx11
-        test_mem_chart_gfx1250
+        test_memory_chart_loader
+        test_memory_chart_units
+        test_memory_chart_mem_chart
         test_membw_engine
         test_membw_summary
         test_membw_guidance
@@ -1225,6 +1217,13 @@ install(
 # src/rocprof_compute_profile
 install(
     DIRECTORY src/rocprof_compute_profile
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
+    PATTERN "__pycache__" EXCLUDE
+)
+# src/memory_chart (renderer and its JSON layouts)
+install(
+    DIRECTORY src/memory_chart
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE

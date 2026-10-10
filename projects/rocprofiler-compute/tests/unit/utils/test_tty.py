@@ -13,7 +13,7 @@ import pytest
 
 import config
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
-from utils.mem_chart_common import strip_ansi
+from memory_chart.mem_chart import strip_ansi
 from utils.tty import (
     _render_membw_guidance,
     convert_time_columns,
@@ -33,7 +33,6 @@ from utils.utils_analysis import (
     build_call_trees,
     build_operator_summary,
 )
-from utils.utils_common import is_gfx115x, is_gfx1250
 
 TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 
@@ -180,7 +179,7 @@ def test_format_table_output_keeps_pc_sampling_table_21_1() -> None:
     assert content.index("Stall reason definitions:") < content.index("v_mov")
 
 
-def test_format_table_output_scales_bytes_per_second_for_gfx9() -> None:
+def test_format_table_output_scales_bytes_per_second() -> None:
     df = pd.DataFrame({
         "Metric": ["DRAM Read Bandwidth"],
         "Value": [1e9],
@@ -193,53 +192,10 @@ def test_format_table_output_scales_bytes_per_second_for_gfx9() -> None:
         df,
         "metric_table",
         runs={"only": object()},
-        gpu_arch="gfx942",
     )
 
     assert "GB/s" in content
     assert "1000000000" not in content
-
-
-def test_format_table_output_mem_chart_uses_unscaled_bytes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: dict[str, dict] = {}
-
-    def gfx9_stub(
-        mem_data: dict,
-        *,
-        chart_title: str,
-        gpu_arch: str = "",
-    ) -> str:
-        calls["gfx9"] = {
-            "mem_data": mem_data,
-            "chart_title": chart_title,
-            "gpu_arch": gpu_arch,
-        }
-        return "rendered CDNA memory chart"
-
-    monkeypatch.setattr("utils.tty.mem_chart_gfx9.plot_mem_chart", gfx9_stub)
-    df = pd.DataFrame({
-        "Metric": ["DRAM Read Bandwidth"],
-        "Value": [1e9],
-        "Unit": ["Bytes/s"],
-    })
-
-    content = format_table_output(
-        make_args(),
-        {
-            "id": 300,
-            "title": "Memory Chart",
-            "cli_style": "mem_chart",
-        },
-        df,
-        "metric_table",
-        runs={"only": object()},
-        gpu_arch="gfx942",
-    )
-
-    assert calls["gfx9"]["mem_data"] == {"DRAM Read Bandwidth": 1e9}
-    assert content == "rendered CDNA memory chart\n"
 
 
 def test_has_time_data_detection() -> None:
@@ -509,7 +465,7 @@ def test_show_all_membw_analysis_panel_gate(
     assert "30.13 EA Interface" in output_lines
 
 
-def test_show_all_dispatches_gfx1250_memory_chart(
+def test_show_all_draws_the_memory_chart_from_raw_values_and_config_units(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     args = argparse.Namespace(
@@ -532,6 +488,7 @@ def test_show_all_dispatches_gfx1250_memory_chart(
         "title": "Instruction Cache",
         "cli_style": "mem_chart",
         "header": {"metric": "Metric", "value": "Value", "unit": "Unit"},
+        "metric": {"DRAM Read Bandwidth": {"value": "X", "unit": "Bytes/s"}},
     }
     arch_configs = SimpleNamespace(
         panel_configs={
@@ -548,21 +505,20 @@ def test_show_all_dispatches_gfx1250_memory_chart(
             sys_info=pd.DataFrame([{"gpu_arch": "gfx1250"}]),
         )
     }
-    calls: list[tuple[dict, str]] = []
+    calls: list[tuple[dict, str, str, dict]] = []
 
     monkeypatch.setattr(
         "utils.tty.process_table_data",
         lambda *_args, **_kwargs: metric_dataframe,
     )
 
-    def gfx1250_stub(mem_data: dict, *, chart_title: str) -> str:
-        calls.append((mem_data, chart_title))
+    def chart_stub(
+        mem_data: dict, *, chart_title: str, gpu_arch: str, units: dict, membw=None
+    ) -> str:
+        calls.append((mem_data, chart_title, gpu_arch, units))
         return "rendered gfx1250 memory chart"
 
-    monkeypatch.setattr(
-        "utils.tty.mem_chart_gfx1250.plot_mem_chart",
-        gfx1250_stub,
-    )
+    monkeypatch.setattr("utils.tty._plot_mem_chart", chart_stub)
     rendered_output = StringIO()
 
     show_all(
@@ -573,10 +529,13 @@ def test_show_all_dispatches_gfx1250_memory_chart(
         profiling_config={"filter_blocks": []},
     )
 
+    # Values are unscaled Bytes/s; units are the config's, not the display's
     assert calls == [
         (
             {"DRAM Read Bandwidth": 512e9},
             "3. Memory Chart (Normalization: per_wave)",
+            "gfx1250",
+            {"DRAM Read Bandwidth": "Bytes/s"},
         )
     ]
     assert "rendered gfx1250 memory chart" in rendered_output.getvalue()
@@ -641,91 +600,6 @@ def test_edge_cases_and_error_handling() -> None:
     result = convert_time_columns(mixed_case_df, "ms")
     assert result.loc[0, "Unit"] == "ms"
     assert result.loc[1, "Unit"] == "ms"
-
-
-@pytest.mark.parametrize(
-    "gpu_arch",
-    [
-        pytest.param("gfx1151", id="rdna35"),
-        pytest.param("gfx942", id="cdna"),
-        pytest.param("gfx1250", id="gfx1250"),
-    ],
-)
-def test_format_table_output_dispatches_memory_chart_renderer(
-    monkeypatch: pytest.MonkeyPatch,
-    gpu_arch: str,
-) -> None:
-    """Memory Chart output uses the architecture renderer and shared heading."""
-    calls: dict[str, dict] = {}
-
-    def gfx11_stub(mem_data: dict, *, chart_title: str) -> str:
-        calls["gfx11"] = {
-            "mem_data": mem_data,
-            "chart_title": chart_title,
-        }
-        return "rendered RDNA3.5 memory chart"
-
-    def gfx9_stub(
-        mem_data: dict,
-        *,
-        chart_title: str = "",
-        gpu_arch: str = "",
-    ) -> str:
-        calls["gfx9"] = {
-            "mem_data": mem_data,
-            "chart_title": chart_title,
-        }
-        return "rendered CDNA memory chart"
-
-    monkeypatch.setattr(
-        "utils.tty.mem_chart_gfx11.plot_mem_chart",
-        gfx11_stub,
-    )
-
-    def gfx1250_stub(mem_data: dict, *, chart_title: str) -> str:
-        calls["gfx1250"] = {
-            "mem_data": mem_data,
-            "chart_title": chart_title,
-        }
-        return "rendered gfx1250 memory chart"
-
-    monkeypatch.setattr(
-        "utils.tty.mem_chart_gfx9.plot_mem_chart",
-        gfx9_stub,
-    )
-    monkeypatch.setattr(
-        "utils.tty.mem_chart_gfx1250.plot_mem_chart",
-        gfx1250_stub,
-    )
-    df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
-
-    content = format_table_output(
-        make_args(),
-        {
-            "id": 701,
-            "title": "Memory Chart",
-            "cli_style": "mem_chart",
-        },
-        df,
-        "metric_table",
-        runs={"only": object()},
-        gpu_arch=gpu_arch,
-    )
-
-    if is_gfx115x(gpu_arch):
-        expected, return_value = "gfx11", "rendered RDNA3.5 memory chart"
-    elif is_gfx1250(gpu_arch):
-        expected, return_value = "gfx1250", "rendered gfx1250 memory chart"
-    else:
-        expected, return_value = "gfx9", "rendered CDNA memory chart"
-
-    assert calls[expected] == {
-        "mem_data": {"Metric A": 1},
-        "chart_title": "7. Memory Chart (Normalization: per_wave)",
-    }
-    for other in {"gfx11", "gfx9", "gfx1250"} - {expected}:
-        assert other not in calls
-    assert content == f"{return_value}\n"
 
 
 def test_format_duration_microseconds_below_threshold():
@@ -925,102 +799,27 @@ def test_show_operator_summary_renders_na_for_nan_cells(capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_format_table_output_view_table_skips_gfx9_memory_chart_renderer(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """--view table renders a mem_chart table as a plain titled table on gfx9."""
-
-    monkeypatch.setattr(
-        "utils.tty.mem_chart_gfx9.plot_mem_chart",
-        lambda *_a, **_k: pytest.fail(
-            "gfx9 memory chart renderer ran despite --view table"
-        ),
-    )
-    df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
-
-    content = format_table_output(
-        make_args(view="table"),
-        {"id": 301, "title": "Memory Chart", "cli_style": "mem_chart"},
-        df,
-        "metric_table",
-        runs={"only": object()},
-        gpu_arch="gfx942",
-    )
-
-    assert content.startswith("3.1 Memory Chart")
-    assert "Metric A" in content
-
-
-def test_format_table_output_view_table_skips_gfx11_memory_chart_renderer(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """--view table renders a mem_chart table as a plain titled table on gfx11."""
-
-    monkeypatch.setattr(
-        "utils.tty.mem_chart_gfx11.plot_mem_chart",
-        lambda *_a, **_k: pytest.fail(
-            "gfx11 memory chart renderer ran despite --view table"
-        ),
-    )
-    df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
-
-    content = format_table_output(
-        make_args(view="table"),
-        {"id": 301, "title": "Memory Chart", "cli_style": "mem_chart"},
-        df,
-        "metric_table",
-        runs={"only": object()},
-        gpu_arch="gfx1151",
-    )
-
-    assert content.startswith("3.1 Memory Chart")
-    assert "Metric A" in content
-
-
-def test_format_table_output_view_table_skips_gfx1250_memory_chart_renderer(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """--view table renders a mem_chart table as a plain titled table on gfx1250."""
-
-    monkeypatch.setattr(
-        "utils.tty.mem_chart_gfx1250.plot_mem_chart",
-        lambda *_a, **_k: pytest.fail(
-            "gfx1250 memory chart renderer ran despite --view table"
-        ),
-    )
-    df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
-
-    content = format_table_output(
-        make_args(view="table"),
-        {"id": 301, "title": "Memory Chart", "cli_style": "mem_chart"},
-        df,
-        "metric_table",
-        runs={"only": object()},
-        gpu_arch="gfx1250",
-    )
-
-    assert content.startswith("3.1 Memory Chart")
-    assert "Metric A" in content
-
-
 @pytest.mark.parametrize(
-    "view,expect_chart",
+    "view,gpu_arch,expect_chart",
     [
-        pytest.param(None, True, id="default"),
-        pytest.param("table", False, id="view_table"),
+        pytest.param(None, "gfx950", True, id="default"),
+        pytest.param("table", "gfx950", False, id="view_table"),
+        pytest.param(None, "gfx1030", False, id="arch_without_layout"),
     ],
 )
 def test_show_all_view_table_replaces_memory_chart_panel(
     monkeypatch: pytest.MonkeyPatch,
     view,
+    gpu_arch: str,
     expect_chart: bool,
 ) -> None:
-    """A mem-chart-only panel emits the merged chart, or tables under --view table."""
+    """A mem-chart-only panel emits the merged chart, or tables under --view table
+    or on an architecture without a chart layout."""
     mem_chart_marker = "rendered memory chart"
     df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
     monkeypatch.setattr("utils.tty.process_table_data", lambda *_a, **_k: df)
     monkeypatch.setattr(
-        "utils.tty.mem_chart_gfx9.plot_mem_chart",
+        "utils.tty._plot_mem_chart",
         lambda *_a, **_k: mem_chart_marker,
     )
     rendered_output = StringIO()
@@ -1046,7 +845,7 @@ def test_show_all_view_table_replaces_memory_chart_panel(
     runs = {
         "fixture": SimpleNamespace(
             dfs={301: df},
-            sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
+            sys_info=pd.DataFrame([{"gpu_arch": gpu_arch}]),
         )
     }
 
