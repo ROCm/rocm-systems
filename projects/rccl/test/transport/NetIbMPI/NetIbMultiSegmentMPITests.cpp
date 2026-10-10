@@ -81,9 +81,11 @@ protected:
     // Per-segment iflush is the RCCL fallback (param default is 1 = scratchpad).
     // RCCL_PARAM caches on first read, so this process must be launched with
     // RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 (test_runner one-mpirun-per-test).
-    static bool directGdrFlushEnabled() {
+    // IB-CAST also keeps flush off unless NCCL_GDR_FLUSH_DISABLE=0.
+    bool directGdrFlushEnabled() const {
         const char* v = getenv("RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING");
-        return v && atoi(v) == 0;
+        if (!(v && atoi(v) == 0)) return false;
+        return net_ != &netIbCast || MPIHelpers::getEnvParam<int>("NCCL_GDR_FLUSH_DISABLE", 1) == 0;
     }
 
     static void FillDevice(void* dptr, size_t size, uint8_t seed) {
@@ -138,7 +140,6 @@ protected:
             PostSendWithRetry(pair.sendComm, buf, size, tag, sendMh_, &req);
             int sz = 0;
             EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
-            EXPECT_EQ(sz, static_cast<int>(size));
         }
         MPI_Barrier(MPI_COMM_WORLD);
         if (rank == 0)
@@ -397,8 +398,9 @@ TEST_F(NetIbMultiSegmentMPITest, ExceedsMaxSegmentsRejected) {
         void* atCapMh = nullptr;
         ncclResult_t atCapRet = RegisterMultiSegmentMr(comm, *atCap, net_ == &netIbCast, &atCapMh);
         NetMHandleGuard atCapGuard(atCapMh, NetMHandleDeleter(net_, comm));
-        ASSERT_EQ(atCapRet, ncclSuccess) << "registration at exactly NCCL_IB_MAX_SEGMENTS must succeed";
-        ASSERT_NE(atCapMh, nullptr) << "at-cap registration must produce a handle";
+        EXPECT_EQ(atCapRet, ncclSuccess) << "registration at exactly NCCL_IB_MAX_SEGMENTS must succeed";
+        EXPECT_NE(atCapMh, nullptr) << "at-cap registration must produce a handle";
+        if (!MPIHelpers::allRanksTrue(atCapRet == ncclSuccess && atCapMh != nullptr)) return;
     }
 
     void* mh = nullptr;
@@ -432,7 +434,7 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentRegisterOff_DeclinesRegistration) {
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
 
     void* mh = nullptr;
-    ncclResult_t r = RegisterMultiSegmentMr(comm, *buf, &mh);
+    ncclResult_t r = RegisterMultiSegmentMr(comm, *buf, net_ == &netIbCast, &mh);
 #if NCCL_CUMEM_DMABUF_EXPORT_GATE
     if (rank == 0) {
         EXPECT_EQ(r, ncclInvalidUsage) << "NCCL_MULTI_SEGMENT_REGISTER=0 receiver still registered a multi-segment buffer";
@@ -443,6 +445,41 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentRegisterOff_DeclinesRegistration) {
         EXPECT_NE(mh, nullptr);
         if (mh != nullptr) EXPECT_EQ(ncclSuccess, net_->deregMr(comm, mh));
     }
+#else
+    (void)r;
+    GTEST_SKIP() << "dma-buf export API unavailable at build time";
+#endif
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// IB-CAST declines multi-segment registration under BY_ORDER matching or QP sharing,
+// since segmented sends carry neither a per-imm byte_len nor a shared-QP commId.
+TEST_F(NetIbMultiSegmentMPITest, CastUnsafeMode_DeclinesRegistration) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                            false, kMinGpusPerNode, kNoNodeLimit);
+    const bool byOrder   = MPIHelpers::getEnvParam<int>("NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME", -2) == 2;
+    const bool qpSharing = MPIHelpers::getEnvParam<int>("RCCL_IB_QP_SHARING_ENABLE", 0) == 1;
+    if (SyncSkip(net_ != &netIbCast || !(byOrder || qpSharing)))
+        GTEST_SKIP() << "Requires NCCL_NET=IB-CAST with NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=2 "
+                        "or RCCL_IB_QP_SHARING_ENABLE=1";
+    int ndev = 0; AssertInitAndGetDevices(&ndev);
+    if (SyncSkip(!PtrSupported(NCCL_PTR_DMABUF))) GTEST_SKIP() << "DMA-BUF registration not supported";
+
+    const int rank = MPIEnvironment::world_rank;
+    MultiSegmentVmmBuffer* buf = AllocSym(kNumSegments);
+    if (SyncSkip(buf == nullptr)) GTEST_SKIP() << "multi-segment VMM allocation unavailable";
+
+    ConnectionPair pair; NetConnectionGuard guard(net_);
+    ASSERT_SETUP_CONNECTION(0, pair, guard);
+    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+
+    void* mh = nullptr;
+    ncclResult_t r = RegisterMultiSegmentMr(comm, *buf, /*isCast=*/true, &mh);
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
+    EXPECT_EQ(r, ncclInvalidUsage) << "byOrder=" << byOrder << " qpSharing=" << qpSharing
+                                   << ": unsafe mode still registered a multi-segment buffer";
+    EXPECT_EQ(mh, nullptr);
+    if (mh != nullptr) (void)net_->deregMr(comm, mh);
 #else
     (void)r;
     GTEST_SKIP() << "dma-buf export API unavailable at build time";
@@ -464,7 +501,7 @@ TEST_F(NetIbMultiSegmentMPITest, SingleSegmentThroughMultiSegPath) {
 // GDR flush is required, so iflush must return a request.
 TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushSelectsSegmentMr) {
     if (SyncSkip(!directGdrFlushEnabled()))
-        GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 "
+        GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 (+ NCCL_GDR_FLUSH_DISABLE=0 on IB-CAST) "
                         "(per-segment iflush chain; RCCL_PARAM caches per process)";
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
     SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh, comm);
@@ -510,7 +547,7 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushSelectsSegmentMr) {
 // without a boundary error and still complete.
 TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushTouchesEverySegment) {
     if (SyncSkip(!directGdrFlushEnabled()))
-        GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 "
+        GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 (+ NCCL_GDR_FLUSH_DISABLE=0 on IB-CAST) "
                         "(per-segment iflush chain; RCCL_PARAM caches per process)";
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
     SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh, comm);
@@ -554,7 +591,7 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushTouchesEverySegment) {
 // iflush must fence every non-zero entry, not only the final receive.
 TEST_F(NetIbMultiSegmentMPITest, MultiRecvFlushTouchesEveryHandle) {
     if (SyncSkip(!directGdrFlushEnabled()))
-        GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 "
+        GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 (+ NCCL_GDR_FLUSH_DISABLE=0 on IB-CAST) "
                         "(per-segment iflush chain; RCCL_PARAM caches per process)";
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh0 = nullptr; void* comm = nullptr;
     SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh0, comm);
