@@ -144,7 +144,16 @@
         {"name": "TeamTopologyTests.Cft_HierMultimem_MatchesFlatWhenCftUnsupported", "description": "ncclTeamCft HIER_MULTIMEM factors by 1 and equals FLAT on ROCm", "test_filter": "TeamTopologyTests.Cft_HierMultimem_MatchesFlatWhenCftUnsupported"},
         {"name": "TeamTopologyTests.RankToWorld_ZeroTeamAliasesSelf_OffsetTeamMapsLinearly", "description": "Pin: a zero-stride team makes ncclTeamRankToWorld alias every team rank to self, contrasted with the linear map on a strided team", "test_filter": "TeamTopologyTests.RankToWorld_ZeroTeamAliasesSelf_OffsetTeamMapsLinearly"},
         {"name": "TeamTopologyTests.RankToLsa_NoBoundsCheck_ExtrapolatesOutOfRange", "description": "Pin: ncclTeamRankToLsa applies lsaSelf + (rank - team.rank) * team.stride unclamped, for in-range and out-of-range team ranks alike", "test_filter": "TeamTopologyTests.RankToLsa_NoBoundsCheck_ExtrapolatesOutOfRange"},
-        {"name": "TeamTopologyTests.Cft_HierLsa_MultiRank_ReturnsEmptyTeam_PinsKnownDefect", "description": "Pin: ncclTeamCft HIER_LSA truncates 1/lsaSize to 0, plus the lsaSelf term and the cftMcSize singleton at 2 ranks (needs 2 GPUs)", "test_filter": "TeamTopologyTests.Cft_HierLsa_MultiRank_ReturnsEmptyTeam_PinsKnownDefect", "env_variables": {"UT_TEAM_TOPOLOGY_REQUIRE_MULTI_GPU": "1"}}
+        {"name": "TeamTopologyTests.Cft_HierLsa_MultiRank_ReturnsEmptyTeam_PinsKnownDefect", "description": "Pin: ncclTeamCft HIER_LSA truncates 1/lsaSize to 0, plus the lsaSelf term and the cftMcSize singleton at 2 ranks (needs 2 GPUs)", "test_filter": "TeamTopologyTests.Cft_HierLsa_MultiRank_ReturnsEmptyTeam_PinsKnownDefect", "env_variables": {"UT_TEAM_TOPOLOGY_REQUIRE_MULTI_GPU": "1"}},
+        {"name": "Diagnostics.DisabledByDefault", "description": "NCCL_RUN_DIAGNOSTICS unset or 0 prints no report", "test_filter": "Diagnostics.DisabledByDefault", "timeout": 300},
+        {"name": "Diagnostics.AllDirectedEdgesVerified", "description": "NCCL_RUN_DIAGNOSTICS verifies every directed P2P edge", "test_filter": "Diagnostics.AllDirectedEdgesVerified", "timeout": 240},
+        {"name": "Diagnostics.EdgeCountFollowsCommSize", "description": "NCCL_RUN_DIAGNOSTICS edge count for 2 and 4 GPUs", "test_filter": "Diagnostics.EdgeCountFollowsCommSize", "timeout": 300},
+        {"name": "Diagnostics.CommUsableAfterDiagnostics", "description": "AllReduce after a diagnosed init", "test_filter": "Diagnostics.CommUsableAfterDiagnostics", "timeout": 240},
+        {"name": "Diagnostics.RunsAtEveryCommInit", "description": "NCCL_RUN_DIAGNOSTICS report after re-init and ncclCommSplit", "test_filter": "Diagnostics.RunsAtEveryCommInit", "timeout": 300},
+        {"name": "Diagnostics.P2pDisabledReportsNoEdges", "description": "NCCL_RUN_DIAGNOSTICS with NCCL_P2P_DISABLE=1", "test_filter": "Diagnostics.P2pDisabledReportsNoEdges", "timeout": 240},
+        {"name": "Diagnostics.ReportOnStdoutOnly", "description": "NCCL_RUN_DIAGNOSTICS report goes to stdout only", "test_filter": "Diagnostics.ReportOnStdoutOnly", "timeout": 240},
+        {"name": "Diagnostics.SingleProcessPeerAccessNotice", "description": "NCCL_RUN_DIAGNOSTICS peer-access notice in one process", "test_filter": "Diagnostics.SingleProcessPeerAccessNotice", "timeout": 240},
+        {"name": "Diagnostics.ReportParserOnFixedCapture", "description": "Diagnostics report parser on a fixed capture (no GPU)", "test_filter": "Diagnostics.ReportParserOnFixedCapture", "timeout": 60}
       ]
     },
     "unit_tests_fixtures": {
