@@ -26,11 +26,13 @@ THE SOFTWARE.
 #include "graph/topo.h"
 #include "enqueue.h"
 #include <algorithm>
+#include <climits>
 #include <cstdint>
 #include <vector>
 #include "debug.h"
 #include "net.h"
 #include "amdsmi_wrap.h"
+#include "xtp_wrap.h"
 #include "include/graph.h"
 #include "register.h"
 #include "info.h"
@@ -2151,6 +2153,22 @@ void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable) {
   const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
   comm->enableCustColl = (archGfx942 || archGfx950) && (inputStr && !atoi(inputStr));
 
+  // An XTP profile replaces the rank threshold below, but never an explicit
+  // NCCL_PXN_DISABLE. This sits ahead of the arch gate deliberately: the gate
+  // scopes the *built-in*, so consulting after it would make a profile
+  // unable to say anything about an arch the built-in never learned.
+  int64_t pxnProfile = 0;
+  if (inputStr == nullptr && rcclXtpClassAInt(comm, "PXN_DISABLE", &pxnProfile)) {
+    if (pxnProfile != 0 && pxnProfile != 1) {
+      WARN("XTP: PXN_DISABLE is %ld, expected 0 or 1; using built-in value", (long)pxnProfile);
+    } else {
+      INFO(NCCL_INIT, "RCCL PXN set as %s by XTP (nRanks=%d)", pxnProfile ? "disabled" : "enabled", comm->nRanks);
+      comm->enableCustColl = !pxnProfile;
+      rcclPxnDisable = comm->pxnDisable = (int)pxnProfile;
+      return;
+    }
+  }
+
   if ((!archGfx942 && !archGfx950) || inputStr) {
     rcclPxnDisable = comm->pxnDisable = RCCL_VALUE_INVALID;
     return;
@@ -2171,6 +2189,22 @@ void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize) {
   const char* inputStr = getenv("NCCL_P2P_NET_CHUNKSIZE");
   const bool archGfx942 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
   const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+
+  // As in rcclSetPxn: a profile outranks the built-in ladder but not
+  // NCCL_P2P_NET_CHUNKSIZE, and is consulted ahead of the arch gate so it can
+  // cover arches the ladder below does not.
+  int64_t chunkProfile = 0;
+  if (inputStr == nullptr && rcclXtpClassAInt(comm, "P2P_NET_CHUNKSIZE", &chunkProfile)) {
+    if (chunkProfile <= 0 || chunkProfile > INT_MAX) {
+      WARN("XTP: P2P_NET_CHUNKSIZE is %ld, which is out of range; using built-in value", (long)chunkProfile);
+    } else {
+      INFO(NCCL_INIT, "RCCL P2P net chunk size set to %ld by XTP (nRanks=%d)", (long)chunkProfile,
+           comm->nRanks);
+      rcclP2pNetChunkSize = comm->p2pNetChunkSize = (int)chunkProfile;
+      return;
+    }
+  }
+
   if ((!archGfx942 && !archGfx950) || inputStr) {
     rcclP2pNetChunkSize = comm->p2pNetChunkSize = RCCL_VALUE_INVALID;
     return;
