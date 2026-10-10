@@ -85,6 +85,7 @@ function(rccl_define_micro_source_lists)
     tuning-general-test.cc
     param-utils-test.cc                  # src/include/param/utils.h, src/include/param/parser_common.h
     param-parsers-test.cc                # src/include/param/parser_{default,enum,bitset,list}.h
+    param-registry-test.cc               # src/param/param_registry.cc
     ras-client-test.cc
     group-test.cc
     devcomm-test.cc
@@ -835,6 +836,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     # plugin/gin.cc is the first gin.cc in SRC_FILES, so hipify keeps the name.
     GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/gin.cc"
     GDR_PROBE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/gdr_probe.cc"
+    PARAM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/param/param_registry.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
 # ---------------------------------------------------------------------------
