@@ -22,6 +22,10 @@ static int maxBlocksLsa(struct ncclComm* comm, enum ncclSymkKernelId kernelId) {
   case ncclSymkKernelId_AllGather_STMC:
   case ncclSymkKernelId_ReduceScatter_LDMC:
     return divUp((comm->minCompCap < 100 ? 16 : 32), comm->nRanks);
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  case ncclSymkKernelId_AllGather_ST:
+    return ncclSymkIsGfx950(comm) ? std::min(ncclSymkMaxBlocks, 24) : ncclSymkMaxBlocks;
+#endif
   default:
     return ncclSymkMaxBlocks;
   }
