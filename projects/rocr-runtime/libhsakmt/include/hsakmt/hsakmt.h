@@ -1008,6 +1008,21 @@ hsaKmtGetClockCounters(
     );
 
 /**
+  Gets GPU and CPU clock counters for particular Node.
+
+  GPU nodes are queried several times and the shortest complete sample is
+  returned. That reduces GPU/CPU clock correlation error from a delay between
+  the counter reads. CPU-only nodes are read once.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetClockCountersPrecise(
+    HSAuint32         NodeId,  //IN
+    HsaClockCounters* Counters //OUT
+    );
+
+/**
   Retrieves information on the available HSA counters
 */
 

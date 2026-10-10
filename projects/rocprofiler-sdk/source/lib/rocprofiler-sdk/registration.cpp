@@ -1570,6 +1570,13 @@ rocprofiler_set_api_table(const char* name,
             rocprofiler::hsa::copy_table(hsa_api_table->pc_sampling_ext_, lib_instance);
 #endif
 
+        // Enable before profiling resources take clock samples. ROCr keeps this mode enabled
+        // for the process lifetime; API-only tools do not need the additional sampling.
+        if(!rocprofiler::context::get_registered_contexts(
+                rocprofiler::hsa::needs_high_precision_timestamps)
+                .empty())
+            rocprofiler::hsa::enable_high_precision_timestamps(hsa_api_table->amd_ext_);
+
         rocprofiler::aqlprofile::hsa_rsrc_factory_init(hsa_api_table);
 
         // need to construct agent mappings before initializing the queue controller

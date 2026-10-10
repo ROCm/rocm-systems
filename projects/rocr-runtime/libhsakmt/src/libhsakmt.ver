@@ -53,6 +53,7 @@ hsaKmtDbgDisable;
 hsaKmtDbgGetDeviceData;
 hsaKmtDbgGetQueueData;
 hsaKmtGetClockCounters;
+hsaKmtGetClockCountersPrecise;
 hsaKmtPmcGetCounterProperties;
 hsaKmtPmcRegisterTrace;
 hsaKmtPmcUnregisterTrace;
