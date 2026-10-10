@@ -23,6 +23,7 @@
 
 #include "hrr/hrr_api_args.h"  // for HRR_API_COUNT, hrr_api_id_t
 #include "hrr_region_map.h"    // external region annotations (regions/*.hrrr)
+#include "hrr_replay_limits.h" // bounds on archive-driven waits and retries
 
 // Whether a replayed H2D blob restore must be drained before subsequent
 // replay work. Draining is skipped while a stream graph capture is active,
@@ -215,6 +216,17 @@ struct PlaybackContext {
     // The spin-wait in dispatch_event also checks it to avoid deadlock when a
     // thread that was supposed to advance next_seq has already aborted.
     std::atomic<bool> fatal_error{false};
+
+    // Bounds on what the archive can make replay wait for (hrr_replay_limits.h).
+    // dispatch_event gives up on a sequence number that never becomes current
+    // after this many waits with no progress (a gap or duplicate in the
+    // recorded sequence), and a hipEventQuery/hipStreamQuery replay stops
+    // retrying hipErrorNotReady after this many attempts.
+    uint64_t max_seq_waits      = hrr::kDefaultMaxSeqWaits;
+    // Threads that hold a turn and are inside their HIP call. A wait for the
+    // next turn does not count against max_seq_waits while this is non-zero.
+    std::atomic<int> turns_in_flight{0};
+    uint64_t max_query_attempts = hrr::kDefaultMaxQueryAttempts;
 
     // Stats — atomic for safe concurrent increment from replay threads.
     // total_kernel_ms is guarded by map_mutex (unique_lock) in the timing path.
@@ -771,6 +783,14 @@ void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live);
 void hrr_free_device_alloc(PlaybackContext& ctx, void* live);
 
 // ---------------------------------------------------------------------------
+// replay_query_until_success — call `once(arg)` until it stops returning
+// hipErrorNotReady, at most ctx.max_query_attempts times. Returns the first
+// result that is not hipErrorNotReady. If the bound is reached it names `api`,
+// sets ctx.fatal_error (so the replay ends even under --continue-on-error) and
+// returns hipErrorNotReady.
+hipError_t replay_query_until_success(PlaybackContext& ctx, const char* api,
+                                      hipError_t (*once)(void*), void* arg);
+
 // hrr_note_unreplayable — this API cannot be reproduced, and here is why.
 //
 // Called by the UNREPLAYABLE_PLAYBACK_APIS handlers before they return
