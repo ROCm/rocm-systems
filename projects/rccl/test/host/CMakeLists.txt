@@ -84,6 +84,7 @@ function(rccl_define_micro_source_lists)
     tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
     param-utils-test.cc                  # src/include/param/utils.h, src/include/param/parser_common.h
+    param-parsers-test.cc                # src/include/param/parser_{default,enum,bitset,list}.h
     ras-client-test.cc
     group-test.cc
     devcomm-test.cc

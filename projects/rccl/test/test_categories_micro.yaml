@@ -78,6 +78,8 @@ test_categories:
       - "TuningMicrotest.*"
       # include/param/utils.h, include/param/parser_common.h
       - "ParamUtilsMicrotest.*"
+      # include/param/parser_{default,enum,bitset,list}.h
+      - "ParamParsersMicrotest.*"
       # group.cc
       - "GroupEndInternalTest.*"
       - "ReclaimPlannerStateTest.*"
