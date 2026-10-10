@@ -1,3 +1,10 @@
+# ============================================================================
+# KEEP IN SYNC: the per-ASIC exclusions here are mirrored in the ctest label
+# path at amd_smi_test/test_categories.yaml (used by TheRock CI). Until the two
+# are consolidated into a single source, any change here must be reflected there
+# (and vice versa).
+# ============================================================================
+
 declare -A FILTER
 
 # FILTER is meant to be used with a negative gtest filter
