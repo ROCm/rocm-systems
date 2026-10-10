@@ -21,7 +21,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from memory_chart.loader import (  # noqa: E402
+from memory_chart.loader import (
     ARROW_KEYS,
     BLOCK_KEYS,
     ITEM_KEYS,
