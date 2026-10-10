@@ -687,7 +687,10 @@ Examples:
     analyze_group.add_argument(
         "--list-stats",
         action="store_true",
-        help="\t\tList all detected kernels and kernel dispatches.",
+        help=(
+            "\t\tList all detected kernels and kernel dispatches.\n"
+            "\t\tCannot be used with --output-format csv or db."
+        ),
     )
     analyze_group.add_argument(
         "--list-available-metrics",

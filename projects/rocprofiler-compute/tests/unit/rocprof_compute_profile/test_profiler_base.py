@@ -574,6 +574,8 @@ def _make_rpc_args(
     membw_analysis=False,
     experimental=False,
     mode="profile",
+    list_stats=False,
+    output_format="stdout",
 ) -> argparse.Namespace:
     """Build a minimal Namespace for sanitize() unit tests."""
     return argparse.Namespace(
@@ -605,6 +607,12 @@ def _make_rpc_args(
         ml_api_trace=False,
         kernel_iteration_range=None,
         remaining=["--", "./myapp"],
+        list_stats=list_stats,
+        output_format=output_format,
+        torch_operator=None,
+        triton_operator=None,
+        list_torch_operators=False,
+        list_triton_operators=False,
     )
 
 
@@ -742,6 +750,21 @@ def test_sanitize_membw_analysis_injects_block_30(
     instance = _make_profiler_with_args(args)
     instance.sanitize()
     assert args.filter_blocks == expected_filter_blocks
+
+
+@pytest.mark.parametrize(
+    "output_format, expect_error",
+    [("stdout", False), ("txt", False), ("csv", True), ("db", True)],
+)
+def test_handle_analyze_args_list_stats_output_format(output_format, expect_error):
+    """--list-stats is rejected with csv and db output."""
+    args = _make_rpc_args(mode="analyze", list_stats=True, output_format=output_format)
+    instance = _make_rpc_with_args(args)
+    if expect_error:
+        with pytest.raises(SystemExit):
+            instance.handle_analyze_args()
+    else:
+        instance.handle_analyze_args()
 
 
 # ---------------------------------------------------------------------------
