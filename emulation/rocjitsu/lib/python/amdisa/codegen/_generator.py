@@ -7211,13 +7211,22 @@ class CodeGenerator:
             L.append('    value = wf.realtime_timestamp();')
             L.append('    break;')
             L.append('  }')
+            L.append('  case 0x87:')  # MSG_RTN_GET_SE_AID_ID
+            L.append('    if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5)')
+            L.append(
+                '      value = (wf.shader_engine_id() & 0xf) | ((wf.cu().xcc_id() & 0xf) << 16);'
+            )
+            L.append('    else if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)')
+            L.append(
+                '      value = wf.shader_engine_id() & 0xf; // AID[11:8] is zero on the modeled single-AID device.'
+            )
+            L.append('    break;')
             L.append('  case 0x80:')  # MSG_RTN_GET_DOORBELL
             L.append('  case 0x81:')  # MSG_RTN_GET_DDID
             L.append('  case 0x82:')  # MSG_RTN_GET_TMA
             L.append('  case 0x84:')  # MSG_RTN_SAVE_WAVE
             L.append('  case 0x85:')  # MSG_RTN_GET_TBA
             L.append('  case 0x86:')  # MSG_RTN_GET_TBA_TO_PC
-            L.append('  case 0x87:')  # MSG_RTN_GET_SE_AID_ID
             L.append('  case 0x88:')  # MSG_RTN_GET_CLUSTER_BARRIER_STATE
             L.append('  case 0x98:')  # MSG_RTN_SAVE_WAVE_HAS_TDM
             L.append('  default:')

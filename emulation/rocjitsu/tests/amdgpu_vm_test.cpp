@@ -4798,6 +4798,323 @@ TEST(CommandProcessorTest, DynamicScratchRequestBlocksRemovalOnlyUntilDelivery) 
   EXPECT_EQ(fixture.cp()->registered_queue_count_for_test(), 0u);
 }
 
+TEST(CommandProcessorTest, LogicalScratchBackingGrowsForLargerDispatches) {
+  using namespace rocr::llvm::amdhsa;
+  VmFixture fixture("cdna3", 1, 2);
+  constexpr uint64_t ring = 0x8000, descriptor = 0xa000, doorbell = 0x9010;
+  constexpr uint64_t read = descriptor + offsetof(amd_queue_t, read_dispatch_id);
+  constexpr uint64_t write = descriptor + offsetof(amd_queue_t, write_dispatch_id);
+  constexpr uint64_t backing = 0x400000;
+  constexpr uint32_t private_bytes = 256, wave_bytes = private_bytes * 64;
+  std::vector<size_t> allocation_sizes;
+  fixture.cp()->set_scratch_backing_resolver([](uint32_t) { return backing; });
+  fixture.cp()->set_scratch_backing_allocator([&](uint32_t, uint64_t address, size_t size) {
+    EXPECT_EQ(address, backing);
+    allocation_sizes.push_back(size);
+    const std::vector<uint8_t> scratch(size);
+    fixture.mem()->load_image(scratch.data(), scratch.size(), address);
+    return true;
+  });
+  const uint32_t code = SOPP_S_ENDPGM;
+  const uint64_t kernel = fixture.write_kernel(0x1000, &code, sizeof(code));
+  fixture.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
+                         private_bytes);
+  ASSERT_NE(fixture.cp()->register_queue({
+                .address_space = fixture.cp()->default_address_space(),
+                .queue_id = 1,
+                .ring_base_va = ring,
+                .ring_size = 64,
+                .read_ptr_va = read,
+                .write_ptr_va = write,
+                .doorbell_va = doorbell,
+                .doorbell_mode = amdgpu::QueueDoorbellMode::VmPolled,
+                .uses_kfd_queue_abi = true,
+                .queue_desc_va = descriptor,
+            }),
+            0u);
+  auto *snapshots = fixture.capture_halts();
+  uint32_t completed_waves = 0;
+  for (uint32_t round = 1; round <= 3; ++round) {
+    const uint32_t waves = round == 1 ? 1 : round == 2 ? 4 : 2;
+    if (round == 3) {
+      // Runtime takes ownership at the same address by replacing the capacity.
+      fixture.mem()->write32(descriptor + offsetof(amd_queue_t, compute_tmpring_size),
+                             2u | ((wave_bytes / 1024) << 12));
+    }
+    auto packet = make_dispatch_packet(kernel, 0, waves * 64, 64);
+    packet.private_segment_size = private_bytes;
+    fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet), ring);
+    fixture.mem()->write64(write, round);
+    fixture.mem()->write64(doorbell, round);
+    fixture.engine->schedule_event_now(fixture.cp()->doorbell_event());
+    for (uint32_t step = 0; step < 100 && snapshots->snapshots().size() < completed_waves + waves;
+         ++step)
+      if (!fixture.engine->step())
+        break;
+    ASSERT_EQ(snapshots->snapshots().size(), completed_waves + waves);
+    ASSERT_EQ(allocation_sizes.size(), std::min(round, 2u));
+    EXPECT_EQ(allocation_sizes.back(), (round == 1 ? 1u : 4u) * wave_bytes);
+    for (uint32_t wave = 0; wave < waves; ++wave) {
+      const auto &snapshot = snapshots->snapshots()[completed_waves + wave];
+      EXPECT_EQ(snapshot.scratch_base, backing + wave * wave_bytes);
+      EXPECT_LE(snapshot.scratch_base + wave_bytes, backing + allocation_sizes.back());
+    }
+    completed_waves += waves;
+    EXPECT_EQ(fixture.mem()->read32(descriptor + offsetof(amd_queue_t, compute_tmpring_size)) &
+                  0xfffu,
+              waves);
+    EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, 0));
+  }
+}
+
+TEST(CommandProcessorTest, RuntimeScratchRequestsReplacementUntilAWholeWorkgroupFits) {
+  using namespace rocr::llvm::amdhsa;
+  for (const bool alternate : {false, true}) {
+    const uint32_t required_waves = alternate ? 2 : 4;
+    for (const uint32_t capacity : {required_waves - 1, required_waves}) {
+      SCOPED_TRACE(alternate);
+      SCOPED_TRACE(capacity);
+      VmFixture fixture("cdna5", 1, 8);
+      constexpr uint64_t ring = 0x8000, descriptor = 0xa000, signal = 0xb000;
+      constexpr uint64_t backing = 0x400000;
+      constexpr uint64_t read = descriptor + offsetof(amd_queue_t, read_dispatch_id);
+      constexpr uint64_t write = descriptor + offsetof(amd_queue_t, write_dispatch_id);
+      constexpr uint32_t private_bytes = 256, wave_bytes = private_bytes * 32;
+      const uint32_t code = 0xbfb00000;
+      const uint64_t kernel = fixture.write_kernel(0x1000, &code, sizeof(code));
+      fixture.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
+                             private_bytes);
+      const std::vector<uint8_t> scratch(required_waves * wave_bytes);
+      fixture.mem()->load_image(scratch.data(), scratch.size(), backing);
+      const uint64_t tmpring_address =
+          descriptor + (alternate ? offsetof(amd_queue_v2_t, alt_compute_tmpring_size)
+                                  : offsetof(amd_queue_t, compute_tmpring_size));
+      const uint32_t wave_size_field = (wave_bytes / 256) << 12;
+      fixture.mem()->write32(tmpring_address, capacity | wave_size_field);
+      fixture.mem()->write64(
+          descriptor + (alternate ? offsetof(amd_queue_v2_t, alt_scratch_backing_memory_location)
+                                  : offsetof(amd_queue_t, scratch_backing_memory_location)),
+          backing);
+      if (alternate) {
+        fixture.mem()->write32(descriptor + offsetof(amd_queue_v2_t, caps),
+                               AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM);
+        fixture.mem()->write32(descriptor +
+                                   offsetof(amd_queue_v2_t, alt_scratch_wave64_lane_byte_size),
+                               private_bytes / 2);
+        fixture.mem()->write32(descriptor + offsetof(amd_queue_v2_t, alt_scratch_dispatch_limit_x),
+                               required_waves * 32);
+        fixture.mem()->write32(descriptor + offsetof(amd_queue_v2_t, alt_scratch_dispatch_limit_y),
+                               1);
+        fixture.mem()->write32(descriptor + offsetof(amd_queue_v2_t, alt_scratch_dispatch_limit_z),
+                               1);
+      }
+      fixture.mem()->write64(descriptor + offsetof(amd_queue_t, queue_inactive_signal), signal);
+      fixture.mem()->write64(signal + 16, signal + 64);
+      fixture.mem()->write32(signal + 24, 7);
+      uint32_t allocation_requests = 0, replacement_requests = 0;
+      fixture.cp()->set_scratch_backing_allocator([&](uint32_t, uint64_t, size_t) {
+        ++allocation_requests;
+        return false;
+      });
+      auto *snapshots = fixture.capture_halts();
+      amdgpu::InterruptSubscription subscription([&](uint32_t, uint32_t) {
+        if (fixture.mem()->read64(signal + 8) != 0x401)
+          return;
+        ++replacement_requests;
+        EXPECT_EQ(fixture.mem()->read64(read), 0u);
+        EXPECT_TRUE(snapshots->snapshots().empty());
+        fixture.mem()->write32(tmpring_address, required_waves | wave_size_field);
+        fixture.mem()->write64(signal + 8, 0);
+      });
+      const auto registration = fixture.cp()->register_queue({
+          .address_space = fixture.cp()->default_address_space(),
+          .interrupt_sink = subscription.sink(),
+          .queue_id = 1,
+          .ring_base_va = ring,
+          .ring_size = 64,
+          .read_ptr_va = read,
+          .write_ptr_va = write,
+          .doorbell_mode = amdgpu::QueueDoorbellMode::Explicit,
+          .uses_kfd_queue_abi = true,
+          .queue_desc_va = descriptor,
+      });
+      ASSERT_NE(registration, 0u);
+      auto packet = make_dispatch_packet(kernel, 0, required_waves * 32, required_waves * 32);
+      packet.private_segment_size = private_bytes;
+      fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet), ring);
+      fixture.mem()->write64(write, 1);
+      fixture.cp()->notify_queue_doorbell(registration, 1);
+      for (uint32_t step = 0; step < 200 && snapshots->snapshots().size() < required_waves; ++step)
+        if (!fixture.engine->step())
+          break;
+      EXPECT_EQ(replacement_requests, capacity < required_waves ? 1u : 0u);
+      EXPECT_EQ(allocation_requests, 0u);
+      EXPECT_EQ(snapshots->snapshots().size(), required_waves);
+      EXPECT_EQ(fixture.mem()->read64(read), 1u);
+      EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, 0));
+    }
+  }
+}
+
+TEST(CommandProcessorTest, RuntimeLogicalScratchNeverGrowsIntoNeighboringBacking) {
+  using namespace rocr::llvm::amdhsa;
+  for (const char *arch : {"cdna3", "rdna4"}) {
+    for (uint32_t rejected_field : {0u, 1u, 2u}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(rejected_field);
+      VmFixture fixture(arch, 1, 4, 64, 104, 256, 2);
+      const bool rdna = fixture.cp()->compute_units()[0]->arch() == ROCJITSU_CODE_ARCH_RDNA4;
+      if (!rdna)
+        fixture.cp()->set_scratch_xcc_layout_for_test(0, 2);
+      constexpr uint64_t ring = 0x8000, descriptor = 0xa000, signal = 0xb000;
+      constexpr uint64_t backing = 0x400000, replacement = 0x800000;
+      constexpr uint64_t read = descriptor + offsetof(amd_queue_t, read_dispatch_id);
+      constexpr uint64_t write = descriptor + offsetof(amd_queue_t, write_dispatch_id);
+      constexpr uint32_t private_bytes = 256;
+      const uint32_t width = rdna ? 32 : 64;
+      const uint32_t wave_bytes = private_bytes * width;
+      const uint32_t granule =
+          isa_properties(fixture.cp()->compute_units()[0]->arch()).compute_tmpring_wavesize_granule;
+      const uint32_t wave_size_field = (wave_bytes / granule) << 12;
+      // One WAVES unit supplies two logical slices: two SEs on RDNA4, two
+      // XCCs on CDNA3. The neighboring region is mapped but belongs elsewhere.
+      const uint64_t neighbor = backing + 2 * wave_bytes;
+      const std::vector<uint8_t> scratch(4 * wave_bytes);
+      fixture.mem()->load_image(scratch.data(), scratch.size(), backing);
+      fixture.mem()->load_image(scratch.data(), scratch.size(), replacement);
+      fixture.mem()->write32(neighbor, 0xdecafbad);
+      fixture.mem()->write64(descriptor + offsetof(amd_queue_t, scratch_backing_memory_location),
+                             backing);
+      const uint32_t tmpring =
+          rejected_field == 2 ? 2u | (wave_size_field - (1u << 12)) : 1u | wave_size_field;
+      fixture.mem()->write32(descriptor + offsetof(amd_queue_t, compute_tmpring_size), tmpring);
+      fixture.mem()->write64(descriptor + offsetof(amd_queue_t, queue_inactive_signal), signal);
+      fixture.mem()->write64(signal + 16, signal + 64);
+      fixture.mem()->write32(signal + 24, 7);
+      uint32_t allocation_requests = 0, replacement_requests = 0;
+      fixture.cp()->set_scratch_backing_allocator([&](uint32_t, uint64_t, size_t) {
+        ++allocation_requests;
+        return true;
+      });
+      auto *snapshots = fixture.capture_halts();
+      amdgpu::InterruptSubscription subscription([&](uint32_t, uint32_t) {
+        if (fixture.mem()->read64(signal + 8) != (rdna ? 0x401u : 1u))
+          return;
+        ++replacement_requests;
+        EXPECT_EQ(fixture.mem()->read64(read), 0u);
+        EXPECT_TRUE(snapshots->snapshots().empty());
+        fixture.mem()->write64(descriptor + offsetof(amd_queue_t, scratch_backing_memory_location),
+                               replacement);
+        fixture.mem()->write32(descriptor + offsetof(amd_queue_t, compute_tmpring_size),
+                               2u | wave_size_field);
+        fixture.mem()->write64(signal + 8, 0);
+      });
+      const uint32_t code = rdna ? 0xbfb00000 : SOPP_S_ENDPGM;
+      const uint64_t kernel = fixture.write_kernel(0x1000, &code, sizeof(code));
+      fixture.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
+                             private_bytes);
+      const auto registration = fixture.cp()->register_queue({
+          .address_space = fixture.cp()->default_address_space(),
+          .interrupt_sink = subscription.sink(),
+          .queue_id = 1,
+          .ring_base_va = ring,
+          .ring_size = 64,
+          .read_ptr_va = read,
+          .write_ptr_va = write,
+          .doorbell_mode = amdgpu::QueueDoorbellMode::Explicit,
+          .uses_kfd_queue_abi = true,
+          .queue_desc_va = descriptor,
+      });
+      ASSERT_NE(registration, 0u);
+      const uint32_t waves = rejected_field ? 4 : 2;
+      auto packet = make_dispatch_packet(kernel, 0, waves * width, width);
+      packet.private_segment_size = private_bytes;
+      fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet), ring);
+      fixture.mem()->write64(write, 1);
+      fixture.cp()->notify_queue_doorbell(registration, 1);
+      for (uint32_t step = 0; step < 200 && snapshots->snapshots().size() < waves; ++step)
+        if (!fixture.engine->step())
+          break;
+      EXPECT_EQ(replacement_requests, rejected_field ? 1u : 0u);
+      EXPECT_EQ(allocation_requests, 0u);
+      EXPECT_EQ(snapshots->snapshots().size(), waves);
+      std::vector<uint64_t> scratch_bases;
+      for (const auto &snapshot : snapshots->snapshots())
+        scratch_bases.push_back(snapshot.scratch_base);
+      std::ranges::sort(scratch_bases);
+      for (uint32_t wave = 0; wave < scratch_bases.size(); ++wave)
+        EXPECT_EQ(scratch_bases[wave],
+                  (rejected_field ? replacement : backing) + wave * wave_bytes);
+      EXPECT_EQ(fixture.mem()->read32(neighbor), 0xdecafbadu);
+      EXPECT_EQ(fixture.mem()->read64(read), 1u);
+      EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, 0));
+    }
+  }
+}
+
+TEST(CommandProcessorTest, RuntimeScratchStrideAndBackingOverrideTheFallbackAllocator) {
+  using namespace rocr::llvm::amdhsa;
+  VmFixture fixture("cdna5", 1, 2, 64, 104, 256, 2);
+  constexpr uint64_t ring = 0x8000, descriptor = 0xa000, doorbell = 0x9010;
+  constexpr uint64_t read = descriptor + offsetof(amd_queue_t, read_dispatch_id);
+  constexpr uint64_t write = descriptor + offsetof(amd_queue_t, write_dispatch_id);
+  constexpr uint32_t private_bytes = 260, wave_bytes = 34 * 256, waves_per_se = 3;
+  constexpr uint32_t tmpring = waves_per_se | (34u << 12);
+  uint32_t allocation_requests = 0;
+  fixture.cp()->set_scratch_backing_allocator([&](uint32_t, uint64_t, size_t) {
+    ++allocation_requests;
+    return false;
+  });
+  const uint32_t code = 0xbfb00000;
+  const uint64_t kernel = fixture.write_kernel(0x1000, &code, sizeof(code));
+  fixture.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
+                         private_bytes);
+  ASSERT_NE(fixture.cp()->register_queue({
+                .address_space = fixture.cp()->default_address_space(),
+                .queue_id = 1,
+                .ring_base_va = ring,
+                .ring_size = 64,
+                .read_ptr_va = read,
+                .write_ptr_va = write,
+                .doorbell_va = doorbell,
+                .doorbell_mode = amdgpu::QueueDoorbellMode::VmPolled,
+                .uses_kfd_queue_abi = true,
+                .queue_desc_va = descriptor,
+            }),
+            0u);
+  auto *snapshots = fixture.capture_halts();
+  for (uint32_t round = 1; round <= 2; ++round) {
+    const uint64_t backing = round * 0x400000;
+    const std::vector<uint8_t> scratch(2 * waves_per_se * wave_bytes);
+    fixture.mem()->load_image(scratch.data(), scratch.size(), backing);
+    fixture.mem()->write64(descriptor + offsetof(amd_queue_t, scratch_backing_memory_location),
+                           backing);
+    fixture.mem()->write32(descriptor + offsetof(amd_queue_t, compute_tmpring_size), tmpring);
+    auto packet = make_dispatch_packet(kernel, 0, 128, 32);
+    packet.private_segment_size = private_bytes;
+    fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet), ring);
+    fixture.mem()->write64(write, round);
+    fixture.mem()->write64(doorbell, round);
+    fixture.engine->schedule_event_now(fixture.cp()->doorbell_event());
+    for (uint32_t step = 0; step < 100 && snapshots->snapshots().size() < round * 4; ++step)
+      if (!fixture.engine->step())
+        break;
+    ASSERT_EQ(snapshots->snapshots().size(), round * 4)
+        << "round=" << round << " admitted=" << fixture.cp()->accepted_entry_count_for_test(1, 0)
+        << " fault=" << fixture.cp()->queue_faulted_for_test(1, 0)
+        << " allocations=" << allocation_requests;
+    for (uint32_t wave = (round - 1) * 4; wave < round * 4; ++wave) {
+      const auto &snapshot = snapshots->snapshots()[wave];
+      EXPECT_EQ(snapshot.scratch_base, backing + (snapshot.shader_engine_id * waves_per_se +
+                                                  snapshot.scratch_scoreboard_id) *
+                                                     wave_bytes);
+    }
+    EXPECT_EQ(fixture.mem()->read32(descriptor + offsetof(amd_queue_t, compute_tmpring_size)),
+              tmpring);
+  }
+  EXPECT_EQ(allocation_requests, 0u);
+}
+
 TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) {
   using namespace rocr::llvm::amdhsa;
 
@@ -4826,6 +5143,11 @@ TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) 
                     /*num_shader_engines=*/2);
   fixture.cp()->set_scratch_wave_divisor(2);
   fixture.cp()->set_scratch_xcc_layout_for_test(kXccId, kXccCount);
+  uint32_t allocation_requests = 0;
+  fixture.cp()->set_scratch_backing_allocator([&](uint32_t, uint64_t, size_t) {
+    ++allocation_requests;
+    return false;
+  });
   const uint32_t code[] = {SOPP_S_ENDPGM};
   const uint64_t kernel = fixture.write_kernel(0x4000, code, sizeof(code));
   fixture.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
@@ -4937,6 +5259,8 @@ TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) 
 
   EXPECT_EQ(scratch_requests, 1u)
       << "the second dispatch used alternate scratch past its maximum-use index";
+  EXPECT_EQ(allocation_requests, 0u)
+      << "expired runtime scratch must not reach the fallback allocator";
   EXPECT_EQ(fixture.cp()->accepted_entry_count_for_test(kQueueId, kProcessId), 2u);
   EXPECT_EQ(fixture.mem()->read64(read_pointer), 3u);
   EXPECT_EQ(fixture.mem()->read64(alternate_last_used), 1u);
