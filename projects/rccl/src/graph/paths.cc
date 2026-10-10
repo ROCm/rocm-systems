@@ -1505,6 +1505,19 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
   }
 
+  // A P2P plan emits one work batch per channel (nChannelsMax == p2pnChannelsPerPeer)
+  // and those batches must live inside the kernel-args region. If p2pnChannelsPerPeer
+  // exceeds what the args budget can hold, scheduleP2pTasksToPlan() can never satisfy
+  // ncclTestBudget() for even a single op, so it returns without draining any task and
+  // ncclLaunchPrepare() spins forever (observed as a hang on small-rank alltoall when
+  // MAXCHANNELS is large). Clamp to the args-bytes limit, keeping a power of two so the
+  // device-side ncclP2pChannelToPart inverse stays valid.
+  {
+    size_t argsBytes = std::min<size_t>(ncclParamWorkArgsBytes(), ncclMaxKernelArgsSize(comm->cudaArch));
+    int maxArgsChannels = pow2Down(ncclDevMaxChannelsForArgsBytes(argsBytes));
+    if (maxArgsChannels < 1) maxArgsChannels = 1;
+    comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, maxArgsChannels);
+  }
   INFO(NCCL_INIT | NCCL_TUNING, "P2P channels: p2pnChannels=%d p2pnChannelsPerPeer=%d maxP2pPeers=%d",
        comm->p2pnChannels, comm->p2pnChannelsPerPeer, maxP2pPeers);
 
