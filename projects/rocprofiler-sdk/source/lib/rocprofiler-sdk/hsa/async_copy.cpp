@@ -31,6 +31,8 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
+#include "lib/rocprofiler-sdk/range_replay/range_state.hpp"
+#include "lib/rocprofiler-sdk/range_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
@@ -465,6 +467,23 @@ get_copy_metadata(hsa_agent_t      _hsa_dst_agent,
     }
 
     return _copy_meta;
+}
+
+/**
+ * @brief Declines an open range replay range when this copy writes device memory.
+ *
+ * A copy that writes device memory while a range is open on that agent writes state the recorded
+ * dispatch sequence does not contain, so a replayed pass would run without it. Callers invoke
+ * this before deciding whether anything traces the copy, because the decline must happen whether
+ * or not anything is tracing memory copies.
+ */
+void
+note_range_replay_device_write(const copy_metadata& _copy_meta)
+{
+    if(range_replay::any_range_open() &&
+       (_copy_meta.direction == ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE ||
+        _copy_meta.direction == ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE))
+        range_replay::note_device_write(_copy_meta.dst_agent.handle);
 }
 
 /**
@@ -946,6 +965,41 @@ populate_batch_traced_copy_data(traced_copy_data_vec_t&         _traced_copies,
 }
 
 /**
+ * @brief Declines open range replay ranges on every GPU agent a batch copy operation names.
+ *
+ * Unlike note_range_replay_device_write(), this does not rely on the per-copy classification that
+ * memory copy tracing uses. An indirect destination is resolved by the copy engine at execution
+ * time and the signal-after-copy is an arbitrary GPU-side write, so neither can be ruled out from
+ * the descriptor, and declining a range that would have replayed correctly costs one replay
+ * while missing a device write corrupts every replayed pass.
+ */
+void
+note_range_replay_batch_device_writes(const hsa_amd_memory_copy_op_t& _copy_op)
+{
+    if(!range_replay::any_range_open()) return;
+
+    const auto _note = [](hsa_agent_t _hsa_agent) {
+        const auto* _rocp_agent = agent::get_rocprofiler_agent(_hsa_agent);
+        if(_rocp_agent != nullptr && _rocp_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+            range_replay::note_device_write(_rocp_agent->id.handle);
+    };
+
+    _note(_copy_op.src_agent);
+
+    // BROADCAST always, and every other type in its multi-entry form, names its destinations
+    // through dst_agent_list rather than dst_agent; the two share storage.
+    const bool _multi_entry =
+        _copy_op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST || _copy_op.num_entries > 0;
+    if(!_multi_entry)
+        _note(_copy_op.dst_agent);
+    else if(_copy_op.dst_agent_list != nullptr)
+    {
+        for(uint32_t i = 0; i < _copy_op.num_entries; ++i)
+            _note(_copy_op.dst_agent_list[i]);
+    }
+}
+
+/**
  * @brief Intercepts batch copy submission and replaces traced op signals with rocprofiler signals.
  */
 template <size_t TableIdx, size_t OpIdx>
@@ -972,6 +1026,8 @@ async_batch_copy_impl(const hsa_amd_memory_copy_op_t* copy_ops,
 
     for(uint32_t i = 0; i < num_copy_ops; ++i)
     {
+        note_range_replay_batch_device_writes(copy_ops[i]);
+
         auto _traced_copies = traced_copy_data_vec_t{};
         populate_batch_traced_copy_data(_traced_copies, copy_ops[i], meta_type::name);
 
@@ -1098,6 +1154,8 @@ async_copy_impl(Args... args)
                                             compute_address(std::get<dst_addr_idx>(_tied_args)).ptr,
                                             compute_address(std::get<src_addr_idx>(_tied_args)).ptr,
                                             meta_type::name);
+
+        note_range_replay_device_write(_copy_meta);
 
         if(!populate_traced_copy_data(_traced_copy,
                                       _copy_meta,
@@ -1317,9 +1375,16 @@ async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance)
             _orig->amd_ext_, _tbl_instance, async_copy::async_copy_index_seq_t{});
 
         auto ctxs = context::get_registered_contexts(async_copy::context_filter);
-        if(!ctxs.empty())
+
+        // Range replay has to see every copy that writes device memory while a range is open,
+        // whether or not anything traces memory copies, so it needs the wrappers on its own. It
+        // does not need copy timestamps, so profiling is only enabled for tracing.
+        const bool range_replay_configured = range_replay::has_registered_range_replay_context();
+
+        if(!ctxs.empty()) _orig->amd_ext_->hsa_amd_profiling_async_copy_enable_fn(true);
+
+        if(!ctxs.empty() || range_replay_configured)
         {
-            _orig->amd_ext_->hsa_amd_profiling_async_copy_enable_fn(true);
             async_copy::async_copy_wrap<ROCPROFILER_HSA_TABLE_ID_AmdExt>(
                 _orig->amd_ext_, async_copy::async_copy_index_seq_t{});
         }
