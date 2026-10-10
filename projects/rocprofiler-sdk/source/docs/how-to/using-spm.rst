@@ -73,14 +73,13 @@ Use the following command to use SPM:
 The preceding command enables SPM for SQ_WAVES and sample interval with unit as sclk cycle counts. Replace ``<application_path>`` with the path to the application you want to profile.
 This generates a JSON results file prefixed with the process ID.
 
-On gfx1200, gfx1201, and gfx1250 (MI450), the sampling interval can instead use the
-reference clock:
+On gfx1200 and above, the sampling interval can also use the reference clock. ``sclk_cycles`` remains available on these GPUs:
 
 .. code-block:: bash
 
  rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval-unit refclk_cycles --spm-sample-interval 1200 --output-format json -- <application_path>
 
-``refclk_cycles`` is supported on gfx1200, gfx1201, and gfx1250 (MI450).
+``refclk_cycles`` is supported on gfx1200 and above.
 Requesting it on other architectures produces an error. Use
 ``rocprofv3-avail list --spm-config``
 to query the supported interval units and ranges for each agent.
@@ -113,7 +112,7 @@ Use the following options to enable and configure SPM collection with ``rocprofv
      - ``rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval 500 -- ./my_app``
    * -
      - ``--spm-sample-interval-unit <UNIT>``
-     - Interval unit; accepts ``sclk_cycles`` and, on gfx1200, gfx1201, and gfx1250, ``refclk_cycles``
+     - Interval unit; accepts ``sclk_cycles`` and, on gfx1200 and above, ``refclk_cycles``
      - ``rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval-unit refclk_cycles -- ./my_app``
    * - ``rocprofv3-avail``
      - ``list --spm``
