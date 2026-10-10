@@ -393,10 +393,46 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   return MemoryAccessCompletion::Complete;
 }
 
+VmAccessOutcome execute_translated_scalar_atomic_rmw(ScalarMemState &d) {
+  assert(d.translated.access.has_value());
+  if (!d.translated.atomic_loaded) {
+    const AtomicLoadResult loaded = d.translated.access->atomic_load(d.addr, d.elem_size);
+    if (loaded.outcome != VmAccessOutcome::Complete)
+      return loaded.outcome;
+    d.translated.atomic_loaded_value = loaded.value;
+    d.translated.atomic_loaded = true;
+  }
+
+  // Retain the load across unavailable CAS attempts, as for vector atomics.
+  while (true) {
+    const uint32_t old = static_cast<uint32_t>(d.translated.atomic_loaded_value);
+    const uint32_t value = apply_int_atomic(d.atomic_op, old, d.store_data[0]);
+    const AtomicCompareExchangeResult exchanged =
+        d.translated.access->compare_exchange(d.addr, d.elem_size, old, value);
+    if (exchanged.outcome != VmAccessOutcome::Complete)
+      return exchanged.outcome;
+    if (exchanged.exchanged) {
+      d.response_data[0] = old;
+      d.translated.atomic_loaded = false;
+      return VmAccessOutcome::Complete;
+    }
+    d.translated.atomic_loaded_value = exchanged.observed;
+  }
+}
+
 } // namespace
 
 VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<ScalarMemState>();
+  const auto atomic_mutation = [&](std::span<std::byte> target) {
+    uint32_t old;
+    std::memcpy(&old, target.data(), sizeof(old));
+    const uint32_t value = apply_int_atomic(d.atomic_op, old, d.store_data[0]);
+    std::memcpy(target.data(), &value, sizeof(value));
+    d.response_data[0] = old;
+  };
+  if (d.atomic_op != AtomicOp::NONE && (d.elem_size != 4 || d.num_dwords != 1))
+    return VmAccessOutcome::Malformed;
   // Masked loads still write the zero response, without taking a VM snapshot or
   // touching backing memory, including byte and halfword requests.
   if (d.is_load && d.load_dword_mask == 0)
@@ -412,6 +448,8 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
       d.translated.initialized = true;
     }
     if (!d.translated.access->info().legacy_cache_compatible) {
+      if (d.atomic_op != AtomicOp::NONE)
+        return execute_translated_scalar_atomic_rmw(d);
       if (d.is_load) {
         if (d.elem_size >= 4 && d.load_dword_mask != 0xffff) {
           while (d.translated.request_index < d.num_dwords) {
@@ -457,6 +495,14 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
     }
   }
 
+  if (d.atomic_op != AtomicOp::NONE) {
+    return wf.raw_cu().l2()->atomic_rmw(
+        d.addr, d.elem_size,
+        [&](uint8_t *line, uint32_t offset) {
+          atomic_mutation({reinterpret_cast<std::byte *>(line + offset), d.elem_size});
+        },
+        wf.process_id());
+  }
   if (d.is_load) {
     if (d.load_dword_mask == 0) {
       // Descriptor bounds suppress memory access while preserving zero writeback.
