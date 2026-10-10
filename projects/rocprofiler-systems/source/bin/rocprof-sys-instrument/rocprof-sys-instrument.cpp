@@ -9,6 +9,7 @@
 #include "common/path.hpp"
 #include "core/demangler.hpp"
 #include "dl/dl.hpp"
+#include "dynamic_dependency_listing.hpp"
 #include "fwd.hpp"
 #include "internal_libs.hpp"
 #include "log.hpp"
@@ -28,6 +29,7 @@
 #include <timemory/utility/signals.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
@@ -2750,31 +2752,35 @@ main(int argc, char** argv)
             }
         }
 
-        if(main_func)
+        // read_dynamic_dependencies should not be called on static executables
+        if(main_func && !is_static_exe)
         {
-            verbprintf(0, "Getting linked libraries for %s...\n", cmdv0.c_str());
-            verbprintf(0, "Consider instrumenting the relevant libraries...\n");
-            verbprintf(0, "\n");
+            // no newline: will append result later
+            verbprintf(0, "Getting linked libraries for %s... ", cmdv0.c_str());
 
-            auto cmdv_envp = std::array<char*, 2>{};
-            cmdv_envp.fill(nullptr);
-            cmdv_envp.at(0) = strdup("LD_TRACE_LOADED_OBJECTS=1");
-            auto       ldd  = tim::popen::popen(cmdv0.c_str(), nullptr, cmdv_envp.data());
-            auto const linked_libs = tim::popen::read_ldd_fork(ldd);
-            auto const perr        = tim::popen::pclose(ldd);
-            for(auto& itr : cmdv_envp)
+            constexpr auto k_dep_read_timeout = std::chrono::milliseconds{ 3000 };
+            const auto linked_libs = rocprofsys::instrument::read_dynamic_dependencies(
+                cmdv0, k_dep_read_timeout);
+            if(!linked_libs)
             {
-                ::free(itr);
+                verbprintf_bare(0, "Error\n");
             }
-
-            if(perr != 0)
+            else
             {
-                perror("Error in rocprofsys_fork");
+                if(linked_libs->empty())
+                {
+                    verbprintf_bare(0, "Not found\n");
+                }
+                else
+                {
+                    verbprintf_bare(0, "Done\n");
+                    verbprintf(0, "Consider instrumenting the relevant libraries:\n");
+                    for(const auto& lib_path : *linked_libs)
+                    {
+                        verbprintf(0, "\t%s\n", lib_path.c_str());
+                    }
+                }
             }
-
-            for(const auto& itr : linked_libs)
-                verbprintf(0, "\t%s\n", itr.c_str());
-
             verbprintf(0, "\n");
         }
     }
