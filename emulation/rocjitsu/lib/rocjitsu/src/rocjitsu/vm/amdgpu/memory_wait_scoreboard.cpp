@@ -783,31 +783,10 @@ uint32_t MemoryWaitScoreboard::issue_units(const Instruction &inst,
                                            rj_code_arch_t arch) {
   using namespace waitcheck_detail;
   const auto model = waitcnt_model(arch).value();
-  const auto counter_kind = [model](WaitCounterType counter) {
-    switch (counter) {
-    case WaitCounterType::VMCNT:
-    case WaitCounterType::LOADCNT:
-      return WaitCounterKind::Load;
-    case WaitCounterType::VSCNT:
-    case WaitCounterType::STORECNT:
-      return vmem_store_wait_counter(model);
-    case WaitCounterType::LGKMCNT:
-    case WaitCounterType::DSCNT:
-      return WaitCounterKind::Ds;
-    case WaitCounterType::KMCNT:
-      return smem_wait_counter(model);
-    case WaitCounterType::EXPCNT:
-      return WaitCounterKind::Exp;
-    case WaitCounterType::ASYNCCNT:
-      return WaitCounterKind::Async;
-    case WaitCounterType::TENSORCNT:
-      return WaitCounterKind::Tensor;
-    }
-    return WaitCounterKind::Count;
-  };
+
   if (const auto *info = inst.amdgpu_memory_issue_info())
     for (const auto &obligation : info->counter_obligations())
-      if (counter_kind(obligation.wait_counter_type()) == event.counter)
+      if (canonical_wait_counter(obligation.wait_counter_type(), model) == event.counter)
         return obligation.counter_increment();
   // Inline message returns are outside the memory-pipeline metadata: one
   // completion acknowledges the send, the other the returned register value.
@@ -1014,7 +993,8 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) 
   const bool full =
       inst.is_memory_wait_producer() && model.succeeded() &&
       std::ranges::any_of(orders_, [&](const Order &order) {
-        const auto maximum = WaitcheckTarget::maximum_dependency_wait(model.value(), order.counter);
+        const auto maximum =
+            WaitCounterPolicy::maximum_dependency_wait(model.value(), order.counter);
         return order.issued - order.retired + MemoryCounterObligation::MAX_COUNTER_INCREMENT >
                maximum + 1;
       });
@@ -1031,7 +1011,7 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) 
         if (event.counter == WaitCounterKind::VmVsrc || event.counter == WaitCounterKind::VaVdst ||
             event.counter == WaitCounterKind::Depctr)
           continue;
-        const auto maximum = WaitcheckTarget::maximum_dependency_wait(arch, event.counter);
+        const auto maximum = WaitCounterPolicy::maximum_dependency_wait(arch, event.counter);
         if (maximum.succeeded())
           backpressure(event.counter, maximum.value() + 1, issue_units(inst, event, arch));
       }
@@ -1041,7 +1021,7 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) 
     wait(WaitCounterKind::X, 0);
   if (!inst.is_waitcnt() && !inst.has_embedded_memory_wait())
     return;
-  const auto fields = inst.is_waitcnt() ? WaitcheckTarget::explicit_wait_fields(inst, arch)
+  const auto fields = inst.is_waitcnt() ? WaitCounterPolicy::explicit_wait_fields(inst, arch)
                                         : WaitcheckTarget::embedded_wait_fields(inst, arch);
   if (fields.failed() || !fields.value())
     return;

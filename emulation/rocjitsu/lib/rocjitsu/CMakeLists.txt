@@ -80,6 +80,7 @@ set_target_properties(
 add_library(
     rocjitsu_waitcheck_internal
     STATIC
+    $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
     $<TARGET_OBJECTS:rocjitsu_waitcheck_target>
     $<TARGET_OBJECTS:rocjitsu_waitcheck_state>
     $<TARGET_OBJECTS:rocjitsu_waitcheck_stream>

@@ -293,11 +293,23 @@ public:
   using ScalarMemPipeline::ScalarMemPipeline;
 };
 
-class TestWaitcntInstruction : public Instruction {
-public:
-  explicit TestWaitcntInstruction(std::string_view mnemonic = "s_waitcnt")
-      : Instruction(mnemonic, nullptr) {}
-};
+void execute_wait(ExecutionPluginGroup &plugins, Wavefront &wave, uint32_t word) {
+  auto decoder = Decoder::create(wave.cu().arch());
+  ASSERT_NE(decoder, nullptr);
+  util::StringDiagnostic error;
+  auto decoded = decoder->decode_window(std::span<const uint32_t>(&word, 1), 0, error.emitter());
+  ASSERT_TRUE(decoded.succeeded()) << error.message();
+  auto &inst = *decoded.value();
+  ASSERT_TRUE(inst.is_waitcnt());
+  inst.execute(inst, &wave);
+  plugins.onAmdgpuAfterExecuteInstruction(wave.pc, inst, wave);
+}
+
+uint32_t legacy_wait_word(rj_code_arch_t arch, uint8_t vmcnt, uint8_t lgkmcnt) {
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+    return 0xbf890007u | (uint32_t{vmcnt} << 10) | (uint32_t{lgkmcnt} << 4);
+  return 0xbf8c0070u | (vmcnt & 0xfu) | ((vmcnt & 0x30u) << 10) | (uint32_t{lgkmcnt} << 8);
+}
 
 struct ForceScalarOverride {
   explicit ForceScalarOverride(bool value) : old(util::force_scalar()) {
@@ -5604,11 +5616,7 @@ protected:
     fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load, *wave);
   }
 
-  void wait(uint32_t count) {
-    wave->set_wait_target_loadcnt(count);
-    TestWaitcntInstruction instruction("s_wait_loadcnt");
-    fixture.plugin_group_->onAmdgpuAfterExecuteInstruction(wave->pc + 4, instruction, *wave);
-  }
+  void wait(uint32_t count) { execute_wait(*fixture.plugin_group_, *wave, 0xbfc00000u | count); }
 
   bool probe(uint32_t destination, uint8_t byte_mask, bool write, uint64_t lanes = 1) {
     const size_t previous = sink->str().size();
@@ -6161,9 +6169,7 @@ TEST(RaceDetectorPluginTest, Rdna4PartialLoadWaitRetiresOnlyOldestOrderedEvent) 
     f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load, *wf);
   }
 
-  wf->set_wait_target_loadcnt(1);
-  TestWaitcntInstruction wait("s_wait_loadcnt");
-  f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+  execute_wait(*f.plugin_group_, *wf, 0xbfc00001u); // s_wait_loadcnt 1.
 
   f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base, /*lane_mask=*/1);
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
@@ -6226,9 +6232,7 @@ TEST(RaceDetectorPluginTest, Rdna4GenericFlatPartialWaitRetiresOldestEvent) {
   EXPECT_EQ(events.memoryOrder(EventId{0}), MemoryOrderClass::UNORDERED);
   EXPECT_EQ(events.memoryOrder(EventId{1}), MemoryOrderClass::UNORDERED);
 
-  wf->set_wait_target_loadcnt_dscnt(/*loadcnt=*/1, /*dscnt=*/1);
-  TestWaitcntInstruction wait("s_wait_loadcnt_dscnt");
-  f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+  execute_wait(*f.plugin_group_, *wf, 0xbfc80101u); // s_wait_loadcnt_dscnt 0x101.
 
   // Both ordered counter domains prove the oldest mixed-order event complete.
   EXPECT_EQ(events.status(EventId{0}), EventStatus::WAVE_COMPLETE);
@@ -6299,13 +6303,9 @@ TEST(RaceDetectorPluginTest, Rdna4GenericFlatStoreRequiresBothCounterWaits) {
 
     const auto apply_wait = [&](WaitCounterType counter) {
       if (counter == WaitCounterType::STORECNT) {
-        wf->set_wait_target_storecnt(0);
-        TestWaitcntInstruction wait("s_wait_storecnt");
-        f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+        execute_wait(*f.plugin_group_, *wf, 0xbfc10000u); // s_wait_storecnt 0.
       } else {
-        wf->set_wait_target_dscnt(0);
-        TestWaitcntInstruction wait("s_wait_dscnt");
-        f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/8, wait, *wf);
+        execute_wait(*f.plugin_group_, *wf, 0xbfc60000u); // s_wait_dscnt 0.
       }
     };
 
@@ -6418,9 +6418,7 @@ TEST(RaceDetectorPluginTest, ScalarLoadToTtmpHonorsSplitKmcntWait) {
   TestMemoryInstruction load(std::move(state));
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
 
-  wf->set_wait_target_kmcnt(0);
-  TestWaitcntInstruction wait("s_wait_kmcnt");
-  f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+  execute_wait(*f.plugin_group_, *wf, 0xbfc70000u); // s_wait_kmcnt 0.
   static_cast<void>(RegisterAccess(*wf).read_ttmp(0));
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
@@ -6456,9 +6454,7 @@ TEST(RaceDetectorPluginTest, NamedVmcntWaitRetiresMonolithicAndSplitLoadEvents) 
     TestMemoryInstruction load(std::move(state));
     f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
 
-    wf->set_wait_target_loadcnt(0);
-    TestWaitcntInstruction wait("s_waitcnt_vmcnt");
-    f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+    execute_wait(*f.plugin_group_, *wf, 0xbcfc0000u); // s_waitcnt_vmcnt null, 0.
     f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base, /*lane_mask=*/1);
     return sink.str().find("RACE ") == std::string::npos;
   };
@@ -6509,9 +6505,7 @@ TEST(RaceDetectorPluginTest, UnresolvedOrMixedFlatWholeResultRequiresBothWaitCou
     }
     f.plugin_group_->onAmdgpuMemoryAccessRouted(access, flat, *wf);
 
-    wf->set_wait_target(vmcnt, lgkmcnt, WaitCounters::EXPCNT_MAX);
-    TestWaitcntInstruction wait;
-    f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+    execute_wait(*f.plugin_group_, *wf, legacy_wait_word(wf->cu().arch(), vmcnt, lgkmcnt));
     f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base, /*lane_mask=*/3);
     return sink.str().find("RACE ") != std::string::npos;
   };
@@ -6599,18 +6593,9 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
                     [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
 
           const auto wait_zero = [&](bool lds) {
-            if (is_rdna4) {
-              if (lds)
-                wf->set_wait_target_dscnt(0);
-              else
-                wf->set_wait_target_loadcnt(0);
-              TestWaitcntInstruction wait(lds ? "s_wait_dscnt" : "s_wait_loadcnt");
-              f.plugin_group_->onAmdgpuAfterExecuteInstruction(0x200, wait, *wf);
-            } else {
-              wf->set_wait_target(lds ? 63 : 0, lds ? 0 : 15, 7);
-              TestWaitcntInstruction wait;
-              f.plugin_group_->onAmdgpuAfterExecuteInstruction(0x200, wait, *wf);
-            }
+            const uint32_t word =
+                is_rdna4 ? (lds ? 0xbfc60000u : 0xbfc00000u) : (lds ? 0xbf8cc07fu : 0xbf8c0f70u);
+            execute_wait(*f.plugin_group_, *wf, word);
             core.wait(lds ? WaitCounterKind::Ds : WaitCounterKind::Load, 0);
           };
           if (waited != Wait::None)
@@ -6759,16 +6744,11 @@ TEST(RaceDetectorPluginTest, FlatResultsFollowTheirResolvedCounter) {
             const uint8_t ds_max = cdna_legacy ? 15 : 63;
             const uint8_t lgkmcnt = waits == 4 ? 1 : (waits & 2) ? 0 : ds_max;
             if (split) {
-              wf->set_wait_target_loadcnt(vmcnt);
-              TestWaitcntInstruction vm_wait("s_wait_loadcnt");
-              f.plugin_group_->onAmdgpuAfterExecuteInstruction(0x200, vm_wait, *wf);
-              wf->set_wait_target_dscnt(lgkmcnt);
-              TestWaitcntInstruction ds_wait("s_wait_dscnt");
-              f.plugin_group_->onAmdgpuAfterExecuteInstruction(0x204, ds_wait, *wf);
+              execute_wait(*f.plugin_group_, *wf, 0xbfc00000u | vmcnt);
+              execute_wait(*f.plugin_group_, *wf, 0xbfc60000u | lgkmcnt);
             } else {
-              wf->set_wait_target(vmcnt, lgkmcnt, 7);
-              TestWaitcntInstruction wait;
-              f.plugin_group_->onAmdgpuAfterExecuteInstruction(0x200, wait, *wf);
+              execute_wait(*f.plugin_group_, *wf,
+                           legacy_wait_word(wf->cu().arch(), vmcnt, lgkmcnt));
             }
             if (vmcnt != 63)
               core.wait(WaitCounterKind::Load, vmcnt);
@@ -6845,9 +6825,7 @@ TEST(RaceDetectorPluginTest, Gfx950FlatEmptyPortionDoesNotOrderAnOlderResult) {
       access.flat_local_lane_mask = lds ? 1 : 0;
 
       const auto apply_wait = [&](uint8_t vmcnt, uint8_t lgkmcnt) {
-        wf->set_wait_target(vmcnt, lgkmcnt, 7);
-        TestWaitcntInstruction wait;
-        f.plugin_group_->onAmdgpuAfterExecuteInstruction(0x200, wait, *wf);
+        execute_wait(*f.plugin_group_, *wf, legacy_wait_word(wf->cu().arch(), vmcnt, lgkmcnt));
       };
       for (int i = 0; i < flat_count; ++i) {
         f.plugin_group_->onAmdgpuMemoryAccessRouted(access, flat, *wf);
@@ -7125,10 +7103,7 @@ TEST(RaceDetectorPluginTest, NamedLgkmcntWaitRetiresSplitScalarEvent) {
   TestMemoryInstruction load(std::move(state));
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
 
-  const auto current_wait = wf->wait_target();
-  wf->set_wait_target(current_wait.vmcnt, 0, current_wait.expcnt);
-  TestWaitcntInstruction wait("s_waitcnt_lgkmcnt");
-  f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+  execute_wait(*f.plugin_group_, *wf, 0xbdfc0000u); // s_waitcnt_lgkmcnt null, 0.
   static_cast<void>(RegisterAccess(*wf).read_ttmp(0));
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
@@ -8535,7 +8510,7 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotCreateDestinationRace) {
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
 
-TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeVmcntOrderingSlot) {
+TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeLoadcntOrderingSlot) {
   PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32);
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
@@ -8557,6 +8532,7 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeVmcntOrderingSlot) {
   load->elem_size = 4;
   load->num_elems = 1;
   load->is_load = true;
+  load->wait_counter_type = WaitCounterType::LOADCNT;
   load->exec_mask = 0x1u;
   load->lane_mask = 0x1u;
   load->wf_size = wf->wf_size();
@@ -8568,6 +8544,7 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeVmcntOrderingSlot) {
   ignored->elem_size = 4;
   ignored->num_elems = 1;
   ignored->is_load = false;
+  ignored->wait_counter_type = WaitCounterType::LOADCNT;
   ignored->atomic_op = GetParam();
   ignored->exec_mask = 0;
   ignored->lane_mask = 0;
@@ -8575,9 +8552,7 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeVmcntOrderingSlot) {
   TestMemoryInstruction ignored_inst(std::move(ignored));
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, ignored_inst, *wf);
 
-  wf->set_wait_target(/*vmcnt=*/1, /*lgkmcnt=*/0, /*expcnt=*/0);
-  TestWaitcntInstruction waitcnt;
-  f.plugin_group_->onAmdgpuAfterExecuteInstruction(wf->pc, waitcnt, *wf);
+  execute_wait(*f.plugin_group_, *wf, 0xbfc00001u); // s_wait_loadcnt 1.
 
   f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + kDestinationVgpr,
                                          /*lane_mask=*/0x1u, /*byte_mask=*/0xFu);

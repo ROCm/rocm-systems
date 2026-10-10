@@ -935,8 +935,8 @@ void ComputeUnitCore::report_memory_wait(void *context,
   if (count > kMaxMemoryWaitDiagnostics)
     return;
   auto counter_name = wait_counter_name(hazard.producer.counter);
-  const auto model = waitcheck_detail::waitcnt_model(cu.arch());
-  if (model.succeeded() && waitcheck_detail::uses_legacy_waitcnt(model.value())) {
+  const auto model = waitcnt_model(cu.arch());
+  if (model.succeeded() && uses_legacy_waitcnt(model.value())) {
     if (hazard.producer.counter == WaitCounterKind::Load)
       counter_name = "vmcnt";
     else if (hazard.producer.counter == WaitCounterKind::Store)
@@ -944,8 +944,8 @@ void ComputeUnitCore::report_memory_wait(void *context,
     else if (hazard.producer.counter == WaitCounterKind::Ds)
       counter_name = "lgkmcnt";
   }
-  const auto max_wait = waitcheck_detail::WaitcheckTarget::maximum_dependency_wait(
-      cu.arch(), hazard.producer.counter);
+  const auto max_wait =
+      WaitCounterPolicy::maximum_dependency_wait(cu.arch(), hazard.producer.counter);
   const auto required = max_wait.succeeded() ? std::min(hazard.required_wait, max_wait.value())
                                              : hazard.required_wait;
   const auto register_name = [&] {
@@ -1103,7 +1103,7 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   for (const auto &event : classified) {
     if (!is_flat_memory_counter(event.counter) || !flat_counter_lanes(event.counter))
       continue;
-    const auto maximum = WaitcheckTarget::maximum_dependency_wait(config_.arch, event.counter);
+    const auto maximum = WaitCounterPolicy::maximum_dependency_wait(config_.arch, event.counter);
     if (maximum.succeeded())
       scoreboard.backpressure(event.counter, maximum.value() + 1,
                               scoreboard.issue_units(inst, event, config_.arch));
