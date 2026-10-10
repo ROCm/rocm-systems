@@ -1569,7 +1569,13 @@ class GpuMetricsBase_v18_t final : public GpuMetricsBase_t {
  public:
   ~GpuMetricsBase_v18_t() = default;
 
-  size_t sizeof_metric_table() override { return sizeof(AMDGpuMetrics_v18_t); }
+  // v1.8 backs both the GPU table and the smaller partition table, so the size
+  // has to follow the same selection get_metrics_table() makes -- callers size
+  // their writes from here and would otherwise overrun the partition buffer.
+  size_t sizeof_metric_table() override {
+    return m_is_partition_metrics ? sizeof(AMDGpuMetrics_v18_Partition_v1_0_t)
+                                  : sizeof(AMDGpuMetrics_v18_t);
+  }
 
   GpuMetricTypePtr_t get_metrics_table() override {
     std::ostringstream ss;

@@ -13,6 +13,7 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "libdrm/amdgpu_drm.h"
 #include "test_common.h"
 
 TestFrequenciesReadWrite::TestFrequenciesReadWrite() : TestBase() {
@@ -45,7 +46,7 @@ void TestFrequenciesReadWrite::Close() {
 
 void TestFrequenciesReadWrite::Run(void) {
   amdsmi_status_t ret;
-  amdsmi_frequencies_t f;
+  amdsmi_frequencies_t f{};
   uint64_t freq_bitmask;
   amdsmi_clk_type_t amdsmi_clk;
   const std::map<amdsmi_clk_type_t, std::string> clk_type_map = {
@@ -93,11 +94,22 @@ void TestFrequenciesReadWrite::Run(void) {
           return false;
         }
 
-        // special driver issue, shouldn't normally occur
+        // Special driver issue that shouldn't normally occur: the clock file exists
+        // but reads back empty.
         if (ret == AMDSMI_STATUS_UNEXPECTED_DATA) {
           std::cerr << "WARN: Clock file [" << FreqEnumToStr(amdsmi_clk) << "] exists on device ["
                     << dv_ind << "] but empty!" << std::endl;
           std::cerr << "      Likely a driver issue!" << std::endl;
+          // Only an APU is known to power-gate a domain into an empty file, so
+          // skip the write there and leave every other ASIC on its previous
+          // path: an empty clock file on a discrete GPU stays visible instead
+          // of being absorbed here.
+          amdsmi_asic_info_t asic_info = {};
+          if (amdsmi_get_gpu_asic_info(processor_handles_[dv_ind], &asic_info) ==
+                  AMDSMI_STATUS_SUCCESS &&
+              (asic_info.flags & AMDGPU_IDS_FLAGS_FUSION) != 0) {
+            return false;
+          }
         }
 
         // CHK_ERR_ASRT(ret)
