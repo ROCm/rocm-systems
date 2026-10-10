@@ -55,6 +55,41 @@ inline Registers integer_input(uint32_t width, bool gfx12) {
   return input;
 }
 
+// Uniform operand words occupy A=v0..7, B=v8..15, C=v16..23, D=v24..31,
+// with sparse indices in v32. These ranges also allow operand overlap tests.
+inline Registers uniform_input(std::array<uint32_t, 5> words) {
+  Registers input{};
+  for (uint32_t reg = 0; reg < 33; ++reg)
+    input[reg].fill(words[reg / 8]);
+  return input;
+}
+
+// Reproduce the finite FP8/BF8 matrix inputs used by the selected captures.
+inline Registers f8_input(uint32_t width, bool bf8) {
+  Registers input{};
+  uint32_t rng = 0x12056f10u;
+  constexpr uint32_t c[] = {0,           1,           0x80000000u, 0x3f800001u,
+                            0xbf800001u, 0x43800001u, 0xc3800001u, 0x80000001u};
+  for (uint32_t reg = 0; reg < 33; ++reg) {
+    for (uint32_t lane = 0; lane < width; ++lane) {
+      rng ^= rng << 13;
+      rng ^= rng >> 17;
+      rng ^= rng << 5;
+      uint32_t value = c[(rng >> 24) & 7];
+      if (reg < 16) {
+        value = 0;
+        for (uint32_t shift = 0; shift < 32; shift += 8) {
+          // BF8 0x7c starts infinity/NaNs; FP8 0x7f is its sole NaN magnitude.
+          const uint32_t byte = (rng >> shift) & 255;
+          value |= ((byte & 128) | ((byte & 127) % (bf8 ? 0x7c : 0x7f))) << shift;
+        }
+      }
+      input[reg][lane] = value;
+    }
+  }
+  return input;
+}
+
 // Execute one instruction, check selected destination words, and verify that
 // registers outside the destination range are unchanged.
 inline void check(rj_code_arch_t arch, uint32_t width, std::array<uint32_t, 2> words, uint32_t mode,

@@ -325,6 +325,11 @@ inline InputLoc mfma_scale_f8f6f4_input_loc(uint32_t dim, uint32_t K, uint32_t i
   return input_loc(dim, K, /*B=*/1, index, k, /*b=*/0, data_bits);
 }
 
+// Swap bits 2 and 3 of a four-bit product index for WMMA operand ordering.
+inline constexpr uint32_t wmma_swap_k_bits_2_3(uint32_t k) {
+  return (k & 3) | ((k & 4) << 1) | ((k & 8) >> 1);
+}
+
 inline InputLoc gfx12_wmma_input_loc(uint32_t wave_size, uint32_t dim, uint32_t K, uint32_t i,
                                      uint32_t k, uint32_t data_bits) {
   require_gfx12_wmma_wave_size(wave_size);
@@ -1918,9 +1923,7 @@ void exec_gfx12_wmma_dot4(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s
         std::array<uint16_t, 4> a, b;
         for (uint32_t j = 0; j < 4; ++j) {
           const uint32_t logical_k = k + j;
-          const uint32_t physical_k =
-              wave_size == 32 ? (logical_k & 3) | ((logical_k & 4) << 1) | ((logical_k & 8) >> 1)
-                              : logical_k;
+          const uint32_t physical_k = wave_size == 32 ? wmma_swap_k_bits_2_3(logical_k) : logical_k;
           const auto al = gfx12_wmma_input_loc(wave_size, 16, 16, row, physical_k, 16);
           const auto bl = gfx12_wmma_input_loc(wave_size, 16, 16, col, physical_k, 16);
           a[j] = uint16_t(regs.read_vgpr(s0 + al.vgpr_offset, al.lane) >> (16 * al.sub_element));
@@ -1947,6 +1950,42 @@ void exec_gfx12_wmma_dot4(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s
                           results[row * 16 + col] | (results[(row + 1) * 16 + col] << 16));
       } else
         regs.write_vgpr(dst + out.reg, out.lane, results[row * 16 + col]);
+    }
+}
+
+// FP8/BF8 WMMA uses two eight-product steps. The wave64 layout swaps K bits
+// 2 and 3, as for dense eight-bit RdnaWmmaI32Policy::physical_k (unlike the
+// F16/BF16 wave32 permutation). Stage the whole result before writing overlapping D.
+template <bool A_FP8, bool B_FP8>
+void exec_gfx12_wmma_dot8(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
+                          uint32_t s2, std::optional<uint32_t> const_acc) {
+  require_gfx12_wmma_wave_size(wave_size);
+  std::array<uint32_t, 256> results;
+  RegisterAccess regs(cu);
+  for (uint32_t row = 0; row < 16; ++row) {
+    for (uint32_t col = 0; col < 16; ++col) {
+      const auto out = gfx12_wmma_output_loc_32(wave_size, 16, 16, row, col);
+      // Assembler-accepted C ABS/NEG bit encodings do not modify C on gfx1201.
+      uint32_t acc = const_acc ? *const_acc : regs.read_vgpr(s2 + out.reg, out.lane);
+      for (uint32_t k = 0; k < 16; k += 8) {
+        std::array<uint8_t, 8> a, b;
+        for (uint32_t j = 0; j < 8; ++j) {
+          const uint32_t logical_k = k + j;
+          const uint32_t physical_k = wave_size == 64 ? wmma_swap_k_bits_2_3(logical_k) : logical_k;
+          const auto al = gfx12_wmma_input_loc(wave_size, 16, 16, row, physical_k, 8);
+          const auto bl = gfx12_wmma_input_loc(wave_size, 16, 16, col, physical_k, 8);
+          a[j] = uint8_t(regs.read_vgpr(s0 + al.vgpr_offset, al.lane) >> al.bit_offset);
+          b[j] = uint8_t(regs.read_vgpr(s1 + bl.vgpr_offset, bl.lane) >> bl.bit_offset);
+        }
+        acc = gfx12_dot8_f32<A_FP8, B_FP8>(a, b, acc);
+      }
+      results[row * 16 + col] = acc;
+    }
+  }
+  for (uint32_t row = 0; row < 16; ++row)
+    for (uint32_t col = 0; col < 16; ++col) {
+      const auto out = gfx12_wmma_output_loc_32(wave_size, 16, 16, row, col);
+      regs.write_vgpr(dst + out.reg, out.lane, results[row * 16 + col]);
     }
 }
 
@@ -4393,7 +4432,7 @@ template <bool Gfx12, uint32_t InBits, uint32_t K, bool Sparse = false> struct R
       return k;
     // The dense K16 IU8 wave64 model swaps the four-product blocks.
     if (Gfx12 && InBits == 8 && wave_size == 64)
-      return (k & 3) | ((k & 4) << 1) | ((k & 8) >> 1);
+      return wmma_swap_k_bits_2_3(k);
     return k;
   }
 };

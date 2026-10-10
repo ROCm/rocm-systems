@@ -45,12 +45,8 @@ def _mma_targ(M: int, N: int, K: int, B: int, *, batch_optional: bool) -> str:
 
 
 def _f8_bools(input_type: str) -> tuple[str, str]:
-    """(A_FP8, B_FP8) C++ bool literals for a fixed f8 input family."""
-    parts = input_type.split('_')
-    return (
-        'true' if parts[0] == 'FP8' else 'false',
-        'true' if parts[1] == 'FP8' else 'false',
-    )
+    """C++ (A_FP8, B_FP8) literals: true denotes FP8, false denotes BF8."""
+    return tuple('true' if part == 'FP8' else 'false' for part in input_type.split('_'))
 
 
 def _fixed_wave32_wmma_spec(
@@ -748,6 +744,21 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f' {s2}.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt,'
                 f" inst_.neg, inst_.neg_hi{', wf.fp16_ovfl()' if packed_arg else ''});"
             )
+        elif (
+            uses_gfx12_wmma_layout
+            and result_type == 'F32'
+            and input_type in _F8_FIXED
+            and (M, N, K) == (16, 16, 16)
+        ):
+            a_fp8, b_fp8 = _f8_bools(input_type)
+            L.append(
+                f'  amdgpu::exec_gfx12_wmma_dot8<{a_fp8}, {b_fp8}>(cu, wf.wf_size(), dst,'
+                f' {src0_base_expr}, {src1_base_expr}, s2,'
+                f' {s2}.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt);'
+            )
+        elif uses_gfx12_wmma_layout and input_type in _F8_FIXED:
+            # No native eight-product executor is defined for other shapes.
+            L.append('  throw util::UnimplementedInst(mnemonic());')
         elif uses_gfx12_wmma_layout and input_type not in ('F8_F6_F4', 'F8F6F4'):
             if result_type == 'F16':
                 L.append(
