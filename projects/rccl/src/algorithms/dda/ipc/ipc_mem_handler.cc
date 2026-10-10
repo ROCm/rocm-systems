@@ -58,7 +58,7 @@ ncclResult_t ncclIpcMemHandler::exchangeMemPtrs() {
     return ncclSuccess;
   }
 
-  // A rank that cannot export still enters the all-gather, so its failure reaches every peer instead of stranding them.
+  // A rank that cannot export still enters the all-gather, so its failure reaches every peer rather than strands them.
   std::vector<ncclIpcExchangeSlot> slots(static_cast<size_t>(nranks_));
   ncclIpcExchangeSlot& self = slots[static_cast<size_t>(rank_)];
   ncclResult_t selfRes = ncclSuccess;
@@ -93,8 +93,7 @@ ncclResult_t ncclIpcMemHandler::exchangeMemPtrs() {
     cudaError_t err = cudaIpcOpenMemHandle(&memPtrs_[static_cast<size_t>(i)], slots[static_cast<size_t>(i)].handle,
                                            cudaIpcMemLazyEnablePeerAccess);
     if (err != cudaSuccess) {
-      WARN("ncclIpcMemHandler::exchangeMemPtrs: cudaIpcOpenMemHandle(rank %d) failed (%s)", i,
-           cudaGetErrorString(err));
+      WARN("ncclIpcMemHandler::exchangeMemPtrs: cudaIpcOpenMemHandle(rank %d) failed: %s", i, cudaGetErrorString(err));
       memPtrs_[static_cast<size_t>(i)] = nullptr;
       closePeerMappings(memPtrs_, rank_, i);
       return ncclUnhandledCudaError;

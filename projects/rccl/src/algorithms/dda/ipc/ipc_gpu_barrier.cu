@@ -53,7 +53,7 @@ __host__ IpcGpuBarrier::IpcGpuBarrier(int nRanks, int nBlocks, int selfRank,
   auto& selfMboxBuf = selfAlloc.first;
   auto& selfMbox = selfAlloc.second;
 
-  // A rank whose mailbox allocation failed still joins the exchange, which then fails on every rank instead of hanging.
+  // A rank whose mailbox allocation failed still joins the exchange, which then fails on every rank rather than hangs.
   auto memHandler = std::make_unique<ncclIpcMemHandler>(bootstrap, selfRank, nRanks);
 
   ncclResult_t result = memHandler->addSelfDeviceMemPtr(selfMboxBuf ? selfMboxBuf->get() : nullptr);
