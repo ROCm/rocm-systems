@@ -285,7 +285,7 @@ and `views/` directories are the canonical source.
 | `verify_against_config_template.py` | Remove Panel Config template validation. Only Layer 2 schema validation. Remove `gfx9_config_template.yaml` and `gfx11_config_template.yaml`. |
 | `metric_description_manager.py` | Remove old panel config reading path. |
 | `hash_manager.py` | Remove old per-arch directory entries from hash database. Only base arch dirs and `views/`. |
-| `format_yaml.py` | Remove Panel Config format handling if no longer needed. |
+| `lint_analysis_config.py` | Remove Panel Config format handling if no longer needed. |
 
 ### Validation
 
