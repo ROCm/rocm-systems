@@ -1185,7 +1185,7 @@ finalize()
         // completion monitor that runs these completions, and correlation_id_finalize
         // consults the loss ledger this populates. Its drain waits on the in-flight counter,
         // so it still works when an application hsa_shut_down stopped the monitor first.
-        // No-op unless signal-less is active.
+        // No-op in a process that never brought the dispatch log up.
         kfd::signal_less_teardown();
 
         hsa::async_copy_fini();
