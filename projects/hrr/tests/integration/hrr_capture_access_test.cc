@@ -53,6 +53,10 @@
  *     others makes them private again, and a hard-linked blob found there is
  *     written again rather than trusted (POSIX).
  *
+ *   Unit_HRR_CaptureResumeCountsOnlyWholeRecords:
+ *     resuming an archive that ends in a torn record cuts it off and leaves
+ *     it out of the event count, so the new trailer counts the records (POSIX).
+ *
  *   Unit_HRR_CaptureActiveMarker:
  *     pid-<pid>/active, the file producers read as "capture is on", exists
  *     while the capture runs, names the process instance on Linux, and is
@@ -899,6 +903,65 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles) {
   CHECK(fs::hard_link_count(archive / linked) == 1);
   CHECK(fs::hard_link_count(victim) == 1);
   CHECK(file_holds(victim, victim_contents));
+#endif
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Captures Unit_HRR_GpuWorkload_Direct, then copies its events.bin into
+ *     the next run's pid-<pid> without the trailer and with a record header
+ *     whose body was never written, as a crash mid-record leaves it. There is
+ *     no writer_state.json, so the resume scans events.bin.
+ *   - The resume cuts the torn record off and does not count it: the archive
+ *     loads complete, with a trailer that counts its records.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureResumeCountsOnlyWholeRecords) {
+#ifdef _WIN32
+  HRR_SKIP("planting relies on /bin/sh and exec keeping the pid");
+#else
+  ScopedDir work{fs::temp_directory_path() / "hrr_access_resume_torn"};
+  const fs::path first = work.path / "first";
+  const fs::path base = work.path / "capture";
+  const fs::path torn = work.path / "torn.bin";
+  fs::create_directories(base);
+  hrr_capture_direct("Unit_HRR_GpuWorkload_Direct", first);
+  const fs::path first_archive = hrr_single_process_archive(first);
+  hrr::Archive earlier;
+  REQUIRE(hrr::load_archive(first_archive.string(), earlier));
+  REQUIRE(earlier.complete);
+  REQUIRE(earlier.skipped_after_trailer == 0);
+
+  fs::copy_file(first_archive / "events.bin", torn);
+  fs::resize_file(torn, fs::file_size(torn) - sizeof(hrr_eof_record));
+  {
+    hrr_event_header h{};
+    h.event_type = static_cast<uint16_t>(HRR_API_HIPDEVICESYNCHRONIZE);
+    h.sequence_id = earlier.events.back().header().sequence_id + 1;
+    h.payload_length = 1024;
+    std::ofstream out(torn, std::ios::binary | std::ios::app);
+    out.write(reinterpret_cast<const char*>(&h), sizeof(h));
+  }
+
+  const PlantedRun run = capture_after_planting(
+      base, work.path / "plant.sh",
+      "mkdir \"$HRR_TEST_BASE/pid-$$\"\n"
+      "cp -R '" + first_archive.string() + "/.' \"$HRR_TEST_BASE/pid-$$/\"\n"
+      "cp '" + torn.string() + "' \"$HRR_TEST_BASE/pid-$$/events.bin\"\n"
+      "rm -f \"$HRR_TEST_BASE/pid-$$/writer_state.json\"\n");
+  INFO("Workload exit code: " << run.ret << "\n" << run.output);
+  REQUIRE(run.ret == 0);
+  CHECK(run.output.find(kCaptureDisabled) == std::string::npos);
+  const std::vector<fs::path> archives = hrr_process_archives(base);
+  REQUIRE(archives.size() == 1);
+
+  hrr::Archive resumed;
+  REQUIRE(hrr::load_archive(archives.front().string(), resumed));
+  CHECK(resumed.events.size() > earlier.events.size());
+  CHECK(resumed.trailer);
+  CHECK(resumed.trailer_events == resumed.events.size());
+  CHECK(resumed.complete);
 #endif
 }
 

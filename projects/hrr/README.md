@@ -100,7 +100,7 @@ On Linux the archive is readable only by the user who captured it (directories 0
 | Option | Purpose |
 |--------|---------|
 | `--info` | Print archive summary and exit (no GPU) |
-| `--repair` | Rewrite a crash-truncated archive with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index |
+| `--repair` | Rewrite an incomplete archive (torn tail, missing or miscounting trailer) with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index |
 | `--events` | With `--info`: print the full event log |
 | `--verbose` | Print each event as it is replayed |
 | `--skip-device-sync` | Skip `hipDeviceSynchronize` / `hipStreamSynchronize` events |

@@ -82,7 +82,9 @@ fault aborts the host, or a host SIGSEGV):
 - **Clean-shutdown trailer.** A normal `writer::flush` appends an
   `hrr_eof_record` (event_type `HRR_EOF_MARKER`, payload carries the final event
   count + `HRR_EOF_MAGIC`) and writes `manifest.json` with `complete:true`. The
-  trailer's **absence** is how the reader detects a crash-truncated archive.
+  reader takes an archive as complete only when the trailer is there and its
+  count matches the records before it; a missing trailer means the capture was
+  interrupted.
 
 Blobs and code objects were already crash-safe (written to a temp file then
 atomically renamed), so a crash never leaves a partial final blob.
@@ -90,10 +92,18 @@ atomically renamed), so a crash never leaves a partial final blob.
 On the read side, `load_archive` is append-only-aware: a torn record can only be
 the last one, so a partial header/payload at the tail is a recovery point — all
 complete records are kept and `Archive::truncated` is set, rather than failing
-the whole load. `Archive::complete` reflects whether the trailer was found.
-`hrr-playback --info` reports both; `hrr-playback --repair` rewrites a truncated
-archive (trimmed to the last complete record, trailer + manifest added) into a
-clean one.
+the whole load. The trailer ends the event stream. Records after it, which a
+runtime older than the writer fix could leave from calls still in flight at
+shutdown, are counted in `Archive::skipped_after_trailer`, reported once and
+not replayed. `Archive::complete` is set when the trailer was found and its
+`total_events` equals the number of records before it; a mismatch is reported
+and leaves the archive incomplete without setting `truncated`. The trailer and
+its count are kept in `Archive::trailer` and `Archive::trailer_events`, and
+`hrr-playback --info` says which of these cases an archive is. `hrr-playback --repair` rewrites any
+incomplete archive, whether its tail was torn, its trailer is missing or its
+trailer miscounts, into a clean one: the complete records before the tail or
+the trailer are kept, and a trailer that counts them and a manifest are
+written.
 
 ### Per-Process Archive Layout
 
@@ -145,8 +155,10 @@ sub-archive in turn and then rebuilds the root `manifest.json` from the results.
 This is the normal case for a multi-process serving stack, where the framework
 force-kills its workers at shutdown — the ranks that did all the GPU work are
 precisely the ones left without a trailer and absent from the root index, while
-the parent that exited cleanly needs no repair. Sub-archives that already carry
-a clean trailer are skipped without being read.
+the parent that exited cleanly needs no repair. A sub-archive is skipped when
+`hrr::has_clean_trailer`, a walk of its record headers that does not read the
+payloads, finds it complete in the sense `load_archive` uses. `--info` on a
+root applies the same check before it shows a process as complete.
 
 ### Archive Format (v7)
 ```
@@ -416,6 +428,8 @@ Version history, so an archive written by an older runtime can be placed:
             total_events   u64   real events written before the trailer
             eof_magic      u32   HRR_EOF_MAGIC ("HEOF")
           Absent => capture was interrupted (crash); reader recovers the tail.
+          Count != records before it => incomplete as well; --repair
+          rewrites either case.
 ```
 
 ### `hrr_args_*` Struct Layout Rules

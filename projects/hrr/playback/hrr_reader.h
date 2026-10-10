@@ -166,14 +166,22 @@ struct Archive {
   std::vector<Event> events;
 
   // Crash-resilience status, set by load_archive:
-  //   complete  — the clean-shutdown trailer (hrr_eof_record) was found, so the
-  //               capturing process exited normally and the archive is whole.
+  //   complete  — the clean-shutdown trailer (hrr_eof_record) was found and
+  //               counts the records before it, so the capturing process
+  //               exited normally and the archive is whole.
   //   truncated — a torn trailing record was detected and discarded; all
   //               complete records before it were recovered. Replay still works.
   // A capture interrupted by a crash typically has complete=false; it may also
   // have truncated=true if the final record was only partially written.
   bool complete  = false;
   bool truncated = false;
+  // The trailer was found and how many events it counts. trailer && !complete
+  // means the count disagrees with the records before it.
+  bool     trailer        = false;
+  uint64_t trailer_events = 0;
+  // Whole records found after the trailer. They are not replayed, and the
+  // trailer's event count must match the records before it for complete=true.
+  size_t skipped_after_trailer = 0;
 
   // Content-addressed blobs: hash_hex -> file path
   std::unordered_map<std::string, std::string> blobs;
@@ -197,6 +205,11 @@ struct Archive {
 // Load an archive from disk. Returns false on error.
 bool load_archive(const std::string& path, Archive& archive);
 
+// Whether load_archive would find the archive in `archive_dir` complete: a
+// trailer whose total_events counts the records before it. Walks the record
+// headers and seeks over the payloads, so it costs a fraction of a load.
+bool has_clean_trailer(const std::string& archive_dir);
+
 // ---------------------------------------------------------------------------
 // Record-stream primitives
 //
@@ -205,6 +218,12 @@ bool load_archive(const std::string& path, Archive& archive);
 // self-delimiting hrr_event_header + payload records. These primitives are that
 // shared framing, so both readers get the same torn-tail recovery.
 // ---------------------------------------------------------------------------
+
+// payload_length is file-supplied. Without a ceiling, a corrupt header can ask
+// resize() for ~4 GiB and OOM the process. Captured kernel launches are far
+// smaller (the writer buffers 256 KiB and spills larger records to a direct
+// write); 64 MiB is well above any legitimate record. A longer record is torn.
+constexpr uint32_t kMaxRecordBytes = 64u * 1024u * 1024u;
 
 enum class RecordStatus {
   Ok,           // a complete record was read into the output buffer
