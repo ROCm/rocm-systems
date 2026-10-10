@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/mxfp4_simd.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -3915,6 +3916,9 @@ void VCvtScalef32PkFp4F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32PkFp4Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  if (amdgpu::try_execute_cvt_scalef32_pk_fp4_bf16_simd(inst, wf))
+    return;
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3926,15 +3930,11 @@ void VCvtScalef32PkFp4Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           *this, wf, vdst, lane, amdgpu::RegisterAccess(wf).read_lane(vdst, lane));
       continue;
     }
-    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
     uint32_t packed_src = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    float s0 = static_cast<float>(
-        static_cast<double>(util::bf16_to_f32(static_cast<uint16_t>(packed_src & 0xFFFF))) / scale);
-    float s1 = static_cast<float>(
-        static_cast<double>(util::bf16_to_f32(static_cast<uint16_t>((packed_src >> 16) & 0xFFFF))) /
-        scale);
-    uint8_t r0 = util::f32_to_fp4_e2m1_rne(s0);
-    uint8_t r1 = util::f32_to_fp4_e2m1_rne(s1);
+    uint8_t r0 = util::bf16_to_fp4_e2m1_scaled_rne(static_cast<uint16_t>(packed_src),
+                                                   static_cast<uint8_t>(biased_exp));
+    uint8_t r1 = util::bf16_to_fp4_e2m1_scaled_rne(static_cast<uint16_t>(packed_src >> 16),
+                                                   static_cast<uint8_t>(biased_exp));
     uint32_t packed = static_cast<uint32_t>(r0 & 0xF) | (static_cast<uint32_t>(r1 & 0xF) << 4);
     uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;
     uint32_t old = amdgpu::RegisterAccess(wf).read_lane(vdst, lane);

@@ -820,9 +820,14 @@ TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossReg
     std::unique_ptr<Instruction> first(decode_valid(*decoder, c.words.data()));
     SCOPED_TRACE(first->mnemonic());
     SCOPED_TRACE(c.arch);
-    const bool expect_async = c.mfma
-                                  ? c.arch == ROCJITSU_CODE_ARCH_CDNA4 && (14u & c.mfma_family) != 0
-                                  : c.arch == ROCJITSU_CODE_ARCH_CDNA5 && c.wmma_k >= 32;
+    bool expect_async = c.mfma ? c.arch == ROCJITSU_CODE_ARCH_CDNA4 && (14u & c.mfma_family) != 0
+                               : c.arch == ROCJITSU_CODE_ARCH_CDNA5 && c.wmma_k >= 32;
+#if defined(__AVX512F__) && defined(__AVX512VL__) && defined(__AVX512BW__) && defined(__FMA__)
+    if (c.arch == ROCJITSU_CODE_ARCH_CDNA4 && c.words.size() == 4 &&
+        ((c.words[2] >> 16) & 127) == 45 && ((c.words[2] >> 8) & 7) == 4 &&
+        (c.words[3] >> 29) == 4 && !util::force_scalar() && amdgpu::mfma_fp4_vnni_available())
+      expect_async = false;
+#endif
     const size_t suffix = c.words.size() - 2;
     const bool acc = c.mfma && ((c.words[suffix] >> 15) & 1);
     for (unsigned hazard = 0; hazard != 5; ++hazard) {

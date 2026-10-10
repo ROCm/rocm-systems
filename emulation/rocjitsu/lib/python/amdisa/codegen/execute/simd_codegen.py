@@ -3311,6 +3311,11 @@ def _local_coverage_probe(
         args = f'{arity}, {str(e32).lower()}, {str(half_dst).lower()}, {half_inputs}'
         return f'  if (amdgpu::try_execute_words_simd<{args}>(inst, wf, {functor})) return;'
 
+    if template_name == 'v_cvt_scalef32_pk_fp4_bf16_vop3':
+        return (
+            '  if (amdgpu::try_execute_cvt_scalef32_pk_fp4_bf16_simd(inst, wf)) return;'
+        )
+
     if template_name in ('v_pk_fmac_f16_vop2', 'v_pk_fmac_f16_vop3'):
         v3 = str(template_name.endswith('_vop3')).lower()
         return f'  if (amdgpu::try_execute_packed_fmac_simd<{v3}>(inst, wf)) return;'

@@ -2446,13 +2446,22 @@ def _gen_narrow_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
         L.append(
             f'    if (biased_exp == 0xFFu) {{ amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, amdgpu::RegisterAccess(wf).read_lane({dst[0]}, lane)); continue; }}'
         )
-        L.append(
-            '    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);'
-        )
+        direct_bf16_fp4 = src_fmt == 'bf16' and dst_fmt == 'fp4'
+        if not direct_bf16_fp4:
+            L.append(
+                '    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);'
+            )
         L.append(
             f'    uint32_t packed_src = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
         )
-        if src_fmt == 'f16':
+        if direct_bf16_fp4:
+            L.append(
+                '    uint8_t r0 = util::bf16_to_fp4_e2m1_scaled_rne(static_cast<uint16_t>(packed_src), static_cast<uint8_t>(biased_exp));'
+            )
+            L.append(
+                '    uint8_t r1 = util::bf16_to_fp4_e2m1_scaled_rne(static_cast<uint16_t>(packed_src >> 16), static_cast<uint8_t>(biased_exp));'
+            )
+        elif src_fmt == 'f16':
             L.append(
                 '    float s0 = static_cast<float>(static_cast<double>(util::f16_to_f32(static_cast<uint16_t>(packed_src & 0xFFFF))) / scale);'
             )
@@ -2466,8 +2475,13 @@ def _gen_narrow_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
             L.append(
                 '    float s1 = static_cast<float>(static_cast<double>(util::bf16_to_f32(static_cast<uint16_t>((packed_src >> 16) & 0xFFFF))) / scale);'
             )
-        L.append(f"    uint8_t r0 = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 's0')};")
-        L.append(f"    uint8_t r1 = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 's1')};")
+        if not direct_bf16_fp4:
+            L.append(
+                f"    uint8_t r0 = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 's0')};"
+            )
+            L.append(
+                f"    uint8_t r1 = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 's1')};"
+            )
         if dst_fmt == 'fp4':
             L.append(
                 '    uint32_t packed = static_cast<uint32_t>(r0 & 0xF) | (static_cast<uint32_t>(r1 & 0xF) << 4);'

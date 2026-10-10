@@ -673,7 +673,14 @@ add_executable(
     memory_wait_scoreboard_test.cpp
     register_access_test.cpp
     register_file_test.cpp
+    mfma_scale_cache_test.cpp
+    mfma_fp4_avx512_test.cpp
+    mfma_scale_simd_test.cpp
+    mfma_scaled_rows_test.cpp
+    mxfp4_conversion_test.cpp
+    mxfp4_simd_test.cpp
     simd_correctness/mfma_lazy_storage_test.cpp
+    simd_correctness/mfma_scaled_operand_exact_test.cpp
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
     vop3_conversion_modifiers_test.cpp

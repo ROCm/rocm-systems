@@ -7,8 +7,10 @@
 #pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/mfma_fp4_dispatch.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "util/simd.h"
 
 #include <algorithm>
 #include <bitset>
@@ -38,6 +40,20 @@ inline bool candidate(std::string_view name) {
     return true;
   return name == "v_mfma_f32_32x32x8_f16" || name == "v_mfma_f32_16x16x16_f16" ||
          name == "v_mfma_f32_32x32x16_f16" || name == "v_mfma_f32_16x16x32_f16";
+}
+
+// Cost preference, separate from the scoreboard capability allowlist.
+// The CDNA4 decoder gives only FP4 a 128-bit source for this shape; the
+// policy test checks that mapping against every valid format pair. The FMA
+// fallback intentionally remains helper-eligible until separately measured.
+inline bool prefer_inline_mma(const Instruction &inst, uint32_t wave_size) {
+  if (inst.mnemonic() != "v_mfma_scale_f32_16x16x128_f8f6f4")
+    return false;
+  const auto *a = inst.src_operand(0), *b = inst.src_operand(1);
+  if (!a || !b)
+    return false;
+  return mfma_fp4_vnni_selected(16, 16, 128, 1, a->size_bits() == 128 ? 4 : 0,
+                                b->size_bits() == 128 ? 4 : 0, wave_size, util::force_scalar());
 }
 
 // Reject non-MFMA encodings on CDNA4, and non-candidates in the CDNA5 allowlist.
