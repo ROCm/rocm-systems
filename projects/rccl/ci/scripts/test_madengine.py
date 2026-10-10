@@ -2,12 +2,14 @@
 """Run MADEngine AI workloads against CI-built RCCL and track performance.
 
 This script handles:
-  1. Installing madengine from source into the CI venv
+  1. Installing madengine from source into the CI Python environment
   2. Building a Docker overlay image with the CI-built RCCL
-  3. Generating a manifest.json for the requested workload
-  4. Running the workload via `madengine run`
-  5. Parsing perf.csv results and checking for regressions
-  6. Appending results to a JSONL datastore for trend analysis
+  3. Generating a manifest.json per A/B phase
+  4. Running both phases back to back inside one SLURM allocation: the stock
+     base image (baseline) and the same image with the CI RCCL laid over it
+     (candidate)
+  5. Scoring the candidate against the baseline measured on the same nodes
+  6. Appending both absolute values and their ratio to a JSONL datastore
 
 Usage from GitHub Actions (on ruby-linux-slurm-scale-runner):
   python3 rocm-systems/projects/rccl/ci/scripts/test_madengine.py \
@@ -27,6 +29,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -50,23 +53,43 @@ PERF_DATASTORE = "madengine_results.jsonl"
 # madengine's perf_entry_super.json uses short metric names that differ
 # from our canonical workload-config keys.  Map each config key to the
 # set of madengine metric names we accept as a match.
+#
+# The ``_avg`` rows hold Megatron's running average over the measured
+# iterations; the plain rows hold the final iteration alone.  Two reasons to
+# score on the average: a single iteration is a one-sample estimate that
+# sporadically dips below the 2% regression gate on its own, and
+# parse_live_log_metrics() already reads the average from the live log, so
+# until now the structured and fallback paths could score one run differently.
 _METRIC_ALIASES: dict[str, set[str]] = {
-    "tokens_per_second_per_gpu": {"tok_per_s_per_gpu"},
+    "tokens_per_second_per_gpu": {"tok_per_s_per_gpu_avg"},
 }
-_TFLOPS_METRICS = {"TFLOPS_per_gpu"}
+_TFLOPS_METRICS = {"TFLOPS_per_gpu_avg"}
 
-REGRESSION_WINDOW = 5
+# Applied to the candidate/baseline ratio of a single A/B pair, not to a
+# rolling mean of absolute throughput.  The absolute number is dominated by
+# which node pair the scheduler picked: over four weeks of history it varies
+# by 2.2% (BF16) and 2.7% (FP8) across pairs, while the one pair that repeated
+# reproduced to 0.02% and 0.25% on two different RCCL builds.  Comparing two
+# runs on the same nodes divides that term out, so 2% is well clear of the
+# noise floor rather than below it (AICOMNET-420).
 REGRESSION_THRESHOLD_TRAINING = 0.02  # 2%
 REGRESSION_THRESHOLD_INFERENCE = 0.05  # 5%
 
+BASELINE = "baseline"
+CANDIDATE = "candidate"
+
 # Kept in its own directory: it doubles as the build context the compute
-# nodes use, and WORK_DIR holds the venv, the clones and the live sbatch
-# logs -- tarring a file that is still growing fails the build.
+# nodes use, and WORK_DIR holds the Python environment, the clones and the
+# live sbatch logs -- tarring a file that is still growing fails the build.
 OVERLAY_CTX = "overlay_ctx"
 OVERLAY_DOCKERFILE = "Dockerfile.rccl-overlay"
 
-MADENGINE_REPO = "https://github.com/ROCm/madengine.git"
-MADENGINE_REF = "98217cd7ba721f5a5f2a8fb4729120cce1d57eac"  # v2.2.0, 2026-09-08
+# TEMPORARY PIN — must move back to ROCm/madengine before this leaves draft.
+# The A/B below needs both runs in one allocation, which requires madengine to
+# execute a multi-node workload in place instead of submitting its own sbatch
+# (ROCm/madengine#213).  That is not on develop yet, so the fork is pinned.
+MADENGINE_REPO = "https://github.com/mkuznet1/madengine.git"
+MADENGINE_REF = "10a0414b644d204e45437ab01d9e795176e0ee4f"  # madengine#213
 MAD_REPO = "https://github.com/ROCm/MAD.git"
 MAD_REF = "b4b296310e52ba5cd67d898825165b06b60cf9bf"  # mad-rccl, 2026-09-08
 MAD_BRANCH = "mad-rccl"
@@ -92,7 +115,7 @@ WORKLOAD_CONFIGS = {
         },
         "slurm_partition": "meta64",
         "gpus_per_node": 8,
-        "time_limit": "03:00:00",
+        "time_limit": "04:00:00",  # one allocation, two runs, plus image staging
         "docker_mounts": {"/dev/infiniband": "/dev/infiniband"},
         "docker_run_options": "--privileged --group-add render --shm-size 64G "
             "--device=/dev/infiniband --cap-add IPC_LOCK "
@@ -108,14 +131,14 @@ WORKLOAD_CONFIGS = {
         "base_image": "rocm/primus:v26.4",
         "gpu_target": "gfx950",
         "metric_key": "tokens_per_second_per_gpu",
-        "multiple_results": "perf_primus-megatron-Llama-3.1-70B.csv",
+        "multiple_results": "perf_primus-megatron-Llama-4-Scout-17B-16E.csv",
         "reference_values": {
             "2N": 2734,
             "4N": 2337,
         },
         "slurm_partition": "meta64",
         "gpus_per_node": 8,
-        "time_limit": "02:00:00",
+        "time_limit": "03:00:00",  # one allocation, two runs, plus image staging
         "docker_mounts": {"/dev/infiniband": "/dev/infiniband"},
         "docker_run_options": "--privileged --group-add render --shm-size 64G "
             "--device=/dev/infiniband --cap-add IPC_LOCK "
@@ -222,140 +245,9 @@ def install_madengine(work_dir: Path) -> Path:
     return madengine_dir
 
 
-def patch_madengine_for_cluster(
-    madengine_dir: Path,
-    no_gres: bool = False,
-) -> None:
+def patch_madengine_for_cluster(madengine_dir: Path) -> None:
     """Patch madengine source for cluster-specific compatibility."""
     src = madengine_dir / "src" / "madengine"
-
-    if no_gres:
-        template = src / "deployment" / "templates" / "slurm" / "job.sh.j2"
-        if not template.exists():
-            log.warning("SLURM template not found at %s", template)
-        else:
-            content = template.read_text()
-            patched = content.replace(
-                "#SBATCH --gpus-per-node={{ gpus_per_node }}\n", ""
-            )
-            if patched != content:
-                template.write_text(patched)
-                log.info("Patched SLURM template: removed --gpus-per-node directive")
-            else:
-                log.info("SLURM template already patched (no --gpus-per-node)")
-
-    template = src / "deployment" / "templates" / "slurm" / "job.sh.j2"
-    if template.exists():
-        content = template.read_text()
-        marker = "# Load required modules"
-        if marker in content and "$HOME/.local/bin" not in content:
-            patched = content.replace(
-                marker,
-                'export PATH="$HOME/.local/bin:$PATH"\n\n' + marker,
-            )
-            template.write_text(patched)
-            log.info(
-                "Patched SLURM template: added $HOME/.local/bin to PATH "
-                "(SLURM jobs do not inherit user shell PATH)"
-            )
-        else:
-            log.info("SLURM template PATH patch already present or marker not found")
-
-    template = src / "deployment" / "templates" / "slurm" / "job.sh.j2"
-    if template and template.exists():
-        content = template.read_text()
-        # The whole template is the sbatch script, so both verification blocks
-        # run on a compute node, and both inherit the submission environment
-        # whose PATH leads with the head node's venv. That interpreter belongs
-        # to another distro (3.10/3.12 there against 3.9 here), so madengine is
-        # not usable from it and both blocks need the node-local bootstrap.
-        verify_str = 'echo "Verifying madengine availability..."'
-        heredoc_idx = content.find("TASK_SCRIPT_EOF")
-        # The single-node block is bounded by the heredoc: the multi-node pass
-        # inserts text starting with verify_str, so an unbounded search could
-        # land inside what it just patched.
-        blocks = [
-            ("single-node", 0, heredoc_idx, "# Single-node: Create local execution manifest"),
-            ("multi-node", heredoc_idx, len(content), "# Create local execution manifest"),
-        ]
-        # Right to left, so patching one does not move the other's offsets.
-        for label, search_from, search_to, end_str in sorted(
-            blocks, key=lambda b: b[1], reverse=True
-        ):
-            if search_from < 0 or search_to < 0:
-                log.warning("Could not locate the %s verification block", label)
-                continue
-            verify_idx = content.find(verify_str, search_from, search_to)
-            end_idx = (
-                content.find(end_str, verify_idx, search_to) if verify_idx != -1 else -1
-            )
-            if verify_idx == -1 or end_idx == -1:
-                log.warning("Could not locate the %s verification block", label)
-                continue
-            replacement = (
-                'echo "Verifying madengine availability..."\n'
-                'MAD_CLI_COMMAND=""\n'
-                'if command -v madengine >/dev/null 2>&1 && '
-                'madengine --help >/dev/null 2>&1; then\n'
-                '    MAD_CLI_COMMAND="madengine"\n'
-                '    echo "  ✓ madengine available: '
-                '$(madengine --version 2>&1 | head -1)"\n'
-                'fi\n'
-                'if [ -z "$MAD_CLI_COMMAND" ]; then\n'
-                # PATH still leads with the head node's venv, whose
-                # interpreter belongs to another distro.
-                '    NODE_PYTHON=""\n'
-                # Building the venv is the probe: `import venv` succeeds on
-                # distro pythons whose ensurepip is missing, and the failure
-                # would land under `set -e` before the next candidate is tried.
-                '    for cand in /usr/bin/python3 /usr/local/bin/python3; do\n'
-                '        [ -x "$cand" ] || continue\n'
-                '        rm -rf "$WORKSPACE/node_venv"\n'
-                '        if "$cand" -m venv "$WORKSPACE/node_venv" >/dev/null 2>&1; then\n'
-                '            NODE_PYTHON="$cand"; break\n'
-                '        fi\n'
-                '    done\n'
-                '    if [ -z "$NODE_PYTHON" ]; then\n'
-                '        echo "  ✗ no usable python3 on $(hostname)"\n'
-                '        exit 1\n'
-                '    fi\n'
-                '    echo "  ⚠ madengine not functional — '
-                'installing for this node\'s Python '
-                '($("$NODE_PYTHON" --version 2>&1) at $NODE_PYTHON)"\n'
-                '    SUBMISSION_DIR={{ manifest_file | dirname }}\n'
-                '    MADENGINE_SRC="$SUBMISSION_DIR/madengine"\n'
-                '    if [ -d "$MADENGINE_SRC" ] && [ -f "$MADENGINE_SRC/pyproject.toml" ]; then\n'
-                '        source "$WORKSPACE/node_venv/bin/activate"\n'
-                '        pip install --upgrade pip setuptools wheel 2>&1 | tail -3\n'
-                '        pip install "$MADENGINE_SRC" 2>&1 | tail -20\n'
-                '        if madengine --version >/dev/null 2>&1; then\n'
-                '            MAD_CLI_COMMAND="madengine"\n'
-                '            echo "  ✓ madengine installed: '
-                '$(madengine --version 2>&1 | head -1)"\n'
-                '        else\n'
-                '            echo "  ✗ madengine install failed"\n'
-                '            exit 1\n'
-                '        fi\n'
-                '    else\n'
-                '        echo "  ✗ madengine source not found at $MADENGINE_SRC"\n'
-                '        exit 1\n'
-                '    fi\n'
-                'fi\n'
-                'echo ""\n\n'
-            )
-            content = content[:verify_idx] + replacement + content[end_idx:]
-            log.info("Patched SLURM template: per-node madengine install (%s)", label)
-        template.write_text(content)
-
-    template = src / "deployment" / "templates" / "slurm" / "job.sh.j2"
-    if template and template.exists():
-        content = template.read_text()
-        old_nfs_pattern = r"\bnfs\b"
-        new_nfs_pattern = r"\bnfs[0-9]*\b"
-        if old_nfs_pattern in content and new_nfs_pattern not in content:
-            content = content.replace(old_nfs_pattern, new_nfs_pattern)
-            template.write_text(content)
-            log.info("Patched SLURM template: NFS detection now matches nfs4")
 
     # /var/tmp is persistent and shared, so job-scope the workspace and delete
     # it after use. Anchor-guarded: a no-op once ROCm/madengine#190 is pinned.
@@ -364,13 +256,6 @@ def patch_madengine_for_cluster(
         content = template.read_text()
         original = content
         patches = [
-            (
-                # Matches the /tmp branch below, job-scoped all along.
-                "multi-node workspace scoping",
-                "    WORKSPACE=$SLURM_TMPDIR/madengine_node_${SLURM_PROCID}\n",
-                "    WORKSPACE=$SLURM_TMPDIR"
-                "/madengine_job_${SLURM_JOB_ID}_node_${SLURM_PROCID}\n",
-            ),
             (
                 # Bare SLURM_TMPDIR would rsync the project into /var/tmp.
                 "single-node workspace scoping",
@@ -422,23 +307,6 @@ def patch_madengine_for_cluster(
 
         if content != original:
             template.write_text(content)
-
-    run_orch = src / "orchestration" / "run_orchestrator.py"
-    if run_orch.exists():
-        content = run_orch.read_text()
-        patched = content.replace(
-            'print(self.console.sh("yum info rocm-libs", canFail=True))',
-            'print(self.console.sh("rpm -qi rocm-libs 2>/dev/null '
-            '|| echo rocm-libs not installed as RPM", canFail=True))',
-        )
-        if patched != content:
-            run_orch.write_text(patched)
-            log.info(
-                "Patched run_orchestrator.py: replaced 'yum info' with 'rpm -qi' "
-                "to avoid interactive GPG prompt hang"
-            )
-        else:
-            log.info("run_orchestrator.py already patched or yum string not found")
 
 
 def get_rccl_commit(rccl_lib: Path | None = None) -> str:
@@ -539,6 +407,17 @@ def _split_rccl_version(version: str) -> tuple[str, str, bool]:
     if not m:
         return version, "", False
     return m.group(1), (m.group(2) or "").lower(), m.group(3) == "+"
+
+
+def runtime_rccl_versions(work_dir: Path) -> list[str]:
+    """Distinct ``RCCL version :`` banners across one phase's node logs."""
+    log_dir = work_dir / "slurm_output"
+    versions: list[str] = []
+    for log_file in sorted(log_dir.glob("*node_*.out")) if log_dir.is_dir() else []:
+        for v in re.findall(r"RCCL version\s*:\s*(\S+)", log_file.read_text(errors="replace")):
+            if v not in versions:
+                versions.append(v)
+    return versions
 
 
 def verify_rccl_replacement(
@@ -780,9 +659,10 @@ def generate_manifest(
     overlay_image: str,
     nodes: int,
     work_dir: Path,
-    nodelist: str = "",
     registry: str = "",
     rccl_lib: Path | None = None,
+    run_dir: Path | None = None,
+    pull_only: bool = False,
 ) -> Path:
     """Generate a madengine manifest.json for the workload.
 
@@ -790,6 +670,15 @@ def generate_manifest(
     deployment config under ``deployment_config``, env vars inside both
     ``context.docker_env_vars`` and ``deployment_config.env_vars``, mounts
     in ``context.docker_mounts``.
+
+    *run_dir* is where madengine will be invoked from, and therefore where the
+    manifest and all of the run's relative outputs (``perf.csv``,
+    ``perf_entry_super.json``, ``slurm_output/``) land.  The A/B gives each
+    phase its own, so the two runs do not overwrite each other.
+
+    *pull_only* describes the baseline image: a stock registry tag with no
+    Dockerfile behind it.  madengine then pulls it per node instead of taking
+    the local-image path, which would try to build it and stage a tar.
     """
     gpus_per_node = workload_config["gpus_per_node"]
 
@@ -876,34 +765,46 @@ def generate_manifest(
         "exclusive": True,
         "enable_node_check": False,
         "network_interface": socket_ifname,
-        **({"nodelist": nodelist} if nodelist else {}),
+        "skip_gpus_directive": cluster_config.get("slurm_no_gres", False),
     }
 
     overlay_dockerfile = work_dir / OVERLAY_CTX / OVERLAY_DOCKERFILE
 
+    if pull_only:
+        image_entry = {
+            "docker_image": overlay_image,
+            "local_image": False,
+            "registry_image": overlay_image,
+            "registry": None,
+            "base_docker": overlay_image,
+            "build_status": "SKIPPED",
+            "build_duration": 0,
+            "gpu_vendor": "AMD",
+        }
+    else:
+        image_entry = {
+            "docker_image": overlay_image,
+            "local_image": not bool(registry),
+            "registry_image": overlay_image if registry else None,
+            "registry": registry or None,
+            "base_docker": workload_config["base_image"],
+            "build_status": "SKIPPED",
+            "build_duration": 0,
+            "gpu_vendor": "AMD",
+            # Lets a compute node build the image it can neither find nor
+            # pull; the context is this file's own directory, overlay_ctx.
+            # Advertised only when it exists: --skip-overlay-build writes no
+            # Dockerfile, and a dead path would turn madengine's fallback
+            # into a guaranteed failure.
+            **(
+                {"dockerfile": str(overlay_dockerfile)}
+                if overlay_dockerfile.is_file()
+                else {}
+            ),
+        }
+
     manifest = {
-        "built_images": {
-            image_key: {
-                "docker_image": overlay_image,
-                "local_image": not bool(registry),
-                "registry_image": overlay_image if registry else None,
-                "registry": registry or None,
-                "base_docker": workload_config["base_image"],
-                "build_status": "SKIPPED",
-                "build_duration": 0,
-                "gpu_vendor": "AMD",
-                # Lets a compute node build the image it can neither find nor
-                # pull; the context is this file's own directory, overlay_ctx.
-                # Advertised only when it exists: --skip-overlay-build writes no
-                # Dockerfile, and a dead path would turn madengine's fallback
-                # into a guaranteed failure.
-                **(
-                    {"dockerfile": str(overlay_dockerfile)}
-                    if overlay_dockerfile.is_file()
-                    else {}
-                ),
-            },
-        },
+        "built_images": {image_key: image_entry},
         "built_models": {
             image_key: {
                 "name": model_repo,
@@ -952,40 +853,111 @@ def generate_manifest(
         },
     }
 
-    manifest_path = work_dir / "manifest.json"
+    manifest_path = (run_dir or work_dir) / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2))
     log.info("Manifest written to: %s", manifest_path)
     return manifest_path
 
 
-def run_madengine(
-    manifest_path: Path,
-    output_csv: Path,
-    work_dir: Path,
-    timeout_minutes: int = 120,
-) -> int:
-    """Run madengine with the given manifest and return the exit code.
+def prepare_phase_dir(work_dir: Path, phase: str) -> Path:
+    """Create the directory madengine will be invoked from for one phase.
 
-    The manifest already contains deployment_config with slurm, distributed,
-    and env_vars sections.  madengine merges deployment_config into
-    additional_context automatically (run_orchestrator.py:225-234), so we
-    do not need to duplicate those here.
+    madengine writes ``perf.csv``, ``perf_entry_super.json`` and
+    ``slurm_output/`` relative to its working directory under fixed names, and
+    resolves the model's ``scripts/...`` path the same way.  Giving each phase
+    its own directory with its own copy of the scripts is what keeps the two
+    runs from overwriting each other's results.
     """
-    cmd = [
-        "madengine", "run",
-        "-m", str(manifest_path),
-        "-o", str(output_csv),
-        "--live-output",
-        "--verbose",
+    run_dir = work_dir / "ab" / phase
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    scripts_src = work_dir / "scripts"
+    scripts_dst = run_dir / "scripts"
+    if scripts_src.is_dir() and not scripts_dst.exists():
+        subprocess.run(["cp", "-r", str(scripts_src), str(scripts_dst)], check=True)
+
+    return run_dir
+
+
+def run_ab_in_one_allocation(
+    phases: list[tuple[str, Path]],
+    work_dir: Path,
+    nodes: int,
+    workload_name: str,
+    workload_config: dict,
+    cluster_config: dict,
+    timeout_minutes: int,
+    nodelist: str = "",
+) -> dict:
+    """Run every phase back to back inside a single SLURM allocation.
+
+    The phases are only comparable if they land on the same nodes.  Which node
+    pair the scheduler picks moves the absolute throughput by more than the
+    regression threshold, so two independently scheduled jobs would be
+    measuring the cluster as much as RCCL (AICOMNET-420).
+
+    Submitting a second job pinned to the first one's nodes does not solve it:
+    such a job is not schedulable until those exact nodes free up again, and
+    while it waits it reserves nothing and accrues no priority.  On a busy
+    shared partition that wait is unbounded, so the comparison would sometimes
+    not happen at all — worse than a noisy gate.  The allocation is therefore
+    taken once and held across both runs.
+
+    madengine picks up SLURM_JOB_ID from salloc and runs the workload in place
+    through srun instead of submitting its own sbatch (ROCm/madengine#213).
+
+    Returns ``{"exit_codes": {phase: int}, "job_id": str, "nodelist": str}``.
+    """
+    alloc_info = work_dir / "allocation.txt"
+    alloc_info.unlink(missing_ok=True)
+
+    script_lines = [
+        "#!/bin/bash",
+        "# Generated by test_madengine.py. Deliberately no `set -e`: a failed",
+        "# baseline must still let the candidate run, so the report can say",
+        "# which side broke.",
+        'echo "Allocation: job=${SLURM_JOB_ID} nodes=${SLURM_JOB_NODELIST}"',
+        'printf "%s\\n%s\\n" "${SLURM_JOB_ID}" "${SLURM_JOB_NODELIST}" > '
+        + shlex.quote(str(alloc_info)),
     ]
+    for phase, run_dir in phases:
+        script_lines += [
+            "",
+            f'echo "===== phase: {phase} ====="',
+            f"cd {shlex.quote(str(run_dir))} || exit 1",
+            "madengine run -m manifest.json -o perf.csv --live-output --verbose",
+            "echo $? > " + shlex.quote(str(run_dir / "exit_code")),
+        ]
+
+    script_path = work_dir / "ab" / "run_phases.sh"
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    script_path.write_text("\n".join(script_lines) + "\n")
+
+    cmd = [
+        "salloc",
+        "--nodes", str(nodes),
+        "--ntasks-per-node", "1",
+        "--exclusive",
+        "--partition",
+        cluster_config.get("slurm_partition", workload_config["slurm_partition"]),
+        "--time", workload_config["time_limit"],
+        "--job-name", f"rccl-ab-{workload_name}",
+    ]
+    qos = cluster_config.get("slurm_qos", "")
+    if qos:
+        cmd += ["--qos", qos]
+    if nodelist:
+        cmd += ["--nodelist", nodelist]
+    cmd += ["bash", str(script_path)]
 
     log.info("Running: %s", " ".join(cmd))
-    log.info("Timeout: %d minutes", timeout_minutes)
+    log.info("Phases: %s", ", ".join(p for p, _ in phases))
+    log.info("Timeout: %d minutes (includes time spent queueing)", timeout_minutes)
 
-    # Pre-warm: madengine's SLURM deployment validates CLI availability by
-    # running `madengine --version` itself.  A cold import of its heavy
-    # dependencies (kubernetes, aiohttp, paramiko) off NFS is slow, so run it
-    # once here to populate the bytecode cache.
+    # Pre-warm: madengine validates CLI availability by running
+    # `madengine --version` itself.  A cold import of its heavy dependencies
+    # (kubernetes, aiohttp, paramiko) off NFS is slow, so run it once here to
+    # populate the bytecode cache.
     try:
         subprocess.run(["madengine", "--version"], capture_output=True, timeout=120)
     except subprocess.TimeoutExpired:
@@ -999,17 +971,32 @@ def run_madengine(
     env["MAD_DOCKER_BUILDS"] = str(docker_builds_dir)
 
     try:
-        proc = subprocess.run(
-            cmd,
-            cwd=work_dir,
-            env=env,
-            timeout=timeout_minutes * 60,
-        )
-        log.info("madengine exit code: %d", proc.returncode)
-        return proc.returncode
+        subprocess.run(cmd, cwd=work_dir, env=env, timeout=timeout_minutes * 60)
     except subprocess.TimeoutExpired:
-        log.error("madengine timed out after %d minutes", timeout_minutes)
-        return 124
+        log.error("Allocation timed out after %d minutes", timeout_minutes)
+
+    exit_codes = {}
+    for phase, run_dir in phases:
+        marker = run_dir / "exit_code"
+        try:
+            exit_codes[phase] = int(marker.read_text().strip())
+        except (OSError, ValueError):
+            # No marker means the phase never ran: salloc never got the nodes,
+            # or the timeout above cut it short.
+            log.error("Phase %s produced no exit code — it did not run", phase)
+            exit_codes[phase] = 124
+        else:
+            log.info("Phase %s exit code: %d", phase, exit_codes[phase])
+
+    job_id, granted_nodes = "", ""
+    try:
+        job_id, granted_nodes = alloc_info.read_text().splitlines()[:2]
+    except (OSError, ValueError):
+        log.warning("Could not read allocation details from %s", alloc_info)
+    else:
+        log.info("Allocation: job=%s nodes=%s", job_id, granted_nodes)
+
+    return {"exit_codes": exit_codes, "job_id": job_id, "nodelist": granted_nodes}
 
 
 def parse_perf_results(work_dir: Path) -> list[dict]:
@@ -1120,64 +1107,107 @@ def parse_live_log_metrics(work_dir: Path) -> list[dict]:
     return runs
 
 
-def check_regression(
-    results_dir: Path,
-    workload_name: str,
-    scale: str,
-    current_value: float,
-    workload_type: str,
-    precision: str | None = None,
-) -> tuple[bool, str]:
-    """Check if current metric is a regression vs rolling average.
+def collect_phase_results(run_dir: Path, metric_key: str) -> list[dict]:
+    """Per-precision metrics for one phase.
 
-    Returns (is_regression, message).
+    Prefers madengine's structured output and falls back to scraping the live
+    log.  Each entry carries precision, metric value and a pass/fail status, so
+    the A/B comparison and the datastore writes are driven from one list.
     """
-    datastore = results_dir / PERF_DATASTORE
-    if not datastore.exists():
-        return False, "No historical data yet — skipping regression check"
+    perf_results = parse_perf_results(run_dir)
+    results: list[dict] = []
+
+    if perf_results:
+        # perf_entry_super.json rows are long-format: metric name is a
+        # value in the ``metric`` column, performance in ``performance``.
+        # Filter to the configured metric_key (or its madengine alias)
+        # and key by precision.
+        accepted_metrics = _METRIC_ALIASES.get(metric_key, {metric_key})
+        for row in perf_results:
+            if row.get("metric") not in accepted_metrics:
+                continue
+            perf_val = row.get("performance", "")
+            precision = (row.get("training_precision")
+                         or row.get("multi_results", {}).get("precision", ""))
+            row_status = row.get("status", "")
+            if not perf_val:
+                continue
+            try:
+                val = float(perf_val)
+            except (ValueError, TypeError):
+                continue
+            results.append({
+                "precision": precision,
+                "metric_value": val,
+                "status": ("pass" if row_status.upper() in ("", "PASS", "SUCCESS")
+                           else "fail"),
+                "source": "structured",
+            })
+            log.info("Structured result: %s %s = %.1f (status=%s)",
+                     precision, metric_key, val, row_status)
+
+        # Attach TFLOPS from companion rows, keyed by precision.
+        tflops_by_precision: dict[str, float] = {}
+        for row in perf_results:
+            if row.get("metric") not in _TFLOPS_METRICS:
+                continue
+            prec = (row.get("training_precision")
+                    or row.get("multi_results", {}).get("precision", ""))
+            try:
+                tflops_by_precision[prec] = float(row["performance"])
+            except (KeyError, ValueError, TypeError):
+                pass
+        for pr in results:
+            if "tflops_avg" not in pr:
+                pr["tflops_avg"] = tflops_by_precision.get(pr["precision"])
+
+    if not results:
+        for run in parse_live_log_metrics(run_dir):
+            val = run.get("tokens_per_second_per_gpu")
+            if val is None:
+                continue
+            results.append({
+                "precision": run.get("precision"),
+                "metric_value": val,
+                "tflops_avg": run.get("tflops_avg"),
+                "status": "pass" if run.get("completed", False) else "fail",
+                "source": "live_log",
+                "iter": run.get("iter", 0),
+                "total": run.get("total", 0),
+                "log_file": run.get("log_file"),
+            })
+            log.info("Live-log result: %s = %.1f (completed=%s)",
+                     run.get("precision"), val, run.get("completed"))
+
+    return results
+
+
+def check_ab_regression(
+    baseline: float,
+    candidate: float,
+    workload_type: str,
+) -> tuple[bool, str]:
+    """Score the candidate against the baseline measured on the same nodes.
+
+    This replaces the rolling mean of absolute throughput, which could not
+    separate an RCCL change from a change of node pair.  Returns
+    (is_regression, message).
+    """
+    if baseline <= 0:
+        return False, "Baseline is not a positive number — cannot compare"
 
     threshold = (
         REGRESSION_THRESHOLD_TRAINING
         if workload_type == "training"
         else REGRESSION_THRESHOLD_INFERENCE
     )
-
-    historical = []
-    with open(datastore) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-                if (
-                    entry.get("workload") == workload_name
-                    and entry.get("scale") == scale
-                    and entry.get("precision") == precision
-                    and entry.get("status") == "pass"
-                    and entry.get("metric_value") is not None
-                ):
-                    historical.append(entry["metric_value"])
-            except json.JSONDecodeError:
-                continue
-
-    if len(historical) < 3:
-        return False, f"Only {len(historical)} historical data points — need at least 3 for regression check"
-
-    window = historical[-REGRESSION_WINDOW:]
-    rolling_avg = sum(window) / len(window)
-    if rolling_avg == 0:
-        return False, "Rolling average is 0 — skipping regression check"
-    pct_change = (current_value - rolling_avg) / rolling_avg
-
+    ratio = candidate / baseline
     msg = (
-        f"Current: {current_value:.1f}, "
-        f"Rolling avg ({len(window)} runs): {rolling_avg:.1f}, "
-        f"Change: {pct_change:+.1%}, "
-        f"Threshold: -{threshold:.0%}"
+        f"candidate {candidate:.1f} vs baseline {baseline:.1f} = "
+        f"{ratio:.4f} ({ratio - 1:+.1%}), threshold: -{threshold:.0%}"
     )
 
-    if pct_change < -threshold:
+    if ratio - 1 < -threshold:
         return True, f"REGRESSION DETECTED — {msg}"
 
     return False, f"No regression — {msg}"
@@ -1223,18 +1253,64 @@ def append_result(
     run_dir.mkdir(parents=True, exist_ok=True)
 
 
+def pair_by_precision(
+    baseline_results: list[dict],
+    candidate_results: list[dict],
+) -> list[dict]:
+    """Join the two phases into one comparison row per precision.
+
+    A precision present in only one phase still gets a row, with the other
+    side left as None, so the report can say which side is missing instead of
+    silently dropping it.
+    """
+    comparisons: dict[str, dict] = {}
+    for phase, rows in ((BASELINE, baseline_results), (CANDIDATE, candidate_results)):
+        for row in rows:
+            precision = row.get("precision") or ""
+            entry = comparisons.setdefault(
+                precision,
+                {"precision": precision, BASELINE: None, CANDIDATE: None},
+            )
+            entry[phase] = row
+
+    for entry in comparisons.values():
+        base, cand = entry[BASELINE], entry[CANDIDATE]
+        entry["ratio"] = None
+        if base and cand:
+            base_val, cand_val = base.get("metric_value"), cand.get("metric_value")
+            if base_val and cand_val:
+                entry["ratio"] = cand_val / base_val
+
+    return [comparisons[p] for p in sorted(comparisons)]
+
+
+def _format_phase(row: dict | None) -> str:
+    """One side of a comparison line, or why it is absent."""
+    if not row:
+        return "missing"
+    val = row.get("metric_value")
+    if val is None:
+        return "no metric"
+    tflops = row.get("tflops_avg")
+    suffix = f" ({tflops:.1f} TFLOP/s/GPU)" if tflops else ""
+    return f"{val:.1f}{suffix} [{row['status']}]"
+
+
 def generate_summary_report(
     workload_name: str,
     scale: str,
     exit_code: int,
-    metric_value: float | None,
     regression_msg: str,
     rccl_commit: str,
     cluster: str,
-    precision_results: list[dict] | None = None,
+    comparisons: list[dict] | None = None,
+    nodelist: str = "",
+    job_id: str = "",
+    phase_rccl: dict[str, str] | None = None,
 ) -> str:
     """Generate a plain-text summary report."""
     status = "PASSED" if exit_code == 0 else "FAILED"
+    phase_rccl = phase_rccl or {}
     lines = [
         "RCCL MADEngine Workload Test Report",
         "=" * 40,
@@ -1244,21 +1320,24 @@ def generate_summary_report(
         f"Workload:   {workload_name}",
         f"Scale:      {scale}",
         f"Cluster:    {cluster}",
-        f"RCCL:       {rccl_commit}",
+        f"Baseline:   RCCL {phase_rccl.get(BASELINE) or 'unknown'}",
+        f"Candidate:  RCCL {phase_rccl.get(CANDIDATE) or 'unknown'} (CI build {rccl_commit})",
+        f"Nodes:      {nodelist or 'unknown'} (job {job_id or 'unknown'})",
+        "",
+        "Both numbers below were measured on those same nodes, back to back,",
+        "inside one allocation. Baseline is the stock image; candidate is the",
+        "same image with the CI-built RCCL laid over it. Throughput in",
+        "tok/s/GPU.",
         "",
     ]
 
-    if precision_results:
-        for r in precision_results:
-            prec = r.get("precision", "?")
-            val = r.get("metric_value")
-            tflops = r.get("tflops_avg")
-            val_s = f"{val:.1f}" if val else "N/A"
-            tflops_s = f"{tflops:.1f}" if tflops else ""
-            suffix = f" ({tflops_s} TFLOP/s/GPU)" if tflops_s else ""
-            lines.append(f"{prec:>4}:       {val_s} tok/s/GPU{suffix} [{r['status']}]")
-    elif metric_value is not None:
-        lines.append(f"Throughput: {metric_value:.1f} tok/s/GPU")
+    if comparisons:
+        for c in comparisons:
+            ratio = c.get("ratio")
+            ratio_s = f"{ratio:.4f} ({ratio - 1:+.1%})" if ratio else "N/A"
+            lines.append(f"{c['precision'] or '?':>5}:  ratio {ratio_s}")
+            lines.append(f"        baseline  {_format_phase(c[BASELINE])}")
+            lines.append(f"        candidate {_format_phase(c[CANDIDATE])}")
     else:
         lines.append("Throughput: N/A (workload did not produce metrics)")
 
@@ -1319,8 +1398,9 @@ def main() -> None:
     parser.add_argument(
         "--timeout-minutes",
         type=int,
-        default=190,
-        help="Timeout for madengine run in minutes (default: 190)",
+        default=330,
+        help="Timeout for the whole allocation, queueing included, in minutes "
+             "(default: 330 — a 4h allocation plus 90min of queueing)",
     )
     parser.add_argument(
         "--notify-email",
@@ -1377,10 +1457,7 @@ def main() -> None:
     # Step 2: Install madengine
     madengine_dir = install_madengine(work_dir)
 
-    patch_madengine_for_cluster(
-        madengine_dir,
-        no_gres=cluster_config.get("slurm_no_gres", False),
-    )
+    patch_madengine_for_cluster(madengine_dir)
 
     # Step 3: Build overlay image (or use pre-built)
     if args.skip_overlay_build:
@@ -1397,9 +1474,17 @@ def main() -> None:
             registry=args.registry,
         )
 
-    # Step 4: Generate manifest
+    # Step 4: Generate one manifest per A/B phase
+    #
+    # The baseline is the untouched base image, and that is forced rather than
+    # chosen: the overlay is tagged {base_image}-rccl-{gpu_target}-{commit} and
+    # with no --registry it never leaves the node that built it, so "yesterday's
+    # overlay" is not a baseline this job can reach. Scoring the CI RCCL against
+    # the RCCL already shipping in the image answers the same question and uses
+    # an image every node can pull.
+    #
     # When no registry is configured, the overlay image only exists on the
-    # node that built it. Pin the SLURM job to that node so madengine can
+    # node that built it. Pin the allocation to that node so madengine can
     # find the image locally.
     nodelist = ""
     if args.nodes == 1 and not args.registry:
@@ -1411,31 +1496,53 @@ def main() -> None:
             if hostname:
                 nodelist = hostname
         if nodelist:
-            log.info("No registry — pinning SLURM job to build node: %s", nodelist)
+            log.info("No registry — pinning allocation to build node: %s", nodelist)
 
-    manifest_path = generate_manifest(
+    phases: list[tuple[str, Path]] = []
+    for phase, image, pull_only in (
+        (BASELINE, workload_config["base_image"], True),
+        (CANDIDATE, overlay_image, False),
+    ):
+        run_dir = prepare_phase_dir(work_dir, phase)
+        generate_manifest(
+            args.workload,
+            workload_config,
+            cluster_config,
+            image,
+            args.nodes,
+            work_dir,
+            registry=args.registry,
+            # The bind-mount of the CI library is what makes a --skip-overlay-build
+            # run the candidate; the baseline must keep the image's own copy.
+            rccl_lib=(
+                rccl_lib if args.skip_overlay_build and phase == CANDIDATE else None
+            ),
+            run_dir=run_dir,
+            pull_only=pull_only,
+        )
+        phases.append((phase, run_dir))
+
+    phase_dirs = dict(phases)
+
+    # Step 5: Run both phases on the same nodes, in one allocation
+    allocation = run_ab_in_one_allocation(
+        phases,
+        work_dir,
+        args.nodes,
         args.workload,
         workload_config,
         cluster_config,
-        overlay_image,
-        args.nodes,
-        work_dir,
+        args.timeout_minutes,
         nodelist=nodelist,
-        registry=args.registry,
-        rccl_lib=rccl_lib if args.skip_overlay_build else None,
     )
+    exit_code = max(allocation["exit_codes"].values(), default=1)
 
-    # Step 5: Run the workload
-    output_csv = work_dir / "perf.csv"
-    exit_code = run_madengine(
-        manifest_path, output_csv, work_dir, args.timeout_minutes,
-    )
-
-    # Step 5b: Verify RCCL replacement (runs in both overlay and bind-mount modes)
+    # Step 5b: Verify RCCL replacement. Only the candidate is meant to carry the
+    # CI library — the baseline runs the image's bundled copy by design.
     rccl_verification_failed = False
     if rccl_fingerprint.get("version"):
         rccl_ok, rccl_msg = verify_rccl_replacement(
-            work_dir, rccl_fingerprint,
+            phase_dirs[CANDIDATE], rccl_fingerprint,
         )
         if rccl_ok:
             log.info("RCCL verification: %s", rccl_msg)
@@ -1444,147 +1551,108 @@ def main() -> None:
             rccl_verification_failed = True
             exit_code = max(exit_code, 1)
 
-    # Step 6: Parse results — structured output first, live log fallback
-    perf_results = parse_perf_results(work_dir)
-    live_log_runs = parse_live_log_metrics(work_dir)
-
-    # Save run artifacts
-    run_id = os.environ.get("GITHUB_RUN_ID", "local")
-    run_artifacts = results_dir / "runs" / run_id
-    try:
-        run_artifacts.mkdir(parents=True, exist_ok=True)
-        for f in ["perf.csv", "perf_entry_super.csv", "perf_entry_super.json"]:
-            src = work_dir / f
-            if src.exists():
-                shutil.copy2(str(src), str(run_artifacts / f))
-    except OSError as exc:
-        log.warning("Could not save run artifacts to %s: %s", run_artifacts, exc)
-
-    # Build per-precision results from structured output (primary) or
-    # live-log scraping (fallback).  Each entry carries precision, metric
-    # value, and a pass/fail status so downstream regression checks and
-    # datastore writes are driven from one list.
+    # Step 6: Parse each phase's results and save its artifacts
     metric_key = workload_config["metric_key"]
-    precision_results: list[dict] = []
+    phase_results = {}
+    run_id = os.environ.get("GITHUB_RUN_ID", "local")
+    for phase, run_dir in phases:
+        log.info("Collecting %s results from %s", phase, run_dir)
+        phase_results[phase] = collect_phase_results(run_dir, metric_key)
 
-    if perf_results:
-        # perf_entry_super.json rows are long-format: metric name is a
-        # value in the ``metric`` column, performance in ``performance``.
-        # Filter to the configured metric_key (or its madengine alias)
-        # and key by precision.
-        accepted_metrics = _METRIC_ALIASES.get(metric_key, {metric_key})
-        for row in perf_results:
-            if row.get("metric") not in accepted_metrics:
-                continue
-            perf_val = row.get("performance", "")
-            precision = (row.get("training_precision")
-                         or row.get("multi_results", {}).get("precision", ""))
-            row_status = row.get("status", "")
-            if not perf_val:
-                continue
-            try:
-                val = float(perf_val)
-            except (ValueError, TypeError):
-                continue
-            precision_results.append({
-                "precision": precision,
-                "metric_value": val,
-                "status": ("pass" if row_status.upper() in ("", "PASS", "SUCCESS")
-                           else "fail"),
-                "source": "structured",
-            })
-            log.info("Structured result: %s %s = %.1f (status=%s)",
-                     precision, metric_key, val, row_status)
+        run_artifacts = results_dir / "runs" / run_id / phase
+        try:
+            run_artifacts.mkdir(parents=True, exist_ok=True)
+            for f in ["perf.csv", "perf_entry_super.csv", "perf_entry_super.json"]:
+                src = run_dir / f
+                if src.exists():
+                    shutil.copy2(str(src), str(run_artifacts / f))
+        except OSError as exc:
+            log.warning("Could not save %s artifacts to %s: %s",
+                        phase, run_artifacts, exc)
 
-        # Attach TFLOPS from companion rows, keyed by precision.
-        tflops_by_precision: dict[str, float] = {}
-        for row in perf_results:
-            if row.get("metric") not in _TFLOPS_METRICS:
-                continue
-            prec = (row.get("training_precision")
-                    or row.get("multi_results", {}).get("precision", ""))
-            try:
-                tflops_by_precision[prec] = float(row["performance"])
-            except (KeyError, ValueError, TypeError):
-                pass
-        for pr in precision_results:
-            if "tflops_avg" not in pr:
-                pr["tflops_avg"] = tflops_by_precision.get(pr["precision"])
-
-    if not precision_results and live_log_runs:
-        for run in live_log_runs:
-            val = run.get("tokens_per_second_per_gpu")
-            if val is None:
-                continue
-            precision_results.append({
-                "precision": run.get("precision"),
-                "metric_value": val,
-                "tflops_avg": run.get("tflops_avg"),
-                "status": "pass" if run.get("completed", False) else "fail",
-                "source": "live_log",
-                "iter": run.get("iter", 0),
-                "total": run.get("total", 0),
-                "log_file": run.get("log_file"),
-            })
-            log.info("Live-log result: %s = %.1f (completed=%s)",
-                     run.get("precision"), val, run.get("completed"))
-
-    metric_value = precision_results[-1]["metric_value"] if precision_results else None
+    all_rows = [r for rows in phase_results.values() for r in rows]
 
     # Override exit_code if training actually completed successfully.
     # madengine can report failure (exit code 3) when its perf collector
     # can't parse the output format, even though training ran to completion.
-    if exit_code != 0 and not rccl_verification_failed and precision_results:
-        all_pass = all(r["status"] == "pass" for r in precision_results)
-        has_metric = all(r.get("metric_value") is not None for r in precision_results)
-        if all_pass and has_metric:
+    if exit_code != 0 and not rccl_verification_failed and all_rows:
+        every_phase_scored = all(phase_results.get(p) for p, _ in phases)
+        all_pass = all(r["status"] == "pass" for r in all_rows)
+        has_metric = all(r.get("metric_value") is not None for r in all_rows)
+        if every_phase_scored and all_pass and has_metric:
             log.info(
-                "Overriding madengine exit code %d → 0: all %d precision run(s) "
-                "passed with metrics",
-                exit_code, len(precision_results),
+                "Overriding madengine exit code %d → 0: all %d run(s) across "
+                "both phases passed with metrics",
+                exit_code, len(all_rows),
             )
-            for r in precision_results:
-                log.info("  %s: %.1f %s", r.get("precision", "?"),
-                         r["metric_value"], metric_key)
             exit_code = 0
 
-    # Step 7: Per-precision regression check
-    regression_msg = "N/A"
-    is_regression = False
-    if precision_results:
-        regression_msgs = []
-        for pr in precision_results:
-            if pr["metric_value"] is not None:
-                reg, msg = check_regression(
-                    results_dir, args.workload, scale, pr["metric_value"],
-                    workload_config["type"], precision=pr.get("precision"),
-                )
-                regression_msgs.append(f"[{pr.get('precision', '?')}] {msg}")
-                if reg:
-                    is_regression = True
-                    log.warning(msg)
-                else:
-                    log.info(msg)
-        regression_msg = "; ".join(regression_msgs) if regression_msgs else "N/A"
-        if is_regression:
-            exit_code = max(exit_code, 1)
-
-    # Step 8: Append result to datastore (one record per precision run)
-    extra = {"cluster": args.cluster, "overlay_image": overlay_image}
-    if precision_results:
-        for pr in precision_results:
-            append_result(
-                results_dir,
-                args.workload,
-                scale,
-                pr["metric_value"],
-                pr["status"],
-                rccl_commit,
-                extra=extra,
-                precision=pr.get("precision"),
-                tflops=pr.get("tflops_avg"),
-                tokens_per_sec=pr["metric_value"],
+    # Step 7: Score the candidate against the baseline, per precision
+    comparisons = pair_by_precision(
+        phase_results.get(BASELINE, []), phase_results.get(CANDIDATE, []),
+    )
+    regression_msgs = []
+    for c in comparisons:
+        prec = c["precision"] or "?"
+        base, cand = c[BASELINE], c[CANDIDATE]
+        if c["ratio"] is None:
+            # One side is missing or produced no number. That is a failure of
+            # the job, not evidence about RCCL, so say so rather than guess.
+            regression_msgs.append(
+                f"[{prec}] no comparison — baseline={_format_phase(base)}, "
+                f"candidate={_format_phase(cand)}"
             )
+            log.error("No comparison possible for %s", prec)
+            exit_code = max(exit_code, 1)
+            continue
+        reg, msg = check_ab_regression(
+            base["metric_value"], cand["metric_value"], workload_config["type"],
+        )
+        regression_msgs.append(f"[{prec}] {msg}")
+        if reg:
+            log.warning(msg)
+            exit_code = max(exit_code, 1)
+        else:
+            log.info(msg)
+
+    if not comparisons:
+        regression_msgs.append("no metrics from either phase — nothing to compare")
+        exit_code = max(exit_code, 1)
+    regression_msg = "; ".join(regression_msgs)
+
+    # Step 8: Append to datastore — one record per phase per precision, with
+    # absolute values kept for trend analysis and the ratio on the candidate.
+    extra = {
+        "cluster": args.cluster,
+        "overlay_image": overlay_image,
+        "nodelist": allocation["nodelist"],
+        "slurm_job_id": allocation["job_id"],
+    }
+    phase_images = {
+        BASELINE: workload_config["base_image"],
+        CANDIDATE: overlay_image,
+    }
+    if comparisons:
+        for c in comparisons:
+            for phase in (BASELINE, CANDIDATE):
+                row = c[phase]
+                if row is None:
+                    continue
+                phase_extra = {**extra, "phase": phase, "image": phase_images[phase]}
+                if phase == CANDIDATE and c["ratio"] is not None:
+                    phase_extra["ratio"] = c["ratio"]
+                append_result(
+                    results_dir,
+                    args.workload,
+                    scale,
+                    row.get("metric_value"),
+                    row["status"],
+                    rccl_commit,
+                    extra=phase_extra,
+                    precision=c["precision"],
+                    tflops=row.get("tflops_avg"),
+                    tokens_per_sec=row.get("metric_value"),
+                )
     else:
         append_result(
             results_dir,
@@ -1599,15 +1667,29 @@ def main() -> None:
     # Step 9: Generate and distribute report
     status = "pass" if exit_code == 0 else "fail"
     report = generate_summary_report(
-        args.workload, scale, exit_code, metric_value,
+        args.workload, scale, exit_code,
         regression_msg, rccl_commit, args.cluster,
-        precision_results=precision_results if precision_results else None,
+        comparisons=comparisons,
+        nodelist=allocation["nodelist"],
+        job_id=allocation["job_id"],
+        phase_rccl={
+            phase: ", ".join(runtime_rccl_versions(run_dir))
+            for phase, run_dir in phases
+        },
     )
     log.info("\n%s", report)
     write_github_summary(report)
     set_github_output("madengine_status", status)
-    if metric_value is not None:
-        set_github_output("madengine_metric", f"{metric_value:.1f}")
+    candidate_values = [
+        c[CANDIDATE]["metric_value"]
+        for c in comparisons
+        if c[CANDIDATE] and c[CANDIDATE].get("metric_value") is not None
+    ]
+    if candidate_values:
+        set_github_output("madengine_metric", f"{candidate_values[-1]:.1f}")
+    ratios = [c["ratio"] for c in comparisons if c["ratio"] is not None]
+    if ratios:
+        set_github_output("madengine_ratio", f"{min(ratios):.4f}")
 
     summary_path = work_dir / "madengine_summary.txt"
     summary_path.write_text(report)
