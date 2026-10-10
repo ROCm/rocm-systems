@@ -50,12 +50,21 @@
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
+#include "core/util/memory.h"
 #include "core/util/os.h"
 
 extern r_debug _amdgpu_r_debug;
 
 namespace rocr {
 namespace AMD {
+
+// Deliberately not page-aligned: Runtime::MappedHandleAllowedAgent::EnableAccess's CPU-agent
+// path maps GetDeviceFd() at driver_handle.mmap_offset, and neither CreateShareableHandle nor
+// ImportMemoryHandle below can produce a real VIRTGPU_MAP offset yet (vamdgpu_bo_cpu_map() is
+// an unimplemented stub, see hsakmt_virtio_amdgpu.c). Using this sentinel makes that mmap()
+// fail outright (EINVAL) instead of silently aliasing whatever real resource sits at
+// file-offset 0; GPU-only access (Map()/Unmap() below) is unaffected.
+static constexpr uint64_t kInvalidMmapOffset = ~uint64_t(0);
 
 __forceinline uint64_t drm_perm(hsa_access_permission_t perm) {
   uint64_t flags = 0;
@@ -578,6 +587,10 @@ hsa_status_t KfdVirtioDriver::ImportMemoryHandle(const core::Agent& agent, core:
     handle->owner = this;
     // vamdgpu_bo_import creates a distinct bo per import, so this handle owns it.
     handle->owns_allocation = true;
+    // See kInvalidMmapOffset: a cross-process import (e.g. Runtime::MappedHandleAllowedAgent::
+    // EnableAccess's "no region/drm_owner" re-import) needs this to force CPU mmap to fail
+    // rather than succeed at the wrong offset.
+    handle->mmap_offset = kInvalidMmapOffset;
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareType::FABRIC_HANDLE:
@@ -597,9 +610,10 @@ hsa_status_t KfdVirtioDriver::Map(const core::DriverMemoryHandle& handle, void* 
                        drm_perm(perms), AMDGPU_VA_OP_MAP) != 0)
     return HSA_STATUS_ERROR;
 
-  // CPU side of the mapping: blob-map the allocation at the reserved VA
-  if (vhsaKmtVirtioMapHandleToVA(reinterpret_cast<void*>(handle.handle), mem, size) !=
-      HSAKMT_STATUS_SUCCESS) {
+  // CPU side of the mapping: blob-map the allocation at the reserved VA, honoring the
+  // caller's requested CPU access permission instead of always mapping it read-write.
+  if (vhsaKmtVirtioMapHandleToVA(reinterpret_cast<void*>(handle.handle), mem, size,
+                                PermissionsToMmapFlags(perms)) != HSAKMT_STATUS_SUCCESS) {
     vamdgpu_bo_va_op(ldrm_bo, offset, size, reinterpret_cast<uint64_t>(mem), 0,
                      AMDGPU_VA_OP_UNMAP);
     return HSA_STATUS_ERROR;
@@ -614,7 +628,8 @@ hsa_status_t KfdVirtioDriver::Unmap(const core::DriverMemoryHandle& handle, void
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
 
-  vhsaKmtVirtioUnmapHandleFromVA(mem, size);
+  if (vhsaKmtVirtioUnmapHandleFromVA(mem, size) != HSAKMT_STATUS_SUCCESS)
+    debug_print("KfdVirtioDriver::Unmap: blob unmap failed for va=%p size=%zx\n", mem, size);
 
   if (vamdgpu_bo_va_op(ldrm_bo, offset, size, reinterpret_cast<uint64_t>(mem), 0,
                       AMDGPU_VA_OP_UNMAP) != 0)
@@ -625,8 +640,10 @@ hsa_status_t KfdVirtioDriver::Unmap(const core::DriverMemoryHandle& handle, void
 
 hsa_status_t KfdVirtioDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
                                                     const core::Agent& agent, uint64_t* offset) {
-  // No CPU mmap offset: a virtio-gpu guest cannot mmap the host BO. The dmabuf fd is
-  // exported lazily when access is set.
+  // KNOWN GAP: handle->mmap_offset is set to kInvalidMmapOffset below (see its definition) --
+  // this driver can't yet produce a real CPU mmap offset for a shareable handle. GPU-only
+  // access (the Map()/Unmap() path above) is unaffected. The dmabuf fd is exported lazily
+  // when access is set.
   if (handle == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   if (offset != nullptr) *offset = 0;
 
@@ -646,6 +663,9 @@ hsa_status_t KfdVirtioDriver::CreateShareableHandle(core::DriverMemoryHandle* ha
 
   core::DriverMemoryHandle target_handle = {};
   ret = ImportMemoryHandle(agent, &target_handle, core::ShareType::DMABUF_FD, &source_handle, mem);
+  // ImportMemoryHandle (DMABUF_FD) resolves source_fd via drmPrimeFDToHandle(), which
+  // duplicates the GEM reference without taking ownership of the fd, so closing it here
+  // is correct regardless of whether import above succeeded or failed.
   rocr::os::DmaBufClose(&source_fd);
   if (ret != HSA_STATUS_SUCCESS) return ret;
 
@@ -654,7 +674,7 @@ hsa_status_t KfdVirtioDriver::CreateShareableHandle(core::DriverMemoryHandle* ha
   handle->vaddr = mem;
   handle->size = size;
   handle->dmabuf_fd = -1;
-  handle->mmap_offset = 0;
+  handle->mmap_offset = kInvalidMmapOffset;
   handle->owner = this;
   handle->owns_allocation = true;
   return HSA_STATUS_SUCCESS;
@@ -673,6 +693,9 @@ hsa_status_t KfdVirtioDriver::DestroyMemoryHandle(core::DriverMemoryHandle* hand
       ret = HSA_STATUS_ERROR;
   }
 
+  // Sole teardown path for a CreateShareableHandle handle (per the Driver::DestroyMemoryHandle
+  // contract, called exactly once); zeroing here also makes a stray second call a no-op
+  // instead of a double-free.
   *handle = {};
   return ret;
 }

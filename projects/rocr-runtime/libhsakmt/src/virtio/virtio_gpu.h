@@ -107,7 +107,7 @@ int virtio_gpu_exec_cmd(struct virtio_gpu_device* vgdev, struct virtio_gpu_ccmd_
 void* virtio_gpu_alloc_rsp(struct virtio_gpu_device* vgdev, struct virtio_gpu_ccmd_req* req,
                            uint32_t size);
 int virtio_gpu_map_handle(struct virtio_gpu_device* vgdev, uint32_t handle, uint64_t size,
-                          void** addr, void* fixed_map);
+                          void** addr, void* fixed_map, int prot);
 void virtio_gpu_unmap(void* addr, uint64_t size);
 int virtio_gpu_create_blob(struct virtio_gpu_device* vgdev,
                            struct drm_virtgpu_resource_create_blob* args);
