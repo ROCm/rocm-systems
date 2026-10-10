@@ -1910,7 +1910,6 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
     }
 
     ginActivated = !devr->ginEnabled;
-    devr->ginEnabled = true;
   }
 
   if (reqs->worldGinBarrierCount > 0 && requestedConnectionType == NCCL_GIN_CONNECTION_RAIL) {
@@ -1928,6 +1927,9 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
 
   if (ginActivated) {
     NCCLCHECKGOTO(ncclGinConnectOnce(comm), ret, fail);
+    // Latch only on success: a failed connect leaves ginCommCount at 0, and a
+    // retry must reconnect rather than reach ncclGinDevCommSetup.
+    devr->ginEnabled = true;
     // Register all preexisting memories with GIN. Update the windows later when
     // we have a stream.
     for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr; mem = mem->next) {

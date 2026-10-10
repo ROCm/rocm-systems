@@ -5508,7 +5508,7 @@ TEST_F(DevCommCreateTest, RequirementsFilterFails_ReturnsErrorWithoutQueueing) {
 // is touched and rejects combinations the communicator cannot serve.
 //
 // The body past that gate builds the whole devcomm -- GIN activation, resource
-// windows, barriers -- and is not covered here.
+// windows, barriers -- and is not covered here beyond a failed GIN connect.
 
 class DevrCommCreateInternalTest : public NcclVersionCompatTest {
 protected:
@@ -5579,6 +5579,35 @@ TEST_F(DevrCommCreateInternalTest, GinForceEnable_BehavesAsFullConnection) {
   comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
 
   EXPECT_EQ(Create(), ncclInvalidArgument);
+}
+
+// Branch: GIN connect fails. GIN must stay unlatched so the next create
+// reconnects; a latched retry would skip connect and reach ncclGinDevCommSetup
+// with ginCommCount still 0 (AICOMRCCL-2879).
+TEST_F(DevrCommCreateInternalTest, GinConnectFails_RetryConnectsAgain) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  ScopedHook connect(g_devrGinConnectOnce, [](ncclComm*) { return ncclSystemError; });
+
+  EXPECT_EQ(Create(), ncclSystemError);
+  EXPECT_FALSE(comm->devrState.ginEnabled);
+
+  EXPECT_EQ(Create(), ncclSystemError);
+  EXPECT_EQ(connect.calls, 2);
+  EXPECT_FALSE(comm->devrState.ginEnabled);
+}
+
+// Branch: a GIN request rejected after the support checks but before connect
+// leaves GIN unlatched, so a later valid create still connects.
+TEST_F(DevrCommCreateInternalTest, WorldGinBarrierOnRail_RejectedWithoutLatchingGin) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_RAIL;
+  reqs.worldGinBarrierCount = 1;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+  ScopedHook connect(g_devrGinConnectOnce, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(Create(), ncclInvalidArgument);
+  EXPECT_EQ(connect.calls, 0);
+  EXPECT_FALSE(comm->devrState.ginEnabled);
 }
 
 

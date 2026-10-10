@@ -312,7 +312,11 @@ ncclResult_t ncclGetRailedGinType(struct ncclComm*, ncclGinType_t* ginType) {
   if (ginType) *ginType = NCCL_GIN_TYPE_NONE;
   return ncclSuccess;
 }
-ncclResult_t ncclGinConnectOnce(struct ncclComm*) { return ncclSuccess; }
+// Seam: ncclDevrCommCreateInternal latches GIN only after this succeeds.
+static ncclResult_t DefaultGinConnectOnce(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_devrGinConnectOnce = DefaultGinConnectOnce;
+
+ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) { return g_devrGinConnectOnce(comm); }
 ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*) {
   return ncclSuccess;
 }
@@ -546,6 +550,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapAllGather                      = DefaultAllGather;
   g_devrBootstrapSend                           = DefaultBootstrapSend;
   g_devrBootstrapRecv                           = DefaultBootstrapRecv;
+  g_devrGinConnectOnce                          = DefaultGinConnectOnce;
   g_devrGinRegister                             = DefaultGinRegister;
   g_devrGinDeregister                           = DefaultGinDeregister;
   g_devrRmaProxyConnectOnce                     = DefaultRmaProxyConnectOnce;
