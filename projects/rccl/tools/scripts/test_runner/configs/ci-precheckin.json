@@ -105,6 +105,7 @@
         {"name": "ReduceScatter.InPlaceUserBufferRegistrationTestBed", "description": "In-place ReduceScatter on an ncclCommRegister'd base buffer through TestBed", "test_filter": "ReduceScatter.InPlaceUserBufferRegistrationTestBed"},
         {"name": "Broadcast.ExplicitPrepareDataFunc", "description": "Explicit PrepareData function crosses the parent/worker pipe under ASLR", "test_filter": "Broadcast.ExplicitPrepareDataFunc"},
         {"name": "ProfilerPluginClose.UnusablePluginIsUnloaded", "description": "Verify a profiler plugin exposing no usable interface is unloaded instead of being left mapped", "test_filter": "ProfilerPluginClose.UnusablePluginIsUnloaded"},
+        {"name": "TunerPluginConstants", "description": "Verify a tuner plugin's init() receives the initialized cost-model constants and its writes survive the cost-model setup", "test_filter": "TunerPluginConstants.*"},
         {"name": "Register.ProcessIsolatedRegisterTests", "description": "Process isolated buffer registration tests", "test_filter": "Register.ProcessIsolatedRegisterTests"},
         {"name": "DoneEventOrdering.FastPathStreamAlternation", "description": "DoneEventOrdering fast path stream alternation", "test_filter": "DoneEventOrdering.FastPathStreamAlternation", "timeout": 240},
         {"name": "DoneEventOrdering.PostReinitStreamAlternation", "description": "DoneEventOrdering post-reinit stream alternation", "test_filter": "DoneEventOrdering.PostReinitStreamAlternation", "timeout": 240},

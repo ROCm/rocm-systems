@@ -113,6 +113,7 @@ test_categories:
       - "ProxyTraceTestFixture.*"
       - "CollTraceUtilsTest.*"
       - "GinPluginInitFail.*"
+      - "TunerPluginConstants.*"
     exclude_windows:
       - "*"
     labels:
