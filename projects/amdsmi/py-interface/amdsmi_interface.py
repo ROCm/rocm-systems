@@ -3935,25 +3935,22 @@ def amdsmi_get_power_info(processor_handle: processor_handle_t) -> Dict[str, cty
     power_info = amdsmi_wrapper.amdsmi_power_info_t()
     _check_res(amdsmi_wrapper.amdsmi_get_power_info(processor_handle, ctypes.byref(power_info)))
 
+    # The library marks an unavailable field with the maximum of that field's
+    # own width, so a smaller maximum such as 255 W is a real reading.
     power_info_dict = {
-        "socket_power": power_info.socket_power,
-        "current_socket_power": power_info.current_socket_power,
-        "average_socket_power": power_info.average_socket_power,
-        "gfx_voltage": power_info.gfx_voltage,
-        "soc_voltage": power_info.soc_voltage,
-        "mem_voltage": power_info.mem_voltage,
-        "power_limit": power_info.power_limit,
-        "ubb_power": power_info.ubb_power,
+        "socket_power": _validate_if_max_uint(power_info.socket_power, MaxUIntegerTypes.UINT64_T),
+        "current_socket_power": _validate_if_max_uint(
+            power_info.current_socket_power, MaxUIntegerTypes.UINT32_T
+        ),
+        "average_socket_power": _validate_if_max_uint(
+            power_info.average_socket_power, MaxUIntegerTypes.UINT32_T
+        ),
+        "gfx_voltage": _validate_if_max_uint(power_info.gfx_voltage, MaxUIntegerTypes.UINT64_T),
+        "soc_voltage": _validate_if_max_uint(power_info.soc_voltage, MaxUIntegerTypes.UINT64_T),
+        "mem_voltage": _validate_if_max_uint(power_info.mem_voltage, MaxUIntegerTypes.UINT64_T),
+        "power_limit": _validate_if_max_uint(power_info.power_limit, MaxUIntegerTypes.UINT32_T),
+        "ubb_power": _validate_if_max_uint(power_info.ubb_power, MaxUIntegerTypes.UINT32_T),
     }
-
-    for key, value in power_info_dict.items():
-        if value in (
-            MaxUIntegerTypes.UINT8_T,
-            MaxUIntegerTypes.UINT16_T,
-            MaxUIntegerTypes.UINT32_T,
-            MaxUIntegerTypes.UINT64_T,
-        ):
-            power_info_dict[key] = "N/A"
 
     return power_info_dict
 
@@ -5816,6 +5813,8 @@ def amdsmi_get_gpu_od_volt_info(processor_handle: processor_handle_t) -> Dict[st
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_od_volt_info(processor_handle, ctypes.byref(freq_data))
     )
+    # The library writes rocm_smi's smaller layout into this buffer.
+    freq_data = _RsmiOdVoltFreqData.from_buffer(freq_data)
 
     sclk_lower = freq_data.curr_sclk_range.lower_bound
     sclk_upper = freq_data.curr_sclk_range.upper_bound
@@ -6656,6 +6655,8 @@ def amdsmi_get_gpu_od_volt_curve_regions(
             processor_handle, ctypes.byref(region_count), buffer
         )
     )
+    # The library writes rocm_smi's 32-byte records into this buffer.
+    buffer = (_RsmiFreqVoltRegion * num_regions).from_buffer(buffer)
 
     result = []
 
