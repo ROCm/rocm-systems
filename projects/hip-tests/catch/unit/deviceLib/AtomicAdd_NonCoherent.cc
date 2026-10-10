@@ -30,7 +30,6 @@ This testcase works only on gfx90a, gfx942, gfx950.
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
-#include <hip_test_features.hh>
 #include <type_traits>
 
 #define INC_VAL 10
@@ -139,9 +138,10 @@ TEST_CASE(Unit_AtomicAdd_NonCoherent) {
   int device;
   HIP_CHECK(hipGetDevice(&device));
   HIP_CHECK(hipGetDeviceProperties(&prop, device));
-  std::string gfxName(prop.gcnArchName);
+  int fineGrainSupport = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&fineGrainSupport, hipDeviceAttributeFineGrainSupport, device));
 
-  if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
+  if (fineGrainSupport) {
     if (prop.canMapHostMemory != 1) {
       HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
