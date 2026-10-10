@@ -136,6 +136,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     before validation. Its raw-byte fixture reproduces the enum UBSan failure;
     enable it after the production fix. The defined `RAS_DIAG_CHECK_COUNT`
     sentinel remains covered by enabled dispatch and peer-payload tests.
+  - `ras/diagnostics_gpu.cc` (`RAS_DIAGNOSTICS_GPU_CC_PATH`, from
+    `ras-diagnostics-gpu-test.cc`); suite `RasDiagnosticsGpuMicrotest.*`. Covers
+    GPU inventory, CUDA and NVIDIA graphics driver versions, ECC, and NVLink
+    collection and summaries, including failed NVML queries and bounded
+    driver-version strings.
   - `ras/peers.cc` (`RAS_PEERS_CC_PATH`, from `ras-peers-test.cc`); suite
     `RasPeersMicrotest.*`. Covers peer conversion and merging, update
     propagation, link selection, dead-peer tracking, address ordering, and
@@ -866,6 +871,13 @@ clear `ncclCommsSorted`; installation validates allocation before replacing
 the old registry and preserves explicit vacant slots. The RAS and diagnostics
 suites use the same helper. `fakes/ras_diagnostics_test_support.h` shares the
 owned communicator and recording reporter used by the diagnostic suites.
+
+The GPU diagnostic suite exercises payload filling through the public collectors
+and owns returned records with RAII. Each summarizer has an over-capacity rank
+case; together they exercise all seven bounded rank arrays and check truncated
+rank sets with total counts. ECC maxima are checked with the largest values on
+an earlier rank, and incomplete-report fixtures include hexadecimal hashes
+larger than nine.
 
 `SetMicroEnviron` in `fakes/env_fakes.{h,cc}` replaces the scripted environment
 for enumeration tests, preserving input order and malformed entries while
