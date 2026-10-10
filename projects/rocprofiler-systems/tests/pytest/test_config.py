@@ -328,3 +328,182 @@ class TestConfig(RocprofsysTest):
                 r"ROCPROFSYS_PERFETTO_\w+\s+=",
             ],
         )
+
+
+CONFIG_READ_ERROR_REGEX = r"Exception reading|Error reading configuration"
+# An uncaught std::runtime_error in the preloaded library calls std::terminate.
+CONFIG_TERMINATE_REGEX = (
+    r"terminate called after throwing an instance of 'std::runtime_error'"
+)
+CONFIG_ABORT_CODE = -6
+CONFIG_APPLY_FAILURE_REGEX = r"Unable to apply configuration file"
+CONFIG_PRESET_HINT_REGEX = r"specify it with '--preset' instead"
+CONFIG_PARSE_FAILURE_REGEX = [
+    CONFIG_READ_ERROR_REGEX,
+    CONFIG_TERMINATE_REGEX,
+    CONFIG_APPLY_FAILURE_REGEX,
+    CONFIG_PRESET_HINT_REGEX,
+]
+
+
+def _assert_exit_code(result, code=1):
+    assert (
+        result.returncode == code
+    ), f"expected exit {code}, got {result.returncode}\n{result.test_output}"
+
+
+BAD_XML_VIA_C_CASES = [
+    pytest.param(
+        "wrong_root.xml",
+        "<wrong-root><settings/></wrong-root>",
+        id="wrong-root",
+    ),
+    pytest.param(
+        "malformed.xml",
+        "<rocprofiler-systems><settings><ROCPROFSYS_TRACE>false</settings></rocprofiler-systems>",
+        id="malformed",
+    ),
+]
+
+
+def _true_cmd() -> str:
+    cmd = shutil.which("true")
+    if cmd is None:
+        pytest.skip("true not found")
+    return cmd
+
+
+@pytest.mark.sys_run
+@pytest.mark.timeout(120)
+@pytest.mark.class_name("config-xml-via-c")
+class TestConfigXmlViaC(RocprofsysTest):
+    """Unreadable XML via -c aborts after Timemory's read warning."""
+
+    @pytest.mark.parametrize("filename, content", BAD_XML_VIA_C_CASES)
+    def test_unreadable(self, config_target, test_output_dir, filename, content):
+        xml_path = test_output_dir / filename
+        xml_path.write_text(content)
+        result = self.run_test(
+            "sys_run",
+            target=config_target,
+            env=MINIMAL_RUNTIME_ENV,
+            sys_run_args=["-c", str(xml_path)],
+            fail_on_pass=True,
+        )
+        _assert_exit_code(result, CONFIG_ABORT_CODE)
+        self.assert_regex(
+            result,
+            pass_regex=[
+                CONFIG_READ_ERROR_REGEX,
+                CONFIG_TERMINATE_REGEX,
+                CONFIG_APPLY_FAILURE_REGEX,
+                CONFIG_PRESET_HINT_REGEX,
+            ],
+            use_abort_fail_regex=False,
+        )
+
+    def test_exported_preset(self, config_target, test_output_dir):
+        exported = test_output_dir / "bad_cfg.xml"
+        self.run_test(
+            "baseline",
+            target="rocprof-sys-run",
+            run_args=[
+                f"--export-config={exported}",
+                "--preset=balanced",
+                "--",
+                _true_cmd(),
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_file_exists(exported, description="exported preset XML")
+        result = self.run_test(
+            "sys_run",
+            target=config_target,
+            env=MINIMAL_RUNTIME_ENV,
+            sys_run_args=["-c", str(exported)],
+            fail_on_pass=True,
+        )
+        _assert_exit_code(result, CONFIG_ABORT_CODE)
+        self.assert_regex(
+            result,
+            pass_regex=[
+                CONFIG_READ_ERROR_REGEX,
+                CONFIG_TERMINATE_REGEX,
+                CONFIG_APPLY_FAILURE_REGEX,
+                CONFIG_PRESET_HINT_REGEX,
+            ],
+            use_abort_fail_regex=False,
+        )
+
+
+@pytest.mark.sys_run
+@pytest.mark.timeout(120)
+@pytest.mark.class_name("json-via-c")
+class TestJsonViaC(RocprofsysTest):
+    """JSON that does not parse aborts after Timemory's read warning."""
+
+    def _assert_unreadable_json_fails(self, config_target, json_path: Path):
+        result = self.run_test(
+            "sys_run",
+            target=config_target,
+            env=MINIMAL_RUNTIME_ENV,
+            sys_run_args=["-c", str(json_path)],
+            fail_on_pass=True,
+        )
+        _assert_exit_code(result, CONFIG_ABORT_CODE)
+        self.assert_regex(
+            result,
+            pass_regex=CONFIG_PARSE_FAILURE_REGEX,
+            use_abort_fail_regex=False,
+        )
+
+    def test_missing_root(self, config_target, test_output_dir):
+        json_path = test_output_dir / "wrong_root.json"
+        json_path.write_text('{"not-rocprofiler-systems": {}}')
+        self._assert_unreadable_json_fails(config_target, json_path)
+
+    def test_exported_preset(self, config_target, test_output_dir):
+        exported = test_output_dir / "cfg.json"
+        self.run_test(
+            "baseline",
+            target="rocprof-sys-run",
+            run_args=[
+                f"--export-config={exported}",
+                "--preset=balanced",
+                "--",
+                _true_cmd(),
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_file_exists(exported, description="exported preset JSON")
+        self._assert_unreadable_json_fails(config_target, exported)
+
+    def test_config_file_env(self, config_target, test_output_dir):
+        """Preset JSON in ROCPROFSYS_CONFIG_FILE aborts in the profiled process."""
+        exported = test_output_dir / "cfg_env.json"
+        self.run_test(
+            "baseline",
+            target="rocprof-sys-run",
+            run_args=[
+                f"--export-config={exported}",
+                "--preset=balanced",
+                "--",
+                _true_cmd(),
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_file_exists(exported, description="exported preset JSON")
+        env = MINIMAL_RUNTIME_ENV.copy()
+        env["ROCPROFSYS_CONFIG_FILE"] = str(exported)
+        result = self.run_test(
+            "sys_run",
+            target=config_target,
+            env=env,
+            fail_on_pass=True,
+        )
+        _assert_exit_code(result, CONFIG_ABORT_CODE)
+        self.assert_regex(
+            result,
+            pass_regex=CONFIG_PARSE_FAILURE_REGEX,
+            use_abort_fail_regex=False,
+        )
