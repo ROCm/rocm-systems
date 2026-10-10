@@ -874,10 +874,7 @@ def get_arch_panel_id_to_alias(arch: str) -> dict[str, str]:
     """Return panel_id_str -> alias from the *_config_template.yaml whose
     filename prefix matches arch. Empty/None aliases stay as "".
     Returns {} when no template matches the arch."""
-    analysis_dir = (
-        config.rocprof_compute_home / "rocprof_compute_soc" / "analysis_configs"
-    )
-    for path in sorted(analysis_dir.glob("*_config_template.yaml")):
+    for path in sorted(config.analysis_configs_dir.glob("*_config_template.yaml")):
         m = re.match(r"(gfx\d+)_config_template\.yaml$", path.name)
         if m and arch.startswith(m.group(1)):
             panel_yaml = load_yaml(path) or {}
