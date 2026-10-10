@@ -846,6 +846,7 @@ target_link_libraries(
 target_include_directories(rocjitsu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 rj_configure_target(rocjitsu_tests TEST)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(rocjitsu_tests PRIVATE plugin_shutdown_lifecycle_test.cpp)
     target_compile_definitions(
         rocjitsu_tests
         PRIVATE PLUGIN_LOADER_FIXTURE_DIR="${PLUGIN_LOADER_FIXTURE_DIR}"
@@ -1969,6 +1970,52 @@ rj_add_test(
     INSTALL_ENVIRONMENT
         "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}:bin/${CMAKE_SHARED_LIBRARY_PREFIX}early_mmap_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+    add_executable(plugin_shutdown_child plugin_shutdown_child.cpp)
+    rj_configure_target(plugin_shutdown_child TEST)
+    add_executable(plugin_shutdown_exit_test plugin_shutdown_exit_test.cpp)
+    rj_configure_target(plugin_shutdown_exit_test TEST)
+    target_include_directories(
+        plugin_shutdown_exit_test
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(plugin_shutdown_exit_test PRIVATE GTest::gtest_main)
+    add_dependencies(
+        plugin_shutdown_exit_test
+        rocjitsu_bin
+        rocjitsu_shared
+        rocjitsu_perfsim_fake_backend
+        rocjitsu_plugin_perfsim_so
+        plugin_shutdown_child
+    )
+    if(RJ_INSTALL_TESTS)
+        rj_install_test_target(plugin_shutdown_child)
+        rj_install_test_target(plugin_shutdown_exit_test)
+        install(
+            TARGETS rocjitsu_perfsim_fake_backend
+            LIBRARY DESTINATION ${RJ_INSTALL_TEST_BIN_DIR}
+        )
+    endif()
+    rj_add_test(
+        NAME InterposerPluginShutdown.OnProcessExit
+        COMMAND $<TARGET_FILE:plugin_shutdown_exit_test>
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        TIMEOUT 300
+        ENVIRONMENT
+            "RJ_SHUTDOWN_CLI=$<TARGET_FILE:rocjitsu_bin>"
+            "RJ_SHUTDOWN_BASE_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x.json"
+            "RJ_SHUTDOWN_FAKE_BACKEND=$<TARGET_FILE:rocjitsu_perfsim_fake_backend>"
+            "RJ_SHUTDOWN_CHILD=$<TARGET_FILE:plugin_shutdown_child>"
+        INSTALL_COMMAND
+            "bin/plugin_shutdown_exit_test"
+        INSTALL_ENVIRONMENT
+            "RJ_SHUTDOWN_CLI=\${RJ_INSTALLED_BINDIR}/rocjitsu"
+            "RJ_SHUTDOWN_BASE_CONFIG=\${RJ_INSTALLED_CONFIG_DIR}/gfx950_mi355x.json"
+            "RJ_SHUTDOWN_FAKE_BACKEND=bin/${CMAKE_SHARED_MODULE_PREFIX}rocjitsu_perfsim_fake_backend${CMAKE_SHARED_MODULE_SUFFIX}"
+            "RJ_SHUTDOWN_CHILD=bin/plugin_shutdown_child"
+    )
+endif()
 
 # --- interposer KFD/DRM integration tests (CLI launcher) ---
 # The launcher preloads the interposer and supplies its config_path file.

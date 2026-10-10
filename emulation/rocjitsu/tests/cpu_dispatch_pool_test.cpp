@@ -429,6 +429,32 @@ TEST(CpuDispatchPoolTest, ZeroFunctionalQuantumRunsUntilWavefrontHalts) {
                std::invalid_argument);
 }
 
+// The engine checks for exit only between events, so an unbounded quantum over a
+// wave that never halts must poll for the stop itself.
+TEST(CpuDispatchPoolTest, ZeroFunctionalQuantumStopsWhenEngineExitIsRequested) {
+  constexpr uint32_t kSBranchSelf = 0xBF82FFFFu; // s_branch -1
+  simdojo::SimulationEngine engine(simdojo::SimulationEngine::Config{});
+  engine.request_exit("functional quantum stop test");
+  ASSERT_TRUE(engine.stop_requested());
+
+  DispatchPoolFixture unbounded(/*cu_count=*/1, /*functional_quantum=*/0);
+  unbounded.memory.write32(kProgramBase, kSBranchSelf);
+  unbounded.cus[0]->set_engine(&engine);
+  auto result = unbounded.cus[0]->run_quantum();
+  EXPECT_TRUE(result.ran);
+  EXPECT_FALSE(result.yielded);
+  EXPECT_EQ(result.iterations, amdgpu::ComputeUnitCore::kStopPollInterval);
+  EXPECT_FALSE(unbounded.cus[0]->is_idle());
+
+  // A quantum no longer than the poll interval runs to its end, as before.
+  DispatchPoolFixture bounded(/*cu_count=*/1,
+                              /*functional_quantum=*/amdgpu::ComputeUnitCore::kStopPollInterval);
+  bounded.memory.write32(kProgramBase, kSBranchSelf);
+  bounded.cus[0]->set_engine(&engine);
+  result = bounded.cus[0]->run_quantum();
+  EXPECT_EQ(result.iterations, amdgpu::ComputeUnitCore::kStopPollInterval);
+}
+
 TEST(CpuDispatchPoolTest, WorkerExceptionsRethrowAndPoolRemainsReusable) {
   DispatchPoolFixture fixture(/*cu_count=*/64);
   amdgpu::CpuDispatchPool pool(/*threads=*/8);

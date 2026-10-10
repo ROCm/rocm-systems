@@ -590,18 +590,28 @@ public:
 
   /// @brief Record a process-exit shutdown request from the DSO finalizer.
   /// @details As an LD_PRELOAD library, librocjitsu.so can be finalized before HIP
-  /// and ROCR. If they still hold app-facing KFD descriptors, this request stays
-  /// pending and the VM is kept alive; their later close paths complete it. If the
-  /// simulator is already idle, this tears the VM down now.
+  /// and ROCR. If they still hold app-facing KFD descriptors, the VM and driver
+  /// stay alive and their later close paths destroy them. on_shutdown does not
+  /// need the driver to be gone, and those closes do not arrive on a normal
+  /// exit(), so this also stops and joins the local engine when the driver is
+  /// not idle. rj_vm_run() then delivers plugin shutdown after its workers have
+  /// stopped. If the simulator is already idle, the VM deleter joins instead.
   void request_local_vm_shutdown() {
     // Declared before the lock so it is destroyed AFTER the lock is dropped; see
     // DoomedLocalVm.
     DoomedLocalVm doomed;
+    EngineStop engine_stop;
     {
       std::lock_guard lock(init_mutex_);
       shutdown_requested_ = true;
       doomed = shutdown_local_vm_if_idle_locked();
+      // The idle path's deleter joins the engine itself. Taking the thread here
+      // as well would join it twice.
+      if (!doomed.vm && !doomed.guest)
+        engine_stop = take_engine_stop_locked();
     }
+    if (engine_stop.thread)
+      finish_engine_stop(std::move(engine_stop));
   }
 
   /// @brief Create-if-needed and open the local backend as ONE atomic operation.
@@ -2235,6 +2245,8 @@ public:
         return;
       }
       assert_not_engine_thread();
+      // Process exit joins this thread before the driver is idle so plugin
+      // on_shutdown has already run. A later idle destroy then finds no thread.
       if (local_vm_thread_) {
         rj_vm_request_exit(vm, "interposer VM destruction");
         local_vm_thread_->join();
@@ -2303,6 +2315,94 @@ public:
     std::shared_ptr<GuestKfd> guest;
     std::shared_ptr<rj_vm_t> vm;
   };
+
+  /// @brief Engine thread taken out of the interposer so it can be joined
+  /// outside init_mutex_.
+  struct EngineStop {
+    std::unique_ptr<std::thread> thread;
+    rj_vm_t *vm = nullptr;
+  };
+
+  /// @brief Claim the local engine thread for a join outside init_mutex_.
+  /// @details Caller holds init_mutex_. Returns an empty stop when there is no
+  /// thread, a join is already in progress, or this thread is the engine thread
+  /// (joining it would deadlock). The self-join case is logged: the plugin group
+  /// stays active and a missing report has a cause.
+  EngineStop take_engine_stop_locked() {
+    EngineStop stop;
+    if (engine_join_in_progress_ || !local_vm_ || !local_vm_thread_)
+      return stop;
+    if (local_vm_thread_->get_id() == std::this_thread::get_id()) {
+      util::Logger::warn(plugin_shutdown_failure_message(
+          local_vm_.get(), "the local VM engine thread cannot join itself"));
+      return stop;
+    }
+    engine_join_in_progress_ = true;
+    stop.vm = local_vm_.get();
+    stop.thread = std::move(local_vm_thread_);
+    return stop;
+  }
+
+  /// @brief Stop the engine, deliver on_shutdown, then idle-destroy if it is safe.
+  /// @details The join runs outside init_mutex_. On success the VM deleter must
+  /// not join the same thread again, so the thread object is dropped here.
+  /// Driver destroy still waits for the idle path.
+  void finish_engine_stop(EngineStop stop) {
+    bool joined = false;
+    std::string failure;
+    try {
+      rj_vm_request_exit(stop.vm, "interposer process exit");
+      stop.thread->join();
+      joined = true;
+    } catch (const std::exception &ex) {
+      failure = ex.what();
+    } catch (...) {
+      // This runs from the DSO finalizer. An escaping exception would terminate
+      // the process and skip the warning that names the group left active.
+      failure = "joining the local VM engine threw a non-standard exception";
+    }
+
+    // rj_vm_run() already does this before it returns, and logs any plugin whose
+    // onShutdown() threw. The second call is a no-op unless run() bailed out
+    // before reaching it.
+    if (joined)
+      rj_vm_shutdown_plugins(stop.vm);
+
+    DoomedLocalVm doomed;
+    std::string warning;
+    {
+      std::lock_guard lock(init_mutex_);
+      engine_join_in_progress_ = false;
+      if (joined) {
+        stop.thread.reset();
+        doomed = shutdown_local_vm_if_idle_locked();
+      } else if (stop.thread && stop.thread->joinable()) {
+        local_vm_thread_ = std::move(stop.thread);
+        warning = plugin_shutdown_failure_message(
+            stop.vm, failure.empty() ? "the local VM engine could not be joined" : failure.c_str());
+      }
+    }
+    if (!warning.empty())
+      util::Logger::warn(warning);
+  }
+
+  /// @brief Name the plugin group a failed process-exit shutdown left active.
+  std::string plugin_shutdown_failure_message(rj_vm_t *vm, const char *why) const {
+    const bool active = vm && vm->plugin_group_active.load(std::memory_order_acquire);
+    std::string names = "execution plugin group";
+    if (active && vm->soc) {
+      std::string listed = vm->soc->plugin_group().joined_plugin_names();
+      if (!listed.empty())
+        names = std::move(listed);
+    }
+    std::string message = "rocjitsu: ";
+    message += why;
+    if (active) {
+      message += "; left active without on_shutdown: ";
+      message += names;
+    }
+    return message;
+  }
 
   /// @brief Release the interposer's own references to the local backend.
   /// @details Caller holds init_mutex_. This does NOT free anything directly: it
@@ -3320,6 +3420,11 @@ private:
     // guest_driver_, so a guest-only backend must not be skipped here.
     if (!local_vm_ && !guest_driver_)
       return doomed;
+    // Process exit may be joining the engine outside this lock. Destroying the
+    // VM here would race that join and call rj_vm_destroy() while rj_vm_run()
+    // is still returning.
+    if (engine_join_in_progress_)
+      return doomed;
     if (!local_driver_is_idle_locked())
       return doomed;
 
@@ -3360,6 +3465,10 @@ private:
   /// @brief Set once the interposer DSO finalizer has requested process-exit
   /// shutdown; the VM is torn down as soon as it is also idle.
   bool shutdown_requested_ = false;
+  /// @brief True while process exit has moved the engine thread out to join it.
+  /// @details shutdown_local_vm_if_idle_locked() must not destroy the VM until
+  /// that join finishes. Touched only under init_mutex_.
+  bool engine_join_in_progress_ = false;
   /// @brief Reference count the published driver had before any application
   /// reference existed. Written by publish_local_driver_locked(), read by
   /// local_driver_is_idle_locked(); both under init_mutex_.
@@ -3568,10 +3677,11 @@ private:
 };
 
 // Storage for the singleton is explicitly shut down (rj_interposer_shutdown →
-// request_local_vm_shutdown, which stops and joins the engine once idle) but never
-// destructed. Aligned raw storage keeps interposed libc entry points from reaching
-// a destroyed context during late process teardown, while the phase-aware shutdown
-// still gives the local VM engine thread a bounded, joined lifetime.
+// request_local_vm_shutdown, which joins the engine so plugin on_shutdown runs,
+// then destroys the VM once it is idle) but never destructed. Aligned raw storage
+// keeps interposed libc entry points from reaching a destroyed context during late
+// process teardown, while the phase-aware shutdown still gives the local VM engine
+// thread a bounded, joined lifetime.
 alignas(16) uint8_t InterposerContext::storage_[sizeof(InterposerContext)];
 InterposerContext &InterposerContext::ctx =
     *reinterpret_cast<InterposerContext *>(InterposerContext::storage_);
@@ -4207,21 +4317,29 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   return static_cast<int>(InterposerContext::real().close(fd));
 }
 
-// Runs at library finalization. As an LD_PRELOAD lib we may finalize before HIP
-// and ROCR, which can still hold KFD descriptors and issue an implicit
-// hsa_shut_down() from THEIR finalizers. So only RECORD the shutdown request here;
-// the VM is destroyed later, when the final KFD client closes and the simulator is
-// idle (via release_local_open()). Destroying it now would make HIP's later scratch
-// release hang against a gone driver.
+// Runs at library finalization, before HIP/ROCr finalizers and before a dlopen'd
+// plugin backend's own ELF destructor. As an LD_PRELOAD lib we may finalize while
+// those runtimes still hold KFD descriptors and will issue an implicit
+// hsa_shut_down() from THEIR finalizers. Destroying the driver here would make
+// HIP's later scratch release hang against a gone driver, so VM/driver destroy
+// stays on the idle path (release_local_open(), once the last reference closes).
+//
+// on_shutdown does not need the driver to be gone, and the idle path is not
+// reached on a normal exit() — those closes never arrive. The finalizer therefore
+// also stops and joins the local engine now, which is what makes rj_vm_run()
+// deliver on_shutdown before this DSO returns and before the backend unloads.
+// A self-join, or a join that throws, is logged and the driver is left up. The
+// join itself waits, the same way the idle-path deleter does.
 //
 // This deferred, reference-counted teardown is what makes cross-library ordering
 // safe — NOT the destructor priority. GCC destructor priorities only order
 // .fini_array entries WITHIN this DSO; the KFD-closing finalizers that matter live
 // in other DSOs (HIP/ROCR) and are ordered relative to librocjitsu.so by dynamic
 // finalization order (an LD_PRELOAD lib finalizes before its dependents), which no
-// attribute here can change. Since this finalizer is now idempotent and only
-// records a request, its priority is immaterial; default priority is used simply
-// because the old destructor(101) special-casing is no longer needed.
+// attribute here can change. The finalizer is idempotent: a second call finds the
+// engine already joined, or no engine to join. Its priority is immaterial; default
+// priority is used because the old destructor(101) special-casing is no longer
+// needed.
 __attribute__((destructor)) void rj_interposer_shutdown() {
   // PID gate FIRST, before anything else. A forked child that calls exit() instead
   // of exec() runs this finalizer too, and request_local_vm_shutdown() takes
