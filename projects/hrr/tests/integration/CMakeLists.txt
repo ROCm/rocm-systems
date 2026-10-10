@@ -36,6 +36,12 @@
 #   aim-labs/scenarios/prep/hrr-api-matrix/check_matrix.py --emit-cxx \
 #       <this dir>/hrr_api_matrix_expectations.h
 #
+# hrr_capture_capabilities_test.cc covers what capture leaves out of the archive
+# when a call hands back a capability or an address: an IPC handle is recorded
+# as a keyed digest, a resolved entry point not at all. Contains its own hidden
+# [.][hrr-direct] workloads, which call host APIs only; the IPC exporter starts
+# the importer as a second process of this binary.
+#
 # hrr_kernel_args_test.cc covers what replay does with a pointer-typed kernel
 # argument no allocation explains: a sentinel keeps its value, an
 # address-shaped lost pointer becomes null. Contains its own hidden
@@ -88,6 +94,7 @@ add_executable(hrr-integration-tests
   hrr_api_matrix_test.cc
   hrr_capture_access_test.cc
   hrr_fatbin_header_test.cc
+  hrr_capture_capabilities_test.cc
   hrr_secure_exec_test.cc
   hrr_clock_hook.cc
 )
@@ -137,8 +144,10 @@ if(NOT WIN32)
   # hrr_disk_space_test.cc defines these for the HIP runtime to bind to. An
   # executable exports only what its link-time libraries reference, and the
   # runtime may name either statvfs or statvfs64, so export all three.
+  # hrr_capture_capabilities_test.cc defines getrandom, open and open64, to see
+  # the digest keys capture draws and to take its random source away.
   set(_hrr_disk_space_exports "${CMAKE_CURRENT_BINARY_DIR}/hrr_disk_space_exports.list")
-  file(WRITE "${_hrr_disk_space_exports}" "{ statvfs; statvfs64; fsync; };\n")
+  file(WRITE "${_hrr_disk_space_exports}" "{ statvfs; statvfs64; fsync; getrandom; open; open64; };\n")
   target_link_options(hrr-integration-tests PRIVATE
                       "LINKER:--dynamic-list=${_hrr_disk_space_exports}")
   target_link_libraries(hrr-integration-tests PRIVATE ${CMAKE_DL_LIBS})

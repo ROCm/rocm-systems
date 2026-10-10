@@ -54,6 +54,7 @@
 #include <thread>
 #include <unordered_set>
 #include <algorithm>
+#include <random>
 #include <vector>
 
 #ifdef _WIN32
@@ -97,6 +98,13 @@ static inline uint64_t current_parent_process_id() {
 #  include <unistd.h>
 #  include <fcntl.h>
 #  include <sys/stat.h>
+// getrandom() came with glibc 2.25; before it the syscall is called directly.
+#  if defined(__has_include)
+#    if __has_include(<sys/random.h>)
+#      include <sys/random.h>
+#      define HRR_HAVE_GETRANDOM 1
+#    endif
+#  endif
 #  include <sys/statvfs.h>
 #  include <sys/syscall.h>
 #  include <pthread.h>
@@ -147,6 +155,150 @@ static Hash128 hash_buffer(const void* data, size_t len) {
   return {h1, h2};
 }
 
+// ---------------------------------------------------------------------------
+// Capability digest: SipHash-2-4 with 128-bit output
+//
+// A capability such as an IPC handle has little entropy: an emulated IPC event
+// is named /hip_<pid>_<counter>, and a memory handle is mostly an address and
+// small integers. An unkeyed hash of it lets an archive reader hash every
+// candidate and find the handle. The digest is therefore keyed, with a key
+// drawn from the system's random source once per process when capture opens
+// and kept only in memory: it is never written to the archive, its manifest,
+// writer state or a log. Replay only compares digests recorded in one
+// per-process archive with each other, so it never needs the key. A forked
+// child does not keep its parent's key: atfork_child() drops it, and the child
+// draws its own when its archive opens, or at its first digest if that comes
+// first, so no digest in the child uses the parent's key.
+//
+// With no random source at all, there is no key and no digest: the handle
+// field is recorded as zeros. A key that is partly drawn is never used.
+// ---------------------------------------------------------------------------
+
+struct DigestKey { uint64_t k0, k1; };
+
+#ifndef _WIN32
+// Fill all of `p` from the kernel's random source, or return false. A source
+// that fails part-way is abandoned and the next one starts from the beginning.
+static bool fill_random(uint8_t* p, size_t n) {
+  size_t got = 0;
+  while (got < n) {
+#if defined(HRR_HAVE_GETRANDOM)
+    const ssize_t r = getrandom(p + got, n - got, 0);
+#elif defined(SYS_getrandom)
+    const ssize_t r = syscall(SYS_getrandom, p + got, n - got, 0);
+#else
+    const ssize_t r = -1;
+    errno = ENOSYS;
+#endif
+    if (r > 0) { got += static_cast<size_t>(r); continue; }
+    if (r < 0 && errno == EINTR) continue;
+    break;  // ENOSYS on a kernel before 3.17, or any other failure
+  }
+  if (got == n) return true;
+  const int fd = ::open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return false;
+  got = 0;
+  while (got < n) {
+    const ssize_t r = ::read(fd, p + got, n - got);
+    if (r > 0) { got += static_cast<size_t>(r); continue; }
+    if (r < 0 && errno == EINTR) continue;
+    break;
+  }
+  ::close(fd);
+  return got == n;
+}
+#endif
+
+// Never throws: this runs inside a hip* entry point.
+static bool draw_digest_key(DigestKey* key) {
+  uint64_t k[2] = {0, 0};
+#ifdef _WIN32
+  try {
+    std::random_device rd;  // RtlGenRandom on MSVC
+    for (auto& w : k) w = (static_cast<uint64_t>(rd()) << 32) | rd();
+  } catch (...) {
+    return false;
+  }
+#else
+  if (!fill_random(reinterpret_cast<uint8_t*>(k), sizeof(k))) return false;
+#endif
+  *key = {k[0], k[1]};
+  return true;
+}
+
+// g_digest_key_mu is a leaf: nothing else is locked under it.
+enum : int { kKeyUndrawn = 0, kKeyDrawn = 1, kKeyNone = 2 };
+static std::mutex       g_digest_key_mu;
+static DigestKey        g_digest_key{};
+static std::atomic<int> g_digest_key_state{kKeyUndrawn};
+
+// The key, drawn on first use; false when there is no random source.
+static bool digest_key(DigestKey* key) {
+  int state = g_digest_key_state.load(std::memory_order_acquire);
+  if (state == kKeyUndrawn) {
+    std::lock_guard<std::mutex> lk(g_digest_key_mu);
+    state = g_digest_key_state.load(std::memory_order_relaxed);
+    if (state == kKeyUndrawn) {
+      state = draw_digest_key(&g_digest_key) ? kKeyDrawn : kKeyNone;
+      if (state == kKeyNone)
+        LogPrintfWarning("[HRR capture] No random source: IPC handles are recorded "
+                         "as zeros, without a digest.");
+      g_digest_key_state.store(state, std::memory_order_release);
+    }
+  }
+  if (state != kKeyDrawn) return false;
+  *key = g_digest_key;
+  return true;
+}
+
+static inline uint64_t rotl64(uint64_t x, int b) { return (x << b) | (x >> (64 - b)); }
+
+static inline void sip_round(uint64_t& v0, uint64_t& v1, uint64_t& v2, uint64_t& v3) {
+  v0 += v1; v1 = rotl64(v1, 13); v1 ^= v0; v0 = rotl64(v0, 32);
+  v2 += v3; v3 = rotl64(v3, 16); v3 ^= v2;
+  v0 += v3; v3 = rotl64(v3, 21); v3 ^= v0;
+  v2 += v1; v1 = rotl64(v1, 17); v1 ^= v2; v2 = rotl64(v2, 32);
+}
+
+static Hash128 siphash128(const DigestKey& key, const void* data, size_t len) {
+  uint64_t v0 = key.k0 ^ 0x736f6d6570736575ULL;
+  uint64_t v1 = key.k1 ^ 0x646f72616e646f6dULL ^ 0xee;
+  uint64_t v2 = key.k0 ^ 0x6c7967656e657261ULL;
+  uint64_t v3 = key.k1 ^ 0x7465646279746573ULL;
+  const auto* p = static_cast<const uint8_t*>(data);
+  const size_t whole = len & ~size_t{7};
+  auto absorb = [&](uint64_t m) {
+    v3 ^= m;
+    sip_round(v0, v1, v2, v3);
+    sip_round(v0, v1, v2, v3);
+    v0 ^= m;
+  };
+  for (size_t i = 0; i < whole; i += 8) {
+    uint64_t m = 0;
+    for (int j = 0; j < 8; ++j) m |= static_cast<uint64_t>(p[i + j]) << (8 * j);
+    absorb(m);
+  }
+  uint64_t b = static_cast<uint64_t>(len) << 56;
+  for (size_t j = 0; j < (len & 7); ++j) b |= static_cast<uint64_t>(p[whole + j]) << (8 * j);
+  absorb(b);
+  v2 ^= 0xee;
+  for (int r = 0; r < 4; ++r) sip_round(v0, v1, v2, v3);
+  const uint64_t lo = v0 ^ v1 ^ v2 ^ v3;
+  v1 ^= 0xdd;
+  for (int r = 0; r < 4; ++r) sip_round(v0, v1, v2, v3);
+  return {lo, v0 ^ v1 ^ v2 ^ v3};
+}
+
+void digest_into(void* dst, size_t dst_len, const void* src, size_t src_len) {
+  auto* out = static_cast<uint8_t*>(dst);
+  memset(out, 0, dst_len);
+  DigestKey key;
+  if (dst_len < 16 || !digest_key(&key)) return;
+  const Hash128 h = siphash128(key, src, src_len);
+  memcpy(out, &h.lo, sizeof(h.lo));
+  memcpy(out + sizeof(h.lo), &h.hi, sizeof(h.hi));
+}
+
 static void hash_hex(Hash128 h, char buf[33]) {
   snprintf(buf, 33, "%016llx%016llx",
            static_cast<unsigned long long>(h.lo),
@@ -171,7 +323,8 @@ static constexpr size_t   kMetadataJsonMax  = 128u * 1024u;
 static constexpr size_t   kEmergencyManifestMax = kMetadataJsonMax + 1024u;
 
 // Lock order: g_reopen_mu, then g_blob_mu, then g_file_mu, then
-// g_unreplayable_mu. atfork_prepare is the only path that holds them all.
+// g_unreplayable_mu, then g_digest_key_mu. atfork_prepare is the only path that
+// holds them all.
 static std::mutex   g_file_mu;
 static int          g_events_fd = -1;
 // g_base_dir is the archive path requested via HIP_HRR_CAPTURE_OUTPUT.
@@ -721,9 +874,12 @@ static void atfork_prepare() {
   g_buf_busy.clear(std::memory_order_release);
   // The child's shutdown writes its manifest under this one.
   g_unreplayable_mu.lock();
+  // The child draws its own digest key under this one.
+  g_digest_key_mu.lock();
 }
 
 static void atfork_parent() {
+  g_digest_key_mu.unlock();
   g_unreplayable_mu.unlock();
   g_file_mu.unlock();
   g_blob_mu.unlock();
@@ -731,6 +887,7 @@ static void atfork_parent() {
 }
 
 static void atfork_child() {
+  g_digest_key_mu.unlock();
   g_unreplayable_mu.unlock();
   g_file_mu.unlock();
   g_blob_mu.unlock();
@@ -754,6 +911,10 @@ static void atfork_child() {
   g_events_finalized = false;
   g_output_dir.clear();
   g_manifest_path[0] = '\0';
+  // The child is another capturing process: it must not digest with the
+  // parent's key. digest_key() draws a new one.
+  g_digest_key = DigestKey{};
+  g_digest_key_state.store(kKeyUndrawn, std::memory_order_relaxed);
   // The child's archive is a new one: an event the parent dropped is not
   // missing from it.
   g_capture_incomplete.store(false, std::memory_order_relaxed);
@@ -1197,6 +1358,10 @@ bool open(const char* output_dir) {
 #ifndef _WIN32
   install_atfork_handlers_once();
 #endif
+  // Drawn at capture start, not at the first IPC call; in a forked child, when
+  // its archive opens.
+  DigestKey key;
+  (void)digest_key(&key);
   // The archive is prepared in locals and published below under the writer
   // mutex and g_buf_busy. A forked child opens its archive while other threads
   // may checkpoint, crash or finalize, and none of them may see the events fd
