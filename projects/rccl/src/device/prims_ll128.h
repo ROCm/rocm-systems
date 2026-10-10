@@ -381,7 +381,14 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     /************************ Recv rest *********************/
     if (RECV) {
       { // Consume data from first recv
+// Fully unrolling this loop is miscompiled on gfx1250 at -O1: 1-byte element types
+// get byte 5 of each uint64_t silently corrupted. Capping the unroll factor avoids it.
+// TODO: Remove once compiler fix is landed.
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && defined(RCCL_GFX1250_LL128_UNROLL_WORKAROUND)
+#pragma unroll 1
+#else
 #pragma unroll
+#endif
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
           v[u] = SRC ? applyReduce(redOp, vr[u], v[u]) : vr[u];
           v[u + 1] = SRC ? applyReduce(redOp, vr[u + 1], v[u + 1]) : vr[u + 1];
@@ -408,7 +415,12 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 #pragma unroll
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
 
+// Same gfx1250 -O1 unroll miscompile as above.
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && defined(RCCL_GFX1250_LL128_UNROLL_WORKAROUND)
+#pragma unroll 1
+#else
 #pragma unroll
+#endif
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
           v[u] = applyReduce(redOp, vr[u], v[u]);
           v[u + 1] = applyReduce(redOp, vr[u + 1], v[u + 1]);

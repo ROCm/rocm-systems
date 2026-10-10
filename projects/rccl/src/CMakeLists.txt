@@ -1069,6 +1069,11 @@ endif()
 if(ENABLE_ROCSHMEM_GIN)
   target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM_GIN)
 endif()
+# gfx1250 miscompiles the fully unrolled LL128 reduce loop at -O1. Matches the
+# predicate that selects -O1 in cmake/DeviceLinker.cmake.
+if(CMAKE_BUILD_TYPE MATCHES "Debug")
+  target_compile_definitions(rccl PRIVATE RCCL_GFX1250_LL128_UNROLL_WORKAROUND)
+endif()
 # Uncached (fine-grained) VMM/cuMem allocation type. Available natively on
 # HIP >= 7.12.60540 and via the ROCm 7.0.2.x backport range [7.0.51831, 7.0.60000).
 if(HIP_VMM_UNCACHED_MEMORY_AVAILABLE AND
