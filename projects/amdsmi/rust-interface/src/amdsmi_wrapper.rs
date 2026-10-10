@@ -3635,7 +3635,7 @@ pub struct AmdsmiNicPortT {
     pub type_: [::std::os::raw::c_char; 256usize],
     pub flavour: [::std::os::raw::c_char; 256usize],
     pub netdev: [::std::os::raw::c_char; 256usize],
-    pub ifindex: u8,
+    pub ifindex: u32,
     pub mac_address: [::std::os::raw::c_char; 256usize],
     pub carrier: u8,
     pub mtu: u16,
@@ -3649,7 +3649,7 @@ pub struct AmdsmiNicPortT {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AmdsmiNicPortT"][::std::mem::size_of::<AmdsmiNicPortT>() - 2328usize];
+    ["Size of AmdsmiNicPortT"][::std::mem::size_of::<AmdsmiNicPortT>() - 2336usize];
     ["Alignment of AmdsmiNicPortT"][::std::mem::align_of::<AmdsmiNicPortT>() - 8usize];
     ["Offset of field: AmdsmiNicPortT::bdf"][::std::mem::offset_of!(AmdsmiNicPortT, bdf) - 0usize];
     ["Offset of field: AmdsmiNicPortT::port_num"]
@@ -3663,25 +3663,25 @@ const _: () = {
     ["Offset of field: AmdsmiNicPortT::ifindex"]
         [::std::mem::offset_of!(AmdsmiNicPortT, ifindex) - 780usize];
     ["Offset of field: AmdsmiNicPortT::mac_address"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, mac_address) - 781usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, mac_address) - 784usize];
     ["Offset of field: AmdsmiNicPortT::carrier"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, carrier) - 1037usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, carrier) - 1040usize];
     ["Offset of field: AmdsmiNicPortT::mtu"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, mtu) - 1038usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, mtu) - 1042usize];
     ["Offset of field: AmdsmiNicPortT::link_state"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, link_state) - 1040usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, link_state) - 1044usize];
     ["Offset of field: AmdsmiNicPortT::link_speed"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, link_speed) - 1296usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, link_speed) - 1300usize];
     ["Offset of field: AmdsmiNicPortT::active_fec"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, active_fec) - 1300usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, active_fec) - 1304usize];
     ["Offset of field: AmdsmiNicPortT::autoneg"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, autoneg) - 1304usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, autoneg) - 1308usize];
     ["Offset of field: AmdsmiNicPortT::pause_autoneg"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, pause_autoneg) - 1560usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, pause_autoneg) - 1564usize];
     ["Offset of field: AmdsmiNicPortT::pause_rx"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, pause_rx) - 1816usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, pause_rx) - 1820usize];
     ["Offset of field: AmdsmiNicPortT::pause_tx"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, pause_tx) - 2072usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, pause_tx) - 2076usize];
 };
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -3691,7 +3691,7 @@ pub struct AmdsmiNicPortInfoT {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AmdsmiNicPortInfoT"][::std::mem::size_of::<AmdsmiNicPortInfoT>() - 74504usize];
+    ["Size of AmdsmiNicPortInfoT"][::std::mem::size_of::<AmdsmiNicPortInfoT>() - 74760usize];
     ["Alignment of AmdsmiNicPortInfoT"][::std::mem::align_of::<AmdsmiNicPortInfoT>() - 8usize];
     ["Offset of field: AmdsmiNicPortInfoT::num_ports"]
         [::std::mem::offset_of!(AmdsmiNicPortInfoT, num_ports) - 0usize];

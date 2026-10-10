@@ -3132,7 +3132,7 @@ typedef struct {
   char type[AMDSMI_MAX_STRING_LENGTH];
   char flavour[AMDSMI_MAX_STRING_LENGTH];
   char netdev[AMDSMI_MAX_STRING_LENGTH];
-  uint8_t ifindex;
+  uint32_t ifindex;  //!< Network interface index; UINT32_MAX if unknown
   char mac_address[AMDSMI_MAX_STRING_LENGTH];
   uint8_t carrier;
   uint16_t mtu;

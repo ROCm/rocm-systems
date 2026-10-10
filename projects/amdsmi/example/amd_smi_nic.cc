@@ -199,8 +199,7 @@ NIC: 0
         << "            TYPE: " << ainic_info.port.ports[port_idx].type << "\n"
         << "            FLAVOUR: " << ainic_info.port.ports[port_idx].flavour << "\n"
         << "            NETDEV: " << ainic_info.port.ports[port_idx].netdev << "\n"
-        << "            IFINDEX: " << static_cast<int>(ainic_info.port.ports[port_idx].ifindex)
-        << "\n"
+        << "            IFINDEX: " << ainic_info.port.ports[port_idx].ifindex << "\n"
         << "            MAC_ADDRESS: " << ainic_info.port.ports[port_idx].mac_address << "\n"
         << "            CARRIER: " << static_cast<int>(ainic_info.port.ports[port_idx].carrier)
         << "\n"
