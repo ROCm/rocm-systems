@@ -54,13 +54,8 @@ RJ_NOINLINE void VMovB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
 
 void VReadfirstlaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint32_t val = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (exec & (1ULL << lane)) {
-      val = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-      break;
-    }
-  }
+  uint32_t lane = exec ? static_cast<uint32_t>(std::countr_zero(exec)) : 0;
+  uint32_t val = amdgpu::RegisterAccess(wf).read_scalar_selected_lane(src0, lane);
   amdgpu::RegisterAccess(wf).write_scalar(vdst, val);
 }
 
@@ -95,10 +90,10 @@ RJ_NOINLINE void VMovB16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
   if (inst_.src0 == amdgpu::SRC_DPP)
@@ -171,8 +166,9 @@ void VMovreldB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + wf.m0() : UINT64_MAX;
-  bool rel_dst_valid = rel_dst_base && wf.m0() <= 1023u &&
-                       rel_dst_index + vdst.vgpr_count() <= wf.vgpr_alloc().count;
+  bool rel_dst_valid =
+      amdgpu::relative_vgpr_index(rel_dst_base, wf.m0(), vdst.vgpr_count(), wf.vgpr_alloc().count)
+          .has_value();
   if (!rel_dst_valid)
     return;
   Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
@@ -205,8 +201,9 @@ RJ_NOINLINE void VMovreldB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
       Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + wf.m0() : UINT64_MAX;
-  bool rel_dst_valid = rel_dst_base && wf.m0() <= 1023u &&
-                       rel_dst_index + vdst.vgpr_count() <= wf.vgpr_alloc().count;
+  bool rel_dst_valid =
+      amdgpu::relative_vgpr_index(rel_dst_base, wf.m0(), vdst.vgpr_count(), wf.vgpr_alloc().count)
+          .has_value();
   if (!rel_dst_valid)
     return;
   Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
@@ -229,8 +226,9 @@ void VMovrelsB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
   uint64_t rel_src_index =
       rel_src_base ? static_cast<uint64_t>(*rel_src_base) + wf.m0() : UINT64_MAX;
-  bool rel_src_valid = rel_src_base && wf.m0() <= 1023u &&
-                       rel_src_index + src0.vgpr_count() <= wf.vgpr_alloc().count;
+  bool rel_src_valid =
+      amdgpu::relative_vgpr_index(rel_src_base, wf.m0(), src0.vgpr_count(), wf.vgpr_alloc().count)
+          .has_value();
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
                   static_cast<int>(rel_src_valid ? rel_src_index : 0u));
   std::optional<StagedOperand> rel_staged_src;
@@ -269,8 +267,9 @@ RJ_NOINLINE void VMovrelsB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
       Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
   uint64_t rel_src_index =
       rel_src_base ? static_cast<uint64_t>(*rel_src_base) + wf.m0() : UINT64_MAX;
-  bool rel_src_valid = rel_src_base && wf.m0() <= 1023u &&
-                       rel_src_index + src0.vgpr_count() <= wf.vgpr_alloc().count;
+  bool rel_src_valid =
+      amdgpu::relative_vgpr_index(rel_src_base, wf.m0(), src0.vgpr_count(), wf.vgpr_alloc().count)
+          .has_value();
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
                   static_cast<int>(rel_src_valid ? rel_src_index : 0u));
   std::optional<StagedOperand> rel_staged_src;
@@ -310,10 +309,12 @@ void VMovrelsdB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       rel_src_base ? static_cast<uint64_t>(*rel_src_base) + rel_src_offset : UINT64_MAX;
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
-  bool rel_src_valid = rel_src_base && rel_src_offset <= 1023u &&
-                       rel_src_index + src0.vgpr_count() <= wf.vgpr_alloc().count;
-  bool rel_dst_valid = rel_dst_base && rel_dst_offset <= 1023u &&
-                       rel_dst_index + vdst.vgpr_count() <= wf.vgpr_alloc().count;
+  bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, src0.vgpr_count(),
+                                                   wf.vgpr_alloc().count)
+                           .has_value();
+  bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, vdst.vgpr_count(),
+                                                   wf.vgpr_alloc().count)
+                           .has_value();
   if (!rel_dst_valid)
     return;
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
@@ -361,10 +362,12 @@ RJ_NOINLINE void VMovrelsdB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) 
       rel_src_base ? static_cast<uint64_t>(*rel_src_base) + rel_src_offset : UINT64_MAX;
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
-  bool rel_src_valid = rel_src_base && rel_src_offset <= 1023u &&
-                       rel_src_index + src0.vgpr_count() <= wf.vgpr_alloc().count;
-  bool rel_dst_valid = rel_dst_base && rel_dst_offset <= 1023u &&
-                       rel_dst_index + vdst.vgpr_count() <= wf.vgpr_alloc().count;
+  bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, src0.vgpr_count(),
+                                                   wf.vgpr_alloc().count)
+                           .has_value();
+  bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, vdst.vgpr_count(),
+                                                   wf.vgpr_alloc().count)
+                           .has_value();
   if (!rel_dst_valid)
     return;
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
@@ -407,10 +410,12 @@ void VMovrelsd2B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       rel_src_base ? static_cast<uint64_t>(*rel_src_base) + rel_src_offset : UINT64_MAX;
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
-  bool rel_src_valid = rel_src_base && rel_src_offset <= 1023u &&
-                       rel_src_index + src0.vgpr_count() <= wf.vgpr_alloc().count;
-  bool rel_dst_valid = rel_dst_base && rel_dst_offset <= 1023u &&
-                       rel_dst_index + vdst.vgpr_count() <= wf.vgpr_alloc().count;
+  bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, src0.vgpr_count(),
+                                                   wf.vgpr_alloc().count)
+                           .has_value();
+  bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, vdst.vgpr_count(),
+                                                   wf.vgpr_alloc().count)
+                           .has_value();
   if (!rel_dst_valid)
     return;
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
@@ -458,10 +463,12 @@ RJ_NOINLINE void VMovrelsd2B32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
       rel_src_base ? static_cast<uint64_t>(*rel_src_base) + rel_src_offset : UINT64_MAX;
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
-  bool rel_src_valid = rel_src_base && rel_src_offset <= 1023u &&
-                       rel_src_index + src0.vgpr_count() <= wf.vgpr_alloc().count;
-  bool rel_dst_valid = rel_dst_base && rel_dst_offset <= 1023u &&
-                       rel_dst_index + vdst.vgpr_count() <= wf.vgpr_alloc().count;
+  bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, src0.vgpr_count(),
+                                                   wf.vgpr_alloc().count)
+                           .has_value();
+  bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, vdst.vgpr_count(),
+                                                   wf.vgpr_alloc().count)
+                           .has_value();
   if (!rel_dst_valid)
     return;
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
@@ -490,6 +497,7 @@ RJ_NOINLINE void VMovrelsd2B32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
 }
 
 void VPermlane16SwapB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t exec = wf.exec();
   uint32_t tmp_dst[64] = {}, tmp_src[64] = {};
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     tmp_dst[lane] = amdgpu::RegisterAccess(wf).read_lane(vdst, lane);
@@ -497,8 +505,10 @@ void VPermlane16SwapB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   for (uint32_t base = 0; base + 16 < wf.wf_size(); base += 2u * 16) {
     for (uint32_t i = 0; i < 16; ++i) {
-      amdgpu::RegisterAccess(wf).write_lane(src0, base + i, tmp_dst[base + 16 + i]);
-      amdgpu::RegisterAccess(wf).write_lane(vdst, base + 16 + i, tmp_src[base + i]);
+      if (exec & (1ULL << (base + i)))
+        amdgpu::RegisterAccess(wf).write_lane(src0, base + i, tmp_dst[base + 16 + i]);
+      if (exec & (1ULL << (base + 16 + i)))
+        amdgpu::RegisterAccess(wf).write_lane(vdst, base + 16 + i, tmp_src[base + i]);
     }
   }
 }
@@ -781,7 +791,8 @@ void VPermlane16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t sel_word = (sub < 8u) ? amdgpu::RegisterAccess(wf).read_scalar(src1)
                                    : amdgpu::RegisterAccess(wf).read_scalar(src2);
     uint32_t sel = (sel_word >> ((sub & 7u) * 4u)) & 0xF;
-    uint32_t src_lane = (lane & ~0xFu) | sel;
+    uint32_t src_lane = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::Perm16, lane, sel,
+                                                        16, wf.wf_size());
     if (src_lane >= wf.wf_size())
       continue;
     bool src_active = (exec & (1ULL << src_lane)) != 0;
@@ -809,9 +820,8 @@ void VPermlanex16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t sel_word = (sub < 8u) ? amdgpu::RegisterAccess(wf).read_scalar(src1)
                                    : amdgpu::RegisterAccess(wf).read_scalar(src2);
     uint32_t sel = (sel_word >> ((sub & 7u) * 4u)) & 0xF;
-    uint32_t row_base = lane & ~0x1Fu;
-    uint32_t half = (lane ^ 0x10u) & 0x10u;
-    uint32_t src_lane = row_base | half | sel;
+    uint32_t src_lane =
+        amdgpu::valu_permutation_source(amdgpu::ValuPermutation::X16, lane, sel, 16, wf.wf_size());
     if (src_lane >= wf.wf_size())
       continue;
     bool src_active = (exec & (1ULL << src_lane)) != 0;
@@ -867,10 +877,10 @@ RJ_NOINLINE void VCndmaskB16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
   if (inst_.src0 == amdgpu::SRC_DPP)
@@ -912,16 +922,15 @@ void VPermlaneBcastB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     snap[i] = amdgpu::RegisterAccess(wf).read_lane(src0, i);
   uint32_t selector = amdgpu::RegisterAccess(wf).read_scalar(src1);
   uint32_t lane_group_width = amdgpu::RegisterAccess(wf).read_scalar(src2);
-  if (lane_group_width == 0 || (lane_group_width & (lane_group_width - 1)) != 0)
-    lane_group_width = wf.wf_size();
-  lane_group_width = std::min(lane_group_width, wf.wf_size());
+  if (exec && inst_.src2 < 256 &&
+      (!lane_group_width || (lane_group_width & (lane_group_width - 1))))
+    wf.report_undefined_behavior("permlane group width is not a power of two");
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t group_base = (lane / lane_group_width) * lane_group_width;
-    uint32_t src_offset = selector % lane_group_width;
-    uint32_t src_lane = group_base + src_offset;
-    if (src_offset >= lane_group_width || src_lane >= wf.wf_size()) {
+    uint32_t src_lane = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::Bcast, lane,
+                                                        selector, lane_group_width, wf.wf_size());
+    if (src_lane >= wf.wf_size()) {
       amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
       continue;
     }
@@ -937,17 +946,15 @@ void VPermlaneUpB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     snap[i] = amdgpu::RegisterAccess(wf).read_lane(src0, i);
   uint32_t selector = amdgpu::RegisterAccess(wf).read_scalar(src1);
   uint32_t lane_group_width = amdgpu::RegisterAccess(wf).read_scalar(src2);
-  if (lane_group_width == 0 || (lane_group_width & (lane_group_width - 1)) != 0)
-    lane_group_width = wf.wf_size();
-  lane_group_width = std::min(lane_group_width, wf.wf_size());
+  if (exec && inst_.src2 < 256 &&
+      (!lane_group_width || (lane_group_width & (lane_group_width - 1))))
+    wf.report_undefined_behavior("permlane group width is not a power of two");
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t group_base = (lane / lane_group_width) * lane_group_width;
-    uint32_t offset = lane - group_base;
-    uint32_t src_offset = (selector <= offset) ? (offset - selector) : lane_group_width;
-    uint32_t src_lane = group_base + src_offset;
-    if (src_offset >= lane_group_width || src_lane >= wf.wf_size()) {
+    uint32_t src_lane = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::Up, lane, selector,
+                                                        lane_group_width, wf.wf_size());
+    if (src_lane >= wf.wf_size()) {
       amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
       continue;
     }
@@ -963,17 +970,15 @@ void VPermlaneDownB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     snap[i] = amdgpu::RegisterAccess(wf).read_lane(src0, i);
   uint32_t selector = amdgpu::RegisterAccess(wf).read_scalar(src1);
   uint32_t lane_group_width = amdgpu::RegisterAccess(wf).read_scalar(src2);
-  if (lane_group_width == 0 || (lane_group_width & (lane_group_width - 1)) != 0)
-    lane_group_width = wf.wf_size();
-  lane_group_width = std::min(lane_group_width, wf.wf_size());
+  if (exec && inst_.src2 < 256 &&
+      (!lane_group_width || (lane_group_width & (lane_group_width - 1))))
+    wf.report_undefined_behavior("permlane group width is not a power of two");
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t group_base = (lane / lane_group_width) * lane_group_width;
-    uint32_t offset = lane - group_base;
-    uint32_t src_offset = offset + selector;
-    uint32_t src_lane = group_base + src_offset;
-    if (src_offset >= lane_group_width || src_lane >= wf.wf_size()) {
+    uint32_t src_lane = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::Down, lane,
+                                                        selector, lane_group_width, wf.wf_size());
+    if (src_lane >= wf.wf_size()) {
       amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
       continue;
     }
@@ -989,17 +994,15 @@ void VPermlaneXorB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     snap[i] = amdgpu::RegisterAccess(wf).read_lane(src0, i);
   uint32_t selector = amdgpu::RegisterAccess(wf).read_scalar(src1);
   uint32_t lane_group_width = amdgpu::RegisterAccess(wf).read_scalar(src2);
-  if (lane_group_width == 0 || (lane_group_width & (lane_group_width - 1)) != 0)
-    lane_group_width = wf.wf_size();
-  lane_group_width = std::min(lane_group_width, wf.wf_size());
+  if (exec && inst_.src2 < 256 &&
+      (!lane_group_width || (lane_group_width & (lane_group_width - 1))))
+    wf.report_undefined_behavior("permlane group width is not a power of two");
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t group_base = (lane / lane_group_width) * lane_group_width;
-    uint32_t offset = lane - group_base;
-    uint32_t src_offset = offset ^ selector;
-    uint32_t src_lane = group_base + src_offset;
-    if (src_offset >= lane_group_width || src_lane >= wf.wf_size()) {
+    uint32_t src_lane = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::Xor, lane,
+                                                        selector, lane_group_width, wf.wf_size());
+    if (src_lane >= wf.wf_size()) {
       amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
       continue;
     }
@@ -1019,7 +1022,8 @@ void VPermlane16VarB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t sel = amdgpu::RegisterAccess(wf).read_lane(src1, lane) & 0xF;
-    uint32_t src_lane = (lane & ~0xFu) | sel;
+    uint32_t src_lane = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::Perm16, lane, sel,
+                                                        16, wf.wf_size());
     if (src_lane >= wf.wf_size())
       continue;
     bool src_active = (exec & (1ULL << src_lane)) != 0;
@@ -1044,9 +1048,8 @@ void VPermlanex16VarB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t sel = amdgpu::RegisterAccess(wf).read_lane(src1, lane) & 0xF;
-    uint32_t row_base = lane & ~0x1Fu;
-    uint32_t half = (lane ^ 0x10u) & 0x10u;
-    uint32_t src_lane = row_base | half | sel;
+    uint32_t src_lane =
+        amdgpu::valu_permutation_source(amdgpu::ValuPermutation::X16, lane, sel, 16, wf.wf_size());
     if (src_lane >= wf.wf_size())
       continue;
     bool src_active = (exec & (1ULL << src_lane)) != 0;

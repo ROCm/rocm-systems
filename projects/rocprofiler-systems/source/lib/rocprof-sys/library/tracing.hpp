@@ -7,6 +7,7 @@
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
+#include "core/control/clocks/timeline.hpp"
 #include "core/demangler.hpp"
 #include "core/perfetto.hpp"
 #include "core/perfetto/emitter.hpp"
@@ -132,7 +133,7 @@ template <typename Tp = std::uint64_t>
 ROCPROFSYS_INLINE auto
 now()
 {
-    return ::tim::get_clock_real_now<Tp, std::nano>();
+    return control::clocks::timeline_ns<Tp>();
 }
 
 inline auto&
@@ -235,7 +236,7 @@ push_timemory(CategoryT, std::string_view name, Args&&... args)
     if(ROCPROFSYS_LIKELY(_data != nullptr))
     {
         // this generates a hash for the raw string array
-        auto _hash = tim::add_hash_id(name);
+        auto const _hash = tim::add_hash_id(name);
         _data->construct(_hash)->start(std::forward<Args>(args)...);
         // increment the profile stack
         ++get_profile_stack<CategoryT>();
@@ -253,8 +254,8 @@ get_timemory(CategoryT, std::string_view name)
         return return_type{ nullptr, -1 };
     }
 
-    auto  _hash = tim::hash::get_hash_id(name);
-    auto& _data = tracing::get_instrumentation_bundles();
+    auto const _hash = tim::hash::get_hash_id(name);
+    auto&      _data = tracing::get_instrumentation_bundles();
     if(ROCPROFSYS_UNLIKELY(_data == nullptr || _data->empty()))
     {
         LOG_DEBUG("[rocprofsys_pop_trace] skipped {} :: empty bundle stack", name);
@@ -400,7 +401,7 @@ perfetto_annotate_timemory_data(CategoryT, const char* name, Arg&& arg)
         return [&arg, name](::perfetto::EventContext _ctx) {
             if(config::get_perfetto_annotations())
             {
-                auto _timemory_data = get_timemory(CategoryT{}, name);
+                auto const _timemory_data = get_timemory(CategoryT{}, name);
                 if(_timemory_data.first)
                 {
                     _timemory_data.first->stop();

@@ -23,8 +23,8 @@ protected:
 
     std::string create_temp_dir()
     {
-        char  tmpl[] = "/tmp/rocprofsys_path_test_XXXXXX";
-        char* dir    = mkdtemp(tmpl);
+        char        tmpl[] = "/tmp/rocprofsys_path_test_XXXXXX";
+        char const* dir    = mkdtemp(tmpl);
         if(!dir)
         {
             throw std::runtime_error("Failed to create temp directory");
@@ -263,7 +263,7 @@ TEST_F(PathTest, IsDirectory_RelativePath)
 
 TEST_F(PathTest, IsRegularFile_ExistingFile)
 {
-    std::string file_path = create_file("isregular_file.txt");
+    std::string const file_path = create_file("isregular_file.txt");
     EXPECT_TRUE(is_regular_file(file_path));
 }
 
@@ -281,21 +281,21 @@ TEST_F(PathTest, IsRegularFile_NonexistentPath)
 
 TEST_F(PathTest, IsRegularFile_SymlinkToFile)
 {
-    std::string target    = create_file("isregular_target.txt");
-    std::string link_path = create_symlink(target, "isregular_link_to_file");
+    std::string const target    = create_file("isregular_target.txt");
+    std::string const link_path = create_symlink(target, "isregular_link_to_file");
     EXPECT_TRUE(is_regular_file(link_path));
 }
 
 TEST_F(PathTest, IsRegularFile_SymlinkToDirectory)
 {
-    std::string subdir    = create_subdir("isregular_target_dir");
-    std::string link_path = create_symlink(subdir, "isregular_link_to_dir");
+    std::string const subdir    = create_subdir("isregular_target_dir");
+    std::string const link_path = create_symlink(subdir, "isregular_link_to_dir");
     EXPECT_FALSE(is_regular_file(link_path));
 }
 
 TEST_F(PathTest, IsRegularFile_BrokenSymlink)
 {
-    std::string link_path =
+    std::string const link_path =
         create_symlink("/nonexistent/target", "isregular_broken_link");
     EXPECT_FALSE(is_regular_file(link_path));
 }
@@ -304,13 +304,13 @@ TEST_F(PathTest, IsRegularFile_EmptyPath) { EXPECT_FALSE(is_regular_file("")); }
 
 TEST_F(PathTest, IsRegularFile_SpecialCharactersInPath)
 {
-    std::string file_path = create_file("isregular file with spaces.txt");
+    std::string const file_path = create_file("isregular file with spaces.txt");
     EXPECT_TRUE(is_regular_file(file_path));
 }
 
 TEST_F(PathTest, IsRegularFile_Fifo)
 {
-    std::string fifo_path = m_test_dir + "/isregular_fifo";
+    std::string const fifo_path = m_test_dir + "/isregular_fifo";
     ASSERT_EQ(mkfifo(fifo_path.c_str(), 0644), 0);
     EXPECT_FALSE(is_regular_file(fifo_path));
 }
@@ -592,4 +592,77 @@ TEST_F(PathTest, CreateParentDirsAndOpenOfstream_TruncatesExistingFile)
     std::string   content;
     std::getline(in_fstream, content);
     EXPECT_EQ(content, "ab");
+}
+
+TEST_F(PathTest, IsMissingInTarget_FalseWhenFileExists)
+{
+    // using our own pid makes "/proc/<pid>/root" resolve to the real filesystem
+    // root, so a plain absolute path exercises the same lookup a genuine
+    // cross-namespace target would, without needing any test-only indirection
+    const std::string absolute_path =
+        m_test_dir + "/opt/rocprofiler-systems/lib/librocprof-sys-dl.so";
+    std::filesystem::create_directories(
+        std::filesystem::path{ absolute_path }.parent_path());
+    std::ofstream{ absolute_path } << "fake library contents";
+
+    EXPECT_FALSE(is_missing_in_target(getpid(), absolute_path));
+}
+
+TEST_F(PathTest, IsMissingInTarget_TrueWhenAbsent)
+{
+    const std::string absolute_path =
+        m_test_dir + "/opt/rocprofiler-systems/lib/librocprof-sys-dl.so";
+
+    EXPECT_TRUE(is_missing_in_target(getpid(), absolute_path));
+}
+
+TEST_F(PathTest, IsMissingInTarget_FalseWhenPathCannotBeChecked)
+{
+    // a path component longer than NAME_MAX (255 bytes on most Linux filesystems)
+    // fails with ENAMETOOLONG regardless of privilege level, which must not be
+    // mistaken for a missing file
+    const std::string too_long_path =
+        "/" + std::string(300, 'a') + "/librocprof-sys-dl.so";
+
+    EXPECT_FALSE(is_missing_in_target(getpid(), too_long_path));
+}
+
+TEST_F(PathTest, IsMissingInTarget_FalseForNonAbsolutePath)
+{
+    EXPECT_FALSE(is_missing_in_target(1, "librocprof-sys-dl.so"));
+}
+
+// the test binary itself is anchored on rather than a system library because system
+// library file names vary across distros (e.g. glibc < 2.34 maps libc-<version>.so)
+TEST_F(PathTest, FindLoadedLibraryDir_FindsLibraryMappedByProcess)
+{
+    const auto self_path = std::filesystem::canonical("/proc/self/exe");
+
+    EXPECT_EQ(find_loaded_library_dir(getpid(), self_path.filename().string()),
+              self_path.parent_path().string());
+}
+
+TEST_F(PathTest, FindLoadedLibraryDir_NulloptWhenNotMapped)
+{
+    EXPECT_FALSE(
+        find_loaded_library_dir(getpid(), "libnot-mapped-anywhere.so").has_value());
+}
+
+TEST_F(PathTest, FindLibraryInLoadedDir_FindsLibraryInLoadedDirectory)
+{
+    const auto self_path = std::filesystem::canonical("/proc/self/exe");
+    const auto self_name = self_path.filename().string();
+
+    EXPECT_EQ(find_library_in_loaded_dir(getpid(), self_name, self_name),
+              self_path.string());
+}
+
+TEST_F(PathTest, FindLibraryInLoadedDir_NulloptWhenLibraryAbsent)
+{
+    const auto self_name =
+        std::filesystem::canonical("/proc/self/exe").filename().string();
+
+    EXPECT_FALSE(
+        find_library_in_loaded_dir(getpid(), "librocprof-sys-missing.so", self_name)
+            .has_value());
 }

@@ -21,11 +21,13 @@ THE SOFTWARE.
 */
 
 #include "rccl_common.h"
+#include "bootstrap.h"
 #include "comm.h"
 #include "graph/topo.h"
 #include "enqueue.h"
 #include <algorithm>
 #include <cstdint>
+#include <vector>
 #include "debug.h"
 #include "net.h"
 #include "amdsmi_wrap.h"
@@ -184,7 +186,7 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
     /**
      * We prefer simple protocol when p2p_disabled = 1,
      * This is due to a fix in LL protocol implementation
-     * for gfx120x with __HIP_MEMORY_SCOPE_SYSTEM in prims_ll.h
+     * for gfx120x with __MEMORY_SCOPE_SYSTEM in prims_ll.h
      * causing poor performance but keeps the LL protocol functional
      */
     bool p2p_disabled = ncclParamP2pDisable();
@@ -1076,13 +1078,51 @@ size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceSca
 
 RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 1);
 
-bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
+// Per rank, so that fixed-size startup AllGathers (PyTorch DDP gathers one int64)
+// stay off the hierarchical path at any job size. 0 removes the floor.
+RCCL_PARAM(HierarchicalAllGatherMinBytesPerRank, "HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK", 16);
+RCCL_PARAM(HierarchicalLazyInit, "HIERARCHICAL_LAZY_INIT", 0);
+
+// msgSize is the total gathered size.
+static bool rcclHierarchicalAllGatherEligible(struct ncclComm* comm, size_t msgSize) {
   if (comm->nNodes < 8) return false;
   if (rcclParamHierarchicalAllGather() != 1) return false;
-  if (!comm->hierarchicalCommsInitialized) return false;
+
+  const int64_t minBytesPerRank = rcclParamHierarchicalAllGatherMinBytesPerRank();
+  if (minBytesPerRank > 0 && comm->nRanks > 0 && msgSize / (size_t)comm->nRanks < (size_t)minBytesPerRank) return false;
 
   size_t threshold = rcclHierarchicalTempBufferSize(comm->nNodes, /*allGather=*/true, /*reduceScatter=*/false);
   return threshold > 0 && msgSize <= threshold;
+}
+
+bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
+  return comm->hierarchicalCommsInitialized && rcclHierarchicalAllGatherEligible(comm, msgSize);
+}
+
+// Collective: every rank reaches this on the same eligible AllGathers. The splits
+// run only once every rank is ready, and the readiness handshake runs only on the
+// 1st, 2nd, 4th, 8th... call, so a rank that stays not ready costs its peers
+// O(log n) bootstrap AllGathers.
+static ncclResult_t rcclLazyInitHierarchicalComms(struct ncclComm* comm, bool capturing) {
+  const uint64_t call = ++comm->hierarchicalLazyCalls;
+  if ((call & (call - 1)) != 0) return ncclSuccess;
+
+  // Ready means not capturing and holding the temp buffer. Allocating it before the
+  // vote keeps a one-rank allocation failure from landing after the peers split.
+  bool localReady = !capturing;
+  if (localReady && rcclReserveHierarchicalTempBuffer(comm) != ncclSuccess) {
+    (void)hipGetLastError();  // tolerated, so keep it out of the application's next error check
+    WARN("Hierarchical collectives: cannot allocate the temp buffer yet, deferring sub-communicator setup");
+    localReady = false;
+  }
+  std::vector<uint8_t> ready(comm->nRanks);
+  ready[comm->rank] = localReady;
+  NCCLCHECK(bootstrapAllGather(comm->bootstrap, ready.data(), sizeof(uint8_t)));
+  if (std::find(ready.begin(), ready.end(), 0) != ready.end()) return ncclSuccess;
+
+  const ncclResult_t res = rcclEnsureHierarchicalComms(comm);
+  if (res != ncclSuccess) WARN("Hierarchical collectives: sub-communicator setup failed (%s)", ncclGetErrorString(res));
+  return res;
 }
 
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
@@ -1593,7 +1633,12 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     if (!query && symEligible) INFO(NCCL_TUNING, "AG DDA disqualified: symk eligible");
     // (2) Hierarchical AllGather. Live dispatch requires being outside a group
     // (rcclSelectAllGatherAlgo); the reporting query always runs outside a group, so
-    // the same gate reproduces rcclGetAlgoInfo's group-agnostic reporting.
+    // the same gate reproduces rcclGetAlgoInfo's group-agnostic reporting. Only live
+    // dispatch builds sub-communicators that RCCL_HIERARCHICAL_LAZY_INIT deferred.
+    if (!query && ncclGroupDepth == 0 && comm->hierarchicalEligible && !comm->hierarchicalCommsInitialized &&
+        rcclHierarchicalAllGatherEligible(comm, msgSize)) {
+      NCCLCHECK(rcclLazyInitHierarchicalComms(comm, ceCapturing));
+    }
     if (ncclGroupDepth == 0 && rcclUseHierarchicalAllGather(comm, msgSize)) {
       decision->algo = RCCL_HIERARCHICAL_ALLGATHER;
       if (query) {
@@ -1676,17 +1721,13 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       // Branch #3.5: Hierarchical CE (multi-node, both buffers registered).
       // ceCollTaskAppend routes to ncclHierCeAllGather via ncclHierCeDispatch(comm),
       // so RCCL_CE_REGISTERED is correct here — same as rcclSelectAlltoAll Branch #5.
+      // It uses none of the hierarchical AllGather sub-communicators, which need not
+      // exist on this comm, so it is reported like the other CE branches.
       const bool hierCeAvailable =
         !ceCapturing && ncclHierCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType, sendWin, recvWin);
       if (hierCeAvailable && !hasSysmemSegment &&
           (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
         decision->algo = RCCL_CE_REGISTERED;
-        if (query) {
-          int a, p, ch;
-          NCCLCHECK(rcclHierarchicalAlgoInfo(comm, ncclFuncAllGather, sendcount, datatype, &a, &p, &ch));
-          decision->protocol = p;
-          decision->nMaxChannels = ch;
-        }
         return ncclSuccess;
       }
       // taskAppend's SYM_CE_THRESHOLD fallback is gated on !allGatherDecided.
@@ -2010,16 +2051,11 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
          (int)ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin));
 
     // (5) Hierarchical CE: multi-node, non-LSA-spanning.
-    // Require CTA_POLICY_ZERO and no sysmem segment, matching the AllGather twin.
+    // Require CTA_POLICY_ZERO and no sysmem segment, and report it like the other
+    // CE branches, matching the AllGather twin.
     if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !a2aHasSysmem &&
         ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin)) {
       decision->algo = RCCL_CE_REGISTERED;  // reports as CE; hier dispatch in taskAppend
-      if (query) {
-        int a, p, ch;
-        NCCLCHECK(rcclHierarchicalAlgoInfo(comm, ncclFuncAlltoAll, count, datatype, &a, &p, &ch));
-        decision->protocol = p;
-        decision->nMaxChannels = ch;
-      }
       return ncclSuccess;
     }
 
@@ -2089,10 +2125,17 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
 
 RCCL_PARAM(HierarchicalReduceScatter, "HIERARCHICAL_REDUCE_SCATTER", 0);
 
+// Per rank, as for AllGather. 0 removes the floor.
+RCCL_PARAM(HierarchicalReduceScatterMinBytesPerRank, "HIERARCHICAL_REDUCE_SCATTER_MIN_BYTES_PER_RANK", 16);
+
 bool rcclUseHierarchicalReduceScatter(struct ncclComm* comm, size_t msgSize) {
   if (comm->nNodes < 8 || rcclParamHierarchicalReduceScatter() != 1 || !comm->hierarchicalCommsInitialized) {
     return false;
   }
+
+  // msgSize is the total size.
+  const int64_t minBytesPerRank = rcclParamHierarchicalReduceScatterMinBytesPerRank();
+  if (minBytesPerRank > 0 && comm->nRanks > 0 && msgSize / (size_t)comm->nRanks < (size_t)minBytesPerRank) return false;
 
   size_t threshold = rcclHierarchicalTempBufferSize(comm->nNodes, /*allGather=*/false, /*reduceScatter=*/true);
   return threshold > 0 && msgSize <= threshold;
@@ -2144,6 +2187,22 @@ void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize) {
   comm->p2pNetChunkSize = p2pNetChunkSize;
   rcclP2pNetChunkSize = p2pNetChunkSize;
 }
+
+// Usable means generated AND compiled for this arch; the Generated flag alone lets gfx1250-only unrolls trap.
+enum ncclUnrollAvailability {
+  ncclUnrollUsable,
+  ncclUnrollNotGenerated,
+  ncclUnrollWrongArch,
+};
+
+// Check arch first: an unroll pinned to another arch is usually also ungenerated, and the arch is the real cause.
+static ncclUnrollAvailability unrollAvailability(int unroll, char const* archName) {
+  char const* requiredArch = ncclDevFuncUnrollArch[unroll];
+  if (requiredArch != nullptr && !IsArchMatch(archName, requiredArch)) return ncclUnrollWrongArch;
+  if (!ncclDevFuncUnrollGenerated[unroll]) return ncclUnrollNotGenerated;
+  return ncclUnrollUsable;
+}
+
 #ifdef ENABLE_WARP_SPEED
 void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels) {
   static int userChannelControlInput = RCCL_VALUE_UNSET;
@@ -2237,6 +2296,16 @@ ncclResult_t validChannelsForWarpSpeed(struct ncclComm* comm, struct ncclTaskCol
   return ncclSuccess;
 }
 
+// Switch to a preferred unroll only if usable here; keeping the validated one beats trapping on an empty table.
+static void rcclPreferUnrollFactor(struct ncclComm* comm, int unroll) {
+  if (unrollAvailability(unroll, comm->archName) != ncclUnrollUsable) {
+    INFO(NCCL_TUNING, "Keeping RCCL unroll factor %d: preferred %d is not usable on arch %s",
+         (1 << comm->unroll), (1 << unroll), comm->archName);
+    return;
+  }
+  comm->unroll = unroll;
+}
+
 ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {
   info->useWarpSpeed = false;
   static bool unrollFactorSet = getenv("RCCL_UNROLL_FACTOR") != nullptr;
@@ -2251,7 +2320,7 @@ ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* in
       info->algorithm = NCCL_ALGO_RING; // Force Ring when WarpSpeed is enabled in manual mode as it only supports Ring
     }
     // TODO: Remove unroll update when all collectives are optimized
-    if (!unrollFactorSet) comm->unroll = NCCL_UNROLL_2;
+    if (!unrollFactorSet) rcclPreferUnrollFactor(comm, NCCL_UNROLL_2);
     info->useWarpSpeed = true;
   } else if (rcclCanUseWarpSpeedAuto(comm, comm->nNodes)) { // Auto performance mode
     // No early return based on the algorithm at the start of the function
@@ -2263,7 +2332,7 @@ ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* in
     if (info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter) {
       // allReduce now benefits from unroll factor of 2 in all modes due to changing its slicing strategy
       // TODO: Remove unroll update when all collectives are optimized
-      if (!unrollFactorSet) comm->unroll = NCCL_UNROLL_2;
+      if (!unrollFactorSet) rcclPreferUnrollFactor(comm, NCCL_UNROLL_2);
     }
     if (rcclIsAboveWarpSpeedThreshold(comm, info, nBytes)) {
       // Skip WarpSpeed when the comm exceeds its channel limit (e.g. RCCL_ENABLE_INTRANET=1 drives
@@ -2401,14 +2470,24 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
            comm->unroll, NCCL_NUM_UNROLLS - 1);
       return ncclInvalidArgument;
     }
-    if (!ncclDevFuncUnrollGenerated[comm->unroll]) {
-      WARN("RCCL_UNROLL_FACTOR %d (unroll %d) was not built for arch %s; its device function table is empty and "
-           "dispatching to it would crash. "
-           "Rebuild with this unroll factor, or select one that was generated for this build.",
-           comm->unroll, (int)(pow(2.0, (double)comm->unroll)), comm->archName);
+    switch (unrollAvailability(comm->unroll, comm->archName)) {
+    case ncclUnrollNotGenerated:
+      WARN("RCCL_UNROLL_FACTOR %d (unroll %d) was not generated by this build for arch %s; its device function "
+           "table is empty and dispatching to it would crash. "
+           "Rebuild with install.sh --all_unrolls (-DBUILD_ALL_UNROLLS=ON), or select one this build generated.",
+           comm->unroll, (1 << comm->unroll), comm->archName);
       return ncclInvalidArgument;
+    case ncclUnrollWrongArch:
+      WARN("RCCL_UNROLL_FACTOR %d (unroll %d) is compiled for %s only, so its device function table is empty on "
+           "arch %s and dispatching to it would crash. "
+           "Rebuild with install.sh --all_unrolls (-DBUILD_ALL_UNROLLS=ON) to compile it for every target, or select a "
+           "different one.",
+           comm->unroll, (1 << comm->unroll), ncclDevFuncUnrollArch[comm->unroll], comm->archName);
+      return ncclInvalidArgument;
+    case ncclUnrollUsable:
+      break;
     }
-    INFO(NCCL_INIT, "RCCL Unroll Factor (user set): %d", (int)(pow(2.0, (double)comm->unroll)));
+    INFO(NCCL_INIT, "RCCL Unroll Factor (user set): %d", (1 << comm->unroll));
     return ncclSuccess;
   }
   if (IsArchMatch(comm->archName, "gfx950")) {
@@ -2419,27 +2498,26 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
   else if (IsArchMatch(comm->archName, "gfx1250")) comm->unroll = NCCL_UNROLL_32;
   else comm->unroll = NCCL_UNROLL_4;
 
-  // Guard against a default that wasn't built for this arch (e.g. the generation
-  // matrix was narrowed). Fall back to any generated unroll rather than segfault.
-  if (!ncclDevFuncUnrollGenerated[comm->unroll]) {
+  // Fall back to the highest usable unroll if the default was not built or is pinned to another arch.
+  if (unrollAvailability(comm->unroll, comm->archName) != ncclUnrollUsable) {
     int fallback = -1;
     for (int u = NCCL_NUM_UNROLLS - 1; u >= NCCL_UNROLL_1; u--) {
-      if (ncclDevFuncUnrollGenerated[u]) {
+      if (unrollAvailability(u, comm->archName) == ncclUnrollUsable) {
         fallback = u;
         break;
       }
     }
     if (fallback < 0) {
-      WARN("No unroll-factor device function tables were generated for arch %s.", comm->archName);
+      WARN("No unroll-factor device function tables are usable on arch %s.", comm->archName);
       return ncclInvalidUsage;
     }
-    WARN("Default RCCL unroll factor %d was not built for arch %s; falling back to %d. Set RCCL_UNROLL_FACTOR to "
+    WARN("Default RCCL unroll factor %d is not usable on arch %s; falling back to %d. Set RCCL_UNROLL_FACTOR to "
          "override.",
-         (int)(pow(2.0, (double)comm->unroll)), comm->archName, (int)(pow(2.0, (double)fallback)));
+         (1 << comm->unroll), comm->archName, (1 << fallback));
     comm->unroll = fallback;
   }
 
-  INFO(NCCL_INIT, "RCCL Unroll Factor (pre-set): %d", (int)(pow(2.0, (double)comm->unroll)));
+  INFO(NCCL_INIT, "RCCL Unroll Factor (pre-set): %d", (1 << comm->unroll));
   return ncclSuccess;
 }
 

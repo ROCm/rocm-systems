@@ -41,11 +41,17 @@ extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerPluginFinaliz
 // src/plugin/tuner.cc: commCleanup unloads the tuner plugin through this.
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclTunerPluginUnload;
 
+// src/allocator.cc: ce_coll.cc allocates its staging buffers here; the default aborts.
+extern std::function<ncclResult_t(void**, size_t)> g_ncclMemAlloc;
+
 // src/misc/mem_manager.cc: commFree releases the single-node size arrays here.
 extern std::function<ncclResult_t(void*)> g_ncclMemFree;
 
 // The public entry point commFree recurses through for hierarchical sub-communicators.
 extern std::function<ncclResult_t(ncclComm_t)> g_ncclCommDestroy;
+
+// rcclEnsureHierarchicalComms creates its two child communicators through this API.
+extern std::function<ncclResult_t(ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*)> g_ncclCommSplit;
 
 // src/channel.cc: the fake initChannel does NOT allocate ring->userRanks/rankToIndex like the real one;
 // callers must supply storage.

@@ -213,6 +213,10 @@ pid_t spawnWorker(int rank, const char* visibleDevices, int localDev,
   setenv(kEnvLocalDev, std::to_string(localDev).c_str(), 1);
   setenv(kEnvUid, uidHex.c_str(), 1);
   setenv("NCCL_CUMEM_ENABLE", "1", 0);
+  // The worker filter lands on shard 0 only; inherited shard vars make it run 0 tests and exit kOk.
+  unsetenv("GTEST_TOTAL_SHARDS");
+  unsetenv("GTEST_SHARD_INDEX");
+  unsetenv("GTEST_SHARD_STATUS_FILE");
 
   std::string filter = "--gtest_filter=AsymmetricVisibilityWorker.Run";
   char argv0[] = "rccl-UnitTests";

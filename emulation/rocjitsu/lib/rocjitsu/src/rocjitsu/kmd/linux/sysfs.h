@@ -41,6 +41,7 @@ public:
     uint32_t revision_id = 0;
     uint32_t pci_revision_id = 0;
     std::string marketing_name;
+    std::vector<config::DeviceIpVersion> ip_versions;
 
     // Compute unit organization
     uint32_t simd_count = 0;

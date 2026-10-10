@@ -1506,6 +1506,10 @@ struct_amdsmi_driver_info_t._fields_ = [
     ('driver_version', ctypes.c_char * 256),
     ('driver_date', ctypes.c_char * 256),
     ('driver_name', ctypes.c_char * 256),
+    ('driver_kernel_version', ctypes.c_char * 256),
+    ('amdgpu_driver_version', ctypes.c_char * 256),
+    ('driver_build_version', ctypes.c_char * 256),
+    ('driver_full_version', ctypes.c_char * 256),
 ]
 
 amdsmi_driver_info_t = struct_amdsmi_driver_info_t
@@ -2728,10 +2732,26 @@ struct_amdsmi_npm_info_t._fields_ = [
     ('limit', ctypes.c_uint64),
     ('ubb_power_threshold', ctypes.c_uint32),
     ('PADDING_1', ctypes.c_ubyte * 4),
-    ('reserved', ctypes.c_uint64 * 5),
+    ('max_node_power_limit', ctypes.c_uint64),
+    ('current_node_power', ctypes.c_uint32),
+    ('PADDING_2', ctypes.c_ubyte * 4),
+    ('reserved', ctypes.c_uint64 * 3),
 ]
 
 amdsmi_npm_info_t = struct_amdsmi_npm_info_t
+
+# values for enumeration 'amdsmi_npm_balancing_mode_t'
+amdsmi_npm_balancing_mode_t__enumvalues = {
+    0: 'AMDSMI_NPM_BALANCING_MODE_INVALID',
+    1: 'AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING',
+    2: 'AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING',
+    3: 'AMDSMI_NPM_BALANCING_MODE_MAX',
+}
+AMDSMI_NPM_BALANCING_MODE_INVALID = 0
+AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING = 1
+AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING = 2
+AMDSMI_NPM_BALANCING_MODE_MAX = 3
+amdsmi_npm_balancing_mode_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_compute_tray_type_t'
 amdsmi_compute_tray_type_t__enumvalues = {
@@ -4342,9 +4362,33 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_npm_balancing_mode = _libraries['libamd_smi.so'].amdsmi_get_npm_balancing_mode
+    amdsmi_get_npm_balancing_mode.restype = amdsmi_status_t
+    amdsmi_get_npm_balancing_mode.argtypes = [amdsmi_node_handle, ctypes.POINTER(amdsmi_npm_balancing_mode_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_set_npm_balancing_mode = _libraries['libamd_smi.so'].amdsmi_set_npm_balancing_mode
+    amdsmi_set_npm_balancing_mode.restype = amdsmi_status_t
+    amdsmi_set_npm_balancing_mode.argtypes = [amdsmi_node_handle, amdsmi_npm_balancing_mode_t]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_npm_supported_balancing_modes = _libraries['libamd_smi.so'].amdsmi_get_npm_supported_balancing_modes
+    amdsmi_get_npm_supported_balancing_modes.restype = amdsmi_status_t
+    amdsmi_get_npm_supported_balancing_modes.argtypes = [amdsmi_node_handle, ctypes.POINTER(ctypes.c_uint64)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_tray_info = _libraries['libamd_smi.so'].amdsmi_get_tray_info
     amdsmi_get_tray_info.restype = amdsmi_status_t
     amdsmi_get_tray_info.argtypes = [amdsmi_node_handle, ctypes.POINTER(struct_amdsmi_tray_info_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_set_npm_limit = _libraries['libamd_smi.so'].amdsmi_set_npm_limit
+    amdsmi_set_npm_limit.restype = amdsmi_status_t
+    amdsmi_set_npm_limit.argtypes = [amdsmi_node_handle, uint64_t]
 except AttributeError:
     pass
 try:
@@ -5165,10 +5209,13 @@ __all__ = \
     'AMDSMI_MEM_TYPE_GTT', 'AMDSMI_MEM_TYPE_LAST',
     'AMDSMI_MEM_TYPE_VIS_VRAM', 'AMDSMI_MEM_TYPE_VRAM',
     'AMDSMI_MM_UVD', 'AMDSMI_MM_VCE', 'AMDSMI_MM_VCN',
-    'AMDSMI_MM__MAX', 'AMDSMI_NPM_STATUS_DISABLED',
-    'AMDSMI_NPM_STATUS_ENABLED', 'AMDSMI_POWER_CAP_TYPE_PPT0',
-    'AMDSMI_POWER_CAP_TYPE_PPT1', 'AMDSMI_PROCESSOR_TYPE_AMD_APU',
-    'AMDSMI_PROCESSOR_TYPE_AMD_CPU',
+    'AMDSMI_MM__MAX', 'AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING',
+    'AMDSMI_NPM_BALANCING_MODE_INVALID',
+    'AMDSMI_NPM_BALANCING_MODE_MAX',
+    'AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING',
+    'AMDSMI_NPM_STATUS_DISABLED', 'AMDSMI_NPM_STATUS_ENABLED',
+    'AMDSMI_POWER_CAP_TYPE_PPT0', 'AMDSMI_POWER_CAP_TYPE_PPT1',
+    'AMDSMI_PROCESSOR_TYPE_AMD_APU', 'AMDSMI_PROCESSOR_TYPE_AMD_CPU',
     'AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE',
     'AMDSMI_PROCESSOR_TYPE_AMD_GPU', 'AMDSMI_PROCESSOR_TYPE_AMD_NIC',
     'AMDSMI_PROCESSOR_TYPE_BRCM_NIC',
@@ -5470,8 +5517,10 @@ __all__ = \
     'amdsmi_get_nic_rdma_dev_info',
     'amdsmi_get_nic_rdma_port_statistics',
     'amdsmi_get_nic_vendor_statistics', 'amdsmi_get_node_handle',
-    'amdsmi_get_npm_info', 'amdsmi_get_pcie_info',
-    'amdsmi_get_power_cap_info', 'amdsmi_get_power_info',
+    'amdsmi_get_npm_balancing_mode', 'amdsmi_get_npm_info',
+    'amdsmi_get_npm_supported_balancing_modes',
+    'amdsmi_get_pcie_info', 'amdsmi_get_power_cap_info',
+    'amdsmi_get_power_info',
     'amdsmi_get_processor_count_from_handles',
     'amdsmi_get_processor_handle_from_bdf',
     'amdsmi_get_processor_handles',
@@ -5505,7 +5554,8 @@ __all__ = \
     'amdsmi_nic_numa_info_t', 'amdsmi_nic_port_info_t',
     'amdsmi_nic_port_t', 'amdsmi_nic_rdma_dev_info_t',
     'amdsmi_nic_rdma_devices_info_t', 'amdsmi_nic_rdma_port_info_t',
-    'amdsmi_nic_stat_t', 'amdsmi_node_handle', 'amdsmi_npm_info_t',
+    'amdsmi_nic_stat_t', 'amdsmi_node_handle',
+    'amdsmi_npm_balancing_mode_t', 'amdsmi_npm_info_t',
     'amdsmi_npm_status_t', 'amdsmi_nps_caps_t',
     'amdsmi_od_vddc_point_t', 'amdsmi_od_volt_curve_t',
     'amdsmi_od_volt_freq_data_t', 'amdsmi_p2p_capability_t',
@@ -5548,12 +5598,13 @@ __all__ = \
     'amdsmi_set_gpu_perf_level', 'amdsmi_set_gpu_power_profile',
     'amdsmi_set_gpu_process_isolation', 'amdsmi_set_gpu_ptl_formats',
     'amdsmi_set_gpu_ptl_state', 'amdsmi_set_gpu_uma_carveout',
-    'amdsmi_set_power_cap', 'amdsmi_set_soc_pstate',
-    'amdsmi_set_ttm_pages_limit', 'amdsmi_set_xgmi_plpd',
-    'amdsmi_shut_down', 'amdsmi_smu_fw_version_t',
-    'amdsmi_sock_info_t', 'amdsmi_socket_handle',
-    'amdsmi_status_code_to_string', 'amdsmi_status_t',
-    'amdsmi_stop_gpu_event_notification',
+    'amdsmi_set_npm_balancing_mode', 'amdsmi_set_npm_limit',
+    'amdsmi_set_power_cap',
+    'amdsmi_set_soc_pstate', 'amdsmi_set_ttm_pages_limit',
+    'amdsmi_set_xgmi_plpd', 'amdsmi_shut_down',
+    'amdsmi_smu_fw_version_t', 'amdsmi_sock_info_t',
+    'amdsmi_socket_handle', 'amdsmi_status_code_to_string',
+    'amdsmi_status_t', 'amdsmi_stop_gpu_event_notification',
     'amdsmi_temp_range_refresh_rate_t', 'amdsmi_temperature_metric_t',
     'amdsmi_temperature_type_t', 'amdsmi_topo_get_link_type',
     'amdsmi_topo_get_link_weight', 'amdsmi_topo_get_numa_node_number',

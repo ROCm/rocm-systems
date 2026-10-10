@@ -177,6 +177,13 @@ if(BUILD_TESTS)
     list(APPEND RCCL_COMMON_INCLUDE_DIRS ${MPI_CXX_INCLUDE_DIRS})
   endif()
 
+  # Ahead of ${ROCM_PATH}/include, so the tests see the headers of the rocSHMEM
+  # librccl.so links rather than any rocSHMEM installed there.
+  if(ENABLE_ROCSHMEM AND ROCSHMEM_INCLUDE_DIR)
+    list(FIND RCCL_COMMON_INCLUDE_DIRS "${ROCM_PATH}/include" _rocm_inc_idx)
+    list(INSERT RCCL_COMMON_INCLUDE_DIRS ${_rocm_inc_idx} ${ROCSHMEM_INCLUDE_DIR})
+  endif()
+
   # Common compile definitions
   set(RCCL_COMMON_COMPILE_DEFS ROCM_PATH="${ROCM_PATH}")
   if(LL128_ENABLED)
@@ -222,8 +229,16 @@ if(BUILD_TESTS)
     dl
     fmt::fmt-header-only
   )
+  set(RCCL_COMMON_BUILD_RPATH "")
   if(OPENMP_TESTS_ENABLED)
-    list(APPEND RCCL_COMMON_LINK_LIBS "${OpenMP_CXX_FLAGS}")
+    list(APPEND RCCL_COMMON_LINK_LIBS OpenMP::OpenMP_CXX)
+    foreach(openmpLibrary IN LISTS OpenMP_CXX_LIBRARIES)
+      if(IS_ABSOLUTE "${openmpLibrary}" AND NOT "${openmpLibrary}" MATCHES "\\.a$")
+        get_filename_component(openmpLibraryDir "${openmpLibrary}" DIRECTORY)
+        list(APPEND RCCL_COMMON_BUILD_RPATH "${openmpLibraryDir}")
+      endif()
+    endforeach()
+    list(REMOVE_DUPLICATES RCCL_COMMON_BUILD_RPATH)
   endif()
   if(ENABLE_MPI_TESTS AND MPI_CXX_LIBRARIES)
     list(APPEND RCCL_COMMON_LINK_LIBS ${MPI_CXX_LIBRARIES})
@@ -261,6 +276,7 @@ if(BUILD_TESTS)
     CollImplInfoTests.cpp
     DeviceResourceRequirementTests.cpp
     DoneEventOrderingTests.cpp
+    Fp8VerifiableTests.cpp
     GatherTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
@@ -269,7 +285,9 @@ if(BUILD_TESTS)
     ReduceTests.cpp
     RegisterTests.cpp
     ScatterTests.cpp
+    TeamTopologyTests.cpp
     P2pChannelScalingTests.cpp
+    PipeUtilsTests.cpp
     VersionGateTests.cpp
     SendRecvTests.cpp
     StandaloneTests.cpp
@@ -292,6 +310,8 @@ if(BUILD_TESTS)
     common/TestBed.cpp
     common/TestBedChild.cpp
     common/StandaloneUtils.cpp
+    common/VerifiableData.cpp
+    common/VerifiableFp8.cpp
     proxy_trace/ProxyTraceUnitTests.cpp
     ../src/misc/proxy_trace/proxy_trace.cc
     latency_profiler/LatencyProfilerUnitTest.cpp
@@ -364,6 +384,7 @@ if(BUILD_TESTS)
       EnqueueCountTests.cpp
       DdaCollCommonTests.cpp
       CheapPostSendFenceTests.cpp
+      Gfx1250SendRecvLl128WindowTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
       device/RcclEpTests.cpp
@@ -373,6 +394,7 @@ if(BUILD_TESTS)
       device/TestAsyncCopy.cpp
       device/TestLdsTransfer.cpp
       device/GinDeviceTests.cpp
+      device/GinBackendMaskDispatch_test.cpp
       device/GinAnvilIpcDevice_test.cpp
       device/HierarchicalShuffleTests.cpp
       DeviceApiTests.cpp
@@ -748,6 +770,7 @@ if(BUILD_TESTS)
       ProxyTests.cpp
       PatAlgorithmTests.cpp
       RcclWrapTests.cpp
+      SymkBlockWidthTests.cpp
       SocketPollTests.cpp
       TransportTests.cpp
       TimeoutTests.cpp
@@ -758,6 +781,7 @@ if(BUILD_TESTS)
       graph/NetDevsPolicyP2pNetTests.cpp
       graph/TopoTests.cpp
       transport/NetIbCast/NetIbCastPlaneSubnetTests.cpp
+      transport/NetIbCast/NetIbCastMultiplaneTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
@@ -774,7 +798,7 @@ if(BUILD_TESTS)
 
     # Hide the test executable's own symbols so it does NOT interpose
     # librccl.so's weak alloc.h template/global symbols (e.g.
-    # ncclCudaHostCallocDebug<>, ncclDebugLevel) at load time. Without this,
+    # ncclCudaHostCallocDebug<>, ncclDebugLevelMask) at load time. Without this,
     # those interposed-but-mismatched definitions corrupt the heap during a
     # full ncclCommInit* in this binary. The test still imports librccl's
     # internal (Debug-visible) symbols normally.
@@ -970,7 +994,9 @@ if(BUILD_TESTS)
       transport/NetIbMPI/GdrFlushTests.cpp
       transport/NetIbMPI/NicFusionTests.cpp
       transport/NetIbMPI/CastTests.cpp
+      transport/NetIbMPI/OptRecvCompletionTests.cpp
       transport/NetIbMPI/FaultInjectTests.cpp
+      transport/NetIbMPI/GidChangeTests.cpp
       transport/NetIbMPI/OpsFaultUnitTests.cpp
       transport/RmaMPI/RmaMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
@@ -1083,6 +1109,9 @@ if(BUILD_TESTS)
       target_compile_definitions(${test_executable} PRIVATE RCCL_DEVICE_LINKER)
     endif()
     target_link_libraries(${test_executable} PRIVATE ${RCCL_COMMON_LINK_LIBS})
+    if(RCCL_COMMON_BUILD_RPATH)
+      set_property(TARGET ${test_executable} APPEND PROPERTY BUILD_RPATH ${RCCL_COMMON_BUILD_RPATH})
+    endif()
     if(BUILD_ADDRESS_SANITIZER)
       target_compile_options(${test_executable} PRIVATE -fsanitize=address)
       target_link_options(${test_executable} PRIVATE -fsanitize=address -shared-libasan)
@@ -1356,5 +1385,19 @@ if(BUILD_TESTS)
   # is dual-mode: under BUILD_TESTS it builds only the in-RCCL-build micro-test
   # target and returns; invoked standalone it builds rccl-HostUnitTests too.
   add_subdirectory(host)
+
+  # Those headers are installed by the rocSHMEM sub-build, and targets that do
+  # not link rccl are otherwise not ordered after it.
+  if(ENABLE_ROCSHMEM AND TARGET rocshmem_static)
+    foreach(_dir ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/host)
+      get_property(_tgts DIRECTORY ${_dir} PROPERTY BUILDSYSTEM_TARGETS)
+      foreach(_tgt IN LISTS _tgts)
+        get_target_property(_type ${_tgt} TYPE)
+        if(NOT _type MATCHES "^(INTERFACE_LIBRARY|UTILITY)$")
+          add_dependencies(${_tgt} rocshmem_static)
+        endif()
+      endforeach()
+    endforeach()
+  endif()
 
 endif()

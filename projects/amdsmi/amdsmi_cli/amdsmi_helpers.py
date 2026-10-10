@@ -1681,6 +1681,28 @@ class AMDSMIHelpers:
             return f"{converted} W"
         return value
 
+    def get_max_node_power_limit(self):
+        """Get the platform max NPM node power limit (Watts), for help-text bounds.
+
+        Mirrors get_power_caps(): queried once at parser-build time so
+        --node-power-limit's help text can show its valid upper bound. NPM is
+        node-wide, so the first device that yields a reading is sufficient.
+        """
+        for dev in self.get_gpu_handles():
+            try:
+                node_handle = amdsmi_interface.amdsmi_get_node_handle(dev)
+                max_node_power_limit = amdsmi_interface.amdsmi_get_npm_info(node_handle)[
+                    "max_node_power_limit"
+                ]
+                if max_node_power_limit != "N/A":
+                    return f"{max_node_power_limit} W"
+            except (amdsmi_interface.AmdSmiLibraryException, KeyError) as e:
+                logging.debug(
+                    f"AMDSMIHelpers.get_max_node_power_limit - Unable to get NPM info for device {dev}: {str(e)}"
+                )
+                continue
+        return "N/A"
+
     @staticmethod
     def detect_gpu_od(bdf):
         """Detect if a GPU has the gpu_od sysfs interface.
@@ -3410,6 +3432,189 @@ class AMDSMIHelpers:
                     "status": "error",
                     "sensor": power_type_key,
                     "requested_power_cap": self.unit_format(logger, requested_power_cap, "W"),
+                    "error": e.get_error_info(detailed=False),
+                    "message": error_msg,
+                }
+            return error_msg
+
+    # CLI-facing full names for the library's internal "PB"/"FB" strings
+    # (amdsmi_interface.py's own string contract stays unchanged).
+    NPM_BALANCING_MODE_TO_CLI = {"PB": "POWER_BALANCING", "FB": "FREQUENCY_BALANCING"}
+    NPM_BALANCING_MODE_FROM_CLI = {"POWER_BALANCING": "PB", "FREQUENCY_BALANCING": "FB"}
+
+    def validate_and_set_node_balancing_mode(self, node_handle, requested_mode, logger):
+        """Validate and set the NPM balancing mode for a node.
+
+        Args:
+            node_handle: Node handle (system-wide, not per-GPU)
+            requested_mode (str): "POWER_BALANCING" or "FREQUENCY_BALANCING"
+            logger: AMDSMILogger instance for format-aware output
+
+        Returns:
+            dict or str: Structured data for JSON/CSV or formatted string for human-readable output
+        """
+        if node_handle is None:
+            message = "No node handle available; cannot set balancing mode"
+            self.error_collector.record(int(amdsmi_cli_exceptions.AmdSmiExitCode.DEVICE_NOT_FOUND))
+            if logger.is_json_format() or logger.is_csv_format():
+                return {"status": "error", "message": message}
+            return message
+
+        # Pre-check NPM enablement, mirroring validate_and_set_node_power_limit():
+        # amdsmi_set_npm_balancing_mode() reports both "NPM disabled" and
+        # "board/mode sysfs file missing/unreadable while NPM is enabled" as
+        # the same AMDSMI_STATUS_NOT_SUPPORTED. Checking status up front lets
+        # the former be reported unambiguously.
+        try:
+            npm_info = amdsmi_interface.amdsmi_get_npm_info(node_handle)
+            if npm_info["status"] == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_DISABLED:
+                message = "[AMDSMI_STATUS_NOT_SUPPORTED] NPM is disabled on this node; cannot set balancing mode"
+                self.error_collector.record_library_error(
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                )
+                if logger.is_json_format() or logger.is_csv_format():
+                    return {
+                        "status": "error",
+                        "requested_mode": requested_mode,
+                        "error": "AMDSMI_STATUS_NOT_SUPPORTED",
+                        "message": message,
+                    }
+                return message
+        except amdsmi_exception.AmdSmiLibraryException:
+            # NPM enablement couldn't be determined (e.g. npm_status sysfs file
+            # unreadable); fall through and let the set call below report its
+            # own error rather than masking it with a pre-check failure.
+            pass
+
+        try:
+            amdsmi_interface.amdsmi_set_npm_balancing_mode(
+                node_handle, self.NPM_BALANCING_MODE_FROM_CLI[requested_mode]
+            )
+            message = f"Successfully set NPM balancing mode to {requested_mode}"
+            if logger.is_json_format() or logger.is_csv_format():
+                return {"status": "success", "balancing_mode": requested_mode, "message": message}
+            return message
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                raise PermissionError("Command requires elevation") from e
+            if (
+                e.get_error_code()
+                == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_SETTING_UNAVAILABLE
+            ):
+                message = (
+                    f"BALANCING_MODE: [{e.get_error_info(detailed=False)}] "
+                    f"{requested_mode} is not supported on this platform"
+                )
+            elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+                message = (
+                    "NPM balancing mode is not supported on this node; cannot set balancing mode"
+                )
+            else:
+                message = f"[{e.get_error_info(detailed=False)}] Unable to set NPM balancing mode to {requested_mode}"
+            self.error_collector.record_library_error(e.get_error_code())
+            if logger.is_json_format() or logger.is_csv_format():
+                return {
+                    "status": "error",
+                    "requested_mode": requested_mode,
+                    "error": e.get_error_info(detailed=False),
+                    "message": message,
+                }
+            return message
+
+    def validate_and_set_node_power_limit(self, node_handle, requested_limit, logger):
+        """Validate and set the NPM (Node Power Management) power limit for a node.
+
+        Mirrors validate_and_set_power_cap(): fetches the platform max bound via
+        amdsmi_get_npm_info() (amdsmi_npm_info_t::max_node_power_limit, sourced from
+        board/max_node_power_limit) and rejects out-of-range requests before ever
+        issuing the write. This is an early, CLI-friendly pre-check only:
+        amdsmi_set_npm_limit() itself already validates `limit` against the same
+        bound internally and fails closed if that bound can't be read (see its
+        docstring); this CLI-side check exists purely to fail fast and surface a
+        clean, user-facing hint here rather than relying solely on the library
+        call's exception.
+
+        There is no driver-exposed minimum bound beyond positivity (no sysfs file
+        or design-doc source documents a real minimum), so the lower bound enforced
+        here is simply "> 0".
+
+        Also rejects the request up front if NPM itself is disabled on this node
+        (amdsmi_npm_info_t::status == AMDSMI_NPM_STATUS_DISABLED) -- there is no
+        max bound to validate against in that case, and writing
+        board/cur_node_power_limit while NPM is disabled has no defined effect.
+        Same fail-fast pattern as the max-bound check above: amdsmi_set_npm_limit()
+        itself already enforces this too, so this is a CLI-friendly early exit,
+        not the sole enforcement.
+
+        Fails closed when the platform max is unavailable ("N/A"): rather than
+        allowing any positive value through in that degraded-driver scenario, the
+        request is rejected outright here too, matching amdsmi_set_npm_limit()'s
+        own fail-closed behavior for the same condition.
+
+        Args:
+            node_handle: Node handle obtained via amdsmi_get_node_handle()
+            requested_limit: Requested node power limit value in watts
+            logger: AMDSMILogger instance for format-aware output
+
+        Returns:
+            dict or str: Structured data for JSON/CSV or formatted string for human-readable output
+        """
+        try:
+            npm_info = amdsmi_interface.amdsmi_get_npm_info(node_handle)
+            max_node_power_limit = npm_info["max_node_power_limit"]
+
+            if npm_info["status"] == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_DISABLED:
+                raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                    sys.argv[1] if len(sys.argv) > 1 else "unknown",
+                    f"{requested_limit}",
+                    self.get_output_format(),
+                    hint="Node power limit cannot be set: NPM is disabled on this node",
+                )
+            elif max_node_power_limit == "N/A":
+                # Fail closed: the platform max is unreadable (degraded driver /
+                # unavailable sysfs), so there is no bound to validate the
+                # request against. Reject rather than let an unbounded value
+                # through.
+                raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                    sys.argv[1] if len(sys.argv) > 1 else "unknown",
+                    f"{requested_limit}",
+                    self.get_output_format(),
+                    hint="Node power limit cannot be validated: platform maximum is unavailable",
+                )
+            elif not 0 < requested_limit <= max_node_power_limit:
+                # Raise so the caller exits with a non-zero return code
+                raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                    sys.argv[1] if len(sys.argv) > 1 else "unknown",
+                    f"{requested_limit}",
+                    self.get_output_format(),
+                    hint=f"Node power limit must be between 1W and {max_node_power_limit}W",
+                )
+
+            amdsmi_interface.amdsmi_set_npm_limit(node_handle, requested_limit)
+            if logger.is_json_format() or logger.is_csv_format():
+                return {
+                    "status": "success",
+                    "requested_limit": f"{requested_limit}",
+                    "message": f"Successfully set node power limit to {requested_limit} W",
+                }
+            return f"Successfully set node power limit to {requested_limit} W."
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                raise PermissionError("Command requires elevation") from e
+            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
+                # Raise so the caller exits with a non-zero return code, same as
+                # the CLI-side bound checks above.
+                raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                    sys.argv[1] if len(sys.argv) > 1 else "unknown",
+                    f"{requested_limit}",
+                    self.get_output_format(),
+                    hint=e.get_error_info(detailed=False),
+                ) from e
+            error_msg = f"[{e.get_error_info(detailed=False)}] Unable to set node power limit to {requested_limit} W"
+            if logger.is_json_format() or logger.is_csv_format():
+                return {
+                    "status": "error",
+                    "requested_limit": f"{requested_limit}",
                     "error": e.get_error_info(detailed=False),
                     "message": error_msg,
                 }

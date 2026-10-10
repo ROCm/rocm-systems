@@ -57,13 +57,6 @@ on:
         type: string
         required: false
         default: 'rccl'
-      baseline_stack:
-        description: >-
-          Stack held at its configured ref rather than PR head (mode=pr), for
-          the perf lane to measure against. Applies to both phases.
-        type: string
-        required: false
-        default: ''
       build_job:
         description: >-
           coco job key compiled with --build-only before `job` runs (mode=pr).
@@ -86,6 +79,9 @@ on:
         required: true
       RCCL_COCO_DB_URL:
         description: 'coco database URL for result ingest. Omit to run without publishing.'
+        required: false
+      HF_TOKEN:
+        description: 'Hugging Face token. Exported to the build and test jobs as MAD_SECRETS_HFTOKEN. Omit to run without it.'
         required: false
 
 permissions:
@@ -168,12 +164,8 @@ jobs:
             echo "dir=${PR_DIR}" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
-          # initialise_plugins() must precede load_job_config, or plugin-typed
-          # jobs (rccl_test) fail config validation.
           stage_dir=$("${COCO_VENV}/bin/python3" -c '
           import os
-          from coco.core.registry import initialise_plugins
-          initialise_plugins()
           from coco.core.config import load_job_config
           print(load_job_config(os.environ["JOB"]).advanced.stage_dir or "")
           ')
@@ -189,7 +181,6 @@ jobs:
           MODE: ${{ inputs.mode }}
           JOB: ${{ inputs.job }}
           BUILD_JOB: ${{ inputs.build_job }}
-          BASELINE_STACK: ${{ inputs.baseline_stack }}
           TRIGGER_KIND: ${{ inputs.trigger_kind }}
           COCO_ARGS: ${{ inputs.coco_args }}
           PR_NUMBER: ${{ inputs.pr_number }}
@@ -198,6 +189,9 @@ jobs:
           SOFTWARE: ${{ inputs.software }}
           COCO_DATABASE_URL: ${{ secrets.RCCL_COCO_DB_URL }}
           COCO_VENV: ${{ env.COCO_DIR }}/venv
+          # sbatch --export=ALL carries the launcher environment to the compute
+          # jobs, so both the build-only pass and the test pass see this.
+          MAD_SECRETS_HFTOKEN: ${{ secrets.HF_TOKEN || '' }}
         run: |
           set -euo pipefail
           # setup-python's interpreter is not runnable on the compute node, and
@@ -226,6 +220,15 @@ jobs:
             echo "No build or fetch failures in $(basename "${log}")."
           }
 
+          # The build job and the smoke job it feeds can declare different baselines.
+          job_baseline() {
+            "${COCO_VENV}/bin/python3" -c '
+          import sys
+          from coco.core.config import load_job_config
+          print(load_job_config(sys.argv[1]).comparison.baseline)
+          ' "$1"
+          }
+
           coco_pr() {
             local job="$1" log="$2"
             shift 2
@@ -239,7 +242,7 @@ jobs:
               --trigger-kind "${TRIGGER_KIND}" \
               -o "${COCO_OUTPUT}" \
               "$@" \
-              ${COCO_ARGS} > "${log}" 2>&1
+              ${COCO_ARGS} 2>&1 | tee "${log}"
             assert_built "${log}"
           }
 
@@ -252,22 +255,19 @@ jobs:
               echo "::error::mode=pr requires a full 40-hex pr_sha"
               exit 1
             fi
-            baseline=()
-            if [[ -n "${BASELINE_STACK}" ]]; then
-              baseline+=(--baseline-stack "${BASELINE_STACK}")
-            fi
             # Superset first, into the same -o tree the test pass reads its
             # stacks back out of.
             if [[ -n "${BUILD_JOB}" ]]; then
-              coco_pr "${BUILD_JOB}" "${BUILD_LOG}" --build-only ${baseline[@]+"${baseline[@]}"}
+              coco_pr "${BUILD_JOB}" "${BUILD_LOG}" --build-only \
+                --baseline-stack "$(job_baseline "${BUILD_JOB}")"
             fi
-            coco_pr "${JOB}" "${LOG_FILE}" ${baseline[@]+"${baseline[@]}"}
+            coco_pr "${JOB}" "${LOG_FILE}" --baseline-stack "$(job_baseline "${JOB}")"
           elif [[ "${MODE}" == 'run' ]]; then
             echo "==> coco run --job ${JOB} --trigger-kind ${TRIGGER_KIND} ${COCO_ARGS}"
             "${COCO_VENV}/bin/coco" run \
               --job "${JOB}" \
               --trigger-kind "${TRIGGER_KIND}" \
-              ${COCO_ARGS} > "${LOG_FILE}" 2>&1
+              ${COCO_ARGS} 2>&1 | tee "${LOG_FILE}"
           else
             echo "::error::mode must be run or pr, got: ${MODE}"
             exit 1

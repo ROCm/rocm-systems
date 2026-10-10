@@ -57,6 +57,15 @@ inline std::optional<uint64_t> scalar_buffer_address(Wavefront &wf, uint32_t sel
 
 /// @brief Scalar-buffer load opcode families (GFX9/RDNA through GFX11, then GFX12).
 constexpr bool smem_is_buffer_load_op(uint32_t op) { return op >= 8 && op <= 12; }
+/// @brief GFX9 scalar-buffer loads, stores and atomics.
+constexpr bool gfx9_smem_is_buffer_op(uint32_t op) {
+  return smem_is_buffer_load_op(op) || (op >= 24 && op <= 26) || (op >= 64 && op <= 76) ||
+         (op >= 96 && op <= 108);
+}
+/// @brief Ordinary GFX12 scalar loads; prefetches have defined drop behavior.
+constexpr bool gfx12_smem_is_ordinary_load_op(uint32_t op) {
+  return op <= 5 || (op >= 8 && op <= 11);
+}
 constexpr bool gfx12_smem_is_buffer_load_op(uint32_t op) {
   return (op >= 16 && op <= 21) || (op >= 24 && op <= 27);
 }
@@ -76,7 +85,8 @@ constexpr bool smem_is_scratch_op(uint32_t op) {
 /// Requires: inst.op, inst.sbase, inst.soffset_en, inst.soffset, inst.imm, inst.offset.
 template <typename SmemInst>
 std::optional<uint64_t> smem_calculate_address(const SmemInst &inst, amdgpu::Wavefront &wf,
-                                               ScalarMemState *state = nullptr) {
+                                               ScalarMemState *state = nullptr,
+                                               bool check_negative_offset = false) {
   constexpr uint64_t kDwordMask = ~0x3ULL;
   auto base = amdgpu::try_read_scalar_selector64(wf, inst.sbase * 2);
   if (!base)
@@ -85,7 +95,7 @@ std::optional<uint64_t> smem_calculate_address(const SmemInst &inst, amdgpu::Wav
 
   int64_t inst_offset = 0;
   if (inst.imm)
-    inst_offset = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11) & ~0x3LL;
+    inst_offset = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
 
   uint64_t reg_offset = 0;
   if (inst.soffset_en || !inst.imm) {
@@ -95,7 +105,15 @@ std::optional<uint64_t> smem_calculate_address(const SmemInst &inst, amdgpu::Wav
       return std::nullopt;
     reg_offset = *value;
   }
-  reg_offset = smem_is_scratch_op(inst.op) ? reg_offset * 64 : reg_offset & kDwordMask;
+  if (smem_is_scratch_op(inst.op))
+    reg_offset *= 64;
+  // Qualify the non-buffer rule before alignment, so compensating low bits
+  // cannot turn a nonnegative raw offset into a warning.
+  if (check_negative_offset && !gfx9_smem_is_buffer_op(inst.op) &&
+      inst_offset + static_cast<int64_t>(reg_offset) < 0)
+    wf.report_undefined_behavior("negative combined scalar-memory offset");
+  inst_offset &= ~0x3LL;
+  reg_offset &= kDwordMask;
   if (smem_is_buffer_load_op(inst.op))
     return scalar_buffer_address(wf, inst.sbase * 2, *base, inst_offset + reg_offset, state);
   const uint64_t addr = *base + inst_offset + reg_offset;
@@ -128,10 +146,11 @@ void ds_calculate_addresses(const DsInst &inst, amdgpu::Wavefront &wf, VectorMem
   uint32_t offset = (static_cast<uint32_t>(inst.offset1) << 8) | inst.offset0;
   RegisterAccess regs(cu);
   auto addr_region = regs.read_vgpr_region(wf.vgpr_alloc().base + inst.addr, 1, exec);
+  const std::span<const uint32_t> addresses = addr_region.lanes();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    d.per_lane_addr[lane] = addr_region.lane(0, lane) + offset + wf.lds_base();
+    d.per_lane_addr[lane] = addresses[lane] + offset + wf.lds_base();
   }
   util::Logger::vm([&](auto &os) {
     static uint64_t ds_addr_count = 0;
