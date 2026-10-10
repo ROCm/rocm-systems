@@ -48,6 +48,7 @@
 #include <mutex>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -65,6 +66,7 @@ namespace amdgpu {
 enum class MemoryWaitDiagnostics { Off, Warn };
 
 class CommandProcessor;
+class ShaderEngine;
 class AsyncInstructionWindow;
 class MmaAdmissionCache;
 struct AsyncInstructionWindowStorage;
@@ -479,21 +481,41 @@ public:
   /// No normal wave/workgroup completion or plugin-completion callback is fired.
   void abort_dispatch(uint32_t dispatch_id);
 
-  /// @brief Set the execution plugin group (shared ownership).
-  /// @details Replacement refreshes resident waves' hot-hook subscriptions but
-  /// does not replay dispatch callbacks or migrate or clear wave-local plugin
-  /// state. Stateful plugins must tolerate missing initialization and state
-  /// left in a reused slot when attached to an already-resident wave.
+  /// @brief Set the execution plugin group on a standalone compute unit.
+  /// @details A CU owned by a shader-engine hierarchy must be replaced through
+  /// Xcd::set_plugin_group() or SoC::set_plugin_group() so command-processor
+  /// callbacks and CU hot hooks cannot be routed to different groups.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
+    if (parent() != nullptr)
+      throw std::logic_error(
+          "hierarchy-owned compute-unit plugins must be replaced through the XCD or SoC");
+    replace_plugin_group(std::move(pg));
+  }
+
+private:
+  void set_plugin_group_from_shader_engine(std::shared_ptr<ExecutionPluginGroup> pg) {
+    replace_plugin_group(std::move(pg));
+  }
+
+  /// Replace the local group as one step of a coherent hierarchy fan-out.
+  void replace_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
     auto replacement = pg ? std::move(pg) : ExecutionPluginGroup::empty_group();
     if (plugin_group_.get() != replacement.get()) {
+      // Dispatch-scoped observations can span gaps where no wave is resident,
+      // so notify the outgoing group once independently of wave-local state.
+      plugin_group_->onAmdgpuPluginGroupDetached();
       // A resident wave's cached decisions belong to the group that observed
-      // its dispatch. A replacement group may have the same plugin count but
-      // different per-wave subscriptions, so force it onto the live-query path.
+      // its dispatch, as does every retained plugin-state slot. Slot indices
+      // restart in each group, so discard the old state before the replacement
+      // can query or populate the same index and force it onto the live-query
+      // path. Stateful replacement plugins remain unsubscribed from resident
+      // waves until a normal dispatch callback initializes their state.
       for (const auto &wf : wfs_) {
         if (!wf)
           continue;
+        plugin_group_->onAmdgpuWavefrontStateInvalidated(*wf);
+        wf->clear_plugin_states();
         wf->hot_hook_subscriptions_valid_ = false;
         wf->hot_hook_observer_count_ = 0;
       }
@@ -512,6 +534,7 @@ public:
                                 observes_sgpr_reads_ || observes_scalar_register_writes_;
   }
 
+public:
   /// Whether register notifications have a diagnostic or plugin consumer.
   bool observes_register_access() const { return observes_register_access_; }
 
@@ -1467,6 +1490,7 @@ protected:
 
   friend class CommandProcessor;
   friend class InstructionComputeUnitView;
+  friend class ShaderEngine;
   friend class ::rocjitsu::test::ComputeUnitTestAccess;
 };
 

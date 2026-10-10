@@ -22,8 +22,11 @@
 #include "rocjitsu/vm/plugins/wavefront_state.h"
 
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <string>
+#include <type_traits>
+#include <utility>
 
 namespace rocjitsu {
 
@@ -42,9 +45,12 @@ namespace rocjitsu {
 ///
 /// Lifecycle callbacks are host-ordered, not part of the hot/infrequent hook
 /// locking policy: onInit() completes before simulation callbacks begin, and
-/// onShutdown() begins only after all simulation callbacks have stopped. The
-/// host must enforce this ordering; lifecycle callbacks do not synchronize
-/// with concurrently executing simulation hooks.
+/// onShutdown() begins only after all simulation callbacks have stopped. Live
+/// replacement delivers the outgoing group's detach and wave-state-
+/// invalidation callbacks before onShutdown(). No simulation callback,
+/// including those replacement notifications, may be delivered after
+/// onShutdown() begins. The host must enforce this ordering; lifecycle
+/// callbacks do not synchronize with concurrently executing simulation hooks.
 class ExecutionPlugin {
 public:
   static constexpr uint8_t kFullByteMask = 0xF;
@@ -58,6 +64,29 @@ public:
 
   /// Index into Wavefront::plugin_states_, assigned by the group on add().
   uint32_t slot_index() const { return slot_index_; }
+
+  /// Return this plugin instance's state for @p wf, or nullptr when the slot is
+  /// empty or belongs to a different plugin instance. Always use this helper
+  /// instead of interpreting a slot index directly: indices are local to one
+  /// ExecutionPluginGroup and are reused after live group replacement.
+  template <typename State = WavefrontState>
+  [[nodiscard]] State *wavefront_state(const amdgpu::Wavefront &wf) const {
+    static_assert(std::is_base_of_v<WavefrontState, State>);
+    return static_cast<State *>(wf.plugin_state(slot_index_, this));
+  }
+
+  /// Install state owned by this concrete plugin instance on @p wf.
+  template <typename State>
+  void set_wavefront_state(amdgpu::Wavefront &wf, std::unique_ptr<State> state) const {
+    static_assert(std::is_base_of_v<WavefrontState, State>);
+    wf.set_plugin_state(slot_index_, this, std::move(state));
+  }
+
+  /// Remove this plugin instance's state from @p wf. A state installed by a
+  /// different plugin that happens to use the same slot is left untouched.
+  void clear_wavefront_state(amdgpu::Wavefront &wf) const {
+    wf.clear_plugin_state(slot_index_, this);
+  }
 
   /// Output sink for this plugin. Use sink().write("msg") for all output.
   PluginSink &sink() { return *sink_; }
@@ -81,8 +110,17 @@ public:
   /// Reentrant hooks during dispatch/halt, hooks without a wavefront, and hooks
   /// on a resident wave after live plugin-group replacement use a live query,
   /// so this method must remain lock-free and thread-safe. The decision must be
-  /// stable between dispatch completion and the matching halt. Lifecycle and
-  /// dispatch/workgroup/wavefront callbacks are unaffected.
+  /// stable between dispatch completion and the matching halt.
+  ///
+  /// Live plugin-group replacement does not replay wavefront-dispatch callbacks
+  /// for waves that are already resident. Their old plugin state is discarded,
+  /// and this predicate is queried live for the replacement group. A plugin
+  /// that requires per-wave state must return false while wavefront_state()
+  /// returns nullptr; it begins observing that slot after the next ordinary
+  /// dispatch callback initializes new state. Stateful infrequent callbacks,
+  /// including wavefront halt, must likewise tolerate an uninitialized resident
+  /// wave. Lifecycle and dispatch/workgroup/wavefront callbacks are otherwise
+  /// unaffected by this predicate.
   virtual bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront * /*wf*/) const {
     return true;
   }
@@ -244,6 +282,10 @@ public:
   virtual void onAmdgpuWavefrontDispatched(amdgpu::Wavefront & /*wf*/) {}
 
   /// Called when a wavefront halts, before its resources are freed.
+  /// After live plugin-group replacement, the replacement group can receive
+  /// this callback for a resident wave for which it never received
+  /// onAmdgpuWavefrontDispatched(). A stateful plugin must treat a null
+  /// wavefront_state() as an unobserved partial wave and return safely.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWavefrontHalted(amdgpu::Wavefront & /*wf*/) {}
 
@@ -305,6 +347,30 @@ public:
   /// Called with the waves synchronized by a completed barrier domain.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
+
+  /// Called before a compute unit replaces this plugin's group, even when no
+  /// resident wavefront currently owns this plugin's state. Plugins that
+  /// aggregate observations across a dispatch must invalidate every active
+  /// dispatch here because callbacks can be missed while the group is
+  /// detached. A group shared by several compute units can receive this
+  /// notification once per detaching compute unit, so implementations must be
+  /// idempotent. Infrequent hook; see the concurrency contract on
+  /// requires_serial_hot_hooks().
+  virtual void onAmdgpuPluginGroupDetached() {}
+
+  /// Called for every resident wavefront immediately before live plugin-group
+  /// replacement discards the outgoing group's wave-local state. If this plugin
+  /// owns state for @p wf, that state remains available through
+  /// wavefront_state() for the duration of this callback. A null state means the
+  /// plugin did not initialize this resident wave, including when it was
+  /// attached after the wave became resident; stateful plugins can use the
+  /// notification to record that unobserved lifetime. Plugins that retain
+  /// pointers to wave-local state must release those references here.
+  /// Dispatch-wide observation is invalidated by the preceding
+  /// onAmdgpuPluginGroupDetached() callback. This is not a wavefront-halt
+  /// notification.
+  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
+  virtual void onAmdgpuWavefrontStateInvalidated(amdgpu::Wavefront & /*wf*/) {}
 
   /// Whether this plugin consumes onAmdgpuMemoryAccessRouted(). Building the
   /// observation is real work on the per-instruction path, so a plugin that

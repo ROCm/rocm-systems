@@ -31,6 +31,10 @@ public:
     trace("init");
     sink().write("boundary:init\n");
   }
+
+  void onShutdown() override { trace("shutdown"); }
+
+  void onAmdgpuPluginGroupDetached() override { trace("detach"); }
 };
 
 __attribute__((destructor)) void on_unload() { trace("unload"); }

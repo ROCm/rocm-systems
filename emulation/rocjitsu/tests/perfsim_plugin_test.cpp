@@ -499,6 +499,308 @@ TEST_F(PerfsimPluginTest, RetainsRejectedDispatchStateUntilLiveWaveRetires) {
   EXPECT_EQ(line_with_prefix(trace, "end 50 "), trace.size());
 }
 
+TEST_F(PerfsimPluginTest, DetachAndRestoreSameGroupRejectsInterruptedResidentWave) {
+  WaveFixture fixture(1);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  auto group = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  auto perfsim = std::make_unique<PerfsimPlugin>(plugin_config().c_str());
+  auto *perfsim_ptr = perfsim.get();
+  ASSERT_TRUE(group->add(std::move(perfsim)));
+  fixture.cu->set_plugin_group(group);
+  group->onInit();
+
+  constexpr uint32_t Dispatch = 51;
+  group->onAmdgpuDispatchPacketProcessed(dispatch_info(Dispatch));
+  group->onAmdgpuDispatchExecutionBegin(Dispatch);
+  Wavefront &wave = fixture.wave(Dispatch, 0, {0, 0, 0}, 0);
+  group->onAmdgpuWavefrontDispatched(wave);
+  ASSERT_TRUE(perfsim_ptr->observes_hot_hooks_for_wavefront(&wave));
+
+  const std::array<uint32_t, 1> add_words{0x7E000200};
+  SyntheticInstruction add("v_add_f32", add_words);
+  group->onAmdgpuBeforeExecuteInstruction(0x4000, add, wave);
+
+  fixture.cu->set_plugin_group(nullptr);
+  EXPECT_FALSE(perfsim_ptr->observes_hot_hooks_for_wavefront(&wave));
+  fixture.cu->set_plugin_group(group);
+  EXPECT_NO_THROW(group->onAmdgpuWavefrontHalted(wave));
+  group->onAmdgpuDispatchExecutionEnd(Dispatch);
+  group->onShutdown();
+
+  EXPECT_NE(sink.str().find("skipped dispatch 51: dispatch observation was interrupted by "
+                            "plugin-group replacement"),
+            std::string::npos);
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_EQ(line_with_prefix(trace, "begin 51 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "instruction 51 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "end 51 "), trace.size());
+  EXPECT_EQ(std::ranges::count(trace, "shutdown"), 1);
+}
+
+TEST_F(PerfsimPluginTest, DetachAndRestoreSameGroupBetweenWorkgroupsRejectsDispatch) {
+  WaveFixture fixture(1);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  auto group = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(group->add(std::make_unique<PerfsimPlugin>(plugin_config().c_str())));
+  fixture.cu->set_plugin_group(group);
+  group->onInit();
+
+  constexpr uint32_t Dispatch = 53;
+  group->onAmdgpuDispatchPacketProcessed(dispatch_info(Dispatch));
+  group->onAmdgpuDispatchExecutionBegin(Dispatch);
+
+  const std::array<uint32_t, 1> add_words{0x7E000200};
+  const std::array<uint32_t, 1> end_words{0xBF810000};
+  SyntheticInstruction add("v_add_f32", add_words);
+  SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+  const auto run_workgroup = [&](uint32_t wg_id) {
+    Wavefront &wave = fixture.wave(Dispatch, wg_id, {wg_id, 0, 0}, 0);
+    auto &observers = fixture.cu->plugin_group();
+    observers.onAmdgpuWavefrontDispatched(wave);
+    observers.onAmdgpuBeforeExecuteInstruction(0x4000, add, wave);
+    observers.onAmdgpuBeforeExecuteInstruction(0x4004, end, wave);
+    wave.halt(Wavefront::CpCompletionNotice::Suppress);
+  };
+
+  run_workgroup(/*wg_id=*/0);
+  ASSERT_EQ(fixture.cu->num_wfs(), 0u);
+  fixture.cu->set_plugin_group(nullptr);
+  run_workgroup(/*wg_id=*/1);
+  ASSERT_EQ(fixture.cu->num_wfs(), 0u);
+  fixture.cu->set_plugin_group(group);
+  run_workgroup(/*wg_id=*/2);
+  group->onAmdgpuDispatchExecutionEnd(Dispatch);
+  group->onShutdown();
+
+  const std::string diagnostic = sink.str();
+  const std::string expected =
+      "skipped dispatch 53: dispatch observation was interrupted by plugin-group replacement";
+  const size_t first = diagnostic.find(expected);
+  ASSERT_NE(first, std::string::npos);
+  EXPECT_EQ(diagnostic.find(expected, first + 1), std::string::npos);
+
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_EQ(line_with_prefix(trace, "begin 53 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "instruction 53 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "end 53 "), trace.size());
+  EXPECT_EQ(std::ranges::count(trace, "shutdown"), 1);
+}
+
+TEST_F(PerfsimPluginTest, DetachAcrossExecutionBeginReportsReplacementInterruption) {
+  WaveFixture fixture(1);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  auto group = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(group->add(std::make_unique<PerfsimPlugin>(plugin_config().c_str())));
+  fixture.cu->set_plugin_group(group);
+  group->onInit();
+
+  constexpr uint32_t Dispatch = 54;
+  group->onAmdgpuDispatchPacketProcessed(dispatch_info(Dispatch));
+  fixture.cu->set_plugin_group(nullptr);
+  fixture.cu->plugin_group().onAmdgpuDispatchExecutionBegin(Dispatch);
+  fixture.cu->set_plugin_group(group);
+
+  Wavefront &wave = fixture.wave(Dispatch, 0, {0, 0, 0}, 0);
+  group->onAmdgpuWavefrontDispatched(wave);
+  wave.halt(Wavefront::CpCompletionNotice::Suppress);
+  group->onAmdgpuDispatchExecutionEnd(Dispatch);
+  group->onShutdown();
+
+  const std::string expected =
+      "skipped dispatch 54: dispatch observation was interrupted by plugin-group replacement";
+  const size_t first = sink.str().find(expected);
+  ASSERT_NE(first, std::string::npos);
+  EXPECT_EQ(sink.str().find(expected, first + 1), std::string::npos);
+  EXPECT_EQ(sink.str().find("outside an active dispatch"), std::string::npos);
+  EXPECT_EQ(sink.str().find("without a matching begin"), std::string::npos);
+
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_EQ(line_with_prefix(trace, "begin 54 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "instruction 54 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "end 54 "), trace.size());
+  EXPECT_EQ(std::ranges::count(trace, "shutdown"), 1);
+}
+
+TEST_F(PerfsimPluginTest, DetachAndRestoreBeforeExecutionBeginKeepsCompleteTrace) {
+  WaveFixture fixture(1);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  auto group = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(group->add(std::make_unique<PerfsimPlugin>(plugin_config().c_str())));
+  fixture.cu->set_plugin_group(group);
+  group->onInit();
+
+  constexpr uint32_t Dispatch = 55;
+  group->onAmdgpuDispatchPacketProcessed(dispatch_info(Dispatch));
+  fixture.cu->set_plugin_group(nullptr);
+  fixture.cu->set_plugin_group(group);
+  group->onAmdgpuDispatchExecutionBegin(Dispatch);
+
+  Wavefront &wave = fixture.wave(Dispatch, 0, {0, 0, 0}, 0);
+  group->onAmdgpuWavefrontDispatched(wave);
+  const std::array<uint32_t, 1> add_words{0x7E000200};
+  const std::array<uint32_t, 1> end_words{0xBF810000};
+  SyntheticInstruction add("v_add_f32", add_words);
+  SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+  group->onAmdgpuBeforeExecuteInstruction(0x4000, add, wave);
+  group->onAmdgpuBeforeExecuteInstruction(0x4004, end, wave);
+  wave.halt(Wavefront::CpCompletionNotice::Suppress);
+  group->onAmdgpuDispatchExecutionEnd(Dispatch);
+  group->onShutdown();
+
+  EXPECT_EQ(sink.str().find("skipped dispatch"), std::string::npos);
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_NE(line_with_prefix(trace, "begin 55 "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "instruction 55 "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "end 55 "), trace.size());
+  EXPECT_EQ(std::ranges::count(trace, "shutdown"), 1);
+}
+
+struct ForeignWavefrontState final : WavefrontState {
+  uint64_t instruction_count = 1;
+};
+
+TEST_F(PerfsimPluginTest, RejectsAnotherPluginInstancesStateAtTheSameSlot) {
+  WaveFixture fixture;
+  Wavefront &wave = fixture.wave(46, 0, {0, 0, 0}, 0);
+
+  // Slot indices are local to a group. Model a retained state from a previous
+  // one-plugin group before installing a new one-plugin Perfsim group.
+  ExecutionPlugin previous("previous_stateful_plugin");
+  previous.set_wavefront_state(wave, std::make_unique<ForeignWavefrontState>());
+
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto perfsim = std::make_unique<PerfsimPlugin>(plugin_config().c_str());
+  auto *perfsim_ptr = perfsim.get();
+  ASSERT_TRUE(group.add(std::move(perfsim)));
+  group.onInit();
+
+  EXPECT_EQ(previous.slot_index(), perfsim_ptr->slot_index());
+  EXPECT_NE(previous.wavefront_state<ForeignWavefrontState>(wave), nullptr);
+  EXPECT_EQ(perfsim_ptr->wavefront_state<ForeignWavefrontState>(wave), nullptr);
+  EXPECT_FALSE(perfsim_ptr->observes_hot_hooks_for_wavefront(&wave));
+
+  const std::array<uint32_t, 1> add_words{0x7E000200};
+  SyntheticInstruction add("v_add_f32", add_words);
+  // The replacement group must not reinterpret the retained foreign state to
+  // decide subscription or to record an instruction on the resident wave.
+  EXPECT_NO_THROW(group.onAmdgpuBeforeExecuteInstruction(0x4000, add, wave));
+
+  group.onAmdgpuDispatchPacketProcessed(dispatch_info(46));
+  group.onAmdgpuDispatchExecutionBegin(46);
+  EXPECT_NO_THROW(group.onAmdgpuWavefrontDispatched(wave));
+  EXPECT_EQ(previous.wavefront_state<ForeignWavefrontState>(wave), nullptr);
+  EXPECT_TRUE(perfsim_ptr->observes_hot_hooks_for_wavefront(&wave));
+
+  const std::array<uint32_t, 1> end_words{0xBF810000};
+  SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+  group.onAmdgpuBeforeExecuteInstruction(0x5000, end, wave);
+  group.onAmdgpuWavefrontHalted(wave);
+  group.onAmdgpuDispatchExecutionEnd(46);
+  group.onShutdown();
+}
+
+TEST_F(PerfsimPluginTest, RejectsRetainedIdentityThatNoLongerOwnsTheWaveState) {
+  WaveFixture fixture(1);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  ExecutionPluginGroup group(std::move(sink_config));
+  auto perfsim = std::make_unique<PerfsimPlugin>(plugin_config().c_str());
+  auto *perfsim_ptr = perfsim.get();
+  ASSERT_TRUE(group.add(std::move(perfsim)));
+  group.onInit();
+
+  constexpr uint32_t Dispatch = 52;
+  group.onAmdgpuDispatchPacketProcessed(dispatch_info(Dispatch));
+  group.onAmdgpuDispatchExecutionBegin(Dispatch);
+  Wavefront &wave = fixture.wave(Dispatch, 0, {0, 0, 0}, 0);
+  group.onAmdgpuWavefrontDispatched(wave);
+  ASSERT_TRUE(perfsim_ptr->observes_hot_hooks_for_wavefront(&wave));
+
+  // Model an unexpected same-slot overwrite. The retained physical identity
+  // must resolve through the wave's current owner before Perfsim reads state.
+  ExecutionPlugin foreign("foreign_stateful_plugin");
+  ASSERT_EQ(foreign.slot_index(), perfsim_ptr->slot_index());
+  foreign.set_wavefront_state(wave, std::make_unique<ForeignWavefrontState>());
+  EXPECT_FALSE(perfsim_ptr->observes_hot_hooks_for_wavefront(&wave));
+  EXPECT_NO_THROW(group.onAmdgpuWavefrontHalted(wave));
+  group.onAmdgpuDispatchExecutionEnd(Dispatch);
+  group.onShutdown();
+  foreign.clear_wavefront_state(wave);
+
+  EXPECT_NE(
+      sink.str().find("skipped dispatch 52: halted wavefront retained stale Perfsim identity"),
+      std::string::npos);
+}
+
+TEST_F(PerfsimPluginTest, IgnoresCompletionCallbacksForDispatchUnobservedAtReplacement) {
+  WaveFixture fixture;
+  constexpr uint32_t ResidentDispatch = 47;
+  Wavefront &resident = fixture.wave(ResidentDispatch, 0, {0, 0, 0}, 0);
+
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  ExecutionPluginGroup replacement(std::move(sink_config));
+  auto perfsim = std::make_unique<PerfsimPlugin>(plugin_config().c_str());
+  auto *perfsim_ptr = perfsim.get();
+  ASSERT_TRUE(replacement.add(std::move(perfsim)));
+  replacement.onInit();
+
+  // Model a group attached after this wave and dispatch were initialized. The
+  // replacement did not receive either dispatch or wave-dispatch callbacks.
+  EXPECT_FALSE(perfsim_ptr->observes_hot_hooks_for_wavefront(&resident));
+
+  // Later workgroups of the same entirely unobserved dispatch are equally
+  // outside this instance's observation window. Their normal callbacks must
+  // remain silent rather than creating a rejected dispatch entry.
+  Wavefront &later = fixture.wave(ResidentDispatch, 1, {1, 0, 0}, 0);
+  EXPECT_NO_THROW(replacement.onAmdgpuWavefrontDispatched(later));
+  const std::array<uint32_t, 1> nop_words{0xBF800000};
+  SyntheticInstruction nop("s_nop", nop_words);
+  EXPECT_NO_THROW(replacement.onAmdgpuBeforeExecuteInstruction(0x4000, nop, later));
+  EXPECT_NO_THROW(replacement.onAmdgpuWavefrontHalted(later));
+
+  EXPECT_NO_THROW(replacement.onAmdgpuWavefrontHalted(resident));
+  EXPECT_NO_THROW(replacement.onAmdgpuDispatchExecutionEnd(ResidentDispatch));
+  replacement.onShutdown();
+
+  EXPECT_EQ(sink.str().find("skipped dispatch"), std::string::npos);
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_EQ(line_with_prefix(trace, "begin "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "end "), trace.size());
+  EXPECT_EQ(std::ranges::count(trace, "shutdown"), 1);
+}
+
+TEST_F(PerfsimPluginTest, RejectsMalformedCompletionCallbacksForObservedDispatches) {
+  WaveFixture fixture;
+  constexpr uint32_t MissingWaveIdentity = 49;
+  constexpr uint32_t MissingDispatchBegin = 50;
+
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  ExecutionPluginGroup group(std::move(sink_config));
+  ASSERT_TRUE(group.add(std::make_unique<PerfsimPlugin>(plugin_config().c_str())));
+  group.onInit();
+
+  group.onAmdgpuDispatchPacketProcessed(dispatch_info(MissingWaveIdentity));
+  group.onAmdgpuDispatchExecutionBegin(MissingWaveIdentity);
+  Wavefront &wave = fixture.wave(MissingWaveIdentity, 0, {0, 0, 0}, 0);
+  group.onAmdgpuWavefrontHalted(wave);
+  group.onAmdgpuDispatchExecutionEnd(MissingWaveIdentity);
+
+  group.onAmdgpuDispatchPacketProcessed(dispatch_info(MissingDispatchBegin));
+  group.onAmdgpuDispatchExecutionEnd(MissingDispatchBegin);
+  group.onShutdown();
+
+  EXPECT_NE(sink.str().find("skipped dispatch 49: halted wavefront has no Perfsim identity"),
+            std::string::npos);
+  EXPECT_NE(sink.str().find("skipped dispatch 50: dispatch ended without a matching begin"),
+            std::string::npos);
+}
+
 TEST_F(PerfsimPluginTest, SelectsExactDispatchNameWithoutRejectingOtherDispatches) {
   WaveFixture fixture;
   const std::string config = plugin_config_with_dispatch_name("target_kernel");

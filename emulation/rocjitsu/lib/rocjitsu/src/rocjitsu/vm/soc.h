@@ -258,6 +258,8 @@ public:
   const std::vector<amdgpu::ComputeUnitCore *> &all_cus();
 
   ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
+  /// Retain the current group across a replacement, for lifecycle ordering.
+  std::shared_ptr<ExecutionPluginGroup> plugin_group_shared() const { return plugin_group_; }
 
 private:
   friend class test::SoCTestAccess;
