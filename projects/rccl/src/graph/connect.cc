@@ -41,6 +41,9 @@ ncclResult_t ncclTopoReconcileGrowChannels(struct ncclComm* comm, int* value) {
 #endif
 }
 
+// Compact tree optimization for sorted domain ordering
+NCCL_PARAM(TreeCompact, "TREE_COMPACT", 0);
+
 /******************************************************************/
 /********************* Internode connection ***********************/
 /******************************************************************/
@@ -542,7 +545,16 @@ static ncclResult_t connectTrees(struct ncclComm* comm, int* treeToParent, int* 
 
   int t0u, t0d0, t0d1, t0ChildType = 0, t1u, t1d0, t1d1, t1ChildType = 0;
   int *ttp, *ttc0, *ttc1;
-  NCCLCHECK(ncclGetDtree(nNodes, node, &t0u, &t0d0, &t0d1, &t0ChildType, &t1u, &t1d0, &t1d1, &t1ChildType));
+
+  // Use compact tree when enabled via NCCL_TREE_COMPACT=1
+  const bool useCompactTree = ncclParamTreeCompact();
+  if (useCompactTree) {
+    NCCLCHECK(ncclGetDtreeCompact(nNodes, node, &t0u, &t0d0, &t0d1, &t0ChildType,
+                                   &t1u, &t1d0, &t1d1, &t1ChildType));
+    INFO(NCCL_GRAPH, "Using compact tree: nNodes=%d, node=%d", nNodes, node);
+  } else {
+    NCCLCHECK(ncclGetDtree(nNodes, node, &t0u, &t0d0, &t0d1, &t0ChildType, &t1u, &t1d0, &t1d1, &t1ChildType));
+  }
   if (nChannels == comm->nChannels) {
     for (int c = 0; c < nChannels; c++) {
       struct ncclChannel* channel0 = comm->channels + c;
@@ -710,8 +722,18 @@ static ncclResult_t connectNvls(struct ncclComm* comm, int* nvlsHeads, int nHead
   // Connect Trees
   int tree0Parent, tree0Child0, tree0Child1, tree1Parent, tree1Child0, tree1Child1;
   int pc0, pc1; // ignored
-  NCCLCHECK(ncclGetDtree(comm->nNodes, comm->node, &tree0Parent, &tree0Child0, &tree0Child1, &pc0, &tree1Parent,
-                         &tree1Child0, &tree1Child1, &pc1));
+
+  // Use compact tree when enabled via NCCL_TREE_COMPACT=1
+  const bool useCompactTree = ncclParamTreeCompact();
+  if (useCompactTree) {
+    NCCLCHECK(ncclGetDtreeCompact(comm->nNodes, comm->node,
+          &tree0Parent, &tree0Child0, &tree0Child1, &pc0,
+          &tree1Parent, &tree1Child0, &tree1Child1, &pc1));
+  } else {
+    NCCLCHECK(ncclGetDtree(comm->nNodes, comm->node,
+          &tree0Parent, &tree0Child0, &tree0Child1, &pc0,
+          &tree1Parent, &tree1Child0, &tree1Child1, &pc1));
+  }
 
   int* heads = NULL;
   int treeUp[2] = {-1, -1};
@@ -813,18 +835,25 @@ void exchangeValues(int* v0, int* v1) {
   *v0 = tmp;
 }
 
-int getTreeNodeParity(int treeDir, int nNodes, int node) {
+int getTreeNodeParity(int treeDir, int nNodes, int node, bool useCompactTree) {
   if (node == -1) return -1;
 
   int parentNodes[2], child0Nodes[2], child1Nodes[2], childTypes[2];
-  ncclGetDtree(nNodes, node, &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0], &parentNodes[1],
-               &child0Nodes[1], &child1Nodes[1], &childTypes[1]);
+  if (useCompactTree) {
+    ncclGetDtreeCompact(nNodes, node,
+                 &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
+                 &parentNodes[1], &child0Nodes[1], &child1Nodes[1], &childTypes[1]);
+  } else {
+    ncclGetDtree(nNodes, node,
+                 &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
+                 &parentNodes[1], &child0Nodes[1], &child1Nodes[1], &childTypes[1]);
+  }
 
   // Uptree and downtree have different parity
   if (parentNodes[treeDir] == -1) return treeDir;
 
   // Recurse and swap parity if this is child that exits from 2nd intranode rank (childType == 0)
-  return ((childTypes[treeDir] + 1) + getTreeNodeParity(treeDir, nNodes, parentNodes[treeDir])) % 2;
+  return ((childTypes[treeDir] + 1) + getTreeNodeParity(treeDir, nNodes, parentNodes[treeDir], useCompactTree)) % 2;
 }
 
 // [RCCL] Build rail-optimized trees
@@ -868,8 +897,19 @@ ncclResult_t connectRailOptimizedTrees(struct ncclComm* comm, int* treeToParent,
 
   // Compute parent/child nodes for this current node, for uptree and downtree
   int parentNodes[2], child0Nodes[2], child1Nodes[2], childTypes[2];
-  NCCLCHECK(ncclGetDtree(nNodes, node, &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
-                         &parentNodes[1], &child0Nodes[1], &child1Nodes[1], &childTypes[1]));
+
+  // Use compact tree when enabled via NCCL_TREE_COMPACT=1
+  const bool useCompactTree = ncclParamTreeCompact();
+  if (useCompactTree) {
+    NCCLCHECK(ncclGetDtreeCompact(nNodes, node,
+                                   &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
+                                   &parentNodes[1], &child0Nodes[1], &child1Nodes[1], &childTypes[1]));
+    INFO(NCCL_GRAPH, "Using compact tree (rail-optimized): nNodes=%d, node=%d", nNodes, node);
+  } else {
+    NCCLCHECK(ncclGetDtree(nNodes, node,
+                           &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
+                           &parentNodes[1], &child0Nodes[1], &child1Nodes[1], &childTypes[1]));
+  }
 
   // Loop over up-tree / down-tree
   for (int treeDir = 0; treeDir < 2; treeDir++) {
@@ -881,10 +921,10 @@ ncclResult_t connectRailOptimizedTrees(struct ncclComm* comm, int* treeToParent,
     int* treeToChild = (childTypes[treeDir] == 0) ? treeToChild0 : treeToChild1;
 
     // Compute the parity for nodes for this tree direction
-    int nodeParity = getTreeNodeParity(treeDir, nNodes, node);
-    int parentParity = getTreeNodeParity(treeDir, nNodes, parentNode);
-    int child0Parity = getTreeNodeParity(treeDir, nNodes, child0Node);
-    int child1Parity = getTreeNodeParity(treeDir, nNodes, child1Node);
+    int nodeParity = getTreeNodeParity(treeDir, nNodes, node, useCompactTree);
+    int parentParity = getTreeNodeParity(treeDir, nNodes, parentNode, useCompactTree);
+    int child0Parity = getTreeNodeParity(treeDir, nNodes, child0Node, useCompactTree);
+    int child1Parity = getTreeNodeParity(treeDir, nNodes, child1Node, useCompactTree);
 
     // Loop over pairs of complimentary channels
     for (int ch = 0; ch < nChannels; ch += 2) {
