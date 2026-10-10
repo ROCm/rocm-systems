@@ -165,7 +165,8 @@
         {"name": "EnqueueCountTests", "description": "Enqueue send/recv count helpers", "test_filter": "EnqueueCountTests.*"},
         {"name": "MiscTests.Sorter", "description": "Task coll sorter unit test", "test_filter": "MiscTests.Sorter"},
         {"name": "VersionInfoTests", "description": "HIP/ROCm version string formatting tests", "test_filter": "VersionInfoTests.*"},
-        {"name": "GinDeviceTest", "description": "GIN proxy backend device-leaf tests", "test_filter": "GinDeviceTest.*:GinProxyFlushWaitTest.*"},
+        {"name": "GinDeviceTest", "description": "GIN proxy backend device-leaf tests", "test_filter": "GinDeviceTest.*:GinProxyFlushWaitTest.*:GinProxyPutTest.*"},
+        {"name": "GinBackendMaskDispatchTest", "description": "GIN backend-mask put dispatch tests", "test_filter": "GinBackendMaskDispatchTest.*"},
         {"name": "DdaCollCommon", "description": "DDA collective common helper tests", "test_filter": "DdaCollCommon.*"}
       ]
     },
@@ -254,7 +255,7 @@
       "num_gpus": 1,
       "timeout": 60,
       "tests": [
-        {"name": "GinHostMicrotests", "description": "Host-only gin_host.cc GIN_PROXY_NTHREADS microtests (no GPU, no HIP/RCCL runtime); NVIDIA/nccl#2279 / AICOMRCCL-2017", "test_filter": "*"}
+        {"name": "GinHostMicrotests", "description": "Host-only gin/gin_host.cc microtests (no GPU, no HIP/RCCL runtime); covers GIN_PROXY_NTHREADS (NVIDIA/nccl#2279 / AICOMRCCL-2017) and proxy-thread CPU affinity (AICOMRCCL-1859)", "test_filter": "*"}
       ]
     }
   },
@@ -315,7 +316,7 @@
     },
     {
       "name": "RCCL Microtests - gin_host.cc",
-      "description": "rccl-UnitTestsMicroGinHost (host-only gin_host.cc GIN_PROXY_NTHREADS microtests, no GPU/HIP/RCCL runtime)",
+      "description": "rccl-UnitTestsMicroGinHost (host-only gin/gin_host.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_gin_host",
       "enabled": true
     }

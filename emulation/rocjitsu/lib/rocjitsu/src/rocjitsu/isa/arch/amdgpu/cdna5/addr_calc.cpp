@@ -193,6 +193,9 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
     return std::nullopt;
   int64_t off = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   const bool buffer_load = amdgpu::addr_calc::gfx12_smem_is_buffer_load_op(inst.op);
+  // CDNA5 section 8.1.1 allows negative ordinary-load offsets, but not buffer IOFFSET.
+  if (buffer_load && off < 0)
+    wf.report_undefined_behavior("negative scalar-buffer load immediate");
   const uint64_t align_mask = std::min<uint64_t>(access_size_bytes, 4u) - 1;
   const uint32_t scale = inst.scale_offset && !buffer_load ? access_size_bytes : 1;
   off &= ~static_cast<int64_t>(align_mask);
@@ -405,10 +408,11 @@ void ds_calculate_addresses_masked(const VdsMachineInst &inst, amdgpu::Wavefront
   amdgpu::RegisterAccess regs(cu);
   amdgpu::RegisterAccess::VgprReadRegion addr_region =
       regs.read_vgpr_region(addr_base, 1, lane_mask);
+  const std::span<const uint32_t> addresses = addr_region.lanes();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(lane_mask & (1ULL << lane)))
       continue;
-    d.per_lane_addr[lane] = addr_region.lane(0, lane) + offset + wf.lds_base();
+    d.per_lane_addr[lane] = addresses[lane] + offset + wf.lds_base();
   }
 }
 

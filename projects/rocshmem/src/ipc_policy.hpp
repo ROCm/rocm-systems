@@ -393,10 +393,17 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe) {
-    if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
+    if (size >= constmem.ipc_sdma_threshold) {
       auto* handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
       assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
-      if constexpr (is_blocking(Kind)) handle->quietAll();
+      if constexpr (is_blocking(Kind)) {
+        handle->quietAll();
+        // SDMA wrote dst to GL2, bypassing L1; device-scope acquire invalidates
+        // stale L1 so the get returns fresh data (partner of sdmaCopy release).
+        if constexpr (!is_put(Kind))
+          atomic::threadfence<atomic::memory_scope::device,
+                              atomic::memory_order::acquire>();
+      }
       return;
     }
     memcpy_lane<Kind>(dst, src, size);
@@ -404,12 +411,22 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe) {
-    if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
+    if (size >= constmem.ipc_sdma_threshold * WF_SIZE) {
       sdma_anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_block()) {
         handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
         assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
         if constexpr (is_blocking(Kind)) handle->quietAll();
+      }
+      if constexpr (is_blocking(Kind) && !is_put(Kind)) {
+        // SDMA wrote dst to GL2, bypassing L1.  Only thread 0 drained, so the
+        // barrier orders that across waves before all lanes invalidate stale L1
+        // via a device-scope acquire.  Acquire must follow the barrier (a
+        // pre-barrier invalidate could be refilled with stale GL2) and be
+        // device scope (workgroup scope would not reach L1).
+        __builtin_amdgcn_s_barrier();
+        atomic::threadfence<atomic::memory_scope::device,
+                            atomic::memory_order::acquire>();
       }
       return;
     }
@@ -418,12 +435,19 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe) {
-    if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
+    if (size >= constmem.ipc_sdma_threshold * WF_SIZE) {
       sdma_anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_wave()) {
         handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
         assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
         if constexpr (is_blocking(Kind)) handle->quietAll();
+      }
+      if constexpr (is_blocking(Kind) && !is_put(Kind)) {
+        // SDMA wrote dst to GL2, bypassing L1.  Thread 0 drained; wave
+        // reconvergence orders that before all lanes invalidate stale L1 via a
+        // device-scope acquire (wave scope would not reach L1).
+        atomic::threadfence<atomic::memory_scope::device,
+                            atomic::memory_order::acquire>();
       }
       return;
     }
@@ -433,17 +457,18 @@ class IpcSdmaImpl : public IpcOnImpl {
   template <atomic::memory_scope scope = atomic::memory_scope::system,
             atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence() {
-    if (sdmaImpl_.sdmaEnabled &&
-        atomic::load<atomic::memory_scope::device,
-                     atomic::memory_order::relaxed>(&sdmaImpl_.sdmaDirty) != 0)
-      sdmaImpl_.sdmaQuietAll();
+    if (constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED) {
+      if (atomic::load<atomic::memory_scope::device,
+                       atomic::memory_order::relaxed>(&sdmaImpl_.sdmaDirty) != 0)
+        sdmaImpl_.sdmaQuietAll();
+    }
     atomic::threadfence<scope, order>();
   }
 
   template <atomic::memory_scope scope = atomic::memory_scope::system,
             atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence(int local_pe) {
-    if (sdmaImpl_.sdmaEnabled) {
+    if (constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED) {
       uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
                          (local_pe * sdmaImpl_.numChannels);
       if (atomic::load<atomic::memory_scope::device,
@@ -455,26 +480,37 @@ class IpcSdmaImpl : public IpcOnImpl {
   }
 
   __device__ void ipcQuiet() {
-    if (sdmaImpl_.sdmaEnabled &&
-          atomic::load<atomic::memory_scope::device,
-                       atomic::memory_order::relaxed>(
-                         &sdmaImpl_.sdmaDirty) != 0)
-      sdmaImpl_.sdmaQuietAll();
+    if (constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED) {
+      // Drain only if work is pending, but the fence is unconditionally
+      // acq_rel whenever SDMA is enabled: the acquire is required to make an
+      // already-drained SDMA get visible to subsequent CU loads. The dirty
+      // bit may have been consumed by an earlier fence/quiet that issued only
+      // a release fence, so it cannot gate the acquire here.
+      if (atomic::load<atomic::memory_scope::device,
+                       atomic::memory_order::relaxed>(&sdmaImpl_.sdmaDirty) != 0)
+        sdmaImpl_.sdmaQuietAll();
+      atomic::threadfence<atomic::memory_scope::system,
+                          atomic::memory_order::acq_rel>();
+      return;
+    }
     atomic::threadfence<atomic::memory_scope::system,
-                        atomic::memory_order::acq_rel>();
+                        atomic::memory_order::release>();
   }
 
   __device__ void ipcQuiet(int local_pe) {
-    if (sdmaImpl_.sdmaEnabled) {
+    if (constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED) {
       uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
                          (local_pe * sdmaImpl_.numChannels);
       if (atomic::load<atomic::memory_scope::device,
                        atomic::memory_order::relaxed>(
                          &sdmaImpl_.sdmaDirty) & pe_mask)
         sdmaImpl_.sdmaQuiet(local_pe);
+      atomic::threadfence<atomic::memory_scope::system,
+                          atomic::memory_order::acq_rel>();
+      return;
     }
     atomic::threadfence<atomic::memory_scope::system,
-                        atomic::memory_order::acq_rel>();
+                        atomic::memory_order::release>();
   }
 };
 #endif  // USE_SDMA
