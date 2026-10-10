@@ -1479,27 +1479,31 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 
   // (5) Enqueue-bound backends: CE registered (Branch B) vs symmetric vs kernel.
   // Reproduce taskAppend()'s AllReduce CE decision exactly so both agree.
-  // develop's taskAppend appends CE for AllReduce iff !hasSysmemSegment && ceAvailable
-  // && ((CTAPolicy & ZERO) || force): ceAvailable is the conjunction of the four
-  // sub-conditions below; split out so the disqualification log can name the blocker.
+  // Under ZERO (ceRegZero) CE wins over an eligible symk at any size; ceRegForce (force without ZERO) yields to symk and ceRegMax.
+  // ceAvailable is the conjunction of the sub-conditions below; split out so the disqualification log can name the blocker.
   const bool ceBufferOk          = !ceCapturing && ncclCeAvailable(comm, ncclFuncAllReduce, (int)op, datatype, winRegType, sendWin, recvWin);
   const bool ceAllReduceOpSupported = (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
   const bool ceCountDivisible    = (count % (size_t)comm->nRanks == 0);
   const bool ceEnabledByArch     = rcclCeAllReduceEnabledDef(ceArArchDefault);
   const bool ceAvailable         = ceArGraphAllowed && ceBufferOk && ceAllReduceOpSupported && ceCountDivisible && ceEnabledByArch;
   // Tuning cap only: registered CE has no staging allocation, so this does not
-  // size a buffer. kThreshUnlimited (or null table) = no upper bound;
-  // env var 0 returns 0, making ceRegInWindow false (disables registered CE).
+  // size a buffer. kThreshUnlimited = no upper bound; 0 (null table, untuned
+  // collective, or env var 0) disables registered CE, under ZERO too.
   // Independent of the 2-shot selector (ceNonRegMax/env, 0 = off) and ceARTmpBuf sizing.
   const size_t ceArRegMax = rcclCeRegMaxTab(archTable, ncclFuncAllReduce);
   const bool ceRegInWindow = ceArRegMax == kThreshUnlimited || msgBytes <= ceArRegMax;
-  if (!symEligible && ceRegInWindow && ceAvailable && !hasSysmemSegment &&
-      ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
+  // CTAPolicy=ZERO takes CE whenever it is available, like upstream taskAppend and rcclSelectAllGather Branch #3.
+  // Under ZERO symk does not veto CE and a positive table cap is ignored; a cap of 0 and an explicit env cap still apply.
+  const bool ceZeroPolicy = (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) != 0;
+  const bool ceRegEnvCapOk = rcclParamCeArRegMaxMsgBytes() < 0 || ceRegInWindow;
+  const bool ceRegZero = ceZeroPolicy && ceArRegMax != 0 && ceRegEnvCapOk;
+  const bool ceRegForce = force && !symEligible && ceRegInWindow;
+  if (ceAvailable && !hasSysmemSegment && (ceRegZero || ceRegForce)) {
     decision->algo = RCCL_CE_REGISTERED;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     return ncclSuccess;
   }
-  if (!query && !symEligible) INFO(NCCL_TUNING,
+  if (!query && (ceZeroPolicy || !symEligible)) INFO(NCCL_TUNING,
        "AR CE-registered disqualified: ceAvailable=%d(graphAllowed=%d bufOk=%d opOk=%d countDiv=%d archEnabled=%d)"
        " ceRegInWindow=%d hasSysmem=%d CTAPolicy=%d force=%d",
        (int)ceAvailable, (int)ceArGraphAllowed, (int)ceBufferOk, (int)ceAllReduceOpSupported,

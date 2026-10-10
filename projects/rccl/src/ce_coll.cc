@@ -475,8 +475,10 @@ bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType
     case ncclFuncAlltoAllv:
     case ncclFuncScatter:
     case ncclFuncGather:
-    case ncclFuncAllReduce:
       return true;
+    case ncclFuncAllReduce:
+      // The CE local reduce kernels have no fp8 instantiation (ce_reduce.cc returns ncclInvalidArgument).
+      return ty != ncclFloat8e4m3 && ty != ncclFloat8e5m2;
     default:
       return false;
     }

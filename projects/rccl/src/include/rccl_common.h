@@ -171,7 +171,7 @@ NCCL_API(ncclResult_t, rcclGetCollImplInfo, struct ncclComm* comm, ncclFunc_t co
          int* protocol, int* maxChannels);
 // Single source of truth for AllReduce implementation selection. Runs the exact
 // priority chain (GIN-SDMA -> symmetric -> CE 2-shot -> DDA LL/LL128/VMM/IPC -> CE registered
-// -> kernel) and returns the decision.
+// -> kernel) and returns the decision. Under CTAPolicy=ZERO an available CE registered path beats symmetric.
 //   query=false : live dispatch path (ncclAllReduce_impl). ceCapturing is probed
 //                 from `stream`; the CE graph latch is ticked; graphCapturingHint
 //                 is ignored.
