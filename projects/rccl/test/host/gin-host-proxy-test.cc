@@ -23,7 +23,7 @@
 
 namespace {
 
-enum class RmaCall { Put, PutSignal, Get };
+enum class RmaCall { Put, PutSignal, Get, Flush };
 
 struct RecordedCall {
   RmaCall call;
@@ -33,6 +33,7 @@ struct RecordedCall {
 
 std::vector<RecordedCall> g_calls;
 int g_requestToken = 0;
+int g_testCalls = 0;
 
 ncclResult_t FakeIput(void*, int, uint64_t, void*, size_t, uint64_t, void*, uint32_t rank, uint32_t optFlags,
                       void** request) {
@@ -55,7 +56,15 @@ ncclResult_t FakeIget(void*, int, uint64_t, void*, size_t, uint64_t, void*, uint
   return ncclSuccess;
 }
 
+// Completes immediately with no request, so the proxy must mark the op done itself.
+ncclResult_t FakeIflush(void*, int, void*, uint32_t rank, void** request) {
+  g_calls.push_back({RmaCall::Flush, rank, ncclRmaOptFlagsDefault});
+  *request = nullptr;
+  return ncclSuccess;
+}
+
 ncclResult_t FakeTest(void*, void*, int* done) {
+  g_testCalls++;
   *done = 1;
   return ncclSuccess;
 }
@@ -71,11 +80,13 @@ class GinHostProxyBatchTest : public ::testing::Test {
   void SetUp() override {
     ResetNcclFakes();
     g_calls.clear();
+    g_testCalls = 0;
     std::memset(&rma_, 0, sizeof(rma_));
     rma_.name = "Recorder";
     rma_.iput = FakeIput;
     rma_.iputSignal = FakeIputSignal;
     rma_.iget = FakeIget;
+    rma_.iflush = FakeIflush;
     rma_.test = FakeTest;
     savedBackend_ = rmaBackend;
     rmaBackend = &rma_;
@@ -136,8 +147,9 @@ class GinHostProxyBatchTest : public ::testing::Test {
 
   std::vector<uint32_t> FlagsFor(int rank) const {
     std::vector<uint32_t> flags;
-    for (const auto& c : g_calls)
+    for (const auto& c : g_calls) {
       if (c.rank == static_cast<uint32_t>(rank)) flags.push_back(c.optFlags);
+    }
     return flags;
   }
 
@@ -221,6 +233,25 @@ TEST_F(GinHostProxyBatchTest, HintReachesPutSignalAndGet) {
   }
 }
 
+TEST_F(GinHostProxyBatchTest, FlushEndsAHintedRun) {
+  Init(1, 32);
+  EnqueuePuts(0, 2);
+  Enqueue(0, ncclGinProxyOpFlush);
+
+  Tick();
+  ASSERT_EQ(3u, g_calls.size());
+  EXPECT_EQ(RmaCall::Put, g_calls[0].call);
+  EXPECT_EQ(RmaCall::Put, g_calls[1].call);
+  EXPECT_EQ(RmaCall::Flush, g_calls[2].call);
+  // Both puts are hinted; the iflush that follows is what tells the backend to submit them.
+  EXPECT_EQ(kAgg, g_calls[0].optFlags);
+  EXPECT_EQ(kAgg, g_calls[1].optFlags);
+  Tick();
+  // A flush with no request is complete at issue, so only the two puts are tested.
+  EXPECT_EQ(2, g_testCalls);
+  EXPECT_EQ(3u, cis_[0]);
+}
+
 TEST_F(GinHostProxyBatchTest, BatchAndHintArePerPeer) {
   Init(2, 2);
   EnqueuePuts(0, 3);
@@ -239,9 +270,11 @@ TEST_F(GinHostProxyBatchTest, DrainedSlotsAreReleasedToTheProducer) {
 
   Tick();
   ASSERT_EQ(4u, g_calls.size());
-  for (uint32_t i = 0; i < 4; i++)
-    for (int k = 0; k < ncclGinProxyGfdQwords; k++)
+  for (uint32_t i = 0; i < 4; i++) {
+    for (int k = 0; k < ncclGinProxyGfdQwords; k++) {
       EXPECT_EQ(0u, queues_[i].qword[k].raw) << "slot " << i << " qword " << k << " was not cleared";
+    }
+  }
   EXPECT_EQ(0u, cis_[0]);
   // Completions, and with them the consumed index, are polled on the next tick.
   Tick();
