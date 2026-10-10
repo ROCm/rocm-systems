@@ -154,6 +154,10 @@ TEST_P(LibMountHelperFilesystemTypeParam, GetMountInfoHandlesFilesystemType)
         .WillOnce(DoAll(SetArgPointee<1>(tbl), Return(0)));
     EXPECT_CALL(mlibmount, mnt_table_find_devno(tbl, dev, MNT_ITER_FORWARD)).WillOnce(Return(fs));
     EXPECT_CALL(mlibmount, mnt_fs_get_fstype(fs)).WillOnce(Return(mnt_fs_get_type_return));
+    if (expected_filesystem_type == FilesystemType::nfs) {
+        EXPECT_CALL(mlibmount, mnt_fs_get_option(fs, StrEq("proto"), NotNull(), NotNull()))
+            .WillOnce(Return(1));
+    }
     EXPECT_CALL(mlibmount, mnt_free_context(cxt));
 
     auto optional_mount_info = LibMountHelper().getMountInfo(dev);
@@ -176,14 +180,68 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple("ext3", FilesystemType::other), std::make_tuple("f2fs", FilesystemType::other),
         std::make_tuple("fusectl", FilesystemType::other),
         std::make_tuple("hugetlbfs", FilesystemType::other), std::make_tuple("jfs", FilesystemType::other),
-        std::make_tuple("mqueue", FilesystemType::other), std::make_tuple("nfs4", FilesystemType::other),
-        std::make_tuple("proc", FilesystemType::other), std::make_tuple("pstore", FilesystemType::other),
+        std::make_tuple("mqueue", FilesystemType::other), std::make_tuple("nfs", FilesystemType::nfs),
+        std::make_tuple("nfs4", FilesystemType::nfs), std::make_tuple("proc", FilesystemType::other),
+        std::make_tuple("pstore", FilesystemType::other),
         std::make_tuple("rpc_pipefs", FilesystemType::other),
         std::make_tuple("securityfs", FilesystemType::other),
         std::make_tuple("squashfs", FilesystemType::other), std::make_tuple("sysfs", FilesystemType::other),
         std::make_tuple("tmpfs", FilesystemType::other), std::make_tuple("tracefs", FilesystemType::other),
         std::make_tuple("vfat", FilesystemType::other), std::make_tuple("xfs", FilesystemType::xfs),
         std::make_tuple("zfs", FilesystemType::other)));
+
+class LibMountHelperNfsTransportParam
+    : public TestWithParam<std::tuple<const char *, std::tuple<int, const char *, size_t, NfsProto>>> {};
+
+TEST_P(LibMountHelperNfsTransportParam, GetMountInfoHandlesNfsTransport)
+{
+    StrictMock<MLibMount> mlibmount;
+    const auto &[filesystem_type, transport]            = GetParam();
+    const auto &[result, value, length, expected_proto] = transport;
+
+    auto dev{makedev(123, 456)};
+    auto context    = reinterpret_cast<libmnt_context *>(0xFACEFEED);
+    auto table      = reinterpret_cast<libmnt_table *>(0x0BADF00D);
+    auto filesystem = reinterpret_cast<libmnt_fs *>(0xCAFEBABE);
+
+    EXPECT_CALL(mlibmount, mnt_new_context).WillOnce(Return(context));
+    EXPECT_CALL(mlibmount, mnt_context_get_mtab(context, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(table), Return(0)));
+    EXPECT_CALL(mlibmount, mnt_table_find_devno(table, dev, MNT_ITER_FORWARD)).WillOnce(Return(filesystem));
+    EXPECT_CALL(mlibmount, mnt_fs_get_fstype(filesystem)).WillOnce(Return(filesystem_type));
+    EXPECT_CALL(mlibmount, mnt_fs_get_option(filesystem, StrEq("proto"), NotNull(), NotNull()))
+        .WillOnce(
+            DoAll(SetArgPointee<2>(const_cast<char *>(value)), SetArgPointee<3>(length), Return(result)));
+    EXPECT_CALL(mlibmount, mnt_free_context(context));
+
+    if (result < 0) {
+        EXPECT_THROW(LibMountHelper().getMountInfo(dev), std::runtime_error);
+    }
+    else {
+        auto mountinfo = LibMountHelper().getMountInfo(dev);
+        ASSERT_TRUE(mountinfo.has_value());
+        EXPECT_EQ(mountinfo->type, FilesystemType::nfs);
+        EXPECT_EQ(mountinfo->options.nfs.proto, expected_proto);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(NfsTransport, LibMountHelperNfsTransportParam,
+                         Combine(Values("nfs", "nfs4"),
+                                 Values(std::make_tuple(0, "rdma", size_t{4}, NfsProto::rdma),
+                                        std::make_tuple(0, "rdma6", size_t{5}, NfsProto::rdma6),
+                                        std::make_tuple(0, "rdma,vers=4.2", size_t{4}, NfsProto::rdma),
+                                        std::make_tuple(0, "rdma6,vers=4.2", size_t{5}, NfsProto::rdma6),
+                                        std::make_tuple(0, "tcp", size_t{3}, NfsProto::tcp),
+                                        std::make_tuple(0, "tcp6", size_t{4}, NfsProto::tcp6),
+                                        std::make_tuple(0, "udp", size_t{3}, NfsProto::udp),
+                                        std::make_tuple(0, "udp6", size_t{4}, NfsProto::udp6),
+                                        std::make_tuple(0, "rdmax", size_t{5}, NfsProto::unknown),
+                                        std::make_tuple(0, "rdma6x", size_t{6}, NfsProto::unknown),
+                                        std::make_tuple(0, "rdma", size_t{3}, NfsProto::unknown),
+                                        std::make_tuple(0, "", size_t{0}, NfsProto::unknown),
+                                        std::make_tuple(0, nullptr, size_t{0}, NfsProto::unknown),
+                                        std::make_tuple(1, nullptr, size_t{0}, NfsProto::unknown),
+                                        std::make_tuple(-1, nullptr, size_t{0}, NfsProto::unknown))));
 
 class LibMountHelperExt4FilesystemTypeParam
     : public TestWithParam<std::tuple<int, const char *, ExtJournalingMode>> {};
