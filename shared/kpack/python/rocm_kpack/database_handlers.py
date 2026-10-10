@@ -248,8 +248,8 @@ class AotritonHandler(DatabaseHandler):
 class MIOpenHandler(DatabaseHandler):
     """Handler for MIOpen performance database and model files.
 
-    MIOpen installs files to share/miopen/db/ with filenames prefixed by
-    the target architecture:
+    MIOpen installs files to share/miopen/db/ (Windows: bin/) with filenames
+    prefixed by the target architecture:
         gfx942130.db.txt          (gfx942 + 130 CUs)
         gfx90878.HIP.fdb.txt      (gfx908 + 78 CUs)
         gfx1030_36.db.txt         (gfx1030 + 36 CUs, underscore separator)
@@ -269,6 +269,7 @@ class MIOpenHandler(DatabaseHandler):
 
         Patterns:
         - share/miopen/db/gfx*.{db.txt,fdb.txt,model,kdb}
+        - bin/gfx*.{db.txt,fdb.txt,kdb} (Windows DATABASE_INSTALL_DIR)
         - CK per-arch shared libraries matching _MIOPEN_CK_SO_PATTERN
         """
         path_str = self._relative_path(path, prefix_root)
@@ -279,23 +280,18 @@ class MIOpenHandler(DatabaseHandler):
         if ck_match:
             return ck_match.group(1)
 
-        if "miopen/db" not in path_str:
+        if "miopen/db" in path_str:
+            suffixes = (".kdb", ".model", ".db.txt", ".fdb.txt")
+        elif Path(path_str).parent == Path("bin"):
+            # Windows installs system DBs beside the DLL; models stay generic.
+            suffixes = (".kdb", ".db.txt", ".fdb.txt")
+        else:
             return None
 
-        if not path.is_file():
+        if not path.is_file() or not filename.endswith(suffixes):
             return None
 
-        # Match .kdb, .model, .db.txt, .fdb.txt, .OpenCL.fdb.txt, .HIP.fdb.txt
-        name = path.name
-        if not (
-            name.endswith(".kdb")
-            or name.endswith(".model")
-            or name.endswith(".db.txt")
-            or name.endswith(".fdb.txt")
-        ):
-            return None
-
-        match = _MIOPEN_ARCH_PATTERN.search(name)
+        match = _MIOPEN_ARCH_PATTERN.search(filename)
         if match:
             return match.group(0)
 
