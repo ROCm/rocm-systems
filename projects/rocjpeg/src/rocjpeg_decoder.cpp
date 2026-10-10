@@ -23,7 +23,7 @@ THE SOFTWARE.
 #include "rocjpeg_decoder.h"
 
 RocJpegDecoder::RocJpegDecoder(RocJpegBackend backend, int device_id) :
-    num_devices_{0}, device_id_ {device_id}, hip_stream_ {0}, backend_{backend} {}
+    num_devices_{0}, device_id_ {device_id}, hip_stream_ {0}, backend_{backend}, initialized_{false} {}
 
 RocJpegDecoder::~RocJpegDecoder() {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -113,8 +113,82 @@ RocJpegStatus RocJpegDecoder::InitializeDecoder() {
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
+    initialized_ = true;
     FunctionExitLog(g_rocjpeg_logger);
     return rocjpeg_status;
+}
+
+/**
+ * @brief Retrieves the decode capabilities of this decoder.
+ *
+ * All values read here are written only during InitializeDecoder(), which completes before rocJpegCreate()
+ * returns, so no lock is taken and the query never waits behind a decode on the same handle.
+ *
+ * @param decode_caps Pointer to store the decode capabilities.
+ * @return The status of the operation.
+ *         - ROCJPEG_STATUS_SUCCESS if the capabilities are filled.
+ *         - ROCJPEG_STATUS_INVALID_PARAMETER if decode_caps is nullptr.
+ *         - ROCJPEG_STATUS_NOT_INITIALIZED if the decoder failed to initialize; decode_caps is zeroed.
+ */
+RocJpegStatus RocJpegDecoder::GetDecoderCaps(RocJpegDecodeCaps *decode_caps) const {
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(decode_caps));
+    if (decode_caps == nullptr) {
+        CriticalLog(g_rocjpeg_logger, "Null decode capability struct pointer.");
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
+    memset(decode_caps, 0, sizeof(RocJpegDecodeCaps));
+    if (!initialized_) {
+        ErrorLog(g_rocjpeg_logger, "The rocJPEG decoder is not initialized!");
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_NOT_INITIALIZED;
+    }
+    switch (backend_) {
+        case ROCJPEG_BACKEND_HARDWARE: {
+            const VcnJpegSpec &vcn_jpeg_spec = jpeg_vaapi_decoder_.GetCurrentVcnJpegSpec();
+            // Without the VCN ROI support, cropping is done while copying/converting the decoded output.
+            decode_caps->roi_decode = 1;
+            decode_caps->hw_roi_decode = vcn_jpeg_spec.can_roi_decode ? 1 : 0;
+            decode_caps->max_components = NUM_COMPONENTS - 1;
+            decode_caps->num_jpeg_cores = vcn_jpeg_spec.num_jpeg_cores;
+            // Report the stricter of the limit enforced at decode time and the one reported by the VA-API driver.
+            decode_caps->min_width = std::max(jpeg_vaapi_decoder_.GetMinPictureWidth(), jpeg_vaapi_decoder_.GetDriverMinSurfaceWidth());
+            decode_caps->min_height = std::max(jpeg_vaapi_decoder_.GetMinPictureHeight(), jpeg_vaapi_decoder_.GetDriverMinSurfaceHeight());
+            // The parser rejects dimensions above MAX_SAFE_DIMENSION regardless of the VA-API limit.
+            decode_caps->max_width = std::min<uint32_t>(jpeg_vaapi_decoder_.GetMaxPictureWidth(), MAX_SAFE_DIMENSION);
+            decode_caps->max_height = std::min<uint32_t>(jpeg_vaapi_decoder_.GetMaxPictureHeight(), MAX_SAFE_DIMENSION);
+            // A subsampling is supported if the VA-API driver supports the surface the VCN JPEG decoder writes for it.
+            // RocJpegStreamParser rejects ROCJPEG_CSS_411 and ROCJPEG_CSS_UNKNOWN streams, which have no surface format.
+            // The internal ChromaSubsampling values match the public RocJpegChromaSubsampling values.
+            for (int css = 0; css < ROCJPEG_NUM_CHROMA_SUBSAMPLINGS; css++) {
+                RocJpegSurfaceFormat surface_format = jpeg_vaapi_decoder_.GetNativeSurfaceFormat(static_cast<ChromaSubsampling>(css));
+                decode_caps->native_surface_format[css] = surface_format;
+                if (surface_format != ROCJPEG_SURFACE_FORMAT_NONE) {
+                    decode_caps->subsampling_mask |= (1u << css);
+                }
+            }
+            if (decode_caps->subsampling_mask == 0) {
+                break;
+            }
+            decode_caps->is_supported = 1;
+            // VA-API only defines VAProfileJPEGBaseline, which InitializeDecoder requires with the VLD entrypoint;
+            // RocJpegStreamParser rejects every other frame type (SOF1 to SOF15).
+            decode_caps->coding_process_mask = (1u << ROCJPEG_CODING_PROCESS_BASELINE);
+            decode_caps->output_format_mask = (1u << ROCJPEG_OUTPUT_FORMAT_MAX) - 1;
+            // Must match the RGB surface selection in RocJpegVappiDecoder::SubmitDecode/SubmitDecodeBatched,
+            // which uses the VCN color conversion for every subsampling except 4:4:0.
+            if (vcn_jpeg_spec.can_convert_to_rgb) {
+                decode_caps->hw_rgb_subsampling_mask = decode_caps->subsampling_mask & ~(1u << ROCJPEG_CSS_440);
+                decode_caps->hw_rgb_output_format_mask = (1u << ROCJPEG_OUTPUT_RGB) | (1u << ROCJPEG_OUTPUT_RGB_PLANAR);
+            }
+            break;
+        }
+        default:
+            FunctionExitLog(g_rocjpeg_logger);
+            return ROCJPEG_STATUS_NOT_IMPLEMENTED;
+    }
+    FunctionExitLog(g_rocjpeg_logger);
+    return ROCJPEG_STATUS_SUCCESS;
 }
 
 /**

@@ -385,7 +385,7 @@ bool RocJpegVaapiMemoryPool::SetSurfaceAsIdle(VASurfaceID surface_id) {
  * @param device_id The ID of the device to be used for decoding.
  */
 RocJpegVappiDecoder::RocJpegVappiDecoder(int device_id) : device_id_{device_id}, drm_fd_{-1}, min_picture_width_{64}, min_picture_height_{64},
-    max_picture_width_{4096}, max_picture_height_{4096}, default_surface_width_{3840}, default_surface_height_{2160}, supports_modifiers_{false}, va_display_{0}, va_config_attrib_{{}}, va_config_id_{0}, va_profile_{VAProfileJPEGBaseline},
+    max_picture_width_{4096}, max_picture_height_{4096}, default_surface_width_{3840}, default_surface_height_{2160}, supports_modifiers_{false}, driver_min_surface_width_{0}, driver_min_surface_height_{0}, va_display_{0}, va_config_attrib_{{}}, va_config_id_{0}, va_profile_{VAProfileJPEGBaseline},
     vaapi_mem_pool_(std::make_unique<RocJpegVaapiMemoryPool>()), current_vcn_jpeg_spec_{1, false, false}, va_picture_parameter_buf_id_{0}, va_quantization_matrix_buf_id_{0}, va_huffmantable_buf_id_{0},
     va_slice_param_buf_id_{0}, va_slice_data_buf_id_{0} {
 #ifdef ROCJPEG_USE_DLOPEN_VA
@@ -682,13 +682,54 @@ RocJpegStatus RocJpegVappiDecoder::CreateDecoderConfig() {
         for (auto attrib : attribs) {
             if (attrib.type == VASurfaceAttribDRMFormatModifiers) {
                 supports_modifiers_ = true;
-                break;
+            } else if (attrib.type == VASurfaceAttribPixelFormat && attrib.value.type == VAGenericValueTypeInteger) {
+                driver_pixel_formats_.push_back(static_cast<uint32_t>(attrib.value.value.i));
+            } else if (attrib.type == VASurfaceAttribMinWidth && attrib.value.type == VAGenericValueTypeInteger) {
+                driver_min_surface_width_ = static_cast<uint32_t>(attrib.value.value.i);
+            } else if (attrib.type == VASurfaceAttribMinHeight && attrib.value.type == VAGenericValueTypeInteger) {
+                driver_min_surface_height_ = static_cast<uint32_t>(attrib.value.value.i);
             }
         }
         return ROCJPEG_STATUS_SUCCESS;
     } else {
         return ROCJPEG_STATUS_HW_JPEG_DECODER_NOT_SUPPORTED;
     }
+}
+
+RocJpegSurfaceFormat RocJpegVappiDecoder::GetNativeSurfaceFormat(ChromaSubsampling chroma_subsampling) const {
+    // Must match the non-RGB surface selection in SubmitDecode and SubmitDecodeBatched.
+    uint32_t pixel_format = 0;
+    RocJpegSurfaceFormat surface_format = ROCJPEG_SURFACE_FORMAT_NONE;
+    switch (chroma_subsampling) {
+        case CSS_444:
+            pixel_format = VA_FOURCC_444P;
+            surface_format = ROCJPEG_SURFACE_FORMAT_YUV444P;
+            break;
+        case CSS_440:
+            pixel_format = VA_FOURCC_422V;
+            surface_format = ROCJPEG_SURFACE_FORMAT_YUV440P;
+            break;
+        case CSS_422:
+            pixel_format = VA_FOURCC_YUY2;
+            surface_format = ROCJPEG_SURFACE_FORMAT_YUYV;
+            break;
+        case CSS_420:
+            pixel_format = VA_FOURCC_NV12;
+            surface_format = ROCJPEG_SURFACE_FORMAT_NV12;
+            break;
+        case CSS_400:
+            pixel_format = VA_FOURCC_Y800;
+            surface_format = ROCJPEG_SURFACE_FORMAT_Y8;
+            break;
+        default:
+            return ROCJPEG_SURFACE_FORMAT_NONE;
+    }
+    // Some drivers do not report pixel formats for the config; the surface selection is then trusted as is.
+    if (!driver_pixel_formats_.empty() &&
+        std::find(driver_pixel_formats_.begin(), driver_pixel_formats_.end(), pixel_format) == driver_pixel_formats_.end()) {
+        return ROCJPEG_SURFACE_FORMAT_NONE;
+    }
+    return surface_format;
 }
 
 /**
@@ -782,6 +823,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecode(const JpegStreamParameters *jpeg
     // If RGB output format is requested, and the HW JPEG decoder has a built-in format conversion,
     // set the RGB surface format and attributes to obtain the RGB output directly from the JPEG HW decoder.
     // otherwise set the appropriate surface format and attributes based on the chroma subsampling of the image.
+    // Keep in sync with the hw_rgb_* fields reported by RocJpegDecoder::GetDecoderCaps().
     if ((decode_params->output_format == ROCJPEG_OUTPUT_RGB || decode_params->output_format == ROCJPEG_OUTPUT_RGB_PLANAR) && current_vcn_jpeg_spec_.can_convert_to_rgb && jpeg_stream_params->chroma_subsampling != CSS_440) {
         if (decode_params->output_format == ROCJPEG_OUTPUT_RGB) {
             surface_format = VA_RT_FORMAT_RGB32;
@@ -791,6 +833,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecode(const JpegStreamParameters *jpeg
             surface_attrib.value.value.i = VA_FOURCC_RGBP;
         }
     } else {
+        // Keep in sync with GetNativeSurfaceFormat().
         switch (jpeg_stream_params->chroma_subsampling) {
             case CSS_444:
                 surface_format = VA_RT_FORMAT_YUV444;
@@ -915,6 +958,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
                 return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
             }
 
+        // Keep in sync with the hw_rgb_* fields reported by RocJpegDecoder::GetDecoderCaps().
         if ((decode_params[i].output_format == ROCJPEG_OUTPUT_RGB || decode_params[i].output_format == ROCJPEG_OUTPUT_RGB_PLANAR) && current_vcn_jpeg_spec_.can_convert_to_rgb && jpeg_streams_params[i].chroma_subsampling != CSS_440) {
             if (decode_params[i].output_format == ROCJPEG_OUTPUT_RGB) {
                 jpeg_stream_key.surface_format = VA_RT_FORMAT_RGB32;
@@ -924,6 +968,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
                 jpeg_stream_key.pixel_format = VA_FOURCC_RGBP;
             }
         } else {
+            // Keep in sync with GetNativeSurfaceFormat().
             switch (jpeg_streams_params[i].chroma_subsampling) {
                 case CSS_444:
                     jpeg_stream_key.surface_format = VA_RT_FORMAT_YUV444;

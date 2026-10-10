@@ -188,6 +188,13 @@ public:
     */
    RocJpegStatus DecodeBatchedSync(RocJpegImage *destinations, int batch_size);
 
+   /**
+    * @brief Retrieves the decode capabilities of this decoder.
+    * @param decode_caps Pointer to store the decode capabilities.
+    * @return The status of the operation.
+    */
+   RocJpegStatus GetDecoderCaps(RocJpegDecodeCaps *decode_caps) const;
+
 private:
    struct AsyncDecodeState {
       VASurfaceID surface_id;
@@ -258,6 +265,7 @@ private:
    std::mutex mutex_; // Mutex for thread safety
    std::mutex finalize_mutex_; // Serializes FinalizeDecodeBatched (shared param buffers + hip_stream_) across concurrent syncs
    RocJpegBackend backend_; // RocJpeg backend
+   bool initialized_; // Set only when InitializeDecoder succeeds; read without a lock by GetDecoderCaps
    RocJpegVappiDecoder jpeg_vaapi_decoder_; // RocJpeg VAAPI decoder object
    std::unordered_map<RocJpegImage*, AsyncDecodeState> pending_decodes_; // Map of pending asynchronous decodes keyed by destination
 

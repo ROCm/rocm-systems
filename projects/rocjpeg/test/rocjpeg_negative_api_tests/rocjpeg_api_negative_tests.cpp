@@ -653,6 +653,106 @@ int RocJpegApiNegativeTests::TestInvalidDecodeBatched() {
     return EXIT_SUCCESS;
 }
 
+int RocJpegApiNegativeTests::TestInvalidGetDecoderCaps() {
+    std::cout << "info: Executing negative test cases for the rocJpegGetDecoderCaps API" << std::endl;
+    RocJpegDecodeCaps decode_caps = {};
+    // Scenario 1: Pass nullptr for all parameters
+    RocJpegStatus rocjpeg_status = rocJpegGetDecoderCaps(nullptr, nullptr);
+    if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+        std::cerr << "Expected ROCJPEG_STATUS_INVALID_PARAMETER but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    // Scenario 2: Pass nullptr for handle
+    rocjpeg_status = rocJpegGetDecoderCaps(nullptr, &decode_caps);
+    if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+        std::cerr << "Expected ROCJPEG_STATUS_INVALID_PARAMETER but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    // Scenario 3: Pass valid handle but nullptr for decode_caps
+    rocjpeg_status = rocJpegGetDecoderCaps(rocjpeg_handle_, nullptr);
+    if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+        std::cerr << "Expected ROCJPEG_STATUS_INVALID_PARAMETER but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    // Scenario 4: Query handles whose rocJpegCreate failed (unsupported backend, invalid device_id);
+    // decode_caps must be fully zeroed.
+    const struct {
+        RocJpegBackend backend;
+        int device_id;
+    } failed_creates[] = {{ROCJPEG_BACKEND_HYBRID, 0}, {ROCJPEG_BACKEND_HARDWARE, 255}};
+    for (const auto &failed_create : failed_creates) {
+        RocJpegHandle handle = nullptr;
+        rocjpeg_status = rocJpegCreate(failed_create.backend, failed_create.device_id, &handle);
+        if (rocjpeg_status == ROCJPEG_STATUS_SUCCESS || handle == nullptr) {
+            std::cerr << "Expected rocJpegCreate to fail with a non-null handle for backend " << failed_create.backend
+                      << " and device_id " << failed_create.device_id << std::endl;
+            if (handle != nullptr) {
+                rocJpegDestroy(handle);
+            }
+            return EXIT_FAILURE;
+        }
+        memset(&decode_caps, 0xFF, sizeof(decode_caps));
+        rocjpeg_status = rocJpegGetDecoderCaps(handle, &decode_caps);
+        rocJpegDestroy(handle);
+        if (rocjpeg_status != ROCJPEG_STATUS_NOT_INITIALIZED) {
+            std::cerr << "Expected ROCJPEG_STATUS_NOT_INITIALIZED but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+        const uint8_t *bytes = reinterpret_cast<const uint8_t *>(&decode_caps);
+        for (size_t i = 0; i < sizeof(decode_caps); i++) {
+            if (bytes[i] != 0) {
+                std::cerr << "Expected a zeroed RocJpegDecodeCaps for a failed rocJpegCreate" << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
+    }
+
+    // Scenario 5: Pass a valid handle; the reported capabilities must be self-consistent.
+    memset(&decode_caps, 0xFF, sizeof(decode_caps));
+    rocjpeg_status = rocJpegGetDecoderCaps(rocjpeg_handle_, &decode_caps);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    const uint32_t rgb_output_formats = (1u << ROCJPEG_OUTPUT_RGB) | (1u << ROCJPEG_OUTPUT_RGB_PLANAR);
+    bool reserved_zero = true;
+    for (uint32_t value : decode_caps.reserved) {
+        reserved_zero = reserved_zero && (value == 0);
+    }
+    if (decode_caps.is_supported != 1 || decode_caps.roi_decode != 1 || decode_caps.hw_roi_decode > 1 ||
+        decode_caps.max_components != 3 || decode_caps.num_jpeg_cores < 1 ||
+        decode_caps.min_width == 0 || decode_caps.min_width > decode_caps.max_width ||
+        decode_caps.min_height == 0 || decode_caps.min_height > decode_caps.max_height ||
+        decode_caps.subsampling_mask == 0 || (decode_caps.subsampling_mask & (1u << ROCJPEG_CSS_411)) != 0 ||
+        decode_caps.output_format_mask != (1u << ROCJPEG_OUTPUT_FORMAT_MAX) - 1 ||
+        decode_caps.coding_process_mask != (1u << ROCJPEG_CODING_PROCESS_BASELINE) ||
+        (decode_caps.hw_rgb_subsampling_mask & ~decode_caps.subsampling_mask) != 0 ||
+        (decode_caps.hw_rgb_output_format_mask & ~rgb_output_formats) != 0 ||
+        (decode_caps.hw_rgb_subsampling_mask == 0) != (decode_caps.hw_rgb_output_format_mask == 0) ||
+        !reserved_zero) {
+        std::cerr << "Inconsistent RocJpegDecodeCaps reported for a valid rocJPEG handle" << std::endl;
+        return EXIT_FAILURE;
+    }
+    // A subsampling is supported exactly when it reports its native surface format.
+    const uint32_t expected_native_formats[ROCJPEG_NUM_CHROMA_SUBSAMPLINGS] = {
+        ROCJPEG_SURFACE_FORMAT_YUV444P, ROCJPEG_SURFACE_FORMAT_YUV440P, ROCJPEG_SURFACE_FORMAT_YUYV,
+        ROCJPEG_SURFACE_FORMAT_NV12, ROCJPEG_SURFACE_FORMAT_NONE, ROCJPEG_SURFACE_FORMAT_Y8};
+    for (int css = 0; css < ROCJPEG_NUM_CHROMA_SUBSAMPLINGS; css++) {
+        bool css_supported = (decode_caps.subsampling_mask & (1u << css)) != 0;
+        uint32_t expected = css_supported ? expected_native_formats[css] : ROCJPEG_SURFACE_FORMAT_NONE;
+        if (decode_caps.native_surface_format[css] != expected) {
+            std::cerr << "Unexpected native_surface_format " << decode_caps.native_surface_format[css]
+                      << " for chroma subsampling " << css << std::endl;
+            return EXIT_FAILURE;
+        }
+    }
+
+    return EXIT_SUCCESS;
+}
+
 int RocJpegApiNegativeTests::TestInvalidGetErrorName() {
     std::cout << "info: Executing negative test cases for the rocJpegGetErrorName API" << std::endl;
     // Scenario 1: Pass an invalid error code
@@ -1452,7 +1552,7 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
 int RocJpegApiNegativeTests::RunTests() {
     if (TestInvalidStreamCreate() || TestInvalidStreamParse () || TestInvalidStreamDestroy() || TestInvalidCreate() || TestInvalidDestroy() ||
         TestInvalidGetImageInfo() || TestInvalidDecode() || TestInvalidDecodeBatched() || TestInvalidGetErrorName() ||
-        TestStreamParseFuzz()) {
+        TestInvalidGetDecoderCaps() || TestStreamParseFuzz()) {
         std::cerr << "One or more negative tests failed." << std::endl;
         return EXIT_FAILURE;
     } else {

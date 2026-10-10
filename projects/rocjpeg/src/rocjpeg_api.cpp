@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include <cstddef>
 #include "rocjpeg_api_stream_handle.h"
 #include "rocjpeg_api_decoder_handle.h"
 #include "rocjpeg_commons.h"
@@ -384,6 +385,43 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedSync(RocJpegHandle handle, RocJpegI
     auto rocjpeg_handle = static_cast<RocJpegDecoderHandle*>(handle);
     try {
         rocjpeg_status = rocjpeg_handle->rocjpeg_decoder->DecodeBatchedSync(destinations, batch_size);
+    } catch (const std::exception& e) {
+        rocjpeg_handle->CaptureError(e.what());
+        ErrorLog(g_rocjpeg_logger, e.what());
+        return ROCJPEG_STATUS_RUNTIME_ERROR;
+    }
+
+    return rocjpeg_status;
+}
+
+// RocJpegDecodeCaps is part of the public ABI; new fields must be carved out of the reserved array.
+static_assert(sizeof(RocJpegDecodeCaps) == 128, "RocJpegDecodeCaps size must stay 128 bytes");
+static_assert(offsetof(RocJpegDecodeCaps, num_jpeg_cores) == 4, "RocJpegDecodeCaps layout changed");
+static_assert(offsetof(RocJpegDecodeCaps, subsampling_mask) == 24, "RocJpegDecodeCaps layout changed");
+static_assert(offsetof(RocJpegDecodeCaps, native_surface_format) == 40, "RocJpegDecodeCaps layout changed");
+static_assert(offsetof(RocJpegDecodeCaps, coding_process_mask) == 64, "RocJpegDecodeCaps layout changed");
+static_assert(offsetof(RocJpegDecodeCaps, reserved) == 68, "RocJpegDecodeCaps layout changed");
+static_assert(ROCJPEG_CSS_400 < 32 && ROCJPEG_OUTPUT_FORMAT_MAX <= 32, "RocJpegDecodeCaps masks are 32 bits wide");
+static_assert(ROCJPEG_CSS_400 < ROCJPEG_NUM_CHROMA_SUBSAMPLINGS, "native_surface_format is indexed by RocJpegChromaSubsampling");
+
+/**
+ * @brief Queries the JPEG decode capabilities of a rocJPEG handle.
+ *
+ * @param handle The rocJPEG handle created by rocJpegCreate.
+ * @param decode_caps A pointer to a RocJpegDecodeCaps structure that will store the decode capabilities.
+ * @return The status of the operation. Returns ROCJPEG_STATUS_INVALID_PARAMETER if handle or decode_caps is nullptr,
+ *         ROCJPEG_STATUS_NOT_INITIALIZED if rocJpegCreate did not succeed for this handle, or
+ *         ROCJPEG_STATUS_RUNTIME_ERROR if an exception occurred.
+ */
+RocJpegStatus ROCJPEGAPI rocJpegGetDecoderCaps(RocJpegHandle handle, RocJpegDecodeCaps *decode_caps) {
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(handle) + ", " + RocJpegFmtPtr(decode_caps));
+    if (handle == nullptr || decode_caps == nullptr) {
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
+    RocJpegStatus rocjpeg_status = ROCJPEG_STATUS_SUCCESS;
+    auto rocjpeg_handle = static_cast<RocJpegDecoderHandle*>(handle);
+    try {
+        rocjpeg_status = rocjpeg_handle->rocjpeg_decoder->GetDecoderCaps(decode_caps);
     } catch (const std::exception& e) {
         rocjpeg_handle->CaptureError(e.what());
         ErrorLog(g_rocjpeg_logger, e.what());
