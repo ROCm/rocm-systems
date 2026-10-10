@@ -84,6 +84,7 @@ test_categories:
       - "Add4G.*"
       - "RcclEpWaveTest.*"
       - "RcclEpLayoutTest.*"
+      - "GinDeviceTest.*"
     exclude_windows:
       - "*"
     labels:
