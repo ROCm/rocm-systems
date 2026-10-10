@@ -1886,6 +1886,18 @@ SIMD_VOP3_BINARY_TRUE16_SRC: dict[str, tuple[str, str]] = {
         ' return ((hi & 0xFFFFu) << 16) | (lo & 0xFFFFu); }',
     ),
 }
+# GFX9 and RDNA1/2 spell the F16 normalized packs *_PKNORM_*. They read the
+# same op_sel-selected halves, so they share the RDNA3+ fast path.
+SIMD_VOP3_BINARY_TRUE16_SRC.update(
+    {
+        'v_cvt_pknorm_i16_f16_vop3': SIMD_VOP3_BINARY_TRUE16_SRC[
+            'v_cvt_pk_norm_i16_f16_vop3'
+        ],
+        'v_cvt_pknorm_u16_f16_vop3': SIMD_VOP3_BINARY_TRUE16_SRC[
+            'v_cvt_pk_norm_u16_f16_vop3'
+        ],
+    }
+)
 
 # True16 VOP3 scalar semantics select 16-bit source halves and merge a selected
 # destination half. The generic 32-bit VOP3 SIMD glue overwrites the whole dword.
@@ -2559,6 +2571,8 @@ _PACKED_NORMALIZED_VOP3 = (
     'v_cvt_pknorm_u16_f32_vop3',
     'v_cvt_pk_norm_i16_f32_vop3',
     'v_cvt_pk_norm_u16_f32_vop3',
+    'v_cvt_pknorm_i16_f16_vop3',
+    'v_cvt_pknorm_u16_f16_vop3',
     'v_cvt_pk_norm_i16_f16_vop3',
     'v_cvt_pk_norm_u16_f16_vop3',
 )
@@ -2567,10 +2581,25 @@ _PACKED_NORMALIZED_VOP3 = (
 _PACKED_RTZ_VOP3 = ('v_cvt_pkrtz_f16_f32_vop3', 'v_cvt_pk_rtz_f16_f32_vop3')
 
 
-def _modified_conversion_op(cpp_op: str, *, bits: int, arity: int = 2) -> str:
+def _modified_conversion_op(
+    cpp_op: str, *, bits: int, arity: int = 2, flush_f16_inputs: bool = False
+) -> str:
     """Apply floating source signs before a raw-word SIMD conversion."""
     operands = ('a', 'b')[:arity]
     parameters = ', '.join(f'auto {operand}' for operand in operands)
+    if flush_f16_inputs:
+        prepare = ''.join(
+            f' {operand} = amdgpu::prepare_f16_input_simd('
+            f'{operand}, inst.inst_.abs & {1 << i}u, '
+            f'inst.inst_.neg & {1 << i}u, f16_denorm_mode);'
+            for i, operand in enumerate(operands)
+        )
+        return (
+            '[&inst, f16_denorm_mode = wf.fp_denorm_mode_f16_f64()]'
+            f'({parameters}) {{'
+            + prepare
+            + f' return ({cpp_op})({", ".join(operands)}); }}'
+        )
     sign = f'0x{1 << (bits - 1):x}u'
     modifiers = ''.join(
         f' if (inst.inst_.abs & {1 << i}u) {operand} &= ~{sign};'
@@ -3007,7 +3036,7 @@ def _simd_probe_line(
     if spec3bin16 is not None:
         cpp_t, cpp_op = spec3bin16
         if template_name in _PACKED_NORMALIZED_VOP3:
-            cpp_op = _modified_conversion_op(cpp_op, bits=16)
+            cpp_op = _modified_conversion_op(cpp_op, bits=16, flush_f16_inputs=True)
         return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC({cpp_t}, {cpp_op});'
     spec3binx = SIMD_VOP3_BINARY_INT_EXTRA.get(template_name)
     if spec3binx is not None:
