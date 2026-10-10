@@ -1286,6 +1286,119 @@ TEST(GpuVmPipeline, TranslatedAtomicRetrySkipsCompletedLanes) {
   EXPECT_EQ(context.external->compare_exchange_calls, 2u);
 }
 
+TEST(GpuVmPipeline, MixedFlatAtomicRetryPreservesLdsAndCompletedGlobalLanes) {
+  TranslatedPipelineContext context;
+  ASSERT_TRUE(context.address_space);
+  ASSERT_NE(context.wf, nullptr);
+  auto &wf = *context.wf;
+  wf.set_exec(0x7);
+  wf.set_lds_base(context.cu->allocate_lds(256));
+  constexpr uint64_t shared_base = 0x100000;
+  constexpr uint32_t lds_offset = 64;
+  constexpr std::array<uint32_t, 3> initial = {10, 20, 30};
+  constexpr std::array<uint32_t, 3> source = {1, 2, 3};
+  context.external->store(0x100, initial[0]);
+  context.external->store(0x200, initial[2]);
+  wf.lds().write32(wf.lds_base() + lds_offset, initial[1]);
+  context.external->unavailable_atomic_load_call = 2;
+
+  auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  state->elem_size = sizeof(uint32_t);
+  state->num_elems = 1;
+  state->is_load = true;
+  state->atomic_op = amdgpu::AtomicOp::ADD;
+  state->wf_size = wf.wf_size();
+  state->exec_mask = state->lane_mask = 0x7;
+  state->flat_shared_lane_mask = 0x2;
+  state->flat_shared_aperture_base = shared_base;
+  state->dst_reg_base = wf.vgpr_alloc().base + 4;
+  state->per_lane_addr[0] = 0x100;
+  state->per_lane_addr[1] = shared_base + lds_offset;
+  state->per_lane_addr[2] = 0x200;
+  state->store_data.resize(wf.wf_size() * sizeof(uint32_t));
+  std::memcpy(state->store_data.data(), source.data(), sizeof(source));
+
+  amdgpu::GlobalMemPipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
+  ASSERT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), wf),
+            amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(wf.state(), amdgpu::WfState::VM_RETRY);
+  EXPECT_EQ(context.external->load<uint32_t>(0x100), initial[0] + source[0]);
+  EXPECT_EQ(wf.lds().read32(wf.lds_base() + lds_offset), initial[1]);
+  EXPECT_EQ(context.external->load<uint32_t>(0x200), initial[2]);
+
+  pipeline.tick();
+  EXPECT_EQ(wf.state(), amdgpu::WfState::RUNNING);
+  EXPECT_TRUE(wf.wait_counters().empty());
+  EXPECT_EQ(context.external->load<uint32_t>(0x100), initial[0] + source[0]);
+  EXPECT_EQ(wf.lds().read32(wf.lds_base() + lds_offset), initial[1] + source[1]);
+  EXPECT_EQ(context.external->load<uint32_t>(0x200), initial[2] + source[2]);
+  for (uint32_t lane = 0; lane < initial.size(); ++lane)
+    EXPECT_EQ(context.cu->read_vgpr(wf.vgpr_alloc().base + 4, lane), initial[lane]);
+  EXPECT_EQ(context.external->atomic_load_calls, 3u);
+  EXPECT_EQ(context.external->compare_exchange_calls, 2u);
+}
+
+TEST(GpuVmPipeline, MixedFlatLegacyAtomicRetryRefreshesVmSnapshot) {
+  for (uint32_t local_lane : {0u, 1u}) {
+    SCOPED_TRACE(local_lane);
+    const uint32_t first_global_lane = 1 - local_lane;
+    TranslatedPipelineContext context(/*legacy_cache_compatible=*/true);
+    ASSERT_TRUE(context.address_space);
+    ASSERT_NE(context.wf, nullptr);
+    auto &wf = *context.wf;
+    wf.set_exec(0x7);
+    wf.set_lds_base(context.cu->allocate_lds(256));
+    constexpr uint64_t shared_base = 0x100000;
+    constexpr uint32_t lds_offset = 64;
+    constexpr std::array<uint32_t, 3> initial = {10, 20, 30};
+    constexpr std::array<uint32_t, 3> source = {1, 2, 3};
+    context.external->store(0x100, initial[first_global_lane]);
+    context.external->store(0x200, initial[2]);
+    wf.lds().write32(wf.lds_base() + lds_offset, initial[local_lane]);
+    context.external->unavailable_atomic_modify_call = 2;
+
+    auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = true;
+    state->atomic_op = amdgpu::AtomicOp::ADD;
+    state->wf_size = wf.wf_size();
+    state->exec_mask = state->lane_mask = 0x7;
+    state->flat_shared_lane_mask = uint64_t{1} << local_lane;
+    state->flat_shared_aperture_base = shared_base;
+    state->dst_reg_base = wf.vgpr_alloc().base + 4;
+    state->per_lane_addr[first_global_lane] = 0x100;
+    state->per_lane_addr[local_lane] = shared_base + lds_offset;
+    state->per_lane_addr[2] = 0x200;
+    state->store_data.resize(wf.wf_size() * sizeof(uint32_t));
+    std::memcpy(state->store_data.data(), source.data(), sizeof(source));
+
+    amdgpu::GlobalMemPipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
+    ASSERT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), wf),
+              amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(wf.state(), amdgpu::WfState::VM_RETRY);
+    EXPECT_EQ(context.external->load<uint32_t>(0x100),
+              initial[first_global_lane] + source[first_global_lane]);
+    EXPECT_EQ(wf.lds().read32(wf.lds_base() + lds_offset), initial[local_lane]);
+    EXPECT_EQ(context.external->load<uint32_t>(0x200), initial[2]);
+
+    // The first global lane has committed. Refresh the VM snapshot on retry,
+    // preserving that lane's result and deferring the LDS atomic until success.
+    ASSERT_TRUE(context.sim.soc->gpu_vm().invalidate(context.address_space));
+    pipeline.tick();
+    EXPECT_EQ(wf.state(), amdgpu::WfState::RUNNING);
+    EXPECT_TRUE(wf.wait_counters().empty());
+    EXPECT_EQ(context.external->load<uint32_t>(0x100),
+              initial[first_global_lane] + source[first_global_lane]);
+    EXPECT_EQ(wf.lds().read32(wf.lds_base() + lds_offset),
+              initial[local_lane] + source[local_lane]);
+    EXPECT_EQ(context.external->load<uint32_t>(0x200), initial[2] + source[2]);
+    for (uint32_t lane = 0; lane < initial.size(); ++lane)
+      EXPECT_EQ(context.cu->read_vgpr(wf.vgpr_alloc().base + 4, lane), initial[lane]);
+    EXPECT_EQ(context.external->atomic_modify_calls, 3u);
+  }
+}
+
 TEST(GpuVmPipeline, TranslatedTensorLoadRetriesBeforeCommittingLdsOrBarrier) {
   TranslatedPipelineContext context;
   ASSERT_TRUE(context.address_space);

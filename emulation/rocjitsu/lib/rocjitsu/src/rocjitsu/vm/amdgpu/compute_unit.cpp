@@ -834,15 +834,12 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
         }
       }
     }
-    // Under the current uniform-address-space assumption, FLAT operations
-    // targeting the shared aperture use the LDS pipeline. Scratch-targeting
-    // FLATs stay on the global path. Counter participation is selected from all
-    // requesting lanes below, independently of the first-lane functional route.
+    // Uniform shared-aperture requests use the LDS pipeline. Mixed requests
+    // retain their addresses; the global pipeline separates LDS from global
+    // and scratch lanes before accessing either backing store.
     const uint64_t request_lanes = transpose_request_lane_mask(d, wf_size);
-    const uint32_t first_lane =
-        request_lanes == 0 ? wf_size : static_cast<uint32_t>(std::countr_zero(request_lanes));
     const uint64_t flat_shared_lane_mask = flat_local_lane_mask | flat_dds_lane_mask;
-    if (first_lane < wf_size && (flat_shared_lane_mask & (uint64_t{1} << first_lane)) != 0) {
+    if (request_lanes != 0 && (request_lanes & ~flat_shared_lane_mask) == 0) {
       if (observe_routed_access) {
         std::ranges::copy_n(d.per_lane_addr.begin(), wf_size, pre_routing_address_storage.begin());
         pre_routing_addresses = {pre_routing_address_storage.data(), wf_size};
@@ -863,6 +860,9 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
         }
       }
       normalized_to_local = true;
+    } else if (flat_shared_lane_mask != 0) {
+      d.flat_shared_lane_mask = flat_shared_lane_mask & request_lanes;
+      d.flat_shared_aperture_base = shared_aperture_base_;
     }
   }
 
@@ -1201,8 +1201,7 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   // map X to a position issued below for this instruction: zero-EXEC operations
   // may be skipped by an empty completion queue while older X entries remain.
   const bool flat_local_route =
-      flat && flat_requests &&
-      (flat_shared_lanes & (uint64_t{1} << std::countr_zero(flat_requests)));
+      flat && flat_requests != 0 && (flat_requests & ~flat_shared_lanes) == 0;
   const auto xcnt_completion_counter =
       flat_local_route ? WaitCounterKind::Ds : classified.front().counter;
   std::optional<WaitCounterKind> xcnt_completion;
@@ -1338,6 +1337,7 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
   access.decoded_space = decoded_memory_space(inst.mnemonic(), decoded_route_tag);
   access.normalized_to_local = normalized_to_local;
   access.pre_routing_addresses = pre_routing_addresses;
+  std::array<uint64_t, 64> flat_address_storage;
 
   switch (route_tag) {
   case SCALAR_MEM: {
@@ -1386,6 +1386,18 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
     access.force_l1_bypass = state.request_force_l1_bypass;
     access.lds_destination = state.lds_dst;
     access.addresses = std::span<const uint64_t>(state.per_lane_addr.data(), wf_size);
+    const uint64_t shared_lanes = access.flat_local_lane_mask | access.flat_dds_lane_mask;
+    if (route_tag == GLOBAL_MEM && shared_lanes != 0) {
+      // Mixed execution retains aperture addresses across retries. Normalize
+      // only this observation, whose storage lives through every callback.
+      std::ranges::copy(access.addresses, flat_address_storage.begin());
+      for (uint32_t lane = 0; lane < wf_size; ++lane) {
+        if (shared_lanes & (uint64_t{1} << lane))
+          flat_address_storage[lane] = state.flat_shared_address_in_lds(lane, wf.lds_base());
+      }
+      access.pre_routing_addresses = access.addresses;
+      access.addresses = std::span<const uint64_t>(flat_address_storage.data(), wf_size);
+    }
     access.element_lane_masks = state.element_lane_masks.view();
     if (state.ds2_active)
       access.secondary_addresses =

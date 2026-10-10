@@ -2517,6 +2517,56 @@ TEST(XcntExecutionTest, ReplayAddressFootprintsHonorScratchAndBufferEnableBits) 
             offen + idxen, 1);
 }
 
+TEST(XcntExecutionTest, FlatReplayCompletionFollowsTheWholeRequestRoute) {
+  GpuMemory memory("flat_replay_memory");
+  L2Cache l2("flat_replay_l2");
+  ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.xcnt_diagnostics = MemoryWaitDiagnostics::Warn;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 128;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  auto cu = ComputeUnitCore::create("flat_replay_cu", config, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(3);
+  wf->set_mode_raw(wf->mode_raw() | (1u << 25));
+  auto decoder = Decoder::create(config.arch);
+  for (bool load : {false, true}) {
+    SCOPED_TRACE(load);
+    util::StringDiagnostic error;
+    auto decoded = decoder->decode_window(
+        cdna5::build_vflat(load ? cdna5::kFlatLoadB32Vflat : cdna5::kFlatStoreB32Vflat,
+                           {.saddr = kModernNullSelector, .vdst = 8, .vsrc = 8, .vaddr = 0}),
+        0, error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+    const auto vmem_counter = load ? WaitCounterKind::Load : WaitCounterKind::Store;
+    for (uint64_t shared_lanes : {0u, 1u, 2u, 3u}) {
+      SCOPED_TRACE(shared_lanes);
+      set_test_flat_domains(*cu, *wf, shared_lanes);
+      for (auto waited : {vmem_counter, WaitCounterKind::Ds, WaitCounterKind::X}) {
+        SCOPED_TRACE(static_cast<unsigned>(waited));
+        auto &state = wf->ensure_memory_wait_scoreboard();
+        state.clear();
+        cu->track_memory_wait(*decoded.value(), *wf);
+        ASSERT_EQ(state.outstanding(WaitCounterKind::X), 1u);
+        unsigned reports = 0;
+        state.bind(0x200, &reports, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+        state.wait(waited, 0);
+        state.access({RegClass::VGPR, 0, 2}, 3, 0xf, true);
+        // Any global lane keeps replay sources protected until VMEM completes,
+        // even when the first lane is LDS. Uniform shared requests use DS.
+        const bool reusable = waited == WaitCounterKind::X ||
+                              waited == (shared_lanes == 3 ? WaitCounterKind::Ds : vmem_counter);
+        EXPECT_EQ(reports, reusable ? 0u : 1u);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::X), reusable ? 0u : 1u);
+      }
+    }
+  }
+}
+
 TEST(XcntExecutionTest, EmptyExecWithoutPendingTranslationsHasNoReplayDependency) {
   std::vector<uint32_t> code;
   enable_multi_group_replay(code);

@@ -208,6 +208,11 @@ public:
   // provenance: buffer SRD swizzling still addresses the SRD's global base.
   bool requires_scratch_backing = false;
   uint64_t scratch_lane_mask = 0;
+  // Mixed FLAT requests retain original shared-aperture addresses while their
+  // global/scratch lanes use the global pipeline. This mask includes both LDS
+  // and DDS shared-aperture lanes, as distinguished by the observation API.
+  uint64_t flat_shared_lane_mask = 0;
+  uint64_t flat_shared_aperture_base = 0;
   uint32_t scratch_addr_stride = 0;
   uint32_t scratch_swizzle_unit = 4; ///< Bytes per swizzle unit; RDNA buffers can use 16.
   // Low bits of the uniform address contribution applied after swizzling. The
@@ -283,6 +288,13 @@ public:
   /// popped-node count. Ordinary DS dual-access results have equal widths.
   [[nodiscard]] uint32_t ds2_destination_vgpr_count() const {
     return lds_stack_inputs ? 1u : destination_vgpr_count();
+  }
+
+  /// Translate a shared-aperture lane of a mixed FLAT request into the LDS
+  /// backing allocation. Execution and observations use the same address.
+  [[nodiscard]] uint64_t flat_shared_address_in_lds(uint32_t lane,
+                                                    uint32_t lds_allocation_base) const {
+    return per_lane_addr[lane] - flat_shared_aperture_base + lds_allocation_base;
   }
 };
 

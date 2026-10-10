@@ -94,12 +94,16 @@ public:
                    int bytesPerLane, uint8_t byteMask, amdgpu::WaitCounterType waitCounterType,
                    MemoryOrderClass memoryOrder,
                    std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
+  /// ldsLaneMask restricts LDS intervals to a subset of execMask (for mixed
+  /// FLAT). Register dependencies still use all execMask lanes, and the whole
+  /// instruction occupies one event with one set of counter obligations.
+  /// Bits outside execMask are ignored; zero records no LDS intervals.
   void registerLdsEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
                         uint64_t execMask, int waveSize,
                         std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
                         uint8_t byteMask,
                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                        MemoryOrderClass memoryOrder);
+                        MemoryOrderClass memoryOrder, uint64_t ldsLaneMask = ~uint64_t{0});
   void registerLdsEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
                         uint64_t execMask, int waveSize,
                         std::span<const uint32_t> firstLaneBaseAddresses,

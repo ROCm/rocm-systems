@@ -1082,20 +1082,19 @@ struct PerfsimPlugin::Impl {
         return;
       }
       {
-        const uint32_t first_lane = static_cast<uint32_t>(std::countr_zero(requests));
         const uint64_t flat_shared_lane_mask =
             access.flat_local_lane_mask | access.flat_dds_lane_mask;
-        const bool first_lane_is_shared =
-            (flat_shared_lane_mask & (uint64_t{1} << first_lane)) != 0;
+        const bool all_lanes_are_shared = (requests & ~flat_shared_lane_mask) == 0;
+        const bool has_original_addresses =
+            access.pre_routing_addresses.size() == access.wavefront_size;
         if (access.route == amdgpu::MemoryRoute::LOCAL) {
-          if (!access.normalized_to_local || !first_lane_is_shared ||
-              access.pre_routing_addresses.size() != access.wavefront_size) {
+          if (!access.normalized_to_local || !all_lanes_are_shared || !has_original_addresses) {
             reject_wave(wave, access.dispatch_id,
                         "FLAT local route lacks consistent per-lane aperture metadata");
             return;
           }
-        } else if (access.normalized_to_local || first_lane_is_shared ||
-                   !access.pre_routing_addresses.empty()) {
+        } else if (access.normalized_to_local || all_lanes_are_shared ||
+                   has_original_addresses != (flat_shared_lane_mask != 0)) {
           reject_wave(wave, access.dispatch_id,
                       "FLAT global route has inconsistent aperture metadata");
           return;

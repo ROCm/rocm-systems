@@ -104,8 +104,8 @@ routed_flat_issue_info(const amdgpu::MemoryAccessObservation &access,
 
   const uint64_t shared_lanes =
       (access.flat_local_lane_mask | access.flat_dds_lane_mask) & access.request_lane_mask;
-  // Mixed-space execution still routes by the first requesting lane (#11456).
-  // Narrow dependencies only when every requesting lane uses the same pipeline.
+  // Functional execution splits mixed requests by address space. The plugin's
+  // single mixed event retains both obligations until both domains are ready.
   if (shared_lanes != 0 && shared_lanes != access.request_lane_mask)
     return decoded;
   if (access.route != (shared_lanes ? amdgpu::MemoryRoute::LOCAL : amdgpu::MemoryRoute::GLOBAL))
@@ -354,9 +354,14 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   if (routed && access.request_lane_mask != 0 && supports_counter_capacity(wf.cu().arch()))
     rs->prepareForMemoryIssue(issue);
 
-  if (inst.data()->tag() == amdgpu::LOCAL_MEM) {
+  const uint64_t sharedLanes = access.flat_local_lane_mask | access.flat_dds_lane_mask;
+  const bool mixedFlat = inst.data()->tag() == amdgpu::GLOBAL_MEM && sharedLanes != 0;
+  if (inst.data()->tag() == amdgpu::LOCAL_MEM || mixedFlat) {
     auto &d = *inst.data_as<amdgpu::VectorMemState>();
     const uint64_t execMask = d.exec_mask;
+    // DDS participates in the instruction's dependencies, but its addresses
+    // do not describe bytes in the ordinary LDS allocation.
+    const uint64_t ldsMask = mixedFlat ? execMask & access.flat_local_lane_mask : execMask;
     if (execMask == 0)
       return;
     auto type = d.is_load ? MemoryEventType::LDS_TO_VGPR : MemoryEventType::VGPR_TO_LDS;
@@ -370,10 +375,13 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       registers = std::move(*destinations);
     }
 
+    uint32_t laneAddrs[64]{};
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      if (!(execMask & (1ULL << lane)))
+      if (!(ldsMask & (1ULL << lane)))
         continue;
-      int addr = static_cast<int>(d.per_lane_addr[lane]);
+      laneAddrs[lane] =
+          static_cast<uint32_t>(mixedFlat ? access.addresses[lane] : d.per_lane_addr[lane]);
+      int addr = static_cast<int>(laneAddrs[lane]);
       if (d.is_load)
         detector->validateRead(addr, waveId, static_cast<int>(lane), perLaneBytes, memoryOrder);
       else
@@ -386,9 +394,6 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
           detector->validateWrite(addr, waveId, static_cast<int>(lane), perLaneBytes, memoryOrder);
       }
     }
-    uint32_t laneAddrs[64];
-    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
-      laneAddrs[lane] = static_cast<uint32_t>(d.per_lane_addr[lane]);
     uint8_t byte_mask = vector_memory_byte_mask(d, wf);
     if (d.is_load) {
       for (uint32_t reg : registers)
@@ -407,8 +412,11 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     } else {
       rs->registerLdsEvent(wf.pc, type, std::move(registers), execMask, wf.wf_size(),
                            std::span<const uint32_t>(laneAddrs, wf.wf_size()), perLaneBytes,
-                           byte_mask, obligations, memoryOrder);
+                           byte_mask, obligations, memoryOrder, ldsMask);
     }
+    // A mixed instruction has one counter entry, with all register lanes but
+    // only the ordinary LDS lanes' intervals. Do not also register a global event.
+    return;
   }
 
   if (inst.data()->tag() == amdgpu::GLOBAL_MEM) {
