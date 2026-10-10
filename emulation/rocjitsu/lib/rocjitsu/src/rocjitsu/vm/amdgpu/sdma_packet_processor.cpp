@@ -557,6 +557,10 @@ private:
   SdmaPacketExecutionOutcome atomic_fetch_add(Operation &operation, uint64_t address,
                                               uint64_t amount) {
     if (!operation.cas_expected_valid) {
+      const VmAccessOutcome allowed =
+          access_->probe(address, sizeof(uint64_t), VmAccessKind::Atomic);
+      if (allowed != VmAccessOutcome::Complete)
+        return map_outcome(allowed);
       const AtomicLoadResult loaded = access_->atomic_load(address, sizeof(uint64_t));
       if (loaded.outcome != VmAccessOutcome::Complete)
         return map_outcome(loaded.outcome);

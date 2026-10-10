@@ -98,9 +98,9 @@ public:
   [[nodiscard]] bool release_page(void *ptr);
 
   /// @brief Signal event(s) from the CP's interrupt callback.
-  /// @details When event_id is non-zero, signals that specific event. When
-  ///          event_id is zero, broadcasts to all type-0 events — matching
-  ///          real KFD's kfd_signal_event_interrupt(pasid, 0, 0) broadcast.
+  /// @details A nonzero ID signals that event, including notifications without
+  ///          a mailbox publication. Zero scans and consumes published slots;
+  ///          unrelated, unpublished events are never activated by the scan.
   void signal_interrupt(uint32_t event_id);
 
   /// @brief Deliver a memory violation to this process's memory-exception event.
