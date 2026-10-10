@@ -2296,7 +2296,7 @@ def test_matrix_i32_final_call_sources_follow_profile_gate():
     )
 
     assert (
-        'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 8, dst, src0_base, '
+        'amdgpu::exec_rdna_wmma_i32<true, 8>(cu, wf.wf_size(), dst, src0_base, '
         'src1_base, s2,' in resolved
     )
     assert (
@@ -2324,9 +2324,29 @@ def _generated_matrix_call(body: str, callee: str) -> str:
         ),
         ('V_WMMA_I32_16X16X16_IU4', 'cdna5', 'exec_wmma_i32', False),
         # Runtime-wave and replicated-half-wave I32.
-        ('V_SWMMAC_I32_16X16X32_IU8', 'rdna4', 'exec_swmmac_i32', True),
-        ('V_WMMA_I32_16X16X16_IU8', 'rdna3', 'exec_gfx11_wmma_i32', False),
-        ('V_WMMA_I32_16X16X16_IU8', 'rdna4', 'exec_wmma_i32', False),
+        ('V_WMMA_I32_16X16X16_IU4', 'rdna3', 'exec_rdna_wmma_i32<false, 4>', False),
+        ('V_WMMA_I32_16X16X16_IU4', 'rdna4', 'exec_rdna_wmma_i32<true, 4>', False),
+        ('V_WMMA_I32_16X16X32_IU4', 'rdna4', 'exec_rdna_wmma_i32<true, 4, 32>', False),
+        (
+            'V_SWMMAC_I32_16X16X32_IU8',
+            'rdna4',
+            'exec_rdna_swmmac_i32<8, 32>',
+            True,
+        ),
+        (
+            'V_SWMMAC_I32_16X16X32_IU4',
+            'rdna4',
+            'exec_rdna_swmmac_i32<4, 32>',
+            True,
+        ),
+        (
+            'V_SWMMAC_I32_16X16X64_IU4',
+            'rdna4',
+            'exec_rdna_swmmac_i32<4, 64>',
+            True,
+        ),
+        ('V_WMMA_I32_16X16X16_IU8', 'rdna3', 'exec_rdna_wmma_i32<false, 8>', False),
+        ('V_WMMA_I32_16X16X16_IU8', 'rdna4', 'exec_rdna_wmma_i32<true, 8>', False),
         # I32 MFMA-style fallback dispatches.
         ('V_WMMA_I32_16X16X16_IU8', 'test_arch', 'exec_i32_mixed', False),
         ('V_MFMA_I32_16X16X16_IU4', 'cdna3', 'exec_i32_mixed', False),
@@ -2443,6 +2463,7 @@ def test_every_matrix_executor_uses_profile_selected_operand_bases(
     )
     call = _generated_matrix_call(body, callee)
     is_standalone_smfmac = mnemonic.startswith('V_SMFMAC_')
+    is_rdna_sparse_i32 = is_sparse and callee.startswith('exec_rdna_swmmac_i32')
 
     if is_standalone_smfmac:
         expected_operands = 'dst, s0b, s1b, idx'
@@ -2472,9 +2493,14 @@ def test_every_matrix_executor_uses_profile_selected_operand_bases(
             )
             assert 'Isa::resolved_vgpr_offset' not in body
 
+    if is_rdna_sparse_i32:
+        expected_operands = 'dst, src0_base, src1_base, index_base'
     assert expected_operands in call
     if is_sparse and not is_standalone_smfmac:
-        assert f'{expected_operands}, index_base,' in call
+        if is_rdna_sparse_i32:
+            assert 'index_base, index_key' in call
+        else:
+            assert f'{expected_operands}, index_base,' in call
         if uses_vgpr_msb_indexing:
             assert 'uint32_t index_base = vb + *index_off;' in body
         else:
@@ -2715,40 +2741,83 @@ def test_rdna_wmma_uses_arch_specific_wave32_operand_layout():
     assert 'amdgpu::exec_f32(cu, 16, 16, 16' not in body
 
 
-def test_rdna_wmma_i32_iu8_uses_arch_specific_wave32_operand_layout():
+@pytest.mark.parametrize('bits', [4, 8])
+def test_rdna_wmma_i32_uses_measured_accumulation_policy(bits):
     operands = [
         Operand('vdst', 256, 'OPR_VGPR', False, True, False, False, 0),
         Operand('src0', 128, 'OPR_SRC_VGPR', True, False, False, False, 1),
         Operand('src1', 128, 'OPR_SRC_VGPR', True, False, False, False, 2),
         Operand('src2', 256, 'OPR_SRC_VGPR_OR_INLINE', True, False, False, False, 3),
     ]
-    inst = Instruction('V_WMMA_I32_16X16X16_IU8', 'ENC_VOP3P', 0, operands)
+    inst = Instruction(f'V_WMMA_I32_16X16X16_IU{bits}', 'ENC_VOP3P', 0, operands)
 
     for arch in ('rdna3', 'rdna3_5'):
         body = _gen_mfma(inst, arch)
 
         assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
         assert (
-            'auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc)'
-            in body
+            f'amdgpu::exec_rdna_wmma_i32<false, {bits}>(cu, wf.wf_size(), dst,' in body
         )
-        assert '(inst_.neg & 0x1u) ? amdgpu::extract_i8(cu, base, loc)' in body
-        assert '(inst_.neg & 0x2u) ? amdgpu::extract_i8(cu, base, loc)' in body
+        assert 'src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc)' in body
         assert (
-            'amdgpu::exec_gfx11_wmma_i32(cu, wf.wf_size(), 16, 16, 16, 8, dst,' in body
+            '/*a_signed=*/(inst_.neg & 0x1u) != 0, /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp'
+            in body
         )
         assert 'amdgpu::exec_i32_mixed(cu, 16, 16, 16' not in body
 
     body = _gen_mfma(inst, 'rdna4')
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
+    assert f'amdgpu::exec_rdna_wmma_i32<true, {bits}>(cu, wf.wf_size(), dst,' in body
+    assert 'src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc)' in body
     assert (
-        'auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc)'
+        '/*a_signed=*/(inst_.neg & 0x1u) != 0, /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp'
         in body
     )
-    assert '(inst_.neg & 0x1u) ? amdgpu::extract_i8(cu, base, loc)' in body
-    assert '(inst_.neg & 0x2u) ? amdgpu::extract_i8(cu, base, loc)' in body
-    assert 'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 8, dst,' in body
     assert 'amdgpu::exec_i32_mixed(cu, 16, 16, 16' not in body
+
+    # CDNA5 shares a split-K layout but has independent numerical behavior.
+    body = _gen_mfma(inst, 'cdna5')
+    assert 'exec_rdna_wmma_i32' not in body
+
+
+@pytest.mark.parametrize(
+    'arch, dtype', [('rdna3', 'IU4'), ('rdna3_5', 'IU4'), ('rdna4', 'IU8')]
+)
+def test_rdna_unmeasured_integer_shape_is_not_approximated(arch, dtype):
+    inst = Instruction(f'V_WMMA_I32_16X16X32_{dtype}', 'ENC_VOP3P', 0, [])
+    body = _gen_mfma(inst, arch)
+    assert 'throw util::UnimplementedInst(mnemonic());' in body
+    assert 'exec_wmma_i32(' not in body
+    assert 'exec_rdna_wmma_i32' not in body
+
+
+@pytest.mark.parametrize('dtype, k', [('IU8', 64), ('IU4', 128)])
+def test_rdna4_unmeasured_sparse_integer_shape_is_not_approximated(dtype, k):
+    inst = Instruction(f'V_SWMMAC_I32_16X16X{k}_{dtype}', 'ENC_VOP3P', 0, [])
+    body = _gen_mfma(inst, 'rdna4')
+    assert 'throw util::UnimplementedInst(mnemonic());' in body
+    assert 'exec_swmmac_i32(' not in body
+    assert 'exec_rdna_swmmac_i32' not in body
+
+
+def test_rdna4_iu4_k32_uses_measured_saturation():
+    inst = Instruction('V_WMMA_I32_16X16X32_IU4', 'ENC_VOP3P', 0, [])
+    body = _gen_mfma(inst, 'rdna4')
+    assert 'exec_rdna_wmma_i32<true, 4, 32>' in body
+    assert 'src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc)' in body
+    assert 'exec_wmma_i32(' not in body
+    assert 'exec_rdna_wmma_i32' not in _gen_mfma(inst, 'cdna5')
+
+
+@pytest.mark.parametrize('bits, k', [(8, 32), (4, 32), (4, 64)])
+def test_rdna4_sparse_integers_use_full_index_key_and_measured_groups(bits, k):
+    inst = Instruction(f'V_SWMMAC_I32_16X16X{k}_IU{bits}', 'ENC_VOP3P', 0, [])
+    body = _gen_mfma(inst, 'rdna4')
+    assert f'exec_rdna_swmmac_i32<{bits}, {k}>' in body
+    assert 'uint32_t index_key = inst_.opsel & 0x3u;' in body
+    assert 'index_base, index_key' in body
+    assert 'const_acc' not in body
+    assert 'exec_rdna_swmmac_i32' not in _gen_mfma(inst, 'cdna5')
 
 
 def test_rdna_wmma_f16_bf16_use_arch_specific_wave32_dispatch():
