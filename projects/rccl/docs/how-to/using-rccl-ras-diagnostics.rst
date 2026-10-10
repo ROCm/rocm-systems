@@ -1,6 +1,6 @@
 .. meta::
    :description: How to use the RCCL RAS diagnostics to compare GPU, driver, and NCCL configuration across the ranks of a job on AMD GPUs
-   :keywords: RCCL, ROCm, AMD, RAS, diagnostics, NCCL_RUN_RAS_DIAGNOSTICS, rcclras, troubleshooting
+   :keywords: RCCL, ROCm, AMD, RAS, diagnostics, NCCL_RUN_RAS_DIAGNOSTICS, rcclras, AMD SMI, ECC, XGMI, troubleshooting
 
 .. _using-rccl-ras-diagnostics:
 
@@ -11,14 +11,14 @@ Checking job configuration with RAS diagnostics
 The RAS (reliability, availability, and serviceability) subsystem of RCCL can
 compare the configuration that every rank of a communicator reports and print a
 short report. The report shows at a glance whether all ranks run with the same
-``NCCL_*`` environment and the same driver version, which is a common cause of
-hangs and performance differences in large jobs.
+``NCCL_*`` environment, driver version, and GPU configuration, which is a
+common cause of hangs and performance differences in large jobs, and whether a
+GPU reports memory errors or a down XGMI link.
 
 This feature is inherited from NCCL 2.31 (RAS diagnostics). The checks only
 collect and compare information. They do not send data between GPUs and do not
-assess the health of the network or of the GPU links. To verify the GPU
-peer-to-peer data paths on a node, use the active diagnostics
-(``NCCL_RUN_DIAGNOSTICS``) instead.
+measure the network or the GPU links. To verify the GPU peer-to-peer data paths
+on a node, use the active diagnostics (``NCCL_RUN_DIAGNOSTICS``) instead.
 
 The report can be produced in two ways:
 
@@ -30,31 +30,46 @@ The report can be produced in two ways:
 Checks on AMD GPUs
 ==================
 
-The report has one result per check and communicator. On AMD GPUs the checks
-currently behave as follows:
+The report has one result per check and communicator:
 
+* **GPU inventory:** compares the number of AMD GPUs on each node and the model
+  of the GPU used by each rank.
+* **HIP driver version:** compares the driver version that the HIP runtime
+  reports (``hipDriverGetVersion``) across the ranks.
+* **AMD GPU driver version:** compares the version of the ``amdgpu`` kernel
+  driver that serves the GPU of each rank, as ``/sys/module/amdgpu/version``
+  shows it, across the ranks.
+* **ECC:** reports the ranks whose GPU has uncorrectable or deferred ECC
+  errors. With ``NCCL_DIAGNOSTICS_ECC_THRESHOLD`` set, it also reports the
+  ranks whose GPU has at least that many correctable errors.
+* **XGMI:** compares the number of AMD Infinity Fabric (XGMI) links of the GPU
+  used by each rank and reports the ranks whose GPU has a link that is down.
+  Disabled links are not counted. A system without XGMI links prints no line.
 * **NCCL environment:** compares the names and values of all ``NCCL_*``
   environment variables across the ranks and lists the ranks of every value
-  that differs. This check is fully supported.
-* **Driver version:** compares the driver version that the HIP runtime reports
-  (``hipDriverGetVersion``) across the ranks. The line is labeled
-  ``CUDA driver version`` and the value is the HIP driver version.
-* **GPU inventory:** reports ``unavailable via NVML``. The check would compare
-  the number and model of the GPUs per node, but RCCL has no AMD data source
-  for it yet.
-* **ECC:** reports ``unavailable via NVML`` for the same reason. It would check
-  the volatile ECC error counters of the GPU used by each rank.
-* **Link state:** prints no line. The check reports NVIDIA NVLink links and
-  finds none on AMD GPUs. The state of the AMD Infinity Fabric (XGMI) links is
-  not checked.
-* **NVIDIA graphics driver version:** reports ``unavailable via NVML``. The
-  check compares the version of the NVIDIA kernel driver across the ranks.
+  that differs.
 
-``unavailable`` results are tagged ``[INFO]`` and do not indicate a problem
-with the system. Use ``amd-smi`` to check the GPU inventory, the ECC counters,
-the XGMI link state, and the ``amdgpu`` driver version of a node, for example
-``amd-smi list``, ``amd-smi metric --ecc``, ``amd-smi xgmi``, and
-``amd-smi static --driver``.
+The GPU inventory, AMD GPU driver version, ECC, and XGMI checks read AMD SMI
+(``libamd_smi.so``), the
+same source as the ``amd-smi`` tool. With ``NCCL_RUN_RAS_DIAGNOSTICS=1``, RCCL
+loads the library when the process creates its first communicator; otherwise,
+the first time the diagnostics run. This does not depend on the value of
+``RCCL_USE_AMD_SMI_LIB``. The ECC check uses the error totals of all memory
+blocks of the GPU, which ``amd-smi metric --ecc`` shows per block. On a GPU
+in a compute partition mode such as CPX or DPX, a rank whose partition AMD SMI
+does not list reports the model, ECC counters, and XGMI links of the physical
+GPU. Use ``amd-smi`` to inspect a GPU that the report names, for example
+``amd-smi static --driver``, ``amd-smi metric --ecc``, and ``amd-smi xgmi``.
+
+If AMD SMI cannot be loaded or does not answer for a GPU, the GPU inventory,
+AMD GPU driver version, and ECC checks report ``unavailable via AMD SMI``. The
+AMD GPU driver version is also unavailable with an ``amdgpu`` driver that is
+built into the kernel, which has no ``/sys/module/amdgpu/version``. Such
+results are tagged ``[INFO]`` and do not indicate a problem with the system. The XGMI check prints
+no line when no GPU answers; a GPU that does not answer while others do counts
+as having no links and is reported as a link-count mismatch. Set
+``NCCL_DEBUG=INFO`` and ``NCCL_DEBUG_SUBSYS=RAS`` to log the AMD SMI query that
+failed, or the AMD SMI functions that an older library does not provide.
 
 The report also contains the results of checks that come from NCCL and are not
 described here: ``rdma_topo``, ``IOMMU mode``, ``ATS state``, ``Xid/SXid``, and
@@ -100,8 +115,8 @@ The report is printed to the standard output of the process that hosts rank 0
 of the communicator, not to ``NCCL_DEBUG_FILE``. That process prints the
 header while the communicator is being created. The results and the
 ``completed`` line follow from the RAS thread shortly after, usually after
-the initialization call has returned. A process that ends right after creating
-its communicator can exit before the report is complete.
+the initialization call has returned. If a process exits or destroys the
+communicator right after creating it, the report can be incomplete.
 
 Diagnostics are informational. A reported difference does not make
 communicator initialization fail, and the communicator remains usable.
@@ -175,17 +190,18 @@ one process per GPU, looks like this:
 .. code:: none
 
    node01:4242 NCCL DIAG === RAS Diagnostics ===
-   node01:4242 NCCL DIAG [INFO] GPU inventory: unavailable via NVML across 8 ranks in comm 0x5fa31c27a9e0d1b4
-   node01:4242 NCCL DIAG [OK]   CUDA driver version: 71526333 consistent across 8 ranks in comm 0x5fa31c27a9e0d1b4
-   node01:4242 NCCL DIAG [INFO] ECC: unavailable via NVML across 8 ranks in comm 0x5fa31c27a9e0d1b4
+   node01:4242 NCCL DIAG [OK]   GPU inventory: 8x AMD Instinct MI355X per node consistent across 8 ranks in comm 0x5fa31c27a9e0d1b4
+   node01:4242 NCCL DIAG [OK]   HIP driver version: 71526333 consistent across 8 ranks in comm 0x5fa31c27a9e0d1b4
+   node01:4242 NCCL DIAG [OK]   ECC: no uncorrected volatile errors across 8 ranks in comm 0x5fa31c27a9e0d1b4
+   node01:4242 NCCL DIAG [OK]   XGMI: 7 links per GPU, all active across 8 ranks in comm 0x5fa31c27a9e0d1b4
    node01:4242 NCCL DIAG [OK]   NCCL environment: NCCL_* env vars consistent across 8 ranks in comm 0x5fa31c27a9e0d1b4
    node01:4242 NCCL DIAG [INFO] rdma_topo check: not usable on 8/8 ranks in comm 0x5fa31c27a9e0d1b4 (unavailable)
    node01:4242 NCCL DIAG [INFO] IOMMU mode: unable to identify relevant GPU/NIC pairs on 8/8 ranks in comm 0x5fa31c27a9e0d1b4
    node01:4242 NCCL DIAG [INFO] ATS state: unable to identify relevant NICs on 8/8 ranks in comm 0x5fa31c27a9e0d1b4
    node01:4242 NCCL DIAG [INFO] Xid/SXid: no kernel-log source was available on host node01
-   node01:4242 NCCL DIAG [INFO] NVIDIA graphics driver version: unavailable via NVML across 8 ranks in comm 0x5fa31c27a9e0d1b4
+   node01:4242 NCCL DIAG [OK]   AMD GPU driver version: 6.14.14 consistent across 8 ranks in comm 0x5fa31c27a9e0d1b4
    node01:4242 NCCL DIAG [OK]   Paths: self+XGMI across 8 ranks in comm 0x5fa31c27a9e0d1b4
-   node01:4242 NCCL DIAG RAS diagnostics completed in 49.0 ms across 8 ranks
+   node01:4242 NCCL DIAG RAS diagnostics completed in 64.5 ms across 8 ranks
 
 The ``completed`` line of an initialization-time report counts the ranks of
 the communicator. The ``completed`` line of an on-demand report counts the RAS
@@ -194,9 +210,11 @@ peers that answered, that is, the processes of the job, for example
 
 Result lines use two tags:
 
-* ``[OK]`` means that the check found no difference across the ranks.
-* ``[INFO]`` marks a difference, incomplete information, or a check whose data
-  is unavailable. Read the message text to tell them apart.
+* ``[OK]`` means that the check found no difference across the ranks and, for
+  the ECC and XGMI checks, no error and no down link.
+* ``[INFO]`` marks a difference, an ECC error or down link, incomplete
+  information, or a check whose data is unavailable. Read the message text to
+  tell them apart.
 
 A check that finds a difference prints several lines that group the ranks by
 value. For example, a job where the processes on the second node run with a
@@ -219,3 +237,53 @@ variables with the configuration you intended.
 If not every rank answered, for example because a process stopped responding,
 the result reads ``diagnostics incomplete, gathered <n>/<total> ranks`` and
 names the communicator.
+
+The ``[INFO]`` results that need attention:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
+
+   * - Result
+     - What to check
+   * - ``GPU inventory: count mismatch``
+     - The listed ranks run on nodes with a different number of AMD GPUs, or
+       on nodes where AMD SMI could not count the GPUs, which counts as none.
+       Compare ``amd-smi list`` on those nodes, for example after a GPU reset.
+   * - ``GPU inventory: model mismatch``
+     - The listed ranks use a different GPU model than the lowest rank of the
+       communicator, whose value is shown in parentheses.
+   * - ``HIP driver version: mismatch``
+     - The listed ranks run a different driver version. Compare the installed
+       ROCm and ``amdgpu`` driver versions on those nodes.
+   * - ``AMD GPU driver version: mismatch``
+     - The GPUs of the listed ranks are served by a different ``amdgpu``
+       driver than the GPU of the lowest rank of the communicator, whose
+       version is shown in parentheses. A rank whose version AMD SMI could not
+       read differs as well. Compare ``amd-smi static --driver`` on those
+       nodes.
+   * - ``ECC: uncorrected volatile errors on rank(s)``
+     - The GPUs of the listed ranks have uncorrectable or deferred ECC errors.
+       ``worst`` is the highest count. Inspect them with ``amd-smi metric --ecc``.
+   * - ``ECC: corrected volatile errors at or above threshold``
+     - The GPUs of the listed ranks reached ``NCCL_DIAGNOSTICS_ECC_THRESHOLD``
+       correctable errors.
+   * - ``XGMI: link-count mismatch``
+     - The GPUs of the listed ranks have a different number of XGMI links than
+       the lowest rank of the communicator, whose value is shown in
+       parentheses. A GPU that AMD SMI did not answer for counts as having no
+       links, so ``(0)`` means that the lowest rank's GPU did not answer or has
+       no XGMI links.
+       Inspect the GPUs with ``amd-smi xgmi``.
+   * - ``XGMI: inactive link(s) on rank(s)``
+     - A link of the GPUs of the listed ranks is down. Inspect them with
+       ``amd-smi xgmi``.
+   * - ``NCCL environment: mismatch``
+     - The ranks run with different values of the named variable. The lines
+       that follow list the ranks of each value.
+   * - ``NCCL environment: ... comparison may be partial``
+     - The ``NCCL_*`` variables of the listed number of ranks exceed the size
+       that the check compares, so a difference in the rest can go unreported.
+   * - ``diagnostics incomplete``
+     - Not every rank answered. Check that the processes of the job are still
+       running.
