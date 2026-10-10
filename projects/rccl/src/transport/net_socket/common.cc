@@ -49,7 +49,7 @@ ncclResult_t ncclNetSocketInitDevices(const char* logPrefix) {
       memcpy(&ncclNetSocketDevs[i].addr, addrs + i, sizeof(union ncclSocketAddress));
       NCCLCHECKGOTO(ncclNetSocketGetPciPath(ncclNetSocketDevs[i].devName, &ncclNetSocketDevs[i].pciPath), ret, fail);
       snprintf(line + strlen(line), maxLineLen - strlen(line), " [%d]%s:%s", i, names + i * MAX_IF_NAME_SIZE,
-               ncclSocketToString(&addrs[i], addrline));
+               ncclSocketToString(&addrs[i], addrline, sizeof(addrline)));
     }
     line[maxLineLen] = '\0';
     INFO(NCCL_INIT | NCCL_NET, "%s : Using%s", logPrefix, line);
