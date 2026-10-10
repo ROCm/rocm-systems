@@ -27,6 +27,15 @@
 #include <sys/platform/ppc.h>
 #endif
 
+#if defined(__loongarch64)
+#include <larchintrin.h>
+static inline unsigned long __rdtscp(unsigned int* unused)
+{
+  (void)unused;
+  return __rdtime_d().dvalue;
+}
+#endif
+
 PerfTimer::PerfTimer() { freq_in_100mhz_ = MeasureTSCFreqHz(); }
 
 PerfTimer::~PerfTimer() {
@@ -162,7 +171,7 @@ uint64_t PerfTimer::CoarseTimestampUs() {
 }
 
 uint64_t PerfTimer::MeasureTSCFreqHz() {
-#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__x86_64__) || defined(_M_X64) || defined(__loongarch64)
   // Make a coarse interval measurement of TSC ticks for 1 gigacycles.
   unsigned int unused;
   uint64_t tscTicksEnd;
