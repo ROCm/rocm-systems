@@ -28,10 +28,14 @@ def test_validate_spm_rocpd_csv(counter_csv: pd.DataFrame, spm_json_data):
     assert not filtered.empty, "No matrixTranspose entries in counter CSV"
 
     filtered = filtered.copy()
-    assert filtered[counter_column].str.contains(
-        r"\[XCC: \d+, Instance: \d+, SE: \d+, SA: \d+, WGP: \d+\]$",
-        regex=True,
-    ).all()
+    assert (
+        filtered[counter_column]
+        .str.contains(
+            r"\[XCC: \d+, Instance: \d+, SE: \d+, SA: \d+, WGP: \d+\]$",
+            regex=True,
+        )
+        .all()
+    )
     filtered["base_counter"] = filtered[counter_column].str.replace(
         r"\[.*\]$", "", regex=True
     )
