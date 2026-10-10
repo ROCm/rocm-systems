@@ -74,6 +74,9 @@ groups:
     - rocrtstFunc.GroupMemoryAllocationTest
     - rocrtstFunc.MemoryAllocateAndFreeTest
     - rocrtstFunc.MemoryAllocateContiguousTest
+    - rocrtstFunc.Memory_Fragment_Overlap_Test
+    - rocrtstFunc.Memory_Fragment_ZeroInit_Test
+    - rocrtstFunc.Memory_Fragment_Coherence_Test
     - rocrtstFunc.Concurrent_Init_Test
     - rocrtstFunc.Concurrent_Init_Shutdown_Test
     - rocrtstFunc.Concurrent_Shutdown
