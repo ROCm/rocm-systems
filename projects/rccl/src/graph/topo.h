@@ -19,7 +19,39 @@
 #include <map>
 
 #define LOC_BW 5000.0
+// Bw of the path between the compute partitions of one physical device. Partitions share HBM
+// rather than crossing a link, so a sibling access measures the same as a local one: 529 GB/s on
+// an MI300X CPX partition, against 48 GB/s for a real XGMI hop. They share one pool rather than
+// owning independent links -- eight concurrent sibling pairs reach 1877 GB/s in aggregate, 235
+// each. The figure has to stay well clear of what ncclTopoSearch spends on one hop, which an XGMI
+// width does not -- see ncclTopoConnectMloPartSiblings() -- and 2618 is the measured aggregate
+// rounded up past the top of speedArrayIntra by enough that a channel never exhausts a hop.
+//
+// It is not free to move within that range: on the 8 partitions of one device, 529, 1877 and 2618
+// all search out the same 128 channels of the same type, but the tree rates them 4, 12 and 20 GB/s
+// respectively, and that rating is what ncclTopoTuneModel() turns into the threshold where tree
+// gives way to ring. (The ring is pinned at 24 either way, and a comm spanning devices does not
+// move at all, since its slowest hop is a real XGMI link.) An earlier version of this comment
+// claimed the three were interchangeable; that was measured while parseRome4P2H() was still
+// capping the ring at 2 channels, which left the search no room to show the difference.
+//
+// ncclTopoSearchInit() does sum these across siblings into system->totalBw -- 7 * 2618 on an
+// 8-partition device, against the 1877 the fabric actually delivers -- but nothing downstream can
+// see the difference. The starting-speed loop compares against speedArrayIntra, whose largest
+// entry is 48, so both figures clear it identically, and the only other reader is the refinement
+// early-exit in ncclTopoCompute(), which runs after a solution is already in hand. Charging
+// siblings once instead of per-link was tried: same graphs at 8, 16 and 64 partitions, and 1 GiB
+// allreduce and sendrecv within run-to-run noise of each other.
 #define MLOPART_LOC_BW 2618.0
+// P2P channels to ask for per peer across that path. ncclTopoGetNchannels() recovers a link count
+// for a real XGMI hop by dividing the path bw by one XGMI width; an on-package hop has no link
+// width to recover, and dividing MLOPART_LOC_BW that way reads it as a ~54-link stack. The count
+// is genuinely large -- eight partitions of one MI300X run a 1 GiB sendrecv at 59 GB/s with 4
+// channels per peer, 89 at 8, 121 at 16 and 114 at 32 -- it just cannot be derived from a width,
+// so state it. ncclTopoComputeP2pChannels() rounds up and doubles this on single-node gfx94x/95x,
+// then clamps it to the channel pool. Only a comm whose every peer is a sibling sees this: one
+// that also spans physical devices takes the smaller cross-device count instead.
+#define MLOPART_P2P_NCHANNELS 32
 #define SM60_NVLINK_BW 18.0
 #define SM70_NVLINK_BW 20.0
 #define SM80_NVLINK_BW 20.0
@@ -197,6 +229,15 @@ struct ncclTopoNode {
   // Used during search
   uint64_t used;
 };
+
+// Whether two GPU nodes are compute partitions of one physical device. Partitions get a DEV node
+// each, with the partition index overlaid on the busId, so masking it off recovers the device they
+// share. A non-partitioned busId has those bits clear (ncclTopoCheckMloPartBusId), so distinct
+// devices stay distinct here.
+static inline bool ncclTopoIsMloPartSibling(struct ncclTopoNode* a, struct ncclTopoNode* b) {
+  if (a->gpu.parent == NULL || b->gpu.parent == NULL || a->gpu.parent == b->gpu.parent) return false;
+  return (a->gpu.parent->id & ~NCCL_TOPO_MLOPART_MASK) == (b->gpu.parent->id & ~NCCL_TOPO_MLOPART_MASK);
+}
 
 struct ncclTopoNodeSet {
   int count;
