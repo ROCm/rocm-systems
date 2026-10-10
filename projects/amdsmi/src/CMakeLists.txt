@@ -55,6 +55,7 @@ set(SRC_LIST
     "${SRC_DIR}/amd_smi_lib_loader.cc"
     "${SRC_DIR}/amd_smi_socket.cc"
     "${SRC_DIR}/amd_smi_system.cc"
+    "${SRC_DIR}/amd_smi_test_overrides.cc"
     "${SRC_DIR}/amd_smi_ualoe.cc"
     "${SRC_DIR}/amd_smi_utils.cc"
     "${SRC_DIR}/amd_smi_uuid.cc"

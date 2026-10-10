@@ -264,6 +264,8 @@ std::vector<uint32_t> AMDSmiSystem::get_cpu_sockets_from_numa_node(int32_t numa_
   return sockets;
 }
 
+// flags == 0 skips all discovery below and returns SUCCESS -- GpuUnit tests
+// (ras_features_test.cc) rely on this fall-through to init with no hardware.
 amdsmi_status_t AMDSmiSystem::init(uint64_t flags) {
   init_flag_ = flags;
   amdsmi_status_t amd_smi_status;
@@ -818,6 +820,32 @@ amdsmi_status_t AMDSmiSystem::handle_to_processor(amdsmi_processor_handle proces
     return AMDSMI_STATUS_SUCCESS;
   }
   return AMDSMI_STATUS_NOT_FOUND;
+}
+
+// See amd_smi_system.h for the contract; only the guard in
+// amd_smi_test_overrides.h is meant to call register/unregister_processor_for_testing.
+std::set<AMDSmiProcessor*>& AMDSmiSystem::set_for_type_for_testing(amdsmi_processor_type_t type) {
+  switch (type) {
+    case AMDSMI_PROCESSOR_TYPE_BRCM_NIC:
+      return nic_processors_;
+    case AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH:
+      return switch_processors_;
+    case AMDSMI_PROCESSOR_TYPE_AMD_NIC:
+      return ainic_processors_;
+    case AMDSMI_PROCESSOR_TYPE_AMD_GPU:
+    case AMDSMI_PROCESSOR_TYPE_AMD_CPU:
+    case AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE:
+    default:
+      return processors_;
+  }
+}
+
+void AMDSmiSystem::register_processor_for_testing(AMDSmiProcessor* processor) {
+  set_for_type_for_testing(processor->get_processor_type()).insert(processor);
+}
+
+void AMDSmiSystem::unregister_processor_for_testing(AMDSmiProcessor* processor) {
+  set_for_type_for_testing(processor->get_processor_type()).erase(processor);
 }
 
 amdsmi_status_t AMDSmiSystem::gpu_index_to_handle(uint32_t gpu_index,
