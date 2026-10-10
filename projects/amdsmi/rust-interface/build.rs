@@ -117,23 +117,90 @@ fn generate_amdsmi_wrapper(amdsmi_header_file: &str) {
         .write_to_file(&bindings_path)
         .expect("Couldn't write binding wrapper for amdsmi C interface!");
     println!("Wrapper generated at: {:?}", bindings_path);
+}
 
+#[cfg(feature = "dynamic-loading")]
+fn generate_runtime_bindings() {
+    use quote::quote;
+    use syn::{FnArg, ForeignItem, Item};
+
+    // Reuse bindgen's checked-in signatures: ordinary builds need neither
+    // libclang nor installed AMD SMI headers, and there is only one ABI source.
+    let source = fs::read_to_string("src/amdsmi_wrapper.rs").expect("Cannot read AMD SMI bindings");
+    let bindings = syn::parse_file(&source).expect("Cannot parse AMD SMI bindings");
+    let mut wrappers = quote! {};
+    for item in bindings.items {
+        let Item::ForeignMod(block) = item else {
+            continue;
+        };
+        let abi = block.abi;
+        for item in block.items {
+            let ForeignItem::Fn(function) = item else {
+                continue;
+            };
+            let name = function.sig.ident;
+            let inputs = function.sig.inputs;
+            let output = function.sig.output;
+            let (args, types): (Vec<_>, Vec<_>) = inputs
+                .iter()
+                .map(|input| {
+                    let FnArg::Typed(arg) = input else {
+                        unreachable!("C functions have no self argument");
+                    };
+                    (&arg.pat, &arg.ty)
+                })
+                .unzip();
+            wrappers.extend(quote! {
+                #[allow(non_snake_case)]
+                pub unsafe fn #name(#inputs) #output {
+                    type Function = unsafe #abi fn(#(#types),*) #output;
+                    static FUNCTION: OnceLock<Result<Function, AmdsmiStatusT>> = OnceLock::new();
+                    let function = FUNCTION.get_or_init(|| {
+                        let library = library()?;
+                        // SAFETY: the signature is taken from bindgen's declaration,
+                        // and the process-wide library outlives every copied symbol.
+                        unsafe {
+                            library.get::<Function>(concat!(stringify!(#name), "\0").as_bytes())
+                                .map(|symbol| *symbol)
+                                .map_err(|_| AmdsmiStatusT::AmdsmiStatusFailLoadSymbol)
+                        }
+                    });
+                    match function {
+                        Ok(function) => unsafe { function(#(#args),*) },
+                        Err(status) => *status,
+                    }
+                }
+            });
+        }
+    }
+    let output = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is not set"));
+    fs::write(output.join("runtime_bindings.rs"), wrappers.to_string())
+        .expect("Cannot write runtime AMD SMI bindings");
 }
 
 fn main() {
-    // Get the amd_smi library directory
-    let amdsmi_lib_dir = get_amdsmi_lib_dir().expect("Failed to get the amd_smi library path");
+    println!("cargo:rerun-if-env-changed=AMDSMI_LIB_DIR");
+    println!("cargo:rerun-if-env-changed=AMDSMI_GENERATE_RUST_WRAPPER");
+    println!("cargo:rerun-if-changed=src/amdsmi_wrapper.rs");
+    println!("cargo:rerun-if-changed=callbacks.rs");
 
-    // Tell cargo to tell rustc to link the AMD-SMI library
-    println!("cargo:rustc-link-lib=amd_smi");
-    println!("cargo:rustc-link-search=native={}", amdsmi_lib_dir);
+    if !cfg!(feature = "dynamic-loading") {
+        let amdsmi_lib_dir = get_amdsmi_lib_dir().expect("Failed to get the amd_smi library path");
+        println!("cargo:rustc-link-lib=amd_smi");
+        println!("cargo:rustc-link-search=native={}", amdsmi_lib_dir);
+    }
 
     let generate_wrapper = env::var("AMDSMI_GENERATE_RUST_WRAPPER").is_ok();
     if generate_wrapper {
         // Get the amdsmi.h header file path
-        let amdsmi_header_file = get_amdsmi_header_file().expect("Failed to get the amd_smi header file");
+        let amdsmi_header_file =
+            get_amdsmi_header_file().expect("Failed to get the amd_smi header file");
+        println!("cargo:rerun-if-changed={}", amdsmi_header_file);
 
         // Generate the amdsmi wrapper
         generate_amdsmi_wrapper(&amdsmi_header_file);
     }
+
+    #[cfg(feature = "dynamic-loading")]
+    generate_runtime_bindings();
 }
