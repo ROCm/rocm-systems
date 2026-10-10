@@ -10,6 +10,7 @@
 /// pipeline subclasses own the initiate/complete logic that operates
 /// on this state.
 
+#include "rocjitsu/isa/arch/amdgpu/shared/block_memory.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
@@ -154,10 +155,16 @@ public:
   }
   std::array<uint64_t, 64> per_lane_addr = {};
   uint64_t lane_mask = 0;
-  /// Optional per-element lane validity for untyped DWORD-component bounds.
+  /// Optional per-element lanes requesting memory traffic. Buffer bounds can
+  /// narrow later elements; M0-masked blocks can have arbitrary holes.
   /// Empty means every element uses lane_mask; otherwise the container has
   /// exactly num_elems masks and lane_mask is their union.
   ElementLaneMasks element_lane_masks;
+  /// Captured M0 distinguishes preserved block destinations from buffer-OOB
+  /// elements, which are zero-filled on load despite requesting no traffic.
+  uint32_t block_dword_mask = kUnmaskedBlockDwordMask;
+  /// Block operands validate ownership per DWORD, including with all bits enabled.
+  bool is_block_transfer = false;
   uint64_t exec_mask = 0; ///< Effective issue mask set by address calculation. This normally
                           ///< snapshots EXEC, but ISA exceptions may replace it (for example,
                           ///< CDNA5 DS transpose loads use an all-lanes mask), while
@@ -268,6 +275,28 @@ public:
   std::vector<uint8_t> ds2_store_data;
   std::vector<uint8_t> ds2_response_data;
   TranslatedMemoryProgress translated;
+
+  /// Capture the issue-time M0 mask and populate element_lane_masks from the
+  /// current lane_mask. An empty mask clears lane_mask; exec_mask is retained
+  /// so the instruction still participates in wait-counter accounting.
+  void set_block_dword_mask(uint32_t mask) {
+    assert(elem_size == sizeof(uint32_t) && num_elems == kBlockDwordCount);
+    is_block_transfer = true;
+    block_dword_mask = mask;
+    element_lane_masks.assign(kBlockDwordCount, 0);
+    for (uint32_t i = 0; i < kBlockDwordCount; ++i) {
+      if (block_dword_enabled(i))
+        element_lane_masks[i] = lane_mask;
+    }
+    if (mask == 0)
+      lane_mask = 0;
+  }
+
+  /// Whether the captured block mask enables this DWORD. Other instructions
+  /// retain the all-ones default; results wider than a block are not masked.
+  [[nodiscard]] bool block_dword_enabled(uint32_t word) const {
+    return amdgpu::block_dword_enabled(block_dword_mask, word);
+  }
 
   /// Number of consecutive VGPRs written starting at dst_reg_base.
   [[nodiscard]] uint32_t destination_vgpr_count() const {
