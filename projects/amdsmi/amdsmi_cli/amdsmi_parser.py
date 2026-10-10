@@ -6,6 +6,7 @@ import argparse
 import errno
 import os
 import sys
+import textwrap
 import time
 import collections
 from amdsmi import amdsmi_interface
@@ -25,6 +26,51 @@ CPU_XGMI_LINK_WIDTH_RANGE = range(0, 2)
 CPU_GMI3_LINK_WIDTH_RANGE = range(0, 3)
 CPU_LCLK_DPM_LEVEL_RANGE = range(0, 4)
 CPU_DISABLE_APB_RANGE = range(0, 4)
+
+
+_USAGE_FIELDS = (
+    "gfx_activity",
+    "umc_activity",
+    "mm_activity",
+    "vcn_activity",
+    "jpeg_activity",
+    "gfx_busy_inst",
+    "jpeg_busy",
+    "vcn_busy",
+    "apu_average_gfx_activity",
+    "apu_average_mm_activity",
+    "apu_average_vcn_activity",
+    "apu_average_ipu_activity",
+    "apu_average_core_c0_activity",
+    "apu_average_dram_reads",
+    "apu_average_dram_writes",
+    "apu_average_ipu_reads",
+    "apu_average_ipu_writes",
+)
+
+
+class _UsageFieldsAction(argparse.Action):
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str,
+        option_string: str = None,
+    ) -> None:
+        if getattr(namespace, self.dest, None) is not None:
+            raise argparse.ArgumentError(self, "may be given only once")
+        fields = tuple(field.strip().lower() for field in values.split(","))
+        if any(not field for field in fields):
+            raise argparse.ArgumentError(self, "usage fields must not contain an empty name")
+        unknown = [field for field in fields if field not in _USAGE_FIELDS]
+        if unknown:
+            raise argparse.ArgumentError(
+                self, "unknown usage field: " + ", ".join(unknown) + " (see amd-smi metric --help)"
+            )
+        if len(fields) != len(set(fields)):
+            raise argparse.ArgumentError(self, "duplicate usage fields are not allowed")
+        namespace.usage_fields = fields
+        namespace.usage = True
 
 
 def _cpu_set_range_label(value_range):
@@ -1886,6 +1932,20 @@ class AMDSMIParser(argparse.ArgumentParser):
             ):
                 metric_parser.add_argument(
                     "-u", "--usage", action="store_true", required=False, help=usage_help
+                )
+                metric_parser.add_argument(
+                    "--usage-fields",
+                    action=_UsageFieldsAction,
+                    metavar="FIELD[,...]",
+                    default=None,
+                    help=(
+                        "Select usage fields in order; implies --usage.\n"
+                        "    Names ignore case. N/A is unavailable; 0 is idle.\n"
+                        "    Average activity is not instantaneous busy readings.\n"
+                        "    Fields:\n    "
+                        # 54 columns plus the help indent stays within the 90-column formatter.
+                        + "\n    ".join(textwrap.wrap(", ".join(_USAGE_FIELDS), width=54))
+                    ),
                 )
                 metric_parser.add_argument(
                     "-p", "--power", action="store_true", required=False, help=power_help

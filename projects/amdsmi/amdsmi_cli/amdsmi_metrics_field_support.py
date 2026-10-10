@@ -369,6 +369,7 @@ def filter_unsupported(
     values_dict: Dict[str, Any],
     suppressed: FrozenSet[CliPath],
     protected_sections: FrozenSet[str] = frozenset(),
+    protected_paths: FrozenSet[CliPath] = frozenset(),
 ) -> Dict[str, Any]:
     """``values_dict`` without the suppressed all-N/A paths.
 
@@ -379,8 +380,10 @@ def filter_unsupported(
     Sections emptied by the filter are dropped, except those in
     ``protected_sections``: the user asked for those by name, so they are handed
     back unfiltered rather than as nothing. A section that arrived empty is kept
-    so filtering never changes anything but suppressed fields.
+    so filtering never changes anything but suppressed fields. Paths in
+    ``protected_paths`` were named by the user and are never removed.
     """
+    suppressed = suppressed - protected_paths
     if not suppressed:
         return values_dict
 
