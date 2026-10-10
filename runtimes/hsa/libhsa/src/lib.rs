@@ -619,7 +619,7 @@ pub unsafe extern "C" fn hsa_agent_get_info(
         let available_memory = if attribute == AMD_AGENT_INFO_MEMORY_AVAIL {
             native_device
                 .as_ref()
-                .map(|(device, _)| device.available_memory())
+                .map(|(device, _)| device.gpu().and_then(|gpu| gpu.available_memory()))
         } else {
             None
         };
@@ -1596,15 +1596,16 @@ pub unsafe extern "C" fn hsa_amd_register_system_event_handler(
         if runtime.system_event_handlers.try_reserve(1).is_err() {
             return OUT_OF_RESOURCES;
         }
-        let status = runtime.ensure_system_event_worker();
-        if status != SUCCESS {
-            return status;
-        }
         runtime
             .system_event_handlers
             // SAFETY: The C registration contract keeps callback data live and
             // synchronizes it until the runtime stops delivering events.
             .push((callback, unsafe { CallbackArg::new(data) }));
+        let status = runtime.ensure_system_event_worker();
+        if status != SUCCESS {
+            runtime.system_event_handlers.pop();
+            return status;
+        }
         SUCCESS
     })
 }

@@ -495,11 +495,13 @@ static ncclResult_t commFree(ncclComm_t comm) {
   NCCLCHECK(ncclCeFinalize(comm));
   NCCLCHECK(ncclRmaCeFinalize(comm));
 
-  if (comm->nNodes == 1) {
+  // AlltoAllv staging is allocated for single-node CE and multi-node hier CE.
+  if (comm->localSizes != nullptr) {
     NCCLCHECK(ncclMemFree(comm->localSizes));
-    NCCLCHECK(ncclMemFree(comm->gatheredSizes));
-
     comm->localSizes = nullptr;
+  }
+  if (comm->gatheredSizes != nullptr) {
+    NCCLCHECK(ncclMemFree(comm->gatheredSizes));
     comm->gatheredSizes = nullptr;
   }
   // tempBuff is allocated per-communicator for direct ReduceScatter on gfx950.
@@ -1821,10 +1823,16 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
         comm->hasMloPart = true;
     }
     for (int j = 0; j < i; j++) {
-      // NVML device is agnostic to MloPart being used. With MloPart, each partition has a different GPU UUID.
+      // NVML device is agnostic to MloPart being used. On NVIDIA MLOPart, each partition has a different GPU UUID.
       comm->hasMultiRankNvml |= (comm->peerInfo[i].hostHash == comm->peerInfo[j].hostHash) &&
                                 (comm->peerInfo[i].nvmlDev == comm->peerInfo[j].nvmlDev);
+      // The UUID alone does not identify a partition on AMD. hipDeviceGetUuid returns ROCr's
+      // HSA_AMD_AGENT_INFO_UUID, which is KFD's per-device unique_id, so all 8 CPX partitions of one
+      // MI300X OAM report one UUID. busId separates them: HIP reports the KFD location_id function
+      // (0000:1b:00.0-.7), unique per partition. Two ranks really on one partition still match both
+      // terms and are still refused, which is what NCCL_MULTI_RANK_GPU_ENABLE=1 gives up wholesale.
       if (!ncclParamMultiRankGpuEnable() && (comm->peerInfo[i].hostHash == comm->peerInfo[j].hostHash) &&
+          (comm->peerInfo[i].busId == comm->peerInfo[j].busId) &&
           memcmp(&comm->peerInfo[i].gpuUuid, &comm->peerInfo[j].gpuUuid, sizeof(cudaUUID_t)) == 0) {
         WARN("Multiple Ranks are using the same GPU/Partition. Set NCCL_MULTI_RANK_GPU_ENABLE=1 to enable this "
              "configuration.");
@@ -3203,14 +3211,6 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
   // update communicator state
   COMPILER_ATOMIC_STORE(&comm->initState, ncclSuccess, std::memory_order_release);
-
-  if (comm->nNodes == 1 && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
-    const size_t nLocal = 4 * (size_t)comm->nRanks;
-    const size_t nGather = nLocal * (size_t)comm->nRanks;
-
-    NCCLCHECK(ncclMemAlloc((void**)&comm->localSizes, nLocal * sizeof(size_t)));
-    NCCLCHECK(ncclMemAlloc((void**)&comm->gatheredSizes, nGather * sizeof(size_t)));
-  }
 
   // Initialize hierarchical sub-communicators and temp buffers
   if (!job->parent && !comm->isGrow && comm->nNodes >= 8 && comm->maxLocalRanks > 1 &&

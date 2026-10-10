@@ -899,6 +899,33 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
   }
 }
 
+void Wavefront::report_undefined_behavior(std::string_view reason) const {
+  cu_.report_undefined_behavior(*this, reason);
+}
+
+void ComputeUnitCore::report_static_isa_diagnostics(const Instruction &inst, const Wavefront &wf) {
+  const uint64_t flags = inst.flags();
+  if (flags & INVALID_MFMA_BROADCAST)
+    report_undefined_behavior(wf, "MFMA broadcast group exceeds the instruction block count");
+  // RDNA3/3.5 skip VOPD in wave64; only diagnose the qualified wave32 execution.
+  if ((flags & INVALID_VOPD_OPERANDS) && wf.wf_size() == 32 && wf.exec())
+    report_undefined_behavior(wf, "invalid VOPD operand combination");
+  if ((flags & INVALID_IU_MODIFIERS) && wf.exec())
+    report_undefined_behavior(wf, "undefined IU DOT/WMMA modifiers");
+  if (flags & MISALIGNED_SCALAR_DATA)
+    report_undefined_behavior(wf, "misaligned scalar data tuple");
+}
+
+void ComputeUnitCore::report_undefined_behavior(const Wavefront &wf, std::string_view reason) {
+  const uint64_t count = isa_diagnostic_count_.fetch_add(1, std::memory_order_relaxed) + 1;
+  if (count > kMaxIsaDiagnostics)
+    return;
+  util::Logger::warn(std::format("isa-undefined: {} wg={} wave={} pc={:#x}: {}.", full_path(),
+                                 wf.wg_id(), wf.wf_id(), wf.pc, reason));
+  if (count == kMaxIsaDiagnostics)
+    util::Logger::warn("isa-undefined: further diagnostics on this CU are suppressed");
+}
+
 void ComputeUnitCore::report_memory_wait(void *context,
                                          const MemoryWaitScoreboard::Hazard &hazard) {
   auto &wf = *static_cast<Wavefront *>(context);
@@ -950,16 +977,15 @@ void ComputeUnitCore::report_memory_wait(void *context,
     util::Logger::warn(std::format(
         "xcnt-wait: {} wg={} wave={} pc={:#x}: overwrite of {} before the replay source from "
         "pc={:#x} is known safe to reuse. XNACK replay may need the original value. "
-        "s_wait_xcnt <= {} is required; xcnt_diagnostics=off silences this diagnostic.",
+        "s_wait_xcnt <= {} is required; set top-level wait_checking to \"off\" "
+        "(rocjitsu --wait-checking=off) to disable wait checking.",
         cu.full_path(), wf.wg_id(), wf.wf_id(), hazard.consumer_pc, register_name,
         hazard.producer.pc, required));
   } else {
     util::Logger::warn(std::format(
         "memory-wait: {} wg={} wave={} pc={:#x}: {} of {} before memory result from pc={:#x} is "
-        "known ready ({}). A wait threshold <= {} is required; memory_wait_diagnostics=off "
-        "silences "
-        "this "
-        "diagnostic.",
+        "known ready ({}). A wait threshold <= {} is required; set top-level wait_checking "
+        "to \"off\" (rocjitsu --wait-checking=off) to disable wait checking.",
         cu.full_path(), wf.wg_id(), wf.wf_id(), hazard.consumer_pc,
         hazard.write ? "overwrite" : "read", register_name, hazard.producer.pc, counter_name,
         required));
@@ -1685,6 +1711,7 @@ template <bool EnableAsync>
       }
       const bool submitted = may_submit && window->submit_mma(decoded.value());
       if (submitted) {
+        check_static_isa_diagnostics(*inst, *active);
         if (issuer)
           window->reserve_issuer(*issuer);
         // Async execution bypasses execute_instruction(), but the submitted

@@ -588,10 +588,20 @@ std::unordered_map<std::string, FactoryFn> &factories() {
   return f;
 }
 
+// Validate explicit policies even when the launch override will replace them.
+void apply_cu_overrides(CfgMap &cfg, const CfgMap &overrides) {
+  for (const auto &[key, value] : overrides) {
+    if (auto it = cfg.find(key); it != cfg.end() && it->second != "off" && it->second != "warn")
+      throw std::invalid_argument(key + " must be warn or off");
+    cfg[key] = value;
+  }
+}
+
 void build_children(simdojo::CompositeComponent *parent,
                     const flatbuffers::Vector<flatbuffers::Offset<fb::ComponentDef>> *children,
                     simdojo::ExecMode mode, rj_code_arch_t arch, rj_code_target_id_t target,
-                    amdgpu::GpuMemory *&mem, const AsyncResources &resources) {
+                    amdgpu::GpuMemory *&mem, const AsyncResources &resources,
+                    const CfgMap &cu_overrides) {
   if (!children)
     return;
   for (auto *cd : *children) {
@@ -602,6 +612,8 @@ void build_children(simdojo::CompositeComponent *parent,
       for (auto *e : *cd->config())
         if (e->key() && e->value())
           cfg[e->key()->str()] = e->value()->str();
+    if (tp == "compute_unit")
+      apply_cu_overrides(cfg, cu_overrides);
 
     auto names = expand_range(np);
     for (auto &n : names) {
@@ -616,7 +628,7 @@ void build_children(simdojo::CompositeComponent *parent,
       parent->add_child(std::move(comp));
       if (cd->children() && cd->children()->size() > 0 && raw->is_composite())
         build_children(static_cast<simdojo::CompositeComponent *>(raw), cd->children(), mode, arch,
-                       target, mem, resources);
+                       target, mem, resources, cu_overrides);
     }
   }
 }
@@ -738,7 +750,7 @@ void set_cu_l2(simdojo::CompositeComponent *root) {
 TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo::ExecMode mode,
                                    rj_code_arch_t arch, rj_code_target_id_t target,
                                    const AsyncResources &resources, uint32_t cus_per_shader_array,
-                                   uint32_t shader_arrays_per_engine) {
+                                   uint32_t shader_arrays_per_engine, const CfgMap &cu_overrides) {
   if (!topology_def || !topology_def->root())
     throw std::runtime_error("TopologyDef missing root ComponentDef");
 
@@ -752,6 +764,8 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
     for (auto *e : *rd->config())
       if (e->key() && e->value())
         root_cfg[e->key()->str()] = e->value()->str();
+  if (rt == "compute_unit")
+    apply_cu_overrides(root_cfg, cu_overrides);
 
   auto &f = factories();
   auto it = f.find(rt);
@@ -765,7 +779,7 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
       static_cast<simdojo::CompositeComponent *>(root_comp.release()));
 
   amdgpu::GpuMemory *mem = nullptr;
-  build_children(root, rd->children(), mode, arch, target, mem, resources);
+  build_children(root, rd->children(), mode, arch, target, mem, resources, cu_overrides);
 
   if (!mem) {
     std::vector<simdojo::Component *> all;
@@ -934,6 +948,14 @@ ExecutionThreadSettings execution_thread_settings(const fb::SimulationConfig *co
 }
 
 LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_threads) {
+  CfgMap cu_overrides;
+  if (const auto *setting = fb_config->wait_checking()) {
+    const auto mode = parse_wait_checking(setting->string_view());
+    if (!mode)
+      throw std::invalid_argument("wait_checking must be on, off, or all");
+    cu_overrides["memory_wait_diagnostics"] = *mode == WaitChecking::Off ? "off" : "warn";
+    cu_overrides["xcnt_diagnostics"] = *mode == WaitChecking::All ? "warn" : "off";
+  }
   LoadedConfig result;
   result.engine_config = engine_config_from_fb(fb_config);
   result.exec_mode = exec_mode_from_fb(fb_config);
@@ -1000,9 +1022,9 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
   if (!result.engine_config.num_threads)
     result.engine_config.num_threads = result.execution_threads.engines;
   result.async_resources = make_async_execution_resources(result.execution_threads.helpers);
-  result.build_result =
-      build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources,
-                     result.device.num_cu_per_sh, result.device.num_shader_arrays_per_engine);
+  result.build_result = build_topology(topo_def, result.exec_mode, arch, result.target,
+                                       result.async_resources, result.device.num_cu_per_sh,
+                                       result.device.num_shader_arrays_per_engine, cu_overrides);
   if (result.device.present)
     if (SoC *soc = result.soc())
       soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
@@ -1027,9 +1049,9 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
       result.devices[i].unique_id = result.device.unique_id + i;
     }
     for (uint32_t i = 1; i < result.num_gpus; ++i) {
-      result.extra_gpu_builds.push_back(
-          build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources,
-                         result.device.num_cu_per_sh, result.device.num_shader_arrays_per_engine));
+      result.extra_gpu_builds.push_back(build_topology(
+          topo_def, result.exec_mode, arch, result.target, result.async_resources,
+          result.device.num_cu_per_sh, result.device.num_shader_arrays_per_engine, cu_overrides));
       if (auto *soc = dynamic_cast<SoC *>(result.extra_gpu_builds.back().root.get()))
         soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
           cp->set_scratch_slots_per_cu(result.device.max_slots_scratch_cu);

@@ -53,6 +53,9 @@ extern std::function<ncclResult_t(ncclComm_t, ncclWindow_t)> g_devrNcclCommWindo
 extern std::function<ncclResult_t(void*, void*, int)> g_devrBootstrapAllGather;
 extern std::function<ncclResult_t(void*, int*, int, int, int)> g_devrBootstrapIntraNodeBarrier;
 extern std::function<ncclResult_t(void*, int*, int, int, void*, int)> g_devrBootstrapIntraNodeAllGather;
+// (commState, peer, tag, data, size) of bootstrapSend / bootstrapRecv.
+extern std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapSend;
+extern std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapRecv;
 
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
                                   ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int)>

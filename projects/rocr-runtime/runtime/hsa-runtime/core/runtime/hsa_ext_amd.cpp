@@ -2089,6 +2089,20 @@ hsa_status_t hsa_amd_vmem_get_alloc_properties_from_handle(hsa_amd_vmem_alloc_ha
   CATCH;
 }
 
+hsa_status_t hsa_amd_vmem_get_vmem_info(hsa_amd_vmem_alloc_handle_t allocHandle,
+                                        hsa_amd_vmem_handle_info_t* info) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(info);
+
+  /* The caller must provide a structure large enough to hold at least the size member. */
+  if (info->size < sizeof(hsa_amd_vmem_handle_info_t))
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  return core::Runtime::runtime_singleton_->VMemoryGetHandleInfo(allocHandle, info);
+  CATCH;
+}
+
 hsa_status_t HSA_API hsa_amd_agent_set_async_scratch_limit(hsa_agent_t _agent, size_t threshold) {
   TRY;
   IS_OPEN();

@@ -80,6 +80,8 @@ extern ncclResult_t g_ncclTopoComputeP2pChannelsPerPeerResult;
 extern std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclTopoCheckNicFused;
 extern std::function<ncclResult_t(struct ncclTopoSystem*, int, float*)> g_ncclTopoGetMinNetBw;
 extern std::function<ncclResult_t(struct ncclTopoSystem*, int, int*, float*)> g_ncclTopoGetLocalNetCountByBw;
+// (system, rank, channelId, id, dev): the channel's local NIC. Default picks net device 0.
+extern std::function<ncclResult_t(struct ncclTopoSystem*, int, int, int64_t*, int*)> g_ncclTopoGetLocalNet;
 extern std::function<ncclResult_t(struct ncclTopoSystem*, int*)> g_ncclTopoPathAllNVLink;
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoRanks*)> g_ncclTopoPreset;
 extern ncclResult_t g_rcclCheckRomeTopoModelIdxConsensusResult;
