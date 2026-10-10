@@ -1549,13 +1549,10 @@ void VSwmmacF3216x16x32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
-  uint32_t s2 = dst;
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x1u;
-  amdgpu::exec_swmmac_f32(cu, 16, 16, 32, 16, dst, src0_base, src1_base, s2, index_base, 16,
-                          index_key, amdgpu::extract_f16, amdgpu::extract_f16, const_acc,
-                          wf.wf_size());
+  uint32_t index_key = inst_.opsel & 0x3u;
+  amdgpu::exec_gfx12_swmmac_dot4<false>(cu, wf.wf_size(), dst, src0_base, src1_base, index_base,
+                                        index_key, inst_.neg, inst_.neg_hi);
 }
 
 void VSwmmacF3216x16x32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -1564,13 +1561,10 @@ void VSwmmacF3216x16x32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
-  uint32_t s2 = dst;
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x1u;
-  amdgpu::exec_swmmac_f32(cu, 16, 16, 32, 16, dst, src0_base, src1_base, s2, index_base, 16,
-                          index_key, amdgpu::extract_bf16, amdgpu::extract_bf16, const_acc,
-                          wf.wf_size());
+  uint32_t index_key = inst_.opsel & 0x3u;
+  amdgpu::exec_gfx12_swmmac_dot4<true>(cu, wf.wf_size(), dst, src0_base, src1_base, index_base,
+                                       index_key, inst_.neg, inst_.neg_hi);
 }
 
 void VSwmmacF1616x16x32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -1579,13 +1573,11 @@ void VSwmmacF1616x16x32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
-  uint32_t s2 = dst;
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x1u;
-  amdgpu::exec_swmmac_f16(cu, 16, 16, 32, 16, dst, src0_base, src1_base, s2, index_base, 16,
-                          index_key, amdgpu::extract_f16, amdgpu::extract_f16, const_acc,
-                          wf.wf_size());
+  uint32_t index_key = inst_.opsel & 0x3u;
+  amdgpu::exec_gfx12_swmmac_dot4<false, true>(cu, wf.wf_size(), dst, src0_base, src1_base,
+                                              index_base, index_key, inst_.neg, inst_.neg_hi,
+                                              wf.fp16_ovfl());
 }
 
 void VSwmmacBf1616x16x32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -1594,13 +1586,11 @@ void VSwmmacBf1616x16x32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
-  uint32_t s2 = dst;
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x1u;
-  amdgpu::exec_swmmac_bf16(cu, 16, 16, 32, 16, dst, src0_base, src1_base, s2, index_base, 16,
-                           index_key, amdgpu::extract_bf16, amdgpu::extract_bf16, const_acc,
-                           wf.wf_size());
+  uint32_t index_key = inst_.opsel & 0x3u;
+  amdgpu::exec_gfx12_swmmac_dot4<true, true>(cu, wf.wf_size(), dst, src0_base, src1_base,
+                                             index_base, index_key, inst_.neg, inst_.neg_hi,
+                                             wf.fp16_ovfl());
 }
 
 void VSwmmacI3216x16x32Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -1648,13 +1638,10 @@ void VSwmmacF3216x16x32Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
-  uint32_t s2 = dst;
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x1u;
-  amdgpu::exec_swmmac_f32(cu, 16, 16, 32, 8, dst, src0_base, src1_base, s2, index_base, 16,
-                          index_key, amdgpu::extract_fp8, amdgpu::extract_fp8, const_acc,
-                          wf.wf_size());
+  uint32_t index_key = inst_.opsel & 0x3u;
+  amdgpu::exec_gfx12_swmmac_dot8<false, false>(cu, wf.wf_size(), dst, src0_base, src1_base,
+                                               index_base, index_key);
 }
 
 void VSwmmacF3216x16x32Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -1663,13 +1650,10 @@ void VSwmmacF3216x16x32Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
-  uint32_t s2 = dst;
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x1u;
-  amdgpu::exec_swmmac_f32(cu, 16, 16, 32, 8, dst, src0_base, src1_base, s2, index_base, 16,
-                          index_key, amdgpu::extract_fp8, amdgpu::extract_bf8, const_acc,
-                          wf.wf_size());
+  uint32_t index_key = inst_.opsel & 0x3u;
+  amdgpu::exec_gfx12_swmmac_dot8<false, true>(cu, wf.wf_size(), dst, src0_base, src1_base,
+                                              index_base, index_key);
 }
 
 void VSwmmacF3216x16x32Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -1678,13 +1662,10 @@ void VSwmmacF3216x16x32Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
-  uint32_t s2 = dst;
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x1u;
-  amdgpu::exec_swmmac_f32(cu, 16, 16, 32, 8, dst, src0_base, src1_base, s2, index_base, 16,
-                          index_key, amdgpu::extract_bf8, amdgpu::extract_fp8, const_acc,
-                          wf.wf_size());
+  uint32_t index_key = inst_.opsel & 0x3u;
+  amdgpu::exec_gfx12_swmmac_dot8<true, false>(cu, wf.wf_size(), dst, src0_base, src1_base,
+                                              index_base, index_key);
 }
 
 void VSwmmacF3216x16x32Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -1693,13 +1674,10 @@ void VSwmmacF3216x16x32Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
-  uint32_t s2 = dst;
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x1u;
-  amdgpu::exec_swmmac_f32(cu, 16, 16, 32, 8, dst, src0_base, src1_base, s2, index_base, 16,
-                          index_key, amdgpu::extract_bf8, amdgpu::extract_bf8, const_acc,
-                          wf.wf_size());
+  uint32_t index_key = inst_.opsel & 0x3u;
+  amdgpu::exec_gfx12_swmmac_dot8<true, true>(cu, wf.wf_size(), dst, src0_base, src1_base,
+                                             index_base, index_key);
 }
 
 } // namespace rdna4

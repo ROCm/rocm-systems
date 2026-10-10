@@ -21,6 +21,14 @@ fixtures record their SDK version and date in the sections below.
 | `rdna_wmma_f32_fp8_bf8_cases.h` | FP8/BF8 F32 WMMA raw matrices and operand witnesses on gfx1201, both wave sizes. |
 | `rdna_wmma_f32_bf8_fp8_cases.h` | BF8/FP8 F32 WMMA raw matrices and operand witnesses on gfx1201, both wave sizes. |
 | `rdna_wmma_f32_bf8_bf8_cases.h` | BF8/BF8 F32 WMMA raw matrices and operand witnesses on gfx1201, both wave sizes. |
+| `rdna_swmmac_f32_f16_cases.h` | F16 F32 sparse SWMMAC raw matrices and operand witnesses on gfx1201, both wave sizes. |
+| `rdna_swmmac_f32_bf16_cases.h` | BF16 F32 sparse SWMMAC raw matrices and operand witnesses on gfx1201, both wave sizes. |
+| `rdna_swmmac_f16_f16_cases.h` | F16 F16 sparse SWMMAC raw matrices and operand witnesses on gfx1201, both wave sizes. |
+| `rdna_swmmac_bf16_bf16_cases.h` | BF16 BF16 sparse SWMMAC raw matrices and operand witnesses on gfx1201, both wave sizes. |
+| `rdna_swmmac_f32_fp8_fp8_cases.h` | FP8/FP8 F32 sparse SWMMAC raw matrices and operand witnesses on gfx1201, both wave sizes. |
+| `rdna_swmmac_f32_fp8_bf8_cases.h` | FP8/BF8 F32 sparse SWMMAC raw matrices and operand witnesses on gfx1201, both wave sizes. |
+| `rdna_swmmac_f32_bf8_fp8_cases.h` | BF8/FP8 F32 sparse SWMMAC raw matrices and operand witnesses on gfx1201, both wave sizes. |
+| `rdna_swmmac_f32_bf8_bf8_cases.h` | BF8/BF8 F32 sparse SWMMAC raw matrices and operand witnesses on gfx1201, both wave sizes. |
 | `packed_wmma_cases.h` | Seven F16/BF16 matrix inputs with packed outputs for both architectures and wave sizes. |
 
 DOT2 records store packed A/B words, FP32 C and the expected FP32 result.
@@ -222,3 +230,123 @@ finite and raw matrices, every inline C selector, MODE sweeps, destination
 overlaps, cancellation/alignment witnesses and the extra C-bit encodings.
 These finite observations qualify the model but do not prove all possible
 matrix inputs.
+
+## F16/BF16 sparse SWMMAC captures
+
+The per-opcode fixtures below were captured on R9700/gfx1201
+on 2026-10-10 using TheRock 10.1.0a20260822, for wave32 and wave64. They use
+the same seed, raw/finite input patterns and all-register decoded comparison
+described above. Destinations v0 and v8 directly overlap A and B; v24 is a
+control. Compact matrices retain non-default MODE settings, and zero-product
+operands make subnormal C observable.
+Sparse C is tied to D. Fixtures also overlap D with the index VGPR using
+the actual output span for each width. They retain every legal index key and
+ordered, distinct two-of-four indices. The best-effort model uses sixteen index
+bits per lane in wave32 and eight in wave64, with contiguous compressed K at
+both widths and four steps of four compressed products. Operand records cover
+every supported source modifier. In the model, A negation follows its packed
+half; B negation follows compressed-product parity after sparse selection.
+These rules are inferred solely from the local input/output observations.
+
+Additional compact operands retain raw sparse C ABS/NEG encodings rejected
+by the local LLVM assembler. Local gfx1201 results are consistent with applying
+ABS before NEG to the tied accumulator, as in the dense WMMA model. This does
+not establish an internal hardware ordering. These extra encoding observations
+are excluded from supported-operand counts. Each qualified header retains six
+such operands,
+using destination v24 and MODE `0xf0` at both wave widths. Raw pairs and code
+objects are retained in the per-opcode directories named below.
+
+Qualified per-opcode headers:
+
+- `rdna_swmmac_f32_f16_cases.h`: `V_SWMMAC_F32_16X16X32_F16`.
+  Extra C-bit pairs: `sparse-c-bit-fixtures-op80`. The 192 additional raw C-bit
+  captures in `float-flags-op80`, including clamp combinations, also match
+  decoded replay in both execution settings.
+- `rdna_swmmac_f32_bf16_cases.h`: `V_SWMMAC_F32_16X16X32_BF16`.
+  Extra C-bit pairs: `sparse-c-bit-fixtures-op81`. The 192 additional raw C-bit
+  captures in `float-flags-op81`, including clamp combinations, also match
+  decoded replay in both execution settings.
+- `rdna_swmmac_f16_f16_cases.h`: `V_SWMMAC_F16_16X16X32_F16`.
+  The model rounds each step directly to F16, including its inferred handling
+  of F16 overflow mode.
+  Extra C-bit pairs: `sparse-c-bit-fixtures-op82`. The 192 additional raw C-bit
+  captures in `float-flags-op82`, including clamp combinations, also match
+  decoded replay in both execution settings.
+- `rdna_swmmac_bf16_bf16_cases.h`: `V_SWMMAC_BF16_16X16X32_BF16`.
+  The model truncates each step's rounded F32 result to BF16.
+  Extra C-bit pairs: `sparse-c-bit-fixtures-op83`. The 192 additional raw C-bit
+  captures in `float-flags-op83`, including clamp combinations, also match
+  decoded replay in both execution settings.
+
+The retained corpus covers finite and raw matrices, MODE sweeps and shifted
+overlaps. These finite observations qualify the model but do not prove all
+possible matrix inputs.
+
+## Native FP8/BF8 sparse SWMMAC captures
+
+The per-opcode fixtures below were captured on R9700/gfx1201
+on 2026-10-10 using TheRock 10.1.0a20260822, for wave32 and wave64. They use
+the same seed, raw/finite input patterns and all-register decoded comparison
+described above. Destinations v0 and v8 directly overlap A and B; v24 is a
+control. Compact matrices retain non-default MODE settings, and zero-product
+operands make subnormal C observable.
+Sparse C is tied to D. Fixtures also overlap D with the index VGPR using
+the actual output span for each width. They retain every legal index key and
+ordered, distinct two-of-four indices. Index slices use sixteen bits per lane
+in wave32 and eight in wave64. Compressed K is contiguous at both widths.
+Arithmetic uses two steps of eight compressed products, with the same native
+format alignment, zero and NaN rules as dense FP8/BF8 above. The ISA defines no
+source sign modifiers for this family. Separately, raw C ABS/NEG and clamp
+encodings in the per-opcode directories named below are observed to be ignored
+on gfx1201. They are
+labeled outside the supported operand scope and require `--include-unsupported`
+for replay. Raw A/B sign encodings have not been measured. Each qualified header
+also retains raw C-bit witnesses at destination v24 and MODE `0xf0`, with zero
+and nonzero products. The latter distinguish ignored modifiers from a missing
+destination write. Uniform special-value records retain
+the format-sensitive `0x7c` witnesses, factor/accumulator NaNs, and negative-zero
+A/C with positive-one B.
+
+Qualified per-opcode headers:
+
+- `rdna_swmmac_f32_fp8_fp8_cases.h`: `V_SWMMAC_F32_16X16X32_FP8_FP8`;
+  both factors are FP8, with no infinities.
+  Extra C-bit pairs: `sparse-c-bit-fixtures-op87` and
+  `nonzero-sparse-c-bit-fixtures-op87`. All 16 raw flag batches in
+  `float-flags-op87`, including clamp combinations, also match decoded replay
+  in both execution settings.
+- `rdna_swmmac_f32_fp8_bf8_cases.h`: `V_SWMMAC_F32_16X16X32_FP8_BF8`;
+  A is FP8 and B is BF8.
+  Twelve nonuniform operand records distinguish infinities within and across
+  eight-product steps, with quiet/signaling NaN or zero C. They patch B at
+  `factor_base` 8 using `factor_groups`.
+  Extra C-bit pairs: `sparse-c-bit-fixtures-op88` and
+  `nonzero-sparse-c-bit-fixtures-op88`. All 16 raw flag batches in
+  `float-flags-op88`, including clamp combinations, also match decoded replay
+  in both execution settings.
+- `rdna_swmmac_f32_bf8_fp8_cases.h`: `V_SWMMAC_F32_16X16X32_BF8_FP8`;
+  A is BF8 and B is FP8.
+  Twelve nonuniform operand records distinguish infinities within and across
+  eight-product steps, with quiet/signaling NaN or zero C. They patch A at
+  `factor_base` 0 using `factor_groups`.
+  Extra C-bit pairs: `sparse-c-bit-fixtures-op89` and
+  `nonzero-sparse-c-bit-fixtures-op89`. All 16 raw flag batches in
+  `float-flags-op89`, including clamp combinations, also match decoded replay
+  in both execution settings.
+- `rdna_swmmac_f32_bf8_bf8_cases.h`: `V_SWMMAC_F32_16X16X32_BF8_BF8`;
+  both factors are BF8.
+  Twenty-four nonuniform operand records distinguish infinities within and across
+  eight-product steps, with quiet/signaling NaN or zero C. They patch A or B at
+  `factor_base` 0 or 8 using `factor_groups`.
+  Extra C-bit pairs: `sparse-c-bit-fixtures-op90` and
+  `nonzero-sparse-c-bit-fixtures-op90`. All 16 raw flag batches in
+  `float-flags-op90`, including clamp combinations, also match decoded replay
+  in both execution settings.
+
+The retained corpus covers finite and raw matrices, MODE sweeps and shifted
+overlaps. Larger local sweeps outside the compact headers retain all 65,536 raw
+byte pairs per format in `results/fp8-pairs-op*`, plus cancellation/alignment
+witnesses in `results/float-cancellation-op*`. The pair sweep uses 256 matrices,
+each testing the Cartesian product of 16 A bytes and 16 B bytes. These finite
+observations qualify the model but do not prove all possible matrix inputs.

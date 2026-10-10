@@ -2,8 +2,19 @@
 // SPDX-License-Identifier: MIT
 
 /// @file rdna_wmma_float_test.cpp
-/// @brief Raw decoded WMMA regressions from physical RDNA captures.
+/// @brief Raw decoded WMMA and SWMMAC regressions from physical RDNA captures.
+/// @details Saved local outputs constrain a best-effort simulator model. These
+/// tests do not establish hardware internals or guarantee untested inputs,
+/// flags, modes or devices. See fixtures/float_dot/README.md for provenance.
 
+#include "fixtures/float_dot/rdna_swmmac_bf16_bf16_cases.h"
+#include "fixtures/float_dot/rdna_swmmac_f16_f16_cases.h"
+#include "fixtures/float_dot/rdna_swmmac_f32_bf16_cases.h"
+#include "fixtures/float_dot/rdna_swmmac_f32_bf8_bf8_cases.h"
+#include "fixtures/float_dot/rdna_swmmac_f32_bf8_fp8_cases.h"
+#include "fixtures/float_dot/rdna_swmmac_f32_f16_cases.h"
+#include "fixtures/float_dot/rdna_swmmac_f32_fp8_bf8_cases.h"
+#include "fixtures/float_dot/rdna_swmmac_f32_fp8_fp8_cases.h"
 #include "fixtures/float_dot/rdna_wmma_f32_bf8_bf8_cases.h"
 #include "fixtures/float_dot/rdna_wmma_f32_bf8_fp8_cases.h"
 #include "fixtures/float_dot/rdna_wmma_f32_fp8_bf8_cases.h"
@@ -41,7 +52,7 @@ struct WmmaFloatShape {
   std::span<const RdnaWmmaFloatOperandCase> operands;
 };
 
-constexpr std::array<WmmaFloatShape, 4> kWmmaFloatShapes{{
+constexpr std::array<WmmaFloatShape, 12> kWmmaFloatShapes{{
     {rdna4::kVWmmaF3216x16x16Fp8Fp8Vop3p, "v_wmma_f32_16x16x16_fp8_fp8", 8, false, false, false,
      kRdnaWmmaF32Fp8Fp8Matrices, kRdnaWmmaF32Fp8Fp8Operands},
     {rdna4::kVWmmaF3216x16x16Fp8Bf8Vop3p, "v_wmma_f32_16x16x16_fp8_bf8", 8, false, true, false,
@@ -50,6 +61,22 @@ constexpr std::array<WmmaFloatShape, 4> kWmmaFloatShapes{{
      kRdnaWmmaF32Bf8Fp8Matrices, kRdnaWmmaF32Bf8Fp8Operands},
     {rdna4::kVWmmaF3216x16x16Bf8Bf8Vop3p, "v_wmma_f32_16x16x16_bf8_bf8", 8, true, true, false,
      kRdnaWmmaF32Bf8Bf8Matrices, kRdnaWmmaF32Bf8Bf8Operands},
+    {rdna4::kVSwmmacF3216x16x32F16Vop3p, "v_swmmac_f32_16x16x32_f16", 16, false, false, false,
+     kRdnaSwmmacF32F16Matrices, kRdnaSwmmacF32F16Operands},
+    {rdna4::kVSwmmacF3216x16x32Bf16Vop3p, "v_swmmac_f32_16x16x32_bf16", 16, true, true, false,
+     kRdnaSwmmacF32Bf16Matrices, kRdnaSwmmacF32Bf16Operands},
+    {rdna4::kVSwmmacF1616x16x32F16Vop3p, "v_swmmac_f16_16x16x32_f16", 16, false, false, true,
+     kRdnaSwmmacF16F16Matrices, kRdnaSwmmacF16F16Operands},
+    {rdna4::kVSwmmacBf1616x16x32Bf16Vop3p, "v_swmmac_bf16_16x16x32_bf16", 16, true, true, true,
+     kRdnaSwmmacBf16Bf16Matrices, kRdnaSwmmacBf16Bf16Operands},
+    {rdna4::kVSwmmacF3216x16x32Fp8Fp8Vop3p, "v_swmmac_f32_16x16x32_fp8_fp8", 8, false, false, false,
+     kRdnaSwmmacF32Fp8Fp8Matrices, kRdnaSwmmacF32Fp8Fp8Operands},
+    {rdna4::kVSwmmacF3216x16x32Fp8Bf8Vop3p, "v_swmmac_f32_16x16x32_fp8_bf8", 8, false, true, false,
+     kRdnaSwmmacF32Fp8Bf8Matrices, kRdnaSwmmacF32Fp8Bf8Operands},
+    {rdna4::kVSwmmacF3216x16x32Bf8Fp8Vop3p, "v_swmmac_f32_16x16x32_bf8_fp8", 8, true, false, false,
+     kRdnaSwmmacF32Bf8Fp8Matrices, kRdnaSwmmacF32Bf8Fp8Operands},
+    {rdna4::kVSwmmacF3216x16x32Bf8Bf8Vop3p, "v_swmmac_f32_16x16x32_bf8_bf8", 8, true, true, false,
+     kRdnaSwmmacF32Bf8Bf8Matrices, kRdnaSwmmacF32Bf8Bf8Operands},
 }};
 
 struct WmmaFloatCase {

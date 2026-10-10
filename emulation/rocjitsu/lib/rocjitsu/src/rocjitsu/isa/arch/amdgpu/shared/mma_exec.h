@@ -538,7 +538,8 @@ inline uint64_t read_swmmac_index_set(auto &cu, uint32_t index_base, uint32_t la
 template <uint32_t InBits, uint32_t K>
 inline uint32_t read_gfx12_swmmac_index_set(auto &cu, uint32_t wave_size, uint32_t index_base,
                                             uint32_t lane, uint32_t index_key) {
-  static_assert((K == 32 && (InBits == 4 || InBits == 8)) || (K == 64 && InBits == 4));
+  static_assert((K == 32 && (InBits == 4 || InBits == 8 || InBits == 16)) ||
+                (K == 64 && InBits == 4));
   uint32_t key_bits;
   if constexpr (K == 64)
     key_bits = wave_size == 32 ? 32 : 16;
@@ -1875,14 +1876,17 @@ void exec_gfx11_wmma_dot2(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s
     }
 }
 
-// GFX12 F16/BF16 WMMA rounds after each group of four products; packed outputs
-// narrow at each group as well.
-// In wave32, documented K bits 2 and 3 occupy the lane and register selectors,
-// respectively; gfx12_wmma_input_loc uses contiguous per-lane K chunks.
-template <bool Bf16, bool Packed = false>
-void exec_gfx12_wmma_dot4(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
-                          uint32_t s2, std::optional<uint32_t> const_acc, uint32_t neg,
-                          uint32_t neg_hi, bool fp16_ovfl = false) {
+// Best-effort GFX12 F16/BF16 WMMA/SWMMAC model inferred solely from local
+// gfx1201 captures. Its four-product rounding/narrowing groups and K order
+// do not establish hardware internals or guarantee untested cases.
+// The dense wave32 model swaps generic K bits 2 and 3; the sparse K32 model
+// uses contiguous compressed K. Both paths stage all results before writing D.
+// See tests/fixtures/float_dot/README.md for the observation scope.
+template <bool Bf16, bool Packed, bool Sparse>
+void exec_gfx12_wmma_dot4_impl(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
+                               uint32_t s2, std::optional<uint32_t> const_acc, uint32_t neg,
+                               uint32_t neg_hi, bool fp16_ovfl, uint32_t index_base,
+                               uint32_t index_key) {
   require_gfx12_wmma_wave_size(wave_size);
   std::array<uint32_t, 256> results;
   RegisterAccess regs(cu);
@@ -1893,6 +1897,7 @@ void exec_gfx12_wmma_dot4(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s
           const_acc ? *const_acc : regs.read_vgpr(s2 + (Packed ? out.reg / 2 : out.reg), out.lane);
       if constexpr (Packed)
         acc = (acc >> (16 * (out.reg % 2))) & 0xffff;
+      // The saved local sparse C-bit outputs fit the dense ABS-then-NEG model.
       if (neg_hi & 4)
         acc &= Packed ? 0x7fffu : 0x7fffffffu;
       if (neg & 4)
@@ -1901,16 +1906,28 @@ void exec_gfx12_wmma_dot4(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s
         std::array<uint16_t, 4> a, b;
         for (uint32_t j = 0; j < 4; ++j) {
           const uint32_t logical_k = k + j;
-          const uint32_t physical_k =
-              wave_size == 32 ? (logical_k & 3) | ((logical_k & 4) << 1) | ((logical_k & 8) >> 1)
-                              : logical_k;
-          const auto al = gfx12_wmma_input_loc(wave_size, 16, 16, row, physical_k, 16);
-          const auto bl = gfx12_wmma_input_loc(wave_size, 16, 16, col, physical_k, 16);
+          InputLoc al, bl;
+          if constexpr (Sparse) {
+            al = swmmac_a_input_loc(wave_size, 16, 32, row, logical_k, 16);
+            const auto index = swmmac_index_loc(wave_size, 16, 32, 16, row, logical_k, 16);
+            const uint32_t indices = read_gfx12_swmmac_index_set<16, 32>(cu, wave_size, index_base,
+                                                                         index.lane, index_key);
+            const uint32_t dense_k = swmmac_dense_k(indices, logical_k, index.local_compressed_k);
+            bl = swmmac_b_input_loc(wave_size, 16, 32, col, dense_k, 16);
+          } else {
+            const uint32_t physical_k =
+                wave_size == 32 ? (logical_k & 3) | ((logical_k & 4) << 1) | ((logical_k & 8) >> 1)
+                                : logical_k;
+            al = gfx12_wmma_input_loc(wave_size, 16, 16, row, physical_k, 16);
+            bl = gfx12_wmma_input_loc(wave_size, 16, 16, col, physical_k, 16);
+          }
           a[j] = uint16_t(regs.read_vgpr(s0 + al.vgpr_offset, al.lane) >> (16 * al.sub_element));
           b[j] = uint16_t(regs.read_vgpr(s1 + bl.vgpr_offset, bl.lane) >> (16 * bl.sub_element));
           if ((al.sub_element ? neg_hi : neg) & 1)
             a[j] ^= 0x8000u;
-          if ((bl.sub_element ? neg_hi : neg) & 2)
+          // In this model, sparse B's modifier follows the compressed product slot.
+          const uint32_t b_half = Sparse ? logical_k & 1u : bl.sub_element;
+          if ((b_half ? neg_hi : neg) & 2)
             b[j] ^= 0x8000u;
         }
         if constexpr (Packed)
@@ -1933,30 +1950,58 @@ void exec_gfx12_wmma_dot4(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s
     }
 }
 
-// Best-effort GFX12 FP8/BF8 WMMA model based solely on local gfx1201 captures.
-// Its two eight-product steps and wave64 K order are inferences, not known
+template <bool Bf16, bool Packed = false>
+void exec_gfx12_wmma_dot4(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
+                          uint32_t s2, std::optional<uint32_t> const_acc, uint32_t neg,
+                          uint32_t neg_hi, bool fp16_ovfl = false) {
+  exec_gfx12_wmma_dot4_impl<Bf16, Packed, false>(cu, wave_size, dst, s0, s1, s2, const_acc, neg,
+                                                 neg_hi, fp16_ovfl, 0, 0);
+}
+
+template <bool Bf16, bool Packed = false>
+void exec_gfx12_swmmac_dot4(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
+                            uint32_t index_base, uint32_t index_key, uint32_t neg, uint32_t neg_hi,
+                            bool fp16_ovfl = false) {
+  exec_gfx12_wmma_dot4_impl<Bf16, Packed, true>(cu, wave_size, dst, s0, s1, dst, std::nullopt, neg,
+                                                neg_hi, fp16_ovfl, index_base, index_key);
+}
+
+// Best-effort GFX12 FP8/BF8 WMMA/SWMMAC model based solely on local gfx1201
+// captures. Its two eight-product steps and K order are inferences, not known
 // hardware internals; untested inputs, flags and devices may differ.
-// The model orders wave64 four-product blocks by K bits 3, then 2.
-template <bool ABf8, bool BBf8>
-void exec_gfx12_wmma_dot8(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
-                          uint32_t s2, std::optional<uint32_t> const_acc) {
+// The dense wave64 model swaps generic K bits 2 and 3; the sparse K32 model
+// uses contiguous compressed K. See tests/fixtures/float_dot/README.md.
+template <bool ABf8, bool BBf8, bool Sparse>
+void exec_gfx12_wmma_dot8_impl(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
+                               uint32_t s2, std::optional<uint32_t> const_acc, uint32_t index_base,
+                               uint32_t index_key) {
   require_gfx12_wmma_wave_size(wave_size);
   std::array<uint32_t, 256> results;
   RegisterAccess regs(cu);
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
       const auto out = gfx12_wmma_output_loc_32(wave_size, 16, 16, row, col);
-      // Assembler-accepted C ABS/NEG bit encodings do not modify C on gfx1201.
+      // Ignore C ABS/NEG bits: the saved local dense/sparse gfx1201 cases fit this model.
       uint32_t acc = const_acc ? *const_acc : regs.read_vgpr(s2 + out.reg, out.lane);
       for (uint32_t k = 0; k < 16; k += 8) {
         std::array<uint8_t, 8> a, b;
         for (uint32_t j = 0; j < 8; ++j) {
           const uint32_t logical_k = k + j;
-          const uint32_t physical_k =
-              wave_size == 64 ? (logical_k & 3) | ((logical_k & 4) << 1) | ((logical_k & 8) >> 1)
-                              : logical_k;
-          const auto al = gfx12_wmma_input_loc(wave_size, 16, 16, row, physical_k, 8);
-          const auto bl = gfx12_wmma_input_loc(wave_size, 16, 16, col, physical_k, 8);
+          InputLoc al, bl;
+          if constexpr (Sparse) {
+            al = swmmac_a_input_loc(wave_size, 16, 32, row, logical_k, 8);
+            const auto index = swmmac_index_loc(wave_size, 16, 32, 8, row, logical_k, 16);
+            const uint32_t indices = read_gfx12_swmmac_index_set<8, 32>(cu, wave_size, index_base,
+                                                                        index.lane, index_key);
+            const uint32_t dense_k = swmmac_dense_k(indices, logical_k, index.local_compressed_k);
+            bl = swmmac_b_input_loc(wave_size, 16, 32, col, dense_k, 8);
+          } else {
+            const uint32_t physical_k =
+                wave_size == 64 ? (logical_k & 3) | ((logical_k & 4) << 1) | ((logical_k & 8) >> 1)
+                                : logical_k;
+            al = gfx12_wmma_input_loc(wave_size, 16, 16, row, physical_k, 8);
+            bl = gfx12_wmma_input_loc(wave_size, 16, 16, col, physical_k, 8);
+          }
           a[j] = uint8_t(regs.read_vgpr(s0 + al.vgpr_offset, al.lane) >> al.bit_offset);
           b[j] = uint8_t(regs.read_vgpr(s1 + bl.vgpr_offset, bl.lane) >> bl.bit_offset);
         }
@@ -1970,6 +2015,19 @@ void exec_gfx12_wmma_dot8(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s
       const auto out = gfx12_wmma_output_loc_32(wave_size, 16, 16, row, col);
       regs.write_vgpr(dst + out.reg, out.lane, results[row * 16 + col]);
     }
+}
+
+template <bool ABf8, bool BBf8>
+void exec_gfx12_wmma_dot8(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
+                          uint32_t s2, std::optional<uint32_t> const_acc) {
+  exec_gfx12_wmma_dot8_impl<ABf8, BBf8, false>(cu, wave_size, dst, s0, s1, s2, const_acc, 0, 0);
+}
+
+template <bool ABf8, bool BBf8>
+void exec_gfx12_swmmac_dot8(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
+                            uint32_t index_base, uint32_t index_key) {
+  exec_gfx12_wmma_dot8_impl<ABf8, BBf8, true>(cu, wave_size, dst, s0, s1, dst, std::nullopt,
+                                              index_base, index_key);
 }
 
 template <typename ExtractA, typename ExtractB>
