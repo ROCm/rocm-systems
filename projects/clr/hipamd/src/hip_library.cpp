@@ -185,7 +185,13 @@ hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fname,
                                   void** libraryOptionValues, unsigned int numLibraryOptions) {
   HIP_INIT_API(hipLibraryLoadFromFile, library, fname, jitOptions, jitOptionsValues, numJitOptions,
                libraryOptions, libraryOptionValues, numLibraryOptions);
-  if (library == nullptr || !std::filesystem::exists(fname) || numJitOptions > 0) {
+  if (library == nullptr || fname == nullptr || numJitOptions > 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  // Check if file exists, also use the nothrow version
+  std::error_code ferr{};
+  if (!std::filesystem::exists(fname, ferr)) {
+    LogPrintfError("File exist check failed with: %s", ferr.message().c_str());
     HIP_RETURN(hipErrorInvalidValue);
   }
   auto* l = new hip::LibraryContainer(std::string(fname));
