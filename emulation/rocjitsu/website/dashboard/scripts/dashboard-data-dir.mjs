@@ -10,8 +10,7 @@ import {
 import path from 'node:path';
 
 function isDashboardDataDirectory(directory) {
-  return existsSync(path.join(directory, 'metadata.json'))
-    && existsSync(path.join(directory, 'index.json'));
+  return existsSync(path.join(directory, 'index.json'));
 }
 
 export function resolveDashboardDataDirectory(input) {
@@ -27,7 +26,7 @@ export function resolveDashboardDataDirectory(input) {
   if (isDashboardDataDirectory(resolved)) return resolved;
   if (isDashboardDataDirectory(nested)) return nested;
   throw new Error(
-    `Expected a dashboard data directory with metadata.json and index.json: ${resolved}`,
+    `Expected a dashboard data directory with index.json: ${resolved}`,
   );
 }
 
@@ -105,7 +104,21 @@ export function createDashboardDataMiddleware(dataDirectory) {
           res.setHeader('Content-Type', 'application/json; charset=utf-8');
         }
         res.setHeader('Cache-Control', 'no-store');
-        createReadStream(resolvedFile).pipe(res);
+        if (res.destroyed) return;
+        const stream = createReadStream(resolvedFile);
+        res.once('close', () => stream.destroy());
+        res.once('error', () => stream.destroy());
+        stream.once('error', () => {
+          stream.unpipe(res);
+          if (res.destroyed) return;
+          if (res.headersSent) {
+            res.destroy();
+          } else {
+            res.statusCode = 500;
+            res.end();
+          }
+        });
+        stream.pipe(res);
       });
     });
   };

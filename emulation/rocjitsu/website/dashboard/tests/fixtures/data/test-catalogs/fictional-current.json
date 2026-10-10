@@ -1,0 +1,63 @@
+{
+  "id": "fictional-current",
+  "tests": [
+    {
+      "id": "a",
+      "suite": "Triton",
+      "name": "Fictional GEMM",
+      "problem": {
+        "operation": "GEMM",
+        "m": 1024
+      }
+    },
+    {
+      "id": "b",
+      "suite": "Llama",
+      "name": "Fictional decode",
+      "problem": {
+        "tokens": 128
+      }
+    },
+    {
+      "id": "d",
+      "suite": "Triton",
+      "name": "Fictional added workload D",
+      "problem": {
+        "size": 256
+      }
+    },
+    {
+      "id": "e",
+      "suite": "Llama",
+      "name": "Fictional added workload E",
+      "problem": {
+        "size": 512
+      }
+    }
+  ],
+  "configurations": {
+    "gfx1250:ST": [
+      "a",
+      "b",
+      "d",
+      "e"
+    ],
+    "gfx1250:MT": [
+      "a",
+      "b",
+      "d",
+      "e"
+    ],
+    "gfx950:ST": [
+      "a",
+      "b",
+      "d",
+      "e"
+    ],
+    "gfx950:MT": [
+      "a",
+      "b",
+      "d"
+    ]
+  }
+}

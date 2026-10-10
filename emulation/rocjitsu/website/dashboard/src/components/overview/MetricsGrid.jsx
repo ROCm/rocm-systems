@@ -1,89 +1,35 @@
-import { Box, Card, CardContent, Stack, Typography } from '@mui/material';
+import { Box, Paper, Typography } from '@mui/material';
 import TimerRoundedIcon from '@mui/icons-material/TimerRounded';
 import SpeedRoundedIcon from '@mui/icons-material/SpeedRounded';
 import FactCheckRoundedIcon from '@mui/icons-material/FactCheckRounded';
 import HealthAndSafetyRoundedIcon from '@mui/icons-material/HealthAndSafetyRounded';
-import ArrowDownwardRoundedIcon from '@mui/icons-material/ArrowDownwardRounded';
-import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded';
-import RemoveRoundedIcon from '@mui/icons-material/RemoveRounded';
+import { alpha } from '@mui/material/styles';
+import { monoFont } from '../../theme/tokens';
+import { historyRangeById } from '../../config/historyRanges';
 import { formatDuration, formatPercent } from '../../utils/formatters';
 import { changeTone, classifyDurationChange } from '../../utils/performance';
 
-function MetricCard({ label, value, caption, icon, tone = 'primary', badge }) {
-  const toneColor = tone === 'neutral' ? 'text.secondary' : `${tone}.main`;
-  const testId = `metric-card-${label.toLowerCase().replaceAll(' ', '-')}`;
+function Metric({ label, value, caption, icon: Icon, tone = 'neutral', badgeTone = tone }) {
   return (
-    <Card data-testid={testId} sx={{ position: 'relative', overflow: 'hidden' }}>
-      <Box sx={{ position: 'absolute', inset: '0 auto 0 0', width: 3, bgcolor: toneColor }} />
-      <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2.25 } }}>
-        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 1 }}>
-          <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography variant="overline" sx={{ color: 'text.secondary' }}>{label}</Typography>
-            <Stack direction="row" sx={{ alignItems: 'baseline', gap: 1, mt: 0.65 }}>
-              <Typography sx={{ fontSize: { xs: 25, xl: 29 }, lineHeight: 1.1, fontWeight: 770, letterSpacing: '-.035em' }}>{value}</Typography>
-              {badge}
-            </Stack>
-          </Box>
-          <Box data-testid="metric-icon" sx={{ width: 38, height: 38, flexShrink: 0, borderRadius: 2.3, display: 'grid', placeItems: 'center', color: toneColor, bgcolor: 'action.hover' }}>
-            {icon}
-          </Box>
-        </Stack>
-        <Typography data-testid="metric-caption" variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.9 }}>{caption}</Typography>
-      </CardContent>
-    </Card>
+    <Box data-testid={`metric-card-${label.toLowerCase().replaceAll(' ', '-')}`} data-tone={tone} data-icon-tone={badgeTone} sx={{ position: 'relative', minWidth: 0, p: 2 }}>
+      <Typography variant="overline" sx={{ color: 'text.secondary', fontSize: 11, lineHeight: '18px', display: 'block', pr: 4.5 }}>{label}</Typography>
+      <Box aria-hidden="true" sx={{ position: 'absolute', top: 16, right: 16, width: 32, height: 32, borderRadius: '7px', display: 'grid', placeItems: 'center', color: badgeTone === 'neutral' ? 'text.secondary' : `${badgeTone}.main`, bgcolor: (theme) => alpha(badgeTone === 'neutral' ? theme.palette.text.secondary : theme.palette[badgeTone].main, 0.1) }}><Icon sx={{ fontSize: 20 }} /></Box>
+      <Typography sx={{ mt: 0.75, fontSize: { xs: 20, sm: 24 }, lineHeight: '32px', fontWeight: 500, fontFamily: monoFont, fontVariantNumeric: 'tabular-nums', color: tone === 'neutral' ? 'text.primary' : `${tone}.main` }}>{value}</Typography>
+      <Typography data-testid="metric-caption" variant="caption" sx={{ display: 'block', mt: 0.5, color: 'text.secondary', lineHeight: '18px', fontSize: 11 }}>{caption}</Typography>
+    </Box>
   );
 }
 
-export default function MetricsGrid({ metrics }) {
+export default function MetricsGrid({ metrics, range = 'ALL' }) {
   const hasResults = metrics.total > 0;
-  const baselineState = classifyDurationChange(metrics.durationDelta);
-  const baselineTone = changeTone(baselineState);
-  const healthy = hasResults && metrics.failed === 0;
+  const healthy = hasResults && metrics.completed === metrics.total && metrics.failed === 0;
+  const period = historyRangeById.get(range)?.period ?? 'selected range';
   return (
-    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' }, gap: 1.5 }}>
-      <MetricCard
-        label="Total duration"
-        value={formatDuration(metrics.duration)}
-        caption="Selected-test duration from the latest commit's newest attempt"
-        icon={<TimerRoundedIcon />}
-        tone={hasResults ? 'primary' : 'neutral'}
-      />
-      <MetricCard
-        label="Perf change"
-        value={formatPercent(metrics.durationDelta)}
-        caption={(
-          <>
-            <Box component="span" sx={{ display: 'block' }}>Selected-test duration change: latest vs oldest commit</Box>
-          </>
-        )}
-        icon={<SpeedRoundedIcon />}
-        tone={baselineTone}
-        badge={Number.isFinite(metrics.durationDelta) && (
-          <Stack component="span" direction="row" sx={{ alignItems: 'center', color: baselineTone === 'neutral' ? 'text.secondary' : `${baselineTone}.main` }}>
-            {baselineState === 'faster' && <ArrowDownwardRoundedIcon sx={{ fontSize: 16 }} />}
-            {baselineState === 'slower' && <ArrowUpwardRoundedIcon sx={{ fontSize: 16 }} />}
-            {baselineState === 'neutral' && <RemoveRoundedIcon sx={{ fontSize: 16 }} />}
-          </Stack>
-        )}
-      />
-      <MetricCard
-        label="Run coverage"
-        value={hasResults ? `${metrics.completed} / ${metrics.total}` : '—'}
-        caption="Completed selected tests in the latest run"
-        icon={<FactCheckRoundedIcon />}
-        tone={!hasResults ? 'neutral' : metrics.completeness === 100 ? 'success' : 'warning'}
-      />
-      <MetricCard
-        label="Run health"
-        value={!hasResults ? '—' : healthy ? 'Healthy' : `${metrics.failed} issue${metrics.failed === 1 ? '' : 's'}`}
-        caption={!hasResults
-          ? 'No latest-run health data available'
-          : healthy
-            ? 'All selected tests completed without failures'
-            : 'Review failed or incomplete selected tests'}
-        icon={<HealthAndSafetyRoundedIcon />}
-        tone={!hasResults ? 'neutral' : healthy ? 'success' : 'error'}
-      />
-    </Box>
+    <Paper variant="outlined" data-testid="metric-strip" sx={{ borderRadius: '8px', display: 'grid', gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: 'repeat(4, minmax(0, 1fr))' }, overflow: 'hidden', boxShadow: 'none', '& > div': { borderRight: 1, borderColor: 'divider' }, '& > div:nth-of-type(2)': { borderRightWidth: { xs: 0, md: 1 } }, '& > div:nth-of-type(n+3)': { borderTopStyle: 'solid', borderTopWidth: { xs: 1, md: 0 }, borderColor: 'divider' }, '& > div:last-child': { borderRight: 0 } }}>
+      <Metric icon={TimerRoundedIcon} badgeTone={hasResults ? 'primary' : 'neutral'} label="Total duration" value={formatDuration(metrics.duration)} caption="Sum of selected benchmark runtimes" />
+      <Metric icon={SpeedRoundedIcon} label="Perf change" value={formatPercent(metrics.durationDelta)} tone={hasResults ? changeTone(classifyDurationChange(metrics.durationDelta)) : 'neutral'} caption={`Selected period · ${period} · first vs latest commit`} />
+      <Metric icon={FactCheckRoundedIcon} label="Run coverage" value={hasResults ? `${metrics.completed} / ${metrics.total}` : '—'} tone={hasResults && metrics.completed === metrics.total ? 'success' : 'neutral'} caption="Completed selected benchmark results" />
+      <Metric icon={HealthAndSafetyRoundedIcon} label="Run health" value={!hasResults ? '—' : healthy ? 'OK' : metrics.failed ? 'Failed' : 'Incomplete'} tone={!hasResults ? 'neutral' : healthy ? 'success' : metrics.failed ? 'error' : 'neutral'} caption={!hasResults ? 'No selected results available' : healthy ? 'All selected tests completed' : `${metrics.total - metrics.completed} incomplete · ${metrics.failed} failed / timed out`} />
+    </Paper>
   );
 }

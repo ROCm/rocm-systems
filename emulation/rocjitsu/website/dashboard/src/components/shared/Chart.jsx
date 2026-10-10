@@ -2,11 +2,8 @@ import ReactEChartsCore from 'echarts-for-react/esm/core';
 import * as echarts from 'echarts/core';
 import { BarChart, LineChart, ScatterChart } from 'echarts/charts';
 import {
-  DataZoomComponent,
   GridComponent,
-  LegendComponent,
   MarkLineComponent,
-  MarkPointComponent,
   TooltipComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
@@ -16,16 +13,13 @@ echarts.use([
   BarChart,
   LineChart,
   ScatterChart,
-  DataZoomComponent,
   GridComponent,
-  LegendComponent,
   MarkLineComponent,
-  MarkPointComponent,
   TooltipComponent,
   CanvasRenderer,
 ]);
 
-export default function Chart({ option, height = 280, ariaLabel, ariaDescribedBy, onEvents }) {
+export default function Chart({ option, height = 280, ariaLabel, ariaDescribedBy, onEvents, lazyUpdate = true }) {
   const theme = useTheme();
   const tooltip = option.tooltip ? {
     backgroundColor: theme.palette.background.paper,
@@ -58,7 +52,7 @@ export default function Chart({ option, height = 280, ariaLabel, ariaDescribedBy
       echarts={echarts}
       option={themedOption}
       notMerge
-      lazyUpdate
+      lazyUpdate={lazyUpdate}
       onEvents={onEvents}
       opts={{ renderer: 'canvas' }}
       style={{ width: '100%', height }}

@@ -1,567 +1,184 @@
+import { fixtureRunPath } from '../fixtures/runPath.js';
 import { expect, test } from '@playwright/test';
-import {
-  clickAggregateIncompletePoint,
-  clickCompletedChartPoint,
-  clickLastCompletedChartPoint,
-  clickLastStatusChartPoint,
-  dispatchZoom,
-  readChart,
-  selectedDotsViewport,
-  selectedRunCount,
-  settledChartScale,
-} from './helpers/chart.js';
-import { expectDialogTypographyContained } from './helpers/dialog.js';
+import { createSchema2Publication } from '../fixtures/schema2Dataset.js';
+import { formatDuration } from '../../src/utils/formatters.js';
+import { clickLastCompletedChartPoint, readChart, selectedRunIds } from './helpers/chart.js';
+import { ensureGridBenchmark, inspectResult, installPublication, openDashboard, ready } from './helpers/dashboard.js';
 
-test('benchmark picker can locally reveal suites hidden by global filters', async ({ page }) => {
-  await page.goto('/');
+const gemm = 'Fictional GEMM';
+const card = (page, name) => page.getByTestId('benchmark-grid-card').filter({ has: page.getByRole('heading', { name, exact: true }) });
 
-  await page.getByLabel('Suites').click();
-  await page.getByRole('option', { name: /Check all suites/ }).click();
-  await page.getByRole('option', { name: 'Triton' }).click();
-  await page.keyboard.press('Escape');
-
-  await page.getByRole('tab', { name: 'Benchmarks' }).click();
-  await expect(page.getByText('Benchmark Explorer')).toBeVisible();
-  await page.getByRole('combobox', { name: 'Benchmark' }).click();
-  await expect(page.getByText('3 benchmarks hidden by global Suite filters')).toBeVisible();
-  await page.getByRole('button', { name: 'Show all benchmarks' }).click();
-  await page.getByRole('combobox', { name: 'Benchmark' }).fill('DeepSeek');
-  await page.getByRole('option', { name: /DeepSeek V3 FP8 decode/ }).click();
-
-  await expect(page.getByText('Outside global Suite filter')).toBeVisible();
-  await expect(page.getByText(/This local override applies only to Benchmark Explorer/)).toBeVisible();
-  await page.getByLabel('Suites').click();
-  await expect(page.getByRole('option', { name: 'Triton' })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('option', { name: 'DeepSeek' })).toHaveAttribute('aria-selected', 'false');
+test('grid picker bounds search and eight slots while draft cancel, pointer removal and empty recovery work', async ({ page }) => {
+  const publication = createSchema2Publication();
+  // One fictional run is enough to test a catalog larger than the visible window.
+  const run = publication.runs.find((entry) => entry.id === 'fictional-develop-23');
+  publication.runs = [run];
+  publication.index.runFiles = [fixtureRunPath(run)];
+  const catalog = publication.catalogs[run.testCatalog];
+  const extras = Array.from({ length: 55 }, (_, index) => ({ id: `picker-${index}`, name: `Fictional picker ${String(index).padStart(2, '0')}`, suite: 'Triton', problem: { size: index, ...(index === 54 ? { dataType: 64 } : {}) } }));
+  catalog.tests.push(...extras);
+  catalog.configurations['gfx1250:ST'].push(...extras.map((entry) => entry.id));
+  run.configurations.find((config) => config.target === 'gfx1250' && config.threadingMode === 'ST')
+    .results.push(...extras.map((entry) => ({ testId: entry.id, status: 'failed', durationSeconds: null, error: 'Fictional picker-only diagnostic' })));
+  await installPublication(page, { publication });
+  await openDashboard(page, '/?view=benchmarks');
+  const headings = page.getByTestId('benchmark-grid-card').getByRole('heading');
+  await expect(headings).toHaveCount(4);
+  const original = await headings.allTextContents();
+  await page.getByRole('button', { name: 'Add benchmarks', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add benchmarks', exact: true });
+  const picker = dialog.getByRole('combobox', { name: 'Benchmarks to graph' });
+  await picker.fill('');
+  await expect(page.getByRole('option')).toHaveCount(50);
+  await picker.fill('no-such-benchmark');
+  await expect(page.getByRole('option')).toHaveCount(0);
+  await expect(page.getByText('No benchmarks match within the selected targets / suites')).toBeVisible();
+  await picker.fill('Fictional picker 54');
+  const scalarOption = page.getByRole('option', { name: /^Fictional picker 54\b/ });
+  await expect(scalarOption).toContainText('64');
+  // Selection belongs to the option, not an unnamed nested form control.
+  await expect(scalarOption.getByRole('checkbox')).toHaveCount(0);
+  await expect(scalarOption.locator('input[type="checkbox"]')).toHaveCount(0);
+  await scalarOption.click();
+  // MUI clears search after selection; the bounded window otherwise hides #54.
+  await picker.fill('Fictional picker 54');
+  await expect(scalarOption).toHaveAttribute('aria-selected', 'true');
+  await picker.press('Escape');
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  // MUI hides the page from role locators until the exiting modal detaches.
+  await expect(headings).toHaveText(original);
+  await page.getByRole('button', { name: 'Add benchmarks', exact: true }).click();
+  for (const index of [54, 53, 52, 51]) {
+    await picker.fill(`Fictional picker ${index}`);
+    if (index === 54) {
+      await picker.press('ArrowDown');
+      await picker.press('Enter');
+      await picker.fill('Fictional picker 54');
+      await expect(scalarOption).toHaveAttribute('aria-selected', 'true');
+    } else await page.getByRole('option').click();
+  }
+  await picker.fill('Fictional picker 50');
+  await expect(page.getByRole('option')).toHaveAttribute('aria-disabled', 'true');
+  await picker.press('ArrowDown');
+  await picker.press('Enter');
+  await picker.press('Escape');
+  await expect(dialog.getByText(/8 of 8 benchmarks selected/)).toBeVisible();
+  await dialog.getByRole('button', { name: 'Apply selection' }).click();
+  await expect(page.getByTestId('benchmark-grid-card')).toHaveCount(8);
+  await page.getByRole('button', { name: 'Remove Fictional picker 54 from grid', exact: true }).click();
+  await expect(page.getByTestId('benchmark-grid-card')).toHaveCount(7);
+  await ensureGridBenchmark(page, 'Fictional picker 54');
+  await expect(page.getByTestId('benchmark-grid-card')).toHaveCount(8);
+  while (await page.getByTestId('benchmark-grid-card').count()) {
+    await page.getByRole('button', { name: /^Remove .* from grid$/ }).first().press('Enter');
+  }
+  await expect(page.getByText('No benchmark graphs selected. Add benchmarks to begin.')).toBeVisible();
+  await ensureGridBenchmark(page, gemm);
+  await expect(page.getByTestId('benchmark-grid-card')).toHaveCount(1);
+  await expect(card(page, gemm).getByRole('img')).toBeVisible();
 });
 
-test('benchmark explorer switches among single, grid, and aggregate modes', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('tab', { name: 'Benchmarks' }).click();
+test('removed and explicitly empty workload choices survive tab remounts and data reloads', async ({ page }) => {
+  await openDashboard(page, '/?view=benchmarks');
+  const headings = page.getByTestId('benchmark-grid-card').getByRole('heading');
+  await expect(headings).toHaveCount(4);
+  const original = await headings.allTextContents();
+  const retained = original.filter((name) => name !== 'Fictional decode');
+  expect(retained).toHaveLength(3);
+  await page.getByRole('button', { name: 'Remove Fictional decode from grid', exact: true }).click();
+  await expect(headings).toHaveText(retained);
 
-  const singleMode = page.getByRole('button', { name: 'Single' });
-  const clickDetails = page.getByRole('button', { name: 'Disable details on click' });
-  const scrollZoom = page.getByRole('button', { name: 'Disable scroll zoom' });
-  await expect(singleMode).toHaveAttribute('aria-pressed', 'true');
-  const controlPositions = await Promise.all([singleMode, clickDetails, scrollZoom].map(async (control) => {
-    const bounds = await control.boundingBox();
-    return { top: bounds.y, center: bounds.x + bounds.width / 2 };
-  }));
-  expect(controlPositions[1].top).toBeGreaterThan(controlPositions[0].top);
-  expect(Math.abs(controlPositions[1].top - controlPositions[2].top)).toBeLessThanOrEqual(1);
-  const benchmarkInputBox = await page.getByRole('combobox', { name: 'Benchmark' }).locator('..').boundingBox();
-  const detailsButtonBox = await clickDetails.boundingBox();
-  expect(Math.abs(
-    (benchmarkInputBox.y + benchmarkInputBox.height / 2)
-    - (detailsButtonBox.y + detailsButtonBox.height / 2),
-  )).toBeLessThanOrEqual(1);
-  const initialSingleChart = page.getByRole('img', { name: /duration history/ });
-  await expect(initialSingleChart).toHaveCount(1);
-  const singleTooltip = await readChart(initialSingleChart, (instance) => {
-    const option = instance.getOption();
-    const series = option.series.find((candidate) => candidate.type === 'line');
-    const dataIndex = series.data.findIndex(Boolean);
-    return option.tooltip[0].formatter([{
-      data: series.data[dataIndex],
-      dataIndex,
-      marker: '',
-      seriesName: series.name,
-      seriesType: 'line',
-    }]);
-  });
-  expect(singleTooltip).toContain('Commit name ·');
-  expect(singleTooltip).toContain('Catalog ·');
-  expect(singleTooltip).toContain('Branch · develop');
-
-  await page.getByRole('button', { name: 'Grid' }).click();
-  await expect(page.getByText('2 of 8 benchmarks selected', { exact: false })).toBeVisible();
-  await page.getByRole('combobox', { name: 'Benchmarks to graph' }).click();
-  const option = page.getByRole('option', { name: /Softmax FP32 4096/ });
-  await expect(option.getByRole('checkbox')).not.toBeChecked();
-  await option.click();
-  await expect(option.getByRole('checkbox')).toBeChecked();
-  await page.keyboard.press('Escape');
-
-  await expect(page.getByText('3 of 8 benchmarks selected', { exact: false })).toBeVisible();
-  await expect(page.getByTestId('benchmark-grid').getByRole('img', { name: /duration history/ })).toHaveCount(3);
-  await page.getByRole('button', { name: 'Hide Softmax FP32 4096×4096 graph' }).click();
-  await expect(page.getByText('2 of 8 benchmarks selected', { exact: false })).toBeVisible();
-  await expect(page.getByTestId('benchmark-grid').getByRole('img', { name: /duration history/ })).toHaveCount(2);
-
-  await page.getByRole('button', { name: 'Aggregate' }).click();
-  await expect(page.getByRole('button', { name: 'Aggregate' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByText('Selected-suite duration by target across all official attempts, including reruns')).toBeVisible();
-  const aggregateInstructions = page.getByText(/official attempts · Selected runs remain visible while zooming/);
-  const aggregateInstructionBox = await aggregateInstructions.boundingBox();
-  const aggregateDetailsBox = await page.getByRole('button', { name: 'Disable details on click' }).boundingBox();
-  expect(aggregateInstructionBox.y + aggregateInstructionBox.height).toBeLessThanOrEqual(aggregateDetailsBox.y);
-
-  const aggregateChart = page.getByRole('img', { name: 'Aggregate duration history for all runs' });
-  await expect(aggregateChart).toBeVisible();
-  const aggregateOption = await readChart(aggregateChart, (instance) => {
-    const option = instance.getOption();
-    return {
-      runCount: option.xAxis[0].data.length,
-      lineSeries: option.series.filter((series) => (
-        series.type === 'line' && !series.name.includes('missed-data bridge')
-      )).map((series) => ({
-        name: series.name,
-        showSymbol: series.showSymbol,
-        hasLatestMarker: Boolean(series.markPoint?.data?.length),
-        finiteIndexes: series.data.flatMap((point, index) => (
-          point && Number.isFinite(point.value) ? [index] : []
-        )),
-      })),
-      gapBridgeTypes: option.series
-        .filter((series) => series.name.includes('missed-data bridge'))
-        .map((series) => series.lineStyle.type),
-      yAxisName: option.yAxis[0].name,
-      yAxisScale: option.yAxis[0].scale,
-      legendTargets: option.legend[0].data,
-      zoomTypes: option.dataZoom.map((item) => item.type),
-      initialStart: option.dataZoom[0].startValue,
-      initialEnd: option.dataZoom[0].endValue,
-    };
-  });
-  expect(aggregateOption.lineSeries.length).toBeGreaterThan(1);
-  expect(aggregateOption.lineSeries.every((series) => series.name === 'gfx1250')).toBe(true);
-  expect(aggregateOption.lineSeries.every((series) => series.finiteIndexes.length > 0)).toBe(true);
-  expect(new Set(aggregateOption.lineSeries.flatMap((series) => series.finiteIndexes)).size)
-    .toBe(aggregateOption.lineSeries.reduce((total, series) => total + series.finiteIndexes.length, 0));
-  expect(aggregateOption.lineSeries
-    .filter((series) => series.finiteIndexes.length !== 1)
-    .every((series) => series.showSymbol === false)).toBe(true);
-  expect(aggregateOption.lineSeries.every((series) => series.hasLatestMarker === false)).toBe(true);
-  expect(aggregateOption.gapBridgeTypes.length).toBeGreaterThan(0);
-  expect(aggregateOption.gapBridgeTypes.every((type) => type === 'dotted')).toBe(true);
-  expect(aggregateOption.yAxisName).toBe('Seconds');
-  expect(aggregateOption.yAxisScale).toBe(true);
-  expect(aggregateOption.legendTargets).toEqual(['gfx1250']);
-  expect(aggregateOption.zoomTypes.sort()).toEqual(['inside', 'slider']);
-  expect(aggregateOption.initialEnd - aggregateOption.initialStart + 1).toBe(45);
-  expect(aggregateOption.runCount).toBeGreaterThan(aggregateOption.initialEnd - aggregateOption.initialStart);
-
-  await dispatchZoom(aggregateChart, 82, 100);
-  const scaleBeforeSelection = await settledChartScale(aggregateChart);
-  const disableDetailsOnClick = page.getByRole('button', { name: 'Disable details on click' });
-  await expect(disableDetailsOnClick).toHaveText('Click details · On');
-  await disableDetailsOnClick.click();
-  const enableDetailsOnClick = page.getByRole('button', { name: 'Enable details on click' });
-  await expect(enableDetailsOnClick).toHaveAttribute('aria-pressed', 'false');
-  await expect(enableDetailsOnClick).toHaveText('Click details · Off');
-
-  await clickLastCompletedChartPoint(aggregateChart);
-  await expect(page.getByText('Selected 31369c4d · Auto')).toBeVisible();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
-  const clearRuns = page.getByRole('button', { name: /Clear selected runs/ });
-  await expect(clearRuns).toHaveText('Clear selected runs (1)');
-  expect(await settledChartScale(aggregateChart)).toEqual(scaleBeforeSelection);
-
-  await clickLastCompletedChartPoint(aggregateChart);
-  await expect(clearRuns).toHaveText('Clear selected runs (0)');
-  expect(await settledChartScale(aggregateChart)).toEqual(scaleBeforeSelection);
-
-  await clickLastCompletedChartPoint(aggregateChart);
-  await expect(clearRuns).toHaveText('Clear selected runs (1)');
-  await clickCompletedChartPoint(aggregateChart, 1);
-  await expect(clearRuns).toHaveText('Clear selected runs (2)');
-  await expect(page.getByText('2 selected runs · latest selection 9f774d29')).toBeVisible();
-
-  await dispatchZoom(aggregateChart, 99.9, 100);
-  await expect.poll(async () => {
-    const viewport = await selectedDotsViewport(aggregateChart, 'Selected run');
-    return viewport.indexes.length === 2 && viewport.allVisible;
-  }).toBe(true);
-  const aggregateSelectedViewport = await selectedDotsViewport(aggregateChart, 'Selected run');
-  expect(aggregateSelectedViewport.startValue).toBeLessThanOrEqual(Math.min(...aggregateSelectedViewport.indexes));
-  expect(aggregateSelectedViewport.endValue).toBeGreaterThanOrEqual(Math.max(...aggregateSelectedViewport.indexes));
-
-  await page.getByRole('button', { name: 'Single' }).click();
-  await expect(page.getByRole('button', { name: 'Single' })).toHaveAttribute('aria-pressed', 'true');
-  const singleChart = page.getByRole('img', { name: /duration history/ });
-  expect(await selectedRunCount(singleChart)).toBe(2);
-  await expect.poll(async () => (await selectedDotsViewport(singleChart, 'selected points')).allVisible).toBe(true);
-
-  await page.getByRole('button', { name: 'Grid' }).click();
-  const gridChart = page.getByTestId('benchmark-grid').getByRole('img', { name: /duration history/ }).first();
-  expect(await selectedRunCount(gridChart)).toBe(2);
-  await expect.poll(async () => (await selectedDotsViewport(gridChart, 'selected points')).allVisible).toBe(true);
-
-  await page.getByRole('button', { name: 'Aggregate' }).click();
-  await expect(page.getByText('2 selected runs · latest selection 9f774d29')).toBeVisible();
-  await expect.poll(() => readChart(aggregateChart, (instance) => {
-    const selected = instance.getOption()?.series?.find((candidate) => candidate.name === 'Selected run');
-    return new Set((selected?.data ?? []).filter(Boolean).map((point) => point.run.runId)).size;
-  })).toBe(2);
-
-  await enableDetailsOnClick.click();
-  await expect(page.getByRole('button', { name: 'Disable details on click' })).toHaveText('Click details · On');
-  const runDialog = page.getByRole('dialog');
-  await clickLastCompletedChartPoint(aggregateChart, () => runDialog.isVisible());
-  await expect(runDialog.getByText('Run Details')).toBeVisible();
-  await expect(runDialog.getByText('Commit 31369c4d · Auto')).toBeVisible();
-  const commitLabel = await runDialog.getByText('Rocjitsu commit', { exact: true }).boundingBox();
-  const messageLabel = await runDialog.getByText('Commit message', { exact: true }).boundingBox();
-  expect(messageLabel.x).toBeGreaterThan(commitLabel.x);
-  await expectDialogTypographyContained(runDialog);
-  await page.getByRole('button', { name: 'Close Run Details' }).click();
+  const remountAndRefresh = async (expected) => {
+    await page.getByRole('tab', { name: 'Overview', exact: true }).click();
+    await page.getByRole('tab', { name: 'Benchmarks', exact: true }).click();
+    await expect(headings).toHaveText(expected);
+    await page.getByRole('button', { name: 'Reload all data', exact: true }).click();
+    await ready(page);
+    await expect(headings).toHaveText(expected);
+  };
+  await remountAndRefresh(retained);
+  for (const name of retained) {
+    await page.getByRole('button', { name: `Remove ${name} from grid`, exact: true }).press('Enter');
+  }
+  await expect(headings).toHaveCount(0);
+  await remountAndRefresh([]);
+  await expect(page.getByText('No benchmark graphs selected. Add benchmarks to begin.')).toBeVisible();
+  await ensureGridBenchmark(page, gemm);
+  await expect(headings).toHaveText([gemm]);
+  await remountAndRefresh([gemm]);
 });
 
-test('aggregate duration history keeps a one-run new catalog vertex', async ({ page }) => {
-  await page.route('**/data/index.json', async (route) => {
-    const response = await route.fetch();
-    const index = await response.json();
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        ...index,
-        runFiles: [
-          'runs/benchmark-202608130530-784750dd.json',
-          'runs/benchmark-202608311945-31369c4d.json',
-        ],
-      }),
-    });
-  });
-
-  await page.goto('/');
-  await page.getByRole('tab', { name: 'Benchmarks' }).click();
-  await page.getByRole('button', { name: 'Aggregate' }).click();
-  const aggregateChart = page.getByRole('img', { name: 'Aggregate duration history for all runs' });
-  const presentation = await readChart(aggregateChart, (instance) => {
+test('grid point selection survives timeframe and scope changes without legacy mode or zoom controls', async ({ page }) => {
+  await openDashboard(page, '/?view=benchmarks');
+  await ensureGridBenchmark(page, gemm);
+  const chart = card(page, gemm).getByRole('img', { name: `${gemm} duration history` });
+  await expect(page.getByRole('button', { name: /^(Single|Grid|Aggregate)$/ })).toHaveCount(0);
+  const clickedPoint = await clickLastCompletedChartPoint(chart);
+  let dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('fictional-develop-23', { exact: true })).toBeVisible();
+  expect(['ST', 'MT']).toContain(clickedPoint.mode);
+  await expect(dialog.getByText('Execution mode', { exact: true }).locator('..')).toContainText(clickedPoint.mode);
+  await expect(dialog.getByText('Simulator threads', { exact: true })).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Close details', exact: true }).click();
+  expect(await selectedRunIds(chart)).toEqual(['fictional-develop-23']);
+  await page.getByRole('button', { name: 'Trailing 7 days' }).click();
+  await expect(page.getByRole('button', { name: 'Trailing 7 days' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('checkbox', { name: 'MT', exact: true }).uncheck();
+  expect(await selectedRunIds(chart)).toEqual(['fictional-develop-23']);
+  const series = await readChart(chart, (instance) => {
     const option = instance.getOption();
-    const lineSeries = option.series.filter((series) => (
-      series.type === 'line' && !series.name.includes('missed-data bridge')
-    ));
-    return lineSeries.map((series) => ({
-      showSymbol: series.showSymbol,
-      finiteIndexes: series.data.flatMap((point, index) => (
-        point && Number.isFinite(point.value) ? [index] : []
-      )),
-      lastValue: series.data.at(-1)?.value ?? null,
-    }));
+    return { zoom: option.dataZoom ?? [], lines: option.series.filter((series) => series.type === 'line').map((series) => series.name) };
   });
-
-  expect(presentation).toHaveLength(2);
-  expect(presentation[0].showSymbol).toBe(true);
-  expect(presentation[1].showSymbol).toBe(true);
-  expect(presentation[1].finiteIndexes).toEqual([1]);
-  expect(typeof presentation[1].lastValue).toBe('number');
-});
-
-test('benchmark explorer scroll zoom is enabled by default and can be disabled', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('tab', { name: 'Benchmarks' }).click();
-
-  const chart = page.getByRole('img', { name: /duration history/ });
-  const disableScrollZoom = page.getByRole('button', { name: 'Disable scroll zoom' });
-  await expect(disableScrollZoom).toHaveAttribute('aria-pressed', 'true');
-  await expect(disableScrollZoom).toHaveText('Scroll zoom · On');
-
-  const insideZoomDisabled = () => readChart(chart, (instance) => instance.getOption().dataZoom[0].disabled);
-  await expect.poll(insideZoomDisabled).toBe(false);
-
-  await disableScrollZoom.click();
-  const enableScrollZoom = page.getByRole('button', { name: 'Enable scroll zoom' });
-  await expect(enableScrollZoom).toHaveAttribute('aria-pressed', 'false');
-  await expect(enableScrollZoom).toHaveText('Scroll zoom · Off');
-  await expect.poll(insideZoomDisabled).toBe(true);
-});
-
-test('benchmark history bridges gaps and opens failed result details', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('tab', { name: 'Benchmarks' }).click();
-
-  const chart = page.getByRole('img', { name: 'GEMM FP16 1024³ duration history' });
-  await expect(chart).toBeVisible();
-  const gapPresentation = await readChart(chart, (instance) => {
-    const option = instance.getOption();
-    return {
-      bridgeTypes: option.series
-        .filter((series) => series.name.includes('missed-data bridge'))
-        .map((series) => series.lineStyle.type),
-      statuses: option.series
-        .find((series) => series.name === 'Failed or timed-out test results')
-        .data.map((point) => point.record.test.status),
-    };
-  });
-  expect(gapPresentation.bridgeTypes.length).toBeGreaterThan(0);
-  expect(gapPresentation.bridgeTypes.every((type) => type === 'dotted')).toBe(true);
-  expect(gapPresentation.statuses).toContain('failed');
-
-  const dialog = page.getByRole('dialog');
-  await clickLastStatusChartPoint(chart, () => dialog.isVisible());
-  await expect(dialog.getByText('Failed', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('Simulation exited before producing a valid timing result')).toBeVisible();
-  await dialog.getByRole('button', { name: 'Close details' }).click();
-
-  const failedSelection = await readChart(chart, (instance) => {
-    const option = instance.getOption();
-    const marker = option.series
-      .find((series) => series.name === 'Failed or timed-out test results')
-      ?.data.find((point) => point.selected);
-    return {
-      markerSize: marker?.symbolSize,
-      borderWidth: marker?.itemStyle?.borderWidth,
-      shadowBlur: marker?.itemStyle?.shadowBlur,
-      hasRippleEffect: option.series.some((series) => series.type === 'effectScatter'),
-    };
-  });
-  expect(failedSelection).toMatchObject({ borderWidth: 4, shadowBlur: 13, hasRippleEffect: false });
-  expect(failedSelection.markerSize).toBeGreaterThanOrEqual(14);
-  expect(failedSelection.markerSize).toBeLessThanOrEqual(17);
-});
-
-test('an incomplete recent run has clickable aggregate and failed-test markers', async ({ page }) => {
-  await page.goto('/');
-
-  const incompleteRun = page.getByTestId('recent-runs-table').locator('tbody tr').filter({ hasText: '19872076' });
-  await incompleteRun.getByRole('button', { name: 'View run 19872076 in Benchmark Explorer' }).click();
-
-  await expect(page.getByRole('tab', { name: 'Benchmarks' })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('button', { name: 'Aggregate' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByText('Selected 19872076 · Auto')).toBeVisible();
-
-  const aggregateChart = page.getByRole('img', { name: 'Aggregate duration history for all runs' });
-  await expect(aggregateChart).toBeVisible();
-  const selection = await readChart(aggregateChart, (instance) => {
-    const option = instance.getOption();
-    const incompletePoint = option.series
-      .find((series) => series.name === 'Incomplete aggregate results')
-      ?.data.find((point) => point?.run?.provenance?.rocjitsuCommitSha?.startsWith('19872076'));
-    return {
-      yAxisName: option.yAxis[0].name,
-      target: incompletePoint?.target,
-      completed: incompletePoint?.completed,
-      total: incompletePoint?.total,
-      label: incompletePoint?.label?.formatter,
-      symbolSize: incompletePoint?.symbolSize,
-      borderWidth: incompletePoint?.itemStyle?.borderWidth,
-      shadowBlur: incompletePoint?.itemStyle?.shadowBlur,
-    };
-  });
-  expect(selection).toMatchObject({
-    yAxisName: 'Seconds',
-    target: 'gfx1250',
-    completed: 5,
-    total: 7,
-    label: '5/7',
-    symbolSize: 17,
-    borderWidth: 4,
-    shadowBlur: 13,
-  });
-
-  const runDetails = page.getByRole('dialog', { name: 'Run Details' });
-  await clickAggregateIncompletePoint(aggregateChart, '19872076', () => runDetails.isVisible());
-  await expect(runDetails.getByRole('heading', { name: 'Selected Scope' })).toBeVisible();
-  await expect(runDetails.getByText('5/7 completed')).toBeVisible();
-  await expect(runDetails.getByText('Incomplete Tests')).toBeVisible();
-  await expect(runDetails.getByText('GEMM FP16 1024³')).toBeVisible();
-  await expect(runDetails.getByText('Failed', { exact: true })).toBeVisible();
-  await expect(runDetails.getByText('Simulation exited before producing a valid timing result')).toBeVisible();
-  await expect(runDetails.getByText('Softmax FP32 4096×4096')).toBeVisible();
-  await expect(runDetails.getByText('Timeout', { exact: true })).toBeVisible();
-  await expect(runDetails.getByText('Benchmark exceeded its configured timeout')).toBeVisible();
-  await runDetails.getByRole('button', { name: 'Close Run Details' }).click();
-
-  await page.getByRole('button', { name: 'Single' }).click();
-  const failedSelection = await readChart(
-    page.getByRole('img', { name: /duration history/ }),
-    (instance) => {
-      const point = instance.getOption().series
-        .find((series) => series.name === 'Failed or timed-out test results')
-        ?.data.find((candidate) => candidate.record?.run?.provenance?.rocjitsuCommitSha?.startsWith('19872076'));
-      return {
-        sha: point?.record?.run?.provenance?.rocjitsuCommitSha?.slice(0, 8),
-        label: point?.label?.formatter,
-        status: point?.record?.test?.status,
-      };
-    },
-  );
-  expect(failedSelection).toEqual({ sha: '19872076', label: 'Failed', status: 'failed' });
-});
-
-test('historical rows and completed chart points open shared provenance details', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('tab', { name: 'Benchmarks' }).click();
-
-  await page.getByTestId('historical-records')
-    .getByRole('row', { name: /31369c4d/ })
-    .getByRole('button', { name: /^Open result details/ })
-    .click();
-  const dialog = page.getByRole('dialog');
-  await expect(dialog.getByText('Environment', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('Run Provenance')).toBeVisible();
-  expect(await dialog.getByText(/^(Environment|Run Provenance)$/).allTextContents()).toEqual([
-    'Environment',
-    'Run Provenance',
-  ]);
-  await expect(dialog.getByRole('link', { name: 'Commit 31369c4d' })).toBeVisible();
-  await expect(dialog.getByText('Validate follow-up scheduler tuning')).toBeVisible();
-  await expect(dialog.getByText('Status', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('Duration', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('Operation', { exact: true }).locator('..')).toContainText('GEMM');
-  await expect(dialog.getByText('Data type', { exact: true }).locator('..')).toContainText('fp16');
-  await expect(dialog.getByText('ROCm SDK', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('7.2.0.dev202608', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('PyTorch', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('Raw problem configuration', { exact: true })).toHaveCount(0);
-  const machineLabel = await dialog.getByText('Machine', { exact: true }).boundingBox();
-  const commitLabel = await dialog.getByText('Rocjitsu commit', { exact: true }).boundingBox();
-  expect(commitLabel.x).toBeGreaterThan(machineLabel.x);
-  await expectDialogTypographyContained(dialog);
-  await page.getByRole('button', { name: 'Close details' }).click();
-
-  const chart = page.getByRole('img', { name: 'GEMM FP16 1024³ duration history' });
-  const clearRuns = page.getByRole('button', { name: /Clear selected runs/ });
-  const disableDetails = page.getByRole('button', { name: 'Disable details on click' });
-  await expect(clearRuns).toHaveText('Clear selected runs (1)');
-  await clearRuns.click();
-  await expect(clearRuns).toBeDisabled();
-  await disableDetails.click();
-
-  const chartPresentation = await readChart(chart, (instance) => {
-    const option = instance.getOption();
-    const zoom = option.dataZoom[0];
-    const visibleValues = option.series
-      .filter((series) => series.type === 'line')
-      .flatMap((series) => series.data
-        .slice(zoom.startValue, zoom.endValue + 1)
-        .map((point) => point?.value)
-        .filter(Number.isFinite));
-    return {
-      lineSymbols: option.series.filter((series) => series.type === 'line').map((series) => series.showSymbol),
-      xAxisName: option.xAxis[0].name,
-      yAxisName: option.yAxis[0].name,
-      yAxisMinimum: option.yAxis[0].min,
-      yAxisMaximum: option.yAxis[0].max,
-      visibleMinimum: Math.min(...visibleValues),
-      visibleMaximum: Math.max(...visibleValues),
-      tooltipRenderMode: option.tooltip[0].renderMode,
-      tooltipTriggerOn: option.tooltip[0].triggerOn,
-    };
-  });
-  expect(chartPresentation.lineSymbols.every((showSymbol) => showSymbol === false)).toBe(true);
-  expect(chartPresentation.xAxisName).toBe('Commit date / commit');
-  expect(chartPresentation.yAxisName).toBe('Seconds');
-  expect(chartPresentation.yAxisMinimum).toBeGreaterThan(0);
-  expect(chartPresentation.yAxisMaximum - chartPresentation.yAxisMinimum).toBeGreaterThanOrEqual(
-    (chartPresentation.visibleMaximum - chartPresentation.visibleMinimum) * 2,
-  );
-  expect(chartPresentation.tooltipRenderMode).not.toBe('richText');
-  expect(chartPresentation.tooltipTriggerOn).toBe('mousemove');
-
+  expect(series).toEqual({ zoom: [], lines: ['gfx1250 ST', 'gfx950 ST'] });
+  // Re-open after an explicit clear: clicking an already-selected run toggles
+  // that run off; detail inspection itself is not a promise to keep it selected.
+  await page.getByRole('button', { name: 'Clear selected runs (1)', exact: true }).click();
+  expect(await selectedRunIds(chart)).toEqual([]);
   await clickLastCompletedChartPoint(chart);
-  await expect(dialog).not.toBeVisible();
-  await expect(clearRuns).toHaveText('Clear selected runs (1)');
-  await clickLastCompletedChartPoint(chart);
-  await expect(clearRuns).toHaveText('Clear selected runs (0)');
-
-  await page.getByRole('button', { name: 'Enable details on click' }).click();
-  await clickLastCompletedChartPoint(chart, () => dialog.isVisible());
-  await expect(dialog.getByRole('link', { name: 'Commit 31369c4d' })).toBeVisible();
-  await page.getByRole('button', { name: 'Close details' }).click();
-  await expect(clearRuns).toHaveText('Clear selected runs (1)');
-
-  // Keep enough horizontal distance from the selected latest point, because adjacent scatter hit
-  // targets intentionally overlap.
-  await clickCompletedChartPoint(chart, 5, () => dialog.isVisible());
-  await expect(dialog).toBeVisible();
-  await page.getByRole('button', { name: 'Close details' }).click();
-  await expect(clearRuns).toHaveText('Clear selected runs (2)');
-  await expect.poll(() => selectedRunCount(chart)).toBe(2);
-  await clearRuns.click();
-  await expect(clearRuns).toBeDisabled();
+  dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('fictional-develop-23', { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Clear selected runs (1)', exact: true }).click();
+  expect(await selectedRunIds(chart)).toEqual([]);
 });
 
-test('opens result and run details with the keyboard alone and pins the run like a click', async ({ page }) => {
-  await page.goto('/');
-
-  const resultAction = page.getByTestId('latest-results')
-    .getByRole('button', { name: /^Open GEMM FP16 1024³ result details/ })
-    .first();
-  await resultAction.focus();
-  await expect(resultAction).toBeFocused();
-  await page.keyboard.press('Enter');
-  await expect(page.getByRole('dialog').getByRole('heading', { name: 'Result' })).toBeVisible();
+test('keyboard result details distinguish completed zero, failed, timeout and unpublished configurations', async ({ page }) => {
+  await openDashboard(page, '/?view=benchmarks');
+  await page.getByRole('checkbox', { name: 'gfx950', exact: true }).check();
+  await ensureGridBenchmark(page, gemm);
+  await page.getByRole('button', { name: `Inspect ${gemm} results`, exact: true }).click();
+  const inspector = page.getByRole('dialog');
+  await inspector.getByRole('combobox', { name: `${gemm} result`, exact: true }).fill('');
+  await expect(page.getByRole('option')).toHaveCount(50);
   await page.keyboard.press('Escape');
-
-  await page.getByRole('tab', { name: 'Benchmarks' }).click();
-  await expect(page.getByRole('button', { name: /^Clear selected runs \(0\)/ })).toBeVisible();
-  await expect(page.getByRole('img', { name: 'GEMM FP16 1024³ duration history' }))
-    .toHaveAttribute('aria-describedby', 'benchmark-chart-keyboard-help-triton-gemm-f16-1024');
-  await expect(page.getByRole('combobox', { name: 'GEMM FP16 1024³ result' })).toBeVisible();
-  const historyAction = page.getByTestId('historical-records')
-    .getByRole('button', { name: /^Open result details/ })
-    .first();
-  await historyAction.focus();
-  await page.keyboard.press('Enter');
-  await expect(page.getByRole('dialog').getByRole('heading', { name: 'Result' })).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('button', { name: /^Clear selected runs \(1\)/ })).toBeVisible();
-
-  await page.getByRole('button', { name: 'Grid' }).click();
-  await expect(page.getByRole('img', { name: 'GEMM FP16 1024³ duration history' }))
-    .toHaveAttribute('aria-describedby', 'benchmark-chart-keyboard-help-triton-gemm-f16-1024');
-  await page.getByRole('combobox', { name: 'GEMM FP16 1024³ result' }).focus();
-  await page.keyboard.press('ArrowDown');
-  await expect(page.getByRole('option').first()).toBeVisible();
-  await page.keyboard.press('Enter');
-  await page.getByRole('button', { name: 'Open GEMM FP16 1024³ result' }).press('Enter');
-  await expect(page.getByRole('dialog').getByRole('heading', { name: 'Result' })).toBeVisible();
-  await page.keyboard.press('Escape');
-
-  await page.getByRole('button', { name: 'Aggregate' }).click();
-  await expect(page.getByRole('img', { name: 'Aggregate duration history for all runs' }))
-    .toHaveAttribute('aria-describedby', 'aggregate-chart-keyboard-help');
-  await page.getByRole('combobox', { name: 'Aggregate run' }).focus();
-  await page.keyboard.press('ArrowDown');
-  await expect(page.getByRole('option').first()).toBeVisible();
-  await page.keyboard.press('Enter');
-  await page.getByRole('button', { name: 'Open run details' }).press('Enter');
-  await expect(page.getByRole('dialog').getByRole('heading', { name: 'Run Details' })).toBeVisible();
-});
-
-test('the chart point selector searches every run but renders a bounded option list', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('tab', { name: 'Benchmarks' }).click();
-  await page.getByRole('button', { name: 'Aggregate' }).click();
-
-  const runSelector = page.getByRole('combobox', { name: 'Aggregate run' });
-  await expect(runSelector).not.toHaveValue('');
-  await runSelector.click();
-  const options = page.getByRole('option');
-  await expect(options).toHaveCount(50);
-  const totalMatches = Number(
-    (await page.getByText(/Search all \d+ runs/).textContent()).match(/all (\d+)/)[1],
-  );
-  expect(totalMatches).toBeGreaterThan(50);
-
-  await runSelector.fill('zzzznomatch');
-  await expect(options).toHaveCount(0);
-  await expect(page.getByText('No options')).toBeVisible();
-
-  // A non-default run outside the rendered window is reachable with the keyboard.
-  await runSelector.fill('9f774d29');
-  await expect(options).toHaveCount(1);
-  await page.keyboard.press('Enter');
-  await page.getByRole('button', { name: 'Open run details' }).click();
-  await expect(page.getByRole('dialog').getByText('Commit 9f774d29 · Auto')).toBeVisible();
-});
-
-test('historical records renders one bounded page at a time', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('tab', { name: 'Benchmarks' }).click();
-
-  const history = page.getByTestId('historical-records');
-  await expect(history.locator('tbody tr')).toHaveCount(25);
-  await expect(history.getByText(/^1–25 of \d+ results$/)).toBeVisible();
-  await history.getByRole('button', { name: 'Go to next page' }).click();
-  await expect(history.getByText(/^26–50 of \d+ results$/)).toBeVisible();
-  await expect(history.locator('tbody tr')).toHaveCount(25);
-
-  await history.getByRole('combobox', { name: 'Rows per page' }).click();
-  await page.getByRole('option', { name: '50' }).click();
-  await expect(history.getByText(/^1–50 of \d+ results$/)).toBeVisible();
-  await expect(history.locator('tbody tr')).toHaveCount(50);
+  await inspector.getByRole('button', { name: 'Close', exact: true }).click();
+  for (const [name, runId, mode, status] of [
+    [gemm, 'fictional-develop-14', 'ST', 'Completed'],
+    ['Fictional added workload D', 'fictional-develop-08', 'ST', 'Failed'],
+    ['Fictional added workload E', 'fictional-develop-08', 'MT', 'Timeout'],
+  ]) {
+    await ensureGridBenchmark(page, name);
+    const dialog = await inspectResult(page, name, runId, 'gfx1250', mode);
+    await expect(dialog.getByText(status, { exact: true })).toBeVisible();
+    await expect(dialog.getByText(runId, { exact: true })).toBeVisible();
+    await expect(dialog.getByText('Run Provenance', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('Environment', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('Fictional SDK', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('Execution mode', { exact: true }).locator('..')).toContainText(mode);
+    await expect(dialog.getByText('Duration', { exact: true }).locator('..')).toContainText(status === 'Completed' ? formatDuration(0) : '—');
+    if (status !== 'Completed') await expect(dialog.getByText('Fictional diagnostic', { exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Close details', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    const parent = page.locator('[role="dialog"][aria-labelledby="inspect-results-title"]');
+    await expect(parent).toBeVisible();
+    await parent.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(parent).toHaveCount(0);
+  }
+  await inspectResult(page, gemm, 'fictional-develop-12', 'gfx950', 'MT');
+  // Unpublished results stay in the inspector; no nested details are invented.
+  const absent = page.locator('[role="dialog"][aria-labelledby="inspect-results-title"]');
+  await expect(page.getByRole('button', { name: 'Close details', exact: true })).toHaveCount(0);
+  await expect(absent.getByRole('alert')).toContainText('Unavailable · gfx950 · MT · fictional-develop-12');
+  await expect(absent.getByRole('alert')).toContainText('not a failed or zero-duration measurement');
+  await expect(absent.getByText('Run Provenance', { exact: true })).toHaveCount(0);
 });

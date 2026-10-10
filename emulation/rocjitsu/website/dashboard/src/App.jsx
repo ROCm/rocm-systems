@@ -1,39 +1,33 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
-  Badge,
   Box,
   Button,
-  Chip,
   Container,
   CssBaseline,
   LinearProgress,
   Paper,
   Skeleton,
   Stack,
-  Tab,
-  Tabs,
   ThemeProvider,
   Typography,
 } from '@mui/material';
-import AccessTimeRoundedIcon from '@mui/icons-material/AccessTimeRounded';
 import DashboardHeader from './components/layout/DashboardHeader';
-import FiltersBar from './components/layout/FiltersBar';
+import DashboardShell from './components/layout/DashboardShell';
 import OverviewView from './components/overview/OverviewView';
 import BenchmarksView from './components/views/BenchmarksView';
 import CompareRunsView from './components/views/CompareRunsView';
-import FailuresView from './components/views/FailuresView';
-import PluginComparisonView from './components/views/PluginComparisonView';
+import BranchRunsView from './components/views/BranchRunsView';
 import { isLoadCancelled, loadDashboardDataFiles } from './data/dashboardData';
 import { summarizeDashboardDataError } from './data/dashboardDataError';
 import { resolvePublishedDataUrls } from './data/publishedDataUrls';
-import { selectFailures, selectOverview } from './data/selectors';
+import { DASHBOARD_SITE_CONFIG } from './config/siteConfig';
+import { selectOverview } from './data/selectors';
 import { useDashboardState } from './hooks/useDashboardState';
 import { visuallyHiddenStyles } from './theme/styles';
 import { createDashboardTheme } from './theme/theme';
-import { formatFullDate, shortSha } from './utils/formatters';
 
-const { metadataUrl: dataMetadataUrl, indexUrl: dataIndexUrl } = resolvePublishedDataUrls();
+const { indexUrl: dataIndexUrl } = resolvePublishedDataUrls();
 const DATA_CACHE_GENERATION_STORAGE_KEY = 'rocjitsu-data-cache-generation';
 
 function readCacheGeneration() {
@@ -55,9 +49,8 @@ function saveCacheGeneration(cacheGeneration) {
 function LoadingDataState({ progress }) {
   const determinate = progress.total > 0;
   return (
-    <Box component="main" sx={{ minHeight: 'calc(100vh - 76px)' }}>
-      <Container maxWidth={false} sx={{ maxWidth: 1600, px: { xs: 2, sm: 3, xl: 4 }, pt: { xs: 2.5, md: 3.5 }, pb: 6 }}>
-        <DashboardHero />
+    <Box component="main">
+      <Container maxWidth={false} sx={{ maxWidth: 1600, px: { xs: 1.5, sm: 2, xl: 3 }, pt: 2, pb: 4 }}>
         <Paper
           data-testid="dashboard-data-loading"
           aria-busy="true"
@@ -104,11 +97,11 @@ function LoadingDataState({ progress }) {
 
 const emptyDashboardData = {
   schemaVersion: null,
-  repository: null,
+  ...DASHBOARD_SITE_CONFIG,
   generatedAt: null,
-  isBeta: false,
   runs: [],
-  pluginRuns: [],
+  allRuns: [],
+  modes: [],
   testCatalog: [],
   targets: [],
   suites: [],
@@ -148,46 +141,7 @@ function emptyOverview(range) {
   };
 }
 
-function EmptyDataState({ error, onRetry }) {
-  return <Dashboard data={emptyDashboardData} dataError={error} onRetry={onRetry} />;
-}
-
-function DashboardHero({ data = null }) {
-  return (
-    <Stack direction={{ xs: 'column', md: 'row' }} sx={{ justifyContent: 'space-between', alignItems: { xs: 'flex-start', md: 'flex-end' }, gap: 2, mb: 2.5 }}>
-      <Box sx={{ minWidth: 0, flex: '1 1 auto' }}>
-        <Typography component="h1" variant="h1">Rocjitsu Simulation Performance</Typography>
-        <Typography sx={{ color: 'text.secondary', mt: 0.7 }}>
-          Track workload duration under Rocjitsu simulation, regressions, and run coverage across selected GFX targets.
-        </Typography>
-      </Box>
-      <Paper data-testid="latest-commit-run" variant="outlined" sx={{ minWidth: 245, flexShrink: 0, py: 1.1, px: 1.5, borderRadius: 2.5, bgcolor: 'action.hover' }}>
-        <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
-          <AccessTimeRoundedIcon color="primary" sx={{ fontSize: 18 }} />
-          <Box sx={{ flex: 1 }}>
-            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>Latest commit run</Typography>
-            {data?.latestCommitRun ? (
-              <Stack direction="row" sx={{ gap: 0.8, alignItems: 'center' }}>
-                <Typography variant="caption" fontWeight={700}>{formatFullDate(data.latestCommitRun.timestamp)}</Typography>
-                <Chip label={shortSha(data.latestCommitRun)} size="small" sx={{ height: 20, fontFamily: 'monospace', fontSize: 10 }} />
-              </Stack>
-            ) : data ? (
-              <Stack direction="row" sx={{ gap: 0.8, alignItems: 'center' }}>
-                <Typography variant="caption" sx={{ color: 'text.secondary' }} fontWeight={700}>—</Typography>
-                <Chip label="—" size="small" disabled sx={{ height: 20, fontFamily: 'monospace', fontSize: 10 }} />
-              </Stack>
-            ) : (
-              <Skeleton variant="text" animation="wave" width="88%" sx={{ fontSize: 16 }} />
-            )}
-          </Box>
-        </Stack>
-      </Paper>
-    </Stack>
-  );
-}
-
-function Dashboard({ data, dataError = null, onRetry = null }) {
-  const state = useDashboardState(data);
+function Dashboard({ data, state, dataError = null, onRetry = null }) {
   const hasData = data.runs.length > 0;
   const dataErrorMessage = dataError ? summarizeDashboardDataError(dataError) : null;
   // Overview derives the whole history, so it stays uncomputed while another tab owns the view.
@@ -199,25 +153,12 @@ function Dashboard({ data, dataError = null, onRetry = null }) {
       : null),
     [data, hasData, state.filters, state.historyRange, state.tab],
   );
-  const failureCount = useMemo(() => selectFailures(data, state.filters).length, [data, state.filters]);
-  const openRunComparison = (runIds) => {
-    const selectedRuns = runIds
-      .map((runId) => data.runs.find((run) => run.runId === runId))
-      .filter(Boolean);
-    if (selectedRuns.length !== 2) return;
-    state.setComparisonCandidateId(selectedRuns[0].runId);
-    state.setComparisonBaselineId(selectedRuns[1].runId);
-    state.setTab('compare');
-  };
-  const openRunInExplorer = (runId) => {
-    state.setExplorerRunIds([runId]);
-    state.setBenchmarkMode('aggregate');
-    state.setTab('benchmarks');
-    window.requestAnimationFrame(() => window.scrollTo({ top: 0 }));
+  const openBranchComparison = (selection) => {
+    state.openComparison(selection);
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
   };
   const openBenchmarks = () => {
     state.setExplorerRunIds([]);
-    state.setBenchmarkMode('aggregate');
     state.setTab('benchmarks');
     window.requestAnimationFrame(() => window.scrollTo({ top: 0 }));
   };
@@ -231,9 +172,8 @@ function Dashboard({ data, dataError = null, onRetry = null }) {
 
   return (
     <>
-      <Box component="main" sx={{ minHeight: 'calc(100vh - 140px)' }}>
-        <Container maxWidth={false} sx={{ maxWidth: 1600, px: { xs: 2, sm: 3, xl: 4 }, pt: { xs: 2.5, md: 3.5 }, pb: 6 }}>
-          <DashboardHero data={data} />
+      <Box component="main">
+        <Container maxWidth={false} sx={{ maxWidth: 1600, px: { xs: 1.5, sm: 2, xl: 3 }, pt: 2, pb: 4 }}>
 
           {dataError && (
             <Alert
@@ -244,7 +184,7 @@ function Dashboard({ data, dataError = null, onRetry = null }) {
               sx={{ mb: 1.75 }}
             >
               <Typography fontWeight={700}>No available test data</Typography>
-              {dataErrorMessage !== 'No available test data' && (
+              {dataErrorMessage !== 'No available test data' && (hasData || !dataErrorMessage.startsWith('Dashboard schema 1 requires migration to schema 2')) && (
                 <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-line' }}>
                   {dataErrorMessage}
                 </Typography>
@@ -253,42 +193,13 @@ function Dashboard({ data, dataError = null, onRetry = null }) {
             </Alert>
           )}
 
-          <FiltersBar data={data} state={state} disabled={!hasData} />
-
-          <Paper data-testid="dashboard-navigation" variant="outlined" sx={{ mt: 1.75, mb: 1.75, borderRadius: 3, overflow: 'hidden' }}>
-            <Tabs
-              value={state.tab}
-              onChange={(_, value) => {
-                if (value === 'benchmarks') {
-                  state.setExplorerRunIds([]);
-                  state.setBenchmarkMode('single');
-                }
-                state.setTab(value);
-              }}
-              variant="scrollable"
-              scrollButtons="auto"
-              aria-label="Dashboard views"
-              sx={{ px: { xs: 0.5, sm: 1.25 }, minHeight: 50 }}
-            >
-              <Tab value="overview" label="Overview" />
-              <Tab value="benchmarks" label="Benchmarks" />
-              <Tab value="compare" label="Run Comparison" />
-              <Tab value="plugins" label="Plugin Comparison" />
-              <Tab
-                value="failures"
-                sx={{ minWidth: 112, px: 2.75 }}
-                label={<Badge badgeContent={failureCount} color="error" max={99} sx={{ '& .MuiBadge-badge': { right: -13, top: 7 } }}>Failures</Badge>}
-              />
-            </Tabs>
-          </Paper>
-
+          <Box role="tabpanel" id={`dashboard-panel-${state.tab}`} aria-labelledby={`dashboard-tab-${state.tab}`}>
+          {state.tab === 'branch' && <BranchRunsView data={data} state={state} onOpenComparison={openBranchComparison} />}
           {state.tab === 'overview' && (
             <OverviewView
               viewModel={overview}
               data={data}
               state={state}
-              onCompareRun={openRunComparison}
-              onExploreRun={openRunInExplorer}
               onOpenBenchmarks={openBenchmarks}
             />
           )}
@@ -296,7 +207,10 @@ function Dashboard({ data, dataError = null, onRetry = null }) {
             <BenchmarksView
               data={data}
               filters={state.filters}
-              initialMode={state.benchmarkMode}
+              historyRange={state.historyRange}
+              onRangeChange={state.setHistoryRange}
+              selectedBenchmarks={state.selectedBenchmarks}
+              onBenchmarksChange={state.setSelectedBenchmarks}
               selectedRunIds={state.explorerRunIds}
               onSelectRun={selectExplorerRun}
               onClearSelectedRuns={() => state.setExplorerRunIds([])}
@@ -310,27 +224,26 @@ function Dashboard({ data, dataError = null, onRetry = null }) {
               selectedCandidateId={state.comparisonCandidateId}
               onBaselineChange={state.setComparisonBaselineId}
               onCandidateChange={state.setComparisonCandidateId}
+              onSwap={state.setComparisonPair}
             />
           )}
-          {state.tab === 'plugins' && <PluginComparisonView data={data} filters={state.filters} />}
-          {state.tab === 'failures' && <FailuresView data={data} filters={state.filters} />}
-        </Container>
-      </Box>
-      <Box component="footer" sx={{ borderTop: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
-        <Container maxWidth={false} sx={{ maxWidth: 1600, px: { xs: 2, sm: 3, xl: 4 }, py: 2.25 }}>
-          <Stack direction="row" sx={{ justifyContent: 'flex-end' }}>
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>Data schema v{data.schemaVersion ?? '—'}</Typography>
-          </Stack>
+          </Box>
         </Container>
       </Box>
     </>
   );
 }
 
+function readPreferredMode() {
+  try {
+    const saved = window.localStorage.getItem('rocjitsu-color-mode');
+    if (saved === 'light' || saved === 'dark') return saved;
+  } catch { /* Theme persistence is optional. */ }
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
 export default function App() {
-  const preferredMode = window.localStorage.getItem('rocjitsu-color-mode')
-    ?? (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-  const [mode, setMode] = useState(preferredMode);
+  const [mode, setMode] = useState(readPreferredMode);
   const [dataState, setDataState] = useState({
     data: null,
     manifest: null,
@@ -346,11 +259,11 @@ export default function App() {
     cacheGeneration: readCacheGeneration(),
   }));
   const theme = useMemo(() => createDashboardTheme(mode), [mode]);
+  const state = useDashboardState(dataState.data ?? emptyDashboardData);
 
   useEffect(() => {
     const controller = new AbortController();
     loadDashboardDataFiles({
-      metadataUrl: dataMetadataUrl,
       indexUrl: dataIndexUrl,
       signal: controller.signal,
       reloadAll: loadRequest.reloadAll,
@@ -376,17 +289,16 @@ export default function App() {
   }, [loadRequest]);
 
   const toggleMode = () => {
-    setMode((current) => {
-      const next = current === 'dark' ? 'light' : 'dark';
-      window.localStorage.setItem('rocjitsu-color-mode', next);
-      return next;
-    });
+    const next = mode === 'dark' ? 'light' : 'dark';
+    setMode(next);
+    try { window.localStorage.setItem('rocjitsu-color-mode', next); } catch { /* Theme persistence is optional. */ }
   };
 
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <DashboardHeader
+      <DashboardShell data={dataState.data ?? emptyDashboardData} state={state} loading={!dataState.data && !dataState.error} header={<DashboardHeader
+        tab={state.tab}
         data={dataState.data ?? dataState.manifest}
         dataError={dataState.error}
         downloadData={dataState.sourceData}
@@ -401,7 +313,8 @@ export default function App() {
           }));
         }}
         onToggleMode={toggleMode}
-      />
+      />}>
+      {state.routeError && <Alert data-testid="dashboard-route-error" severity="warning" sx={{ mx: { xs: 2, md: 3 }, mt: 2 }} action={<Button color="inherit" onClick={state.clearRouteError}>Clear invalid selection</Button>}>{state.routeError}</Alert>}
       {!dataState.data && !dataState.error && (
         <LoadingDataState
           progress={
@@ -412,8 +325,10 @@ export default function App() {
         />
       )}
       {dataState.error && (
-        <EmptyDataState
-          error={dataState.error}
+        <Dashboard
+          data={emptyDashboardData}
+          state={state}
+          dataError={dataState.error}
           onRetry={() => {
             setDataState((current) => ({ ...current, error: null }));
             setLoadRequest((current) => ({
@@ -423,7 +338,14 @@ export default function App() {
           }}
         />
       )}
-      {dataState.data && <Dashboard data={dataState.data} />}
+      {dataState.data && <Dashboard data={dataState.data} state={state} />}
+      <Container component="footer" maxWidth={false} sx={{ maxWidth: 1600, px: { xs: 1.5, sm: 2, xl: 3 } }}>
+        <Box sx={{ borderTop: 1, borderColor: 'divider', py: 2, color: 'text.secondary' }}>
+          <Typography variant="caption" component="p">Copyright © 2025–2026 Advanced Micro Devices, Inc.</Typography>
+          <Typography variant="caption" component="p">MIT License</Typography>
+        </Box>
+      </Container>
+      </DashboardShell>
     </ThemeProvider>
   );
 }

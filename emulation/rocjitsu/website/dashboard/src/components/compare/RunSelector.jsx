@@ -23,7 +23,7 @@ function formatRunTime(timestamp) {
 }
 
 function optionLabel(run) {
-  return `${formatRunTime(run.timestamp)} · ${shortSha(run)} · ${formatRunTime(commitTimestampFor(run))}`;
+  return `${shortSha(run)} · Run ${formatRunTime(run.timestamp)}`;
 }
 
 function searchableRunText(run) {
@@ -32,6 +32,9 @@ function searchableRunText(run) {
     `Test run ${formatRunTime(run.timestamp)}`,
     `Commit ${formatRunTime(commitTimestampFor(run))}`,
     run.runId,
+    run.branch,
+    ...(run.modes ?? []),
+    ...(run.targets ?? []),
     run.timestamp,
     commitTimestampFor(run),
     run.provenance?.rocjitsuCommitSha,
@@ -49,7 +52,9 @@ function filterRunOptions(options, { inputValue }) {
 
 export default function RunSelector({ label, options, value, onChange }) {
   return (
+    <Box sx={{ minWidth: 0 }}>
     <Autocomplete
+      sx={{ minWidth: 0 }}
       disabled={options.length === 0}
       disableClearable
       openOnFocus
@@ -73,6 +78,7 @@ export default function RunSelector({ label, options, value, onChange }) {
                 <>
                   <Box component="span" sx={{ fontFamily: 'monospace', fontWeight: 700 }}>{shortSha(run)}</Box>
                   {` · Commit · ${formatRunTime(commitTimestampFor(run))}`}
+                  <Box component="span" sx={{ display: 'block' }}>{run.branch} · {(run.modes ?? []).join(' / ')} · {run.runId}</Box>
                 </>
               )}
               slotProps={{
@@ -87,10 +93,24 @@ export default function RunSelector({ label, options, value, onChange }) {
         <TextField
           {...params}
           label={label}
+          // Keep empty controls in the same label/notch state as selected ones.
+          // Preserve Autocomplete's anchor, input handlers and adornment slots.
+          slotProps={{
+            ...params.slotProps,
+            inputLabel: { ...params.slotProps.inputLabel, shrink: true },
+          }}
           helperText={`Search ${options.length} runs · Showing up to ${MAX_VISIBLE_OPTIONS} matches`}
         />
       )}
-      slotProps={{ listbox: { sx: { maxHeight: 360 } } }}
+      slotProps={{
+        listbox: { sx: { maxHeight: 360, '& li': { overflowWrap: 'anywhere' } } },
+        popper: { sx: { maxWidth: 'calc(100vw - 24px)' } },
+      }}
     />
+    {value && <Box
+      data-testid={`${label.toLowerCase().replaceAll(' ', '-')}-selected-identity`}
+      sx={{ mt: 0.75, px: 0.5, fontFamily: 'monospace', fontSize: 11, color: 'text.secondary', overflowWrap: 'anywhere' }}
+    >{value.runId}<Box sx={{ mt: 0.25, fontFamily: 'inherit' }}>{value.branch} · {(value.modes ?? []).join(' / ')}</Box></Box>}
+    </Box>
   );
 }
