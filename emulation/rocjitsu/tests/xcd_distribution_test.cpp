@@ -5,17 +5,23 @@
 /// @brief How a single AQL dispatch is spread across the XCDs of a multi-XCD SoC.
 
 #include "aql_queue.h"
+#include "decode_test_util.h"
 #include "test_paths.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gws_device.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -60,6 +66,8 @@ using namespace rocjitsu;
 
 const std::string CONFIG_PATH = test::config_path("gfx950_mi355x.json");
 const std::string CDNA5_CONFIG_PATH = test::config_path("gfx1250_mi455x.json");
+// CDNA3 (GWS-capable, multi-XCD) for the cross-XCD GWS rendezvous regressions.
+const std::string CDNA3_CONFIG_PATH = test::config_path("gfx942_cdna3.json");
 
 constexpr uint32_t kTotalXcds = 8;
 constexpr uint32_t kCusPerXcd = 36; // 4 SEs x 9 CUs
@@ -174,6 +182,27 @@ void install_scratch_kernel(amdgpu::GpuMemory &memory, uint32_t private_bytes,
   memory.load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kScratchKdAddr);
   memory.write32(kScratchKdAddr + sizeof(kernel_descriptor_t), build_s_endpgm(arch));
 }
+
+// Minimal CDNA3 (GFX9) DS GWS op issue for the cross-XCD rendezvous regressions.
+// GFX9 numbers DS GWS from SEMA_RELEASE_ALL = 152; the count-carrying ops read the
+// count from the ADDR VGPR's first active lane. These run through the CU execute
+// path only (no instruction fetch), so a config-loaded CU can be driven directly.
+namespace gws_cdna3 {
+constexpr uint16_t kSemaV = 154;
+constexpr uint16_t kSemaP = 156;
+constexpr uint16_t kBarrier = 157;
+constexpr uint8_t kCountVgpr = 4;
+
+void issue(amdgpu::ComputeUnitCore &cu, Decoder &decoder, uint16_t op, amdgpu::Wavefront &wf,
+           bool has_count, uint32_t count) {
+  if (has_count)
+    cu.write_vgpr(wf.vgpr_alloc().base + kCountVgpr, /*lane=*/0, count);
+  const auto words = cdna3::build_ds(op, {.gds = 1, .addr = has_count ? kCountVgpr : uint8_t{0}});
+  std::unique_ptr<Instruction> inst(decode_valid(decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_TRUE(cu.execute_instruction(inst.get(), wf).succeeded());
+}
+} // namespace gws_cdna3
 
 /// Index of the XCD whose command processor is @p cp.
 uint32_t assigned_xcd_index(const SoC &soc, const amdgpu::CommandProcessor *cp) {
@@ -1803,26 +1832,146 @@ TEST(XcdDistributionTest, ScratchRequiresTheCompleteWaveSlice) {
       << "a one-byte scratch mapping was accepted for a complete wave";
 }
 
-// Production construction (config loader): the loader wires every CU of an XCD
-// to that XCD's single device-global GWS store, and each XCD gets its own store.
-// This is what makes cross-CU GWS rendezvous work for a real dispatch, which
-// the command processor scatters across an XCD's CUs. Regression for CUs falling
-// back to their private default store when assembled from a config file.
-TEST(XcdDistributionTest, ConfigLoaderWiresSharedGwsStorePerXcd) {
+// Production construction (config loader): GWS resources are device-global, and
+// under XCD fan-out a single dispatch scatters its workgroups across XCDs (see
+// FanoutQueueGridSpreadsOverAllXcds), so the whole SoC must share ONE GWS store
+// across every CU of every XCD -- not one store per XCD. Regression for CUs
+// falling back to a per-XCD (or private default) store when assembled from a
+// config file, which would break a cross-XCD rendezvous.
+TEST(XcdDistributionTest, ConfigLoaderSharesOneGwsStoreAcrossXcds) {
   XcdDistributionFixture fx;
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
 
-  std::set<const amdgpu::GwsDevice *> per_xcd_stores;
+  const amdgpu::GwsDevice *device_store = fx.soc->gws_device().get();
+  ASSERT_NE(device_store, nullptr) << "SoC has no device-global GWS store";
+
+  std::set<const amdgpu::GwsDevice *> stores;
   for (uint32_t xi = 0; xi < fx.soc->num_xcds(); ++xi) {
     auto *xcd = fx.soc->xcd(xi);
-    const amdgpu::GwsDevice *store = xcd->gws_device().get();
-    ASSERT_NE(store, nullptr) << "xcd " << xi << " has no GWS store";
-    per_xcd_stores.insert(store);
+    EXPECT_EQ(xcd->gws_device().get(), device_store) << "xcd " << xi << " has a private GWS store";
+    stores.insert(xcd->gws_device().get());
     const auto &cus = xcd->command_processor()->compute_units();
     EXPECT_FALSE(cus.empty());
     for (auto *cu : cus)
-      EXPECT_EQ(&cu->gws_device(), store) << "xcd " << xi << " CU does not share the XCD GWS store";
+      EXPECT_EQ(&cu->gws_device(), device_store)
+          << "xcd " << xi << " CU does not share the device-global GWS store";
   }
-  // Each XCD is an independent dispatch/cross-CU boundary, so stores are distinct.
-  EXPECT_EQ(per_xcd_stores.size(), fx.soc->num_xcds());
+  // One device-global store is shared across every XCD.
+  EXPECT_EQ(stores.size(), 1u);
+}
+
+// Cross-XCD GWS barrier rendezvous (config-loaded CDNA3). Two waves of the same
+// dispatch land on CUs of *different* XCDs. The barrier's residency bound is
+// summed across the participating XCDs via the shared store, so a barrier(1)
+// (two participants) parks the first arrival instead of taking the residency
+// fallback -- which a per-XCD store, seeing only one resident participant, would
+// have done, letting the first arrival proceed before its peer. The releasing
+// arrival on the other XCD then wakes the parked peer.
+TEST(XcdDistributionTest, CrossXcdGwsBarrierRendezvous) {
+  XcdDistributionFixture fx(Threading::Single, /*dispatch_threads=*/1, CDNA3_CONFIG_PATH);
+  ASSERT_GE(fx.soc->num_xcds(), 2u);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+
+  // The released arrival retires at an s_endpgm (direct-memory fetch; the wave has
+  // no address space and vmid 0, so it fetches straight from VRAM).
+  constexpr uint64_t kPc = 0x200000;
+  fx.memory->write32(kPc, cdna3::build_sopp(cdna3::kSEndpgmSopp)[0]);
+
+  auto *cu0 = fx.soc->xcd(0)->command_processor()->compute_units().front();
+  auto *cu1 = fx.soc->xcd(1)->command_processor()->compute_units().front();
+  ASSERT_NE(cu0, nullptr);
+  ASSERT_NE(cu1, nullptr);
+  // The fix shares one device-global store across XCDs.
+  ASSERT_EQ(&cu0->gws_device(), &cu1->gws_device());
+
+  auto *wf0 = cu0->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
+  auto *wf1 = cu1->dispatch_wf(/*wg_id=*/1, /*pc=*/0, 102, 16);
+  ASSERT_NE(wf0, nullptr);
+  ASSERT_NE(wf1, nullptr);
+  // One resident wave per XCD, same dispatch: the shared residency bound is two.
+  cu0->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
+  cu1->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1);
+  for (auto *wf : {wf0, wf1}) {
+    wf->set_exec(0x1);
+    wf->set_m0(0);
+  }
+
+  // wf0 (XCD0) arrives first at a two-participant barrier and parks: proof the
+  // residency bound crossed the XCD boundary (a per-XCD bound of 1 would not park).
+  gws_cdna3::issue(*cu0, *decoder, gws_cdna3::kBarrier, *wf0, /*has_count=*/true, /*count=*/1);
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT)
+      << "cross-XCD barrier arrival proceeded before its peer (per-XCD residency)";
+
+  // wf1 (XCD1) is the releasing arrival; the peer parked on XCD0 wakes when XCD0
+  // next runs its GWS maintenance (cross-XCD wake is poll-applied). wf1 is never
+  // stepped, so it stays RUNNING at pc 0.
+  gws_cdna3::issue(*cu1, *decoder, gws_cdna3::kBarrier, *wf1, /*has_count=*/true, /*count=*/1);
+  EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
+  for (int i = 0; i < 4 && wf0->state() == amdgpu::WfState::GWS_WAIT; ++i)
+    cu0->step();
+  EXPECT_NE(wf0->state(), amdgpu::WfState::GWS_WAIT);
+
+  if (!wf0->is_halted())
+    wf0->halt();
+  wf1->halt();
+}
+
+// Cross-XCD GWS quiescence (config-loaded CDNA3). A P parked on a CU of XCD0 must
+// not be released by the deadlock backstop while a runnable producer of the same
+// process is resident on a CU of XCD1: the quiescence scan spans XCDs through the
+// shared store. A per-XCD store would scan only XCD0, see no runnable wave, and
+// escape the P prematurely; here the P proceeds only once the producer issues a V.
+TEST(XcdDistributionTest, CrossXcdGwsPDoesNotEscapeWhilePeerXcdProducerRunnable) {
+  XcdDistributionFixture fx(Threading::Single, /*dispatch_threads=*/1, CDNA3_CONFIG_PATH);
+  ASSERT_GE(fx.soc->num_xcds(), 2u);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+
+  // The consumer retires at an s_endpgm once released (direct-memory fetch).
+  constexpr uint64_t kPc = 0x200000;
+  fx.memory->write32(kPc, cdna3::build_sopp(cdna3::kSEndpgmSopp)[0]);
+
+  auto *cu0 = fx.soc->xcd(0)->command_processor()->compute_units().front();
+  auto *cu1 = fx.soc->xcd(1)->command_processor()->compute_units().front();
+  ASSERT_NE(cu0, nullptr);
+  ASSERT_NE(cu1, nullptr);
+  ASSERT_EQ(&cu0->gws_device(), &cu1->gws_device());
+
+  // Consumer on XCD0 (dispatch 0), runnable producer on XCD1 (dispatch 1, same
+  // process). The producer is never stepped, so it stays RUNNING and can signal.
+  auto *consumer = cu0->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
+  auto *producer = cu1->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_NE(producer, nullptr);
+  consumer->set_dispatch_id(0);
+  producer->set_dispatch_id(1);
+  cu0->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
+  cu1->begin_workgroup(/*dispatch_id=*/1, /*wg_id=*/0, /*wf_count=*/1);
+  for (auto *wf : {consumer, producer}) {
+    wf->set_exec(0x1);
+    wf->set_m0(0);
+  }
+
+  gws_cdna3::issue(*cu0, *decoder, gws_cdna3::kSemaP, *consumer, /*has_count=*/false, /*count=*/0);
+  ASSERT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT);
+
+  // Running XCD0's GWS maintenance must NOT escape the P: the shared quiescence
+  // scan spans XCDs, so the runnable producer on XCD1 (registered in the one
+  // device-global store) keeps the process from looking quiescent. A per-XCD
+  // store would not list XCD1's CU at all and would escape the P. XCD1 is never
+  // stepped, so its producer stays RUNNING (as in OverlappingDispatch...).
+  for (int i = 0; i < 8; ++i)
+    cu0->step();
+  EXPECT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT)
+      << "parked P was escaped while a producer on another XCD was still runnable";
+
+  // The producer signals; XCD0 then releases the consumer with a credit on its
+  // next step -- a real V, never a cross-XCD premature escape.
+  gws_cdna3::issue(*cu1, *decoder, gws_cdna3::kSemaV, *producer, /*has_count=*/false, /*count=*/0);
+  for (int i = 0; i < 4 && consumer->state() == amdgpu::WfState::GWS_WAIT; ++i)
+    cu0->step();
+  EXPECT_NE(consumer->state(), amdgpu::WfState::GWS_WAIT);
+
+  producer->halt();
+  if (!consumer->is_halted())
+    consumer->halt();
 }

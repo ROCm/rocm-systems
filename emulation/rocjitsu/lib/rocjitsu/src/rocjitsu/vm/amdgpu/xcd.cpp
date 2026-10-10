@@ -68,6 +68,13 @@ void Xcd::wire_gws_to_cus() {
       compute_unit->set_gws_device(gws_device_);
 }
 
+void Xcd::adopt_gws_store(std::shared_ptr<GwsDevice> store) {
+  if (!store || store == gws_device_)
+    return;
+  gws_device_ = std::move(store);
+  wire_gws_to_cus();
+}
+
 void Xcd::set_l2_cache(L2Cache *l2) {
   l2_cache_ = l2;
   if (l2_cache_)

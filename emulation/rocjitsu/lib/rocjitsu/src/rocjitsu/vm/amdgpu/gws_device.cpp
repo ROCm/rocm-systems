@@ -48,7 +48,7 @@ void GwsDevice::unregister_compute_unit(ComputeUnitCore *cu) {
   std::lock_guard<std::mutex> lock(mutex_);
   std::erase(cus_, cu);
   cu_runnable_.erase(cu);
-  cu_epoch_.erase(cu);
+  cu_summary_epoch_.erase(cu);
 }
 
 void GwsDevice::add_resident(uint32_t dispatch_id, uint32_t count) {
@@ -56,6 +56,14 @@ void GwsDevice::add_resident(uint32_t dispatch_id, uint32_t count) {
     return;
   std::lock_guard<std::mutex> lock(mutex_);
   resident_waves_[dispatch_id] += count;
+  // New resident waves are potential signalers. Invalidate every published
+  // quiescence snapshot so the deadlock backstop cannot treat a peer CU's
+  // earlier zero-runnable summary (taken before this work became visible) as
+  // proof of quiescence until that CU republishes. The 0 -> positive park bump
+  // alone would miss this: workgroup turnover (a parked wave replaced by a
+  // runnable producer) or a producer dispatched alongside a parked wave leaves
+  // parked_total_ positive, so only this versioning catches the new signaler.
+  ++summary_epoch_;
 }
 
 void GwsDevice::remove_resident(uint32_t dispatch_id, uint32_t count) {
@@ -76,10 +84,11 @@ void GwsDevice::park_wave(Wavefront &wf, uint32_t rid, bool is_barrier, uint64_t
   wf.gws_wait_generation_ = generation;
   wf.set_state(WfState::GWS_WAIT);
   ++parked_[wf.process_id()];
-  // 0 -> positive opens a new park epoch, invalidating stale per-CU snapshots so
-  // a producer that has not yet published cannot be mistaken for quiescent.
+  // 0 -> positive opens a fresh snapshot version, invalidating stale per-CU
+  // summaries so a producer that has not yet published cannot be mistaken for
+  // quiescent at the start of a parking episode.
   if (parked_total_.fetch_add(1, std::memory_order_release) == 0)
-    ++park_epoch_;
+    ++summary_epoch_;
 }
 
 void GwsDevice::wake_wave(ComputeUnitCore &cu, Wavefront &wf) {
@@ -92,6 +101,12 @@ void GwsDevice::wake_wave(ComputeUnitCore &cu, Wavefront &wf) {
   if (it != parked_.end() && it->second > 0 && --it->second == 0)
     parked_.erase(it);
   parked_total_.fetch_sub(1, std::memory_order_release);
+  // A woken wave is runnable again (a potential signaler). Advance the snapshot
+  // version so a peer escape decision cannot treat a pre-wake zero-runnable
+  // summary as quiescent before the owning CU republishes. The waking CU
+  // republishes in the same step (refresh_summary runs right after
+  // poll_local_waiters), so only peer summaries are invalidated.
+  ++summary_epoch_;
 }
 
 uint32_t GwsDevice::poll_local_waiters(ComputeUnitCore &cu) {
@@ -127,7 +142,7 @@ void GwsDevice::refresh_summary(ComputeUnitCore &cu) {
       ++runnable[slot->process_id()];
   }
   cu_runnable_[&cu] = std::move(runnable);
-  cu_epoch_[&cu] = park_epoch_;
+  cu_summary_epoch_[&cu] = summary_epoch_;
 }
 
 bool GwsDevice::escape_ready(uint32_t process) const {
@@ -142,9 +157,9 @@ bool GwsDevice::escape_ready(uint32_t process) const {
         static_cast<uint32_t>(cu->wave_activity_.load(std::memory_order_acquire));
     if (active == 0)
       continue; // Idle CU: hosts no waves of any process, contributes nothing.
-    auto eit = cu_epoch_.find(cu);
-    if (eit == cu_epoch_.end() || eit->second != park_epoch_)
-      return false; // An active CU has not published this epoch: picture incomplete.
+    auto eit = cu_summary_epoch_.find(cu);
+    if (eit == cu_summary_epoch_.end() || eit->second != summary_epoch_)
+      return false; // An active CU has not republished since the latest signaler.
     auto rit = cu_runnable_.find(cu);
     if (rit == cu_runnable_.end())
       continue;

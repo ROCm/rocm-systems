@@ -827,9 +827,11 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
         // from the topology and must wire it here.
         if (xcd_cp && xcd_l2)
           xcd_cp->add_l2_cache(xcd_l2);
-        // Share one device-global GWS store across this XCD's CUs. The full
-        // constructor does this; the config-driven path wires it here now that
-        // the XCD's shader engines and CUs are attached (see GwsDevice).
+        // Share one device-global GWS store across this XCD's CUs now that its
+        // shader engines and CUs are attached (see GwsDevice). A standalone XCD
+        // (no SoC) keeps this per-XCD store; when a SoC owns the XCD, add_xcd
+        // below supersedes it with the one device-wide store shared across every
+        // XCD, so a dispatch under XCD fan-out still rendezvouses.
         xcd->wire_gws_to_cus();
         if (soc)
           soc->add_xcd(xcd);

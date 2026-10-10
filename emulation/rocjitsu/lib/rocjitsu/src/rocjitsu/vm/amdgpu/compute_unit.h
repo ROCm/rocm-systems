@@ -415,31 +415,19 @@ public:
     return *cluster_lds_multicast_engine_;
   }
 
-  /// @brief Share one device-global GWS store across the CUs that run a dispatch.
+  /// @brief Share one reference-counted device-global GWS store across the CUs
+  /// that run a dispatch.
   ///
   /// @details GWS resources are device-global (see GwsDevice): the command
-  /// processor scatters a dispatch's workgroups across CUs, so every CU that can
-  /// run a dispatch must share one store for cross-CU wakeups and quiescence.
-  /// Passing nullptr restores this CU's private default store (standalone use).
-  /// The CU registers itself with the store so its waves participate in shared
-  /// wake and deadlock-escape. This non-owning overload requires the caller to
-  /// keep @p device alive for this CU's lifetime; production wiring should prefer
-  /// the shared_ptr overload below.
-  void set_gws_device(GwsDevice *device) {
-    GwsDevice *replacement = device ? device : &default_gws_device_;
-    gws_device_owner_.reset();
-    if (replacement == gws_device_)
-      return;
-    gws_device_->unregister_compute_unit(this);
-    gws_device_ = replacement;
-    gws_device_->register_compute_unit(this);
-  }
-
-  /// @brief Share a reference-counted device-global GWS store (production path).
-  /// @details Holding the shared_ptr guarantees the store outlives this CU, so
-  /// ~ComputeUnitCore can unregister safely even when the owning device tears its
-  /// components down in an arbitrary order. Passing nullptr restores the private
-  /// default store. See GwsDevice (gws_device.h) for the scheduling policy.
+  /// processor scatters a dispatch's workgroups across CUs -- and, under XCD
+  /// fan-out, across XCDs -- so every CU that can run a dispatch must share one
+  /// store for cross-CU wakeups and quiescence. The CU registers itself with the
+  /// store so its waves participate in shared wake and deadlock-escape. Holding
+  /// the shared_ptr guarantees the store outlives this CU, so ~ComputeUnitCore
+  /// can unregister safely even when the owning device tears its components down
+  /// in an arbitrary order. Passing nullptr restores this CU's private default
+  /// store (standalone use). This is the sole injection path; a CU with no
+  /// injected store uses its embedded default (default_gws_device_).
   void set_gws_device(std::shared_ptr<GwsDevice> device) {
     GwsDevice *replacement = device ? device.get() : &default_gws_device_;
     if (replacement == gws_device_) {
@@ -1446,16 +1434,20 @@ protected:
   void notify_barrier_complete(std::span<Wavefront *> members);
   std::unordered_map<uint64_t, WorkgroupBarriers> barrier_wgs_;
 
-  /// @brief Device-global GWS resource store (see GwsDevice).
-  /// @details GWS state is device-global, matching hardware: the store is shared
-  /// across every CU that can run a dispatch (via set_gws_device) and persists
-  /// across dispatches. Standalone CUs use the embedded default store so single-CU
-  /// use needs no wiring. The store reads this CU's wfs_ / active_wgs_ / wave
-  /// activity for shared wakeups and the process-wide quiescence backstop (always
-  /// on this CU's own thread), so it is a friend.
+  /// @brief CU-private fallback GWS store, used when no shared store is injected.
+  /// @details GWS state is device-global in hardware (see GwsDevice), so in
+  /// production every CU that can run a dispatch shares one injected store (via
+  /// set_gws_device). A standalone CU with no injected store falls back to this
+  /// embedded instance, so single-CU use needs no wiring. The active store reads
+  /// this CU's wfs_ / active_wgs_ / wave activity for shared wakeups and the
+  /// process-wide quiescence backstop, always on this CU's own thread, so
+  /// GwsDevice is a friend.
   GwsDevice default_gws_device_;
-  /// Pins an injected shared store so it outlives this CU (see set_gws_device).
+  /// @brief Pins an injected shared store so it outlives this CU (see
+  /// set_gws_device); null while the CU uses its private fallback.
   std::shared_ptr<GwsDevice> gws_device_owner_;
+  /// @brief Active GWS store for this CU: the injected shared store when one is
+  /// wired, otherwise &default_gws_device_. Never null.
   GwsDevice *gws_device_ = &default_gws_device_;
 
   uint64_t shared_aperture_base_ = 0;
