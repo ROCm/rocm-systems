@@ -2873,7 +2873,8 @@ bool Device::createBlitProgram() {
 
   // Delayed compilation due to brig_loader memory allocation
   std::string extraBlits;
-  std::string ocl20;
+  // Some blit kernels require atomics, for which we use CL2.0 standard
+  std::string blitOptions = "-cl-std=CL2.0";
   if (amd::IS_HIP) {
     if (settings().gwsInitSupported_) {
       extraBlits = device::HipExtraSourceCode;
@@ -2884,7 +2885,6 @@ bool Device::createBlitProgram() {
     if (settings().oclVersion_ >= OpenCL20) {
       extraBlits = iDev()->GetDispatchKernelSource();
       extraBlits.append(SchedulerSourceCode20);
-      ocl20 = "-cl-std=CL2.0";
     }
   }
 
@@ -2914,7 +2914,7 @@ bool Device::createBlitProgram() {
 
   blitProgram_ = new BlitProgram(context_);
   // Create blit programs
-  if (blitProgram_ == nullptr || !blitProgram_->create(this, extraBlits, ocl20)) {
+  if (blitProgram_ == nullptr || !blitProgram_->create(this, extraBlits, blitOptions)) {
     delete blitProgram_;
     blitProgram_ = nullptr;
     LogError("Couldn't create blit kernels!");

@@ -8,39 +8,302 @@ namespace amd::device {
 
 #define BLIT_KERNELS(...) #__VA_ARGS__
 
+// Blits Moved from device libs to clr
+// Requires CL2.0 standard
+
 const char* BlitLinearSourceCode = BLIT_KERNELS(
-    // Extern
-    extern void __amd_fillBufferAligned2D(__global uchar*, __global ushort*, __global uint*,
-                                          __global ulong*, __constant uchar*, uint, ulong, ulong,
-                                          ulong, ulong);
-
-    extern void __amd_copyBuffer(__global uchar*, __global uchar*, ulong, ulong, ulong, uint);
-
-    extern void __amd_copyBufferAligned(__global uint*, __global uint*, ulong, ulong, ulong, uint);
-
-    extern void __amd_copyBufferRect(__global uchar*, __global uchar*, ulong4, ulong4, ulong4);
-
-    extern void __amd_copyBufferRectAligned(__global uint*, __global uint*, ulong4, ulong4, ulong4);
-
-    extern void __amd_streamOpsWrite(__global uint*, __global ulong*, ulong);
-
-    extern void __amd_streamOpsIncrement(__global uint*, __global ulong*, ulong);
-
-    extern void __amd_streamOpsDecrement(__global uint*, __global ulong*, ulong);
-
-    extern void __amd_streamOpsWait(__global uint*, __global ulong*, ulong, ulong, ulong);
-
-    extern void __amd_batchMemOp(__global void*, uint count);
-
     extern void __ockl_dm_init_v1(ulong, ulong, uint, uint);
 
-    extern void __amd_fillBufferUnAligned(
-        __global void* __restrict buf, __constant uchar* __restrict pattern,
-        ulong2 body_tile_pattern, ulong body_pattern, ulong body_tail_pattern,
-        ulong body_tile_count, ulong body_tile_passes, ulong stride,
-        ulong pattern_size, ulong tail_offset, __global uchar* __restrict body_ptr,
-        __global uchar* __restrict body_tail_ptr, __global uchar* __restrict tail_ptr,
-        __global ulong2* __restrict element_tiled, ushort4 counts);
+    typedef enum BatchMemOpType {
+      STREAM_WAIT_VALUE_32 = 0x1,
+      STREAM_WRITE_VALUE_32 = 0x2,
+      STREAM_WAIT_VALUE_64 = 0x4,
+      STREAM_WRITE_VALUE_64 = 0x5,
+      STREAM_MEM_OP_BARRIER = 0x6,            // Currently not supported
+      STREAM_MEM_OP_FLUSH_REMOTE_WRITES = 0x3 // Currently not supported
+    } BatchMemOpType;
+
+    typedef union streamBatchMemOpParams_union {
+      BatchMemOpType operation;
+      struct streamMemOpWaitValueParams_t{
+        BatchMemOpType operation;
+        atomic_ulong* address;
+        union {
+          uint value;
+          ulong value64;
+        };
+        uint flags;
+        atomic_ulong* alias; // Not valid for AMD backend
+      } waitValue;
+      struct streamMemOpWriteValueParams_t{
+        BatchMemOpType operation;
+        atomic_ulong* address;
+        union {
+          uint value;
+          ulong value64;
+        };
+        uint flags;
+        atomic_ulong* alias; // Not valid for AMD backend
+      } writeValue;
+      struct streamMemOpFlushRemoteWritesParams_t{ // Currently not supported
+        BatchMemOpType operation;
+        uint flags;
+      } flushRemoteWrites;
+      struct streamMemOpMemoryBarrierParams_t{ // Currently not supported
+        BatchMemOpType operation;
+        uint flags;
+      } memoryBarrier;
+      ulong pad[6];
+    } BatchMemOpParams;
+
+    typedef struct CopyBufferBatchDescriptor {
+      ulong source_address;
+      ulong destination_address;
+      ulong aligned_element_count;
+      uint aligned_element_size;
+      uint trailing_byte_count;
+    } CopyBufferBatchDescriptor;
+
+    __attribute__((always_inline)) static void __amd_fillBufferAligned2D(__global uchar* bufUChar,
+                              __global ushort* bufUShort,
+                              __global uint* bufUInt,
+                              __global ulong* bufULong,
+                              __constant uchar* pattern,
+                              uint patternSize,
+                              ulong origin,
+                              ulong width,
+                              ulong height,
+                              ulong pitch)
+    {
+      ulong tid_x = get_global_id(0);
+      ulong tid_y = get_global_id(1);
+
+      if (tid_x >= width || tid_y >= height) {
+        return;
+      }
+
+      ulong offset = (tid_y * pitch + tid_x);
+
+      if (bufULong) {
+        __global ulong* element = &bufULong[origin + offset];
+        __constant ulong* pt = (__constant ulong*)pattern;
+        for (uint i = 0; i < patternSize; ++i) {
+          element[i] = pt[i];
+        }
+      } else if (bufUInt) {
+        __global uint* element = &bufUInt[origin + offset];
+        __constant uint* pt = (__constant uint*)pattern;
+        for (uint i = 0; i < patternSize; ++i) {
+          element[i] = pt[i];
+        }
+      } else if (bufUShort) {
+        __global ushort* element = &bufUShort[origin + offset];
+        __constant ushort* pt = (__constant ushort*)pattern;
+        for (uint i = 0; i < patternSize; ++i) {
+          element[i] = pt[i];
+        }
+      } else if (bufUChar) {
+        __global uchar* element = &bufUChar[origin + offset];
+        __constant uchar* pt = (__constant uchar*)pattern;
+        for (uint i = 0; i < patternSize; ++i) {
+          element[i] = pt[i];
+        }
+      }
+    }
+
+    __attribute__((always_inline)) static void __amd_copyBufferAligned(
+        __global uint* src,
+        __global uint* dst,
+        ulong srcOrigin,
+        ulong dstOrigin,
+        ulong size,
+        uint alignment)
+    {
+        ulong id = get_global_id(0);
+
+        if (id >= size) {
+            return;
+        }
+
+        ulong   offsSrc = id + srcOrigin;
+        ulong   offsDst = id + dstOrigin;
+
+        if (alignment == 16) {
+            __global uint4* src4 = (__global uint4*)src;
+            __global uint4* dst4 = (__global uint4*)dst;
+            dst4[offsDst] = src4[offsSrc];
+        }
+        else {
+            dst[offsDst] = src[offsSrc];
+        }
+    }
+
+    __attribute__((always_inline)) static void __amd_copyBufferRect(
+        __global uchar* src,
+        __global uchar* dst,
+        ulong4 srcRect,
+        ulong4 dstRect,
+        ulong4 size)
+    {
+        ulong x = get_global_id(0);
+        ulong y = get_global_id(1);
+        ulong z = get_global_id(2);
+
+        if ((x >= size.x) ||
+            (y >= size.y) ||
+            (z >= size.z)) {
+            return;
+        }
+
+        ulong offsSrc = srcRect.z + x + y * srcRect.x + z * srcRect.y;
+        ulong offsDst = dstRect.z + x + y * dstRect.x + z * dstRect.y;
+
+        dst[offsDst] = src[offsSrc];
+    }
+
+    __attribute__((always_inline)) static void __amd_copyBufferRectAligned(
+        __global uint* src,
+        __global uint* dst,
+        ulong4 srcRect,
+        ulong4 dstRect,
+        ulong4 size)
+    {
+        ulong x = get_global_id(0);
+        ulong y = get_global_id(1);
+        ulong z = get_global_id(2);
+
+        if ((x >= size.x) ||
+            (y >= size.y) ||
+            (z >= size.z)) {
+            return;
+        }
+
+        ulong offsSrc = srcRect.z + x + y * srcRect.x + z * srcRect.y;
+        ulong offsDst = dstRect.z + x + y * dstRect.x + z * dstRect.y;
+
+        if (size.w == 16) {
+            __global uint4* src4 = (__global uint4*)src;
+            __global uint4* dst4 = (__global uint4*)dst;
+            dst4[offsDst] = src4[offsSrc];
+        }
+        else {
+            dst[offsDst] = src[offsSrc];
+        }
+    }
+
+    __attribute__((always_inline)) static void __amd_streamOpsWrite(
+        __global atomic_uint* ptrUint,
+        __global atomic_ulong* ptrUlong,
+        ulong value) {
+
+      // The launch parameters for this shader is a 1 grid work-item
+
+      // 32-bit write
+      if (ptrUint) {
+        atomic_store_explicit(ptrUint, (uint)value, memory_order_relaxed, memory_scope_all_svm_devices);
+      }
+      // 64-bit write
+      else {
+        atomic_store_explicit(ptrUlong, value, memory_order_relaxed, memory_scope_all_svm_devices);
+      }
+    }
+
+    __attribute__((always_inline)) static void __amd_streamOpsIncrement(
+        __global atomic_uint* ptrUint,
+        __global atomic_ulong* ptrUlong,
+        ulong value) {
+
+        if (ptrUint) {
+          atomic_fetch_add_explicit (ptrUint, value,  memory_order_relaxed, memory_scope_all_svm_devices);
+        } else {
+          atomic_fetch_add_explicit  (ptrUlong, value,  memory_order_relaxed, memory_scope_all_svm_devices);
+        }
+    }
+
+    __attribute__((always_inline)) static void __amd_streamOpsDecrement(
+        __global atomic_uint* ptrUint,
+        __global atomic_ulong* ptrUlong,
+        ulong value) {
+
+        __attribute__((atomic(remote_memory, fine_grained_memory)))
+        {
+          if (ptrUint) {
+            __scoped_atomic_fetch_sub((volatile uint*)ptrUint, (uint)value, memory_order_relaxed, __MEMORY_SCOPE_SYSTEM);
+          } else {
+            __scoped_atomic_fetch_sub((volatile ulong*)ptrUlong, value, memory_order_relaxed, __MEMORY_SCOPE_SYSTEM);
+          }
+        }
+    }
+
+    __attribute__((always_inline)) static void __amd_streamOpsWait(
+        __global atomic_uint* ptrUint,
+        __global atomic_ulong* ptrUlong,
+        ulong value, ulong compareOp, ulong mask) {
+
+        // The launch parameters for this shader is a 1 grid work-item
+
+        switch (compareOp) {
+        case 0: //GEQ
+          if (ptrUint) {
+            while ((int)(atomic_load_explicit(ptrUint, memory_order_relaxed,
+                        memory_scope_all_svm_devices) & (uint)mask) < (uint)value) {
+              __builtin_amdgcn_s_sleep(1);
+            }
+          }
+          else {
+            while ((long)(atomic_load_explicit(ptrUlong, memory_order_relaxed,
+                        memory_scope_all_svm_devices) & mask) < value) {
+              __builtin_amdgcn_s_sleep(1);
+            }
+          }
+          break;
+
+        case 1: // EQ
+          if (ptrUint) {
+            while ((atomic_load_explicit(ptrUint, memory_order_relaxed,
+                       memory_scope_all_svm_devices) & (uint)mask) != (uint)value) {
+              __builtin_amdgcn_s_sleep(1);
+            }
+          }
+          else {
+            while ((atomic_load_explicit(ptrUlong, memory_order_relaxed,
+                       memory_scope_all_svm_devices) & mask) != value) {
+              __builtin_amdgcn_s_sleep(1);
+            }
+          }
+          break;
+
+        case 2: //AND
+          if (ptrUint) {
+            while (!((atomic_load_explicit(ptrUint, memory_order_relaxed,
+                       memory_scope_all_svm_devices) & (uint)mask) & (uint)value)) {
+              __builtin_amdgcn_s_sleep(1);
+            }
+          }
+          else {
+            while (!((atomic_load_explicit(ptrUlong, memory_order_relaxed,
+                       memory_scope_all_svm_devices) & mask) & value)) {
+              __builtin_amdgcn_s_sleep(1);
+            }
+          }
+          break;
+
+        case 3: //NOR
+          if (ptrUint) {
+            while (((atomic_load_explicit(ptrUint, memory_order_relaxed,
+                     memory_scope_all_svm_devices) | (uint)value) & (uint)mask) == (uint)mask) {
+              __builtin_amdgcn_s_sleep(1);
+            }
+          }
+          else {
+            while (((atomic_load_explicit(ptrUlong, memory_order_relaxed,
+                         memory_scope_all_svm_devices) | value) & mask) == mask) {
+              __builtin_amdgcn_s_sleep(1);
+            }
+          }
+          break;
+        }
+    }
 
     __kernel void __amd_rocclr_fillBufferUnAligned(
         __global void* __restrict buf, __constant uchar* __restrict pattern,
@@ -128,14 +391,6 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
       }
     }
 
-    typedef struct CopyBufferBatchDescriptor {
-      ulong source_address;
-      ulong destination_address;
-      ulong aligned_element_count;
-      uint aligned_element_size;
-      uint trailing_byte_count;
-    } CopyBufferBatchDescriptor;
-
     __kernel void __amd_rocclr_copyBufferBatch(
         __global const CopyBufferBatchDescriptor *descriptors,
         uint workgroup_size,
@@ -192,61 +447,30 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
       __amd_copyBufferRectAligned(src, dst, srcRect, dstRect, size);
     }
 
-    // TODO: Once the sequential for-loop fix lands in llvm-project/amd/device-libs/opencl/src/misc/amdblit.cl
-    // (replacing get_global_id(0) with a for loop), revert this back to:
-    //   __amd_batchMemOp(params, count);
-    //
-    // Local definitions mirroring BatchMemOpType and BatchMemOpParams from
-    // amd/device-libs/opencl/src/misc/amdblit.cl. Defined here because blitcl.cpp
-    // kernels are JIT-compiled by COMGR in OpenCL C 1.x mode, which does not have
-    // access to amdblit.cl's types. Values match hipStreamBatchMemOpType in hip_runtime_api.h.
-    typedef enum {
-      ROCCLR_STREAM_WAIT_VALUE_32  = 0x1,
-      ROCCLR_STREAM_WRITE_VALUE_32 = 0x2,
-      ROCCLR_STREAM_WAIT_VALUE_64  = 0x4,
-      ROCCLR_STREAM_WRITE_VALUE_64 = 0x5,
-    } RocclrBatchMemOpType;
-
-    // Mirrors BatchMemOpParams in amdblit.cl — uses __global ulong* instead of
-    // atomic_ulong* since atomic_ulong requires OpenCL C 2.0 unavailable here.
-    typedef union {
-      RocclrBatchMemOpType operation;
-      struct {
-        RocclrBatchMemOpType  operation;
-        __global ulong*       address;
-        union { uint value; ulong value64; };
-        uint                  flags;
-        __global ulong*       alias;
-      } waitValue;
-      struct {
-        RocclrBatchMemOpType  operation;
-        __global ulong*       address;
-        union { uint value; ulong value64; };
-        uint                  flags;
-        __global ulong*       alias;
-      } writeValue;
-      ulong pad[6];
-    } RocclrBatchMemOpParams;
+    // DEVIATION from amdblit.cl: __amd_batchMemOp there indexes param[get_global_id(0)].
+    // KernelBlitManager::batchMemOps dispatches globalWorkSize=1 (rocblit.cpp), so that form would
+    // execute only param[0]. CUDA requires the ops run in array order, hence the sequential loop.
+    // Revert to a verbatim call once amdblit.cl replaces get_global_id(0) with a for loop.
     __kernel void __amd_rocclr_batchMemOp(__global void* params, uint count) {
-      __global RocclrBatchMemOpParams* param = (__global RocclrBatchMemOpParams*)params;
+      __global BatchMemOpParams* param = (__global BatchMemOpParams*)params;
       for (uint i = 0; i < count; i++) {
         switch (param[i].operation) {
-          case ROCCLR_STREAM_WAIT_VALUE_32:
-            __amd_streamOpsWait((__global uint*)param[i].waitValue.address, NULL,
+          case STREAM_WAIT_VALUE_32:
+            __amd_streamOpsWait((__global atomic_uint*)param[i].waitValue.address, NULL,
                                 (uint)param[i].waitValue.value, (uint)param[i].waitValue.flags,
                                 (ulong)~0UL);
             break;
-          case ROCCLR_STREAM_WRITE_VALUE_32:
-            __amd_streamOpsWrite((__global uint*)param[i].writeValue.address, NULL,
+          case STREAM_WRITE_VALUE_32:
+            __amd_streamOpsWrite((__global atomic_uint*)param[i].writeValue.address, NULL,
                                  (uint)param[i].writeValue.value);
             break;
-          case ROCCLR_STREAM_WAIT_VALUE_64:
-            __amd_streamOpsWait(NULL, (__global ulong*)param[i].waitValue.address,
+          case STREAM_WAIT_VALUE_64:
+            __amd_streamOpsWait(NULL, (__global atomic_ulong*)param[i].waitValue.address,
                                 param[i].waitValue.value64,
                                 (uint)param[i].waitValue.flags, (ulong)~0UL);
             break;
-          case ROCCLR_STREAM_WRITE_VALUE_64:
-            __amd_streamOpsWrite(NULL, (__global ulong*)param[i].writeValue.address,
+          case STREAM_WRITE_VALUE_64:
+            __amd_streamOpsWrite(NULL, (__global atomic_ulong*)param[i].writeValue.address,
                                  param[i].writeValue.value64);
             break;
           default:
@@ -258,22 +482,25 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
 const char* HipExtraSourceCode = BLIT_KERNELS(
     __kernel void __amd_rocclr_streamOpsWrite(__global uint* ptrInt, __global ulong* ptrUlong,
                                               ulong value) {
-      __amd_streamOpsWrite(ptrInt, ptrUlong, value);
+      __amd_streamOpsWrite((__global atomic_uint*)ptrInt, (__global atomic_ulong*)ptrUlong, value);
     }
 
     __kernel void __amd_rocclr_streamOpsIncrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsIncrement(ptrInt, ptrUlong, value);
+      __amd_streamOpsIncrement((__global atomic_uint*)ptrInt, (__global atomic_ulong*)ptrUlong,
+                               value);
     }
 
     __kernel void __amd_rocclr_streamOpsDecrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsDecrement(ptrInt, ptrUlong, value);
+      __amd_streamOpsDecrement((__global atomic_uint*)ptrInt, (__global atomic_ulong*)ptrUlong,
+                               value);
     }
 
     __kernel void __amd_rocclr_streamOpsWait(__global uint* ptrInt, __global ulong* ptrUlong,
                                              ulong value, ulong flags, ulong mask) {
-      __amd_streamOpsWait(ptrInt, ptrUlong, value, flags, mask);
+      __amd_streamOpsWait((__global atomic_uint*)ptrInt, (__global atomic_ulong*)ptrUlong, value,
+                          flags, mask);
     }
 
     __kernel void __amd_rocclr_initHeap(ulong heap_to_initialize, ulong initial_blocks,
@@ -286,22 +513,25 @@ const char* HipExtraSourceCode = BLIT_KERNELS(
 const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
     __kernel void __amd_rocclr_streamOpsWrite(__global uint* ptrInt, __global ulong* ptrUlong,
                                               ulong value) {
-      __amd_streamOpsWrite(ptrInt, ptrUlong, value);
+      __amd_streamOpsWrite((__global atomic_uint*)ptrInt, (__global atomic_ulong*)ptrUlong, value);
     }
 
     __kernel void __amd_rocclr_streamOpsIncrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsIncrement(ptrInt, ptrUlong, value);
+      __amd_streamOpsIncrement((__global atomic_uint*)ptrInt, (__global atomic_ulong*)ptrUlong,
+                               value);
     }
 
     __kernel void __amd_rocclr_streamOpsDecrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsDecrement(ptrInt, ptrUlong, value);
+      __amd_streamOpsDecrement((__global atomic_uint*)ptrInt, (__global atomic_ulong*)ptrUlong,
+                               value);
     }
 
     __kernel void __amd_rocclr_streamOpsWait(__global uint* ptrInt, __global ulong* ptrUlong,
                                              ulong value, ulong flags, ulong mask) {
-      __amd_streamOpsWait(ptrInt, ptrUlong, value, flags, mask);
+      __amd_streamOpsWait((__global atomic_uint*)ptrInt, (__global atomic_ulong*)ptrUlong, value,
+                          flags, mask);
     }
 
     __kernel void __amd_rocclr_initHeap(ulong heap_to_initialize, ulong initial_blocks,
@@ -310,22 +540,306 @@ const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
     });
 
 const char* BlitImageSourceCode = BLIT_KERNELS(
-    // Extern
-    extern void __amd_fillImage(__write_only image2d_array_t, float4, int4, uint4, int4, int4,
-                                uint);
+    __constant uint SplitCount = 3;
 
-    extern void __amd_copyImage(__read_only image2d_array_t, __write_only image2d_array_t, int4,
-                                int4, int4);
+    __attribute__((always_inline)) static void __amd_fillImage(
+        __write_only image2d_array_t image,
+        float4 patternFLOAT4,
+        int4 patternINT4,
+        uint4 patternUINT4,
+        int4 origin,
+        int4 size,
+        uint type)
+    {
+        int4  coords;
 
-    extern void __amd_copyImage1DA(__read_only image2d_array_t, __write_only image2d_array_t, int4,
-                                   int4, int4);
+        coords.x = get_global_id(0);
+        coords.y = get_global_id(1);
+        coords.z = get_global_id(2);
+        coords.w = 0;
 
-    extern void __amd_copyBufferToImage(__global uint*, __write_only image2d_array_t, ulong4, int4,
-                                        int4, uint4, ulong4);
+        if ((coords.x >= size.x) ||
+            (coords.y >= size.y) ||
+            (coords.z >= size.z)) {
+            return;
+        }
 
-    extern void __amd_copyImageToBuffer(__read_only image2d_array_t, __global uint*,
-                                        __global ushort*, __global uchar*, int4, ulong4, int4,
-                                        uint4, ulong4);
+        coords += origin;
+
+        int SizeX = get_global_size(0);
+        int AdjustedSizeX = size.x + origin.x;
+
+        for (uint i = 0; i < SplitCount; ++i) {
+            // Check components
+            switch (type) {
+            case 0:
+                write_imagef(image, coords, patternFLOAT4);
+                break;
+            case 1:
+                write_imagei(image, coords, patternINT4);
+                break;
+            case 2:
+                write_imageui(image, coords, patternUINT4);
+                break;
+            }
+            coords.x += SizeX;
+            if (coords.x >= AdjustedSizeX) return;
+        }
+    }
+
+    __attribute__((always_inline)) static void __amd_copyImage(
+        __read_only image2d_array_t src,
+        __write_only image2d_array_t dst,
+        int4 srcOrigin,
+        int4 dstOrigin,
+        int4 size)
+    {
+        int4    coordsDst;
+        int4    coordsSrc;
+
+        coordsDst.x = get_global_id(0);
+        coordsDst.y = get_global_id(1);
+        coordsDst.z = get_global_id(2);
+        coordsDst.w = 0;
+
+        if ((coordsDst.x >= size.x) ||
+            (coordsDst.y >= size.y) ||
+            (coordsDst.z >= size.z)) {
+            return;
+        }
+
+        coordsSrc = srcOrigin + coordsDst;
+        coordsDst += dstOrigin;
+
+        uint4  texel;
+        texel = read_imageui(src, coordsSrc);
+        write_imageui(dst, coordsDst, texel);
+    }
+
+    __attribute__((always_inline)) static void __amd_copyImage1DA(
+        __read_only image2d_array_t src,
+        __write_only image2d_array_t dst,
+        int4 srcOrigin,
+        int4 dstOrigin,
+        int4 size)
+    {
+        int4 coordsDst;
+        int4 coordsSrc;
+
+        coordsDst.x = get_global_id(0);
+        coordsDst.y = get_global_id(1);
+        coordsDst.z = get_global_id(2);
+        coordsDst.w = 0;
+
+        if ((coordsDst.x >= size.x) ||
+            (coordsDst.y >= size.y) ||
+            (coordsDst.z >= size.z)) {
+            return;
+        }
+
+        coordsSrc = srcOrigin + coordsDst;
+        coordsDst += dstOrigin;
+        if (srcOrigin.w != 0) {
+           coordsSrc.z = coordsSrc.y;
+           coordsSrc.y = 0;
+        }
+        if (dstOrigin.w != 0) {
+           coordsDst.z = coordsDst.y;
+           coordsDst.y = 0;
+        }
+
+        uint4  texel;
+        texel = read_imageui(src, coordsSrc);
+        write_imageui(dst, coordsDst, texel);
+    }
+
+    __attribute__((always_inline)) static void __amd_copyBufferToImage(
+        __global uint *src,
+        __write_only image2d_array_t dst,
+        ulong4 srcOrigin,
+        int4 dstOrigin,
+        int4 size,
+        uint4 format,
+        ulong4 pitch)
+    {
+        ulong idxSrc;
+        int4 coordsDst;
+        uint4 pixel;
+        __global uint* srcUInt = src;
+        __global ushort* srcUShort = (__global ushort*)src;
+        __global uchar* srcUChar  = (__global uchar*)src;
+        ushort tmpUShort;
+        uint tmpUInt;
+
+        coordsDst.x = get_global_id(0);
+        coordsDst.y = get_global_id(1);
+        coordsDst.z = get_global_id(2);
+        coordsDst.w = 0;
+
+        if ((coordsDst.x >= size.x) ||
+            (coordsDst.y >= size.y) ||
+            (coordsDst.z >= size.z)) {
+            return;
+        }
+
+        idxSrc = (coordsDst.z * pitch.y +
+           coordsDst.y * pitch.x + coordsDst.x) *
+           format.z + srcOrigin.x;
+
+        coordsDst.x += dstOrigin.x;
+        coordsDst.y += dstOrigin.y;
+        coordsDst.z += dstOrigin.z;
+
+        // Check components
+        switch (format.x) {
+        case 1:
+            // Check size
+            if (format.y == 1) {
+                pixel.x = (uint)srcUChar[idxSrc];
+            }
+            else if (format.y == 2) {
+                pixel.x = (uint)srcUShort[idxSrc];
+            }
+            else {
+                pixel.x = srcUInt[idxSrc];
+            }
+        break;
+        case 2:
+            // Check size
+            if (format.y == 1) {
+                tmpUShort = srcUShort[idxSrc];
+                pixel.x = (uint)(tmpUShort & 0xff);
+                pixel.y = (uint)(tmpUShort >> 8);
+            }
+            else if (format.y == 2) {
+                tmpUInt = srcUInt[idxSrc];
+                pixel.x = (tmpUInt & 0xffff);
+                pixel.y = (tmpUInt >> 16);
+            }
+            else {
+                pixel.x = srcUInt[idxSrc++];
+                pixel.y = srcUInt[idxSrc];
+            }
+        break;
+        case 4:
+            // Check size
+            if (format.y == 1) {
+                tmpUInt = srcUInt[idxSrc];
+                pixel.x = tmpUInt & 0xff;
+                pixel.y = (tmpUInt >> 8) & 0xff;
+                pixel.z = (tmpUInt >> 16) & 0xff;
+                pixel.w = (tmpUInt >> 24) & 0xff;
+            }
+            else if (format.y == 2) {
+                tmpUInt = srcUInt[idxSrc++];
+                pixel.x = tmpUInt & 0xffff;
+                pixel.y = (tmpUInt >> 16);
+                tmpUInt = srcUInt[idxSrc];
+                pixel.z = tmpUInt & 0xffff;
+                pixel.w = (tmpUInt >> 16);
+            }
+            else {
+                pixel.x = srcUInt[idxSrc++];
+                pixel.y = srcUInt[idxSrc++];
+                pixel.z = srcUInt[idxSrc++];
+                pixel.w = srcUInt[idxSrc];
+            }
+        break;
+        }
+        // Write the final pixel
+        write_imageui(dst, coordsDst, pixel);
+    }
+
+    __attribute__((always_inline)) static void __amd_copyImageToBuffer(
+        __read_only image2d_array_t src,
+        __global uint* dstUInt,
+        __global ushort* dstUShort,
+        __global uchar* dstUChar,
+        int4 srcOrigin,
+        ulong4 dstOrigin,
+        int4 size,
+        uint4 format,
+        ulong4 pitch)
+    {
+        ulong idxDst;
+        int4 coordsSrc;
+        uint4 texel;
+
+        coordsSrc.x = get_global_id(0);
+        coordsSrc.y = get_global_id(1);
+        coordsSrc.z = get_global_id(2);
+        coordsSrc.w = 0;
+
+        if ((coordsSrc.x >= size.x) ||
+            (coordsSrc.y >= size.y) ||
+            (coordsSrc.z >= size.z)) {
+            return;
+        }
+
+        idxDst = (coordsSrc.z * pitch.y + coordsSrc.y * pitch.x +
+            coordsSrc.x) * format.z + dstOrigin.x;
+
+        coordsSrc.x += srcOrigin.x;
+        coordsSrc.y += srcOrigin.y;
+        coordsSrc.z += srcOrigin.z;
+
+        texel = read_imageui(src, coordsSrc);
+
+        // Check components
+        switch (format.x) {
+        case 1:
+            // Check size
+            switch (format.y) {
+            case 1:
+                dstUChar[idxDst] = (uchar)texel.x;
+                break;
+            case 2:
+                dstUShort[idxDst] = (ushort)texel.x;
+                break;
+            case 4:
+                dstUInt[idxDst] = texel.x;
+                break;
+            }
+        break;
+        case 2:
+            // Check size
+            switch (format.y) {
+            case 1:
+                dstUShort[idxDst] = (ushort)texel.x |
+                   ((ushort)texel.y << 8);
+                break;
+            case 2:
+                dstUInt[idxDst] = texel.x | (texel.y << 16);
+                break;
+            case 4:
+                dstUInt[idxDst++] = texel.x;
+                dstUInt[idxDst] = texel.y;
+                break;
+            }
+        break;
+        case 4:
+            // Check size
+            switch (format.y) {
+            case 1:
+                dstUInt[idxDst] = (uint)texel.x |
+                   (texel.y << 8) |
+                   (texel.z << 16) |
+                   (texel.w << 24);
+                break;
+            case 2:
+                dstUInt[idxDst++] = texel.x | (texel.y << 16);
+                dstUInt[idxDst] = texel.z | (texel.w << 16);
+                break;
+            case 4:
+                dstUInt[idxDst++] = texel.x;
+                dstUInt[idxDst++] = texel.y;
+                dstUInt[idxDst++] = texel.z;
+                dstUInt[idxDst] = texel.w;
+                break;
+            }
+        break;
+        }
+    }
 
     __kernel void __amd_rocclr_fillImage(__write_only image2d_array_t image, float4 patternFLOAT4,
                                          int4 patternINT4, uint4 patternUINT4, int4 origin,
