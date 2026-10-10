@@ -3,12 +3,12 @@
 
 
 import tempfile
-from pathlib import Path
 from unittest.mock import patch
 
 import common
 import pytest
 
+import config
 from utils.mi_gpu_spec import MIGPUSpecs
 from utils.specs import _extract_gpu_info
 
@@ -17,7 +17,7 @@ class TestMIGPUSpecs:
     # -- YAML parsing / initialization ---------------------------------------
 
     def test_yaml_loads_successfully(self):
-        yaml_path = Path(common.SRC) / "utils" / "mi_gpu_spec.yaml"
+        yaml_path = config.rocprof_compute_home / "utils" / "mi_gpu_spec.yaml"
         data = MIGPUSpecs._load_yaml(str(yaml_path))
         assert isinstance(data, dict)
         assert "mi_gpu_spec" in data
@@ -31,7 +31,7 @@ class TestMIGPUSpecs:
         assert models_from_dict == all_models
 
     def test_supported_archs_matches_soc_files(self):
-        soc_dir = Path(common.SRC) / "rocprof_compute_soc"
+        soc_dir = config.rocprof_compute_home / "rocprof_compute_soc"
         soc_archs = {f.stem.removeprefix("soc_") for f in soc_dir.glob("soc_gfx*.py")}
 
         supported = set(common.SUPPORTED_ARCHS)
