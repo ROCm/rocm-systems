@@ -107,6 +107,21 @@ rocprofiler_add_integration_execute_test(
         "GPU:[0-9]*\\n*;Name:\\t[a-zA-Z_]*\\n;Counter_Name:\\t[a-zA-Z_]*\\n;Description:\\t(.*)\\n*;Expression:\\t(.)*\\n*;Block:\\t[a-zA-Z]*\\n*;Dimensions:\\t([A-Z_]*)\\t([[0-9]*:[0-9]*\\])*\\n*"
     DISABLED "${IS_SPM_DISABLED}")
 
+# The pytest skips when no agent advertises a reference-clock interval. IS_SPM_DISABLED is
+# forced on for every gfx12 agent above, so this test does not use that flag.
+rocprofiler_add_integration_validate_test(
+    rocprofv3-avail-test-spm-refclk-config
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_validate_spm_refclk_config
+    ARGS --rocm-path ${rocprofiler-sdk_ROOT_DIR}
+    TIMEOUT 45
+    PRELOAD "${PRELOAD_ENV}"
+    LABELS "integration-tests;spm"
+    DISABLED_NO_KFD
+    DISABLED_MEMCHECKS "(Address|Thread|UndefinedBehavior)Sanitizer")
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-avail-test-pc-sample-config
     COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail> info

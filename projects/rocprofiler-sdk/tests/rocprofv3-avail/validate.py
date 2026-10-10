@@ -51,6 +51,37 @@ def test_validate_metrics(rocm_path):
                 counter.expression == "reduce(TA_TA_BUSY,min)"
 
 
+def test_validate_spm_refclk_config(rocm_path):
+    set_library(rocm_path)
+
+    from rocprofv3 import avail
+
+    agent_info_map = avail.get_agent_info_map()
+    refclk_configs = []
+    for agent, configs in avail.get_spm_configs().items():
+        name = str(agent_info_map[agent].get("name", ""))
+        refclk = [
+            config for config in configs if config.type == "SAMPLE_INTERVAL_REFCLK_CYCLES"
+        ]
+        if not refclk:
+            continue
+        assert name.removesuffix("-strict") in {
+            "gfx1200",
+            "gfx1201",
+            "gfx1250",
+        }, f"{name} advertised a reference-clock SPM interval"
+        refclk_configs.extend(refclk)
+
+    if not refclk_configs:
+        pytest.skip("reference-clock SPM interval is not available")
+
+    for config in refclk_configs:
+        assert isinstance(config.sample_interval_min, ctypes.c_ulong)
+        assert isinstance(config.sample_interval_max, ctypes.c_ulong)
+        assert config.sample_interval_min.value == 1
+        assert config.sample_interval_max.value > config.sample_interval_min.value
+
+
 def test_validate_list_pc_sample_config(rocm_path):
     set_library(rocm_path)
 
