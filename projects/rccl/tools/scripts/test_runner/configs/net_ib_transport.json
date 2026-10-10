@@ -448,6 +448,56 @@
       ]
     },
 
+    "net_ib_wqe_lat_unit": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "NetIB_WqeLatMon_Unit",
+          "description": "AICOMRCCL-2013: CPU-only checks of the WQE post-to-poll latency monitor state machine, Welford/P^2 statistics, slow threshold and stall check rate limiters",
+          "test_filter": "NetIbWqeLatMonUnit.*"
+        }
+      ]
+    },
+
+    "net_ib_wqe_lat": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "NetIB_WqeLatMon_Functional",
+          "description": "AICOMRCCL-2013: per-QP WQE latency sampling on live net_ib connections (disabled/sync/delayed-poll/pipelined, env knobs)",
+          "test_filter": "NetIbWqeLatMonTest.*"
+        }
+      ]
+    },
+
+    "net_ib_wqe_lat_multi_qp_split": {
+      "extends": "net_ib_wqe_lat",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      }
+    },
+
+    "net_ib_wqe_lat_multi_qp_nosplit": {
+      "extends": "net_ib_wqe_lat",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "0"
+      }
+    },
+
+    "net_ib_wqe_lat_env": {
+      "extends": "net_ib_wqe_lat",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET",
+        "NCCL_IB_WQE_LATENCY_THRESHOLD_NS": "1000000",
+        "NCCL_IB_WQE_LATENCY_REPORT": "1"
+      }
+    },
+
     "cast_base": {
       "extends": "net_ib_base",
       "env_variables": {
@@ -1425,6 +1475,36 @@
       "name": "NET IB - CTS Depth Stress",
       "description": "CTS match-table depth stress / overflow reproducer (AINIC); fully under RCCL_IB_P2P_DISABLE_CTS=1 workaround so passes cleanly on healthy stacks",
       "config": "net_ib_cts_stress",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - WQE Latency Monitor Unit",
+      "description": "AICOMRCCL-2013: WQE post-to-poll latency monitor statistics and state machine (CPU only)",
+      "config": "net_ib_wqe_lat_unit",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - WQE Latency Monitor",
+      "description": "AICOMRCCL-2013: per-QP WQE latency monitor on live net_ib connections, default QP layout",
+      "config": "net_ib_wqe_lat",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - WQE Latency Monitor Multi-QP Split",
+      "description": "AICOMRCCL-2013: per-QP WQE latency monitor with 4 QPs, data split across QPs",
+      "config": "net_ib_wqe_lat_multi_qp_split",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - WQE Latency Monitor Multi-QP NoSplit",
+      "description": "AICOMRCCL-2013: per-QP WQE latency monitor with 4 QPs on the nDataQps path",
+      "config": "net_ib_wqe_lat_multi_qp_nosplit",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - WQE Latency Monitor Env-Enabled",
+      "description": "AICOMRCCL-2013: monitor enabled only through NCCL_IB_WQE_LATENCY_THRESHOLD_NS=1000000, summary lines in NET INFO log",
+      "config": "net_ib_wqe_lat_env",
       "enabled": true
     },
     {
