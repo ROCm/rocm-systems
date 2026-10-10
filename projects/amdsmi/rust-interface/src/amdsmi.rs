@@ -3527,7 +3527,7 @@ pub fn amdsmi_get_gpu_ecc_count(
     processor_handle: AmdsmiProcessorHandle,
     block: AmdsmiGpuBlockT,
 ) -> AmdsmiResult<AmdsmiErrorCountT> {
-    let mut ec = MaybeUninit::<AmdsmiErrorCountT>::uninit();
+    let mut ec = MaybeUninit::<AmdsmiErrorCountT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_ecc_count(
         processor_handle,
         block,
@@ -5633,7 +5633,7 @@ pub fn amdsmi_get_gpu_vbios_info(
 pub fn amdsmi_get_gpu_activity(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<AmdsmiEngineUsageT> {
-    let mut info = MaybeUninit::<AmdsmiEngineUsageT>::uninit();
+    let mut info = MaybeUninit::<AmdsmiEngineUsageT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_activity(
         processor_handle,
         info.as_mut_ptr()
@@ -5684,7 +5684,7 @@ pub fn amdsmi_get_gpu_activity(
 pub fn amdsmi_get_power_info(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<AmdsmiPowerInfoT> {
-    let mut info = MaybeUninit::<AmdsmiPowerInfoT>::uninit();
+    let mut info = MaybeUninit::<AmdsmiPowerInfoT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_power_info(
         processor_handle,
         info.as_mut_ptr()
@@ -5790,7 +5790,7 @@ pub fn amdsmi_get_clock_info(
     processor_handle: AmdsmiProcessorHandle,
     clk_type: AmdsmiClkTypeT,
 ) -> AmdsmiResult<AmdsmiClkInfoT> {
-    let mut info = MaybeUninit::<AmdsmiClkInfoT>::uninit();
+    let mut info = MaybeUninit::<AmdsmiClkInfoT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_clock_info(
         processor_handle,
         clk_type,
@@ -5893,7 +5893,7 @@ pub fn amdsmi_get_gpu_vram_usage(
 pub fn amdsmi_get_gpu_total_ecc_count(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<AmdsmiErrorCountT> {
-    let mut ec = MaybeUninit::<AmdsmiErrorCountT>::uninit();
+    let mut ec = MaybeUninit::<AmdsmiErrorCountT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_total_ecc_count(
         processor_handle,
         ec.as_mut_ptr()
