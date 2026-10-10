@@ -7932,9 +7932,7 @@ class CodeGenerator:
             L.append('    return;')
             L.append('  }')
             if not is_load:
-                L.append(
-                    f'  amdgpu::capture_buffer_format_store(wf, *d, {data_base});'
-                )
+                L.append(f'  amdgpu::capture_buffer_format_store(wf, *d, {data_base});')
             L.append('  set_data(std::move(d));')
             return '\n'.join(L)
 
@@ -13760,8 +13758,14 @@ class CodeGenerator:
                 if any(self._issues_image_memory(i.name) for i in all_insts):
                     cpp_includes.extend(
                         [
-                            ('rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h', False),
-                            ('rocjitsu/isa/arch/amdgpu/shared/gfx9_image_access.h', False),
+                            (
+                                'rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h',
+                                False,
+                            ),
+                            (
+                                'rocjitsu/isa/arch/amdgpu/shared/gfx9_image_access.h',
+                                False,
+                            ),
                             ('memory', True),
                         ]
                     )
