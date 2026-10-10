@@ -1,23 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Draw a resolved memory chart layout in the terminal.
+"""Draw a memory chart layout in the terminal.
 
-No architecture-specific code: placement comes from the layout, formatting from
-the metric units, and sizes from the content.
-
-- The first column is the compute side, drawn as a compact list.
-- Arrows with a count unit are request arrows ("Read : 119"); others show a
-  label, a value, and an arrow line.
-- Arrows line up with the block on the side of the edge that has several or
-  nested blocks; arrows between two single blocks are centred.
-
-Vertical rules, which keep every arrow beside the box it belongs to:
-- A box of height h at row top has interior rows [top + 1, top + h - 1).
-- Arrows anchored on a box start at top + 1, and h >= 2 + their line count.
-- A nested box starts below its parent's border, note, and earlier children;
-  the parent's height is 2 + note lines + its children's heights.
-- Centred arrows sit in the middle of the grid interior [1, H - 1).
+README.md describes the layout files. tools/memory_chart_preview.py draws a layout
+without a GPU or a profile.
 """
 
 import textwrap
@@ -255,7 +242,11 @@ class MemChart:
     # -- edges -------------------------------------------------------------
 
     def _anchor(self, arrow: LayoutArrow) -> Optional[str]:
-        """Block an arrow lines up with; None to centre it in the edge."""
+        """Block an arrow lines up with; None to centre it in the edge.
+
+        An arrow lines up with the end whose column has several blocks, or that
+        is nested. Arrows between two single blocks are centred.
+        """
         for end in (arrow.target, arrow.source):
             block = self.blocks[end]
             if block.parent or len(self.layout.columns[block.column]) > 1:
@@ -335,7 +326,15 @@ class MemChart:
         return lengths
 
     def _heights(self) -> tuple[dict[str, int], int]:
-        """Panel height of every block, and the height of the whole grid."""
+        """Panel height of every block, and the height of the whole grid.
+
+        The heights keep every arrow beside the box it belongs to:
+        - A box of height h at row top has interior rows [top + 1, top + h - 1).
+        - Arrows anchored on a box start at top + 1, and h >= 2 + their line count.
+        - A nested box starts below its parent's border, note, and earlier
+          children; the parent's height is 2 + note lines + its children's heights.
+        - Centred arrows sit in the middle of the grid interior [1, H - 1).
+        """
         needs = self._segment_lengths()
         heights: dict[str, int] = {}
         totals = [
@@ -403,7 +402,7 @@ class MemChart:
             row += self.height[child.id]
 
     def _placements(self) -> list[Placement]:
-        """Where every edge's arrow lines go (see the vertical rules above)."""
+        """Where every edge's arrow lines go (see the rules in _heights)."""
         placements = []
         interior = self.total_height - 2
         for edge, segments in enumerate(self.edges):
@@ -435,13 +434,13 @@ class MemChart:
             widths.append(self.text_width[column[0].id] + _PANEL_FRAME)
         return widths
 
-    def _x(self, block_id: str) -> int:
+    def _column_left_edge(self, block_id: str) -> int:
         """Left edge of a column block."""
         return sum(self._column_widths()[: 2 * self.blocks[block_id].column])
 
     def _attached(self, host: LayoutBlock, sub: LayoutBlock, above: bool) -> Group:
         """A block drawn above or below *host*, joined by a connector."""
-        x = self._x(host.id)
+        x = self._column_left_edge(host.id)
         panel = Table.grid(padding=0)
         panel.add_column(width=x)
         panel.add_column()
@@ -470,7 +469,7 @@ class MemChart:
         return Group(panel, connector) if above else Group(connector, panel)
 
     def _scope_bar(self, total_width: int) -> str:
-        split = self._x(self.layout.scope_split)
+        split = self._column_left_edge(self.layout.scope_split)
         left, right = self.layout.scope_labels
         left_part = _scope_section(left, split - 1)
         right_part = _scope_section(right, total_width - split - 2)

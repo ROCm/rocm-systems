@@ -145,6 +145,7 @@ class Layouts:
 
 
 def layout_files() -> list[Path]:
+    """The shipped layout files, sorted by name."""
     return sorted(LAYOUTS_DIR.glob("*.json"))
 
 

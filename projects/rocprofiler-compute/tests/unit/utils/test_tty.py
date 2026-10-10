@@ -518,7 +518,7 @@ def test_show_all_draws_the_memory_chart_from_raw_values_and_config_units(
         calls.append((mem_data, chart_title, gpu_arch, units))
         return "rendered gfx1250 memory chart"
 
-    monkeypatch.setattr("utils.tty._plot_mem_chart", chart_stub)
+    monkeypatch.setattr("utils.tty.plot_mem_chart", chart_stub)
     rendered_output = StringIO()
 
     show_all(
@@ -819,7 +819,7 @@ def test_show_all_view_table_replaces_memory_chart_panel(
     df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
     monkeypatch.setattr("utils.tty.process_table_data", lambda *_a, **_k: df)
     monkeypatch.setattr(
-        "utils.tty._plot_mem_chart",
+        "utils.tty.plot_mem_chart",
         lambda *_a, **_k: mem_chart_marker,
     )
     rendered_output = StringIO()

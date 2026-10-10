@@ -10,7 +10,8 @@ under their parent, and a blank line between arrows of different block pairs.
 
 Usage:
     tools/memory_chart_layout_format.py           # rewrite every layout
-    tools/memory_chart_layout_format.py --check   # list files that need it
+    tools/memory_chart_layout_format.py --check   # report unformatted layouts and
+                                                  # exit 1 without changing them
 """
 
 import argparse
@@ -107,7 +108,11 @@ def format_layout(data: dict[str, Any]) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--check", action="store_true", help="only report")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="report unformatted layouts and exit 1 without changing them",
+    )
     args = parser.parse_args()
     stale = []
     for path in layout_files():

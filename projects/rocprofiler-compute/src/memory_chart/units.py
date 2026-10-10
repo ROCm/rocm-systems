@@ -1,10 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""How the memory chart displays each panel 300 metric unit.
+"""How the memory chart displays a metric value, by the metric's unit.
 
-Units come from the metric config, never from a layout. A test checks that
-every unit the shipped configs use has a rule here.
+Units come from the `unit` field of each metric in the memory chart panel config
+(0300_memory_chart.yaml), never from a layout. A unit test fails if a metric shown
+on a chart has a unit with no rule here.
 """
 
 import math
