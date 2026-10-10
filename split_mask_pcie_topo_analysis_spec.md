@@ -487,4 +487,107 @@ Without root privilege, there is **no reliable unprivileged method** to discover
 
 1. **DSN-based userspace alternative**: Could RCCL read PCIe DSN directly from config space (offset 0x100) to infer physical switch membership without requiring a kernel module? This would be a portable, module-free solution.
 
+   #### Constraint Analysis
+
+   RCCL itself runs as an unprivileged library within user-space GPU workloads — it cannot access PCIe extended config space (offset 0x100+) which requires `CAP_SYS_RAWIO` or root. However, the limitation is scoped to the RCCL library process only. A separate **privileged service** could extract DSN mappings and populate the sysfs interface that RCCL already reads via `ncclOsGetBcmLinks()` (`src/os/linux.cc:702-730`).
+
+   #### RCCL's Existing Sysfs Consumption Pattern
+
+   RCCL reads inter-partition link information from a well-defined sysfs path:
+   ```
+   /sys/kernel/pci_switch_link/virtual_switch_links/<busid>/<peer_busid>
+   ```
+
+   The `ncclOsGetBcmLinks()` function:
+   1. Opens directory `/sys/kernel/pci_switch_link/virtual_switch_links/<busid>/`
+   2. Iterates directory entries, filtering by PCI BDF string length (`BUSID_SIZE - 1` = 12 chars, e.g. `0000:c1:00.0`)
+   3. Validates each entry resolves to a real PCI device via `ncclOsGetPciPath()`
+   4. Collects valid peer bus IDs into a list
+
+   **Key insight**: Any mechanism that populates this exact directory structure enables RCCL to discover inter-partition links **with zero code changes** to RCCL.
+
+   #### Approach 1: Privileged Systemd Service (Recommended)
+
+   A lightweight systemd service (`rccl-switch-discovery.service`) running as root at boot:
+
+   **Operation**:
+   - Enumerates all PCIe switches via `/sys/bus/pci/devices/*/class` (class `0x060400` = PCI bridge)
+   - For each switch upstream port, reads DSN from extended config space at capability offset `0x100` (8-byte serial number)
+   - Groups switch ports sharing the same DSN → these belong to the same physical switch chip
+   - For each group, creates sysfs-compatible directory entries:
+     ```
+     /sys/kernel/pci_switch_link/virtual_switch_links/<port_A_busid>/<port_B_busid>
+     /sys/kernel/pci_switch_link/virtual_switch_links/<port_B_busid>/<port_A_busid>
+     ```
+
+   **Sysfs population method**: Since writing to `/sys/kernel/` requires a kernel module, the service would use one of:
+   - **Option A — Minimal kernel module**: A thin kernel module that exposes a write interface (e.g., `/sys/kernel/pci_switch_link/add_link`) and creates the sysfs directory entries. The userspace service does DSN discovery and tells the module which links to create. Much simpler than `switch_discovery` since it doesn't touch VSEC registers.
+   - **Option B — tmpfs overlay**: Mount a tmpfs at `/sys/kernel/pci_switch_link/virtual_switch_links/` and populate it with symlinks/directories. Requires cooperation from system init scripts.
+   - **Option C — RCCL-side configfs**: Propose an RCCL enhancement to also check an alternative path (e.g., `/etc/rccl/switch_links/` or a path set via env var) that doesn't require kernel sysfs writes. The privileged service writes plain files to this path.
+
+   **Advantages**: Runs once at boot, no runtime overhead, survives container restarts, works with unmodified RCCL (for Options A/B).
+
+   #### Approach 2: Capability-Restricted Helper Binary
+
+   Instead of a full root service, use a setcap binary with minimal privileges:
+
+   ```bash
+   # Grant only raw I/O capability (for PCIe config space reads)
+   sudo setcap cap_sys_rawio+ep /usr/local/bin/rccl-dsn-mapper
+   ```
+
+   **Operation**:
+   - Binary reads PCIe extended config space via `/sys/bus/pci/devices/*/config` (requires `CAP_SYS_RAWIO` for offsets > 0xFF)
+   - Extracts DSN at offset 0x100 from each PCI bridge device
+   - Groups by DSN and writes the link map to a file (e.g., `/var/run/rccl/switch_links.json`)
+   - RCCL would need a small enhancement to read this file as a fallback when sysfs path is absent
+
+   **Advantages**: No kernel module needed, minimal privilege escalation (only `CAP_SYS_RAWIO`, not full root), can be run on-demand.
+
+   **Limitation**: Requires a minor RCCL code change to read the alternative link map format.
+
+   #### Approach 3: udev Rule with DSN Extraction
+
+   A udev rule triggered on PCIe bridge device enumeration:
+
+   ```
+   SUBSYSTEM=="pci", ATTR{class}=="0x060400", RUN+="/usr/local/bin/rccl-dsn-mapper --udev %k"
+   ```
+
+   **Operation**:
+   - Triggered automatically when PCIe devices are enumerated (boot or hot-plug)
+   - The helper script reads DSN from the newly-added device, cross-references with previously-seen devices
+   - Populates link entries incrementally as devices appear
+
+   **Advantages**: Automatic, no manual service management, handles hot-plug scenarios.
+
+   **Limitation**: Race conditions during parallel device enumeration at boot; must handle partial state gracefully.
+
+   #### Approach 4: Simplified Kernel Module (DSN-only)
+
+   A kernel module much simpler than `switch_discovery` that reads only DSN (not VSEC registers):
+
+   **Comparison with `switch_discovery`**:
+   | Aspect | `switch_discovery` | DSN-only module |
+   |---|---|---|
+   | Data source | VSEC registers (vendor-specific) | PCIe DSN capability (standard) |
+   | Switch vendor dependency | Broadcom-specific | Vendor-agnostic |
+   | Complexity | High (VSEC register parsing) | Low (standard capability read) |
+   | Sysfs output | Same path | Same path |
+
+   **Operation**:
+   - On load, iterates PCI bridges, reads DSN from standard extended capability (ID `0x0003`)
+   - Groups ports by DSN, creates sysfs entries at `/sys/kernel/pci_switch_link/virtual_switch_links/`
+   - Fully compatible with RCCL's existing `ncclOsGetBcmLinks()` — zero RCCL changes needed
+
+   **Advantages**: Vendor-agnostic (works with any PCIe switch, not just Broadcom), standard PCIe capability (not vendor-specific VSEC), simpler to maintain and audit.
+
+   #### Recommendation
+
+   **Short-term**: Approach 1 (Option A) — a minimal kernel module for sysfs population paired with a userspace service for DSN discovery. This preserves RCCL compatibility with zero code changes while being significantly simpler than the full `switch_discovery` module.
+
+   **Medium-term**: Approach 4 — a simplified DSN-only kernel module that is vendor-agnostic and uses the standard PCIe DSN extended capability. This is the cleanest long-term solution as it works across switch vendors and produces the exact sysfs layout RCCL expects.
+
+   **For evaluation/prototyping**: Approach 2 — a setcap helper binary is the fastest path to validating that DSN-based grouping correctly identifies physical switch membership on the SMC300x platform, before investing in kernel module development.
+
 2. **NIC-aware split strategy**: Explore whether `NCCL_TESTS_SPLIT=DIV` or `MOD` can create communicators aligned with NIC topology to avoid cross-partition contention.
