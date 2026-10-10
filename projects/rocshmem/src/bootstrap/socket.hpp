@@ -109,6 +109,8 @@ class Socket {
  private:
   void tryAccept();
   void finalizeAccept();
+  void discardAccept();
+  bool recvMagic(uint64_t* magic, int* received);
   void startConnect();
   void pollConnect();
   void finalizeConnect();
