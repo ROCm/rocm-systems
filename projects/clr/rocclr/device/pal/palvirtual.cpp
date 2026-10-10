@@ -2411,24 +2411,27 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
   size_t vaddr_offset = 0;
   size_t phys_offset = 0;
   if (phys_mem_obj != nullptr) {
-    vaddr_sub_obj =
-        dev().MapMemObjBookkeeping(phys_mem_obj, const_cast<void*>(vcmd.ptr()), vcmd.size());
-    if (vaddr_sub_obj == nullptr) {
-      LogError("PAL Command: MapMemObjBookkeeping failed!");
-      profilingEnd(vcmd);
-      return;
+    if (vcmd.trackMapping()) {
+      vaddr_sub_obj =
+          dev().MapMemObjBookkeeping(phys_mem_obj, const_cast<void*>(vcmd.ptr()), vcmd.size());
+      if (vaddr_sub_obj == nullptr) {
+        LogError("PAL Command: MapMemObjBookkeeping failed!");
+        profilingEnd(vcmd);
+        return;
+      }
     }
 
     pal::Memory* phys_pal_mem = dev().getGpuMemory(phys_mem_obj);
     phymem_igpu_mem = phys_pal_mem->iMem();
     phys_offset = phys_pal_mem->offset();
-  } else {
+  } else if (vcmd.trackMapping()) {
     vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
   }
 
   // Calculate the offset from the original pointer.
-  vaddr_offset = (reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) -
-                  reinterpret_cast<address>(vaddr_base_obj->getSvmPtr()));
+  const void* mapped_ptr = (vaddr_sub_obj != nullptr) ? vaddr_sub_obj->getSvmPtr() : vcmd.ptr();
+  vaddr_offset = (reinterpret_cast<uintptr_t>(mapped_ptr) -
+                  reinterpret_cast<uintptr_t>(vaddr_base_obj->getSvmPtr()));
 
   // The imem() in the backend is shared between base and sub/view object.
   pal::Memory* vaddr_pal_mem = dev().getGpuMemory(vaddr_base_obj);
@@ -2449,7 +2452,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
   GpuEvent event;
   eventEnd(MainEngine, event);
   setGpuEvent(event);
-  if (result == Pal::Result::Success) {
+  if (result == Pal::Result::Success && vcmd.trackMapping()) {
     if (phys_mem_obj != nullptr) {
       constexpr bool kImportVmmForInterprocess = false;
       dev().FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys_mem_obj, const_cast<void*>(vcmd.ptr()),

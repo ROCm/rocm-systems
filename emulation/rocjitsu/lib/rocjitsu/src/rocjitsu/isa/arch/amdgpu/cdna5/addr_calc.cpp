@@ -193,6 +193,9 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
     return std::nullopt;
   int64_t off = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   const bool buffer_load = amdgpu::addr_calc::gfx12_smem_is_buffer_load_op(inst.op);
+  // CDNA5 section 8.1.1 allows negative ordinary-load offsets, but not buffer IOFFSET.
+  if (buffer_load && off < 0)
+    wf.report_undefined_behavior("negative scalar-buffer load immediate");
   const uint64_t align_mask = std::min<uint64_t>(access_size_bytes, 4u) - 1;
   const uint32_t scale = inst.scale_offset && !buffer_load ? access_size_bytes : 1;
   off &= ~static_cast<int64_t>(align_mask);

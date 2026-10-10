@@ -165,7 +165,8 @@
         {"name": "EnqueueCountTests", "description": "Enqueue send/recv count helpers", "test_filter": "EnqueueCountTests.*"},
         {"name": "MiscTests.Sorter", "description": "Task coll sorter unit test", "test_filter": "MiscTests.Sorter"},
         {"name": "VersionInfoTests", "description": "HIP/ROCm version string formatting tests", "test_filter": "VersionInfoTests.*"},
-        {"name": "GinDeviceTest", "description": "GIN proxy backend device-leaf tests", "test_filter": "GinDeviceTest.*:GinProxyFlushWaitTest.*"},
+        {"name": "GinDeviceTest", "description": "GIN proxy backend device-leaf tests", "test_filter": "GinDeviceTest.*:GinProxyFlushWaitTest.*:GinProxyPutTest.*"},
+        {"name": "GinBackendMaskDispatchTest", "description": "GIN backend-mask put dispatch tests", "test_filter": "GinBackendMaskDispatchTest.*"},
         {"name": "DdaCollCommon", "description": "DDA collective common helper tests", "test_filter": "DdaCollCommon.*"}
       ]
     },

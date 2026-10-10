@@ -39,6 +39,11 @@ rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/init_fakes.cc"
   "int64_t ncclParamP2pLL128Enable() { return g_loadParam(\"P2P_LL128_ENABLE\", -1); }"
   "the P2pLL128Enable fake default")
+rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/connect.cc"
+  "NCCL_PARAM(IbQpsPerConn, \"IB_QPS_PER_CONNECTION\", 1)" "fakes/transport_net_ib_fakes.cc: ncclParamIbQpsPerConn()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_fakes.cc"
+  "int64_t ncclParamIbQpsPerConn() { return g_loadParam(\"IB_QPS_PER_CONNECTION\", 1); }"
+  "the IbQpsPerConn fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMinNchannels = -2;" "the MinNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
@@ -79,6 +84,7 @@ function(rccl_define_micro_source_lists)
     ras-diagnostics-common-test.cc       # src/ras/diagnostics_checks_common.cc
     ras-collectives-test.cc              # src/ras/collectives.cc
     ras-diagnostics-test.cc              # src/ras/diagnostics.cc
+    ras-peers-test.cc                    # src/ras/peers.cc
     ras-diagnostics-env-test.cc          # src/ras/diagnostics_env.cc
     ras-param-test.cc                    # src/ras/ras_param.cc
     tuning-test.cc                       # src/tuning/tuning.cc
@@ -90,12 +96,16 @@ function(rccl_define_micro_source_lists)
     dev-runtime-test.cc
     # sym-kernels-index-test.cc: added conditionally below, only when GENERATE_SYM_KERNELS is ON.
     gdr-probe-test.cc                    # src/misc/gdr_probe.cc runtime GDR registration probe
+    process-isolated-runner-test.cc
     # real IsArchMatch, for wrap-test.cc (path is build-directory-relative).
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     fakes/dev_runtime_micro_fakes.cc
     fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
     fakes/nccl_fakes.cc
     fakes/libc_fakes.cc
+    fakes/ras_net_fakes.cc
+    fakes/ras_client_support_fakes.cc
+    fakes/ras_message_fakes.cc
     fakes/ras_param_fakes.cc
     fakes/rma_fakes.cc
     fakes/comm_fakes.cc
@@ -332,11 +342,15 @@ function(rccl_define_micro_source_lists)
   # src/diagnostics/p2p.cc; fakes transport/p2p.cc, which rccl-UnitTestsMicro compiles.
   set(TEST_MICRO_DIAGNOSTICS_SOURCE_FILES
     diag-p2p-test.cc
+    diag-ib-write-bw-test.cc
     fakes/dev_runtime_micro_fakes.cc     # bootstrap collectives
+    fakes/diagnostics_fakes.cc           # src/diagnostics.cc external-tool runners
     fakes/diagnostics_p2p_device_fakes.cc  # src/diagnostics/device/p2p.cu
     fakes/hip_fakes.cc
+    fakes/libc_fakes.cc
     fakes/nccl_fakes.cc
     fakes/topo_stubs.cc
+    fakes/transport_net_ib_fakes.cc      # src/transport/net_ib/connect.cc params
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -808,6 +822,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     # so add_file_unique() renames this one. Re-check after any source-list reorder.
     COLLECTIVES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/collectives_tmp.cc"
     RAS_DIAGNOSTICS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_tmp.cc"
+    RAS_PEERS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/peers.cc"
     RAS_DIAGNOSTICS_ENV_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_env.cc"
     RAS_PARAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras_param.cc"
     # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
@@ -1007,6 +1022,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDiagnostics
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     DIAG_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/p2p.cc"
+    DIAG_IB_WRITE_BW_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/ib_write_bw.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_diagnostics.yaml")
 
 # =====================================================================
