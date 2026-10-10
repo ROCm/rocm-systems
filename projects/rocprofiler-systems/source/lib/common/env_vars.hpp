@@ -115,6 +115,9 @@ inline constexpr const char* AMD_SMI_FREQ         = "ROCPROFSYS_AMD_SMI_FREQ";
 inline constexpr const char* AMD_SMI_DEVICES      = "ROCPROFSYS_AMD_SMI_DEVICES";
 
 // --- Domains: hipFile (AMD Infinity Storage I/O stats) ---
+// UPPER_CASE so the identifier matches the environment variable name, same as
+// every other constant in this header.
+// NOLINTBEGIN(readability-identifier-naming)
 inline constexpr const char* USE_HIPFILE     = "ROCPROFSYS_USE_HIPFILE";
 inline constexpr const char* HIPFILE_METRICS = "ROCPROFSYS_HIPFILE_METRICS";
 // Registered default for HIPFILE_METRICS.
@@ -122,6 +125,7 @@ inline constexpr const char* HIPFILE_METRICS_DEFAULT =
     "fastpath, fallback, bandwidth, bytes, errors";
 // The environment variable read by libhipfile itself to enable its stats server.
 inline constexpr const char* HIPFILE_STATS_LEVEL = "HIPFILE_STATS_LEVEL";
+// NOLINTEND(readability-identifier-naming)
 
 // --- Domains: ROCm ---
 inline constexpr const char* ROCM_DOMAINS        = "ROCPROFSYS_ROCM_DOMAINS";
