@@ -148,7 +148,7 @@ precisely the ones left without a trailer and absent from the root index, while
 the parent that exited cleanly needs no repair. Sub-archives that already carry
 a clean trailer are skipped without being read.
 
-### Archive Format (v7)
+### Archive Format (v8)
 ```
 capture.hrr/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
@@ -260,7 +260,7 @@ projects/hrr/                     — standalone HRR project (portable layer)
                                     Not used by capture — it is the format an
                                     out-of-tree producer writes and playback reads
   playback/
-    hrr_reader.h/.cpp             — archive loader, v7 format; record framing
+    hrr_reader.h/.cpp             — archive loader, v8 format; record framing
                                     (read_raw_record / open_record_stream) shared
                                     with the region sidecars
     hrr_region_map.h/.cpp         — region timeline: merge, cursor, live block set,
@@ -339,13 +339,13 @@ The generator classifies each API:
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).
 When adding HIP API support, update this script to classify the API in the appropriate capture and playback policy sets. APIs requiring non-trivial serialization or replay belong in `MANUAL_CAPTURE_APIS` and/or `MANUAL_PLAYBACK_APIS`; intentionally unsupported replay APIs belong in `NOOP_PLAYBACK_APIS`.
 
-## Archive Format (v7)
+## Archive Format (v8)
 
 Single-authority definition in `hrr_api_args.h` (auto-generated):
 
 ```
 HRR_MAGIC   = 0x52524845  ("HRRE")
-HRR_VERSION = 7
+HRR_VERSION = 8
 ```
 
 Version history, so an archive written by an older runtime can be placed:
@@ -374,12 +374,15 @@ Version history, so an archive written by an older runtime can be placed:
   `HRR_FILE_FLAG_PACKED_HOST_RECTS` in `hrr_file_header.reserved`. A v6 reader
   ignores that field and would replay a packed blob with the recorded pitch,
   reading past its end. See 2D/3D Memcpy and Memset below.
+- **v8** puts pinned host snapshot records after a kernel launch's arguments
+  (`num_snapshots` was always 0). A v7 reader would not restore them. See
+  Pinned Host Snapshots below.
 
 ```
 <output_dir>/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
                      (version here is the manifest schema = 1, distinct from the
-                      events.bin HRR_VERSION = 7)
+                      events.bin HRR_VERSION = 8)
   pid-<pid>/
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     writer_state.json  checkpoint cursor (next_seq, event/blob counts, events file
@@ -497,41 +500,46 @@ At playback:
 - `playback_hipHostUnregister` translates the pointer, calls `hipHostUnregister`, frees the
   backing buffer, and removes both map entries.
 
-### Sysmem Update Tracking (planned — not yet implemented)
+### Pinned Host Snapshots
 
-**Problem:** `hipHostRegister` captures the buffer contents at registration time only.
-After that, the CPU may modify the buffer without going through any HIP API:
+A kernel can read pinned host memory that the host filled with plain stores, which no HIP
+call records; replay would run it on whatever its fresh buffer holds. Capture tracks the
+ranges of `hipHostMalloc` and `hipHostRegister` (dropped on `hipHostFree`, `hipFreeHost`,
+`hipFree` and `hipHostUnregister`). Before each launch it reads the 8-byte-aligned words of
+the arguments, by-value structs included; for each tracked allocation a word points into,
+it writes the whole allocation as a blob and adds a record (base, offset 0, length, blob
+hash, direction 0) to the launch event, unless the hash equals that of the allocation's
+last record. Struct words pointing into such an allocation are flagged for translation like
+embedded device pointers. Replay checks each record names the base of a pinned host
+allocation it made, lies inside it and matches its blob's length, refusing and counting it
+otherwise; then it synchronizes the launch stream, copies the blob in, and launches. The
+summary prints restored, refused and skipped counts.
 
-```
-hipHostRegister(ptr, sz)   ← blob captured (initial state)
-// CPU writes to ptr[]     ← invisible to capture layer
-hipMemcpyAsync(d, ptr, sz, H2D, stream)   ← H2D blob captures current contents ✓
-// CPU writes to ptr[] again
-hipModuleLaunchKernel(...)  ← kernel reads ptr directly via mapped flag ✗ stale
-```
+Kept deliberately simple:
 
-H2D memcpy is already handled — the src buffer is re-snapshotted at each call regardless
-of registration. The gap is direct GPU reads from registered host memory (mapped flag)
-after a CPU write that was not routed through a memcpy.
+- Capture does not wait for the stream: the bytes are those at enqueue time, which is what
+  the kernel reads unless earlier queued work still changes them.
+- `HIP_HRR_HOST_SNAPSHOTS=0` turns snapshots off; an allocation larger than
+  `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (64) is not snapshotted and is listed under
+  `unreplayable_apis`.
+- Replay restores nothing for a launch replayed into a graph capture, and capture does not
+  snapshot at graph launch.
+- `hipHostAlloc`, `hipMallocHost` and `hipMemAllocHost` are not tracked, since replay makes
+  no buffer for them, nor is a `hipHostRegister` device alias that differs from the host
+  address.
+- An unchanged allocation gets no record, so device writes into it between two launches
+  stay in replay's buffer as they did at capture; a host store that puts back exactly the
+  last recorded bytes after such a device write is missed.
+- Only the launch stream is synchronized before a restore; work on other streams reading
+  the buffer is not waited for. A `fork()` while another thread snapshots can leave the
+  child's tracking lock held.
 
-**Planned design:**
-
-1. New synthetic event `HRR_SYSMEM_UPDATE` (not a real HIP API):
-   fields: `hostPtr u64`, `sizeBytes u64`, `blob_hash_lo u64`, `blob_hash_hi u64`.
-
-2. Per-region `last_hash` stored alongside `g_pinned_reg_map`. Before each H2D memcpy src
-   check and before each kernel launch for pointer args in registered ranges: hash the
-   current contents, compare with `last_hash`. Emit `HRR_SYSMEM_UPDATE` + write blob only
-   if hash changed. Content-addressed storage deduplicates unchanged regions automatically.
-
-3. Optional sync-gated dirty flag: set `dirty=true` for all registered regions after any
-   `hipStreamSynchronize` / `hipDeviceSynchronize` / `hipEventSynchronize`. Only hash
-   (step 2) if `dirty==true`. Avoids hashing in pure-GPU loops where the CPU never
-   touches the buffer between launches. Falls back to always-hash if sync events are
-   not captured.
-
-4. At replay: `HRR_SYSMEM_UPDATE` handler `memcpy`s the blob into the live registered
-   buffer, ordered by sequence ID like all other events.
+**Threat model.** The snapshots put into the archive host memory the application never
+handed to a HIP call: for a serving stack, token IDs, sampling state and request metadata,
+including stale bytes from earlier requests in a reused buffer. The archive must be
+handled as at least as sensitive as the workload's data. Replay treats every record as
+untrusted input and writes only inside a pinned host allocation it made itself, never
+through a recorded address.
 
 ## Kernel Argument Capture
 
@@ -619,10 +627,9 @@ This detector is a value-based heuristic with three deliberate properties:
   previously caused occasional replay faults on ATen elementwise kernels.
   `HIP_HRR_PTR_RELAX=1` disables the replay-side guard for debugging.
 
-**Scope:** only `hipMemoryTypeDevice`/`Unified` words are flagged. A pinned/host
-(`hipMemoryTypeHost`) pointer embedded by value keeps its capture-time host VA at
-replay (invalid in the replay process); translating embedded host pointers is
-intentionally out of scope.
+**Scope:** `hipMemoryTypeDevice`/`Unified` words are flagged, and so are words
+pointing into a pinned allocation the launch snapshots (see Pinned Host Snapshots).
+Any other embedded host pointer keeps its capture-time VA at replay.
 
 A per-launch `co_hash` (the FNV-1a-128 hash of the owning code object) **is** recorded
 in kernel launch events. Playback resolves kernels by `(co_hash, name)`: it first looks
@@ -1170,7 +1177,8 @@ Sysmem capture is a fundamentally hard problem. Two approaches exist:
   and emit `HRR_SYSMEM_UPDATE` synthetic events only when content changes. This is
   significantly more complex to implement and may not be fully feasible on all platforms.
 
-Neither approach is currently implemented.
+Pinned host memory a kernel reads is now snapshotted before each launch; see Pinned Host
+Snapshots above.
 
 ### Partial-Replay APIs — H2D and D2H Work, Kernel Launches Do Not
 
