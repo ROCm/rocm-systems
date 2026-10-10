@@ -24,7 +24,7 @@ from membw_analysis.summary import (
     status_text,
 )
 from memory_chart.loader import Layouts, is_memory_chart_panel
-from memory_chart.mem_chart import format_mem_chart_heading, plot_mem_chart
+from memory_chart.render import format_mem_chart_heading, plot_mem_chart
 from memory_chart.units import panel_units
 from utils import parser, schema
 from utils.logger import console_error, console_log, console_warning

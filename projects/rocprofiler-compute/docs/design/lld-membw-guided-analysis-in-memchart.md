@@ -547,7 +547,7 @@ def extract_membw_metrics(
 
 ## Renderer Changes
 
-`src/memory_chart/mem_chart.py` draws the memory chart from a JSON layout in `src/memory_chart/layouts/`, one per architecture family. The layout lists the blocks, the metrics in each block, and the arrows between blocks. The renderer has no architecture-specific code. See `src/memory_chart/README.md` for the layout fields.
+`src/memory_chart/render.py` draws the memory chart from a JSON layout in `src/memory_chart/layouts/`, one per architecture family. The layout lists the blocks, the metrics in each block, and the arrows between blocks. The renderer has no architecture-specific code. See `src/memory_chart/README.md` for the layout fields.
 
 ### Where bottleneck annotations go
 
@@ -803,7 +803,7 @@ Primary: `sample/membw_analysis_test_suite/` -- existing HIP microbenchmarks tar
 ## References
 
 - `src/rocprof_compute_soc/analysis_configs/gfx950/3000_mem_bw.yaml` -- metric definitions and formulas (tables 3001, 3012, 3018 are primary)
-- `src/memory_chart/mem_chart.py` -- memory chart renderer, drawing the layouts in `src/memory_chart/layouts/`
+- `src/memory_chart/render.py` -- memory chart renderer, drawing the layouts in `src/memory_chart/layouts/`
 - `src/utils/tty.py` -- analyze output orchestration (memory chart branch)
 - `src/utils/parser.py` -- `build_dfs` (target for flag check cleanup)
 - `src/argparser.py` -- `ExperimentalAction` and `--membw-analysis` flag definitions

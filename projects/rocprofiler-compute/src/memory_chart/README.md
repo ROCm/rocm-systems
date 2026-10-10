@@ -4,7 +4,7 @@
 [`layouts/`](layouts/). There is one file per architecture family. A layout lists the
 blocks of the chart, how they nest, and which memory chart panel metric each block and
 arrow shows. [`loader.py`](loader.py) checks the file and works out where each block
-goes and which way each arrow points. [`mem_chart.py`](mem_chart.py) draws it.
+goes and which way each arrow points. [`render.py`](render.py) draws it.
 
 ## Adding an architecture
 
