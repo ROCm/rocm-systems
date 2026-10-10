@@ -5,14 +5,10 @@
 """Tests for the memory chart layout formatter."""
 
 import json
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+from memory_chart_layout_format import format_layout
 
-from memory_chart_layout_format import format_layout  # noqa: E402
-
-from memory_chart.loader import layout_files  # noqa: E402
+from memory_chart.loader import layout_files
 
 
 def reversed_keys(value):

@@ -24,12 +24,12 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-import yaml  # noqa: E402
+import yaml
 
-import config  # noqa: E402
-from memory_chart.loader import Layouts, load_layout  # noqa: E402
-from memory_chart.mem_chart import MemChart  # noqa: E402
-from memory_chart.units import PLAIN, display_unit, panel_units  # noqa: E402
+import config
+from memory_chart.loader import Layouts, load_layout
+from memory_chart.mem_chart import MemChart
+from memory_chart.units import PLAIN, display_unit, panel_units
 
 # Values as shown on the chart, before the unit's scale is undone
 _PLACEHOLDERS = {"percent": 42.0, "bandwidth": 123.456, "count": 1234, "value": 12.5}

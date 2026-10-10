@@ -5,18 +5,13 @@
 """Tests for the memory chart layout preview."""
 
 import json
-import sys
-from pathlib import Path
 
 import pytest
+from memory_chart_preview import main
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from memory_chart_preview import main  # noqa: E402
-
-import config  # noqa: E402
-from memory_chart.loader import layout_files  # noqa: E402
-from memory_chart.mem_chart import strip_ansi  # noqa: E402
+import config
+from memory_chart.loader import layout_files
+from memory_chart.mem_chart import strip_ansi
 
 GFX942_CONFIG = (
     config.rocprof_compute_home
