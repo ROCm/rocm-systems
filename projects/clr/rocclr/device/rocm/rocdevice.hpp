@@ -48,6 +48,7 @@ namespace amd::roc {
 //! Forward declarations
 class Command;
 class Device;
+struct DeviceSignalAllocation;
 class GpuCommand;
 class Heap;
 class HeapBlock;
@@ -72,9 +73,10 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
 
   typedef union {
     struct {
-      uint32_t done_ : 1;       //!< True if signal is done
-      uint32_t interrupt_ : 1;  //!< True if the signal will trigger an interrupt
-      uint32_t reserved_ : 30;
+      uint32_t done_ : 1;           //!< True if signal is done
+      uint32_t interrupt_ : 1;      //!< True if the signal will trigger an interrupt
+      uint32_t device_backed_ : 1;  //!< amd_signal_t lives in device memory, not ROCr
+      uint32_t reserved_ : 29;
     };
     uint32_t data_;
   } Flags;
@@ -89,6 +91,9 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   };
   CachedTiming cached_timing_;
 
+  //! Shared ownership of the allocation containing this device-backed signal.
+  DeviceSignalAllocation* device_allocation_ = nullptr;
+
   ProfilingSignal() : ts_(nullptr), engine_(HwQueueEngine::Compute) {
     signal_.handle = 0;
     flags_.data_ = 0;
@@ -98,6 +103,10 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
 
   virtual ~ProfilingSignal();
   std::recursive_mutex& LockSignalOps() { return lock_; }
+
+  hsa_signal_value_t LoadRelaxed() const;
+  void StoreRelaxed(hsa_signal_value_t value);
+  bool WaitUntilDone(bool active_wait = false);
 
   //! Cache timing data from HSA for this signal (called once when signal completes)
   void CacheTimingData(hsa_agent_t gpu_device);
