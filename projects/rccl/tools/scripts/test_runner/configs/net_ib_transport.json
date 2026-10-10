@@ -620,7 +620,6 @@
     "cast_base": {
       "extends": "net_ib_base",
       "env_variables": {
-        "NCCL_NET":                         "IB-CAST",
         "RCCL_IB_QP_SCHED_ENABLE":          "1",
         "RCCL_IB_QP_SCHED_WRR_ENABLE":      "1",
         "RCCL_IB_QP_SCHED_WEIGHT":          "0",
@@ -670,6 +669,7 @@
       "extends": "cast_base",
       "timeout": 300,
       "env_variables": {
+        "NCCL_NET": "IB-CAST",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "RCCL_FORCE_ENABLE_DMABUF": "1",
@@ -694,6 +694,72 @@
             "NCCL_LOCAL_REGISTER": "1",
             "NCCL_DEBUG_SUBSYS": "REG",
             "RCCL_MPI_LOG_ALL_RANKS": "1"
+          }
+        }
+      ]
+    },
+
+    "cast_multisegment_register_off": {
+      "extends": "cast_base",
+      "timeout": 300,
+      "description": "IB-CAST with NCCL_MULTI_SEGMENT_REGISTER=0: no multi-segment capability is advertised, a multi-segment registration is declined, and single-segment registrations still transfer.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "0",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "RCCL_IB_P2P_DISABLE_CTS": "1",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0",
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "NCCL_GDR_FLUSH_DISABLE": "0",
+        "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0"
+      },
+      "tests": [
+        {
+          "name": "Cast_MultiSeg_RegisterOff_DeclinesRegistration",
+          "description": "A 4-segment window is declined with ncclInvalidUsage because neither peer advertised the side table",
+          "test_filter": "NetIbMultiSegmentMPITest.MultiSegmentRegisterOff_DeclinesRegistration"
+        },
+        {
+          "name": "Cast_MultiSeg_RegisterOff_SingleSegmentRegression",
+          "description": "Host, device and 1-segment VMM registrations still transfer with the switch off",
+          "test_filter": "NetIbMultiSegmentMPITest.HostAndDeviceSingleSegmentRegression:NetIbMultiSegmentMPITest.SingleSegmentThroughMultiSegPath"
+        }
+      ]
+    },
+
+    "cast_multisegment_unsafe_modes": {
+      "extends": "cast_base",
+      "timeout": 300,
+      "description": "IB-CAST declines multi-segment registration under BY_ORDER matching and under QP sharing.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "RCCL_IB_P2P_DISABLE_CTS": "1",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0",
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "NCCL_GDR_FLUSH_DISABLE": "0",
+        "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0"
+      },
+      "tests": [
+        {
+          "name": "Cast_MultiSeg_ByOrder_DeclinesRegistration",
+          "description": "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=2 (BY_ORDER): a 4-segment window is declined with ncclInvalidUsage",
+          "test_filter": "NetIbMultiSegmentMPITest.CastUnsafeMode_DeclinesRegistration",
+          "env_variables": {
+            "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "2"
+          }
+        },
+        {
+          "name": "Cast_MultiSeg_QpSharing_DeclinesRegistration",
+          "description": "RCCL_IB_QP_SHARING_ENABLE=1: a 4-segment window is declined with ncclInvalidUsage",
+          "test_filter": "NetIbMultiSegmentMPITest.CastUnsafeMode_DeclinesRegistration",
+          "env_variables": {
+            "RCCL_IB_QP_SHARING_ENABLE": "1"
           }
         }
       ]
@@ -864,70 +930,70 @@
     "net_ib_initialization_cast": {
       "extends": "net_ib_initialization",
       "env_variables": {
-        "NCCL_NET": "IB-CAST"
+        "NCCL_NET": "ib-cast"
       }
     },
 
     "net_ib_properties_cast": {
       "extends": "net_ib_properties",
       "env_variables": {
-        "NCCL_NET": "IB-CAST"
+        "NCCL_NET": "ib-cast"
       }
     },
 
     "net_ib_connection_cast": {
       "extends": "net_ib_connection",
       "env_variables": {
-        "NCCL_NET": "IB-CAST"
+        "NCCL_NET": "ib-cast"
       }
     },
 
     "net_ib_memory_cast": {
       "extends": "net_ib_memory",
       "env_variables": {
-        "NCCL_NET": "IB-CAST"
+        "NCCL_NET": "ib-cast"
       }
     },
 
     "net_ib_transfer_cast": {
       "extends": "net_ib_transfer",
       "env_variables": {
-        "NCCL_NET": "IB-CAST"
+        "NCCL_NET": "ib-cast"
       }
     },
 
     "net_ib_flush_cast": {
       "extends": "net_ib_flush",
       "env_variables": {
-        "NCCL_NET": "IB-CAST"
+        "NCCL_NET": "ib-cast"
       }
     },
 
     "net_ib_vdevice_cast": {
       "extends": "net_ib_vdevice",
       "env_variables": {
-        "NCCL_NET": "IB-CAST"
+        "NCCL_NET": "ib-cast"
       }
     },
 
     "net_ib_vnic_functional_cast": {
       "extends": "net_ib_vnic_functional",
       "env_variables": {
-        "NCCL_NET": "IB-CAST"
+        "NCCL_NET": "ib-cast"
       }
     },
 
     "net_ib_vnic_edge_cast": {
       "extends": "net_ib_vnic_edge",
       "env_variables": {
-        "NCCL_NET": "IB-CAST"
+        "NCCL_NET": "ib-cast"
       }
     },
 
     "net_ib_vnic_stress_cast": {
       "extends": "net_ib_vnic_stress",
       "env_variables": {
-        "NCCL_NET": "IB-CAST"
+        "NCCL_NET": "ib-cast"
       }
     },
 
@@ -1236,13 +1302,13 @@
     "net_ib_cast_gin_peermem": {
       "extends": "net_ib_gin_peermem",
       "env_variables": {
-        "NCCL_NET": "IB-CAST"
+        "NCCL_NET": "ib-cast"
       }
     },
     "net_ib_cast_gin_dmabuf": {
       "extends": "net_ib_gin_dmabuf",
       "env_variables": {
-        "NCCL_NET": "IB-CAST"
+        "NCCL_NET": "ib-cast"
       }
     },
     "net_ib_rma_multisegment": {
@@ -2370,6 +2436,18 @@
       "name": "NET IB-CAST - Multi-Segment Optional Recv Completion (2 QPs)",
       "description": "CAST multi-segment suite with optRecvCompletion on and data split over 2 QPs",
       "config": "cast_multisegment_opt_recv_2qp",
+      "enabled": true
+    },
+    {
+      "name": "NET IB-CAST - Multi-Segment P2P (register off)",
+      "description": "IB-CAST with NCCL_MULTI_SEGMENT_REGISTER=0: multi-segment registration declined, single-region paths unchanged",
+      "config": "cast_multisegment_register_off",
+      "enabled": true
+    },
+    {
+      "name": "NET IB-CAST - Multi-Segment P2P (unsafe modes)",
+      "description": "IB-CAST declines multi-segment registration under BY_ORDER matching and QP sharing",
+      "config": "cast_multisegment_unsafe_modes",
       "enabled": true
     },
     {
