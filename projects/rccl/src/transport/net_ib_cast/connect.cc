@@ -548,6 +548,7 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
 
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs) {
   qp->telQpStats = NULL;
+  IbCastWqeLatMonInit(&qp->latMon);
   if (createQpAttrs->oooRq) {
     NCCLCHECK(ncclIbCreateQpMlx5(createQpAttrs, qp));
     return ncclSuccess;
@@ -1183,6 +1184,7 @@ static ncclResult_t IbCastQpSharingSenderSetup(
       // with QP sharing; the non-offload signaling path uses devIndex instead.
       comm->base.qps[q].qp = slot->qp;
       comm->base.qps[q].devIndex = slot->devIndex;
+      IbCastWqeLatMonInit(&comm->base.qps[q].latMon);
       comm->base.activeQps[q] = &comm->base.qps[q];
 
       // Populate metadata with shared QP info
@@ -2038,6 +2040,7 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
       // with QP sharing; the non-offload signaling path uses devIndex instead.
       rComm->base.qps[q].qp = recvSlot->qp;
       rComm->base.qps[q].devIndex = recvSlot->devIndex;
+      IbCastWqeLatMonInit(&rComm->base.qps[q].latMon);
       // remDevIdx is normally set by IbCastReceiverQpsCreateToRts, which is
       // skipped for secondary comms; set it here or CTS rkey selection is wrong.
       rComm->base.qps[q].remDevIdx = remMeta->qpInfo[q].devIndex;
@@ -2631,16 +2634,18 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
     bool isSharing = IbCastCommIsSharing(&comm->base);
     if (comm->base.vProps.ndevs > 0)
       rcclTelemetryAddCqPolls(comm->base.vProps.devs[0], comm->base.telCqPollCount);
-    NCCLCHECK(ncclSocketClose(&comm->base.sock));
 
     // Acquire QP sharing mutex only when this comm participates in sharing
     std::unique_lock<std::mutex> lock(g_IbCastQpSharingGlobalMutex, std::defer_lock);
     if (isSharing) lock.lock();
 
-    // QP teardown: refcount-based for shared, direct destroy for non-shared
+    // QP teardown: refcount-based for shared, direct destroy for non-shared.
+    // Report the WQE latency summary (reads the peer address off the socket)
+    // before closing the socket below, or the peer= field logs blank.
     struct IbCastSharedQp* slot0 = NULL;
     for (int q = 0; q < comm->base.nqps; q++) {
       if (comm->base.qps[q].qp == NULL) continue;
+      IbCastWqeLatReportQpSummary(&comm->base, comm->base.qps[q].devIndex, &comm->base.qps[q]);
       if (isSharing) {
         struct IbCastSharedQp* slot = IbCastFindSharedQpByQpn(comm->base.qps[q].qp->qp_num, true);
         if (slot) {
@@ -2657,6 +2662,8 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
         NCCLCHECK(wrap_ibv_destroy_qp(comm->base.qps[q].qp));
       }
     }
+
+    NCCLCHECK(ncclSocketClose(&comm->base.sock));
 
     if (comm->base.resiliency) {
       NCCLCHECK(IbCastResiliencyClose(comm->base.resiliency));

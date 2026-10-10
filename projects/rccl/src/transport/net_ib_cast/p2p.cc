@@ -340,6 +340,8 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       for (int r=0; r<nreqs; r++) reqs[r]->tel_post_ts = _tel_ns;
     }
 
+    if (ncclIbCastWqeLatEnabled) IbCastWqeLatMonStampSend(qp, comm->wrs);
+
     NCCLCHECK(wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr));
 
     rcclTelemetryQpSendPosted(qp->telQpStats, useWriteOp ? 0 : 1);
@@ -1314,7 +1316,8 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
       } else {
         TIME_STOP(3);
       }
-      if (wrDone == 0) continue;
+      uint64_t tPollNs = 0;
+      bool tPollNsValid = false;
       totalWrDone += wrDone;
       for (int w = 0; w < wrDone; w++) {
         struct ibv_wc* wc = wcs + w;
@@ -1345,6 +1348,9 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
           }
 
           TRACE(NCCL_NET, "NET/IB: %s: Processing a completion event (devIndex=%d, comm=%p (%s), req=%p, wr_id=0x%lx, qp_num=%d)", __func__, i, targetBase, targetBase->isSend ? "send" : "recv", r, wc->wr_id, wc->qp_num);
+          if (ncclIbCastWqeLatEnabled) {
+            IbCastWqeLatHandleCompletion(targetBase, i, wc, &tPollNs, &tPollNsValid);
+          }
           if (targetBase->recvMatchingScheme != BY_ORDER) {
             NCCLCHECK(IbCastCompletionEventProcess(targetBase, wc, i));
           } else {
@@ -1352,6 +1358,12 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
           }
         }
       }
+      // Scan for stalled (late/missing-CQE) WQEs on every poll, including
+      // iterations where poll_cq returned zero, so a hung WQE is caught even
+      // when no completions are flowing. Runs after the completion loop so a
+      // WQE whose CQE was just processed above isn't also reported as stalled.
+      if (ncclIbCastWqeLatEnabled) IbCastWqeLatScanStalls(r->base, i);
+      if (wrDone == 0) continue;
       // Once the IB fatal event is reported in the async thread, we want to propagate this error
       // to communicator and prevent further polling to reduce error pollution.
       NCCLCHECK(IbCastStatsCheckFatalCount(&IbCastDevs[r->devBases[i]->ibDevN].stats, __func__));
