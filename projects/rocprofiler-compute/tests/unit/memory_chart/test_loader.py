@@ -76,7 +76,9 @@ def test_every_config_arch_has_one_layout(arch):
 def test_layout_shows_every_panel_metric_and_no_other(path, arch):
     shown = load_layout(path).metrics()
     panel = set(panel_metric_names(arch))
-    assert not shown - panel, f"not in {arch} panel 300: {sorted(shown - panel)}"
+    assert not shown - panel, (
+        f"not in the {arch} memory chart panel: {sorted(shown - panel)}"
+    )
     assert not panel - shown, f"missing from {path.name}: {sorted(panel - shown)}"
 
 

@@ -24,8 +24,7 @@ from membw_analysis.summary import (
     status_text,
 )
 from memory_chart.loader import Layouts
-from memory_chart.mem_chart import format_mem_chart_heading
-from memory_chart.mem_chart import plot_mem_chart as _plot_mem_chart
+from memory_chart.mem_chart import format_mem_chart_heading, plot_mem_chart
 from memory_chart.units import panel_units
 from utils import parser, schema
 from utils.logger import console_error, console_log, console_warning
@@ -941,7 +940,7 @@ def show_all(
             _ = is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols)
 
         panel_content = ""  # store content of all data_source from one panel
-        # Memory chart metrics, merged across the panel's tables
+        # Metric -> value from every table in this panel, drawn as one chart
         mem_chart_data: dict[str, Any] = {}
 
         for data_source in panel["data source"]:
@@ -1060,7 +1059,7 @@ def show_all(
         if mem_chart_data:
             heading = format_mem_chart_heading(args.normal_unit, panel_id=panel_id)
             membw_result = getattr(first_run, "membw_result", None)
-            chart_output = _plot_mem_chart(
+            chart_output = plot_mem_chart(
                 mem_chart_data,
                 chart_title=heading,
                 gpu_arch=gpu_arch,

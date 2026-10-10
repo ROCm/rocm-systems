@@ -19,7 +19,7 @@ DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
 
 
 def sample_values(arch: str) -> dict[str, float]:
-    """A distinct, plausible value for every panel 300 metric of an arch, by unit."""
+    """A distinct, plausible value for every memory chart metric of an arch."""
     values = {}
     for name, unit in panel_units(panel_config(arch)).items():
         seed = zlib.crc32(name.encode()) % 97
