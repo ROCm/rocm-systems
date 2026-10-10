@@ -11,15 +11,14 @@
 
 #include "MPIHelpers.hpp"
 #include "ipcsocket.h"
+#include "rocmwrap.h"
 
 #include "MultiSegmentVmmHelpers.hpp"
 
 #include <hip/hip_runtime.h>
 #include <mpi.h>
-#include "rocmwrap.h"
 
-// hipMemLocationTypeHost is absent outside NCCL_CUMEM_HOST_GATE (ROCm 7.12 or
-// the probed 7.0.2.x backport). CUDA HOST == 2.
+// hipMemLocationTypeHost is undeclared without the CMake host probe; outside the gate the shim is harmless (HOST == 2).
 #if !NCCL_CUMEM_HOST_GATE
 #ifndef hipMemLocationTypeHost
 #define hipMemLocationTypeHost (static_cast<hipMemLocationType>(2))
@@ -29,6 +28,7 @@
 #include <unistd.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <random>
 #include <string>
 #include <utility>
@@ -134,17 +134,29 @@ cleanup:
     return support;
 }
 
+enum class HybridVmmStatus { Ok, Skip, Fail };
+
+// RCCL_TEST_HYBRID_VMM_REQUIRE=1 (hybrid CI job) fails instead of skipping on a missing ROCM-29812 fix or host gate.
+inline HybridVmmStatus HybridVmmUnsupportedStatus()
+{
+    const char* require = std::getenv("RCCL_TEST_HYBRID_VMM_REQUIRE");
+    return (require && std::string(require) == "1") ? HybridVmmStatus::Fail : HybridVmmStatus::Skip;
+}
+
 // Collective: every rank must call it. Skips on ROCM-29812. Imported handles are not re-exported.
 // Hybrid elastic windows require NCCL_SYM_REUSE_SYSMEM_HANDLES=1 at registration time.
-inline bool CheckHybridVmmRuntimeSupport(int dev, std::string* reason = nullptr)
+inline bool CheckHybridVmmRuntimeSupport(int dev, std::string* reason = nullptr,
+                                         HybridVmmStatus* status = nullptr)
 {
     HybridVmmRuntimeSupport local = ProbeHybridVmmRuntimeSupport(dev);
     bool cpuAccessSupported = MPIHelpers::allRanksTrue(local.importedHostCpuAccess);
+    if (status) *status = HybridVmmStatus::Skip;
 
     // TODO(ROCM-29812): Remove this skip gate when imported host VMM CPU access is fixed.
     if (!cpuAccessSupported)
     {
         if (reason) *reason = "ROCM-29812: imported host VMM CPU access is unsupported";
+        if (status) *status = HybridVmmUnsupportedStatus();
         return false;
     }
     return true;
@@ -457,6 +469,48 @@ inline bool AllocHybridForLocalRanks(int dev, size_t gpuBytes, size_t localCpuBy
     return true;
 }
 
+// Collective over MPI_COMM_WORLD: support check, then allocation. A failure on any rank frees *out on every rank.
+inline HybridVmmStatus AllocHybridCollective(size_t gpuBytes, size_t localCpuBytes, int expectedLocalRanks,
+                                             HybridVmmBuffer* out, std::string* reason)
+{
+    *out = HybridVmmBuffer{};
+#if !NCCL_CUMEM_HOST_GATE
+    // Compile-time gate, so every rank returns here without a collective.
+    (void)gpuBytes; (void)localCpuBytes; (void)expectedLocalRanks;
+    *reason = "host VMM is outside this build's NCCL_CUMEM_HOST_GATE window";
+    return HybridVmmUnsupportedStatus();
+#else
+    int dev = 0;
+    // The support check runs collectives; call it even if hipGetDevice failed.
+    const bool haveDev = hipGetDevice(&dev) == hipSuccess;
+    HybridVmmStatus status = HybridVmmStatus::Skip;
+    bool supported = CheckHybridVmmRuntimeSupport(dev, reason, &status) && haveDev;
+    if (!MPIHelpers::allRanksTrue(supported))
+    {
+        if (reason->empty()) *reason = "hybrid VMM runtime support is unavailable on another rank";
+        return status;
+    }
+    bool allocated = AllocHybridForLocalRanks(dev, gpuBytes, localCpuBytes, expectedLocalRanks, out, reason);
+    if (!MPIHelpers::allRanksTrue(allocated))
+    {
+        FreeHybridVmm(*out);
+        if (reason->empty()) *reason = "hybrid VMM allocation failed on another rank";
+        return HybridVmmStatus::Skip;
+    }
+    return HybridVmmStatus::Ok;
+#endif
+}
+
+// Fails or skips the calling test for a non-Ok AllocHybridCollective status; all ranks see the same status.
+#define HYBRID_VMM_SKIP_OR_FAIL(status, reason)                                                    \
+    do {                                                                                         \
+        const RCCLHybridVmmTests::HybridVmmStatus hybridStatus_ = (status);                      \
+        if (hybridStatus_ == RCCLHybridVmmTests::HybridVmmStatus::Fail)                          \
+            FAIL() << "RCCL_TEST_HYBRID_VMM_REQUIRE=1: " << (reason);                           \
+        if (hybridStatus_ != RCCLHybridVmmTests::HybridVmmStatus::Ok)                            \
+            GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << (reason);                \
+    } while (0)
+
 // DeepEP ElasticSymmetricMemory geometry: one GPU segment then one independently
 // sized CPU segment in a 2 MiB-aligned VA. Shared by UBR and RMA tests.
 struct DeepEpElasticRange
@@ -581,13 +635,13 @@ namespace RCCLRmaTests
 {
 
 inline bool AllocDeepEpElasticVmm(int dev, size_t gpuBytes, size_t cpuBytes,
-                                  MultiSegmentVmmBuffer* out)
+                                  RCCLTestHelpers::MultiSegmentVmmBuffer* out)
 {
     if (out == nullptr) return false;
     RCCLHybridVmmTests::DeepEpElasticRange range;
     if (!RCCLHybridVmmTests::AllocDeepEpElasticRange(dev, gpuBytes, cpuBytes, &range))
         return false;
-    *out = MultiSegmentVmmBuffer{};
+    *out = RCCLTestHelpers::MultiSegmentVmmBuffer{};
     out->ptr       = reinterpret_cast<void*>(range.base);
     out->base      = range.base;
     out->totalSize = range.totalSize;

@@ -603,7 +603,7 @@
         },
         {
           "name": "Cast_SplitDataThresholdBoundary",
-          "description": "Exact threshold boundary: size>=splitDataMin*nqps \u2192 split path (0 tokens); size<threshold \u2192 WRR path (1 token)",
+          "description": "Exact threshold boundary: size>=splitDataMin*nqps → split path (0 tokens); size<threshold → WRR path (1 token)",
           "test_filter": "NetIbMPITest.CastSplitDataThresholdBoundary"
         },
         {
@@ -616,7 +616,7 @@
         },
         {
           "name": "Cast_SendRecvMultipleSizes",
-          "description": "Sizes across split/WRR threshold: below threshold\u21921 token each; at/above threshold\u21920 tokens; data integrity verified",
+          "description": "Sizes across split/WRR threshold: below threshold→1 token each; at/above threshold→0 tokens; data integrity verified",
           "test_filter": "NetIbMPITest.CastSendRecvMultipleSizes"
         },
         {
@@ -646,7 +646,7 @@
       "tests": [
         {
           "name": "Cast_WeightsDistributionOneRound",
-          "description": "Two-phase WRR distribution: equal then triangular weights \u2014 both exhaust all active tokens after one full round",
+          "description": "Two-phase WRR distribution: equal then triangular weights — both exhaust all active tokens after one full round",
           "test_filter": "NetIbMPITest.CastWeightsDistributionOneRound",
           "env_variables": {
             "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "60000000"
@@ -2845,12 +2845,12 @@
       "tests": [
         {
           "name": "CE_AllGather_8Ranks",
-          "description": "AllGather CE correctness \u2014 default production topology (8 ranks)",
+          "description": "AllGather CE correctness — default production topology (8 ranks)",
           "test_filter": "CeMPI_AllGather.EightRanks"
         },
         {
           "name": "CE_AlltoAll_8Ranks",
-          "description": "AlltoAll CE correctness \u2014 default production topology (8 ranks)",
+          "description": "AlltoAll CE correctness — default production topology (8 ranks)",
           "test_filter": "CeMPI_AlltoAll.EightRanks"
         },
         {
@@ -2860,17 +2860,17 @@
         },
         {
           "name": "CE_Scatter_8Ranks",
-          "description": "Scatter CE correctness, root=0 \u2014 default production topology (8 ranks)",
+          "description": "Scatter CE correctness, root=0 — default production topology (8 ranks)",
           "test_filter": "CeMPI_Scatter.EightRanksRoot0"
         },
         {
           "name": "CE_Gather_8Ranks",
-          "description": "Gather CE correctness, root=0 \u2014 default production topology (8 ranks)",
+          "description": "Gather CE correctness, root=0 — default production topology (8 ranks)",
           "test_filter": "CeMPI_Gather.EightRanksRoot0"
         },
         {
           "name": "CE_AllReduce_8Ranks",
-          "description": "AllReduce CE correctness \u2014 default production topology (8 ranks)",
+          "description": "AllReduce CE correctness — default production topology (8 ranks)",
           "test_filter": "CeMPI_AllReduce.EightRanks"
         },
         {
@@ -6056,8 +6056,8 @@
       "tests": [
         {
           "name": "MultiSegment_HostBoundaryMath_All",
-          "description": "Host-only segment selection and split arithmetic",
-          "test_filter": "NetIbMultiSeg.*:NetIbSplit.*"
+          "description": "Host-only segment selection, split arithmetic and CTS layout validation",
+          "test_filter": "NetIbMultiSeg.*:NetIbSplit.*:NetIbCtsLayout.*"
         }
       ]
     },
@@ -6073,7 +6073,6 @@
         "NCCL_DEBUG_SUBSYS": "REG",
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_CUMEM_ENABLE": "1",
-        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_WIN_ENABLE": "1",
         "NCCL_ELASTIC_BUFFER_REGISTER": "1",
         "RCCL_MPI_LOG_ALL_RANKS": "1"
@@ -6117,12 +6116,12 @@
         "NCCL_DEBUG_SUBSYS": "REG",
         "NCCL_NET": "IB",
         "NCCL_CUMEM_ENABLE": "1",
-        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "RCCL_FORCE_ENABLE_DMABUF": "1",
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_WIN_ENABLE": "1",
         "NCCL_ELASTIC_BUFFER_REGISTER": "1",
         "NCCL_SYM_REUSE_SYSMEM_HANDLES": "1",
+        "RCCL_TEST_HYBRID_VMM_REQUIRE": "1",
         "NCCL_GIN_ENABLE": "1",
         "NCCL_GIN_TYPE": "2",
         "RCCL_MPI_LOG_ALL_RANKS": "1"
@@ -6197,7 +6196,6 @@
       "env_variables": {
         "NCCL_NET": "IB",
         "NCCL_CUMEM_ENABLE": "1",
-        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "RCCL_FORCE_ENABLE_DMABUF": "1",
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_DEBUG_SUBSYS": "REG",
@@ -6213,6 +6211,14 @@
           "test_filter": "NetIbMultiSegmentMPITest.*:RmaMultiSegmentMPITest.*-RmaMultiSegmentMPITest.DeepEP_Hybrid*"
         },
         {
+          "name": "MultiSegment_Transport_RegisterOff_MultiNode",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: classic NET/IB declines a multi-segment registration, a multi-segment RMA window stays on the single-MR path, and single-segment buffers still transfer",
+          "test_filter": "NetIbMultiSegmentMPITest.MultiSegmentRegisterOff_*:NetIbMultiSegmentMPITest.HostAndDeviceSingleSegmentRegression:NetIbMultiSegmentMPITest.SingleSegmentThroughMultiSegPath:RmaMultiSegmentMPITest.MultiSegmentRegisterOff_*:RmaMultiSegmentMPITest.SingleSegmentRegression:RmaMultiSegmentMPITest.IFlushSingleSegmentRegression",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "0"
+          }
+        },
+        {
           "name": "UBR_MultiSegment_Generic",
           "description": "Out-of-place AllReduce on an 8-segment VMM buffer; asserts NET cache netNSegments",
           "test_filter": "UBR_MultiSegment.Generic"
@@ -6224,6 +6230,32 @@
           "env_variables": {
             "NCCL_GIN_ENABLE": "0"
           }
+        }
+      ]
+    },
+    "multisegment_netproxy_intranode_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_NET": "IB",
+        "NCCL_CUMEM_ENABLE": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_GIN_ENABLE": "0",
+        "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_NET_Proxy_Partial_Final_Segment_IntraNodePeer",
+          "description": "NET proxy registration clips the final physical segment with an intra-node peer (2 ranks per node) on the non-blocking test stream",
+          "test_filter": "UBR_MultiSegment.NetProxyPartialFinalSegment"
         }
       ]
     }
@@ -6257,6 +6289,12 @@
       "name": "Multi-Segment - Classic NET/IB and GIN (Multi-Node)",
       "description": "All classic and GIN transport tests, including DeepEP and boundary stress",
       "config": "multisegment_transport_multinode",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - NET Proxy Intra-Node Peer (Multi-Node)",
+      "description": "NetProxyPartialFinalSegment at 4 ranks across 2 nodes, so every rank also has an intra-node peer",
+      "config": "multisegment_netproxy_intranode_multinode",
       "enabled": true
     },
     {
@@ -6729,7 +6767,7 @@
     },
     {
       "name": "CE Tests - 8-Rank (AllGather, AlltoAll, Scatter, Gather)",
-      "description": "CE collective tests on 8 GPUs/ranks \u2014 default production topology. Skips automatically on unsupported driver version.",
+      "description": "CE collective tests on 8 GPUs/ranks — default production topology. Skips automatically on unsupported driver version.",
       "config": "ce_8rank",
       "enabled": true
     },
