@@ -72,9 +72,13 @@ TEST(ParamParsersMicrotest, Bool_DescribesAcceptedSpellings) {
 // ---------------------------------------------------------------------------
 
 TEST(ParamParsersMicrotest, Cstr_ResolvePassesThePointerThrough) {
+  // EXPECT_EQ(in, out), not EXPECT_STREQ: resolve() aliases the caller's
+  // buffer (parser_default.h:69-73) rather than copying it, so the test must
+  // check pointer identity, which EXPECT_STREQ's content-only check can't see.
+  const char* in = "hello";
   const char* out = nullptr;
-  EXPECT_EQ(ncclSuccess, ncclParamParserDefault<const char*>::resolve("hello", out));
-  EXPECT_STREQ("hello", out);
+  EXPECT_EQ(ncclSuccess, ncclParamParserDefault<const char*>::resolve(in, out));
+  EXPECT_EQ(in, out);
 }
 
 TEST(ParamParsersMicrotest, Cstr_ValidateAlwaysTrue) {
@@ -139,7 +143,7 @@ TEST(ParamParsersMicrotest, Integer_NarrowerTypeTruncatesRatherThanErrors) {
   EXPECT_EQ(static_cast<int8_t>(200), out);
 }
 
-TEST(ParamParsersMicrotest, Integer_ValidateAcceptsAnInRangeValue) {
+TEST(ParamParsersMicrotest, Integer_ValidateAlwaysTrue) {
   EXPECT_TRUE(ncclParamParserDefault<int32_t>::validate(0));
   EXPECT_TRUE(ncclParamParserDefault<uint32_t>::validate(0));
 }
@@ -271,12 +275,12 @@ TEST(ParamParsersMicrotest, OneOf_DescribesEachOptionWithOrWithoutADescription) 
 enum class Flag : uint32_t { None = 0, A = 1, B = 2, C = 4, AB = 3 };
 
 ncclParamParser<uint32_t> MakeFlagParser(bool ignoreUnknown = false) {
-  // NONE is a real, explicitly listed zero-valued option (mirroring how
-  // production bitset params commonly spell their all-clear alias), so the
-  // decomposition loop's optVal != 0 / isSingleBit(0) short-circuits run for
-  // every toString() call, not just the exact-match "NONE" case below.
+  // NONE is listed so toString(0) returns it from the exact-match pass, and so
+  // bitsetToString's isSingleBit(0) guard skips it whenever decomposition runs
+  // for some other value instead. C carries a description so the built desc
+  // string exercises both the described and undescribed option formatting.
   auto opts = makeOptions(makeOption<Flag>("NONE", Flag::None), makeOption<Flag>("A", Flag::A),
-                          makeOption<Flag>("B", Flag::B), makeOption<Flag>("C", Flag::C),
+                          makeOption<Flag>("B", Flag::B), makeOption<Flag>("C", Flag::C, "the C bit"),
                           makeOption<Flag>("AB", Flag::AB));
   return ncclParamBitsetOf<Flag, uint32_t>(opts, ',', ignoreUnknown);
 }
@@ -302,6 +306,10 @@ TEST(ParamParsersMicrotest, Bitset_CaretPrefixInvertsTheMask) {
   // composite alias that happens to include it.
   EXPECT_EQ(ncclSuccess, parser.resolve("^A", out));
   EXPECT_EQ(~uint32_t(0) & ~uint32_t(1), out);
+  // A bare '^' finds no token to clear, so every bit stays set -- worth
+  // pinning since that's a one-character env value enabling every flag.
+  EXPECT_EQ(ncclSuccess, parser.resolve("^", out));
+  EXPECT_EQ(~uint32_t(0), out);
 }
 
 TEST(ParamParsersMicrotest, Bitset_UnknownTokenIsRejectedByDefault) {
@@ -352,9 +360,22 @@ TEST(ParamParsersMicrotest, Bitset_ToStringDecomposesAnUnlistedCombination) {
   EXPECT_EQ("A,C", parser.toString(5u));
 }
 
-TEST(ParamParsersMicrotest, Bitset_ToStringOfZeroIsNone) {
+TEST(ParamParsersMicrotest, Bitset_ToStringOfZeroOrNoMatchIsNone) {
   auto parser = MakeFlagParser();
   EXPECT_EQ("NONE", parser.toString(0u));
+  // 8u matches no alias and no listed single bit, so this reaches the
+  // fallback's own "NONE" arm rather than the exact-match pass above.
+  EXPECT_EQ("NONE", parser.toString(8u));
+}
+
+TEST(ParamParsersMicrotest, Bitset_DescribesEachOptionWithOrWithoutADescription) {
+  auto parser = MakeFlagParser();
+  // ncclParamBitsetOf hardcodes "Comma-separated list of:" regardless of the
+  // actual delimiter (a pre-existing quirk in parser_bitset.h, not something
+  // this test should paper over); MakeFlagParser uses the default ',' so the
+  // hardcoded text happens to match here.
+  EXPECT_EQ("Comma-separated list of:\n        NONE\n        A\n        B\n        C - the C bit\n        AB",
+            parser.desc);
 }
 
 // ---------------------------------------------------------------------------

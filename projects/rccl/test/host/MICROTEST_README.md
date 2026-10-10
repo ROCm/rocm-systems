@@ -191,8 +191,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `ncclParamBounded`'s closed-range validation and single-arg overload,
     `ncclParamOneOf`'s case-insensitive trimmed matching and per-option
     descriptions, `ncclParamBitsetOf`'s comma-separated OR, `^`-prefixed
-    negation, `ignoreUnknown`, and its exact-alias-first/decompose-to-
-    single-bits `toString`, and `ncclParamListOf`'s trim/empty-token-skip
+    negation, `ignoreUnknown`, and its exact-alias-first/decompose-to-single-bits
+    `toString`, and `ncclParamListOf`'s trim/empty-token-skip
     resolution into both vector and set containers. Second PR in the
     AICOMRCCL-2820 stacked chain; see `param-utils-test.cc` for the shared
     `ncclParamParser<T>` wrapper and option-set builders these factories
