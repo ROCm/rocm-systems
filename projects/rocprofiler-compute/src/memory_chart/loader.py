@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, NoReturn, Optional
 
 import config
+from membw_analysis.models import BOTTLENECK_LEVELS
 from utils.logger import console_error
 from utils.utils_common import canonical_config_arch
 
@@ -64,7 +65,6 @@ _ARROW_DIRECTIONS = {
     "atomic": "both",
     "neutral": "both",
 }
-_STALL_LEVELS = frozenset({"GL1", "GL2", "EA"})
 
 
 @dataclass(frozen=True)
@@ -226,7 +226,7 @@ def _block(
     else:
         keys = NESTED_BLOCK_KEYS if parent else BLOCK_KEYS
     _check_keys(path, raw, keys, where)
-    if raw.get("stall_level") not in (None, *_STALL_LEVELS):
+    if raw.get("stall_level") not in (None, *BOTTLENECK_LEVELS):
         _fail(path, f"unknown stall_level {raw['stall_level']!r} on {where}")
     if "children" in raw and ({"metrics", "stall_level"} & set(raw)):
         _fail(path, f"{where} has nested blocks, so its metrics go in them")

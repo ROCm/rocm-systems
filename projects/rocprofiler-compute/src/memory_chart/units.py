@@ -27,9 +27,10 @@ class DisplayUnit:
 
 # For values whose unit has no display rule
 PLAIN = DisplayUnit("value")
+PERCENT = DisplayUnit("percent", "%")
 
 _DISPLAY_UNITS: dict[str, DisplayUnit] = {
-    "Percent": DisplayUnit("percent", "%"),
+    "Percent": PERCENT,
     "Bytes/s": DisplayUnit("bandwidth", " GB/s", 3, 1e-9),
     "KB per Wave": DisplayUnit("value", " KB", 3),
     "Bytes per Workgroup": DisplayUnit("value", " KB", 1, 1 / 1024),

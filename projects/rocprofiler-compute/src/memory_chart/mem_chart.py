@@ -31,8 +31,16 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 from memory_chart.loader import Layout, LayoutArrow, LayoutBlock, Layouts
-from memory_chart.units import PLAIN, DisplayUnit, display_unit, format_value, numeric
+from memory_chart.units import (
+    PERCENT,
+    PLAIN,
+    DisplayUnit,
+    display_unit,
+    format_value,
+    numeric,
+)
 
 COLORS = {
     "cu": "green",
@@ -85,7 +93,7 @@ def plot_mem_chart(
     chart_title: str,
     gpu_arch: str,
     units: dict[str, str],
-    membw: Optional[Any] = None,  # noqa: ANN401
+    membw: Optional[MemBwAnalysisResult] = None,
 ) -> str:
     """The memory chart of *gpu_arch* as text.
 
@@ -133,7 +141,7 @@ class MemChart:
         layout: Layout,
         values: dict[str, Any],
         units: dict[str, str],
-        membw: Optional[Any] = None,  # noqa: ANN401
+        membw: Optional[MemBwAnalysisResult] = None,
     ) -> None:
         self.layout = layout
         self.values = values
@@ -240,7 +248,7 @@ class MemChart:
         for row in self.stalls[block.id]:
             if lines:
                 lines.append("")
-            shown = format_value(row.value, display_unit("Percent"))
+            shown = format_value(row.value, PERCENT)
             lines.append(f"{row.label} {_colored(shown, COLORS['stall'])}")
         return lines
 
@@ -560,7 +568,9 @@ class _StallRow:
     value: Optional[float]
 
 
-def _stall_rows(membw: Any, level: Optional[str]) -> list[_StallRow]:  # noqa: ANN401
+def _stall_rows(
+    membw: Optional[MemBwAnalysisResult], level: Optional[str]
+) -> list[_StallRow]:
     """Active leaf bottlenecks of membw at *level*, in tree order."""
     rows: list[_StallRow] = []
     if membw is None or level is None:
@@ -570,7 +580,9 @@ def _stall_rows(membw: Any, level: Optional[str]) -> list[_StallRow]:  # noqa: A
     return rows
 
 
-def _collect_stall_rows(node: Any, level: str, rows: list[_StallRow]) -> None:  # noqa: ANN401
+def _collect_stall_rows(
+    node: BottleneckNode, level: str, rows: list[_StallRow]
+) -> None:
     if node.state != "active":
         return
     if node.level == level and not any(c.state == "active" for c in node.children):
