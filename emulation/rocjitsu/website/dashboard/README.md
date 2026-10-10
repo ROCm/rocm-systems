@@ -53,6 +53,50 @@ continues to come from `gh-pages-rocjitsu`.
 See the [handbook publishing setup](../handbook/README.md#verification-and-publishing)
 for GitHub App secrets, permissions, and Pages configuration.
 
+## Prepare benchmark data
+
+[`scripts/dashboard_publish.py`](scripts/dashboard_publish.py) converts a finalized
+`run.json` from the rocjitsu-test-corpus benchmark runner into the dashboard's
+[data contract](docs/website-data-contract.md). It uses only the Python standard
+library; Python 3.12 is used in CI. From this directory:
+
+```bash
+python scripts/dashboard_publish.py \
+  --raw-run "$RAW_RUN" \
+  --data-dir "$DATA_DIR" \
+  --run-id "$RUN_ID" \
+  --repository https://github.com/ROCm/rocm-systems \
+  --environment-id "$ENVIRONMENT_ID" \
+  --expected-sha "$ROCJITSU_SHA" \
+  --expected-corpus-sha "$CORPUS_SHA" \
+  --trigger manual \
+  --branch develop
+node scripts/validate-dashboard-data.mjs "$DATA_DIR"
+```
+
+Set `RAW_RUN` to the raw run file, `DATA_DIR` to the staged dashboard data directory,
+`RUN_ID` to a unique execution ID, and `ENVIRONMENT_ID` to the benchmark environment
+ID. Set `ROCJITSU_SHA` and `CORPUS_SHA` to the full commit SHAs used for the run.
+The publisher requires provenance from clean checkouts of both repositories.
+It writes local files; the
+[benchmark workflow](../../../../.github/workflows/rocjitsu-benchmarks.yml) handles
+committing and pushing validated data.
+
+The raw input is a cross-repository interface with `schemaVersion: 1`. Only
+finalized runs with `status: completed` or `status: failed` are accepted, including
+failed or interrupted matrix cells. Keep the runner and publisher compatible when
+changing this format. The workflow pins the corpus runner separately and uses the
+publisher and validator from the rocjitsu revision being benchmarked.
+
+Run and catalog files are immutable, and the publisher updates the index last.
+Publishing the same run again is a no-op; conflicting content is rejected. Use
+`python scripts/dashboard_publish.py --help` for plugin comparison and metadata
+options. Automatic publication requires `develop`; manual publication accepts a
+nonempty branch name. Manual topic-branch results also require a compatible
+dashboard, as described in the
+[corpus publication guide](https://github.com/ROCm/rocjitsu-test-corpus/blob/develop/benchmarks/README.md#results-and-plugins).
+Always validate the staged directory before publication.
+
 ## Source layout
 
 | Path | Purpose |
@@ -64,6 +108,7 @@ for GitHub App secrets, permissions, and Pages configuration.
 | `package.json`, `package-lock.json` | Commands and reproducible dependency installation |
 | `*.config.js` | Vite, ESLint, Vitest, and Playwright configuration |
 | `tests/unit/`, `tests/e2e/`, `tests/fixtures/` | Tests, helpers, and dummy fixtures |
+| `scripts/dashboard_publish.py`, `tests/python/` | Benchmark data publisher and Python tests |
 | `docs/` | Build, testing, hosting, and data-contract documentation |
 
 ## Further documentation
