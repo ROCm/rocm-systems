@@ -7,7 +7,8 @@ This does not create or modify index.json or metadata.json. The publication
 workflow copies the candidate files into the results branch and updates the
 index separately. Metadata is bundled website configuration.
 
-Completed results use the median of accepted timing_results_s samples. Failed
+Accepted timing_results_s samples are preserved in their original order.
+Completed results use the median of these samples. Failed
 and timed-out results always have null duration, even with partial samples:
 partial work is not a completed-workload measurement. No completion is invented.
 Logical workload IDs hash suite/name/raw problem, never target, mode or case ID.
@@ -300,6 +301,7 @@ def normalize_runs(
             results[test_id] = {
                 'testId': test_id,
                 'status': result['status'],
+                'timing_results_s': list(result['timing_results_s']),
                 'durationSeconds': (
                     statistics.median(result['timing_results_s'])
                     if result['status'] == 'completed'

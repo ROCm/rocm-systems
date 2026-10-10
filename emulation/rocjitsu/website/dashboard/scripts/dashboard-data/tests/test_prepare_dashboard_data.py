@@ -230,6 +230,63 @@ class PrepareTests(unittest.TestCase):
             ),
         )
 
+    def test_timing_samples_survive_publication_and_consumer_normalization(self):
+        value = raw()
+        cases = [
+            ('completed', [1, 9, 2], 2),
+            ('completed', [9, 1, 4, 2], 3),
+            ('failed', [5, 2], None),
+            ('timeout', [], None),
+        ]
+        value['benchmark_results'] = []
+        for index, (status, samples, _) in enumerate(cases):
+            result = copy.deepcopy(raw()['benchmark_results'][0])
+            result.update(
+                id=f'case-{index}',
+                name=f'Example {index}',
+                status=status,
+                timing_results_s=samples,
+                exit_code=0 if status == 'completed' else 1,
+                error=None if status == 'completed' else 'Incomplete execution',
+            )
+            value['benchmark_results'].append(result)
+        self.assert_ok(self.invoke([value]))
+        run = self.read('runs/default-branch/attempt-1.json')
+        catalog = self.read(run['testCatalog'])
+        names = {test['id']: test['name'] for test in catalog['tests']}
+        published = {
+            names[result['testId']]: result
+            for result in run['configurations'][0]['results']
+        }
+        (self.data / 'index.json').write_text(
+            json.dumps(
+                {
+                    'generatedAt': '2026-01-01T02:00:00Z',
+                    'runFiles': ['runs/default-branch/attempt-1.json'],
+                }
+            )
+        )
+        processed = subprocess.run(
+            [
+                'node',
+                str(HERE.parents[1] / 'process-dashboard-data.mjs'),
+                str(self.data),
+            ],
+            text=True,
+            capture_output=True,
+        )
+        self.assert_ok(processed)
+        normalized = {
+            test['name']: test
+            for test in json.loads(processed.stdout)['data']['runs'][0]['tests']
+        }
+        for index, (status, samples, duration) in enumerate(cases):
+            for results in (published, normalized):
+                result = results[f'Example {index}']
+                self.assertEqual(result.get('timing_results_s'), samples)
+                self.assertEqual(result['status'], status)
+                self.assertEqual(result['durationSeconds'], duration)
+
     def test_uppercase_git_shas_are_published_in_lowercase(self):
         value = raw()
         value['provenance']['rocjitsu']['rocjitsu_commit_sha'] = SHA.upper()

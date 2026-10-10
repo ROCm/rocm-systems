@@ -75,14 +75,14 @@ data/
       "target": "gfx950",
       "threadingMode": "ST",
       "results": [
-        { "testId": "gemm", "status": "completed", "durationSeconds": 2, "error": null }
+        { "testId": "gemm", "status": "completed", "timing_results_s": [1, 9, 2], "durationSeconds": 2, "error": null }
       ]
     },
     {
       "target": "gfx950",
       "threadingMode": "MT",
       "results": [
-        { "testId": "gemm", "status": "completed", "durationSeconds": 1.25, "error": null }
+        { "testId": "gemm", "status": "completed", "timing_results_s": [1, 1.5], "durationSeconds": 1.25, "error": null }
       ]
     }
   ]
@@ -92,14 +92,16 @@ data/
 ## Result rules
 
 ```js
-// completed: finite seconds >= 0; error must be null
-{ testId: "gemm", status: "completed", durationSeconds: 0, error: null }
+// completed: positive finite samples; duration is their median; error must be null
+{ testId: "gemm", status: "completed", timing_results_s: [1, 9, 2], durationSeconds: 2, error: null }
 
 // failed / timeout: seconds must be null; error may be null or nonempty text
-{ testId: "gemm", status: "failed", durationSeconds: null, error: "Execution failed" }
-{ testId: "gemm", status: "timeout", durationSeconds: null, error: null }
+{ testId: "gemm", status: "failed", timing_results_s: [5], durationSeconds: null, error: "Execution failed" }
+{ testId: "gemm", status: "timeout", timing_results_s: [], durationSeconds: null, error: null }
 ```
 
+- The preparer publishes `timing_results_s` for every result, preserving accepted sample values and order. Normalization retains the samples. Completed results require a nonempty array and `durationSeconds` equal to its median. Failed/timeout results may retain partial samples or an empty array, but their duration remains null.
+- Older publications (including migrated schema-1 runs) may omit `timing_results_s`; their existing finite, nonnegative completed durations remain valid. Missing samples are not reconstructed from a median. New run bodies must use new run IDs rather than overwrite immutable published files.
 - Each included configuration has exactly its catalog's workload IDs. An absent configuration means unpublished, not zero.
 - Commit/base SHAs: lowercase, 40 hex characters. Times: commit ≤ completion ≤ publication.
 - `source.message`, `source.base: { branch, commit }`, and `source.pullRequest: { number, url? }` are optional.

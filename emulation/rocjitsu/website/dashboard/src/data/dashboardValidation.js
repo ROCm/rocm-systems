@@ -103,6 +103,19 @@ export function validatePublishedResult(result) {
     if (result.error !== null) throw new Error(`Completed result ${result.testId} cannot contain an error`);
   } else if (result.durationSeconds !== null) throw new Error(`${result.status} result ${result.testId} must have a null durationSeconds`);
   if (result.error !== null && !hasText(result.error)) throw new Error(`Result ${result.testId} error must be a non-empty string or null`);
+  if (Object.hasOwn(result, 'timing_results_s')) {
+    const samples = result.timing_results_s;
+    if (!Array.isArray(samples) || samples.some((sample) => !Number.isFinite(sample) || sample <= 0)
+      || result.status === 'completed' && samples.length === 0) {
+      throw new Error(`Result ${result.testId} timing_results_s must contain positive finite samples, nonempty when completed`);
+    }
+    if (result.status === 'completed') {
+      const sorted = [...samples].sort((a, b) => a - b);
+      const middle = Math.floor(sorted.length / 2);
+      const median = sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+      if (result.durationSeconds !== median) throw new Error(`Result ${result.testId} durationSeconds must equal the timing_results_s median`);
+    }
+  }
   return result;
 }
 
@@ -134,7 +147,8 @@ function normalizeRun(run, catalog, generatedAt) {
     results.forEach(validatePublishedResult);
     const ids = results.map(({ testId }) => testId);
     if (new Set(ids).size !== ids.length || !sameSet(ids, catalog.configurations[key])) throw new Error(`Run ${run.id} must contain exactly one result per ${key} catalog workload`);
-    return results.map(({ testId, status, durationSeconds, error }) => ({ ...definitions.get(testId), status, durationSeconds, error,
+    return results.map(({ testId, status, durationSeconds, error, timing_results_s }) => ({ ...definitions.get(testId), status, durationSeconds, error,
+      ...(timing_results_s !== undefined ? { timing_results_s: [...timing_results_s] } : {}),
       testId: `${key}:${testId}`, logicalTestId: testId, target, mode: threadingMode }));
   });
   return {
