@@ -226,19 +226,68 @@ static constexpr size_t kTrampolineStubStride =
 // and readable, which the allocation's zero-fill already guarantees.
 static constexpr size_t kInstPrefUnitBytes = 128;  // GFX11+ CP I$ prefetch line size
 
+// Instruction encodings the GFX1250 start-of-kernel workaround is built from. Both
+// forms of the workaround below are spelled in terms of these, so the prefetch's two
+// SADDR spellings -- which live in the low byte of the first prefetch dword, and are
+// one of the two things separating the forms, the other being instruction order --
+// stay visible instead of being buried in duplicated literals.
+static constexpr uint32_t kGfx1250VNop = 0x7E000000;              // v_nop
+static constexpr uint32_t kGfx1250MovB64S64Zero = 0xBEC00180;     // s_mov_b64 s[64:65], 0
+// global_prefetch_b8 v0, <saddr> -- SADDR is the low byte of this first dword.
+static constexpr uint32_t kGfx1250PrefetchB8SaddrS0 = 0xEE174000;   // ... [s0, s1]
+static constexpr uint32_t kGfx1250PrefetchB8SaddrS64 = 0xEE174040;  // ... s[64:65]
+static constexpr uint32_t kGfx1250PrefetchB8Mod = 0x00040000;  // scope:SCOPE_SE th:TH_LOAD_RT
+static constexpr uint32_t kGfx1250PrefetchB8Tail = 0x00000000;  // :
+
 // The GFX1250 unclaused-VMEM workaround prologue. The compiler (SIInsertWaitcnts)
 // emits these 4 dwords -- global_prefetch_b8 v0, [s0, s1] scope:SCOPE_SE
 // th:TH_LOAD_RT followed by v_nop -- at every hardware kernel entry so the first
 // VMEM instruction is unclaused. It is exactly the sequence the entry trampoline
 // prepends, so when a kernel's entry already begins with it the trampoline would
-// only duplicate the workaround. gfx1250 encoding verified with
-// llvm-mc --mcpu=gfx1250 --show-encoding (TH_LOAD_RT is the default TH=0;
-// SCOPE_SE sets bit 0x04 in the third encoding byte).
+// only duplicate the workaround.
 static constexpr uint32_t kGfx1250UnclausedVmemPrologue[4] = {
-    0xEE174000,  // global_prefetch_b8 v0, [s0, s1] ...
-    0x00040000,  // ... scope:SCOPE_SE th:TH_LOAD_RT
-    0x00000000,  // :
-    0x7E000000,  // v_nop
+    kGfx1250PrefetchB8SaddrS0,
+    kGfx1250PrefetchB8Mod,
+    kGfx1250PrefetchB8Tail,
+    kGfx1250VNop,
+};
+
+// The compiler's start-of-kernel workaround sequence has since changed shape. It
+// now prefetches through an explicitly zeroed SGPR pair rather than through s[0:1],
+// and the prefetch comes last rather than first:
+//
+//   s_mov_b64  s[64:65], 0
+//   v_nop
+//   global_prefetch_b8 v0, s[64:65] scope:SCOPE_SE
+//
+// kGfx1250UnclausedVmemPrologue above matches neither the order nor the prefetch's
+// SADDR field of that sequence, so on a current code object the entry scan misses
+// and the loader installs a stub for a kernel that already carries the workaround.
+// The two stay separate rather than folding into one pattern: they differ in operand
+// and in order, and the prologue array doubles as the dwords the stub itself emits.
+static constexpr uint32_t kGfx1250NullPrefetchSequence[5] = {
+    kGfx1250MovB64S64Zero,
+    kGfx1250VNop,
+    kGfx1250PrefetchB8SaddrS64,
+    kGfx1250PrefetchB8Mod,
+    kGfx1250PrefetchB8Tail,
+};
+
+// The compiler also enables multi-group replay mode on every gfx125x wave by
+// writing MODE.REPLAY_MODE at kernel entry:
+//
+//   s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
+//
+// That write used to sit behind the prefetch sequence, where it stalled the wave
+// until the speculative prefetch returned XACK. It is now emitted ahead of the
+// sequence instead. The assembler accepts a kernel entry with or without it, so
+// the entry scan treats it as optional and steps over it when present.
+//
+// The encoding is SOPK op 19 (S_SETREG_IMM32_B32) with a 32-bit literal: hwreg
+// ID 1 (MODE), offset 25, size 1, value 1.
+static constexpr uint32_t kGfx1250ReplayModeSetreg[2] = {
+    0xB9800641,  // s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), ...
+    0x00000001,  // ... 1
 };
 
 static void BuildTrampolineGfx1250(uint8_t* buf, uint64_t target) {
@@ -1597,24 +1646,59 @@ hsa_status_t ExecutableImpl::LoadSegmentV2(const code::Segment *data_segment,
   return HSA_STATUS_SUCCESS;
 }
 
-// Returns true if the kernel entry at entry_vaddr already begins with the GFX1250
-// unclaused-VMEM workaround prologue (see kGfx1250UnclausedVmemPrologue). The check
-// reads the post-relocation host shadow of the code segment (valid pre-Freeze).
+// Dword-wise compare of pattern against the first count dwords readable at w.
+static bool EntryWordsMatch(const uint32_t* w, size_t readable_words, const uint32_t* pattern,
+                            size_t count) {
+  if (readable_words < count) return false;
+  for (size_t i = 0; i < count; ++i) {
+    if (w[i] != pattern[i]) return false;
+  }
+  return true;
+}
+
+// Returns true if the kernel entry at entry_vaddr already carries the compiler's
+// GFX1250 unclaused-VMEM workaround, in any of the forms the compiler has emitted:
+// the current null-prefetch sequence (kGfx1250NullPrefetchSequence) or the earlier
+// prefetch-then-v_nop prologue (kGfx1250UnclausedVmemPrologue), either on its own or
+// preceded by the optional multi-group replay-mode s_setreg (kGfx1250ReplayModeSetreg).
+// The check reads the post-relocation host shadow of the code segment (valid
+// pre-Freeze).
 static bool KernelEntryHasUnclausedVmemPrologue(Context* context, Segment* code_seg,
                                                 uint64_t entry_vaddr) {
-  static constexpr size_t kPrologueBytes = sizeof(kGfx1250UnclausedVmemPrologue);
-  if (!code_seg->IsAddressInSegment(entry_vaddr) ||
-      !code_seg->IsAddressInSegment(entry_vaddr + kPrologueBytes - 1)) {
-    return false;
+  static constexpr size_t kLegacyWords =
+      sizeof(kGfx1250UnclausedVmemPrologue) / sizeof(uint32_t);
+  static constexpr size_t kSequenceWords =
+      sizeof(kGfx1250NullPrefetchSequence) / sizeof(uint32_t);
+  static constexpr size_t kSetregWords = sizeof(kGfx1250ReplayModeSetreg) / sizeof(uint32_t);
+  static constexpr size_t kMaxWords =
+      kSetregWords + (kSequenceWords > kLegacyWords ? kSequenceWords : kLegacyWords);
+
+  if (!code_seg->IsAddressInSegment(entry_vaddr)) return false;
+
+  // The forms differ in length, so read as much of the longest one as this segment
+  // actually holds. A kernel entry close to the end of the segment can still carry
+  // one of the shorter forms in full, and must still be recognised.
+  size_t readable_words = 0;
+  while (readable_words < kMaxWords &&
+         code_seg->IsAddressInSegment(entry_vaddr + (readable_words + 1) * sizeof(uint32_t) -
+                                      1)) {
+    ++readable_words;
   }
+  if (readable_words == 0) return false;
+
   void* host = context->SegmentHostAddress(code_seg->ElfSegment(), code_seg->Agent(),
                                            code_seg->Ptr(), code_seg->Offset(entry_vaddr));
   if (host == nullptr) return false;
   const uint32_t* w = reinterpret_cast<const uint32_t*>(host);
-  return w[0] == kGfx1250UnclausedVmemPrologue[0] &&
-         w[1] == kGfx1250UnclausedVmemPrologue[1] &&
-         w[2] == kGfx1250UnclausedVmemPrologue[2] &&
-         w[3] == kGfx1250UnclausedVmemPrologue[3];
+
+  // Step over the replay-mode write when it leads. It is not a match on its own:
+  // that kernel would still need the VMEM workaround.
+  const size_t off =
+      EntryWordsMatch(w, readable_words, kGfx1250ReplayModeSetreg, kSetregWords) ? kSetregWords
+                                                                                 : 0;
+  const size_t left = readable_words - off;
+  return EntryWordsMatch(w + off, left, kGfx1250NullPrefetchSequence, kSequenceWords) ||
+         EntryWordsMatch(w + off, left, kGfx1250UnclausedVmemPrologue, kLegacyWords);
 }
 
 hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
