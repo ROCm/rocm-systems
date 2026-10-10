@@ -34,6 +34,21 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Authorize uploads for the canonical repository
+        id: authorize_uploads
+        shell: bash
+        env:
+          CURRENT_REPOSITORY: ${{ github.repository }}
+          CURRENT_SERVER_URL: ${{ github.server_url }}
+        run: |
+          if [[ "${CURRENT_SERVER_URL}" == "https://github.com" &&
+                "${CURRENT_REPOSITORY}" == "ROCm/rocm-systems" ]]; then
+            echo "allowed=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "allowed=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::Uploads disabled for non-canonical repository: ${CURRENT_SERVER_URL}/${CURRENT_REPOSITORY}"
+          fi
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -51,7 +66,7 @@ jobs:
         run: npm run verify
 
       - name: Upload Playwright diagnostics
-        if: ${{ !cancelled() && failure() }}
+        if: ${{ !cancelled() && failure() && steps.authorize_uploads.outputs.allowed == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: rocjitsu-website-playwright-results

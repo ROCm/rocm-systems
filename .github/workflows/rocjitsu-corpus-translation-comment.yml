@@ -29,6 +29,21 @@ jobs:
             .github/scripts
             emulation/rocjitsu/tests/corpus
 
+      - name: Authorize writes for the canonical repository
+        id: authorize_writes
+        shell: bash
+        env:
+          CURRENT_REPOSITORY: ${{ github.repository }}
+          CURRENT_SERVER_URL: ${{ github.server_url }}
+        run: |
+          if [[ "${CURRENT_SERVER_URL}" == "https://github.com" &&
+                "${CURRENT_REPOSITORY}" == "ROCm/rocm-systems" ]]; then
+            echo "allowed=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "allowed=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::PR comment writes disabled for non-canonical repository: ${CURRENT_SERVER_URL}/${CURRENT_REPOSITORY}"
+          fi
+
       - name: Resolve comparison inputs
         id: plan
         env:
@@ -59,7 +74,7 @@ jobs:
           run-id: ${{ steps.plan.outputs.baseline-run-id }}
 
       - name: Update PR translation comment
-        if: steps.plan.outputs.ready == 'true'
+        if: steps.plan.outputs.ready == 'true' && steps.authorize_writes.outputs.allowed == 'true'
         env:
           BASELINE_FOUND: ${{ steps.plan.outputs.baseline-found }}
           CANDIDATE_HEAD_SHA: ${{ steps.plan.outputs.candidate-head-sha }}
