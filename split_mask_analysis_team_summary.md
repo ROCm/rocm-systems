@@ -138,6 +138,42 @@ We implemented and validated Approach 2 end-to-end on the SMC300x cluster. The f
 - **alltoall**: Small before-fix advantage (~3% at saturated sizes, 23.62 vs 23.30 GB/s) — host-bounced paths may reduce PCIe switch contention in point-to-point patterns
 - **Primary win is architectural correctness**: uniform GDR, uniform NIC assignment, uniform transport, simplified tuning
 
+**Results: GDR Verification — All 10 Collectives (NCCL_DEBUG=info, 1G msg)**
+
+Ran all 10 collectives with INFO-level logging to verify GDR ON/OFF per GPU:
+
+```
+┌─────────────────┬────────────────────────────────┬────────────────────────────────┬────────────┐
+│ Collective      │ Before-Fix GDR ON              │ After-Fix GDR ON               │ Fix Effect │
+├─────────────────┼────────────────────────────────┼────────────────────────────────┼────────────┤
+│ all_reduce      │ 4/8 ( 50%) GPU[0,3,4,7]        │ 8/8 (100%) GPU[0,1,2,3,4,5,6,7] │    +4 GPUs │
+│ alltoall        │ 4/8 ( 50%) GPU[0,3,4,7]        │ 8/8 (100%) GPU[0,1,2,3,4,5,6,7] │    +4 GPUs │
+│ alltoallv       │ 4/8 ( 50%) GPU[0,3,4,7]        │ 8/8 (100%) GPU[0,1,2,3,4,5,6,7] │    +4 GPUs │
+│ broadcast       │ 4/8 ( 50%) GPU[0,3,4,7]        │ 8/8 (100%) GPU[0,1,2,3,4,5,6,7] │    +4 GPUs │
+│ reduce_scatter  │ 4/8 ( 50%) GPU[0,3,4,7]        │ 8/8 (100%) GPU[0,1,2,3,4,5,6,7] │    +4 GPUs │
+│ all_gather      │ 4/8 ( 50%) GPU[0,3,4,7]        │ 8/8 (100%) GPU[0,1,2,3,4,5,6,7] │    +4 GPUs │
+│ reduce          │ 4/8 ( 50%) GPU[0,3,4,7]        │ 8/8 (100%) GPU[0,1,2,3,4,5,6,7] │    +4 GPUs │
+│ scatter         │ 4/8 ( 50%) GPU[0,3,4,7]        │ 8/8 (100%) GPU[0,1,2,3,4,5,6,7] │    +4 GPUs │
+│ gather          │ 4/8 ( 50%) GPU[0,3,4,7]        │ 8/8 (100%) GPU[0,1,2,3,4,5,6,7] │    +4 GPUs │
+│ sendrecv        │ 4/8 ( 50%) GPU[0,3,4,7]        │ 8/8 (100%) GPU[0,1,2,3,4,5,6,7] │    +4 GPUs │
+└─────────────────┴────────────────────────────────┴────────────────────────────────┴────────────┘
+```
+
+GDR pattern is **identical across all 10 collectives** — before-fix GPUs 1,2,5,6 (cross-partition) always get PATH_PHB / GDR OFF / 2 NICs / plain NET; after-fix all 8 GPUs get PATH_PXB / GDR ON / 1 NIC / GDRDMA.
+
+NIC assignment change for the 4 affected GPUs:
+
+```
+┌─────┬──────────┬────────────────────────────┬────────────────────────────┐
+│ GPU │ GPU BDF  │ Before NICs                │ After NICs                 │
+├─────┼──────────┼────────────────────────────┼────────────────────────────┤
+│  1  │ 29:00.0  │ 2 NIC: ionic_0, ionic_2    │ 1 NIC: ionic_0             │
+│  2  │ 49:00.0  │ 2 NIC: ionic_0, ionic_2    │ 1 NIC: ionic_2             │
+│  5  │ a9:00.0  │ 2 NIC: ionic_4, ionic_6    │ 1 NIC: ionic_4             │
+│  6  │ c9:00.0  │ 2 NIC: ionic_4, ionic_6    │ 1 NIC: ionic_6             │
+└─────┴──────────┴────────────────────────────┴────────────────────────────┘
+```
+
 **Deployment Path**
 
 1. **Immediate** (validated): Run `rccl_dsn_mapper.sh --populate` at NIC bring-up + set `RCCL_BCM_LINKS_PATH=/var/run/rccl_bcm_links` in RCCL env
@@ -150,6 +186,8 @@ We implemented and validated Approach 2 end-to-end on the SMC300x cluster. The f
 - DSN mapper: `rccl_dsn_mapper.sh`
 - RCCL patch: `projects/rccl/src/os/linux.cc` (`ncclOsGetBcmLinks()`)
 - NCCL_MAX_NCHANNELS=16 report: `test-experiments/nccl_max_nchannels_16_report.md`
+- All-collectives busBw comparison: `test-experiments/all_collectives_comparison_report.md`
+- GDR verification (all collectives): `test-experiments/gdr_verification_report.md`
 - Before-fix evidence: `test-experiments/before-inter-link-visibility/`
 - After-fix evidence: `test-experiments/after-inter-link-visibility/`
 
