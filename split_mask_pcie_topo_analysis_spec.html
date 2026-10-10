@@ -758,6 +758,19 @@ Result: <span class="bad">PATH_PHB (8)</span> &rarr; GDR disabled
             </p>
         </div>
 
+        <div class="card blue">
+            <p>
+                As described in section 4, the <code>switch_discovery</code> kernel module exposes inter-partition
+                fabric links via sysfs, enabling RCCL to build correct topology paths. However, in the absence of
+                this kernel module &mdash; for example, on deployments where the module is not yet available or
+                cannot be loaded &mdash; an alternative approach is needed to infer which upstream ports belong to
+                the same physical switch. The <strong>PCIe Device Serial Number (DSN)</strong> provides exactly this:
+                all ports on the same physical silicon share an identical DSN, making it a viable method to discover
+                physical switch membership and reconstruct the inter-partition relationships that RCCL needs for
+                correct NIC selection.
+            </p>
+        </div>
+
         <h3>6.2 Physical Switch Mapping (via PCIe Device Serial Number)</h3>
         <p>
             <strong>Discovery method:</strong> PCIe DSN at extended capability offset <code>0x100</code>.

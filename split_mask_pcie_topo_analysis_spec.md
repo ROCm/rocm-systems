@@ -339,6 +339,8 @@ Since path type uses `max()` (worst segment wins), the pcilink path stays at PAT
 
 Each physical PEX89104 presents as **two virtual PCIe switches** (multi-host partitioning), each with its own upstream port connected to a different CPU root port. The OS sees two independent PCIe hierarchies per physical switch.
 
+As described in section 4, the `switch_discovery` kernel module exposes inter-partition fabric links via sysfs, enabling RCCL to build correct topology paths. However, in the absence of this kernel module — for example, on deployments where the module is not yet available or cannot be loaded — an alternative approach is needed to infer which upstream ports belong to the same physical switch. The **PCIe Device Serial Number (DSN)** provides exactly this: all ports on the same physical silicon share an identical DSN, making it a viable method to discover physical switch membership and reconstruct the inter-partition relationships that RCCL needs for correct NIC selection.
+
 ### 6.2 Physical Switch Mapping (via PCIe Device Serial Number)
 
 **Discovery method**: PCIe DSN at extended capability offset 0x100. All ports on the same physical switch share an identical DSN. Upstream ports with the same DSN are partitions of the same physical silicon — they share an internal cross-partition fabric.
