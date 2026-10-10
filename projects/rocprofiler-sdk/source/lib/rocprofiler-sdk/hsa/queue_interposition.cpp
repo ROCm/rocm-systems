@@ -1060,6 +1060,12 @@ completion_monitor_loop(completion_monitor& mon)
         conds.emplace_back(HSA_SIGNAL_CONDITION_NE);
         values.emplace_back(0);
 
+        // Add null signal to avoid OOB error in hsa_amd_signal_wait_any_fn in older
+        // runtime versions
+        signals.emplace_back(hsa_signal_t{});
+        conds.emplace_back(HSA_SIGNAL_CONDITION_NE);
+        values.emplace_back(0);
+
         ROCP_TRACE << fmt::format("[queue-interposition] waiting on {} completion signal(s) + wake",
                                   mon.active.size());
 
@@ -1069,7 +1075,7 @@ completion_monitor_loop(completion_monitor& mon)
         // index and value are discarded -- wait_any names at most one signal, and the active set is
         // rescanned below because several may have dropped at once.
         [[maybe_unused]] auto satisfying_value = hsa_signal_value_t{0};
-        get_amd_ext_table()->hsa_amd_signal_wait_any_fn(static_cast<uint32_t>(signals.size()),
+        get_amd_ext_table()->hsa_amd_signal_wait_any_fn(static_cast<uint32_t>(signals.size() - 1),
                                                         signals.data(),
                                                         conds.data(),
                                                         values.data(),
