@@ -11,6 +11,7 @@
 #include <cinttypes>
 
 #include "CL/cl_ext.h"
+#include <limits>
 
 #include "utils/util.hpp"
 #include "device/device.hpp"
@@ -718,11 +719,34 @@ void Memory::mgpuCacheWriteBack(VirtualGPU& gpu) {
 // ==================================== roc::Buffer ===============================================
 Buffer::Buffer(const roc::Device& dev, amd::Memory& owner) : roc::Memory(dev, owner) {}
 
-Buffer::Buffer(const roc::Device& dev, size_t size) : roc::Memory(dev, size) {}
+Buffer::Buffer(const roc::Device& dev, size_t size, size_t alignment)
+    : roc::Memory(dev, size), requestedAlignment_(alignment) {}
+
+bool Buffer::createAlignedAllocation(size_t alignment) {
+  if (alignment == 0 || (alignment & (alignment - 1)) != 0 ||
+      size() > std::numeric_limits<size_t>::max() - (alignment - 1)) {
+    LogError("Invalid aligned device allocation size or alignment");
+    return false;
+  }
+  const size_t allocationSize = size() + alignment - 1;
+  void* base = dev().deviceLocalAlloc(allocationSize);
+  if (base == nullptr) {
+    // An unaligned fallback cannot satisfy the caller's allocation contract.
+    return false;
+  }
+  alignedAllocationBase_ = base;
+  alignedAllocationSize_ = allocationSize;
+  deviceMemory_ = reinterpret_cast<void*>(
+      amd::alignUp(reinterpret_cast<uintptr_t>(base), alignment));
+  return true;
+}
 
 Buffer::~Buffer() {
   if (owner() == nullptr) {
-    dev().memFree(deviceMemory_, size());
+    if (deviceMemory_ != nullptr) {
+      dev().memFree(alignedAllocationBase_ != nullptr ? alignedAllocationBase_ : deviceMemory_,
+                    alignedAllocationBase_ != nullptr ? alignedAllocationSize_ : size());
+    }
   } else {
     destroy();
 
@@ -745,6 +769,14 @@ void Buffer::destroy() {
   // The root buffer owns this descriptor even if interop mapping failed before
   // kind_ could be changed to MEMORY_KIND_INTEROP.
   freeInteropImageDescriptor();
+
+  if (alignedAllocationBase_ != nullptr) {
+    dev().memFree(alignedAllocationBase_, alignedAllocationSize_);
+    const_cast<Device&>(dev()).updateFreeMemory(alignedAllocationSize_, true);
+    alignedAllocationBase_ = nullptr;
+    deviceMemory_ = nullptr;
+    return;
+  }
 
   if (kind_ == MEMORY_KIND_INTEROP) {
     destroyInteropBuffer();
@@ -857,6 +889,13 @@ bool Buffer::create(bool alloc_local) {
 
   if (owner() == nullptr) {
     if (alloc_local) {
+      if (requestedAlignment_ != 0) {
+        success = createAlignedAllocation(requestedAlignment_);
+        if (success) {
+          flags_ |= HostMemoryDirectAccess;
+        }
+        return success;
+      }
       deviceMemory_ = dev().deviceLocalAlloc(size());
       if (deviceMemory_ != nullptr) {
         flags_ |= HostMemoryDirectAccess;
@@ -1102,27 +1141,35 @@ bool Buffer::create(bool alloc_local) {
 #endif
 
   if (!(memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR))) {
-    deviceMemory_ = dev().deviceLocalAlloc(size());
-
-    if (deviceMemory_ == nullptr) {
-      // TODO: device memory is not enabled yet.
-      // Fallback to system memory if exist.
-      flags_ |= HostMemoryDirectAccess;
-      if (dev().agent_profile() == HSA_PROFILE_FULL && owner()->getHostMem() != nullptr) {
-        deviceMemory_ = owner()->getHostMem();
-        assert(
-            amd::isMultipleOf(deviceMemory_, static_cast<size_t>(dev().info().memBaseAddrAlign_)));
-        return true;
+    if (owner()->getAlignment() != 0) {
+      // This is a new owned device allocation, not an imported, SVM or sub-buffer.
+      if (!createAlignedAllocation(owner()->getAlignment())) {
+        return false;
       }
+      const_cast<Device&>(dev()).updateFreeMemory(alignedAllocationSize_, false);
+    } else {
+      deviceMemory_ = dev().deviceLocalAlloc(size());
 
-      deviceMemory_ = dev().hostAlloc(size(), 1, Device::MemorySegment::kNoAtomics);
-      owner()->setHostMem(deviceMemory_);
+      if (deviceMemory_ == nullptr) {
+        // TODO: device memory is not enabled yet.
+        // Fallback to system memory if exist.
+        flags_ |= HostMemoryDirectAccess;
+        if (dev().agent_profile() == HSA_PROFILE_FULL && owner()->getHostMem() != nullptr) {
+          deviceMemory_ = owner()->getHostMem();
+          assert(
+              amd::isMultipleOf(deviceMemory_, static_cast<size_t>(dev().info().memBaseAddrAlign_)));
+          return true;
+        }
 
-      if ((deviceMemory_ != nullptr) && dev().settings().apuSystem_) {
+        deviceMemory_ = dev().hostAlloc(size(), 1, Device::MemorySegment::kNoAtomics);
+        owner()->setHostMem(deviceMemory_);
+
+        if ((deviceMemory_ != nullptr) && dev().settings().apuSystem_) {
+          const_cast<Device&>(dev()).updateFreeMemory(size(), false);
+        }
+      } else {
         const_cast<Device&>(dev()).updateFreeMemory(size(), false);
       }
-    } else {
-      const_cast<Device&>(dev()).updateFreeMemory(size(), false);
     }
 
     assert(amd::isMultipleOf(deviceMemory_, static_cast<size_t>(dev().info().memBaseAddrAlign_)));

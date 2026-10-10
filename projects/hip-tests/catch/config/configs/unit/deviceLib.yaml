@@ -94,6 +94,9 @@ deviceLib:
   Unit_deviceAllocationFollowedByDeviceReset:
     <<: *level_default
     tags: [memory]
+  Unit_deviceHeap_HostcallSlabAlignment:
+    <<: *level_2
+    tags: [memory]
   Unit_deviceAllocationAfterDeviceReset:
     <<: *level_default
     # AIRUNTIME-263: segfaults inside amdhip64 on Windows gfx110X PAL.
