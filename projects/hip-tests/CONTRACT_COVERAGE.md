@@ -13,20 +13,20 @@ contract tier intentionally pins only small, portable semantic guarantees.
 ## Snapshot
 
 <!-- contract-coverage-snapshot
-contract_tests: 625
+contract_tests: 637
 contract_domains: 118
-declared_apis: 502
-covered_apis: 489
+declared_apis: 503
+covered_apis: 490
 uncovered_allowlisted: 13
 coverage_pct: 97.4
 -->
 
-- Snapshot date: 2026-08-26
-- Snapshot commit: `920418c484`
-- Contract tests: 625
+- Snapshot date: 2026-10-09
+- Snapshot commit: `5cdceb141b`
+- Contract tests: 637
 - Contract domains: 118
-- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 502
-- Declared HIP runtime APIs directly exercised by contract tests: 489
+- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 503
+- Declared HIP runtime APIs directly exercised by contract tests: 490
 - Intentionally uncovered, allowlisted APIs: 13
 - Approximate declared API-name coverage: 97.4%
 - Additional public macro exercised: `hipLaunchKernelGGL`
@@ -55,7 +55,7 @@ plan or the full covered-API listing here.
 
 ## Current allowlisted gaps
 
-The checker currently reports these 11 uncovered declared APIs, all intentionally
+The checker currently reports these 13 uncovered declared APIs, all intentionally
 allowlisted:
 
 ### External-semaphore graph nodes
@@ -104,7 +104,7 @@ binaries instead of exposing portable state to assert.
 | `context_config` | 6 |
 | `context_mutation` | 5 |
 | `copy3d` | 4 |
-| `device` | 11 |
+| `device` | 23 |
 | `device_config` | 6 |
 | `device_identity` | 9 |
 | `device_lifecycle` | 7 |

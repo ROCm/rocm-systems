@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 625 | 625 | 0 |
-| **total** | **625** | **625** | **0** |
+| `contract` | 637 | 637 | 0 |
+| **total** | **637** | **637** | **0** |
 
 ## Tier: `contract`
 
@@ -135,7 +135,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Copy3D_HipMemcpy3D_Default_HostDeviceRoundTripsExtent` | hipMemcpy3D | a full-extent H2D then D2H 3D copy round-trips all bytes unchanged |
 | `Contract_Copy3D_HipMemcpy3D_Default_SingleSliceRoundTripsBytes` | hipMemcpy3D | a single-slice (depth=1) H2D then D2H 3D copy round-trips that slice's bytes |
 
-### `device` (11 cases)
+### `device` (23 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -144,6 +144,18 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_ToAllDevices_AcceptedOrUnsupported` | hipDeviceFlushGPUDirectRDMAWrites | a flush to all-devices scope is accepted or reports unsupported |
 | `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_ToOwner_AcceptedOrUnsupported` | hipDeviceFlushGPUDirectRDMAWrites | a flush to owner scope is accepted or reports unsupported |
 | `Contract_Device_HipDeviceGetAttribute_WarpSize_MatchesProperties` | hipDeviceGetAttribute | hipDeviceAttributeWarpSize matches the warp size from hipGetDeviceProperties |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_CuCountType_IsAlwaysSupported` | hipDeviceGetExecAffinitySupport | CU-count affinity is supported on every AMD device |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_CuCountType_ReportsBooleanFlag` | hipDeviceGetExecAffinitySupport | a CU-count query reports a boolean flag or unsupported |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_CuGranularityType_ReportsBooleanFlag` | hipDeviceGetExecAffinitySupport | a CU-granularity query reports a boolean flag or unsupported |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_MaskGranularity_IsExactlyOneType` | hipDeviceGetExecAffinitySupport | exactly one masking granularity is supported |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_NegativeDevice_IsRejected` | hipDeviceGetExecAffinitySupport | a negative device ordinal is rejected as an invalid device |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_NullOutPointer_IsRejected` | hipDeviceGetExecAffinitySupport | a null out-pointer is rejected as an invalid argument |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_NullOutPointer_OutranksBadDevice` | hipDeviceGetExecAffinitySupport | a null out-pointer outranks a bad device ordinal |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_OutOfRangeDevice_IsRejected` | hipDeviceGetExecAffinitySupport | an out-of-range device is rejected as an invalid device |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_OutOfRangeType_IsRejected` | hipDeviceGetExecAffinitySupport | an out-of-range type is rejected as an invalid argument |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_RepeatedQuery_IsStable` | hipDeviceGetExecAffinitySupport | repeating a query reports the same flag |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_SentinelType_IsRejected` | hipDeviceGetExecAffinitySupport | the type sentinel is rejected as an invalid argument |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_WgpGranularityType_ReportsBooleanFlag` | hipDeviceGetExecAffinitySupport | a WGP-granularity query reports a boolean flag or unsupported |
 | `Contract_Device_HipGetDeviceProperties_GetProperties_SucceedsForCurrentDevice` | hipGetDeviceProperties | succeeds in populating properties for the current device |
 | `Contract_Device_HipGetDeviceProperties_MultiProcessorCount_IsPositive` | hipGetDeviceProperties | reported multiprocessor count is positive |
 | `Contract_Device_HipGetDeviceProperties_Name_IsNonEmpty` | hipGetDeviceProperties | the device name string is non-empty |

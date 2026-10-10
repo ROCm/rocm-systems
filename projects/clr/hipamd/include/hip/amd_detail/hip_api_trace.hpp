@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 36
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 37
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1191,6 +1191,7 @@ typedef hipError_t (*t_hipDeviceFlushGPUDirectRDMAWrites)(
     enum hipFlushGPUDirectRDMAWritesTarget target, enum hipFlushGPUDirectRDMAWritesScope scope);
 
 typedef hipError_t (*t_hipLibraryGetModule)(hipModule_t* pMod, hipLibrary_t library);
+typedef hipError_t (*t_hipDeviceGetExecAffinitySupport)(int*, hipExecAffinityType, hipDevice_t);
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
   // HIP_COMPILER_API_TABLE_STEP_VERSION == 0
@@ -1853,8 +1854,11 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 36
   t_hipLibraryGetModule hipLibraryGetModule_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 37
+  t_hipDeviceGetExecAffinitySupport hipDeviceGetExecAffinitySupport_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 38
 
   // ******************************************************************************************* //
   //
