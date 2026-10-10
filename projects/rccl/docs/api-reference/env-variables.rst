@@ -200,6 +200,25 @@ in the following table.
           ``DEBUG_GLOBAL`` wins; any other ``NCCL_CHECK_MODE`` value keeps the
           mode selected by ``NCCL_CHECK_POINTERS=1``.
 
+    * - | ``RCCL_FABRIC_TELEMETRY_ENABLE``
+        | Periodically logs UALoE fabric counters for the GPUs this process
+          uses. Also requires ``RCCL_USE_AMD_SMI_LIB=1``, since the counters are
+          only reachable through the amd-smi library, and ``NCCL_DEBUG=INFO``,
+          since the reports are logged at ``INFO`` level under the ``INIT``
+          subsystem. See :ref:`fabric-telemetry` for what they contain.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``RCCL_FABRIC_TELEMETRY_INTERVAL_MS``
+        | Sampling period for ``RCCL_FABRIC_TELEMETRY_ENABLE``, in
+          milliseconds. The firmware republishes its datasets roughly once a
+          second, so periods much shorter than that cost work without yielding
+          more information.
+      - | Default ``1000``.
+        | Values below ``100`` are raised to ``100``.
+        | Values above ``3600000`` (one hour) are lowered to ``3600000``.
+        | ``0`` or less disables telemetry.
+
 .. _check-mode:
 
 Validating collective arguments
@@ -242,6 +261,74 @@ reach the expected symmetric performance.
    ``DEBUG_GLOBAL`` adds a bootstrap all-gather to every group launch, which is
    far more expensive than the collective itself for small messages. Use it to
    diagnose a configuration, not in production.
+
+.. _fabric-telemetry:
+
+Fabric telemetry
+----------------
+
+``RCCL_FABRIC_TELEMETRY_ENABLE=1`` starts a sampler that reads every amd-smi
+fabric telemetry category for the GPUs this process opens communicators on and
+logs the counters that moved. It is diagnostic only and off by default.
+
+Three settings are needed for any output to appear. The first two are easy to
+omit, and leaving either out makes the feature silent rather than noisy::
+
+    RCCL_USE_AMD_SMI_LIB=1 RCCL_FABRIC_TELEMETRY_ENABLE=1 \
+      NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT \
+      mpirun -np 4 ./all_reduce_perf -b 8 -e 1G -f 2 -g 1
+
+``RCCL_USE_AMD_SMI_LIB=1`` is required because the counters are only reachable
+through the amd-smi library; the sysfs fabric discovery path RCCL uses otherwise
+exposes no telemetry. Without it, RCCL warns that telemetry is disabled and
+initialization continues.
+
+.. note::
+
+   ``VERSION`` is below ``WARN`` in the ``NCCL_DEBUG`` ordering, so running with
+   ``NCCL_DEBUG=VERSION`` suppresses both the reports and the warning explaining
+   why there are none. Enabling telemetry then looks exactly like not enabling
+   it. Use ``NCCL_DEBUG=INFO`` to see the reports, or at least ``WARN`` to see
+   why they are missing.
+
+Each report names the GPU, the communicator that opened telemetry on it, that
+communicator's rank, and the category, followed by the firmware generation
+count, how many counters moved out of how many exist, and the largest movers::
+
+    fabric telemetry GPU 1 comm 0xa01ec474f15d9f01 rank 1 NetPort: gen=28091
+      changed=888/4104 top: NETPORT_RX_TOTAL_BYTES[netport6] +3887018566, ...
+
+The rank is included because the amd-smi device index alone does not say which
+rank owns the GPU. The counters are per device, so when several communicators
+share a GPU the reports cover all of them but keep the identity of whichever
+opened it, and a line is logged when a later communicator joins.
+
+Values are cumulative since firmware boot, so each report is a delta. A category
+whose generation count has not advanced is skipped rather than reported as
+unchanged traffic. When a device's last communicator is destroyed it is reported
+once more, measured over the whole time it was sampled, so a run too short for
+the firmware to publish more than once still produces output.
+
+Telemetry also needs access to the IFoE config character device, which ships
+root-only. It is a request/response channel rather than a readable file, so
+amd-smi opens it ``O_RDWR`` and read-only permission is not sufficient. Granting
+the ``render`` group read and write is enough::
+
+    # /etc/udev/rules.d/70-amdgpu-ualoe-telemetry.rules
+    SUBSYSTEM=="misc", KERNEL=="cbl-cfg-*", GROUP="render", MODE="0660"
+
+.. note::
+
+   On a ROCm host ``render`` is every GPU user and container, and a file in
+   ``/etc/udev/rules.d`` persists across reboots, so the rule outlives the run
+   that motivated it. Install it to diagnose a fabric and remove it afterwards,
+   rather than carrying it in a deployment.
+
+Without that access ``amdsmi_get_fabric_telemetry_data`` returns
+``NOT_SUPPORTED``. RCCL logs which device it skipped and why, and
+initialization continues normally. That line is logged at ``INFO``, so unlike
+the missing-``RCCL_USE_AMD_SMI_LIB`` case above, ``WARN`` alone will not explain
+this one.
 
 Algorithm and protocol control
 ==============================

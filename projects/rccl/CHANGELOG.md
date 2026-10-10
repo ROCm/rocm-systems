@@ -21,6 +21,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `NCCL_CE_INTRA_GPU_MEMCPY_ENABLE` (default `1`): controls whether batched Copy Engine collective copies pass `hipMemcpyFlagPreferOverlapWithCompute`. RCCL previously always set this flag, so the default keeps the previous behavior; set `0` to omit it.
 * `NCCL_HIER_CE_COLL_AG_RAIL_RING_ENABLE` (default `-1`): a positive value selects a ring for the inter-node rail phase of hierarchical Copy Engine `ncclAllGather`. The default keeps the direct path.
 * `NCCL_IB_SORT_MERGE_NICS`: sorts the sub-devices of a merged IB device by plane ID. RCCL defaults it to `0` (NCCL defaults to `1`), so merged-device order and names are unchanged.
+* `RCCL_FABRIC_TELEMETRY_ENABLE` (default `0`): samples every amd-smi fabric telemetry category for the GPUs this process opens communicators on and logs the counters that moved, plus a closing report over the whole sampled span when a device's last communicator is destroyed. Diagnostic only, and off by default. Also needs `RCCL_USE_AMD_SMI_LIB=1` and `render`-group access to the IFoE config character device; without either, RCCL logs why telemetry was skipped and initialization continues.
+* `RCCL_FABRIC_TELEMETRY_INTERVAL_MS` (default `1000`): sampling period for `RCCL_FABRIC_TELEMETRY_ENABLE`, clamped to a 100 ms floor and a one-hour ceiling. A non-positive value disables telemetry entirely.
 * nccl4py: per-call collective configuration (`NCCLCollConfig`, `VendorOption`) including the launch completion event, communicator properties (`NCCLCommProperties`), and the `GIN_ONLY` window flag. On ROCm, the HIP `Event` shim provides only an event handle; `record()`, `sync()` and `query` are not implemented.
 
 ### Changed

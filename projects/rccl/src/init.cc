@@ -878,6 +878,12 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
 #ifdef USE_AMDSMI
   NCCLCHECK(amd_smi_init());
   NCCLCHECK(amd_smi_getDeviceIndexByPciBusId(busId, (unsigned int*)&comm->nvmlDev));
+  // Opt-in via RCCL_FABRIC_TELEMETRY_ENABLE, and a no-op otherwise. Only this
+  // comm's own device is sampled, so a rank does not report on GPUs it never uses.
+  // commHash is assigned before commAlloc on both init paths, and rank at the top of
+  // this function, so both are set here.
+  NCCLCHECK(amd_smi_fabricTelemetryAcquire((uint32_t)comm->nvmlDev, comm->commHash, comm->rank,
+                                           &comm->fabricTelemetryAcquired));
 #else
   NCCLCHECK(rocm_smi_init());
   NCCLCHECK(rocm_smi_getDeviceIndexByPciBusId(busId, (unsigned int*)&comm->nvmlDev));
@@ -4305,6 +4311,27 @@ fail:
 }
 
 static ncclResult_t commCleanup(ncclComm_t comm) {
+#ifdef USE_AMDSMI
+  // This device's last reference frees its telemetry; the session's last device
+  // stops the sampler. Guarded by the per-comm flag so a comm that never joined
+  // (telemetry disabled, or an init that failed before acquiring) does not
+  // unbalance the count.
+  //
+  // Ahead of everything else because teardown is expected to fail on abort, and
+  // every step below can return early -- including the three before commFree, whose
+  // only caller this is. Any of them bailing would leave the device in
+  // telemetryDevices with the sampler polling a GPU whose comm is gone. This needs
+  // only comm->nvmlDev, which commAlloc sets.
+  //
+  // A comm whose intraComm0 is NULL never reaches commReclaim's teardown at all, so
+  // it never reaches here either; the atexit handler is the backstop for that case
+  // and for any process that exits with comms still alive.
+  if (comm->fabricTelemetryAcquired) {
+    NCCLCHECK(amd_smi_fabricTelemetryRelease((uint32_t)comm->nvmlDev));
+    comm->fabricTelemetryAcquired = false;
+  }
+#endif
+
   CUDACHECK(cudaSetDevice(comm->cudaDev));
   // Stop the counter monitor before freeing counter buffers.
   NCCLCHECK(ncclProgressCounterMonitorDestroy(comm));

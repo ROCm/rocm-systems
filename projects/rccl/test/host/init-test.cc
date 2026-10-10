@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "fakes/init_fakes.h"
+#include "fakes/amdsmi_fakes.h"                      // g_amdSmiFabricTelemetry{Acquire,Release}
 #include "fakes/sym_kernels_fakes.h"                 // g_symkFinalize
 #include "../common/LogCapture.hpp"                 // CaptureLog: assert on WARN/INFO text
 #include "../common/ProcessIsolatedTestRunner.hpp"  // fork+execv process isolation
@@ -2348,6 +2349,40 @@ TEST_F(InitMicrotest, CommCleanup_CommFreeFails_PropagatesError) {
 
   ASSERT_NO_FATAL_FAILURE(ReleaseUncleanedComm(c));
 }
+
+#ifdef USE_AMDSMI
+// --- fabric telemetry release sits ahead of every fallible step of teardown ---
+// Teardown is expected to fail on abort, and cudaSetDevice is the earliest step that
+// can bail. A release behind it would leave the sampler polling a GPU whose comm is
+// gone, so this pins it ahead of even that one.
+TEST_F(InitMicrotest, CommCleanup_TelemetryAcquired_ReleasesEvenWhenTeardownFails) {
+  ScopedHook acquire(g_amdSmiFabricTelemetryAcquire,
+                     [](uint32_t, uint64_t, int, bool* acquired) {
+                       *acquired = true;
+                       return ncclSuccess;
+                     });
+  ScopedHook release(g_amdSmiFabricTelemetryRelease, [](uint32_t) { return ncclSuccess; });
+  CleanupComm c;
+  ASSERT_NO_FATAL_FAILURE(MakeCleanupComm(c, /*withTuner=*/false));
+  ASSERT_TRUE(c.comm->fabricTelemetryAcquired) << "commAlloc never recorded the session ref";
+
+  ncclResult_t res = ncclSuccess;
+  std::string log;
+  {
+    // Scoped so the hook is back to normal before ReleaseUncleanedComm runs.
+    ScopedHook setDevice(g_hipSetDevice, [](int) { return hipErrorInvalidDevice; });
+    log = RcclUnitTesting::CaptureLog([&] { res = commCleanup(c.comm); });
+  }
+
+  EXPECT_EQ(ncclUnhandledCudaError, res);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "HIP failure:"));  // the step really did fail
+  EXPECT_EQ(1, release.calls) << "a failing teardown stranded the device in the sampler's device list";
+  EXPECT_FALSE(c.comm->fabricTelemetryAcquired) << "a retried teardown would double-release";
+
+  ASSERT_NO_FATAL_FAILURE(ReleaseUncleanedComm(c));
+  EXPECT_EQ(1, release.calls) << "the retry released the same device twice";
+}
+#endif  // USE_AMDSMI
 
 // ===========================================================================
 // initTransportsRank's supporting cast: four helpers it calls that are already
