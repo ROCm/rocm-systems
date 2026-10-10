@@ -1016,7 +1016,7 @@ inline size_t rcclDdaVmmThresholdCtxTab(const rcclArchThresholds* table, ncclFun
 }
 
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
-                    bool query, const char* prefix) {
+                    bool query, const char* prefix, int minRanks) {
   // The environment parameter can be NCCL_CONFIG_UNDEF_INT when launch order
   // is configured per communicator. Use the resolved communicator value:
   // testing the raw sentinel as a boolean disables DDA by default, while
@@ -1028,7 +1028,9 @@ bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
   if (IsArchMatch(comm->archName, "gfx1250")) {
     // gfx1250 has no nRanks floor.
   } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
-    if (comm->nRanks < 8) return false;
+    // Participant-count floor supplied by the caller; see the declaration in
+    // rccl_common.h for which collectives relax it.
+    if (comm->nRanks < minRanks) return false;
   } else {
     return false;
   }
