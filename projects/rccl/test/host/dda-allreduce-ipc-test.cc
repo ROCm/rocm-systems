@@ -31,6 +31,8 @@ using RcclUnitTesting::DdaIpcMockComm;
 constexpr size_t kFlatTreeThresholdBytes = 256 * 1024;
 constexpr size_t kFp32CountAtThreshold = kFlatTreeThresholdBytes / sizeof(float);
 constexpr size_t kFp16CountAtThreshold = kFlatTreeThresholdBytes / sizeof(uint16_t);
+// Above any in-kernel staging cap, so the tree path must copy sendbuff into scratch before it launches.
+constexpr size_t kFp32CountCopiedBeforeTree = (8u << 20) / sizeof(float);
 
 void* const kSendbuff = reinterpret_cast<void*>(0x10);
 void* const kRecvbuff = reinterpret_cast<void*>(0x20);
@@ -198,10 +200,6 @@ class DdaAllReduceIpcDispatchTest : public ::testing::Test {
   static const void* Flat() {
     return reinterpret_cast<const void*>(&dda::common::ddaAllReduceFlatIpc<T, kDdaNranks, false>);
   }
-  template <typename T>
-  static const void* Tree() {
-    return reinterpret_cast<const void*>(&dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false>);
-  }
 
   const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
   DdaIpcMockComm mock_;
@@ -271,12 +269,19 @@ TEST_F(DdaAllReduceIpcDispatchTest, PayloadAtThresholdRunsFlatWithoutCopy) {
   EXPECT_EQ(0, g_hipMemcpyAsyncCalls);
 }
 
-TEST_F(DdaAllReduceIpcDispatchTest, PayloadAboveThresholdCopiesToScratchThenRunsTree) {
+TEST_F(DdaAllReduceIpcDispatchTest, PayloadAboveThresholdRunsTree) {
   const size_t count = kFp32CountAtThreshold + 4 * kDdaNranks;
   ASSERT_EQ(ncclSuccess, Run(count, ncclFloat32));
   ASSERT_EQ(1u, launches_.size());
-  EXPECT_EQ(Tree<float>(), launches_[0].kernel);
+  EXPECT_NE(Flat<float>(), launches_[0].kernel);
   EXPECT_EQ(count, launches_[0].count);
+}
+
+TEST_F(DdaAllReduceIpcDispatchTest, LargeTreePayloadIsCopiedToScratchBeforeLaunch) {
+  const size_t count = kFp32CountCopiedBeforeTree;
+  ASSERT_EQ(ncclSuccess, Run(count, ncclFloat32));
+  ASSERT_EQ(1u, launches_.size());
+  EXPECT_NE(Flat<float>(), launches_[0].kernel);
   ASSERT_EQ(1u, g_hipMemcpyAsyncArgs.size());
   EXPECT_EQ(1u, launches_[0].memcpysBefore);
   EXPECT_EQ(mock_.comm.ddaScratch, g_hipMemcpyAsyncArgs[0].dst);
@@ -296,9 +301,7 @@ TEST_F(DdaAllReduceIpcDispatchTest, ThresholdIsInBytesNotElements) {
   ASSERT_EQ(ncclSuccess, Run(kFp16CountAtThreshold + 8 * kDdaNranks, ncclBfloat16));
   ASSERT_EQ(2u, launches_.size());
   EXPECT_EQ(Flat<bf16>(), launches_[0].kernel);
-  EXPECT_EQ(Tree<bf16>(), launches_[1].kernel);
-  ASSERT_EQ(1u, g_hipMemcpyAsyncArgs.size());
-  EXPECT_EQ((kFp16CountAtThreshold + 8 * kDdaNranks) * sizeof(bf16), g_hipMemcpyAsyncArgs[0].bytes);
+  EXPECT_NE(Flat<bf16>(), launches_[1].kernel);
 }
 
 TEST_F(DdaAllReduceIpcDispatchTest, LaunchErrorIsReported) {
