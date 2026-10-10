@@ -2,126 +2,126 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/architecture/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/async-instructions/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/benchmarking/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/building/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/codegen/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/concurrent-dispatch/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/configuration/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/dbi-design/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/dbi-overview/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/dbt-design/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/isa-diagnostics/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/isa-gap-audit/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/isa-target-providers/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/memory-wait-counter-coverage/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/memory-wait-diagnostics/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/mma-admission/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/npi/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/performance-dashboard/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/plugins/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/qemu-vfio/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/race-detector/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/rj_dbt_translate/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/rocgdb-debugging/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/rocjitsu-cli/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/rocjitsu_dbt_guest/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/simdojo/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/style/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/vm-design/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/vulkan-compute/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/blog/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
     <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/</loc>
-         <lastmod>2026-10-09</lastmod>
+         <lastmod>2026-10-10</lastmod>
     </url>
 </urlset>
