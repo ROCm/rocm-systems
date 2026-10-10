@@ -185,6 +185,7 @@ set(TEST_tile_get_wg_colmajor 170)
 set(TEST_signaladd 171)
 set(TEST_signalset 172)
 set(TEST_signalwaituntil 173)
+set(TEST_signal_ops_on_stream 174)
 
 # MPI should already be found by the parent CMakeLists.txt
 # Use standard CMake MPI variables set by find_package(MPI)
@@ -1150,6 +1151,7 @@ function(add_stream_tests)
 
     begin_test_group(CATEGORY "STREAM;SIGOPS" TIER full BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME signal_wait_until_on_stream RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME signal_ops_on_stream RANKS 2 WORKGROUPS 1 THREADS 1)
     end_test_group()
 
     # putmem_signal_on_stream - doesn't work with RO (AIROCSHMEM-217)

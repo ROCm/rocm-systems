@@ -665,6 +665,32 @@ __global__ ATTR_NO_INLINE void rocshmem_putmem_signal_kernel(
     uint64_t signal, int sig_op, int pe);
 
 /**
+ * @brief Kernel wrapper for signal_add operation on stream
+ *
+ * @param[in] sig_addr  Address of signal variable on remote PE
+ * @param[in] signal    Value to add to the signal variable
+ * @param[in] pe        PE of the remote process
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_signal_add_kernel(uint64_t *sig_addr,
+                                                          uint64_t signal,
+                                                          int pe);
+
+/**
+ * @brief Kernel wrapper for signal_set operation on stream
+ *
+ * @param[in] sig_addr  Address of signal variable on remote PE
+ * @param[in] signal    Value to store in the signal variable
+ * @param[in] pe        PE of the remote process
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_signal_set_kernel(uint64_t *sig_addr,
+                                                          uint64_t signal,
+                                                          int pe);
+
+/**
  * @brief Kernel wrapper for signal_wait_until operation on stream
  *
  * @param[in] sig_addr  Address of signal variable on the symmetric heap

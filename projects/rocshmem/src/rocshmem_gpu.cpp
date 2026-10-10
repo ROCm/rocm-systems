@@ -1829,10 +1829,22 @@ __global__ ATTR_NO_INLINE void rocshmem_putmem_signal_kernel(
   rocshmem_putmem_signal_wg(dest, source, nelems, sig_addr, signal, sig_op, pe);
 }
 
+__global__ ATTR_NO_INLINE void rocshmem_signal_add_kernel(uint64_t *sig_addr,
+                                                          uint64_t signal,
+                                                          int pe) {
+  rocshmem_signal_add(sig_addr, signal, pe);
+}
+
+__global__ ATTR_NO_INLINE void rocshmem_signal_set_kernel(uint64_t *sig_addr,
+                                                          uint64_t signal,
+                                                          int pe) {
+  rocshmem_signal_set(sig_addr, signal, pe);
+}
+
 __global__ ATTR_NO_INLINE void rocshmem_signal_wait_until_kernel(
     uint64_t *sig_addr, int cmp, uint64_t cmp_value) {
   // Use default context to wait on signal
-  rocshmem_uint64_wait_until(sig_addr, cmp, cmp_value);
+  rocshmem_signal_wait_until(sig_addr, cmp, cmp_value);
 }
 
 __device__ void rocshmem_barrier_all() {
