@@ -5,7 +5,6 @@
 
 #include "agent_manager.hpp"
 #include "config.hpp"
-#include "core/output_file_registry.hpp"
 #include "core/perfetto/fwd.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor_interface.hpp"
@@ -13,6 +12,8 @@
 #include <cstdint>
 
 #include "core/perfetto/category_registry.hpp"
+#include <sys/types.h>
+
 #include <functional>
 #include <memory>
 #include <optional>
@@ -38,9 +39,8 @@ class perfetto_processor_t : public sample_processor_interface
 {
 public:
     perfetto_processor_t(const std::shared_ptr<metadata_registry>& metadata,
-                         const std::shared_ptr<agent_manager>& agent_mngr, int pid,
-                         int ppid, output_file_registry& output_registry,
-                         rocprofsys::track_registry& tracks);
+                         const std::shared_ptr<agent_manager>& agent_mngr, pid_t pid,
+                         pid_t ppid, rocprofsys::track_registry& tracks);
 
     void prepare_for_processing() override;
     // Cached-mode drain runs at cache_manager scope (engine.stop());

@@ -6,10 +6,12 @@
 #include "common/path.hpp"
 #include "common/units/data_size.hpp"
 #include "config.hpp"
+#include "core/output/output_summary.hpp"
 #include "library/runtime.hpp"
-#include "output_file_registry.hpp"
 #include "perfetto_fwd.hpp"
 #include "utility.hpp"
+
+#include <unistd.h>
 
 #include <chrono>
 #include <fstream>
@@ -185,8 +187,7 @@ stop()
 }
 
 void
-post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
-             output_file_registry& _output_registry)
+post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
 {
     using char_vec_t = std::vector<char>;
 
@@ -307,7 +308,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
                 {
                     _timemory_manager->add_file_output("protobuf", "perfetto", _filename);
                 }
-                _output_registry.register_file(_filename, output_format::perfetto);
+                output::registry::instance().register_file(_filename, getpid());
             }
             ofs.close();
         }
