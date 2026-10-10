@@ -988,6 +988,143 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_ReuseAllowInternalDependencies) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Verify that allocations from a managed memory pool produce fine-grain,
+ *    host-accessible memory (same semantics as hipMallocManaged), and that
+ *    alloc/free/reuse cycles work correctly including pool trim and destroy.
+ * Test source
+ * ------------------------
+ *  - /unit/memory/hipMallocFromPoolAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - Device supports memory pools and managed memory
+ *  - HSA_XNACK=1 (XNACK enabled) for host-accessible managed memory
+ *  - HIP_VERSION >= 6.4
+ */
+HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_ManagedPool) {
+  int device = 0;
+  HIP_CHECK(hipGetDevice(&device));
+  checkMempoolSupported(device);
+  if (!isManagedMemorySupportedOnDevice(device)) {
+    HIP_SKIP_TEST("Managed memory not supported on this device");
+  }
+
+  // Obtain the default managed memory pool.
+  hipMemPool_t pool = nullptr;
+  hipMemLocation location{};
+  location.type = hipMemLocationTypeDevice;
+  location.id = device;
+  HIP_CHECK(hipMemGetDefaultMemPool(&pool, &location, hipMemAllocationTypeManaged));
+  REQUIRE(pool != nullptr);
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  constexpr size_t N = 256;
+  constexpr size_t byte_size = N * sizeof(int);
+
+  SECTION("Allocation is host-accessible and reports managed type") {
+    void* ptr = nullptr;
+    HIP_CHECK(hipMallocFromPoolAsync(&ptr, byte_size, pool, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    REQUIRE(ptr != nullptr);
+
+    // The pointer must report as managed memory (type 3).
+    hipPointerAttribute_t attr{};
+    HIP_CHECK(hipPointerGetAttributes(&attr, ptr));
+    REQUIRE(attr.type == hipMemoryTypeManaged);
+
+    // Host must be able to read and write the allocation directly.
+    int* host_view = static_cast<int*>(ptr);
+    for (size_t i = 0; i < N; i++) {
+      host_view[i] = static_cast<int>(i);
+    }
+    for (size_t i = 0; i < N; i++) {
+      REQUIRE(host_view[i] == static_cast<int>(i));
+    }
+
+    HIP_CHECK(hipFreeAsync(ptr, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+  }
+
+  SECTION("Alloc-free-reuse cycle") {
+    void* ptr1 = nullptr;
+    HIP_CHECK(hipMallocFromPoolAsync(&ptr1, byte_size, pool, stream));
+    HIP_CHECK(hipFreeAsync(ptr1, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    // Second allocation of the same size should succeed (may reuse ptr1).
+    void* ptr2 = nullptr;
+    HIP_CHECK(hipMallocFromPoolAsync(&ptr2, byte_size, pool, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    REQUIRE(ptr2 != nullptr);
+
+    // Verify reused pointer is still host-accessible.
+    int* host_view = static_cast<int*>(ptr2);
+    host_view[0] = 0xBEEF;
+    REQUIRE(host_view[0] == 0xBEEF);
+
+    HIP_CHECK(hipFreeAsync(ptr2, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+  }
+
+  SECTION("Trim does not corrupt the pool") {
+    void* ptr = nullptr;
+    HIP_CHECK(hipMallocFromPoolAsync(&ptr, byte_size, pool, stream));
+    HIP_CHECK(hipFreeAsync(ptr, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    // Trim the pool — should release freed memory without error.
+    HIP_CHECK(hipMemPoolTrimTo(pool, 0));
+
+    // Allocation after trim must still produce valid managed memory.
+    void* ptr2 = nullptr;
+    HIP_CHECK(hipMallocFromPoolAsync(&ptr2, byte_size, pool, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    REQUIRE(ptr2 != nullptr);
+
+    hipPointerAttribute_t attr{};
+    HIP_CHECK(hipPointerGetAttributes(&attr, ptr2));
+    REQUIRE(attr.type == hipMemoryTypeManaged);
+
+    HIP_CHECK(hipFreeAsync(ptr2, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+  }
+
+  SECTION("User-created managed pool lifecycle") {
+    // Create a separate managed pool, use it, then destroy it.
+    hipMemPoolProps props{};
+    props.allocType = hipMemAllocationTypeManaged;
+    props.handleTypes = hipMemHandleTypeNone;
+    props.location.type = hipMemLocationTypeDevice;
+    props.location.id = device;
+    hipMemPool_t user_pool = nullptr;
+    HIP_CHECK(hipMemPoolCreate(&user_pool, &props));
+    REQUIRE(user_pool != nullptr);
+
+    void* ptr = nullptr;
+    HIP_CHECK(hipMallocFromPoolAsync(&ptr, byte_size, user_pool, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    REQUIRE(ptr != nullptr);
+
+    hipPointerAttribute_t attr{};
+    HIP_CHECK(hipPointerGetAttributes(&attr, ptr));
+    REQUIRE(attr.type == hipMemoryTypeManaged);
+
+    int* host_view = static_cast<int*>(ptr);
+    host_view[0] = 42;
+    REQUIRE(host_view[0] == 42);
+
+    HIP_CHECK(hipFreeAsync(ptr, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipMemPoolDestroy(user_pool));
+  }
+
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
  * End doxygen group StreamOTest.
  * @}
  */
