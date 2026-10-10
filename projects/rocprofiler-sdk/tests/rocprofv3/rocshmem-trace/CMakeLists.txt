@@ -60,7 +60,28 @@ if(NOT MPIRUN_EXECUTABLE)
     set(IS_DISABLED ON)
 endif()
 
-set(MPI_ENV_VARS OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1)
+# Configure MPI transport layer to avoid network device issues.
+# This test launches 2 ranks on a single node, so shared memory is sufficient.
+#
+# OMPI_MCA_btl=self,vader
+#   Restricts Open MPI's Byte Transfer Layer to local transports only:
+#   - self: loopback communication within the same process
+#   - vader: shared memory between processes on the same node
+#   This excludes openib (InfiniBand/RoCE) and other network transports,
+#   preventing MPI from probing network adapters during initialization and
+#   teardown. The test consistently times out after tool finalization when
+#   network transports are not restricted.
+#
+# OMPI_MCA_pml=ob1
+#   Explicitly selects the ob1 point-to-point messaging layer, which uses the
+#   BTL layer where our transport restrictions apply. This prevents Open MPI
+#   from auto-selecting alternative PMLs (like UCX) that might bypass BTL and
+#   directly probe network hardware.
+#
+# These settings are safe for this test because both ranks run on the same node,
+# requiring only local IPC, not cross-node network communication.
+set(MPI_ENV_VARS OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+                 OMPI_MCA_btl=self,vader OMPI_MCA_pml=ob1)
 
 # rocSHMEM cannot bootstrap with a single PE (MPI_Win_create fails) so the demo is
 # launched with -np 2. Each rank gets its own per-rank output directory keyed by
