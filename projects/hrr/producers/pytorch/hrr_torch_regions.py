@@ -10,14 +10,16 @@
 # lets replay tell "this pointer addresses a live tensor" from "this pointer is
 # past the end of one".
 #
-# Usage: put this directory on PYTHONPATH via a sitecustomize.py, or import it
-# from the application:
+# Usage: start it from the application,
 #
 #     import hrr_torch_regions; hrr_torch_regions.start()
 #
-# It is inert unless HRR capture is active, so leaving it enabled costs one idle
-# thread. The format it writes is specified in ../README.md; it calls no HRR
-# function and links against nothing.
+# or import it from a sitecustomize.py on PYTHONPATH and set
+# HRR_REGIONS_AUTOSTART=1. Importing it alone starts nothing: the producer turns
+# on PyTorch's allocator history, which keeps a record of every allocation and
+# free, so it runs only when asked. Once started it waits for HRR capture to be
+# active before it records anything. The format it writes is specified in
+# ../README.md; it calls no HRR function and links against nothing.
 
 import os
 import stat
@@ -43,9 +45,12 @@ _BATCH_PREFIX = struct.calcsize(_EVENT_HEADER) + 8  # + u32 n, u32 flags
 
 _INTERVAL_S = float(os.environ.get("HRR_REGIONS_INTERVAL_S", "2.0"))
 _VERBOSE = os.environ.get("HRR_REGIONS_VERBOSE", "") not in ("", "0")
-# PyTorch's trace ring depth. Must comfortably exceed the number of alloc/free
-# events between two polls, or events are overwritten before we read them.
-_MAX_ENTRIES = int(os.environ.get("HRR_REGIONS_MAX_ENTRIES", "1000000"))
+# PyTorch's trace ring depth, per device, which bounds how much allocator
+# history the process holds. Must exceed the number of alloc/free events between
+# two polls, or events are overwritten before we read them. A workload that
+# allocates more than that in HRR_REGIONS_INTERVAL_S needs a larger value or a
+# shorter interval.
+_MAX_ENTRIES = int(os.environ.get("HRR_REGIONS_MAX_ENTRIES", "100000"))
 
 # PyTorch device_trace actions that change what is live. free_requested and
 # free_completed both map to DEL: the replayer's erase is idempotent, and
@@ -444,5 +449,5 @@ def start():
 
 _start = start  # os.register_at_fork wants a plain callable
 
-if os.environ.get("HRR_REGIONS_AUTOSTART", "1") not in ("", "0"):
+if os.environ.get("HRR_REGIONS_AUTOSTART", "") not in ("", "0"):
     start()

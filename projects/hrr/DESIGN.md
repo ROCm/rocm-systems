@@ -949,7 +949,10 @@ another framework or a customer can emit the format without touching HRR.
   destroy the very layout being reproduced. It converts PyTorch's `time_us`
   (`CLOCK_REALTIME`) to `CLOCK_MONOTONIC` and restarts itself via
   `os.register_at_fork`, because the polling thread does not survive a fork while
-  the capture writer happily reopens under the child's pid.
+  the capture writer happily reopens under the child's pid. It is opt-in
+  (`HRR_REGIONS_AUTOSTART=1` or `start()`), and its history ring defaults to
+  100,000 entries, because allocator history keeps a record of every allocation
+  in the process.
 
 Known producer-quality limits, none of which are format limits: a block allocated
 and freed between two polls is missed if PyTorch's trace ring overflows between

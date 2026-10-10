@@ -137,7 +137,8 @@ outside the runtime writes those ranges down as
 `pid-<pid>/regions/<name>.hrrr`; `hrr-playback` loads them automatically. See
 [`producers/README.md`](producers/README.md) for the format and
 [`producers/pytorch/hrr_torch_regions.py`](producers/pytorch/hrr_torch_regions.py)
-for the reference PyTorch producer.
+for the reference PyTorch producer. That producer is opt-in: set
+`HRR_REGIONS_AUTOSTART=1` or call its `start()`.
 
 **Fidelity.** With annotations present and no guard flag, replay's memory layout
 is exactly what it would have been without them; the annotations are read, not

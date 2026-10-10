@@ -171,8 +171,17 @@ file.
 ## Reference producers
 
 - [`pytorch/hrr_torch_regions.py`](pytorch/hrr_torch_regions.py) — the PyTorch
-  caching allocator, via `torch.cuda.memory._snapshot()`. Auto-loads through
-  `PYTHONPATH` and needs no change to the application.
+  caching allocator, via `torch.cuda.memory._snapshot()`. It is opt-in, because
+  it turns on PyTorch's allocator history. Call `hrr_torch_regions.start()`, or
+  import it from a `sitecustomize.py` on `PYTHONPATH` and set
+  `HRR_REGIONS_AUTOSTART=1`, which needs no change to the application.
+
+  | Variable | Default | Purpose |
+  |---|---|---|
+  | `HRR_REGIONS_AUTOSTART` | off | Any value other than empty or `0` starts the producer when it is imported |
+  | `HRR_REGIONS_MAX_ENTRIES` | 100000 | Depth of PyTorch's allocator history ring, per device. It must exceed the allocations and frees between two polls, or some are lost |
+  | `HRR_REGIONS_INTERVAL_S` | 2.0 | Seconds between polls |
+  | `HRR_REGIONS_VERBOSE` | off | Any value other than empty or `0` logs the producer's progress to stderr |
 
 ## Notes
 
