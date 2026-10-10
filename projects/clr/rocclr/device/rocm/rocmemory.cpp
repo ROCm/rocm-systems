@@ -1615,7 +1615,15 @@ bool Image::create(bool alloc_local) {
   }
 
   if (originalDeviceMemory_ == nullptr) {
-    originalDeviceMemory_ = dev().hostAlloc(alloc_size, 1, Device::MemorySegment::kNoAtomics);
+    // Skip host fallback for allocations that failed deviceLocalAlloc and exceed
+    // available device memory - attempting a multi-GB hostAlloc would cause soft-hang
+    // in the KFD ioctl while the kernel sets up huge page-table mappings.
+    size_t freeMemInfo[2] = {0, 0};
+    dev().globalFreeMemory(freeMemInfo);
+    // globalFreeMemory returns KiB; convert to bytes for comparison
+    if (alloc_size <= freeMemInfo[0] * 1024) {
+      originalDeviceMemory_ = dev().hostAlloc(alloc_size, 1, Device::MemorySegment::kNoAtomics);
+    }
     if (originalDeviceMemory_ != nullptr) {
       kind_ = MEMORY_KIND_HOST;
       if (dev().settings().apuSystem_) {
