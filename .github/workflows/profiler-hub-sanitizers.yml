@@ -55,7 +55,7 @@ jobs:
             test_wrap: 'setarch $(uname -m) -R'
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: |
             profilers/profiler-hub
@@ -132,7 +132,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: sanitizer-results-${{ matrix.sanitizer.name }}
           path: profilers/profiler-hub/build/test-results.xml

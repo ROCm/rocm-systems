@@ -75,7 +75,7 @@ jobs:
       gfx1151_runner: ${{ steps.runner.outputs.gfx1151_runner }}
     steps:
       - name: Checkout workflow actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
           set-safe-directory: true
@@ -93,7 +93,7 @@ jobs:
       matrix: ${{ steps.generate_matrix.outputs.matrix }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: projects/rocprofiler-compute/.github
 
@@ -159,7 +159,7 @@ jobs:
         --pull always
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'schedule' && 'rocprofiler-compute-develop' || github.ref }}
           sparse-checkout: |
@@ -274,7 +274,7 @@ jobs:
 
       - name: Upload Test Logs (on failure)
         if: steps.test.outcome == 'failure'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: failed-test-logs-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.arch }}
           path: |
