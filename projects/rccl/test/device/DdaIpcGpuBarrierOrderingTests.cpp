@@ -35,6 +35,7 @@ constexpr int kMpWords = 16;
 constexpr int kMpIters = 100000;
 constexpr int kFlatIters = 20000;
 constexpr int kFlatSlice = 256;
+constexpr int kSkewSleeps = 4;  // ~16 us of s_sleep 127, well above an XGMI flag round trip
 
 // No host constructor works without a bootstrap, so build the objects bitwise; a layout change breaks the build.
 struct MailboxImage {
@@ -116,6 +117,12 @@ __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int
   unsigned long long mismatches = 0;
   for (int it = 0; it < iters; ++it) {
     uint32_t* mine = bufs[self] + static_cast<size_t>(b) * slice;
+    // Half the ranks hold back their later waves each round, so a flag set before the whole block wrote is read stale.
+    if ((self + it) % 2 == 1 && threadIdx.x >= warpSize) {
+      for (int k = 0; k < kSkewSleeps; ++k) {
+        __builtin_amdgcn_s_sleep(127);
+      }
+    }
     for (int i = threadIdx.x; i < slice; i += blockDim.x) {
       mine[i] = payloadValue(self, it, b, i);
     }
