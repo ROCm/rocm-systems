@@ -233,6 +233,10 @@ namespace envvar {
     const var<bool> spread_channels("SPREAD_CHANNELS",
         "Apply wf_id round-robin channel offset for all contexts (default: only for default ctx)",
         false);
+    const var<int32_t> fail_connect_local_rank("FAIL_CONNECT_LOCAL_RANK",
+        "Debug: node-local rank whose SDMA connect to its last peer is reported as failed, to "
+        "exercise the node-wide fallback to IPC memcpy (-1: never)",
+        -1);
   }  // namespace sdma
 
   namespace _detail {
