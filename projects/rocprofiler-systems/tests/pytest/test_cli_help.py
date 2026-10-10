@@ -447,7 +447,7 @@ class TestCliHelp(RocprofsysTest):
 
     @pytest.mark.parametrize("target", TARGETS)
     @pytest.mark.parametrize("run_args, pass_regex", HELP_CASES)
-    def test(self, target, run_args, pass_regex):
+    def test(self, target, run_args, pass_regex, rocprof_config):
         # Substitute the program name into name-dependent patterns.
         pass_regex = [p.replace("{prog}", target) for p in pass_regex]
 
@@ -455,6 +455,14 @@ class TestCliHelp(RocprofsysTest):
         # the full dump; rocprof-sys-sample does not.
         if target == "rocprof-sys-run" and run_args == ["--help=all"]:
             pass_regex = pass_regex + [r"\[EXECUTION OPTIONS\]"]
+
+        # --ai-nics is only registered when built with ROCPROFSYS_BUILD_AINIC=1
+        # (requires AMD SMI >= 26.3 AND ROCPROFSYS_USE_AINIC=ON).
+        # On builds where AINIC was compiled out, silently drop the pattern so
+        # the rest of the domain/topic checks still run.
+        _amdsmi = rocprof_config.capabilities.amdsmi_version
+        if _amdsmi is None or _amdsmi < (26, 3):
+            pass_regex = [p for p in pass_regex if p != r"--ai-nics"]
 
         result = self.run_test(
             "baseline",

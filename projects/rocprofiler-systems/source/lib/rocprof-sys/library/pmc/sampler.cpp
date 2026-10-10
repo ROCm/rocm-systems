@@ -19,7 +19,7 @@
 #    include "library/pmc/device_providers/rocprofiler_sdk/provider.hpp"
 #endif
 
-#if defined(ROCPROFSYS_BUILD_AINIC)
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
 #    include "library/pmc/collectors/nic/cache_policy.hpp"
 #    include "library/pmc/collectors/nic/collector.hpp"
 #    include "library/pmc/collectors/nic/perfetto_policy.hpp"
@@ -99,7 +99,7 @@ struct gpu_production_config
     using CacheApi    = collectors::gpu::cache_policy;
 };
 
-#if defined(ROCPROFSYS_BUILD_AINIC)
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
 struct nic_production_config
 {
     using SettingsApi = collectors::settings_policy;
@@ -132,7 +132,7 @@ using gpu_perf_counter_collector_t =
     collectors::gpu_perf_counter::collector<gpu_perf_counter_provider_t>;
 #endif
 
-#if defined(ROCPROFSYS_BUILD_AINIC)
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
 using nic_device_t = collectors::nic::device<amd_smi_device_t>;
 using nic_collector_t =
     collectors::nic::collector<provider_t, nic_device_t, nic_production_config>;
@@ -169,7 +169,7 @@ std::unique_ptr<gpu_collector_t> g_gpu_collector;
 std::shared_ptr<gpu_perf_counter_provider_t>  g_gpu_perf_counter_provider;
 std::unique_ptr<gpu_perf_counter_collector_t> g_gpu_perf_counter_collector;
 #endif
-#if defined(ROCPROFSYS_BUILD_AINIC)
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
 std::unique_ptr<nic_collector_t> g_nic_collector;
 #endif
 
@@ -343,12 +343,12 @@ setup()
             g_device_provider = provider_factory_t::create();
 
             g_gpu_collector = std::make_unique<gpu_collector_t>(g_device_provider);
-#if defined(ROCPROFSYS_BUILD_AINIC)
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
             g_nic_collector = std::make_unique<nic_collector_t>(g_device_provider);
 #endif
 
             g_collector_slices.emplace_back(*g_gpu_collector);
-#if defined(ROCPROFSYS_BUILD_AINIC)
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
             g_collector_slices.emplace_back(*g_nic_collector);
 #endif
         }
@@ -464,7 +464,7 @@ postfork_child_cleanup()
     g_gpu_perf_counter_provider.reset();
 #endif
     g_gpu_collector.reset();
-#if defined(ROCPROFSYS_BUILD_AINIC)
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     g_nic_collector.reset();
 #endif
 #if defined(ROCPROFSYS_BUILD_HIPFILE)
