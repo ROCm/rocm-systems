@@ -17,10 +17,12 @@ rocprofiler_add_integration_execute_test(
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED ${IS_DISABLED})
 
-# Reference-clock sampling is enabled for gfx1200, gfx1201, and gfx1250.
-# IS_DISABLED and SANITIZER keep this off with the rest of the SPM suite.
+# Reference-clock sampling is enabled for gfx1200, gfx1201, and gfx1250. IS_DISABLED and
+# SANITIZER keep this off with the rest of the SPM suite.
 set(IS_REFCLK_DISABLED True)
-if(NOT IS_DISABLED AND NOT SANITIZER AND rocprofiler-sdk-tests-gfx-info)
+if(NOT IS_DISABLED
+   AND NOT SANITIZER
+   AND rocprofiler-sdk-tests-gfx-info)
     list(GET rocprofiler-sdk-tests-gfx-info 0 spm-refclk-gpu-0-gfx-info)
     if("${spm-refclk-gpu-0-gfx-info}" MATCHES "^(gfx1200|gfx1201|gfx1250)(-strict)?$")
         set(IS_REFCLK_DISABLED False)
@@ -33,9 +35,8 @@ rocprofiler_add_integration_execute_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --spm-beta-enabled=on --spm
         ${COUNTER_LIST} --spm-sample-interval-unit refclk_cycles --spm-sample-interval
-        1200 --kernel-trace --hip-trace -d
-        ${CMAKE_CURRENT_BINARY_DIR}/out_refclk --output-format json -o spm_refclk --
-        $<TARGET_FILE:simple-transpose>
+        1200 --kernel-trace --hip-trace -d ${CMAKE_CURRENT_BINARY_DIR}/out_refclk
+        --output-format json -o spm_refclk -- $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 60
     LABELS "integration-tests;spm"
