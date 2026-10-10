@@ -2883,6 +2883,16 @@
           "description": "Interleaved CE AllGather and SM AllReduce on same comm; validates no state corruption",
           "test_filter": "CeMPI_Stress.InterleavedCEAllGatherAndSMAllReduce",
           "timeout": 300
+        },
+        {
+          "name": "CE_AllReduce_MaxOp_2Ranks",
+          "description": "128 MiB Max AllReduce: CE registered on the first call, CE 2-shot after, exact data and pipelined chunking",
+          "test_filter": "CeMPI_AllReduce.MaxOp128MiB"
+        },
+        {
+          "name": "CE_AllReduce_MinOp_2Ranks",
+          "description": "128 MiB Min AllReduce: CE registered on the first call, CE 2-shot after, exact data and pipelined chunking",
+          "test_filter": "CeMPI_AllReduce.MinOp128MiB"
         }
       ]
     },

@@ -3546,6 +3546,15 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyNullTableKeepsCeRegistered
       });
 }
 
+TEST(WrapMicrotestIsolated, SelectAllReduce_NoForceNoZeroSkipsCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_NoForceNoZeroSkipsCeRegistered",
+      []() {
+        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        EXPECT_EQ(NCCL_ALGO_RING, SelectCeVsSymk(NCCL_CTA_POLICY_DEFAULT, /*count=*/8, /*symkRequested=*/false));
+      });
+}
+
 TEST(WrapMicrotestIsolated, SelectAllReduce_ForceWithoutZeroAboveTableCapSkipsCeRegistered) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_ForceWithoutZeroAboveTableCapSkipsCeRegistered",
