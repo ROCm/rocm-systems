@@ -30,7 +30,7 @@
 set -euo pipefail
 
 # --- Configuration ---
-SYSFS_BASE="/sys/kernel/pci_switch_link/virtual_switch_links"
+SYSFS_BASE="/var/run/rccl_bcm_links"
 CHANGE_LOG="/var/run/rccl_dsn_mapper.log"
 MODE="discover"        # discover | populate | clean
 BCM_VENDOR="1000"      # Broadcom vendor ID

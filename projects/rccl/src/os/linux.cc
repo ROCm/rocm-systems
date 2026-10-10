@@ -703,9 +703,22 @@ ncclResult_t ncclOsGetBcmLinks(const char* busId, int* nlinks, char** peers) {
   *nlinks = 0;
   *peers = NULL;
 
-  // Path to Broadcom switch virtual links in sysfs
-  char dirPath[] = "/sys/kernel/pci_switch_link/virtual_switch_links/0000:00:00.0";
-  memcpylower(dirPath + sizeof("/sys/kernel/pci_switch_link/virtual_switch_links/") - 1, busId, BUSID_SIZE - 1);
+  // Default sysfs path populated by switch_discovery kernel module
+  static const char defaultBase[] = "/sys/kernel/pci_switch_link/virtual_switch_links";
+  // Fallback: if the default path doesn't exist, check RCCL_BCM_LINKS_PATH env var
+  // (e.g. populated by rccl_dsn_mapper.sh userspace tool)
+  const char* base = defaultBase;
+  struct stat st;
+  if (stat(defaultBase, &st) != 0 || !S_ISDIR(st.st_mode)) {
+    const char* envBase = getenv("RCCL_BCM_LINKS_PATH");
+    if (envBase && stat(envBase, &st) == 0 && S_ISDIR(st.st_mode)) {
+      base = envBase;
+    }
+  }
+
+  char dirPath[PATH_MAX];
+  snprintf(dirPath, sizeof(dirPath), "%s/%s", base, "0000:00:00.0");
+  memcpylower(dirPath + strlen(base) + 1, busId, BUSID_SIZE - 1);
 
   DIR* dir = opendir(dirPath);
   if (dir) {
