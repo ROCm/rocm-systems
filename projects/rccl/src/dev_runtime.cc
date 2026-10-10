@@ -1873,6 +1873,7 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
   size_t ginSignalShadowsOffset = 0;
   size_t ginAnvilNetSignalsOffset = 0;
   int nGinContextsTotal = 0;
+  bool ginDevCommSetupDone = false;
   void* outDevCommPreserve = nullptr;
   struct ncclDevComm outDevCommTmp;
   cudaStreamCaptureMode captureMode = cudaStreamCaptureModeRelaxed;
@@ -2099,6 +2100,7 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
     reqs->ginSignalCount = ginSignalTotal;
     reqs->ginCounterCount = ginCounterTotal;
     NCCLCHECKGOTO(ncclGinDevCommSetup(comm, reqs, outDevComm, deviceCodeVersion), ret, fail);
+    ginDevCommSetupDone = true;
     // SDMA signal binding is deferred until the resource window is created
     // (see ncclGinAnvilBindResourceWindowSignals call below).
   }
@@ -2209,6 +2211,11 @@ fail_stream_mem:
 fail_stream:
   CUDACHECKIGNORE(cudaStreamDestroy(stream));
 fail:
+  // Destroy the GIN contexts this call created. Without this, a failure between
+  // ncclGinDevCommSetup and the signal bind leaves them registered with the
+  // backend (Anvil keeps them pending), and a retried create binds the stale
+  // contexts alongside the new ones.
+  if (ginDevCommSetupDone) (void)ncclGinDevCommFree(comm, outDevComm);
   CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
   return ret;
 }

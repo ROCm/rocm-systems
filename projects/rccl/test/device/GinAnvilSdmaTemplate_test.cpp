@@ -477,7 +477,10 @@ TEST_F(GinAnvilSdmaTemplateTest, PutValue_SelectLogicalContext) {
   DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
   ncclGinAnvilIpcBufEntry ipcEntry{};
   ipcEntry.local_base = reinterpret_cast<uintptr_t>(d_dst.ptr);
-  ipcEntry.length = 4096;
+  // Size the window to d_dst exactly. A larger length could also cover d_signals,
+  // depending on where hipMalloc places it, and remoteSignalAddr would then resolve
+  // the signal through this entry instead of the per-context fallback above.
+  ipcEntry.length = 8;
   ipcEntry.remote_bases[1] = reinterpret_cast<uintptr_t>(d_dst.ptr);
   d_entry.upload(ipcEntry);
 

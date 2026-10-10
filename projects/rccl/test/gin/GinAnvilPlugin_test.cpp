@@ -343,6 +343,79 @@ TEST_F(GinAnvilPluginTest, BindSignals_Success) {
   plugin_.finalize(ictx);
 }
 
+// ncclDevCommCreate calls this bind whenever a resource window and GIN signals
+// exist, including for non-Anvil backends that never queue an Anvil context. With
+// nothing pending the bind must succeed without registering a span or running any
+// comm-wide collective.
+TEST_F(GinAnvilPluginTest, BindSignals_NothingPendingSucceedsWithoutCollectives) {
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll);
+  // A context without signals is never queued for binding.
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 0;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  const int allGathersBeforeBind = GinAnvilPluginStubs::GetBootstrapAllGatherCalls();
+  const int intraNodeBeforeBind = GinAnvilPluginStubs::GetIntraNodeAllGatherCalls();
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 1), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetBootstrapAllGatherCalls(), allGathersBeforeBind);
+  EXPECT_EQ(GinAnvilPluginStubs::GetIntraNodeAllGatherCalls(), intraNodeBeforeBind);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 0);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 0);
+
+  ncclGinAnvilSdmaGPUContext hostCtx{};
+  ASSERT_EQ(hipMemcpy(&hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
+  EXPECT_EQ(hostCtx.signals, nullptr);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// When ncclDevCommCreate fails after GIN setup but before the signal bind, it now
+// destroys the contexts it created. destroyContext must also drop them from the
+// pending list: each logical context takes a signal slot, so a stale nContexts=3
+// context would push the retry's bind past nSignalSlots.
+TEST_F(GinAnvilPluginTest, BindSignals_DestroyedUnboundContextReleasesItsSlots) {
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll);
+  ncclGinConfig_t cfg{};
+  cfg.nContexts = 3;
+  cfg.nSignals = 2;
+
+  void* staleCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* staleHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &staleCtx, &staleHandle), ncclSuccess);
+  // Failed create: torn down without ever being bound.
+  ASSERT_EQ(plugin_.destroyContext(staleCtx), ncclSuccess);
+
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  char arena[8192] = {};
+  // Exactly enough slots for the retry's own three logical contexts.
+  ASSERT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 3, 2), ncclSuccess);
+
+  ncclGinAnvilSdmaGPUContext hostCtx[3]{};
+  ASSERT_EQ(hipMemcpy(hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
+  ASSERT_NE(hostCtx[0].signals, nullptr);
+  EXPECT_EQ(hostCtx[1].signals - hostCtx[0].signals, 2);
+  EXPECT_EQ(hostCtx[2].signals - hostCtx[1].signals, 2);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
 // AICOMRCCL-2339: logical contexts on one Anvil connection share SDMA
 // queues, but each context must bind a distinct signal stripe. A second
 // pending context on the same comm makes slot and contextId diverge: the
